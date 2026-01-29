@@ -73,6 +73,7 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "django>=4.2.0",
     "py7zr>=1.1.2",
+    "pycloc>=0.0.1a0",
 ]
 
 [project.optional-dependencies]

@@ -53,6 +53,7 @@ class LLMRequest:
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
     stream: bool = False
+    tools: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
@@ -70,6 +71,7 @@ class LLMResponse:
     model: Optional[str] = None
     usage: Optional[LLMUsage] = None
     finish_reason: Optional[str] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
 
 
 class LLMError(Exception):

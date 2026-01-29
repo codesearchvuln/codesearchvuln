@@ -1104,6 +1104,7 @@ dependencies = [
     { name = "portalocker" },
     { name = "prettytable" },
     { name = "py7zr" },
+    { name = "pycloc" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pygments" },
@@ -1190,6 +1191,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.5.0" },
     { name = "prettytable", specifier = ">=3.0.0" },
     { name = "py7zr", specifier = ">=1.1.2" },
+    { name = "pycloc", specifier = ">=0.0.1a0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pygments", specifier = ">=2.17.0" },
@@ -4192,6 +4194,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3e/28/ad306f5acb1226241960bb86e9021b4e32bb7da426ccdc824d9d36d61261/pybcj-1.0.7-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:00448182d535cca37e8f24d892d480fa86f80ff20c79385f6eca75f118efcbb4", size = 55194, upload-time = "2025-11-29T00:53:26.209Z" },
     { url = "https://files.pythonhosted.org/packages/2e/d8/70c5e5701926fc67dae02101f0298d21c0b89ff83fa705712c3b4da252e5/pybcj-1.0.7-cp314-cp314t-win_amd64.whl", hash = "sha256:7e94aa712d0fa5fda9875828441755ece7121fc3f8c5cc3bc8ee92d05b853590", size = 25826, upload-time = "2025-11-29T00:53:27.655Z" },
     { url = "https://files.pythonhosted.org/packages/d1/5d/7a87ba32c0c0756f36000fafe642fa4609be2c26a50a7913a057a47eabdf/pybcj-1.0.7-cp314-cp314t-win_arm64.whl", hash = "sha256:16fd4e51a5556d1f38d7ba5d1fab588bfb60ae23d2299b5179779bf9900adf71", size = 24049, upload-time = "2025-11-29T00:53:28.679Z" },
+]
+
+[[package]]
+name = "pycloc"
+version = "0.0.1a0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/92/da038e21e9a019686954263802949952fd6147172e4f241e37908955537c/pycloc-0.0.1a0.tar.gz", hash = "sha256:df8320b513cb7c1a392fad1cf066835792f88a42a144994840505a9f681f2a68", size = 315876, upload-time = "2026-01-17T14:34:08.363Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/77/3b056f80816acdade4139009af8918b0c6b1b267466b28a2b2650799183e/pycloc-0.0.1a0-py3-none-any.whl", hash = "sha256:c472e6c8ea6f10d97a7455981cf01e828f5ba3bcf5855b0dbb463a61966ea084", size = 162550, upload-time = "2026-01-17T14:34:06.882Z" },
 ]
 
 [[package]]

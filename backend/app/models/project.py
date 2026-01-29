@@ -32,6 +32,7 @@ class Project(Base):
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
     tasks = relationship("AuditTask", back_populates="project", cascade="all, delete-orphan")
     agent_tasks = relationship("AgentTask", back_populates="project", cascade="all, delete-orphan")
+    infos = relationship("ProjectInfo", back_populates="project", cascade="all, delete-orphan")
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
