@@ -726,7 +726,7 @@ async def _initialize_tools(
     from app.services.agent.tools import (
         FileReadTool, FileSearchTool, ListFilesTool,
         PatternMatchTool, CodeAnalysisTool, DataFlowAnalysisTool,
-        SemgrepTool, BanditTool, GitleaksTool,
+        OpengrepTool, BanditTool, GitleaksTool,
         NpmAuditTool, SafetyTool, TruffleHogTool, OSVScannerTool,  # 🔥 Added missing tools
         ThinkTool, ReflectTool,
         CreateVulnerabilityReportTool,
@@ -919,7 +919,7 @@ async def _initialize_tools(
     recon_tools = {
         **base_tools,
         # 🔥 外部侦察工具 (Recon 阶段也需要使用这些工具来收集初步信息)
-        "semgrep_scan": SemgrepTool(project_root, sandbox_manager),
+        "opengrep_scan": OpengrepTool(project_root, sandbox_manager),
         "bandit_scan": BanditTool(project_root, sandbox_manager),
         "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
         "npm_audit": NpmAuditTool(project_root, sandbox_manager),
@@ -947,7 +947,7 @@ async def _initialize_tools(
         # 数据流分析
         "dataflow_analysis": DataFlowAnalysisTool(llm_service),
         # 外部安全工具 (传入共享的 sandbox_manager)
-        "semgrep_scan": SemgrepTool(project_root, sandbox_manager),
+        "opengrep_scan": OpengrepTool(project_root, sandbox_manager),
         "bandit_scan": BanditTool(project_root, sandbox_manager),
         "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
         "npm_audit": NpmAuditTool(project_root, sandbox_manager),

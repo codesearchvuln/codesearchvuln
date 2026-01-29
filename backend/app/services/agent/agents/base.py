@@ -1125,7 +1125,7 @@ class BaseAgent(ABC):
 
             # 🔥 根据工具类型设置不同的超时时间
             tool_timeouts = {
-                "semgrep_scan": 120,      # 外部扫描工具需要更长时间
+                "opengrep_scan": 120,      # 外部扫描工具需要更长时间
                 "bandit_scan": 90,
                 "gitleaks_scan": 60,
                 "npm_audit": 90,

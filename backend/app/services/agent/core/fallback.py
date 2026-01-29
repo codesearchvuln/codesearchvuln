@@ -54,7 +54,7 @@ class FallbackConfig:
     max_context_reduction_ratio: float = 0.5  # Reduce context to 50%
     continue_on_partial: bool = True
     tool_fallbacks: Dict[str, str] = field(default_factory=lambda: {
-        "semgrep_scan": "pattern_match",
+        "opengrep_scan": "pattern_match",
         "bandit_scan": "pattern_match",
         "gitleaks_scan": "search_code",
         "npm_audit": "search_code",

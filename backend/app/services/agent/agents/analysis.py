@@ -44,7 +44,7 @@ ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞分析 Agent，一个**自
 ## 🔧 工具优先级（必须按此顺序使用）
 
 ### 第一优先级：外部专业安全工具 ⭐⭐⭐ 【必须首先使用！】
-- **semgrep_scan**: 全语言静态分析 - **每次分析必用**
+- **opengrep_scan**: 全语言静态分析 - **每次分析必用**
   参数: target_path (str), rules (str: "auto" 或 "p/security-audit")
   示例: {"target_path": ".", "rules": "auto"}
 
@@ -102,7 +102,7 @@ ANALYSIS_SYSTEM_PROMPT = """你是 DeepAudit 的漏洞分析 Agent，一个**自
 
 ```
 # 所有项目必做
-Action: semgrep_scan
+Action: opengrep_scan
 Action Input: {"target_path": ".", "rules": "auto"}
 
 Action: gitleaks_scan
@@ -161,15 +161,15 @@ Final Answer: [JSON 格式的漏洞报告]
 
 ✅ 正确：
 ```
-Thought: 我需要使用 semgrep 扫描代码。
-Action: semgrep_scan
+Thought: 我需要使用 opengrep 扫描代码。
+Action: opengrep_scan
 Action Input: {"target_path": ".", "rules": "auto"}
 ```
 
 ❌ 错误（禁止）：
 ```
 **Thought:** 我需要扫描
-**Action:** semgrep_scan
+**Action:** opengrep_scan
 **Action Input:** {...}
 ```
 
@@ -206,7 +206,7 @@ Action Input: {"target_path": ".", "rules": "auto"}
 - 不安全的反序列化 (pickle, yaml.load, eval)
 
 ## 重要原则
-1. **外部工具优先** - 首先使用 semgrep、bandit 等专业工具
+1. **外部工具优先** - 首先使用 opengrep、bandit 等专业工具
 2. **质量优先** - 宁可深入分析几个真实漏洞，不要浅尝辄止报告大量误报
 3. **上下文分析** - 看到可疑代码要读取上下文，理解完整逻辑
 4. **自主判断** - 不要机械相信工具输出，要用你的专业知识判断
@@ -238,7 +238,7 @@ Action Input: {"target_path": ".", "rules": "auto"}
 
 ## ⚠️ 关键约束 - 必须遵守！
 1. **禁止直接输出 Final Answer** - 你必须先调用工具来分析代码
-2. **至少调用两个工具** - 使用 smart_scan/semgrep_scan 进行扫描，然后用 read_file 查看代码
+2. **至少调用两个工具** - 使用 smart_scan/opengrep_scan 进行扫描，然后用 read_file 查看代码
 3. **没有工具调用的分析无效** - 不允许仅凭推测直接报告漏洞
 4. **先 Action 后 Final Answer** - 必须先执行工具，获取 Observation，再输出最终结论
 
@@ -537,7 +537,7 @@ class AnalysisAgent(BaseAgent):
                     retry_prompt = f"""收到空响应。请根据以下格式输出你的思考和行动：
 
 Thought: [你对当前安全分析情况的思考]
-Action: [工具名称，如 read_file, search_code, pattern_match, semgrep_scan]
+Action: [工具名称，如 read_file, search_code, pattern_match, opengrep_scan]
 Action Input: {{"参数名": "参数值"}}
 
 可用工具: {', '.join(self.tools.keys())}

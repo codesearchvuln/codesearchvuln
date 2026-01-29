@@ -158,7 +158,7 @@ TOOL_USAGE_GUIDE = """
 
 ### ⚠️ 核心原则：优先使用外部专业工具
 
-**外部工具优先级最高！** 外部安全工具（Semgrep、Bandit、Gitleaks、Kunlun-M 等）是经过业界验证的专业工具，具有：
+**外部工具优先级最高！** 外部安全工具（Opengrep、Bandit、Gitleaks、Kunlun-M 等）是经过业界验证的专业工具，具有：
 - 更全面的规则库和漏洞检测能力
 - 更低的误报率
 - 更专业的安全分析算法
@@ -171,7 +171,7 @@ TOOL_USAGE_GUIDE = """
 #### 第一优先级：外部专业安全工具 ⭐⭐⭐
 | 工具 | 用途 | 何时使用 |
 |------|------|---------|
-| `semgrep_scan` | 多语言静态分析 | **每次分析必用**，支持30+语言，OWASP规则 |
+| `opengrep_scan` | 多语言静态分析 | **每次分析必用**，支持30+语言，OWASP规则 |
 | `bandit_scan` | Python安全扫描 | Python项目**必用**，检测注入/反序列化等 |
 | `gitleaks_scan` | 密钥泄露检测 | **每次分析必用**，检测150+种密钥类型 |
 | `kunlun_scan` | 深度代码审计 | 大型项目推荐，支持PHP/Java/JS深度分析 |
@@ -242,7 +242,7 @@ Action Input: {"query": "用户的登录认证逻辑在哪里？", "top_k": 5}
 
 ```
 # 通用项目（必做）
-Action: semgrep_scan
+Action: opengrep_scan
 Action Input: {"target_path": ".", "rules": "p/security-audit"}
 
 Action: gitleaks_scan

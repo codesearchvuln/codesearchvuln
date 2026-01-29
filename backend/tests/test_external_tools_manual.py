@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 手动测试 external_tools.py 中的安全工具集合
-支持 Semgrep、Bandit、Gitleaks、npm audit、Safety、TruffleHog、OSV-Scanner
+支持 Opengrep、Bandit、Gitleaks、npm audit、Safety、TruffleHog、OSV-Scanner
 
 使用方法:
-    python test_external_tools_manual.py --tool semgrep --path .
+    python test_external_tools_manual.py --tool opengrep --path .
     python test_external_tools_manual.py --tool bandit --path .
     python test_external_tools_manual.py --tool gitleaks --path .
     python test_external_tools_manual.py --tool npm_audit --path .
@@ -52,7 +52,7 @@ check_dependencies()
 # 现在安全地导入
 try:
     from app.services.agent.tools.external_tools import (
-        SemgrepTool, BanditTool, GitleaksTool, NpmAuditTool,
+        OpengrepTool, BanditTool, GitleaksTool, NpmAuditTool,
         SafetyTool, TruffleHogTool, OSVScannerTool
     )
     from app.services.agent.tools.sandbox_tool import SandboxManager
@@ -63,15 +63,15 @@ except ModuleNotFoundError as e:
     sys.exit(1)
 
 
-async def test_semgrep(project_root: str):
-    """测试 Semgrep 工具"""
+async def test_opengrep(project_root: str):
+    """测试 Opengrep 工具"""
     print("\n" + "="*60)
-    print("🔍 测试 Semgrep 工具")
+    print("🔍 测试 Opengrep 工具")
     print("="*60)
     
     sandbox_manager = SandboxManager()
     
-    tool = SemgrepTool(project_root, sandbox_manager)
+    tool = OpengrepTool(project_root, sandbox_manager)
     
     print(f"工具名称: {tool.name}")
     print(f"工具描述: {tool.description[:200]}...")
@@ -270,20 +270,20 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 测试 Semgrep
-  python test_external_tools_manual.py --tool semgrep
+  # 测试 Opengrep
+  python test_external_tools_manual.py --tool opengrep
 
   # 测试所有工具
   python test_external_tools_manual.py --tool all
 
   # 测试特定项目路径
-  python test_external_tools_manual.py --tool semgrep --path /path/to/project
+  python test_external_tools_manual.py --tool opengrep --path /path/to/project
         """
     )
     
     parser.add_argument(
         "--tool",
-        choices=["semgrep", "bandit", "gitleaks", "npm_audit", "safety", "trufflehog", "osv_scanner", "all"],
+        choices=["opengrep", "bandit", "gitleaks", "npm_audit", "safety", "trufflehog", "osv_scanner", "all"],
         default="all",
         help="要测试的工具（默认: all）"
     )
@@ -321,8 +321,8 @@ async def main():
     results = {}
     
     try:
-        if args.tool in ["all", "semgrep"]:
-            results["semgrep"] = await test_semgrep(project_root)
+        if args.tool in ["all", "opengrep"]:
+            results["opengrep"] = await test_opengrep(project_root)
         
         if args.tool in ["all", "bandit"]:
             results["bandit"] = await test_bandit(project_root)

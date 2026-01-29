@@ -1,6 +1,6 @@
 """
 外部安全工具集成
-集成 Semgrep、Bandit、Gitleaks、TruffleHog、npm audit 等专业安全工具
+集成 Opengrep、Bandit、Gitleaks、TruffleHog、npm audit 等专业安全工具
 """
 
 import asyncio
@@ -76,10 +76,10 @@ def _smart_resolve_target_path(
     return safe_target_path, host_check_path, None
 
 
-# ============ Semgrep 工具 ============
+# ============ Opengrep 工具 ============
 
-class SemgrepInput(BaseModel):
-    """Semgrep 扫描输入"""
+class OpengrepInput(BaseModel):
+    """Opengrep 扫描输入"""
     target_path: str = Field(
         default=".",
         description="要扫描的路径。⚠️ 重要：使用 '.' 扫描整个项目（推荐），或使用 'src/' 等子目录。不要使用项目目录名如 'PHP-Project'！"
@@ -95,11 +95,11 @@ class SemgrepInput(BaseModel):
     max_results: int = Field(default=50, description="最大返回结果数")
 
 
-class SemgrepTool(AgentTool):
+class OpengrepTool(AgentTool):
     """
-    Semgrep 静态分析工具
+    Opengrep 静态分析工具
     
-    Semgrep 是一款快速、轻量级的静态分析工具，支持多种编程语言。
+    Opengrep 是一款快速、轻量级的静态分析工具，支持多种编程语言。
     提供丰富的安全规则库，可以检测各种安全漏洞。
     
     官方规则集:
@@ -136,12 +136,12 @@ class SemgrepTool(AgentTool):
 
     @property
     def name(self) -> str:
-        return "semgrep_scan"
+        return "opengrep_scan"
     
     @property
     def description(self) -> str:
-        return """使用 Semgrep 进行静态安全分析。
-Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
+        return """使用 Opengrep 进行静态安全分析。
+Opengrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
 
 ⚠️ 重要提示:
 - target_path 使用 '.' 扫描整个项目（推荐）
@@ -160,7 +160,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
     
     @property
     def args_schema(self):
-        return SemgrepInput
+        return OpengrepInput
     
     async def _execute(
         self,
@@ -170,11 +170,11 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
         max_results: int = 50,
         **kwargs
     ) -> ToolResult:
-        """执行 Semgrep 扫描"""
+        """执行 Opengrep 扫描"""
         # 确保 Docker 可用
         await self.sandbox_manager.initialize()
         if not self.sandbox_manager.is_available:
-            error_msg = f"Semgrep unavailable: {self.sandbox_manager.get_diagnosis()}"
+            error_msg = f"Opengrep unavailable: {self.sandbox_manager.get_diagnosis()}"
             return ToolResult(
                 success=False,
                 data=error_msg,  # 🔥 修复：设置 data 字段避免 None
@@ -183,7 +183,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
 
         # 🔥 使用公共函数进行智能路径解析
         safe_target_path, host_check_path, error_msg = _smart_resolve_target_path(
-            target_path, self.project_root, "Semgrep"
+            target_path, self.project_root, "Opengrep"
         )
         if error_msg:
             return ToolResult(success=False, data=error_msg, error=error_msg)
@@ -211,29 +211,28 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
                 command=cmd_str,
                 host_workdir=self.project_root,
                 timeout=300,
-                network_mode="bridge"  # 🔥 Semgrep 需要网络来下载规则
+                network_mode="bridge"  # 🔥 Opengrep 需要网络来下载规则
             )
 
             # 🔥 添加调试日志
-            logger.info(f"[Semgrep] 执行结果: success={result['success']}, exit_code={result['exit_code']}, "
+            logger.info(f"[Opengrep] 执行结果: success={result['success']}, exit_code={result['exit_code']}, "
                        f"stdout_len={len(result.get('stdout', ''))}, stderr_len={len(result.get('stderr', ''))}")
             if result.get('error'):
-                logger.warning(f"[Semgrep] 错误信息: {result['error']}")
+                logger.warning(f"[Opengrep] 错误信息: {result['error']}")
             if result.get('stderr'):
-                logger.warning(f"[Semgrep] stderr: {result['stderr'][:500]}")
-
+                logger.warning(f"[Opengrep] stderr: {result['stderr'][:500]}")
             if not result["success"] and result["exit_code"] != 1:  # 1 means findings were found
                 # 🔥 增强：优先使用 stderr，其次 stdout，最后用 error 字段
                 stdout_preview = result.get('stdout', '')[:500]
                 stderr_preview = result.get('stderr', '')[:500]
                 error_msg = stderr_preview or stdout_preview or result.get('error') or "未知错误"
-                logger.error(f"[Semgrep] 执行失败 (exit_code={result['exit_code']}): {error_msg}")
+                logger.error(f"[Opengrep] 执行失败 (exit_code={result['exit_code']}): {error_msg}")
                 if stdout_preview:
-                    logger.error(f"[Semgrep] stdout: {stdout_preview}")
+                    logger.error(f"[Opengrep] stdout: {stdout_preview}")
                 return ToolResult(
                     success=False,
-                    data=f"Semgrep 执行失败 (exit_code={result['exit_code']}): {error_msg}",
-                    error=f"Semgrep 执行失败: {error_msg}",
+                    data=f"Opengrep 执行失败 (exit_code={result['exit_code']}): {error_msg}",
+                    error=f"Opengrep 执行失败: {error_msg}",
                 )
 
             # 解析结果
@@ -241,19 +240,19 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
             try:
                 # 尝试从 stdout 查找 JSON
                 json_start = stdout.find('{')
-                logger.debug(f"[Semgrep] JSON 起始位置: {json_start}, stdout 前200字符: {stdout[:200]}")
+                logger.debug(f"[Opengrep] JSON 起始位置: {json_start}, stdout 前200字符: {stdout[:200]}")
 
                 if json_start >= 0:
                     json_str = stdout[json_start:]
                     results = json.loads(json_str)
-                    logger.info(f"[Semgrep] JSON 解析成功, results 数量: {len(results.get('results', []))}")
+                    logger.info(f"[Opengrep] JSON 解析成功, results 数量: {len(results.get('results', []))}")
                 else:
-                    logger.warning(f"[Semgrep] 未找到 JSON 起始符 '{{', stdout: {stdout[:500]}")
+                    logger.warning(f"[Opengrep] 未找到 JSON 起始符 '{{', stdout: {stdout[:500]}")
                     results = {}
             except json.JSONDecodeError as e:
-                error_msg = f"无法解析 Semgrep 输出 (位置 {e.pos}): {e.msg}"
-                logger.error(f"[Semgrep] JSON 解析失败: {error_msg}")
-                logger.error(f"[Semgrep] 原始输出前500字符: {stdout[:500]}")
+                error_msg = f"无法解析 Opengrep 输出 (位置 {e.pos}): {e.msg}"
+                logger.error(f"[Opengrep] JSON 解析失败: {error_msg}")
+                logger.error(f"[Opengrep] 原始输出前500字符: {stdout[:500]}")
                 return ToolResult(
                     success=False,
                     data=error_msg,  # 🔥 修复：设置 data 字段避免 None
@@ -265,12 +264,12 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
             if not findings:
                 return ToolResult(
                     success=True,
-                    data=f"Semgrep 扫描完成，未发现安全问题 (规则集: {rules})",
+                    data=f"Opengrep 扫描完成，未发现安全问题 (规则集: {rules})",
                     metadata={"findings_count": 0, "rules": rules}
                 )
             
             # 格式化输出
-            output_parts = [f"🔍 Semgrep 扫描结果 (规则集: {rules})\n"]
+            output_parts = [f"🔍 Opengrep 扫描结果 (规则集: {rules})\n"]
             output_parts.append(f"发现 {len(findings)} 个问题:\n")
             
             severity_icons = {"ERROR": "🔴", "WARNING": "🟠", "INFO": "🟡"}
@@ -299,7 +298,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
             )
             
         except Exception as e:
-            error_msg = f"Semgrep 执行错误: {str(e)}"
+            error_msg = f"Opengrep 执行错误: {str(e)}"
             return ToolResult(
                 success=False,
                 data=error_msg,  # 🔥 修复：设置 data 字段避免 None
@@ -1139,7 +1138,7 @@ Google 开源的漏洞扫描工具。
 # ============ 导出所有工具 ============
 
 __all__ = [
-    "SemgrepTool",
+    "OpengrepTool",
     "BanditTool",
     "GitleaksTool",
     "NpmAuditTool",

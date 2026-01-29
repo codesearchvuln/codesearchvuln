@@ -4,7 +4,7 @@ Agent 工具集
 提供 Agent 使用的各种工具，包括：
 - 基础工具（文件操作、代码搜索）
 - 分析工具（模式匹配、数据流分析）
-- 外部安全工具（Semgrep、Bandit等）
+- 外部安全工具（Opengrep、Bandit等）
 - 协作工具（Think、Agent通信）
 - 报告工具（漏洞报告）
 - 🔥 智能扫描工具（批量扫描、快速审计）
@@ -47,7 +47,7 @@ from .sandbox_vuln import (
 
 # 外部安全工具
 from .external_tools import (
-    SemgrepTool,
+    OpengrepTool,
     BanditTool,
     GitleaksTool,
     NpmAuditTool,
@@ -132,7 +132,7 @@ __all__ = [
     "UniversalVulnTestTool",
     
     # 外部安全工具
-    "SemgrepTool",
+    "OpengrepTool",
     "BanditTool",
     "GitleaksTool",
     "NpmAuditTool",

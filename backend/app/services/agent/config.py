@@ -101,9 +101,9 @@ class AgentConfig(BaseSettings):
     )
 
     # External Tool Toggles
-    semgrep_enabled: bool = Field(
+    opengrep_enabled: bool = Field(
         default=True,
-        description="Enable Semgrep scanner"
+        description="Enable Opengrep scanner"
     )
     bandit_enabled: bool = Field(
         default=True,
@@ -132,9 +132,9 @@ class AgentConfig(BaseSettings):
     )
 
     # External Tool Timeouts
-    semgrep_timeout_seconds: int = Field(
+    opengrep_timeout_seconds: int = Field(
         default=120,
-        description="Timeout for Semgrep scanner"
+        description="Timeout for Opengrep scanner"
     )
     bandit_timeout_seconds: int = Field(
         default=60,
@@ -380,10 +380,10 @@ def get_tool_config(tool_name: str) -> ToolConfig:
 
     # Tool-specific configurations
     tool_configs: Dict[str, ToolConfig] = {
-        "semgrep_scan": ToolConfig(
-            name="semgrep_scan",
-            enabled=config.semgrep_enabled,
-            timeout_seconds=config.semgrep_timeout_seconds,
+        "opengrep_scan": ToolConfig(
+            name="opengrep_scan",
+            enabled=config.opengrep_enabled,
+            timeout_seconds=config.opengrep_timeout_seconds,
             rate_limit_per_second=config.external_tool_rate_per_second,
             fallback_tool="pattern_match",
         ),
@@ -454,7 +454,7 @@ def get_agent_type_config(agent_type: str) -> AgentTypeConfig:
             timeout_seconds=config.sub_agent_timeout_seconds,
             tools=[
                 "smart_scan", "pattern_match", "dataflow_analysis",
-                "read_file", "search_code", "semgrep_scan", "bandit_scan"
+                "read_file", "search_code", "opengrep_scan", "bandit_scan"
             ],
             knowledge_modules=["sql_injection", "xss", "command_injection"],
         ),

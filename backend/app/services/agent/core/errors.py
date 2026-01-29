@@ -319,7 +319,7 @@ class ToolResourceError(ToolError):
 
 class ExternalToolError(ToolError):
     """
-    External tool (semgrep, bandit, etc.) failed.
+    External tool (opengrep, bandit, etc.) failed.
 
     Recoverable using fallback scanning method.
     """

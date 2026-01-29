@@ -273,7 +273,7 @@ class ExternalToolInput(ToolInput):
     @classmethod
     def validate_tool_name(cls, v: str) -> str:
         valid_tools = {
-            'semgrep', 'bandit', 'gitleaks', 'npm_audit',
+            'opengrep', 'bandit', 'gitleaks', 'npm_audit',
             'safety', 'osv_scanner', 'trufflehog'
         }
         if v.lower() not in valid_tools:
