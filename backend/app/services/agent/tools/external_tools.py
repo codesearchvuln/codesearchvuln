@@ -188,7 +188,7 @@ Semgrep 是业界领先的静态分析工具，支持 30+ 种编程语言。
         if error_msg:
             return ToolResult(success=False, data=error_msg, error=error_msg)
         
-        cmd = ["semgrep", "--json", "--quiet"]
+        cmd = ["opengrep", "--json", "--quiet"]
         
         if rules == "auto":
             # 🔥 Fallback if user explicitly requests 'auto', but prefer security-audit

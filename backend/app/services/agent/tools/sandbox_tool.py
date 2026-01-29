@@ -271,8 +271,8 @@ class SandboxManager:
                     host_workdir: {"bind": "/workspace", "mode": "ro"}, # 只读挂载项目代码
                 },
                 "tmpfs": {
-                    "/home/sandbox": "rw,size=100m,mode=1777",
-                    "/tmp": "rw,size=100m,mode=1777"  # 添加 /tmp 目录供工具写入临时文件
+                    "/home/sandbox": "rw,exec,size=512m,mode=1777",  # 添加 exec 允许执行，用于 opengrep 规则缓存
+                    "/tmp": "rw,exec,size=512m,mode=1777"  # 添加 exec 允许执行临时文件
                 },
                 "working_dir": "/workspace",
                 "environment": container_env,
