@@ -109,6 +109,15 @@ class StatsResponse(BaseModel):
     resolved_issues: int
 
 
+class ProjectInfoResponse(BaseModel):
+    id: str
+    project_id: str
+    language_info: str
+    description: str
+    status: str
+    created_at: datetime
+    
+
 @router.post("/", response_model=ProjectResponse)
 async def create_project(
     *,
@@ -271,7 +280,7 @@ async def read_project(
     return project
 
 
-@router.get("/info/{id}", response_model=ProjectInfo)
+@router.get("/info/{id}", response_model=ProjectInfoResponse)
 async def get_project_info(
     id: str,
     db: AsyncSession = Depends(get_db),
@@ -312,7 +321,7 @@ async def get_project_info(
             raise HTTPException(status_code=500, detail="项目信息生成失败，请稍后再试")
 
     # 创建新的 ProjectInfo 记录并持久化为 pending 状态
-    project_info = ProjectInfo(project_id=id, status="pending")
+    project_info = ProjectInfoResponse(project_id=id, status="pending",created_at=datetime.now(timezone.utc))
     db.add(project_info)
     await db.commit()
     await db.refresh(project_info)
