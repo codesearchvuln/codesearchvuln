@@ -407,6 +407,24 @@ async def create_static_task(
     return scan_task
 
 
+@router.delete("/tasks/{task_id}")
+async def delete_static_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """删除静态代码扫描任务及其相关漏洞记录"""
+    result = await db.execute(select(OpengrepScanTask).where(OpengrepScanTask.id == task_id))
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    await db.delete(task)
+    await db.commit()
+
+    return {"message": "任务已删除", "task_id": task_id}
+
+
 @router.get("/tasks/{task_id}", response_model=OpengrepScanTaskResponse)
 async def get_static_task(
     task_id: str,
