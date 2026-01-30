@@ -7,7 +7,7 @@ import AuditTasks from "@/pages/AuditTasks";
 import TaskDetail from "@/pages/TaskDetail";
 import AgentAudit from "@/pages/AgentAudit";
 import AdminDashboard from "@/pages/AdminDashboard";
-import Account from "@/pages/Account";
+// import Account from "@/pages/Account";
 import AuditRules from "@/pages/AuditRules";
 import PromptManager from "@/pages/PromptManager";
 import type { ReactNode } from 'react';
@@ -92,12 +92,12 @@ const routes: RouteConfig[] = [
     element: <RecycleBin />,
     visible: true,
   },
-  {
-    name: "账号管理",
-    path: "/account",
-    element: <Account />,
-    visible: false, // 不在主导航显示，在侧边栏底部单独显示
-  },
+  // {
+  //   name: "账号管理",
+  //   path: "/account",
+  //   element: <Account />,
+  //   visible: false, // 不在主导航显示，在侧边栏底部单独显示
+  // },
 ];
 
 export default routes;

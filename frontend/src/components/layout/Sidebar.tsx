@@ -19,7 +19,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Github,
-    UserCircle,
+    // UserCircle,
     Shield,
     MessageSquare,
     Bot,
@@ -49,7 +49,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
     const location = useLocation();
     const [mobileOpen, setMobileOpen] = useState(false);
 
-    const visibleRoutes = routes.filter(route => route.visible !== false);
+    const visibleRoutes = routes.filter((route) => route.visible !== false);
 
     return (
         <>
@@ -59,13 +59,17 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                 size="sm"
                 className="fixed top-4 left-4 z-50 md:hidden"
                 style={{
-                    background: 'var(--cyber-bg)',
-                    border: '1px solid var(--cyber-border)',
-                    color: 'var(--cyber-text-muted)'
+                    background: "var(--cyber-bg)",
+                    border: "1px solid var(--cyber-border)",
+                    color: "var(--cyber-text-muted)",
                 }}
                 onClick={() => setMobileOpen(!mobileOpen)}
             >
-                {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                {mobileOpen ? (
+                    <X className="w-5 h-5" />
+                ) : (
+                    <Menu className="w-5 h-5" />
+                )}
             </Button>
 
             {/* Overlay for mobile */}
@@ -84,8 +88,8 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                     ${mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
                 `}
                 style={{
-                    background: 'var(--cyber-bg)',
-                    borderRight: '1px solid var(--cyber-border)'
+                    background: "var(--cyber-bg)",
+                    borderRight: "1px solid var(--cyber-border)",
                 }}
             >
                 <div className="flex flex-col h-full relative">
@@ -100,7 +104,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                 linear-gradient(var(--cyber-border-accent) 1px, transparent 1px),
                                 linear-gradient(90deg, var(--cyber-border-accent) 1px, transparent 1px)
                             `,
-                            backgroundSize: '32px 32px',
+                            backgroundSize: "32px 32px",
                         }}
                     />
 
@@ -109,10 +113,10 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 
                     {/* Logo Section */}
                     <div
-                        className={`flex-shrink-0 relative flex items-center h-16 ${collapsed ? 'px-3 justify-center' : 'px-5 pr-6'}`}
+                        className={`flex-shrink-0 relative flex items-center h-16 ${collapsed ? "px-3 justify-center" : "px-5 pr-6"}`}
                         style={{
-                            background: 'var(--cyber-bg-elevated)',
-                            borderBottom: '1px solid var(--cyber-border)'
+                            background: "var(--cyber-bg-elevated)",
+                            borderBottom: "1px solid var(--cyber-border)",
                         }}
                     >
                         {/* Bottom accent line */}
@@ -120,7 +124,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 
                         <Link
                             to="/"
-                            className={`flex items-center gap-3 group transition-all duration-300 ${collapsed ? 'justify-center' : 'flex-1 min-w-0'}`}
+                            className={`flex items-center gap-3 group transition-all duration-300 ${collapsed ? "justify-center" : "flex-1 min-w-0"}`}
                             onClick={() => setMobileOpen(false)}
                         >
                             {/* Logo Icon */}
@@ -128,8 +132,9 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                 <div
                                     className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-all duration-300 group-hover:shadow-[0_0_20px_rgba(255,107,44,0.3)]"
                                     style={{
-                                        background: 'linear-gradient(135deg, hsl(var(--primary) / 0.15), hsl(var(--primary) / 0.05))',
-                                        border: '1px solid hsl(var(--primary) / 0.4)'
+                                        background:
+                                            "linear-gradient(135deg, hsl(var(--primary) / 0.15), hsl(var(--primary) / 0.05))",
+                                        border: "1px solid hsl(var(--primary) / 0.4)",
                                     }}
                                 >
                                     <img
@@ -143,13 +148,22 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                             </div>
 
                             {/* Logo Text */}
-                            <div className={`transition-all duration-300 ${collapsed ? 'w-0 opacity-0 overflow-hidden' : 'flex-1 min-w-0 opacity-100'}`}>
+                            <div
+                                className={`transition-all duration-300 ${collapsed ? "w-0 opacity-0 overflow-hidden" : "flex-1 min-w-0 opacity-100"}`}
+                            >
                                 <div
                                     className="text-xl font-bold tracking-wider font-mono leading-tight"
-                                    style={{ textShadow: '0 0 25px rgba(255,107,44,0.4)' }}
+                                    style={{
+                                        textShadow:
+                                            "0 0 25px rgba(255,107,44,0.4)",
+                                    }}
                                 >
                                     <span className="text-primary">DEEP</span>
-                                    <span style={{ color: 'var(--cyber-text)' }}>AUDIT</span>
+                                    <span
+                                        style={{ color: "var(--cyber-text)" }}
+                                    >
+                                        AUDIT
+                                    </span>
                                 </div>
                             </div>
                         </Link>
@@ -158,10 +172,10 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                         <button
                             className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md items-center justify-center hover:bg-primary hover:border-primary hover:text-white transition-all duration-300 shadow-sm"
                             style={{
-                                background: 'var(--cyber-bg)',
-                                border: '1px solid var(--cyber-border)',
-                                color: 'var(--cyber-text-muted)',
-                                zIndex: 100
+                                background: "var(--cyber-bg)",
+                                border: "1px solid var(--cyber-border)",
+                                color: "var(--cyber-text-muted)",
+                                zIndex: 100,
                             }}
                             onClick={() => setCollapsed(!collapsed)}
                         >
@@ -177,31 +191,39 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                     <nav className="flex-1 min-h-0 py-3 px-3 relative">
                         <div className="space-y-1">
                             {visibleRoutes.map((route) => {
-                                const isActive = location.pathname === route.path;
+                                const isActive =
+                                    location.pathname === route.path;
                                 return (
                                     <Link
                                         key={route.path}
                                         to={route.path}
                                         className={`
                                             flex items-center gap-3 px-3 py-2 transition-all duration-300 group relative rounded-lg
-                                            ${isActive
-                                                ? 'bg-primary/15 border border-primary/40 shadow-[0_0_15px_rgba(255,107,44,0.1)]'
-                                                : 'border border-transparent hover:bg-card/60 hover:border-border/50'
+                                            ${
+                                                isActive
+                                                    ? "bg-primary/15 border border-primary/40 shadow-[0_0_15px_rgba(255,107,44,0.1)]"
+                                                    : "border border-transparent hover:bg-card/60 hover:border-border/50"
                                             }
                                         `}
                                         style={{
-                                            color: isActive ? 'hsl(var(--primary))' : 'var(--cyber-text-muted)'
+                                            color: isActive
+                                                ? "hsl(var(--primary))"
+                                                : "var(--cyber-text-muted)",
                                         }}
                                         onClick={() => setMobileOpen(false)}
-                                        title={collapsed ? route.name : undefined}
+                                        title={
+                                            collapsed ? route.name : undefined
+                                        }
                                         onMouseEnter={(e) => {
                                             if (!isActive) {
-                                                e.currentTarget.style.color = 'var(--cyber-text)';
+                                                e.currentTarget.style.color =
+                                                    "var(--cyber-text)";
                                             }
                                         }}
                                         onMouseLeave={(e) => {
                                             if (!isActive) {
-                                                e.currentTarget.style.color = 'var(--cyber-text-muted)';
+                                                e.currentTarget.style.color =
+                                                    "var(--cyber-text-muted)";
                                             }
                                         }}
                                     >
@@ -211,16 +233,22 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                         )}
 
                                         {/* Icon */}
-                                        <span className={`
+                                        <span
+                                            className={`
                                             flex-shrink-0 transition-all duration-300 p-1.5 rounded-md
-                                            ${isActive ? 'bg-primary/20' : 'group-hover:bg-muted/50'}
-                                        `}>
-                                            {routeIcons[route.path] || <LayoutDashboard className="w-[18px] h-[18px]" />}
+                                            ${isActive ? "bg-primary/20" : "group-hover:bg-muted/50"}
+                                        `}
+                                        >
+                                            {routeIcons[route.path] || (
+                                                <LayoutDashboard className="w-[18px] h-[18px]" />
+                                            )}
                                         </span>
 
                                         {/* Label */}
                                         {!collapsed && (
-                                            <span className={`font-mono text-sm tracking-wide transition-all duration-300 ${isActive ? 'font-semibold' : 'font-medium'}`}>
+                                            <span
+                                                className={`font-mono text-sm tracking-wide transition-all duration-300 ${isActive ? "font-semibold" : "font-medium"}`}
+                                            >
                                                 {route.name}
                                             </span>
                                         )}
@@ -241,8 +269,8 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                     <div
                         className="flex-shrink-0 p-3 space-y-1 relative"
                         style={{
-                            background: 'var(--cyber-bg-elevated)',
-                            borderTop: '1px solid var(--cyber-border)'
+                            background: "var(--cyber-bg-elevated)",
+                            borderTop: "1px solid var(--cyber-border)",
                         }}
                     >
                         {/* Top accent line */}
@@ -252,7 +280,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                         <ThemeToggle collapsed={collapsed} />
 
                         {/* Account Link */}
-                        <Link
+                        {/*<Link
                             to="/account"
                             className={`
                                 flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-300 group
@@ -273,21 +301,25 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                             {!collapsed && (
                                 <span className="font-mono text-sm">账号管理</span>
                             )}
-                        </Link>
+                        </Link>*/}
 
                         {/* GitHub & Status Row */}
-                        <div className={`flex items-center ${collapsed ? 'flex-col gap-2' : 'justify-between'} px-3 py-2`}>
+                        <div
+                            className={`flex items-center ${collapsed ? "flex-col gap-2" : "justify-between"} px-3 py-2`}
+                        >
                             <a
                                 href="https://github.com/lintsinghua/DeepAudit"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="flex items-center gap-2 transition-all duration-300 group"
-                                style={{ color: 'var(--cyber-text-muted)' }}
+                                style={{ color: "var(--cyber-text-muted)" }}
                                 title="GitHub"
                             >
                                 <Github className="w-[18px] h-[18px] group-hover:text-primary transition-colors" />
                                 {!collapsed && (
-                                    <span className="text-xs font-mono text-muted-foreground">v{version}</span>
+                                    <span className="text-xs font-mono text-muted-foreground">
+                                        v{version}
+                                    </span>
                                 )}
                             </a>
 
@@ -296,11 +328,16 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                     <div className="relative">
                                         <div
                                             className="w-2 h-2 rounded-full bg-emerald-400"
-                                            style={{ boxShadow: '0 0 8px rgba(52, 211, 153, 0.6)' }}
+                                            style={{
+                                                boxShadow:
+                                                    "0 0 8px rgba(52, 211, 153, 0.6)",
+                                            }}
                                         />
                                         <div className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-50" />
                                     </div>
-                                    <span className="text-xs font-mono text-emerald-500">Online</span>
+                                    <span className="text-xs font-mono text-emerald-500">
+                                        Online
+                                    </span>
                                 </div>
                             )}
 
@@ -308,7 +345,10 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                 <div className="relative">
                                     <div
                                         className="w-2 h-2 rounded-full bg-emerald-400"
-                                        style={{ boxShadow: '0 0 8px rgba(52, 211, 153, 0.6)' }}
+                                        style={{
+                                            boxShadow:
+                                                "0 0 8px rgba(52, 211, 153, 0.6)",
+                                        }}
                                     />
                                     <div className="absolute inset-0 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-50" />
                                 </div>
