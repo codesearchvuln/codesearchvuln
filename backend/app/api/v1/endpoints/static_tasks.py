@@ -15,6 +15,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.post("/tasks")
+async def create_static_task():
+    pass
+
+
+@router.get("/tasks/{task_id}/findings")
+async def get_static_task_findings(task_id: str):
+    pass
+
+
+@router.post("/update/findings/{finding_id}")
+async def update_static_task_finding(finding_id: str):
+    pass
+
+
 @router.post("/rules/create", response_model=OpengrepRulePatchResponse)
 async def create_opengrep_rule(
     request: OpengrepRuleCreateRequest, db: AsyncSession = Depends(get_db)
@@ -70,3 +85,9 @@ async def create_opengrep_rule(
     return result
 
 
+@router.post("/rules/update/{rule_id}")
+async def update_opengrep_rule(rule_id: str):
+    """
+    是否启用或禁用一个已有的 Opengrep 规则
+    """
+    pass
