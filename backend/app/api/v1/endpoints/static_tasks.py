@@ -591,3 +591,23 @@ async def update_opengrep_rule(
         await db.commit()
 
     return {"message": "规则已更新", "rule_id": rule_id, "is_active": rule.is_active}
+
+
+@router.delete("/rules/{rule_id}")
+async def delete_opengrep_rule(
+    rule_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    删除一个 Opengrep 规则
+    """
+    result = await db.execute(select(OpengrepRule).where(OpengrepRule.id == rule_id))
+    rule = result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(status_code=404, detail="规则不存在")
+
+    await db.delete(rule)
+    await db.commit()
+
+    return {"message": "规则已删除", "rule_id": rule_id}
