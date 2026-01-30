@@ -17,16 +17,19 @@ router = APIRouter()
 
 @router.post("/tasks")
 async def create_static_task():
+    """创建一个静态代码扫描任务或者获取已有任务"""
     pass
 
 
 @router.get("/tasks/{task_id}/findings")
 async def get_static_task_findings(task_id: str):
+    """获取静态代码扫描任务的漏洞列表"""
     pass
 
 
 @router.post("/update/findings/{finding_id}")
 async def update_static_task_finding(finding_id: str):
+    """更新静态代码扫描任务的某个漏洞状态, open/verified/false_positive"""
     pass
 
 
