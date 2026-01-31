@@ -40,7 +40,7 @@ class OpengrepScanTask(Base):
     files_scanned = Column(Integer, default=0)
     lines_scanned = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
     project = relationship("Project", back_populates="opengrep_scan_tasks")
