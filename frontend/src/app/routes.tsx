@@ -4,6 +4,7 @@ import AgentAudit from "@/pages/AgentAudit";
 import AdminDashboard from "@/pages/AdminDashboard";
 // import Account from "@/pages/Account";
 import AuditRules from "@/pages/AuditRules";
+import OpengrepRules from "@/pages/OpengrepRules";
 import type { ReactNode } from "react";
 
 export interface RouteConfig {
@@ -42,6 +43,12 @@ const routes: RouteConfig[] = [
         name: "审计规则",
         path: "/audit-rules",
         element: <AuditRules />,
+        visible: true,
+    },
+    {
+        name: "Opengrep规则",
+        path: "/opengrep-rules",
+        element: <OpengrepRules />,
         visible: true,
     },
     {

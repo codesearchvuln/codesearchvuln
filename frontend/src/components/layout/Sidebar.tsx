@@ -21,6 +21,7 @@ import {
     Github,
     // UserCircle,
     Shield,
+    Code,
     // MessageSquare,
     Bot,
 } from "lucide-react";
@@ -35,6 +36,7 @@ const routeIcons: Record<string, React.ReactNode> = {
     // "/instant-analysis": <Zap className="w-[18px] h-[18px]" />,
     // "/audit-tasks": <ListTodo className="w-[18px] h-[18px]" />,
     "/audit-rules": <Shield className="w-[18px] h-[18px]" />,
+    "/opengrep-rules": <Code className="w-[18px] h-[18px]" />,
     // "/prompts": <MessageSquare className="w-[18px] h-[18px]" />,
     "/admin": <Settings className="w-[18px] h-[18px]" />,
     // "/recycle-bin": <Trash2 className="w-[18px] h-[18px]" />,

@@ -1,0 +1,121 @@
+/**
+ * Opengrep Rules API Client
+ * API calls for opengrep rule management
+ */
+
+import { apiClient } from '@/shared/api/serverClient';
+
+export interface OpengrepRule {
+  id: string;
+  name: string;
+  language: string;
+  severity: string;
+  source: 'internal' | 'patch';
+  correct: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface OpengrepRuleDetail extends OpengrepRule {
+  pattern_yaml: string;
+  patch?: string;
+}
+
+export interface OpengrepRulesListResponse {
+  data: OpengrepRule[];
+  total: number;
+}
+
+/**
+ * Get opengrep rules list
+ */
+export async function getOpengrepRules(params?: {
+  language?: string;
+  source?: 'internal' | 'patch';
+  is_active?: boolean;
+  skip?: number;
+  limit?: number;
+}): Promise<OpengrepRule[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.language) searchParams.set('language', params.language);
+  if (params?.source) searchParams.set('source', params.source);
+  if (params?.is_active !== undefined) searchParams.set('is_active', String(params.is_active));
+  if (params?.skip !== undefined) searchParams.set('skip', String(params.skip));
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
+
+  const query = searchParams.toString();
+  const response = await apiClient.get(
+    `/static-tasks/rules${query ? `?${query}` : ''}`
+  );
+  return response.data;
+}
+
+/**
+ * Get opengrep rule detail
+ */
+export async function getOpengrepRule(ruleId: string): Promise<OpengrepRuleDetail> {
+  const response = await apiClient.get(`/static-tasks/rules/${ruleId}`);
+  return response.data;
+}
+
+/**
+ * Toggle opengrep rule activation status
+ */
+export async function toggleOpengrepRule(
+  ruleId: string
+): Promise<{ message: string; rule_id: string; is_active: boolean }> {
+  const response = await apiClient.put(`/static-tasks/rules/${ruleId}`);
+  return response.data;
+}
+
+/**
+ * Delete opengrep rule
+ */
+export async function deleteOpengrepRule(
+  ruleId: string
+): Promise<{ message: string; rule_id: string }> {
+  const response = await apiClient.delete(`/static-tasks/rules/${ruleId}`);
+  return response.data;
+}
+
+/**
+ * Generate opengrep rule from patch
+ */
+export async function generateOpengrepRule(params: {
+  repo_owner: string;
+  repo_name: string;
+  commit_hash: string;
+  commit_content: string;
+}): Promise<any> {
+  const response = await apiClient.post(`/static-tasks/rules/create`, params);
+  return response.data;
+}
+
+/**
+ * Get supported languages
+ */
+export const SUPPORTED_LANGUAGES = [
+  { value: 'python', label: 'Python' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'java', label: 'Java' },
+  { value: 'go', label: 'Go' },
+  { value: 'rust', label: 'Rust' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'csharp', label: 'C#' },
+  { value: 'php', label: 'PHP' },
+  { value: 'ruby', label: 'Ruby' },
+  { value: 'swift', label: 'Swift' },
+  { value: 'kotlin', label: 'Kotlin' },
+];
+
+export const RULE_SOURCES = [
+  { value: 'internal', label: '内置规则' },
+  { value: 'patch', label: '从Patch生成' },
+];
+
+export const SEVERITIES = [
+  { value: 'ERROR', label: '错误' },
+  { value: 'WARNING', label: '警告' },
+  { value: 'INFO', label: '信息' },
+];
