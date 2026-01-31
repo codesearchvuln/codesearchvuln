@@ -610,7 +610,7 @@ async def create_opengrep_rule(
     return result
 
 
-@router.patch("/rules/{rule_id}")
+@router.put("/rules/{rule_id}")
 async def update_opengrep_rule(
     rule_id: str,
     is_active: Optional[bool] = Query(None, description="是否启用规则"),
