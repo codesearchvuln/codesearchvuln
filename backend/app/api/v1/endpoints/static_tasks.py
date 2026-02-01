@@ -349,6 +349,40 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/tasks", response_model=List[OpengrepScanTaskResponse])
+async def list_static_tasks(
+    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    获取静态代码扫描任务列表
+
+    - 可按项目ID过滤
+    - 仅返回当前用户项目的任务
+    """
+    if project_id:
+        project = await db.get(Project, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        if project.owner_id != current_user.id:
+            raise HTTPException(status_code=403, detail="无权查看此项目")
+        query = select(OpengrepScanTask).where(OpengrepScanTask.project_id == project_id)
+    else:
+        result = await db.execute(select(Project.id).where(Project.owner_id == current_user.id))
+        project_ids = [row[0] for row in result.all()]
+        if not project_ids:
+            return []
+        query = select(OpengrepScanTask).where(OpengrepScanTask.project_id.in_(project_ids))
+
+    query = query.order_by(OpengrepScanTask.created_at.desc()).offset(skip).limit(limit)
+    result = await db.execute(query)
+    tasks = result.scalars().all()
+    return tasks
+
+
 @router.post("/tasks", response_model=OpengrepScanTaskResponse)
 async def create_static_task(
     request: OpengrepScanTaskCreate,

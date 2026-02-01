@@ -448,5 +448,5 @@ class ProjectDescriptionAnalyzer:
             for p, s in summaries.items()
         ]
         body = "\\n\\n".join(parts[:30])
-        prompt = f"请基于以下各文件的分析结果，使用简体中文生成一段项目摘要，包含：项目主要功能、核心模块。输入：\\n{body}\\n\\n请只返回最终的项目描述文本。"
+        prompt = f"请基于以下各文件的分析结果，使用简体中文生成一段简要的项目描述，不超过500字。输入：\\n{body}\\n\\n请只返回最终的项目描述文本。"
         return prompt

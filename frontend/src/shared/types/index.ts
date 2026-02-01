@@ -148,7 +148,8 @@ export type LatestProblem = {
 
 export type UnifiedTask =
   | { kind: "audit"; task: AuditTask }
-  | { kind: "agent"; task: import("@/shared/api/agentTasks").AgentTask };
+  | { kind: "agent"; task: import("@/shared/api/agentTasks").AgentTask }
+  | { kind: "static"; task: import("@/shared/api/opengrep").OpengrepScanTask };
 
 // 表单相关类型
 export interface CreateProjectForm {

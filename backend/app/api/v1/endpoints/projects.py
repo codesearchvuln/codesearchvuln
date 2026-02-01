@@ -309,7 +309,7 @@ async def get_project_info(
     except Exception as e:
         logger.warning(f"获取用户配置失败: {e}")
 
-    # 如果已存在 ProjectInfo，按状态返回或等待
+    # 如果已存在 ProjectInfo，按状态返回或等待；失败则重新生成
     existing_info_result = await db.execute(select(ProjectInfo).where(ProjectInfo.project_id == id))
     existing_info = existing_info_result.scalars().first()
     if existing_info:
@@ -318,21 +318,34 @@ async def get_project_info(
         if existing_info.status == "pending":
             raise HTTPException(status_code=202, detail="项目信息正在生成中，请稍后再试")
         if existing_info.status == "failed":
-            raise HTTPException(status_code=500, detail="项目信息生成失败，请稍后再试")
-
-    # 创建新的 ProjectInfo 记录并持久化为 pending 状态
-    project_info = ProjectInfoResponse(project_id=id, status="pending",created_at=datetime.now(timezone.utc))
-    db.add(project_info)
-    await db.commit()
-    await db.refresh(project_info)
+            existing_info.status = "pending"
+            existing_info.language_info = None
+            existing_info.description = None
+            existing_info.created_at = datetime.now(timezone.utc)
+            db.add(existing_info)
+            await db.commit()
+            await db.refresh(existing_info)
+            project_info = existing_info
+        else:
+            project_info = existing_info
+    else:
+        # 创建新的 ProjectInfo 记录并持久化为 pending 状态
+        project_info = ProjectInfo(
+            project_id=id,
+            status="pending",
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(project_info)
+        await db.commit()
+        await db.refresh(project_info)
 
     try:
-        # 生成语言统计（使用 project id）
-        cloc_result = await get_cloc_stats(id)
+        # 生成语言统计（使用 ProjectInfo）
+        cloc_result = await get_cloc_stats(project_info)
         project_info.language_info = cloc_result
 
-        # 生成项目描述（使用 project id）
-        analysis_result = await generate_project_description(id)
+        # 生成项目描述（使用 ProjectInfo）
+        analysis_result = await generate_project_description(project_info)
         if isinstance(analysis_result, dict):
             project_info.description = analysis_result.get("project_description", "")
         else:

@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.db.base import Base
 import uuid
+from sqlalchemy.sql import func
 
 
 class ProjectInfo(Base):
@@ -13,7 +14,7 @@ class ProjectInfo(Base):
     language_info = Column(JSON, nullable=True, comment="项目所用编程语言信息, JSON格式")
     description = Column(String, nullable=True, comment="项目描述, 由大模型生成")
     status = Column(String, default="pending", comment="信息状态: pending, completed, failed")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="创建时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
 
     # Relationships
     project = relationship("Project", back_populates="infos")

@@ -153,6 +153,22 @@ export async function getOpengrepScanFindings(params: {
   return response.data;
 }
 
+export async function getOpengrepScanTasks(params?: {
+  projectId?: string;
+  skip?: number;
+  limit?: number;
+}): Promise<OpengrepScanTask[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.projectId) searchParams.set("project_id", params.projectId);
+  if (params?.skip !== undefined) searchParams.set("skip", String(params.skip));
+  if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  const response = await apiClient.get(
+    `/static-tasks/tasks${query ? `?${query}` : ""}`
+  );
+  return response.data;
+}
+
 export async function updateOpengrepFindingStatus(params: {
   findingId: string;
   status: "open" | "verified" | "false_positive";

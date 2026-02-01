@@ -32,10 +32,10 @@ import type { Project, AuditTask, CreateProjectForm, AuditIssue } from "@/shared
 import type { AgentFinding, AgentTask } from "@/shared/api/agentTasks";
 import { getAgentTasks } from "@/shared/api/agentTasks";
 import { apiClient } from "@/shared/api/serverClient";
+import { getOpengrepScanTasks, type OpengrepScanTask } from "@/shared/api/opengrep";
 import { isRepositoryProject, getSourceTypeLabel, getRepositoryPlatformLabel } from "@/shared/utils/projectUtils";
 import { toast } from "sonner";
 import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
-import TerminalProgressDialog from "@/components/audit/TerminalProgressDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 import type { AggregatedAgentFinding, AggregatedAuditIssue, IssuesSummary, LatestProblem, UnifiedTask } from "@/shared/types";
 import {
@@ -52,10 +52,18 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [auditTasks, setAuditTasks] = useState<AuditTask[]>([]);
   const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
+  const [staticTasks, setStaticTasks] = useState<OpengrepScanTask[]>([]);
+  const [projectInfo, setProjectInfo] = useState<{
+    id?: string;
+    project_id?: string;
+    language_info?: string;
+    description?: string;
+    status?: string;
+    created_at?: string;
+  } | null>(null);
+  const [projectInfoStatus, setProjectInfoStatus] = useState<string>("idle");
   const [loading, setLoading] = useState(true);
   const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false);
-  const [showTerminalDialog, setShowTerminalDialog] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<CreateProjectForm>({
     name: "",
     description: "",
@@ -329,6 +337,30 @@ export default function ProjectDetail() {
     return merged;
   }, [latestIssues, latestFindings]);
 
+  const parsedLanguageInfo = useMemo(() => {
+    if (!projectInfo?.language_info) return null;
+    const raw = projectInfo.language_info;
+    try {
+      const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!data || typeof data !== "object") return null;
+
+      const total = Number(data.total ?? 0);
+      const languages = data.languages && typeof data.languages === "object" ? data.languages : {};
+      const items = Object.entries(languages)
+        .map(([name, info]) => {
+          const loc = Number((info as { loc_number?: number }).loc_number ?? 0);
+          const proportion = Number((info as { proportion?: number }).proportion ?? 0);
+          return { name, loc, proportion };
+        })
+        .filter((item) => item.name && Number.isFinite(item.loc))
+        .sort((a, b) => b.proportion - a.proportion);
+
+      return { total, items };
+    } catch {
+      return null;
+    }
+  }, [projectInfo?.language_info]);
+
   const handleOpenSettings = () => {
     if (!project) return;
 
@@ -376,10 +408,11 @@ export default function ProjectDetail() {
 
     try {
       setLoading(true);
-      const [projectRes, auditTasksRes, agentTasksRes] = await Promise.allSettled([
+      const [projectRes, auditTasksRes, agentTasksRes, staticTasksRes] = await Promise.allSettled([
         api.getProjectById(id),
         api.getAuditTasks(id),
-        getAgentTasks({ project_id: id })
+        getAgentTasks({ project_id: id }),
+        getOpengrepScanTasks({ projectId: id })
       ]);
 
       if (projectRes.status === 'fulfilled') {
@@ -404,6 +437,36 @@ export default function ProjectDetail() {
         setAgentTasks([]);
       }
 
+      if (staticTasksRes.status === 'fulfilled') {
+        setStaticTasks(Array.isArray(staticTasksRes.value) ? staticTasksRes.value : []);
+      } else {
+        console.warn('Failed to load static tasks:', staticTasksRes.reason);
+        setStaticTasks([]);
+      }
+
+      try {
+        setProjectInfoStatus("loading");
+        const infoRes = await apiClient.get(`/projects/info/${id}`);
+        if (infoRes.data?.status) {
+          setProjectInfo(infoRes.data);
+          setProjectInfoStatus(infoRes.data.status || "completed");
+        } else if (infoRes.data?.detail) {
+          setProjectInfo(null);
+          setProjectInfoStatus("pending");
+        } else {
+          setProjectInfo(infoRes.data);
+          setProjectInfoStatus("completed");
+        }
+      } catch (infoError: any) {
+        const statusCode = infoError?.response?.status;
+        if (statusCode === 202) {
+          setProjectInfoStatus("pending");
+        } else {
+          console.warn("Failed to load project info:", infoError);
+          setProjectInfoStatus("failed");
+        }
+      }
+
     } catch (error) {
       console.error('Failed to load project data:', error);
       toast.error("加载项目数据失败");
@@ -416,27 +479,31 @@ export default function ProjectDetail() {
     const merged: UnifiedTask[] = [
       ...auditTasks.map((t) => ({ kind: 'audit' as const, task: t })),
       ...agentTasks.map((t) => ({ kind: 'agent' as const, task: t })),
+      ...staticTasks.map((t) => ({ kind: 'static' as const, task: t })),
     ];
     merged.sort((a, b) => new Date((b.task as any).created_at).getTime() - new Date((a.task as any).created_at).getTime());
     return merged;
-  }, [auditTasks, agentTasks]);
+  }, [auditTasks, agentTasks, staticTasks]);
 
   const combinedStats: ProjectCombinedStats = useMemo(() => {
-    const totalTasks = auditTasks.length + agentTasks.length;
+    const totalTasks = auditTasks.length + agentTasks.length + staticTasks.length;
     const completedTasks =
       auditTasks.filter((t) => t.status === 'completed').length +
-      agentTasks.filter((t) => t.status === 'completed').length;
+      agentTasks.filter((t) => t.status === 'completed').length +
+      staticTasks.filter((t) => t.status === 'completed').length;
     const totalIssues =
       auditTasks.reduce((sum, t) => sum + (t.issues_count || 0), 0) +
-      agentTasks.reduce((sum, t) => sum + (t.findings_count || 0), 0);
-    const avgQualityScore = totalTasks > 0
-      ? (
-        (auditTasks.reduce((sum, t) => sum + (t.quality_score || 0), 0) +
-          agentTasks.reduce((sum, t) => sum + (t.quality_score || 0), 0)) / totalTasks
-      )
+      agentTasks.reduce((sum, t) => sum + (t.findings_count || 0), 0) +
+      staticTasks.reduce((sum, t) => sum + (t.total_findings || 0), 0);
+    const scoredTasks = [
+      ...auditTasks.map((t) => t.quality_score ?? null),
+      ...agentTasks.map((t) => t.quality_score ?? null),
+    ].filter((v): v is number => typeof v === 'number');
+    const avgQualityScore = scoredTasks.length > 0
+      ? scoredTasks.reduce((sum, v) => sum + v, 0) / scoredTasks.length
       : 0;
     return { totalTasks, completedTasks, totalIssues, avgQualityScore };
-  }, [auditTasks, agentTasks]);
+  }, [auditTasks, agentTasks, staticTasks]);
 
   const handleRunAudit = () => {
     setShowCreateTaskDialog(true);
@@ -514,11 +581,6 @@ export default function ProjectDetail() {
       duration: 5000
     });
     loadProjectData();
-  };
-
-  const handleFastScanStarted = (taskId: string) => {
-    setCurrentTaskId(taskId);
-    setShowTerminalDialog(true);
   };
 
   if (loading) {
@@ -681,7 +743,13 @@ export default function ProjectDetail() {
                     {unifiedTasks.slice(0, 5).map((t) => (
                       <Link
                         key={`${t.kind}:${t.task.id}`}
-                        to={t.kind === 'audit' ? `/tasks/${t.task.id}` : `/agent-audit/${t.task.id}`}
+                        to={
+                          t.kind === 'static'
+                            ? `/static-analysis/${t.task.id}`
+                            : t.kind === 'audit'
+                              ? `/tasks/${t.task.id}`
+                              : `/agent-audit/${t.task.id}`
+                        }
                         className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-all group"
                       >
                         <div className="flex items-center space-x-3">
@@ -694,9 +762,11 @@ export default function ProjectDetail() {
                           </div>
                           <div>
                             <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors uppercase">
-                              {t.kind === 'audit'
-                                ? ((t.task as AuditTask).task_type === 'repository' ? '审计任务' : '即时分析')
-                                : 'Agent 审计'}
+                              {t.kind === 'static'
+                                ? '静态分析'
+                                : t.kind === 'audit'
+                                  ? ((t.task as AuditTask).task_type === 'repository' ? '审计任务' : '即时分析')
+                                  : 'Agent 审计'}
                             </p>
                             <p className="text-xs text-muted-foreground font-mono">
                               {formatDate(t.task.created_at)}
@@ -705,7 +775,7 @@ export default function ProjectDetail() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge className={t.kind === 'agent' ? 'cyber-badge-info' : 'cyber-badge-muted'}>
-                            {t.kind === 'agent' ? 'AGENT' : 'AUDIT'}
+                            {t.kind === 'agent' ? 'AGENT' : t.kind === 'static' ? 'STATIC' : 'AUDIT'}
                           </Badge>
                           {getStatusBadge(t.task.status)}
                         </div>
@@ -719,6 +789,69 @@ export default function ProjectDetail() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* 项目分析 */}
+            <div className="cyber-card p-4 lg:col-span-2">
+              <div className="section-header">
+                <Terminal className="w-5 h-5 text-primary" />
+                <h3 className="section-title">项目分析</h3>
+              </div>
+              {projectInfoStatus === 'loading' && (
+                <p className="text-sm text-muted-foreground font-mono">正在生成项目分析...</p>
+              )}
+              {projectInfoStatus === 'pending' && (
+                <p className="text-sm text-muted-foreground font-mono">项目分析生成中，请稍后刷新。</p>
+              )}
+              {projectInfoStatus === 'failed' && (
+                <p className="text-sm text-rose-400 font-mono">项目分析生成失败，可稍后重试。</p>
+              )}
+              {projectInfoStatus !== 'loading' && projectInfoStatus !== 'pending' && projectInfoStatus !== 'failed' && projectInfo && (
+                <div className="space-y-4 font-mono">
+                  {projectInfo.description && (
+                    <div>
+                      <h4 className="text-sm font-bold mb-2 uppercase text-muted-foreground">项目描述</h4>
+                      <div className="text-sm text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap">
+                        {projectInfo.description}
+                      </div>
+                    </div>
+                  )}
+                  {projectInfo.language_info && (
+                    <div>
+                      <h4 className="text-sm font-bold mb-2 uppercase text-muted-foreground">语言统计</h4>
+                      {parsedLanguageInfo ? (
+                        <div className="space-y-3">
+                          <div className="text-xs text-muted-foreground">
+                            总计行数: <span className="text-foreground font-semibold">{parsedLanguageInfo.total.toLocaleString()}</span>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {parsedLanguageInfo.items.map((item) => (
+                              <div key={item.name} className="flex items-center justify-between gap-3 bg-muted/60 border border-border rounded px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold text-foreground">{item.name}</span>
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {(item.proportion * 100).toFixed(2)}%
+                                  </Badge>
+                                </div>
+                                <div className="text-xs text-muted-foreground font-mono">
+                                  {item.loc.toLocaleString()} 行
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <pre className="text-xs text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
+                          {projectInfo.language_info}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {projectInfoStatus === 'completed' && !projectInfo && (
+                <p className="text-sm text-muted-foreground font-mono">暂无项目分析结果。</p>
+              )}
             </div>
           </div>
         </TabsContent>
@@ -892,16 +1025,7 @@ export default function ProjectDetail() {
         open={showCreateTaskDialog}
         onOpenChange={setShowCreateTaskDialog}
         onTaskCreated={handleTaskCreated}
-        onFastScanStarted={handleFastScanStarted}
         preselectedProjectId={id}
-      />
-
-      {/* 终端进度对话框 */}
-      <TerminalProgressDialog
-        open={showTerminalDialog}
-        onOpenChange={setShowTerminalDialog}
-        taskId={currentTaskId}
-        taskType="repository"
       />
     </div>
   );

@@ -33,12 +33,17 @@ export function ProjectTasksTab(props: {
         <div className="space-y-4">
           {unifiedTasks.map((wrappedTask) => {
             const isAuditTask = wrappedTask.kind === "audit";
+            const isStaticTask = wrappedTask.kind === "static";
             const task: any = wrappedTask.task as any;
 
-            const issueCount = isAuditTask ? (task.issues_count ?? 0) : (task.findings_count ?? 0);
-            const totalFiles = task.total_files ?? 0;
-            const totalLines = task.total_lines ?? "-";
-            const qualityScore = typeof task.quality_score === "number" ? task.quality_score : 0;
+            const issueCount = isStaticTask
+              ? (task.total_findings ?? 0)
+              : isAuditTask
+                ? (task.issues_count ?? 0)
+                : (task.findings_count ?? 0);
+            const totalFiles = isStaticTask ? (task.files_scanned ?? 0) : (task.total_files ?? 0);
+            const totalLines = isStaticTask ? (task.lines_scanned ?? "-") : (task.total_lines ?? "-");
+            const qualityScore = typeof task.quality_score === "number" ? task.quality_score : null;
 
             return (
               <div key={`${wrappedTask.kind}:${task.id}`} className="cyber-card p-6">
@@ -58,16 +63,28 @@ export function ProjectTasksTab(props: {
                     </div>
                     <div>
                       <h4 className="font-bold text-foreground uppercase">
-                        {isAuditTask
-                          ? ((task as AuditTask).task_type === "repository" ? "审计任务" : "即时分析任务")
-                          : "Agent 审计任务"}
+                        {isStaticTask
+                          ? "静态分析任务"
+                          : isAuditTask
+                            ? ((task as AuditTask).task_type === "repository" ? "审计任务" : "即时分析任务")
+                            : "Agent 审计任务"}
                       </h4>
                       <p className="text-sm text-muted-foreground font-mono">创建于 {formatDate(task.created_at)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge className={wrappedTask.kind === "agent" ? "cyber-badge-info" : "cyber-badge-muted"}>
-                      {wrappedTask.kind === "agent" ? "AGENT" : "AUDIT"}
+                    <Badge className={
+                      wrappedTask.kind === "agent"
+                        ? "cyber-badge-info"
+                        : wrappedTask.kind === "static"
+                          ? "cyber-badge-warning"
+                          : "cyber-badge-muted"
+                    }>
+                      {wrappedTask.kind === "agent"
+                        ? "AGENT"
+                        : wrappedTask.kind === "static"
+                          ? "STATIC"
+                          : "AUDIT"}
                     </Badge>
                     {renderStatusBadge(task.status)}
                   </div>
@@ -87,7 +104,9 @@ export function ProjectTasksTab(props: {
                     <p className="text-xs text-muted-foreground uppercase">{isAuditTask ? "发现问题" : "发现漏洞"}</p>
                   </div>
                   <div className="text-center p-3 bg-muted rounded-lg border border-border">
-                    <p className="text-2xl font-bold text-primary">{qualityScore.toFixed(1)}</p>
+                    <p className="text-2xl font-bold text-primary">
+                      {qualityScore != null ? qualityScore.toFixed(1) : "-"}
+                    </p>
                     <p className="text-xs text-muted-foreground uppercase">质量评分</p>
                   </div>
                 </div>
@@ -103,7 +122,13 @@ export function ProjectTasksTab(props: {
                 )}
 
                 <div className="flex justify-end space-x-2 pt-4 border-t border-border">
-                  <Link to={isAuditTask ? `/tasks/${task.id}` : `/agent-audit/${task.id}`}>
+                  <Link to={
+                    isStaticTask
+                      ? `/static-analysis/${task.id}`
+                      : isAuditTask
+                        ? `/tasks/${task.id}`
+                        : `/agent-audit/${task.id}`
+                  }>
                     <Button variant="outline" size="sm" className="cyber-btn-outline">
                       <FileText className="w-4 h-4 mr-2" />
                       查看详情
