@@ -60,6 +60,13 @@ const normalizePath = (path?: string | null) => {
   return path;
 };
 
+const getCheckIdSuffix = (checkId?: string | null) => {
+  const value = String(checkId || "");
+  if (!value) return "";
+  const parts = value.split(".");
+  return parts[parts.length - 1] || value;
+};
+
 const getRuleMeta = (finding: OpengrepFinding) => {
   const rule = (finding.rule || {}) as Record<string, any>;
   const extra = (rule.extra || {}) as Record<string, any>;
@@ -312,7 +319,7 @@ export default function StaticAnalysis() {
                           <Badge className="cyber-badge-muted">CONF: {meta.confidence}</Badge>
                         )}
                         <span className="text-sm text-foreground font-bold">
-                          {meta.checkId}
+                          {getCheckIdSuffix(meta.checkId)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -410,7 +417,7 @@ export default function StaticAnalysis() {
                       <Badge className="cyber-badge-muted">CONF: {meta.confidence}</Badge>
                     )}
                     <span className="text-sm text-foreground font-bold">
-                      {meta.checkId}
+                      {getCheckIdSuffix(meta.checkId)}
                     </span>
                   </div>
 
