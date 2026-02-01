@@ -4,6 +4,9 @@
 """
 import json
 import logging
+import os
+import yaml
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -13,6 +16,7 @@ from app.models.user import User
 from app.models.project import Project, ProjectMember
 from app.models.audit import AuditTask, AuditIssue
 from app.models.analysis import InstantAnalysis
+from app.models.opengrep import OpengrepRule
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +263,83 @@ async def create_demo_data(db: AsyncSession, user: User) -> None:
     logger.info("✓ 演示数据创建完成")
 
 
+async def create_internal_opengrep_rules(db: AsyncSession) -> None:
+    """
+    从 app/db/rules 目录读取所有 .yaml 文件并创建内置 opengrep 规则
+    """
+    # 检查是否已有内置规则
+    result = await db.execute(
+        select(OpengrepRule).where(OpengrepRule.source == "internal")
+    )
+    existing_rules = result.scalars().all()
+    if existing_rules:
+        logger.info(f"内置规则已存在 ({len(existing_rules)} 条)，跳过创建")
+        return
+    
+    # 获取规则文件目录
+    rules_dir = Path(__file__).parent / "rules"
+    if not rules_dir.exists():
+        logger.warning(f"规则目录不存在: {rules_dir}")
+        return
+    
+    # 读取所有 .yaml 文件
+    yaml_files = list(rules_dir.glob("*.yaml")) + list(rules_dir.glob("*.yml"))
+    if not yaml_files:
+        logger.warning(f"规则目录中没有找到 .yaml 文件: {rules_dir}")
+        return
+    
+    logger.info(f"开始加载内置规则，找到 {len(yaml_files)} 个文件...")
+    
+    created_count = 0
+    for yaml_file in yaml_files:
+        try:
+            with open(yaml_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                rule_data = yaml.safe_load(content)
+            
+            # 解析 YAML 中的规则
+            if not rule_data or 'rules' not in rule_data:
+                logger.warning(f"跳过无效的规则文件: {yaml_file.name}")
+                continue
+            
+            for rule in rule_data['rules']:
+                rule_id = rule.get('id', yaml_file.stem)
+                
+                # 提取语言
+                languages = rule.get('languages', [])
+                if isinstance(languages, list) and languages:
+                    language = languages[0]
+                else:
+                    language = 'unknown'
+                
+                # 提取严重程度
+                severity = rule.get('severity', 'INFO')
+                if severity not in ['ERROR', 'WARNING', 'INFO']:
+                    severity = 'INFO'
+                
+                # 创建规则记录
+                opengrep_rule = OpengrepRule(
+                    name=rule_id,
+                    pattern_yaml=content,  # 保存完整的 YAML 内容
+                    language=language,
+                    severity=severity,
+                    source="internal",
+                    correct=True,  # 内置规则默认为正确
+                    is_active=True,
+                )
+                db.add(opengrep_rule)
+                created_count += 1
+                logger.info(f"  ✓ 加载规则: {rule_id} ({language}, {severity})")
+        
+        except Exception as e:
+            logger.error(f"加载规则文件失败 {yaml_file.name}: {e}")
+            continue
+    
+    await db.flush()
+    logger.info(f"✓ 成功创建 {created_count} 条内置规则")
+    await db.commit()
+
+
 async def init_db(db: AsyncSession) -> None:
     """
     初始化数据库
@@ -273,6 +354,9 @@ async def init_db(db: AsyncSession) -> None:
         await create_demo_data(db, demo_user)
     
     await db.commit()
+    
+    # 初始化内置 opengrep 规则
+    await create_internal_opengrep_rules(db)
     
     # 初始化系统模板和规则
     try:
