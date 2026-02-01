@@ -29,97 +29,97 @@
 @layer base {
   /* ====== Light Mode ====== */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 5%;
-    --card: 210 40% 98%;
-    --card-foreground: 0 0% 5%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 5%;
-    --primary: 21 90% 48%;
+    --background: 0 0% 0%;
+    --foreground: 0 0% 98%;
+    --card: 220 30% 6%;
+    --card-foreground: 0 0% 98%;
+    --popover: 220 30% 4%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 210 100% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 199 89% 48%;
+    --secondary: 210 90% 48%;
     --secondary-foreground: 0 0% 100%;
-    --success: 142 71% 45%;
+    --success: 142 60% 40%;
     --success-foreground: 0 0% 100%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 35% 18%;
-    --accent: 262 83% 58%;
+    --muted: 220 20% 14%;
+    --muted-foreground: 210 20% 80%;
+    --accent: 210 100% 64%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
+    --destructive: 0 80% 55%;
     --destructive-foreground: 0 0% 100%;
-    --warning: 32 95% 44%;
-    --warning-foreground: 0 0% 100%;
-    --border: 214 32% 70%;
-    --input: 214 32% 88%;
-    --ring: 21 90% 48%;
+    --warning: 38 85% 52%;
+    --warning-foreground: 0 0% 10%;
+    --border: 210 35% 24%;
+    --input: 210 30% 20%;
+    --ring: 210 100% 56%;
     --radius: 4px;
 
     /* Light mode specific */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
     --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
     --shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
-    --shadow-focus: 0 0 0 3px rgba(234, 88, 12, 0.25);
-    --glow-primary: 0 2px 8px rgba(234, 88, 12, 0.15);
+    --shadow-focus: 0 0 0 3px rgba(59, 130, 246, 0.35);
+    --glow-primary: 0 2px 8px rgba(59, 130, 246, 0.2);
     --glow-success: 0 2px 8px rgba(22, 163, 74, 0.15);
-    --glow-accent: 0 2px 8px rgba(124, 58, 237, 0.15);
-    --glow-cyan: 0 2px 8px rgba(2, 132, 199, 0.15);
+    --glow-accent: 0 2px 8px rgba(59, 130, 246, 0.2);
+    --glow-cyan: 0 2px 8px rgba(14, 165, 233, 0.2);
     --glow-red: 0 2px 8px rgba(220, 38, 38, 0.15);
 
     /* Theme-specific colors for utilities - 高对比度深色字体 */
-    --cyber-bg: #ffffff;
-    --cyber-bg-elevated: #f8fafc;
-    --cyber-border: #94a3b8;
-    --cyber-border-accent: rgba(234, 88, 12, 0.4);
-    --cyber-text: #0a0a0a;
-    --cyber-text-muted: #334155;
-    --cyber-hover-bg: #f1f5f9;
+    --cyber-bg: #000000;
+    --cyber-bg-elevated: #0b0f1a;
+    --cyber-border: #1f2a44;
+    --cyber-border-accent: rgba(59, 130, 246, 0.6);
+    --cyber-text: #ffffff;
+    --cyber-text-muted: #cbd5f5;
+    --cyber-hover-bg: #0f172a;
   }
 
   /* ====== Dark Mode ====== */
   .dark {
     --background: 0 0% 0%;
     --foreground: 0 0% 98%;
-    --card: 0 0% 3%;
+    --card: 220 30% 6%;
     --card-foreground: 0 0% 98%;
-    --popover: 0 0% 2%;
+    --popover: 220 30% 4%;
     --popover-foreground: 0 0% 98%;
-    --primary: 18 97% 59%;
+    --primary: 210 100% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 199 89% 48%;
+    --secondary: 210 90% 48%;
     --secondary-foreground: 0 0% 100%;
-    --success: 142 71% 45%;
+    --success: 142 60% 40%;
     --success-foreground: 0 0% 100%;
-    --muted: 0 0% 12%;
-    --muted-foreground: 0 0% 78%;
-    --accent: 270 76% 66%;
+    --muted: 220 20% 14%;
+    --muted-foreground: 210 20% 80%;
+    --accent: 210 100% 64%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --destructive: 0 80% 55%;
     --destructive-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;
+    --warning: 38 85% 52%;
     --warning-foreground: 0 0% 10%;
-    --border: 0 0% 24%;
-    --input: 0 0% 10%;
-    --ring: 18 97% 59%;
+    --border: 210 35% 24%;
+    --input: 210 30% 20%;
+    --ring: 210 100% 56%;
 
     /* Dark mode specific */
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
-    --shadow-focus: 0 0 0 2px rgba(255, 107, 44, 0.4);
-    --glow-primary: 0 0 20px rgba(255, 107, 44, 0.25), 0 0 40px rgba(255, 107, 44, 0.1);
+    --shadow-focus: 0 0 0 2px rgba(59, 130, 246, 0.45);
+    --glow-primary: 0 0 20px rgba(59, 130, 246, 0.35), 0 0 40px rgba(59, 130, 246, 0.15);
     --glow-success: 0 0 20px rgba(34, 197, 94, 0.25), 0 0 40px rgba(34, 197, 94, 0.1);
-    --glow-accent: 0 0 20px rgba(168, 85, 247, 0.25), 0 0 40px rgba(168, 85, 247, 0.1);
-    --glow-cyan: 0 0 20px rgba(14, 165, 233, 0.25), 0 0 40px rgba(14, 165, 233, 0.1);
+    --glow-accent: 0 0 20px rgba(59, 130, 246, 0.35), 0 0 40px rgba(59, 130, 246, 0.15);
+    --glow-cyan: 0 0 20px rgba(14, 165, 233, 0.35), 0 0 40px rgba(14, 165, 233, 0.15);
     --glow-red: 0 0 20px rgba(239, 68, 68, 0.25), 0 0 40px rgba(239, 68, 68, 0.1);
 
     /* Theme-specific colors for utilities - 纯黑背景 + 高对比度浅色字体 */
     --cyber-bg: #000000;
-    --cyber-bg-elevated: #0a0a0a;
-    --cyber-border: #3d3d3d;
-    --cyber-border-accent: rgba(255, 107, 44, 0.6);
-    --cyber-text: #fafafa;
-    --cyber-text-muted: #b8b8b8;
-    --cyber-hover-bg: #1a1a1a;
+    --cyber-bg-elevated: #0b0f1a;
+    --cyber-border: #1f2a44;
+    --cyber-border-accent: rgba(59, 130, 246, 0.6);
+    --cyber-text: #ffffff;
+    --cyber-text-muted: #cbd5f5;
+    --cyber-hover-bg: #0f172a;
   }
 
   * {
@@ -149,7 +149,8 @@
   }
 
   body {
-    @apply bg-background text-foreground font-mono antialiased;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     line-height: 1.65;
     font-weight: 550;
   }
@@ -291,7 +292,7 @@
   .terminal-title {
     font-size: 13px;
     margin-left: 0.75rem;
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     letter-spacing: 0.15em;
     text-transform: uppercase;
     color: var(--cyber-text-muted);
@@ -299,14 +300,14 @@
 
   .terminal-content {
     padding: 1rem;
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     font-size: 1rem;
     color: var(--cyber-text);
   }
 
   /* ============ Cyber Buttons ============ */
   .cyber-btn {
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     font-weight: 600;
     padding: 0.625rem 1.25rem;
     border-radius: var(--radius);
@@ -381,7 +382,7 @@
     border: 1px solid var(--cyber-border);
     padding: 0.75rem 1rem;
     border-radius: var(--radius);
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     font-size: 1rem;
     color: var(--cyber-text);
     transition: all 0.15s ease;
@@ -408,7 +409,7 @@
     padding: 0.375rem 0.75rem;
     border-radius: var(--radius);
     font-size: 13px;
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -639,7 +640,7 @@
     font-size: 14px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     font-weight: 700;
     color: var(--cyber-text-muted);
   }
@@ -670,7 +671,7 @@
     padding: 1rem 1rem;
     text-align: left;
     font-size: 14px;
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -818,7 +819,7 @@
 
   /* ============ Data Display ============ */
   .data-value {
-    font-family: 'JetBrains Mono', 'Roboto Mono', monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     color: hsl(var(--secondary));
   }
 
@@ -847,7 +848,7 @@
 
   /* ============ Theme-Aware Form Elements ============ */
   .cyber-label {
-    font-family: monospace;
+    font-family: "Times New Roman", Times, "FangSong_GB2312", "FangSong", "仿宋", "STFangsong", serif;
     font-weight: 700;
     text-transform: uppercase;
     font-size: 15px;

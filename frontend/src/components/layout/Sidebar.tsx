@@ -249,7 +249,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                         {/* Label */}
                                         {!collapsed && (
                                             <span
-                                                className={`font-mono text-sm tracking-wide transition-all duration-300 ${isActive ? "font-semibold" : "font-medium"}`}
+                                                className={`font-mono text-base tracking-wide transition-all duration-300 ${isActive ? "font-semibold" : "font-medium"}`}
                                             >
                                                 {route.name}
                                             </span>
