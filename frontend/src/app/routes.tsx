@@ -3,7 +3,6 @@ import Projects from "@/pages/Projects";
 import AgentAudit from "@/pages/AgentAudit";
 import AdminDashboard from "@/pages/AdminDashboard";
 import ProjectDetail from "@/pages/ProjectDetail";
-// import Account from "@/pages/Account";
 import AuditRules from "@/pages/AuditRules";
 import OpengrepRules from "@/pages/OpengrepRules";
 import StaticAnalysis from "@/pages/StaticAnalysis";
