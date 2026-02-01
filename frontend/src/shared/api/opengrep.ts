@@ -153,6 +153,18 @@ export async function getOpengrepScanFindings(params: {
   return response.data;
 }
 
+export async function updateOpengrepFindingStatus(params: {
+  findingId: string;
+  status: "open" | "verified" | "false_positive";
+}): Promise<{ message: string; finding_id: string; status: string }> {
+  const response = await apiClient.post(
+    `/static-tasks/findings/${params.findingId}/status`,
+    undefined,
+    { params: { status: params.status } }
+  );
+  return response.data;
+}
+
 /**
  * Get supported languages
  */
