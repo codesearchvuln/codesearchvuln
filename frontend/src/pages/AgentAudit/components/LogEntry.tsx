@@ -94,13 +94,13 @@ export const LogEntry = memo(function LogEntry({ item, isExpanded, onToggle }: L
       <div className={`
         relative rounded-lg border-l-3 overflow-hidden
         ${config.borderColor}
-        ${isExpanded ? 'bg-slate-100 dark:bg-card/80' : 'bg-slate-50 dark:bg-card/40'}
-        ${isCollapsible ? 'hover:bg-slate-100 dark:hover:bg-card/60' : ''}
-        ${isFinding ? 'border border-rose-500/30 dark:border-rose-500/20 !bg-rose-50 dark:!bg-rose-950/20' : 'border border-slate-200 dark:border-transparent'}
-        ${isError ? 'border border-red-500/30 dark:border-red-500/20 !bg-red-50 dark:!bg-red-950/20' : ''}
-        ${isDispatch ? 'border-sky-500/30 dark:border-sky-500/20 !bg-sky-50 dark:!bg-sky-950/20' : ''}
-        ${isThinking ? '!bg-violet-50 dark:!bg-violet-950/20 border-violet-500/30 dark:border-violet-500/20' : ''}
-        ${isTool ? '!bg-amber-50 dark:!bg-amber-950/20 border-amber-500/30 dark:border-amber-500/20' : ''}
+        ${isExpanded ? 'bg-card/70' : 'bg-card/40'}
+        ${isCollapsible ? 'hover:bg-card/60' : ''}
+        ${isFinding ? 'border border-rose-500/30 !bg-rose-950/20' : 'border border-border'}
+        ${isError ? 'border border-red-500/30 !bg-red-950/20' : ''}
+        ${isDispatch ? 'border-sky-500/30 !bg-sky-950/20' : ''}
+        ${isThinking ? '!bg-violet-950/20 border-violet-500/30' : ''}
+        ${isTool ? '!bg-amber-950/20 border-amber-500/30' : ''}
       `}>
 
         {/* Content */}

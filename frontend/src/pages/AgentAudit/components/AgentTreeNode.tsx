@@ -19,10 +19,10 @@ const AGENT_TYPE_ICONS: Record<string, React.ReactNode> = {
 
 // Agent type background colors
 const AGENT_TYPE_BG: Record<string, string> = {
-  orchestrator: 'bg-violet-100 dark:bg-violet-500/15 border-violet-300 dark:border-violet-500/30',
-  recon: 'bg-teal-100 dark:bg-teal-500/15 border-teal-300 dark:border-teal-500/30',
-  analysis: 'bg-amber-100 dark:bg-amber-500/15 border-amber-300 dark:border-amber-500/30',
-  verification: 'bg-emerald-100 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/30',
+  orchestrator: 'bg-violet-500/15 border-violet-500/30',
+  recon: 'bg-teal-500/15 border-teal-500/30',
+  analysis: 'bg-amber-500/15 border-amber-500/30',
+  verification: 'bg-emerald-500/15 border-emerald-500/30',
 };
 
 export const AgentTreeNodeItem = memo(function AgentTreeNodeItem({
@@ -51,7 +51,7 @@ export const AgentTreeNodeItem = memo(function AgentTreeNodeItem({
         <>
           {/* 垂直线 - 从父节点延伸下来 */}
           <div
-            className="absolute border-l-2 border-slate-300 dark:border-slate-600"
+            className="absolute border-l-2 border-border"
             style={{
               left: `${indent - 12}px`,
               top: 0,
@@ -60,7 +60,7 @@ export const AgentTreeNodeItem = memo(function AgentTreeNodeItem({
           />
           {/* 水平线 - 连接到当前节点 */}
           <div
-            className="absolute border-t-2 border-slate-300 dark:border-slate-600"
+            className="absolute border-t-2 border-border"
             style={{
               left: `${indent - 12}px`,
               top: '20px',
@@ -75,16 +75,16 @@ export const AgentTreeNodeItem = memo(function AgentTreeNodeItem({
         className={`
           relative flex items-center gap-2 py-2 px-2 cursor-pointer rounded-md
           ${isSelected
-            ? 'bg-primary/15 border-2 border-primary shadow-[0_0_12px_rgba(255,95,31,0.4)]'
+            ? 'bg-primary/15 border-2 border-primary shadow-[0_0_12px_rgba(59,130,246,0.4)]'
             : isRunning
-              ? 'bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-400 dark:border-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.3)]'
+              ? 'bg-emerald-950/30 border-2 border-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.3)]'
               : isCompleted
-                ? 'bg-slate-50 dark:bg-card border border-emerald-300 dark:border-emerald-600'
+                ? 'bg-card/60 border border-emerald-600'
                 : isFailed
-                  ? 'bg-rose-50 dark:bg-rose-950/20 border border-rose-300 dark:border-rose-500'
+                  ? 'bg-rose-950/20 border border-rose-500'
                   : node.status === 'waiting'
-                    ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-500'
-                    : 'bg-slate-50 dark:bg-card border border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500'
+                    ? 'bg-amber-950/20 border border-amber-500'
+                    : 'bg-card/40 border border-border hover:border-slate-500'
           }
         `}
         style={{ marginLeft: `${indent}px` }}
@@ -144,7 +144,7 @@ export const AgentTreeNodeItem = memo(function AgentTreeNodeItem({
           )}
 
           {!node.parent_agent_id && node.findings_count > 0 && (
-            <Badge className="h-5 px-2 text-xs bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 font-mono font-bold">
+            <Badge className="h-5 px-2 text-xs bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono font-bold">
               {node.findings_count}
             </Badge>
           )}

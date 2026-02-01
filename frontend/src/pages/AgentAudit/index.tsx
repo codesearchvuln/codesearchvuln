@@ -748,7 +748,7 @@ function AgentAuditPageContent() {
 
   if (showSplash && !taskId) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center relative overflow-hidden">
+      <div className="h-[100dvh] max-h-[100dvh] bg-background flex items-center justify-center relative overflow-hidden">
         <div className="absolute inset-0 cyber-grid opacity-20" />
         <div className="absolute inset-0 vignette pointer-events-none" />
 
@@ -780,7 +780,7 @@ function AgentAuditPageContent() {
 
   if (isLoading && !task) {
     return (
-      <div className="h-screen bg-background flex items-center justify-center relative overflow-hidden">
+      <div className="h-[100dvh] max-h-[100dvh] bg-background flex items-center justify-center relative overflow-hidden">
         {/* Grid background */}
         <div className="absolute inset-0 cyber-grid opacity-30" />
         {/* Vignette */}
@@ -794,7 +794,7 @@ function AgentAuditPageContent() {
   }
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden relative">
+    <div className="h-[100dvh] max-h-[100dvh] bg-background flex flex-col overflow-hidden relative">
 
       {/* Header */}
       <Header
