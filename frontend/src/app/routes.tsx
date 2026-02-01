@@ -5,6 +5,7 @@ import AdminDashboard from "@/pages/AdminDashboard";
 // import Account from "@/pages/Account";
 import AuditRules from "@/pages/AuditRules";
 import OpengrepRules from "@/pages/OpengrepRules";
+import StaticAnalysis from "@/pages/StaticAnalysis";
 import type { ReactNode } from "react";
 
 export interface RouteConfig {
@@ -50,6 +51,12 @@ const routes: RouteConfig[] = [
         path: "/opengrep-rules",
         element: <OpengrepRules />,
         visible: true,
+    },
+    {
+        name: "静态分析结果",
+        path: "/static-analysis/:taskId",
+        element: <StaticAnalysis />,
+        visible: false,
     },
     {
         name: "系统管理",

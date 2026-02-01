@@ -91,6 +91,68 @@ export async function generateOpengrepRule(params: {
   return response.data;
 }
 
+export interface OpengrepScanTask {
+  id: string;
+  project_id: string;
+  name: string;
+  status: string;
+  target_path: string;
+  total_findings: number;
+  error_count: number;
+  warning_count: number;
+  scan_duration_ms: number;
+  files_scanned: number;
+  lines_scanned: number;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface OpengrepFinding {
+  id: string;
+  scan_task_id: string;
+  rule: Record<string, any>;
+  description?: string | null;
+  file_path: string;
+  start_line?: number | null;
+  code_snippet?: string | null;
+  severity: string;
+  status: string;
+}
+
+export async function createOpengrepScanTask(params: {
+  project_id: string;
+  name?: string;
+  rule_ids: string[];
+  target_path?: string;
+}): Promise<OpengrepScanTask> {
+  const response = await apiClient.post(`/static-tasks/tasks`, params);
+  return response.data;
+}
+
+export async function getOpengrepScanTask(taskId: string): Promise<OpengrepScanTask> {
+  const response = await apiClient.get(`/static-tasks/tasks/${taskId}`);
+  return response.data;
+}
+
+export async function getOpengrepScanFindings(params: {
+  taskId: string;
+  severity?: string;
+  status?: string;
+  skip?: number;
+  limit?: number;
+}): Promise<OpengrepFinding[]> {
+  const searchParams = new URLSearchParams();
+  if (params.severity) searchParams.set('severity', params.severity);
+  if (params.status) searchParams.set('status', params.status);
+  if (params.skip !== undefined) searchParams.set('skip', String(params.skip));
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
+  const query = searchParams.toString();
+  const response = await apiClient.get(
+    `/static-tasks/tasks/${params.taskId}/findings${query ? `?${query}` : ''}`
+  );
+  return response.data;
+}
+
 /**
  * Get supported languages
  */

@@ -33,7 +33,6 @@ import type { AuditTask } from "@/shared/types";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
-import TerminalProgressDialog from "@/components/audit/TerminalProgressDialog";
 import ExportReportDialog from "@/components/reports/ExportReportDialog";
 import { calculateTaskProgress } from "@/shared/utils/utils";
 import { getAgentTasks, cancelAgentTask, getAgentFindings, type AgentTask, type AgentFinding } from "@/shared/api/agentTasks";
@@ -56,8 +55,6 @@ export default function AuditTasks() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
 
   // Agent任务状态
   const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
@@ -258,11 +255,6 @@ export default function AuditTasks() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleFastScanStarted = (taskId: string) => {
-    setCurrentTaskId(taskId);
-    setShowTerminal(true);
   };
 
   const getStatusBadge = (status: string) => {
@@ -950,15 +942,6 @@ export default function AuditTasks() {
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
         onTaskCreated={loadTasks}
-        onFastScanStarted={handleFastScanStarted}
-      />
-
-      {/* Terminal Progress Dialog for Fast Scan */}
-      <TerminalProgressDialog
-        open={showTerminal}
-        onOpenChange={setShowTerminal}
-        taskId={currentTaskId}
-        taskType="repository"
       />
 
       {/* 快速扫描任务导出对话框 */}

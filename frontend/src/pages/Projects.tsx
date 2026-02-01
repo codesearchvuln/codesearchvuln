@@ -44,7 +44,6 @@ import { isRepositoryProject, isZipProject, getSourceTypeBadge } from "@/shared/
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
-import TerminalProgressDialog from "@/components/audit/TerminalProgressDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 
 export default function Projects() {
@@ -54,8 +53,6 @@ export default function Projects() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false);
   const [selectedProjectForTask, setSelectedProjectForTask] = useState<string>("");
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -126,11 +123,6 @@ export default function Projects() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleFastScanStarted = (taskId: string) => {
-    setCurrentTaskId(taskId);
-    setShowTerminal(true);
   };
 
   const handleCreateProject = async () => {
@@ -939,16 +931,7 @@ export default function Projects() {
         open={showCreateTaskDialog}
         onOpenChange={setShowCreateTaskDialog}
         onTaskCreated={handleTaskCreated}
-        onFastScanStarted={handleFastScanStarted}
         preselectedProjectId={selectedProjectForTask}
-      />
-
-      {/* Terminal Progress Dialog for Fast Scan */}
-      <TerminalProgressDialog
-        open={showTerminal}
-        onOpenChange={setShowTerminal}
-        taskId={currentTaskId}
-        taskType="repository"
       />
 
       {/* Edit Dialog */}

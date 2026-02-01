@@ -35,6 +35,7 @@ import {
   type OpengrepRule,
   type OpengrepRuleDetail,
 } from '@/shared/api/opengrep';
+import { setOpengrepActiveRules } from '@/shared/stores/opengrepRulesStore';
 
 export default function OpengrepRules() {
   const [rules, setRules] = useState<OpengrepRule[]>([]);
@@ -79,6 +80,9 @@ export default function OpengrepRules() {
       // 提取所有唯一的编程语言
       const languages = Array.from(new Set(data.map(rule => rule.language))).sort();
       setAvailableLanguages(languages);
+
+      // 同步启用规则到全局缓存
+      setOpengrepActiveRules(data.filter((rule) => rule.is_active));
     } catch (error) {
       console.error('Failed to load rules:', error);
       toast.error('加载规则失败');

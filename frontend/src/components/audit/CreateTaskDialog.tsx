@@ -45,19 +45,23 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/shared/config/database";
-import { getRuleSets, type AuditRuleSet } from "@/shared/api/rules";
-import { getPromptTemplates, type PromptTemplate } from "@/shared/api/prompts";
 import { createAgentTask } from "@/shared/api/agentTasks";
+import {
+  createOpengrepScanTask,
+  getOpengrepRules,
+  type OpengrepRule,
+} from "@/shared/api/opengrep";
+import {
+  getOpengrepActiveRules,
+  subscribeOpengrepActiveRules,
+} from "@/shared/stores/opengrepRulesStore";
 
 import { useProjects } from "./hooks/useTaskForm";
 import { useZipFile, formatFileSize } from "./hooks/useZipFile";
 import FileSelectionDialog from "./FileSelectionDialog";
 import AgentModeSelector, { type AuditMode } from "@/components/agent/AgentModeSelector";
 
-import { runRepositoryAudit } from "@/features/projects/services/repoScan";
 import {
-  scanZipFile,
-  scanStoredZipFile,
   validateZipFile,
 } from "@/features/projects/services/repoZipScan";
 import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
@@ -67,7 +71,6 @@ interface CreateTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onTaskCreated: () => void;
-  onFastScanStarted?: (taskId: string) => void;
   preselectedProjectId?: string;
 }
 
@@ -83,7 +86,6 @@ export default function CreateTaskDialog({
   open,
   onOpenChange,
   onTaskCreated,
-  onFastScanStarted,
   preselectedProjectId,
 }: CreateTaskDialogProps) {
   const navigate = useNavigate();
@@ -100,11 +102,9 @@ export default function CreateTaskDialog({
   const [uploading, setUploading] = useState(false);
 
   const [auditMode, setAuditMode] = useState<AuditMode>("agent");
-
-  const [ruleSets, setRuleSets] = useState<AuditRuleSet[]>([]);
-  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
-  const [selectedRuleSetId, setSelectedRuleSetId] = useState<string>("");
-  const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<string>("");
+  const [staticRules, setStaticRules] = useState<OpengrepRule[]>([]);
+  const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
+  const [loadingStaticRules, setLoadingStaticRules] = useState(false);
 
   const { projects, loading, loadProjects } = useProjects();
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
@@ -150,33 +150,42 @@ export default function CreateTaskDialog({
     );
   }, [projects, searchTerm]);
 
+  const staticRuleOptions = useMemo(
+    () =>
+      staticRules.map((rule) => ({
+        value: rule.id,
+        label: `${rule.name} (${rule.language.toUpperCase()} · ${rule.severity})`,
+      })),
+    [staticRules]
+  );
+
   useEffect(() => {
-    const loadRulesAndPrompts = async () => {
+    const cached = getOpengrepActiveRules();
+    if (cached.length > 0) {
+      setStaticRules(cached);
+    }
+    const unsubscribe = subscribeOpengrepActiveRules((rules) => {
+      setStaticRules(rules);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const loadStaticRules = async () => {
+      if (!open || auditMode !== "static") return;
+      if (staticRules.length > 0) return;
+      setLoadingStaticRules(true);
       try {
-        const [rulesRes, promptsRes] = await Promise.all([
-          getRuleSets({ is_active: true }),
-          getPromptTemplates({ is_active: true }),
-        ]);
-        setRuleSets(rulesRes.items);
-        setPromptTemplates(promptsRes.items);
-        const defaultRuleSet = rulesRes.items.find((r: AuditRuleSet) => r.is_default);
-        if (defaultRuleSet) {
-          setSelectedRuleSetId(defaultRuleSet.id);
-        } else if (rulesRes.items.length > 0) {
-          setSelectedRuleSetId(rulesRes.items[0].id);
-        }
-        const defaultPrompt = promptsRes.items.find((p: PromptTemplate) => p.is_default);
-        if (defaultPrompt) {
-          setSelectedPromptTemplateId(defaultPrompt.id);
-        } else if (promptsRes.items.length > 0) {
-          setSelectedPromptTemplateId(promptsRes.items[0].id);
-        }
+        const rules = await getOpengrepRules({ is_active: true });
+        setStaticRules(rules);
       } catch (error) {
-        console.error("加载规则集和提示词失败:", error);
+        console.error("加载静态分析规则失败:", error);
+      } finally {
+        setLoadingStaticRules(false);
       }
     };
-    loadRulesAndPrompts();
-  }, []);
+    loadStaticRules();
+  }, [open, auditMode, staticRules.length]);
 
   useEffect(() => {
     if (open) {
@@ -186,13 +195,10 @@ export default function CreateTaskDialog({
       }
       setSearchTerm("");
       setShowAdvanced(false);
-      const defaultRuleSet = ruleSets.find(r => r.is_default);
-      setSelectedRuleSetId(defaultRuleSet?.id || ruleSets[0]?.id || "");
-      const defaultPrompt = promptTemplates.find(p => p.is_default);
-      setSelectedPromptTemplateId(defaultPrompt?.id || promptTemplates[0]?.id || "");
+      setSelectedRuleIds([]);
       zipState.reset();
     }
-  }, [open, preselectedProjectId, ruleSets, promptTemplates]);
+  }, [open, preselectedProjectId, loadProjects]);
 
   const excludePatternsRef = useRef(excludePatterns);
   useEffect(() => {
@@ -211,7 +217,6 @@ export default function CreateTaskDialog({
 
     try {
       setCreating(true);
-      let taskId: string;
 
       if (auditMode === "agent") {
         const agentTask = await createAgentTask({
@@ -234,52 +239,40 @@ export default function CreateTaskDialog({
         return;
       }
 
-      if (isZipProject(selectedProject)) {
-        if (zipState.useStoredZip && zipState.storedZipInfo?.has_file) {
-          taskId = await scanStoredZipFile({
-            projectId: selectedProject.id,
-            excludePatterns,
-            createdBy: "local-user",
-            filePaths: selectedFiles,
-            ruleSetId: selectedRuleSetId || undefined,
-            promptTemplateId: selectedPromptTemplateId || undefined,
-          });
-        } else if (zipState.zipFile) {
-          taskId = await scanZipFile({
-            projectId: selectedProject.id,
-            zipFile: zipState.zipFile,
-            excludePatterns,
-            createdBy: "local-user",
-            ruleSetId: selectedRuleSetId || undefined,
-            promptTemplateId: selectedPromptTemplateId || undefined,
-          });
-        } else {
-          toast.error("请上传 ZIP 文件");
+      if (auditMode === "static") {
+        if (!isZipProject(selectedProject)) {
+          toast.error("静态分析仅支持源码归档项目");
           return;
         }
-      } else {
-        if (!selectedProject.repository_url) {
-          toast.error("仓库地址为空");
+        if (!zipState.storedZipInfo?.has_file) {
+          toast.error("请先上传源码归档");
           return;
         }
-        taskId = await runRepositoryAudit({
-          projectId: selectedProject.id,
-          repoUrl: selectedProject.repository_url,
-          branch,
-          exclude: excludePatterns,
-          createdBy: "local-user",
-          filePaths: selectedFiles,
-          ruleSetId: selectedRuleSetId || undefined,
-          promptTemplateId: selectedPromptTemplateId || undefined,
+        const activeRuleIds =
+          selectedRuleIds.length > 0
+            ? selectedRuleIds
+            : staticRules.map((rule) => rule.id);
+        if (activeRuleIds.length === 0) {
+          toast.error("未找到启用的规则，请先在规则管理中启用规则");
+          return;
+        }
+        const staticTask = await createOpengrepScanTask({
+          project_id: selectedProject.id,
+          name: `静态分析-${selectedProject.name}`,
+          rule_ids: activeRuleIds,
+          target_path: ".",
         });
-      }
 
-      onOpenChange(false);
-      onTaskCreated();
-      if (onFastScanStarted) {
-        onFastScanStarted(taskId);
+        onOpenChange(false);
+        onTaskCreated();
+        toast.success("静态分析任务已创建");
+        navigate(`/static-analysis/${staticTask.id}`);
+
+        setSelectedProjectId("");
+        setSelectedFiles(undefined);
+        setExcludePatterns(DEFAULT_EXCLUDES);
+        return;
       }
-      toast.success("扫描任务已启动");
 
       setSelectedProjectId("");
       setSelectedFiles(undefined);
@@ -294,6 +287,12 @@ export default function CreateTaskDialog({
 
   const canStart = useMemo(() => {
     if (!selectedProject) return false;
+    if (auditMode === "static") {
+      return (
+        isZipProject(selectedProject) &&
+        !!zipState.storedZipInfo?.has_file
+      );
+    }
     if (isZipProject(selectedProject)) {
       return (
         (zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
@@ -301,7 +300,7 @@ export default function CreateTaskDialog({
       );
     }
     return !!selectedProject.repository_url && !!branch.trim();
-  }, [selectedProject, zipState, branch]);
+  }, [selectedProject, zipState, branch, auditMode, selectedRuleIds]);
 
   return (
     <>
@@ -432,47 +431,7 @@ export default function CreateTaskDialog({
                   />
                 )}
 
-                {/* 规则集和提示词选择 - 仅快速扫描模式显示 */}
-                {auditMode !== "agent" && (
-                  <div className="p-3 border border-border rounded bg-violet-50 dark:bg-violet-950/20 space-y-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Zap className="w-4 h-4 text-violet-600 dark:text-violet-400" />
-                      <span className="font-mono text-sm font-bold text-violet-700 dark:text-violet-300 uppercase">审计配置</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">规则集</label>
-                        <Select value={selectedRuleSetId} onValueChange={setSelectedRuleSetId}>
-                          <SelectTrigger className="h-9 cyber-input text-xs">
-                            <SelectValue placeholder="选择规则集" />
-                          </SelectTrigger>
-                          <SelectContent className="cyber-dialog border-border">
-                            {ruleSets.map((rs) => (
-                              <SelectItem key={rs.id} value={rs.id} className="font-mono text-xs">
-                                {rs.name} {rs.is_default && '(默认)'} ({rs.enabled_rules_count})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">提示词模板</label>
-                        <Select value={selectedPromptTemplateId} onValueChange={setSelectedPromptTemplateId}>
-                          <SelectTrigger className="h-9 cyber-input text-xs">
-                            <SelectValue placeholder="选择提示词模板" />
-                          </SelectTrigger>
-                          <SelectContent className="cyber-dialog border-border">
-                            {promptTemplates.map((pt) => (
-                              <SelectItem key={pt.id} value={pt.id} className="font-mono text-xs">
-                                {pt.name} {pt.is_default && '(默认)'}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {auditMode === "static" && null}
 
                 {/* 高级选项 */}
                 <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
@@ -631,7 +590,7 @@ export default function CreateTaskDialog({
               ) : (
                 <>
                   <Zap className="w-4 h-4 mr-2" />
-                  开始快速扫描
+                  开始静态分析
                 </>
               )}
             </Button>

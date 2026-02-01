@@ -6,7 +6,7 @@
 import { Bot, Zap, CheckCircle2, Clock, Shield, Code } from "lucide-react";
 import { cn } from "@/shared/utils/utils";
 
-export type AuditMode = "fast" | "agent";
+export type AuditMode = "static" | "agent";
 
 interface AgentModeSelectorProps {
   value: AuditMode;
@@ -29,11 +29,11 @@ export default function AgentModeSelector({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        {/* 快速审计模式 */}
+        {/* 静态分析模式 */}
         <label
           className={cn(
             "relative flex flex-col p-4 border cursor-pointer transition-all rounded",
-            value === "fast"
+            value === "static"
               ? "border-amber-500/50 bg-amber-50 dark:bg-amber-950/30"
               : "border-border hover:border-border bg-muted/50",
             disabled && "opacity-50 cursor-not-allowed"
@@ -42,9 +42,9 @@ export default function AgentModeSelector({
           <input
             type="radio"
             name="auditMode"
-            value="fast"
-            checked={value === "fast"}
-            onChange={() => onChange("fast")}
+            value="static"
+            checked={value === "static"}
+            onChange={() => onChange("static")}
             disabled={disabled}
             className="sr-only"
           />
@@ -52,22 +52,22 @@ export default function AgentModeSelector({
           <div className="flex items-center gap-2 mb-2">
             <div className={cn(
               "p-1.5 rounded border",
-              value === "fast"
+              value === "static"
                 ? "bg-amber-500/20 border-amber-500/50"
                 : "bg-muted border-border"
             )}>
               <Zap className={cn(
                 "w-4 h-4",
-                value === "fast" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+                value === "static" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
               )} />
             </div>
             <span className={cn(
               "font-bold text-sm font-mono uppercase",
-              value === "fast" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"
+              value === "static" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"
             )}>
-              快速审计
+              静态分析
             </span>
-            {value === "fast" && (
+            {value === "static" && (
               <CheckCircle2 className="w-4 h-4 text-amber-600 dark:text-amber-400 ml-auto" />
             )}
           </div>
@@ -75,21 +75,21 @@ export default function AgentModeSelector({
           <ul className="text-xs text-muted-foreground space-y-1 mb-3 font-mono">
             <li className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              速度快（分钟级）
+              基于规则的静态扫描
             </li>
             <li className="flex items-center gap-1">
               <Code className="w-3 h-3" />
-              逐文件 LLM 分析
+              选择规则多次分析
             </li>
             <li className="flex items-center gap-1 text-muted-foreground">
               <Shield className="w-3 h-3" />
-              无漏洞验证
+              无沙箱验证
             </li>
           </ul>
 
           <div className="mt-auto pt-2 border-t border-border">
             <span className="text-xs uppercase tracking-wider text-muted-foreground font-bold font-mono">
-              适合: CI/CD 集成、日常检查
+              适合: 合规检查、规则扫描
             </span>
           </div>
         </label>
