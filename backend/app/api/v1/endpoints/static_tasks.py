@@ -1,33 +1,34 @@
-import logging
-import yaml
 import json
-import subprocess
-import tempfile
+import logging
 import os
 import shutil
+import subprocess
+import tempfile
 import zipfile
-from typing import Any, List, Optional, Dict
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+import yaml
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.api import deps
+from app.core.config import settings
+from app.db.session import async_session_factory, get_db
+from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
+from app.models.project import Project
+from app.models.user import User
 from app.schemas.opengrep import (
     OpengrepRuleCreateRequest,
     OpengrepRulePatchResponse,
+    OpengrepRuleTextCreateRequest,
+    OpengrepRuleTextResponse,
 )
-from app.db.session import get_db, async_session_factory
-from app.models.opengrep import OpengrepRule, OpengrepScanTask, OpengrepFinding
-from app.models.project import Project
-from app.models.user import User
-from app.api import deps
-from app.services.rule import get_rule_by_patch
-from app.core.config import settings
-
+from app.services.rule import get_rule_by_patch, validate_generic_rule
 
 # ============ Schemas ============
 
@@ -339,7 +340,9 @@ async def _execute_opengrep_scan(
                     return
 
                 fatal_rule_errors = [item for item in scan_errors if _is_fatal_rule_error(item)]
-                non_fatal_scan_errors = [item for item in scan_errors if not _is_fatal_rule_error(item)]
+                non_fatal_scan_errors = [
+                    item for item in scan_errors if not _is_fatal_rule_error(item)
+                ]
 
                 # 规则配置错误/执行错误才判定失败；源码语法错误不视为失败
                 if fatal_rule_errors:
@@ -350,12 +353,14 @@ async def _execute_opengrep_scan(
                         f"Scan task {task_id} failed with fatal rule errors: {fatal_rule_errors[:3]}"
                     )
                     return
-                
+
                 # 记录警告但不影响任务状态
                 if scan_errors:
                     warning_errors = [err for err in scan_errors if err.get("level") != "error"]
                     if warning_errors:
-                        logger.warning(f"Scan task {task_id} has {len(warning_errors)} warnings (e.g., PartialParsing)")
+                        logger.warning(
+                            f"Scan task {task_id} has {len(warning_errors)} warnings (e.g., PartialParsing)"
+                        )
 
                 if non_fatal_scan_errors:
                     logger.warning(
@@ -687,6 +692,7 @@ async def get_opengrep_rule(rule_id: str, db: AsyncSession = Depends(get_db)):
         "created_at": rule.create_at,
     }
 
+
 @router.post("/rules/create", response_model=OpengrepRulePatchResponse)
 async def create_opengrep_rule(
     request: OpengrepRuleCreateRequest, db: AsyncSession = Depends(get_db)
@@ -742,6 +748,56 @@ async def create_opengrep_rule(
         logger.error(f"Failed to persist opengrep rule attempts: {e}")
 
     return result
+
+
+@router.post("/rules/create-generic", response_model=OpengrepRuleTextResponse)
+async def create_opengrep_generic_rule(
+    request: OpengrepRuleTextCreateRequest, db: AsyncSession = Depends(get_db)
+):
+    """
+    创建通用型 Opengrep 规则
+
+    - 校验 YAML 格式与规则结构
+    - 使用大模型生成 test.yaml 并进行规则有效性测试
+    """
+    result = await validate_generic_rule(request.rule_yaml)
+    validation = result.get("validation") or {}
+    if not validation.get("is_valid"):
+        raise HTTPException(status_code=400, detail=validation.get("message") or "规则验证失败")
+
+    rule = result.get("rule") or {}
+    rule_yaml = result.get("rule_yaml") or request.rule_yaml
+
+    name = rule.get("id") or "custom-rule"
+    languages = rule.get("languages") or []
+    language = languages[0] if isinstance(languages, list) and languages else "unknown"
+    severity = rule.get("severity") or "ERROR"
+
+    opengrep_rule = OpengrepRule(
+        name=name,
+        pattern_yaml=rule_yaml,
+        language=language,
+        severity=severity,
+        source="internal",
+        patch=None,
+        correct=True,
+        is_active=True,
+    )
+
+    try:
+        db.add(opengrep_rule)
+        await db.commit()
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Failed to persist generic rule: {e}")
+        raise HTTPException(status_code=500, detail="规则保存失败")
+
+    return {
+        "rule": rule,
+        "validation": validation,
+        "test_yaml": result.get("test_yaml"),
+        "rule_id": opengrep_rule.id,
+    }
 
 
 @router.put("/rules/{rule_id}")

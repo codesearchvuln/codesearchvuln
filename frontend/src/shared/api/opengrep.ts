@@ -3,209 +3,230 @@
  * API calls for opengrep rule management
  */
 
-import { apiClient } from '@/shared/api/serverClient';
+import { apiClient } from "@/shared/api/serverClient";
 
 export interface OpengrepRule {
-  id: string;
-  name: string;
-  language: string;
-  severity: string;
-  source: 'internal' | 'patch';
-  correct: boolean;
-  is_active: boolean;
-  created_at: string;
+    id: string;
+    name: string;
+    language: string;
+    severity: string;
+    source: "internal" | "patch";
+    correct: boolean;
+    is_active: boolean;
+    created_at: string;
 }
 
 export interface OpengrepRuleDetail extends OpengrepRule {
-  pattern_yaml: string;
-  patch?: string;
+    pattern_yaml: string;
+    patch?: string;
 }
 
 export interface OpengrepRulesListResponse {
-  data: OpengrepRule[];
-  total: number;
+    data: OpengrepRule[];
+    total: number;
 }
 
 /**
  * Get opengrep rules list
  */
 export async function getOpengrepRules(params?: {
-  language?: string;
-  source?: 'internal' | 'patch';
-  is_active?: boolean;
-  skip?: number;
-  limit?: number;
+    language?: string;
+    source?: "internal" | "patch";
+    is_active?: boolean;
+    skip?: number;
+    limit?: number;
 }): Promise<OpengrepRule[]> {
-  const searchParams = new URLSearchParams();
-  if (params?.language) searchParams.set('language', params.language);
-  if (params?.source) searchParams.set('source', params.source);
-  if (params?.is_active !== undefined) searchParams.set('is_active', String(params.is_active));
-  if (params?.skip !== undefined) searchParams.set('skip', String(params.skip));
-  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
+    const searchParams = new URLSearchParams();
+    if (params?.language) searchParams.set("language", params.language);
+    if (params?.source) searchParams.set("source", params.source);
+    if (params?.is_active !== undefined)
+        searchParams.set("is_active", String(params.is_active));
+    if (params?.skip !== undefined)
+        searchParams.set("skip", String(params.skip));
+    if (params?.limit !== undefined)
+        searchParams.set("limit", String(params.limit));
 
-  const query = searchParams.toString();
-  const response = await apiClient.get(
-    `/static-tasks/rules${query ? `?${query}` : ''}`
-  );
-  return response.data;
+    const query = searchParams.toString();
+    const response = await apiClient.get(
+        `/static-tasks/rules${query ? `?${query}` : ""}`,
+    );
+    return response.data;
 }
 
 /**
  * Get opengrep rule detail
  */
-export async function getOpengrepRule(ruleId: string): Promise<OpengrepRuleDetail> {
-  const response = await apiClient.get(`/static-tasks/rules/${ruleId}`);
-  return response.data;
+export async function getOpengrepRule(
+    ruleId: string,
+): Promise<OpengrepRuleDetail> {
+    const response = await apiClient.get(`/static-tasks/rules/${ruleId}`);
+    return response.data;
 }
 
 /**
  * Toggle opengrep rule activation status
  */
 export async function toggleOpengrepRule(
-  ruleId: string
+    ruleId: string,
 ): Promise<{ message: string; rule_id: string; is_active: boolean }> {
-  const response = await apiClient.put(`/static-tasks/rules/${ruleId}`);
-  return response.data;
+    const response = await apiClient.put(`/static-tasks/rules/${ruleId}`);
+    return response.data;
 }
 
 /**
  * Delete opengrep rule
  */
 export async function deleteOpengrepRule(
-  ruleId: string
+    ruleId: string,
 ): Promise<{ message: string; rule_id: string }> {
-  const response = await apiClient.delete(`/static-tasks/rules/${ruleId}`);
-  return response.data;
+    const response = await apiClient.delete(`/static-tasks/rules/${ruleId}`);
+    return response.data;
 }
 
 /**
  * Generate opengrep rule from patch
  */
 export async function generateOpengrepRule(params: {
-  repo_owner: string;
-  repo_name: string;
-  commit_hash: string;
-  commit_content: string;
+    repo_owner: string;
+    repo_name: string;
+    commit_hash: string;
+    commit_content: string;
 }): Promise<any> {
-  const response = await apiClient.post(`/static-tasks/rules/create`, params);
-  return response.data;
+    const response = await apiClient.post(`/static-tasks/rules/create`, params);
+    return response.data;
+}
+
+export async function createOpengrepGenericRule(params: {
+    rule_yaml: string;
+}): Promise<any> {
+    const response = await apiClient.post(
+        `/static-tasks/rules/create-generic`,
+        params,
+    );
+    return response.data;
 }
 
 export interface OpengrepScanTask {
-  id: string;
-  project_id: string;
-  name: string;
-  status: string;
-  target_path: string;
-  total_findings: number;
-  error_count: number;
-  warning_count: number;
-  scan_duration_ms: number;
-  files_scanned: number;
-  lines_scanned: number;
-  created_at: string;
-  updated_at?: string | null;
+    id: string;
+    project_id: string;
+    name: string;
+    status: string;
+    target_path: string;
+    total_findings: number;
+    error_count: number;
+    warning_count: number;
+    scan_duration_ms: number;
+    files_scanned: number;
+    lines_scanned: number;
+    created_at: string;
+    updated_at?: string | null;
 }
 
 export interface OpengrepFinding {
-  id: string;
-  scan_task_id: string;
-  rule: Record<string, any>;
-  description?: string | null;
-  file_path: string;
-  start_line?: number | null;
-  code_snippet?: string | null;
-  severity: string;
-  status: string;
+    id: string;
+    scan_task_id: string;
+    rule: Record<string, any>;
+    description?: string | null;
+    file_path: string;
+    start_line?: number | null;
+    code_snippet?: string | null;
+    severity: string;
+    status: string;
 }
 
 export async function createOpengrepScanTask(params: {
-  project_id: string;
-  name?: string;
-  rule_ids: string[];
-  target_path?: string;
+    project_id: string;
+    name?: string;
+    rule_ids: string[];
+    target_path?: string;
 }): Promise<OpengrepScanTask> {
-  const response = await apiClient.post(`/static-tasks/tasks`, params);
-  return response.data;
+    const response = await apiClient.post(`/static-tasks/tasks`, params);
+    return response.data;
 }
 
-export async function getOpengrepScanTask(taskId: string): Promise<OpengrepScanTask> {
-  const response = await apiClient.get(`/static-tasks/tasks/${taskId}`);
-  return response.data;
+export async function getOpengrepScanTask(
+    taskId: string,
+): Promise<OpengrepScanTask> {
+    const response = await apiClient.get(`/static-tasks/tasks/${taskId}`);
+    return response.data;
 }
 
 export async function getOpengrepScanFindings(params: {
-  taskId: string;
-  severity?: string;
-  status?: string;
-  skip?: number;
-  limit?: number;
+    taskId: string;
+    severity?: string;
+    status?: string;
+    skip?: number;
+    limit?: number;
 }): Promise<OpengrepFinding[]> {
-  const searchParams = new URLSearchParams();
-  if (params.severity) searchParams.set('severity', params.severity);
-  if (params.status) searchParams.set('status', params.status);
-  if (params.skip !== undefined) searchParams.set('skip', String(params.skip));
-  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
-  const query = searchParams.toString();
-  const response = await apiClient.get(
-    `/static-tasks/tasks/${params.taskId}/findings${query ? `?${query}` : ''}`
-  );
-  return response.data;
+    const searchParams = new URLSearchParams();
+    if (params.severity) searchParams.set("severity", params.severity);
+    if (params.status) searchParams.set("status", params.status);
+    if (params.skip !== undefined)
+        searchParams.set("skip", String(params.skip));
+    if (params.limit !== undefined)
+        searchParams.set("limit", String(params.limit));
+    const query = searchParams.toString();
+    const response = await apiClient.get(
+        `/static-tasks/tasks/${params.taskId}/findings${query ? `?${query}` : ""}`,
+    );
+    return response.data;
 }
 
 export async function getOpengrepScanTasks(params?: {
-  projectId?: string;
-  skip?: number;
-  limit?: number;
+    projectId?: string;
+    skip?: number;
+    limit?: number;
 }): Promise<OpengrepScanTask[]> {
-  const searchParams = new URLSearchParams();
-  if (params?.projectId) searchParams.set("project_id", params.projectId);
-  if (params?.skip !== undefined) searchParams.set("skip", String(params.skip));
-  if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
-  const query = searchParams.toString();
-  const response = await apiClient.get(
-    `/static-tasks/tasks${query ? `?${query}` : ""}`
-  );
-  return response.data;
+    const searchParams = new URLSearchParams();
+    if (params?.projectId) searchParams.set("project_id", params.projectId);
+    if (params?.skip !== undefined)
+        searchParams.set("skip", String(params.skip));
+    if (params?.limit !== undefined)
+        searchParams.set("limit", String(params.limit));
+    const query = searchParams.toString();
+    const response = await apiClient.get(
+        `/static-tasks/tasks${query ? `?${query}` : ""}`,
+    );
+    return response.data;
 }
 
 export async function updateOpengrepFindingStatus(params: {
-  findingId: string;
-  status: "open" | "verified" | "false_positive";
+    findingId: string;
+    status: "open" | "verified" | "false_positive";
 }): Promise<{ message: string; finding_id: string; status: string }> {
-  const response = await apiClient.post(
-    `/static-tasks/findings/${params.findingId}/status`,
-    undefined,
-    { params: { status: params.status } }
-  );
-  return response.data;
+    const response = await apiClient.post(
+        `/static-tasks/findings/${params.findingId}/status`,
+        undefined,
+        { params: { status: params.status } },
+    );
+    return response.data;
 }
 
 /**
  * Get supported languages
  */
 export const SUPPORTED_LANGUAGES = [
-  { value: 'python', label: 'Python' },
-  { value: 'javascript', label: 'JavaScript' },
-  { value: 'typescript', label: 'TypeScript' },
-  { value: 'java', label: 'Java' },
-  { value: 'go', label: 'Go' },
-  { value: 'rust', label: 'Rust' },
-  { value: 'cpp', label: 'C++' },
-  { value: 'csharp', label: 'C#' },
-  { value: 'php', label: 'PHP' },
-  { value: 'ruby', label: 'Ruby' },
-  { value: 'swift', label: 'Swift' },
-  { value: 'kotlin', label: 'Kotlin' },
+    { value: "python", label: "Python" },
+    { value: "javascript", label: "JavaScript" },
+    { value: "typescript", label: "TypeScript" },
+    { value: "java", label: "Java" },
+    { value: "go", label: "Go" },
+    { value: "rust", label: "Rust" },
+    { value: "cpp", label: "C++" },
+    { value: "csharp", label: "C#" },
+    { value: "php", label: "PHP" },
+    { value: "ruby", label: "Ruby" },
+    { value: "swift", label: "Swift" },
+    { value: "kotlin", label: "Kotlin" },
 ];
 
 export const RULE_SOURCES = [
-  { value: 'internal', label: '内置规则' },
-  { value: 'patch', label: '从Patch生成' },
+    { value: "internal", label: "内置规则" },
+    { value: "patch", label: "从Patch生成" },
 ];
 
 export const SEVERITIES = [
-  { value: 'ERROR', label: '错误' },
-  { value: 'WARNING', label: '警告' },
-  { value: 'INFO', label: '信息' },
+    { value: "ERROR", label: "错误" },
+    { value: "WARNING", label: "警告" },
+    { value: "INFO", label: "信息" },
 ];

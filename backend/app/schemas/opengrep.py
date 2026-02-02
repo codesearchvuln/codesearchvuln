@@ -3,8 +3,9 @@ Opengrep API 数据模型 - Pydantic Schemas
 用于API请求和响应序列化
 """
 
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -38,6 +39,17 @@ class OpengrepRulePatchResponse(BaseModel):
     validation: OpengrepRuleValidation
     attempts: List[OpengrepRuleAttempt]
     meta: Optional[Dict[str, Any]] = None
+
+
+class OpengrepRuleTextCreateRequest(BaseModel):
+    rule_yaml: str
+
+
+class OpengrepRuleTextResponse(BaseModel):
+    rule: Optional[Dict[str, Any]] = None
+    validation: OpengrepRuleValidation
+    test_yaml: Optional[str] = None
+    rule_id: Optional[str] = None
 
 
 class OpengrepRuleResponse(BaseModel):

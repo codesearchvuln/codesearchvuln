@@ -1,16 +1,22 @@
 import asyncio
-from app.schemas.opengrep import OpengrepRuleCreateRequest
+import json
+import logging
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
+
+from app.schemas.opengrep import OpengrepRuleCreateRequest
 
 from .llm_rule.config import Config
 from .llm_rule.git_manager import GitManager
-from .llm_rule.patch_processor import PatchProcessor, PatchInfo
+from .llm_rule.llm_client import LLMClient
+from .llm_rule.patch_processor import PatchInfo, PatchProcessor
 from .llm_rule.rule_manager import RuleManager
 from .llm_rule.rule_validator import RuleValidator
-from .llm_rule.llm_client import LLMClient
-import logging
-from typing import Optional, Tuple, Dict, Any, List
-import shutil
 
 
 class AutoGrep:
@@ -269,7 +275,6 @@ class AutoGrep:
 
 
 async def get_rule_by_patch(request: OpengrepRuleCreateRequest) -> Dict[str, Any]:
-
     repo_owner = request.repo_owner
     repo_name = request.repo_name
     commit_hash = request.commit_hash
@@ -344,3 +349,295 @@ async def get_rule_by_patch(request: OpengrepRuleCreateRequest) -> Dict[str, Any
             temp_file.unlink()
         shutil.rmtree(config.generated_rules_dir, ignore_errors=True)
         # shutil.rmtree(config.repos_cache_dir, ignore_errors=True)
+
+
+LANGUAGE_EXTENSION_MAP = {
+    "python": ".py",
+    "javascript": ".js",
+    "typescript": ".ts",
+    "java": ".java",
+    "go": ".go",
+    "rust": ".rs",
+    "cpp": ".cpp",
+    "c++": ".cpp",
+    "c": ".c",
+    "csharp": ".cs",
+    "c#": ".cs",
+    "php": ".php",
+    "ruby": ".rb",
+    "kotlin": ".kt",
+    "swift": ".swift",
+    "scala": ".scala",
+    "solidity": ".sol",
+}
+
+
+def _normalize_rule_yaml(
+    rule_yaml: str, llm_client: LLMClient
+) -> Tuple[Optional[str], Optional[dict], Optional[str]]:
+    cleaned = llm_client.clean_yaml_text(rule_yaml)
+    if not cleaned:
+        return None, None, "规则YAML格式错误"
+    try:
+        data = yaml.safe_load(cleaned) or {}
+    except yaml.YAMLError:
+        return None, None, "规则YAML解析失败"
+
+    rules = data.get("rules")
+    if not isinstance(rules, list) or not rules:
+        return None, None, "规则中未找到有效的 rules 列表"
+
+    rule = rules[0]
+    if not isinstance(rule, dict):
+        return None, None, "规则结构不合法"
+
+    return cleaned, rule, None
+
+
+def _validate_rule_schema_generic(rule: dict) -> Tuple[bool, Optional[str]]:
+    if not isinstance(rule, dict):
+        return False, "规则结构不合法"
+
+    required_fields = ["id", "message", "severity", "languages"]
+    missing_fields = [field for field in required_fields if field not in rule]
+    if missing_fields:
+        return False, f"缺少必填字段: {', '.join(missing_fields)}"
+
+    pattern_fields = ["pattern", "patterns", "pattern-either", "pattern-regex"]
+    if not any(field in rule for field in pattern_fields):
+        return False, "缺少模式字段: pattern/patterns/pattern-either/pattern-regex"
+
+    valid_severities = ["ERROR", "WARNING", "INFO"]
+    if rule.get("severity") not in valid_severities:
+        return False, f"严重程度必须为: {', '.join(valid_severities)}"
+
+    return True, None
+
+
+def _extract_snippets(value: Any) -> List[str]:
+    snippets: List[str] = []
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str):
+                snippets.append(item)
+            elif isinstance(item, dict):
+                code = item.get("code") or item.get("snippet") or item.get("content")
+                if code:
+                    snippets.append(code)
+    elif isinstance(value, dict):
+        code = value.get("code") or value.get("snippet") or value.get("content")
+        if code:
+            snippets.append(code)
+    elif isinstance(value, str):
+        snippets.append(value)
+    return [s for s in snippets if isinstance(s, str) and s.strip()]
+
+
+async def _generate_test_yaml(
+    rule_yaml: str, rule: dict, llm_client: LLMClient
+) -> Tuple[Optional[str], Optional[str]]:
+    languages = rule.get("languages") or []
+    language_hint = languages[0] if isinstance(languages, list) and languages else ""
+    rule_id = rule.get("id") or "custom-rule"
+
+    prompt = f"""你是静态规则测试工程师。
+给定以下规则 YAML，请输出用于测试该规则的 test.yaml。
+
+规则要求：
+- 仅输出 YAML，不要任何解释
+- YAML 必须包含字段：language, positive, negative
+- positive/negative 为代码片段列表，每个片段应尽量短
+- positive 必须命中该规则，negative 必须不命中该规则
+
+规则ID: {rule_id}
+建议语言: {language_hint}
+规则YAML:
+{rule_yaml}
+"""
+
+    try:
+        response = await llm_client.client.chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "只输出YAML，不要输出markdown或其他文字。",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+    except Exception as e:
+        logging.error(f"Failed to generate test YAML: {e}")
+        return None, "生成测试用例失败"
+
+    content = response.get("content") if isinstance(response, dict) else None
+    if not content:
+        return None, "生成测试用例失败"
+
+    text = llm_client.extract_response(content)
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return None, "测试用例YAML解析失败"
+
+    if not isinstance(data, dict):
+        return None, "测试用例格式错误"
+
+    if "positive" not in data and "negative" not in data and "tests" in data:
+        data = data.get("tests") or {}
+
+    positive = _extract_snippets(data.get("positive"))
+    negative = _extract_snippets(data.get("negative"))
+    language = data.get("language") or language_hint
+
+    if not language:
+        return None, "测试用例缺少语言信息"
+    if not positive or not negative:
+        return None, "测试用例必须包含正负样本"
+
+    normalized = {
+        "language": language,
+        "positive": [{"code": snippet} for snippet in positive],
+        "negative": [{"code": snippet} for snippet in negative],
+    }
+    return yaml.safe_dump(normalized, sort_keys=False), None
+
+
+def _run_opengrep(rule_file: str, target_path: str) -> Tuple[list, Optional[str]]:
+    try:
+        result = subprocess.run(
+            ["opengrep", "--config", rule_file, "--json", target_path],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return [], "未找到 opengrep 命令"
+    except subprocess.TimeoutExpired:
+        return [], "opengrep 执行超时"
+    except Exception as e:
+        return [], f"opengrep 执行失败: {str(e)}"
+
+    if not result.stdout:
+        if result.stderr:
+            return [], result.stderr.strip()
+        return [], None
+
+    try:
+        output = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return [], "解析 opengrep 输出失败"
+
+    errors = output.get("errors") or []
+    if errors:
+        for error in errors:
+            if isinstance(error, dict):
+                error_type = error.get("type", "")
+                if "InvalidRuleSchemaError" in error_type or "InvalidRuleError" in error_type:
+                    return [], error.get("long_msg") or "规则格式不合法"
+        return [], errors[0].get("long_msg") if isinstance(errors[0], dict) else "opengrep 错误"
+
+    return output.get("results", []), None
+
+
+def _validate_rule_with_tests(
+    rule_yaml: str, rule: dict, test_yaml: str
+) -> Tuple[bool, Optional[str]]:
+    try:
+        test_data = yaml.safe_load(test_yaml) or {}
+    except yaml.YAMLError:
+        return False, "测试用例YAML解析失败"
+
+    language = str(test_data.get("language") or "").strip()
+    if not language:
+        return False, "无法确定测试语言"
+
+    language_key = language.lower()
+    ext = LANGUAGE_EXTENSION_MAP.get(language_key)
+    if not ext:
+        return False, f"暂不支持语言: {language}"
+
+    rule_languages = [
+        str(lang).lower()
+        for lang in (rule.get("languages") or [])
+        if isinstance(lang, str) and lang.strip()
+    ]
+    if rule_languages and language_key not in rule_languages:
+        return False, "测试语言不在规则 languages 中"
+
+    positive_snippets = _extract_snippets(test_data.get("positive"))
+    negative_snippets = _extract_snippets(test_data.get("negative"))
+    if not positive_snippets or not negative_snippets:
+        return False, "测试用例缺少正负样本"
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        rule_path = Path(temp_dir) / "rule.yaml"
+        rule_path.write_text(rule_yaml)
+        test_path = Path(temp_dir) / "test.yaml"
+        test_path.write_text(test_yaml)
+
+        for idx, snippet in enumerate(positive_snippets, start=1):
+            target_path = Path(temp_dir) / f"positive_{idx}{ext}"
+            target_path.write_text(snippet)
+            results, error = _run_opengrep(str(rule_path), str(target_path))
+            if error:
+                return False, error
+            if not results:
+                return False, "正样本未命中规则"
+
+        for idx, snippet in enumerate(negative_snippets, start=1):
+            target_path = Path(temp_dir) / f"negative_{idx}{ext}"
+            target_path.write_text(snippet)
+            results, error = _run_opengrep(str(rule_path), str(target_path))
+            if error:
+                return False, error
+            if results:
+                return False, "负样本被规则误报"
+
+    return True, None
+
+
+async def validate_generic_rule(rule_yaml: str) -> Dict[str, Any]:
+    llm_client = LLMClient()
+    cleaned, rule, error = _normalize_rule_yaml(rule_yaml, llm_client)
+    if error:
+        return {
+            "rule": None,
+            "rule_yaml": None,
+            "test_yaml": None,
+            "validation": {"is_valid": False, "message": error},
+        }
+
+    is_valid, validation_error = _validate_rule_schema_generic(rule)
+    if not is_valid:
+        return {
+            "rule": rule,
+            "rule_yaml": cleaned,
+            "test_yaml": None,
+            "validation": {"is_valid": False, "message": validation_error},
+        }
+
+    test_yaml, test_error = await _generate_test_yaml(cleaned, rule, llm_client)
+    if test_error:
+        return {
+            "rule": rule,
+            "rule_yaml": cleaned,
+            "test_yaml": None,
+            "validation": {"is_valid": False, "message": test_error},
+        }
+
+    is_valid, validation_error = _validate_rule_with_tests(cleaned, rule, test_yaml)
+    if not is_valid:
+        return {
+            "rule": rule,
+            "rule_yaml": cleaned,
+            "test_yaml": test_yaml,
+            "validation": {"is_valid": False, "message": validation_error},
+        }
+
+    return {
+        "rule": rule,
+        "rule_yaml": cleaned,
+        "test_yaml": test_yaml,
+        "validation": {"is_valid": True, "message": None},
+    }
