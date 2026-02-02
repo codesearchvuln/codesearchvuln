@@ -4,10 +4,10 @@ from sqlalchemy.future import select
 from typing import Any, List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
-import uuid
 import shutil
 import os
 import json
+import tempfile
 from pathlib import Path
 import zipfile
 import asyncio
@@ -22,6 +22,7 @@ from app.models.user_config import UserConfig
 from app.services.llm.service import LLMService
 from app.services.scanner import task_control, is_text_file, should_exclude, get_language_from_path, get_analysis_config
 from app.services.zip_storage import load_project_zip, save_project_zip, has_project_zip
+from app.services.upload.upload_manager import UploadManager
 from app.core.config import settings
 
 router = APIRouter()
@@ -236,8 +237,8 @@ async def scan_zip(
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Upload and scan a ZIP file.
-    上传ZIP文件并启动扫描，同时将ZIP文件保存到持久化存储
+    Upload and scan a compressed file.
+    上传压缩包并启动扫描，同时将文件转换并保存为 ZIP 到持久化存储
     """
     # Verify project exists
     project = await db.get(Project, project_id)
@@ -248,24 +249,32 @@ async def scan_zip(
     if project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权操作此项目")
     
-    # Validate file
-    if not file.filename.lower().endswith('.zip'):
-        raise HTTPException(status_code=400, detail="请上传ZIP格式文件")
-        
-    # Save Uploaded File to temp
-    file_id = str(uuid.uuid4())
-    file_path = f"/tmp/{file_id}.zip"
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    # Check file size
-    file_size = os.path.getsize(file_path)
-    if file_size > 500 * 1024 * 1024:  # 500MB limit
-        os.remove(file_path)
-        raise HTTPException(status_code=400, detail="文件大小不能超过500MB")
-    
-    # 保存ZIP文件到持久化存储
-    await save_project_zip(project_id, file_path, file.filename)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    # 支持多种压缩格式，统一转换为 zip 保存
+    with tempfile.TemporaryDirectory(prefix="deepaudit_scan_", suffix="_upload") as temp_dir:
+        upload_path = os.path.join(temp_dir, file.filename)
+        with open(upload_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        is_valid, error = UploadManager.validate_file(upload_path)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error or "文件验证失败")
+
+        extract_dir = os.path.join(temp_dir, "extracted")
+        success, _, error = await UploadManager.extract_file(upload_path, extract_dir)
+        if not success:
+            raise HTTPException(status_code=400, detail=error or "解压失败")
+
+        converted_zip_path = os.path.join(temp_dir, f"{project_id}.zip")
+        shutil.make_archive(converted_zip_path.replace(".zip", ""), "zip", extract_dir)
+
+        is_valid_zip, zip_error = UploadManager.validate_file(converted_zip_path)
+        if not is_valid_zip:
+            raise HTTPException(status_code=400, detail=zip_error or "转换后的 ZIP 文件无效")
+
+        await save_project_zip(project_id, converted_zip_path, file.filename)
     
     # Parse scan_config if provided
     parsed_scan_config = {}
@@ -301,7 +310,9 @@ async def scan_zip(
 
     # Trigger Background Task - 使用持久化存储的文件路径
     stored_zip_path = await load_project_zip(project_id)
-    background_tasks.add_task(process_zip_task, task.id, stored_zip_path or file_path, AsyncSessionLocal, user_config)
+    if not stored_zip_path:
+        raise HTTPException(status_code=500, detail="上传成功但未找到持久化文件")
+    background_tasks.add_task(process_zip_task, task.id, stored_zip_path, AsyncSessionLocal, user_config)
 
     return {"task_id": task.id, "status": "queued"}
 

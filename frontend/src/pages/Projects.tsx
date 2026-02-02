@@ -175,6 +175,7 @@ export default function Projects() {
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = event.target;
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -185,12 +186,12 @@ export default function Projects() {
     }
 
     setSelectedFile(file);
-    event.target.value = '';
+    inputEl.value = '';
   };
 
   const handleUploadAndCreate = async () => {
     if (!selectedFile) {
-      toast.error("请先选择ZIP文件");
+      toast.error("请先选择压缩包文件");
       return;
     }
 
@@ -220,8 +221,10 @@ export default function Projects() {
         repository_url: undefined
       } as any);
 
+      let detectedLanguages: string[] = [];
       try {
-        await uploadZipFile(project.id, selectedFile);
+        const uploadResult = await uploadZipFile(project.id, selectedFile);
+        detectedLanguages = uploadResult.detected_languages || [];
       } catch (error) {
         console.error('保存ZIP文件失败:', error);
       }
@@ -242,7 +245,9 @@ export default function Projects() {
       loadProjects();
 
       toast.success(`项目 "${project.name}" 已创建`, {
-        description: 'ZIP文件已保存，您可以启动代码审计',
+        description: detectedLanguages.length > 0
+          ? `已自动识别语言: ${detectedLanguages.join(" / ")}`
+          : '项目压缩包已保存，您可以启动代码审计',
         duration: 4000
       });
 
@@ -370,8 +375,8 @@ export default function Projects() {
         });
       });
 
-      toast.success(`项目 "${projectToDelete.name}" 已移到回收站`, {
-        description: '您可以在回收站中恢复此项目',
+      toast.success(`项目 "${projectToDelete.name}" 删除成功`, {
+        description: '项目已从列表中移除',
         duration: 4000
       });
       setShowDeleteDialog(false);
@@ -604,38 +609,6 @@ export default function Projects() {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="font-mono font-bold uppercase text-xs text-muted-foreground">技术栈</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {supportedLanguages.map((lang) => (
-                      <label key={lang} className={`flex items-center space-x-2 px-3 py-1.5 border cursor-pointer transition-all rounded ${createForm.programming_languages.includes(lang)
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border hover:border-border text-muted-foreground'
-                        }`}>
-                        <input
-                          type="checkbox"
-                          checked={createForm.programming_languages.includes(lang)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setCreateForm({
-                                ...createForm,
-                                programming_languages: [...createForm.programming_languages, lang]
-                              });
-                            } else {
-                              setCreateForm({
-                                ...createForm,
-                                programming_languages: createForm.programming_languages.filter(l => l !== lang)
-                              });
-                            }
-                          }}
-                          className="rounded border border-border w-3.5 h-3.5 text-primary focus:ring-0 bg-transparent"
-                        />
-                        <span className="text-xs font-mono font-bold uppercase">{lang}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="space-y-4">
                   <Label className="font-mono font-bold uppercase text-xs text-muted-foreground">源代码</Label>
 
@@ -645,7 +618,7 @@ export default function Projects() {
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3 group-hover:text-primary transition-colors" />
-                      <h3 className="text-base font-bold text-foreground uppercase mb-1">上传源码归档</h3>
+                      <h3 className="text-base font-bold text-foreground uppercase mb-1">上传项目文件</h3>
                       <p className="text-xs font-mono text-muted-foreground mb-3">
                         最大: 500MB // 格式: .zip .tar .tar.gz .tar.bz2 .7z .rar
                       </p>
@@ -685,7 +658,10 @@ export default function Projects() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => setSelectedFile(null)}
+                        onClick={() => {
+                          setSelectedFile(null);
+                          setCreateForm((prev) => ({ ...prev, programming_languages: [] }));
+                        }}
                         disabled={uploading}
                         className="hover:bg-rose-500/10 hover:text-rose-400"
                       >
@@ -693,6 +669,11 @@ export default function Projects() {
                       </Button>
                     </div>
                   )}
+
+                  <div className="border border-border bg-muted/30 p-3 rounded">
+                    <p className="text-xs font-mono text-muted-foreground mb-1">语言自动识别</p>
+                    <p className="text-xs text-muted-foreground">支持 ZIP / TAR / TAR.GZ / TAR.BZ2 / 7Z / RAR，上传后自动解包并识别项目语言。</p>
+                  </div>
 
                   {uploading && (
                     <div className="space-y-1.5">
@@ -703,20 +684,6 @@ export default function Projects() {
                       <Progress value={uploadProgress} className="h-2 bg-muted [&>div]:bg-primary" />
                     </div>
                   )}
-
-                  <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded">
-                    <div className="flex items-start space-x-3">
-                      <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5" />
-                      <div className="text-xs font-mono text-amber-300">
-                        <p className="font-bold mb-1 uppercase">上传协议:</p>
-                        <ul className="space-y-0.5 list-disc list-inside text-amber-400/80">
-                          <li>确保完整的项目代码</li>
-                          <li>移除 node_modules 等依赖目录</li>
-                          <li>包含必要的配置文件</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="flex justify-end space-x-4 pt-4 border-t border-border mt-auto">
@@ -1210,7 +1177,7 @@ export default function Projects() {
               确认删除
             </AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground font-mono">
-              您确定要移动 <span className="font-bold text-rose-400">"{projectToDelete?.name}"</span> 到回收站吗？
+              您确定要删除 <span className="font-bold text-rose-400">"{projectToDelete?.name}"</span> 吗？
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -1218,10 +1185,9 @@ export default function Projects() {
             <div className="bg-sky-500/10 border border-sky-500/30 p-4 rounded">
               <p className="text-sky-300 font-bold mb-2 font-mono uppercase text-sm">系统通知:</p>
               <ul className="list-none text-sky-400/80 space-y-1 text-xs font-mono">
-                <li className="flex items-center gap-2"><span className="text-sky-400">&gt;</span> 项目移至回收站</li>
-                <li className="flex items-center gap-2"><span className="text-sky-400">&gt;</span> 可恢复</li>
+                <li className="flex items-center gap-2"><span className="text-sky-400">&gt;</span> 项目将被删除</li>
                 <li className="flex items-center gap-2"><span className="text-sky-400">&gt;</span> 审计数据保留</li>
-                <li className="flex items-center gap-2"><span className="text-sky-400">&gt;</span> 在回收站中永久删除</li>
+                <li className="flex items-center gap-2"><span className="text-sky-400">&gt;</span> 此操作将立即生效</li>
               </ul>
             </div>
           </div>

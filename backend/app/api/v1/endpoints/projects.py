@@ -44,6 +44,7 @@ from app.services.zip_storage import (
 )
 from app.services.upload.upload_manager import UploadManager
 from app.services.upload.compression_factory import CompressionStrategyFactory
+from app.services.upload.language_detection import detect_languages_from_paths
 from app.services.upload.project_stats import get_cloc_stats, generate_project_description
 
 router = APIRouter()
@@ -852,6 +853,12 @@ async def upload_project_zip(
             if not success:
                 raise HTTPException(status_code=400, detail=error)
 
+            # 自动识别项目语言并回写项目信息
+            detected_languages = detect_languages_from_paths(extracted_files or [])
+            project.programming_languages = json.dumps(detected_languages, ensure_ascii=False)
+            await db.commit()
+            await db.refresh(project)
+
             # 生成最终的文件名
             archive_filename = f"{id}.zip"
 
@@ -868,6 +875,7 @@ async def upload_project_zip(
                 "uploaded_at": meta["uploaded_at"],
                 "file_count": len(file_list),
                 "sample_files": file_list[:10],
+                "detected_languages": detected_languages,
             }
 
         except HTTPException:

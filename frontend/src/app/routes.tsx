@@ -5,6 +5,7 @@ import AdminDashboard from "@/pages/AdminDashboard";
 import ProjectDetail from "@/pages/ProjectDetail";
 // import AuditRules from "@/pages/AuditRules";
 import OpengrepRules from "@/pages/OpengrepRules";
+import IntelligentAudit from "@/pages/IntelligentAudit";
 import StaticAnalysis from "@/pages/StaticAnalysis";
 import type { ReactNode } from "react";
 
@@ -50,6 +51,12 @@ const routes: RouteConfig[] = [
         name: "审计规则",
         path: "/opengrep-rules",
         element: <OpengrepRules />,
+        visible: true,
+    },
+    {
+        name: "智能审计",
+        path: "/intelligent-audit",
+        element: <IntelligentAudit />,
         visible: true,
     },
     {

@@ -33,6 +33,7 @@ export async function uploadZipFile(projectId: string, file: File): Promise<{
   message?: string;
   original_filename?: string;
   file_size?: number;
+  detected_languages?: string[];
 }> {
   const formData = new FormData();
   formData.append('file', file);
@@ -48,6 +49,9 @@ export async function uploadZipFile(projectId: string, file: File): Promise<{
       message: response.data.message,
       original_filename: response.data.original_filename,
       file_size: response.data.file_size,
+      detected_languages: Array.isArray(response.data.detected_languages)
+        ? response.data.detected_languages
+        : [],
     };
   } catch (error: any) {
     console.error('上传ZIP文件失败:', error);
@@ -90,5 +94,4 @@ export function formatFileSize(bytes: number): string {
   }
   return `${bytes} B`;
 }
-
 

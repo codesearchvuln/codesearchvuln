@@ -37,7 +37,17 @@ import {
 } from '@/shared/api/opengrep';
 import { setOpengrepActiveRules } from '@/shared/stores/opengrepRulesStore';
 
-export default function OpengrepRules() {
+interface OpengrepRulesProps {
+  headerTitle?: string;
+  headerDescription?: string;
+}
+
+export default function OpengrepRules(props: OpengrepRulesProps = {}) {
+  const {
+    headerTitle = '静态扫描规则管理',
+    headerDescription = '管理和配置静态代码扫描规则',
+  } = props;
+
   const [rules, setRules] = useState<OpengrepRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -214,10 +224,10 @@ export default function OpengrepRules() {
           <div>
             <h1 className="text-3xl font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
               <Shield className="w-8 h-8 text-primary" />
-              静态扫描规则管理
+              {headerTitle}
             </h1>
             <p className="text-muted-foreground font-mono text-sm mt-1">
-              管理和配置静态代码扫描规则
+              {headerDescription}
             </p>
           </div>
           <div className="text-right">
@@ -272,7 +282,7 @@ export default function OpengrepRules() {
 
       {/* Filters */}
       <div className="cyber-card p-4 relative z-10 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
           <div>
             <Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
               搜索
@@ -345,17 +355,17 @@ export default function OpengrepRules() {
             </Select>
           </div>
 
-          <div className="flex items-end gap-2">
+          <div className="md:col-span-2 xl:col-span-1 flex flex-wrap items-end gap-2">
             <Button
               variant="outline"
               onClick={handleResetFilters}
-              className="cyber-btn-outline"
+              className="cyber-btn-outline h-10 min-w-[110px] flex-1 sm:flex-none"
             >
               重置
             </Button>
             <Button
               onClick={() => setShowGenerateDialog(true)}
-              className="cyber-btn-primary"
+              className="cyber-btn-primary h-10 min-w-[150px] flex-1 sm:flex-none whitespace-nowrap"
             >
               <Zap className="w-4 h-4 mr-2" />
               生成新规则
@@ -384,7 +394,7 @@ export default function OpengrepRules() {
                   key={rule.id}
                   className="p-4 hover:bg-muted/50 transition-colors border-b border-border last:border-0"
                 >
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2">
                         <h3 className="font-bold text-foreground truncate">{rule.name}</h3>
@@ -430,12 +440,12 @@ export default function OpengrepRules() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 xl:justify-end">
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handleViewRule(rule)}
-                        className="cyber-btn-ghost h-8 px-3"
+                        className="cyber-btn-ghost h-8 px-3 min-w-[64px]"
                       >
                         <Eye className="w-4 h-4" />
                       </Button>
@@ -443,7 +453,7 @@ export default function OpengrepRules() {
                         size="sm"
                         variant="outline"
                         onClick={() => handleToggleRule(rule)}
-                        className={`cyber-btn-ghost h-8 px-3 ${rule.is_active ? 'hover:bg-rose-500/10' : 'hover:bg-emerald-500/10'
+                        className={`cyber-btn-ghost h-8 px-3 min-w-[72px] ${rule.is_active ? 'hover:bg-rose-500/10' : 'hover:bg-emerald-500/10'
                           }`}
                       >
                         {rule.is_active ? '禁用' : '启用'}
@@ -452,7 +462,7 @@ export default function OpengrepRules() {
                         size="sm"
                         variant="outline"
                         onClick={() => handleDeleteRule(rule.id)}
-                        className="cyber-btn-ghost h-8 px-3 hover:bg-rose-500/10 hover:text-rose-400"
+                        className="cyber-btn-ghost h-8 px-3 min-w-[64px] hover:bg-rose-500/10 hover:text-rose-400"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
@@ -614,11 +624,8 @@ export default function OpengrepRules() {
             backgroundSize: '100% 4px',
           }} />
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-green-500 to-cyan-500" />
-          <span className="absolute top-2 left-4 text-xs font-mono text-emerald-400">[ RULE_GENERATOR ]</span>
-
           <DialogHeader className="px-6 pt-4 flex-shrink-0">
             <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
-              <Zap className="w-5 h-5 text-emerald-400" />
               根据Patch生成规则
             </DialogTitle>
           </DialogHeader>
@@ -685,10 +692,7 @@ export default function OpengrepRules() {
                   生成中...
                 </>
               ) : (
-                <>
-                  <Zap className="w-4 h-4 mr-2" />
-                  生成规则
-                </>
+                <>生成规则</>
               )}
             </Button>
           </div>
