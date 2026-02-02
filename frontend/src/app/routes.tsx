@@ -50,7 +50,7 @@ const routes: RouteConfig[] = [
         name: "审计规则",
         path: "/audit-rules",
         element: <AuditRules />,
-        visible: true,
+        visible: false,
     },
     {
         name: "Opengrep规则",
