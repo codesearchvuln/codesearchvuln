@@ -567,8 +567,6 @@ async def list_opengrep_rules(
     language: Optional[str] = Query(None, description="按编程语言过滤"),
     source: Optional[str] = Query(None, description="按来源过滤: internal, patch"),
     is_active: Optional[bool] = Query(None, description="只获取活跃规则"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     """获取 Opengrep 规则列表"""
@@ -580,8 +578,6 @@ async def list_opengrep_rules(
         query = query.where(OpengrepRule.source == source)
     if is_active is not None:
         query = query.where(OpengrepRule.is_active == is_active)
-
-    query = query.offset(skip).limit(limit)
 
     result = await db.execute(query)
     rules = result.scalars().all()
