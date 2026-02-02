@@ -305,8 +305,13 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
             for rule in rule_data['rules']:
                 rule_id = rule.get('id', yaml_file.stem)
                 
-                # 提取语言
+                # 提取语言（优先从顶层查找，再从 metadata 中查找）
                 languages = rule.get('languages', [])
+                if not languages or not isinstance(languages, list):
+                    # 从 metadata 中查找 languages
+                    metadata = rule.get('metadata', {})
+                    languages = metadata.get('languages', [])
+                
                 if isinstance(languages, list) and languages:
                     language = languages[0]
                 else:
