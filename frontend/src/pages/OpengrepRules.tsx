@@ -87,9 +87,12 @@ export default function OpengrepRules(props: OpengrepRulesProps = {}) {
     }
   }, [selectedLanguage, selectedSource, selectedSeverity]);
 
-  const loadRules = async () => {
+  const loadRules = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       const data = await getOpengrepRules({
         language: selectedLanguage || undefined,
         source: (selectedSource as 'internal' | 'patch') || undefined,
@@ -110,7 +113,9 @@ export default function OpengrepRules(props: OpengrepRulesProps = {}) {
       console.error('Failed to load rules:', error);
       toast.error('加载规则失败');
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -129,11 +134,21 @@ export default function OpengrepRules(props: OpengrepRulesProps = {}) {
   };
 
   const handleToggleRule = async (rule: OpengrepRule) => {
+    const nextActive = !rule.is_active;
+    const previousRules = rules;
+    const nextRules = rules.map((item) =>
+      item.id === rule.id ? { ...item, is_active: nextActive } : item
+    );
+
+    setRules(nextRules);
+    setOpengrepActiveRules(nextRules.filter((item) => item.is_active));
+
     try {
       await toggleOpengrepRule(rule.id);
       toast.success(`规则已${rule.is_active ? '禁用' : '启用'}`);
-      loadRules();
     } catch (error) {
+      setRules(previousRules);
+      setOpengrepActiveRules(previousRules.filter((item) => item.is_active));
       console.error('Failed to toggle rule:', error);
       toast.error('更新规则失败');
     }

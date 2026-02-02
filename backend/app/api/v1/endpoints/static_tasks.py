@@ -185,6 +185,42 @@ def _parse_opengrep_output(stdout: str) -> tuple[List[Dict[str, Any]], List[Dict
         raise ValueError("Failed to parse opengrep output") from e
 
 
+def _is_fatal_rule_error(error_item: Dict[str, Any]) -> bool:
+    """
+    判断是否为应导致任务失败的规则错误。
+
+    约定：
+    - 规则配置/语法/加载失败 => fatal
+    - 扫描目标文件语法错误（带 path）=> non-fatal
+    """
+    err_type = str(error_item.get("type", "")).lower()
+    msg = str(error_item.get("message", "")).lower()
+    path = str(error_item.get("path", "")).strip()
+
+    # 常见源码解析错误：仅影响单文件，不应导致整任务失败
+    if "syntax error" in err_type and path:
+        return False
+
+    fatal_keywords = (
+        "invalid rule",
+        "rule parse",
+        "rule syntax",
+        "rule schema",
+        "invalid config",
+        "config error",
+        "yaml",
+        "toml",
+    )
+    if any(keyword in msg for keyword in fatal_keywords):
+        return True
+
+    # 无路径错误通常是全局级错误（规则/引擎层）
+    if not path:
+        return True
+
+    return False
+
+
 async def _execute_opengrep_scan(
     task_id: str,
     project_root: str,
@@ -270,11 +306,26 @@ async def _execute_opengrep_scan(
 
                 logger.info(f"Executing opengrep for task {task_id}: {' '.join(cmd)}")
 
+                # opengrep/semgrep 在解析空代理变量时会报错，扫描时显式清理代理环境变量
+                scan_env = os.environ.copy()
+                for proxy_key in (
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "ALL_PROXY",
+                    "http_proxy",
+                    "https_proxy",
+                    "all_proxy",
+                ):
+                    scan_env.pop(proxy_key, None)
+                scan_env["NO_PROXY"] = "*"
+                scan_env["no_proxy"] = "*"
+
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=600,
+                    env=scan_env,
                 )
 
                 # 解析扫描结果
@@ -287,14 +338,17 @@ async def _execute_opengrep_scan(
                     await db.commit()
                     return
 
-                # 规则配置错误/执行错误才判定失败；命中数为 0 不算失败
-                # 只有 level=error 的错误才算失败，warn 级别的忽略（如 PartialParsing）
-                critical_errors = [err for err in scan_errors if err.get("level") == "error"]
-                if critical_errors:
+                fatal_rule_errors = [item for item in scan_errors if _is_fatal_rule_error(item)]
+                non_fatal_scan_errors = [item for item in scan_errors if not _is_fatal_rule_error(item)]
+
+                # 规则配置错误/执行错误才判定失败；源码语法错误不视为失败
+                if fatal_rule_errors:
                     task.status = "failed"
-                    task.error_count = max(1, len(critical_errors))
+                    task.error_count = max(1, len(fatal_rule_errors))
                     await db.commit()
-                    logger.error(f"Scan task {task_id} failed with critical errors: {critical_errors[:3]}")
+                    logger.error(
+                        f"Scan task {task_id} failed with fatal rule errors: {fatal_rule_errors[:3]}"
+                    )
                     return
                 
                 # 记录警告但不影响任务状态
@@ -303,8 +357,13 @@ async def _execute_opengrep_scan(
                     if warning_errors:
                         logger.warning(f"Scan task {task_id} has {len(warning_errors)} warnings (e.g., PartialParsing)")
 
-                # 无扫描结果且进程异常退出，按规则执行失败处理
-                if result.returncode != 0 and not findings:
+                if non_fatal_scan_errors:
+                    logger.warning(
+                        f"Scan task {task_id} has non-fatal scan errors: {non_fatal_scan_errors[:3]}"
+                    )
+
+                # 无扫描结果且进程异常退出，且无可忽略扫描错误时，按执行失败处理
+                if result.returncode != 0 and not findings and not non_fatal_scan_errors:
                     stderr_text = (result.stderr or "").strip()
                     task.status = "failed"
                     task.error_count = 1
@@ -355,7 +414,7 @@ async def _execute_opengrep_scan(
                 task.status = "completed"
                 task.total_findings = len(findings)
                 task.error_count = error_count
-                task.warning_count = warning_count
+                task.warning_count = warning_count + len(non_fatal_scan_errors)
                 task.files_scanned = len(files_scanned)
                 task.lines_scanned = lines_scanned
 

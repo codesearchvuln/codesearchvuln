@@ -75,6 +75,20 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     bandit \
     safety
 
+# 安装 Opengrep CLI（不可用时保留 semgrep 并创建 opengrep 兼容命令）
+RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
+    if ! pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple opengrep; then \
+      echo "opengrep install failed, fallback to semgrep compatibility"; \
+    fi && \
+    opengrep_target="semgrep" && \
+    if [ -x /usr/local/bin/opengrep ]; then \
+      mv /usr/local/bin/opengrep /usr/local/bin/opengrep.real && \
+      opengrep_target="/usr/local/bin/opengrep.real"; \
+    elif command -v opengrep >/dev/null 2>&1; then \
+      opengrep_target="$(command -v opengrep)"; \
+    fi && \
+    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY=\"*\"\nexport no_proxy=\"*\"\nexec %s \"$@\"\n' "$opengrep_target" > /usr/local/bin/opengrep && chmod +x /usr/local/bin/opengrep
+
 # 安装 Gitleaks
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz -o gitleaks.tar.gz && \
@@ -115,4 +129,3 @@ WORKDIR /workspace
 
 # 默认命令
 CMD ["/bin/bash"]
-

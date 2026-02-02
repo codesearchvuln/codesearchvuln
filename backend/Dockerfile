@@ -96,6 +96,21 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# 安装 Opengrep CLI（若官方包不可用则回退到 Semgrep，并提供 opengrep 兼容命令）
+RUN set -eux; \
+    if ! pip install --no-cache-dir opengrep; then \
+        pip install --no-cache-dir semgrep; \
+    fi; \
+    opengrep_target="semgrep"; \
+    if [ -x /usr/local/bin/opengrep ]; then \
+        mv /usr/local/bin/opengrep /usr/local/bin/opengrep.real; \
+        opengrep_target="/usr/local/bin/opengrep.real"; \
+    elif command -v opengrep >/dev/null 2>&1; then \
+        opengrep_target="$(command -v opengrep)"; \
+    fi; \
+    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY="*"\nexport no_proxy="*"\nexec %s "$@"\n' "$opengrep_target" > /usr/local/bin/opengrep; \
+    chmod +x /usr/local/bin/opengrep
+
 # 从构建阶段复制虚拟环境和 uv
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv

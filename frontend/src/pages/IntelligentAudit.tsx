@@ -1,206 +1,153 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Bot, Brain, Crosshair, PlayCircle, ShieldCheck, Sparkles } from "lucide-react";
+import { Bot, Boxes, Puzzle, Sparkles } from "lucide-react";
 
-type AgentConfig = {
-  id: string;
-  name: string;
-  role: string;
-  icon: ReactNode;
-  colorClass: string;
-  systemPrompt: string;
-  taskPrompt: string;
+type SidebarGroup = {
+  id: "agent" | "mcp" | "agent-skill";
+  title: string;
+  subtitle: string;
+  items: string[];
 };
 
-const AGENT_CONFIGS: AgentConfig[] = [
+const SIDEBAR_GROUPS: SidebarGroup[] = [
   {
-    id: "orchestrator",
-    name: "Orchestrator Agent",
-    role: "调度全流程并分发任务",
-    icon: <Bot className="w-4 h-4" />,
-    colorClass: "text-cyan-300 border-cyan-400/30 bg-cyan-500/10",
-    systemPrompt: "你是审计流程调度器，负责制定任务拆分与执行顺序。",
-    taskPrompt: "根据项目上下文分配子任务，并跟踪执行状态与结果汇总。",
+    id: "agent",
+    title: "Agent（智能体）",
+    subtitle: "负责调度、分析、验证",
+    items: ["Orchestrator 调度智能体", "Recon 侦察智能体", "Analysis 分析智能体", "Verification 验证智能体"],
   },
   {
-    id: "reconnaissance",
-    name: "Reconnaissance Agent",
-    role: "侦察项目结构与攻击面",
-    icon: <Crosshair className="w-4 h-4" />,
-    colorClass: "text-sky-300 border-sky-400/30 bg-sky-500/10",
-    systemPrompt: "你负责快速识别关键目录、入口点、依赖与可疑代码区块。",
-    taskPrompt: "输出高风险文件清单与优先审计建议。",
+    id: "mcp",
+    title: "MCP（工具协议）",
+    subtitle: "统一管理外部能力接入",
+    items: ["文件系统 MCP", "代码检索 MCP", "命令执行 MCP", "知识库 MCP"],
   },
   {
-    id: "analysis",
-    name: "Analysis Agent",
-    role: "执行漏洞分析与证据提取",
-    icon: <Brain className="w-4 h-4" />,
-    colorClass: "text-blue-200 border-blue-400/30 bg-blue-500/10",
-    systemPrompt: "你是漏洞分析专家，给出漏洞类型、利用路径和风险等级。",
-    taskPrompt: "结合规则与代码上下文输出可复现的分析证据。",
-  },
-  {
-    id: "verification",
-    name: "Verification Agent",
-    role: "验证漏洞与收敛误报",
-    icon: <ShieldCheck className="w-4 h-4" />,
-    colorClass: "text-emerald-300 border-emerald-400/30 bg-emerald-500/10",
-    systemPrompt: "你负责确认漏洞真实性，并说明误报或不可利用原因。",
-    taskPrompt: "输出验证结果、验证方法与最终建议处理优先级。",
+    id: "agent-skill",
+    title: "Agent Skill（技能）",
+    subtitle: "智能体可复用的专项能力",
+    items: ["漏洞模式识别技能", "补丁差异分析技能", "误报收敛技能", "审计报告生成技能"],
   },
 ];
 
-export default function IntelligentAudit() {
-  const [activeAgentId, setActiveAgentId] = useState<string>(AGENT_CONFIGS[0].id);
-  const [projectName, setProjectName] = useState("");
-  const [projectPath, setProjectPath] = useState("");
-  const [promptDrafts, setPromptDrafts] = useState<Record<string, { systemPrompt: string; taskPrompt: string }>>(
-    () =>
-      AGENT_CONFIGS.reduce((acc, item) => {
-        acc[item.id] = {
-          systemPrompt: item.systemPrompt,
-          taskPrompt: item.taskPrompt,
-        };
-        return acc;
-      }, {} as Record<string, { systemPrompt: string; taskPrompt: string }>)
-  );
+const GROUP_ICON = {
+  agent: <Bot className="w-4 h-4 text-cyan-300" />,
+  mcp: <Boxes className="w-4 h-4 text-blue-300" />,
+  "agent-skill": <Puzzle className="w-4 h-4 text-emerald-300" />,
+} as const;
 
-  const activeAgent = useMemo(
-    () => AGENT_CONFIGS.find((item) => item.id === activeAgentId) ?? AGENT_CONFIGS[0],
-    [activeAgentId]
+export default function IntelligentAudit() {
+  const [selectedGroupId, setSelectedGroupId] = useState<SidebarGroup["id"]>("agent");
+  const [selectedItem, setSelectedItem] = useState<string>(SIDEBAR_GROUPS[0].items[0]);
+
+  const selectedGroup = useMemo(
+    () => SIDEBAR_GROUPS.find((group) => group.id === selectedGroupId) ?? SIDEBAR_GROUPS[0],
+    [selectedGroupId]
   );
 
   return (
     <div className="space-y-6 p-6 bg-background min-h-screen relative">
       <div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
       <div className="relative z-10 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-bold tracking-wide flex items-center gap-2">
-              <Sparkles className="w-7 h-7 text-primary" />
-              智能审计 Agent 控制台
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              展示智能审计中全部 Agent，支持后续提示词调优与项目参数预配置。
-            </p>
-          </div>
-          <Badge className="cyber-badge-info">Agent 数量：{AGENT_CONFIGS.length}</Badge>
+        <div className="space-y-1">
+          <h1 className="text-3xl font-bold tracking-wide flex items-center gap-2">
+            <Sparkles className="w-7 h-7 text-primary" />
+            智能审计能力面板
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            左侧下拉栏仅展示 Agent、MCP 与 Agent Skill；展开后查看对应项目。
+          </p>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
-          <section className="cyber-card p-4 space-y-3">
-            <h2 className="text-lg font-bold">Agent 列表</h2>
-            <p className="text-xs text-muted-foreground">选择左侧 Agent，在右侧调优其提示词。</p>
-            <div className="space-y-2">
-              {AGENT_CONFIGS.map((agent) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  onClick={() => setActiveAgentId(agent.id)}
-                  className={`w-full text-left p-3 rounded border transition ${
-                    activeAgentId === agent.id ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"
+          <aside className="cyber-card p-4 space-y-3 h-fit">
+            <h2 className="text-lg font-bold">能力目录</h2>
+            <Accordion
+              type="single"
+              collapsible
+              value={selectedGroupId}
+              onValueChange={(value) => {
+                if (!value) return;
+                const groupId = value as SidebarGroup["id"];
+                setSelectedGroupId(groupId);
+                const firstItem = SIDEBAR_GROUPS.find((group) => group.id === groupId)?.items[0];
+                if (firstItem) {
+                  setSelectedItem(firstItem);
+                }
+              }}
+              className="w-full"
+            >
+              {SIDEBAR_GROUPS.map((group) => (
+                <AccordionItem key={group.id} value={group.id} className="border-border/70">
+                  <AccordionTrigger className="py-3">
+                    <div className="flex items-start gap-2">
+                      <span className="mt-0.5">{GROUP_ICON[group.id]}</span>
+                      <div className="text-left">
+                        <p className="text-sm font-bold">{group.title}</p>
+                        <p className="text-xs text-muted-foreground">{group.subtitle}</p>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pt-0 pb-2">
+                    <div className="space-y-1">
+                      {group.items.map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGroupId(group.id);
+                            setSelectedItem(item);
+                          }}
+                          className={`w-full text-left text-sm rounded px-2 py-2 border transition ${
+                            selectedItem === item
+                              ? "border-primary bg-primary/10 text-foreground"
+                              : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+                          }`}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </aside>
+
+          <section className="cyber-card p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold">{selectedGroup.title}</h2>
+                <p className="text-sm text-muted-foreground">{selectedGroup.subtitle}</p>
+              </div>
+              <Badge className="cyber-badge-info">项目数：{selectedGroup.items.length}</Badge>
+            </div>
+
+            <div className="rounded border border-primary/20 bg-primary/5 p-4">
+              <p className="text-xs text-muted-foreground mb-2">当前选择</p>
+              <p className="text-lg font-bold">{selectedItem}</p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              {selectedGroup.items.map((item) => (
+                <div
+                  key={item}
+                  className={`rounded border p-3 transition ${
+                    selectedItem === item ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center justify-center rounded p-1 border ${agent.colorClass}`}>
-                      {agent.icon}
-                    </span>
-                    <div>
-                      <p className="text-sm font-bold">{agent.name}</p>
-                      <p className="text-xs text-muted-foreground">{agent.role}</p>
-                    </div>
-                  </div>
-                </button>
+                  <p className="text-sm font-bold">{item}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    用于智能审计流程展示与后续提示词调优。
+                  </p>
+                </div>
               ))}
-            </div>
-          </section>
-
-          <section className="space-y-6">
-            <div className="cyber-card p-4 space-y-4">
-              <h2 className="text-lg font-bold">项目配置</h2>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="project-name">项目名称</Label>
-                  <Input
-                    id="project-name"
-                    className="cyber-input"
-                    value={projectName}
-                    onChange={(event) => setProjectName(event.target.value)}
-                    placeholder="请输入项目名称"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="project-path">项目路径/仓库地址</Label>
-                  <Input
-                    id="project-path"
-                    className="cyber-input"
-                    value={projectPath}
-                    onChange={(event) => setProjectPath(event.target.value)}
-                    placeholder="请输入本地路径或仓库地址"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="cyber-card p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold">{activeAgent.name} 提示词调优</h2>
-                  <p className="text-xs text-muted-foreground">{activeAgent.role}</p>
-                </div>
-                <Badge className="cyber-badge-muted">{activeAgent.id}</Badge>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="system-prompt">System Prompt</Label>
-                <Textarea
-                  id="system-prompt"
-                  className="cyber-input min-h-[110px]"
-                  value={promptDrafts[activeAgent.id]?.systemPrompt ?? ""}
-                  onChange={(event) =>
-                    setPromptDrafts((prev) => ({
-                      ...prev,
-                      [activeAgent.id]: {
-                        ...prev[activeAgent.id],
-                        systemPrompt: event.target.value,
-                      },
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="task-prompt">Task Prompt</Label>
-                <Textarea
-                  id="task-prompt"
-                  className="cyber-input min-h-[140px]"
-                  value={promptDrafts[activeAgent.id]?.taskPrompt ?? ""}
-                  onChange={(event) =>
-                    setPromptDrafts((prev) => ({
-                      ...prev,
-                      [activeAgent.id]: {
-                        ...prev[activeAgent.id],
-                        taskPrompt: event.target.value,
-                      },
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <Button variant="outline" className="cyber-btn-outline">
-                  重置当前 Agent
-                </Button>
-                <Button className="cyber-btn-primary">
-                  <PlayCircle className="w-4 h-4 mr-2" />
-                  保存调优配置
-                </Button>
-              </div>
             </div>
           </section>
         </div>
