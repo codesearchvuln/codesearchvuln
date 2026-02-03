@@ -266,16 +266,8 @@ async def create_demo_data(db: AsyncSession, user: User) -> None:
 async def create_internal_opengrep_rules(db: AsyncSession) -> None:
     """
     从 app/db/rules 目录读取所有 .yaml 文件并创建内置 opengrep 规则
+    - 判断文件名是否已在表中，只添加不存在的规则
     """
-    # 检查是否已有内置规则
-    result = await db.execute(
-        select(OpengrepRule).where(OpengrepRule.source == "internal")
-    )
-    existing_rules = result.scalars().all()
-    if existing_rules:
-        logger.info(f"内置规则已存在 ({len(existing_rules)} 条)，跳过创建")
-        return
-    
     # 获取规则文件目录
     rules_dir = Path(__file__).parent / "rules"
     if not rules_dir.exists():
@@ -290,7 +282,14 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
     
     logger.info(f"开始加载内置规则，找到 {len(yaml_files)} 个文件...")
     
+    # 获取数据库中已存在的规则名称
+    result = await db.execute(select(OpengrepRule.name))
+    existing_rule_names = {row[0] for row in result.fetchall()}
+    logger.info(f"数据库中已存在 {len(existing_rule_names)} 条规则")
+    
     created_count = 0
+    skipped_count = 0
+    
     for yaml_file in yaml_files:
         try:
             with open(yaml_file, 'r', encoding='utf-8') as f:
@@ -304,6 +303,12 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
             
             for rule in rule_data['rules']:
                 rule_id = rule.get('id', yaml_file.stem)
+                
+                # 判断规则是否已在表中
+                if rule_id in existing_rule_names:
+                    logger.debug(f"  ⊘ 规则已存在，跳过: {rule_id}")
+                    skipped_count += 1
+                    continue
                 
                 # 提取语言（优先从顶层查找，再从 metadata 中查找）
                 languages = rule.get('languages', [])
@@ -334,15 +339,18 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
                 )
                 db.add(opengrep_rule)
                 created_count += 1
-                logger.info(f"  ✓ 加载规则: {rule_id} ({language}, {severity})")
+                logger.info(f"  ✓ 加载新规则: {rule_id} ({language}, {severity})")
         
         except Exception as e:
             logger.error(f"加载规则文件失败 {yaml_file.name}: {e}")
             continue
     
-    await db.flush()
-    logger.info(f"✓ 成功创建 {created_count} 条内置规则")
-    await db.commit()
+    if created_count > 0:
+        await db.flush()
+        await db.commit()
+        logger.info(f"✓ 成功创建 {created_count} 条新规则，跳过 {skipped_count} 条已存在的规则")
+    else:
+        logger.info(f"所有 {skipped_count} 条规则已存在，无需创建新规则")
 
 
 async def init_db(db: AsyncSession) -> None:
