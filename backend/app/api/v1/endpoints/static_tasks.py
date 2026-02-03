@@ -20,6 +20,7 @@ from app.api import deps
 from app.core.config import settings
 from app.db.session import async_session_factory, get_db
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
+from app.models.gitleaks import GitleaksScanTask, GitleaksFinding
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.opengrep import (
@@ -900,3 +901,431 @@ async def select_opengrep_rules(
         "updated_count": updated_count,
         "is_active": request.is_active,
     }
+
+
+# ============ Gitleaks 密钥泄露检测 ============
+
+
+class GitleaksScanTaskCreate(BaseModel):
+    """创建 Gitleaks 扫描任务请求"""
+
+    project_id: str = Field(..., description="项目ID")
+    name: Optional[str] = Field(None, description="任务名称")
+    target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
+    no_git: bool = Field(True, description="不使用 git history，仅扫描文件")
+
+
+class GitleaksScanTaskResponse(BaseModel):
+    """Gitleaks 扫描任务响应"""
+
+    id: str
+    project_id: str
+    name: str
+    status: str
+    target_path: str
+    no_git: str
+    total_findings: int
+    scan_duration_ms: int
+    files_scanned: int
+    error_message: Optional[str]
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class GitleaksFindingResponse(BaseModel):
+    """Gitleaks 发现的密钥泄露响应"""
+
+    id: str
+    scan_task_id: str
+    rule_id: str
+    description: Optional[str]
+    file_path: str
+    start_line: Optional[int]
+    end_line: Optional[int]
+    secret: Optional[str]
+    match: Optional[str]
+    commit: Optional[str]
+    author: Optional[str]
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
+async def _execute_gitleaks_scan(
+    task_id: str,
+    project_root: str,
+    target_path: str,
+    no_git: bool = True,
+) -> None:
+    """
+    后台执行 Gitleaks 扫描
+
+    Args:
+        task_id: 扫描任务ID
+        project_root: 项目根目录
+        target_path: 扫描目标路径
+        no_git: 是否不使用 git history
+    """
+    async with async_session_factory() as db:
+        try:
+            # 获取任务
+            result = await db.execute(
+                select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
+            )
+            task = result.scalar_one_or_none()
+            if not task:
+                logger.error(f"Gitleaks task {task_id} not found")
+                return
+
+            # 更新任务状态为运行中
+            task.status = "running"
+            await db.commit()
+
+            # 构建扫描路径
+            full_target_path = os.path.join(project_root, target_path)
+            if not os.path.exists(full_target_path):
+                task.status = "failed"
+                task.error_message = f"Target path {full_target_path} not found"
+                await db.commit()
+                logger.error(f"Target path {full_target_path} not found")
+                return
+
+            # 创建临时输出文件
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as tf:
+                report_file = tf.name
+
+            try:
+                # 构建 gitleaks 命令
+                cmd = [
+                    "gitleaks",
+                    "detect",
+                    "--source",
+                    full_target_path,
+                    "--report-format",
+                    "json",
+                    "--report-path",
+                    report_file,
+                    "--exit-code",
+                    "0",  # 不要因为发现密钥而返回非零退出码
+                ]
+                if no_git:
+                    cmd.append("--no-git")
+
+                logger.info(
+                    f"Executing gitleaks for task {task_id}: {' '.join(cmd)}"
+                )
+
+                start_time = datetime.now()
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+                end_time = datetime.now()
+                scan_duration_ms = int((end_time - start_time).total_seconds() * 1000)
+
+                # 检查执行结果
+                if result.returncode != 0:
+                    error_msg = result.stderr or result.stdout or "Unknown error"
+                    task.status = "failed"
+                    task.error_message = error_msg[:500]
+                    task.scan_duration_ms = scan_duration_ms
+                    await db.commit()
+                    logger.error(
+                        f"Gitleaks scan task {task_id} failed: {error_msg}"
+                    )
+                    return
+
+                # 读取扫描结果
+                if not os.path.exists(report_file):
+                    task.status = "completed"
+                    task.total_findings = 0
+                    task.scan_duration_ms = scan_duration_ms
+                    await db.commit()
+                    logger.info(
+                        f"Gitleaks scan task {task_id} completed with no findings"
+                    )
+                    return
+
+                with open(report_file, "r") as f:
+                    content = f.read().strip()
+                    if not content:
+                        findings = []
+                    else:
+                        try:
+                            findings = json.loads(content)
+                            if not isinstance(findings, list):
+                                findings = []
+                        except json.JSONDecodeError as e:
+                            logger.error(
+                                f"Failed to parse gitleaks output: {e}"
+                            )
+                            task.status = "failed"
+                            task.error_message = f"Failed to parse JSON output: {str(e)}"
+                            task.scan_duration_ms = scan_duration_ms
+                            await db.commit()
+                            return
+
+                # 保存发现的密钥泄露
+                files_scanned = set()
+                for finding in findings:
+                    try:
+                        file_path = finding.get("File", "")
+                        if file_path:
+                            files_scanned.add(file_path)
+
+                        # 脱敏密钥
+                        secret = finding.get("Secret", "")
+                        if len(secret) > 8:
+                            masked_secret = (
+                                secret[:4] + "*" * (len(secret) - 8) + secret[-4:]
+                            )
+                        else:
+                            masked_secret = "*" * len(secret)
+
+                        gitleaks_finding = GitleaksFinding(
+                            scan_task_id=task_id,
+                            rule_id=finding.get("RuleID", "unknown"),
+                            description=finding.get("Description", ""),
+                            file_path=file_path,
+                            start_line=finding.get("StartLine"),
+                            end_line=finding.get("EndLine"),
+                            secret=masked_secret,
+                            match=finding.get("Match", "")[:500],  # 限制长度
+                            commit=finding.get("Commit"),
+                            author=finding.get("Author"),
+                            email=finding.get("Email"),
+                            date=finding.get("Date"),
+                            fingerprint=finding.get("Fingerprint"),
+                            status="open",
+                        )
+                        db.add(gitleaks_finding)
+                    except Exception as e:
+                        logger.error(f"Error processing gitleaks finding: {e}")
+
+                # 更新任务统计
+                task.status = "completed"
+                task.total_findings = len(findings)
+                task.scan_duration_ms = scan_duration_ms
+                task.files_scanned = len(files_scanned)
+
+                await db.commit()
+                logger.info(
+                    f"Gitleaks scan task {task_id} completed: "
+                    f"{len(findings)} findings in {len(files_scanned)} files"
+                )
+
+            finally:
+                # 清理临时文件
+                try:
+                    if os.path.exists(report_file):
+                        os.unlink(report_file)
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary report file: {e}")
+
+        except Exception as e:
+            logger.error(f"Error executing gitleaks scan for task {task_id}: {e}")
+            try:
+                result = await db.execute(
+                    select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
+                )
+                task = result.scalar_one_or_none()
+                if task:
+                    task.status = "failed"
+                    task.error_message = str(e)[:500]
+                    await db.commit()
+            except Exception as commit_error:
+                logger.error(
+                    f"Failed to update task status after error: {commit_error}"
+                )
+
+
+@router.post("/gitleaks/scan", response_model=GitleaksScanTaskResponse)
+async def create_gitleaks_scan(
+    request: GitleaksScanTaskCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    创建 Gitleaks 密钥泄露检测任务
+
+    Gitleaks 会扫描代码中的硬编码密钥，支持 150+ 种密钥类型：
+    - AWS/GCP/Azure 凭据
+    - GitHub/GitLab Tokens
+    - 私钥 (RSA, SSH, PGP)
+    - 数据库连接字符串
+    - JWT Secrets
+    """
+    # 验证项目存在
+    result = await db.execute(
+        select(Project).where(Project.id == request.project_id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    # 获取项目根目录
+    project_root = await _get_project_root(request.project_id)
+    if not project_root:
+        raise HTTPException(status_code=404, detail="未找到项目文件")
+
+    # 创建扫描任务
+    task_name = request.name or f"Gitleaks 扫描 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    scan_task = GitleaksScanTask(
+        project_id=request.project_id,
+        name=task_name,
+        target_path=request.target_path,
+        no_git=str(request.no_git).lower(),
+        status="pending",
+    )
+    db.add(scan_task)
+    await db.commit()
+    await db.refresh(scan_task)
+
+    # 添加后台任务
+    background_tasks.add_task(
+        _execute_gitleaks_scan,
+        scan_task.id,
+        project_root,
+        request.target_path,
+        request.no_git,
+    )
+
+    logger.info(
+        f"Created gitleaks scan task {scan_task.id} for project {request.project_id}"
+    )
+
+    return scan_task
+
+
+@router.get("/gitleaks/tasks", response_model=List[GitleaksScanTaskResponse])
+async def list_gitleaks_tasks(
+    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
+    status: Optional[str] = Query(None, description="按状态过滤"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """获取 Gitleaks 扫描任务列表"""
+    query = select(GitleaksScanTask)
+
+    if project_id:
+        query = query.where(GitleaksScanTask.project_id == project_id)
+    if status:
+        query = query.where(GitleaksScanTask.status == status)
+
+    query = query.order_by(GitleaksScanTask.created_at.desc()).offset(skip).limit(limit)
+
+    result = await db.execute(query)
+    tasks = result.scalars().all()
+    return tasks
+
+
+@router.get("/gitleaks/tasks/{task_id}", response_model=GitleaksScanTaskResponse)
+async def get_gitleaks_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """获取 Gitleaks 扫描任务详情"""
+    result = await db.execute(
+        select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return task
+
+
+@router.delete("/gitleaks/tasks/{task_id}")
+async def delete_gitleaks_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """删除 Gitleaks 扫描任务及其相关发现"""
+    result = await db.execute(
+        select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    await db.delete(task)
+    await db.commit()
+
+    return {"message": "任务已删除", "task_id": task_id}
+
+
+@router.get("/gitleaks/tasks/{task_id}/findings", response_model=List[GitleaksFindingResponse])
+async def get_gitleaks_findings(
+    task_id: str,
+    status: Optional[str] = Query(
+        None, description="按状态过滤: open, verified, false_positive, fixed"
+    ),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """获取 Gitleaks 扫描任务的密钥泄露列表"""
+    # 验证任务存在
+    result = await db.execute(
+        select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 构建查询
+    query = select(GitleaksFinding).where(GitleaksFinding.scan_task_id == task_id)
+
+    if status:
+        query = query.where(GitleaksFinding.status == status)
+
+    query = query.offset(skip).limit(limit)
+
+    result = await db.execute(query)
+    findings = result.scalars().all()
+    return findings
+
+
+@router.post("/gitleaks/findings/{finding_id}/status")
+async def update_gitleaks_finding_status(
+    finding_id: str,
+    status: str = Query(
+        ...,
+        regex="^(open|verified|false_positive|fixed)$",
+        description="新状态: open, verified, false_positive, fixed",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    更新 Gitleaks 发现的密钥泄露状态
+
+    可用状态：
+    - open: 开放
+    - verified: 已验证为真实泄露
+    - false_positive: 误报
+    - fixed: 已修复
+    """
+    result = await db.execute(
+        select(GitleaksFinding).where(GitleaksFinding.id == finding_id)
+    )
+    finding = result.scalar_one_or_none()
+    if not finding:
+        raise HTTPException(status_code=404, detail="密钥泄露记录不存在")
+
+    finding.status = status
+    await db.commit()
+
+    return {"message": "状态已更新", "finding_id": finding_id, "status": status}
