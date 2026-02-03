@@ -51,7 +51,28 @@ interface SystemConfigData {
   maxAnalyzeFiles: number; llmConcurrency: number; llmGapMs: number; outputLanguage: string;
 }
 
-export function SystemConfig() {
+type ConfigSection = "llm" | "embedding" | "analysis" | "git";
+
+interface SystemConfigProps {
+  visibleSections?: ConfigSection[];
+  defaultSection?: ConfigSection;
+}
+
+export function SystemConfig({
+  visibleSections = ["llm", "embedding", "analysis", "git"],
+  defaultSection = "llm",
+}: SystemConfigProps = {}) {
+  const enabledSections = visibleSections.length > 0 ? visibleSections : ["llm"];
+  const hasGitSection = enabledSections.includes("git");
+  const tabsGridClass =
+    enabledSections.length === 1
+      ? "grid-cols-1"
+      : enabledSections.length === 2
+        ? "grid-cols-2"
+        : enabledSections.length === 3
+          ? "grid-cols-3"
+          : "grid-cols-4";
+
   const [config, setConfig] = useState<SystemConfigData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showApiKey, setShowApiKey] = useState(false);
@@ -69,7 +90,12 @@ export function SystemConfig() {
   const [testRepoUrl, setTestRepoUrl] = useState("");
   const [showDeleteKeyDialog, setShowDeleteKeyDialog] = useState(false);
 
-  useEffect(() => { loadConfig(); loadSSHKey(); }, []);
+  useEffect(() => {
+    loadConfig();
+    if (hasGitSection) {
+      loadSSHKey();
+    }
+  }, [hasGitSection]);
 
   const loadConfig = async () => {
     try {
@@ -382,23 +408,34 @@ export function SystemConfig() {
         </div>
       </div>
 
-      <Tabs defaultValue="llm" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 bg-muted border border-border p-1 h-auto gap-1 rounded-lg mb-6">
-          <TabsTrigger value="llm" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
-            <Zap className="w-3 h-3" /> LLM 配置
-          </TabsTrigger>
-          <TabsTrigger value="embedding" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
-            <Brain className="w-3 h-3" /> 嵌入模型
-          </TabsTrigger>
-          <TabsTrigger value="analysis" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
-            <Settings className="w-3 h-3" /> 分析参数
-          </TabsTrigger>
-          <TabsTrigger value="git" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
-            <Globe className="w-3 h-3" /> Git 集成
-          </TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue={enabledSections.includes(defaultSection) ? defaultSection : enabledSections[0]} className="w-full">
+        {enabledSections.length > 1 && (
+          <TabsList className={`grid w-full ${tabsGridClass} bg-muted border border-border p-1 h-auto gap-1 rounded-lg mb-6`}>
+            {enabledSections.includes("llm") && (
+              <TabsTrigger value="llm" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
+                <Zap className="w-3 h-3" /> LLM 配置
+              </TabsTrigger>
+            )}
+            {enabledSections.includes("embedding") && (
+              <TabsTrigger value="embedding" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
+                <Brain className="w-3 h-3" /> 嵌入模型
+              </TabsTrigger>
+            )}
+            {enabledSections.includes("analysis") && (
+              <TabsTrigger value="analysis" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
+                <Settings className="w-3 h-3" /> 分析参数
+              </TabsTrigger>
+            )}
+            {enabledSections.includes("git") && (
+              <TabsTrigger value="git" className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2">
+                <Globe className="w-3 h-3" /> Git 集成
+              </TabsTrigger>
+            )}
+          </TabsList>
+        )}
 
         {/* LLM Config */}
+        {enabledSections.includes("llm") && (
         <TabsContent value="llm" className="space-y-6">
           <div className="cyber-card p-6 space-y-6">
             {/* Provider Selection */}
@@ -717,13 +754,17 @@ export function SystemConfig() {
             <p className="text-muted-foreground">• <strong className="text-muted-foreground">API 中转站</strong>: 在 Base URL 填入中转站地址即可，API Key 填中转站提供的 Key</p>
           </div>
         </TabsContent>
+        )}
 
         {/* Embedding Config */}
+        {enabledSections.includes("embedding") && (
         <TabsContent value="embedding" className="space-y-6">
           <EmbeddingConfig />
         </TabsContent>
+        )}
 
         {/* Analysis Parameters */}
+        {enabledSections.includes("analysis") && (
         <TabsContent value="analysis" className="space-y-6">
           <div className="cyber-card p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -773,8 +814,10 @@ export function SystemConfig() {
             </div>
           </div>
         </TabsContent>
+        )}
 
         {/* Git Integration */}
+        {enabledSections.includes("git") && (
         <TabsContent value="git" className="space-y-6">
           <div className="cyber-card p-6 space-y-6">
             <div className="space-y-2">
@@ -989,6 +1032,7 @@ export function SystemConfig() {
             )}
           </div>
         </TabsContent>
+        )}
       </Tabs>
 
       {/* Floating Save Button */}

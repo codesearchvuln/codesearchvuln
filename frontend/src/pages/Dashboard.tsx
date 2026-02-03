@@ -33,11 +33,30 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboardData();
+
+    const timer = window.setInterval(() => {
+      loadDashboardData({ silent: true });
+    }, 15000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
-  const loadDashboardData = async () => {
+  const sortTasksByRecent = (tasks: AuditTask[]): AuditTask[] => {
+    return [...tasks].sort((a, b) => {
+      const aTime = new Date(a.completed_at || a.started_at || a.created_at || 0).getTime();
+      const bTime = new Date(b.completed_at || b.started_at || b.created_at || 0).getTime();
+      return bTime - aTime;
+    });
+  };
+
+  const loadDashboardData = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
 
       const results = await Promise.allSettled([
         api.getProjectStats(),
@@ -67,7 +86,7 @@ export default function Dashboard() {
 
       let tasks: AuditTask[] = [];
       if (results[2].status === 'fulfilled') {
-        tasks = Array.isArray(results[2].value) ? results[2].value : [];
+        tasks = sortTasksByRecent(Array.isArray(results[2].value) ? results[2].value : []);
         setRecentTasks(tasks.slice(0, 10));
       } else {
         setRecentTasks([]);
@@ -126,7 +145,9 @@ export default function Dashboard() {
       console.error('仪表盘数据加载失败:', error);
       toast.error("数据加载失败");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 

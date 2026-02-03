@@ -43,7 +43,7 @@ export function Header({
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-foreground tracking-wider text-base leading-tight">
-              DEEP<span className="text-primary">AUDIT</span>
+              <span className="text-primary">Vul</span>Hunter
             </span>
             <span className="text-[10px] text-muted-foreground tracking-[0.2em] uppercase">Security Agent</span>
           </div>

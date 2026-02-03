@@ -95,9 +95,9 @@ export const API_ENDPOINTS = {
 
 // 本地存储键名
 export const STORAGE_KEYS = {
-  THEME: 'deepaudit-theme',
-  USER_PREFERENCES: 'deepaudit-preferences',
-  RECENT_PROJECTS: 'deepaudit-recent-projects',
+  THEME: 'vulhunter-theme',
+  USER_PREFERENCES: 'vulhunter-preferences',
+  RECENT_PROJECTS: 'vulhunter-recent-projects',
 } as const;
 
 // 导出项目类型相关常量

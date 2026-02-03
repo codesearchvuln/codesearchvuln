@@ -52,6 +52,14 @@ class OpengrepRuleTextResponse(BaseModel):
     rule_id: Optional[str] = None
 
 
+class OpengrepRuleUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, description="规则名称")
+    pattern_yaml: Optional[str] = Field(None, description="规则YAML文本")
+    language: Optional[str] = Field(None, description="编程语言")
+    severity: Optional[str] = Field(None, description="严重程度: ERROR, WARNING, INFO")
+    is_active: Optional[bool] = Field(None, description="是否启用")
+
+
 class OpengrepRuleResponse(BaseModel):
     id: str
     name: str

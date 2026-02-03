@@ -170,6 +170,19 @@ export async function uploadOpengrepRulesDirectory(
             },
         },
     );
+export interface OpengrepRuleUpdateRequest {
+    name?: string;
+    pattern_yaml?: string;
+    language?: string;
+    severity?: "ERROR" | "WARNING" | "INFO";
+    is_active?: boolean;
+}
+
+export async function updateOpengrepRule(
+    ruleId: string,
+    params: OpengrepRuleUpdateRequest,
+): Promise<{ message: string; rule: OpengrepRuleDetail }> {
+    const response = await apiClient.patch(`/static-tasks/rules/${ruleId}`, params);
     return response.data;
 }
 

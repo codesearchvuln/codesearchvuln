@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import LanguageToggle from "@/components/layout/LanguageToggle";
 // import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
     Menu,
@@ -25,6 +26,7 @@ import {
     Bot,
 } from "lucide-react";
 import routes from "@/app/routes";
+import { useI18n } from "@/shared/i18n";
 
 // Icon mapping for routes with consistent sizing
 const routeIcons: Record<string, React.ReactNode> = {
@@ -49,6 +51,7 @@ interface SidebarProps {
 export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
     const location = useLocation();
     const [mobileOpen, setMobileOpen] = useState(false);
+    const { t, isEnglish } = useI18n();
 
     const visibleRoutes = routes.filter((route) => route.visible !== false);
 
@@ -139,8 +142,8 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                     }}
                                 >
                                     <img
-                                        src="/logo_deepaudit.png"
-                                        alt="DeepAudit"
+                                        src="/logo_vulhunter.png"
+                                        alt="VulHunter"
                                         className="w-6 h-6 object-contain transition-transform duration-300 group-hover:scale-110"
                                     />
                                 </div>
@@ -159,11 +162,11 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                             "0 0 25px rgba(255,107,44,0.4)",
                                     }}
                                 >
-                                    <span className="text-primary">DEEP</span>
-                                    <span
-                                        style={{ color: "var(--cyber-text)" }}
-                                    >
-                                        AUDIT
+                                    <span className="text-primary">
+                                        Vul
+                                    </span>
+                                    <span style={{ color: "var(--cyber-text)" }}>
+                                        Hunter
                                     </span>
                                 </div>
                             </div>
@@ -194,6 +197,9 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                             {visibleRoutes.map((route) => {
                                 const isActive =
                                     location.pathname === route.path;
+                                const routeLabel = route.nameKey
+                                    ? t(route.nameKey, route.name)
+                                    : route.name;
                                 return (
                                     <Link
                                         key={route.path}
@@ -213,7 +219,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                         }}
                                         onClick={() => setMobileOpen(false)}
                                         title={
-                                            collapsed ? route.name : undefined
+                                            collapsed ? routeLabel : undefined
                                         }
                                         onMouseEnter={(e) => {
                                             if (!isActive) {
@@ -248,9 +254,9 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                         {/* Label */}
                                         {!collapsed && (
                                             <span
-                                                className={`font-mono text-base tracking-wide transition-all duration-300 ${isActive ? "font-semibold" : "font-medium"}`}
+                                                className={`font-mono tracking-wide transition-all duration-300 break-words leading-snug ${isEnglish ? "text-sm" : "text-base"} ${isActive ? "font-semibold" : "font-medium"}`}
                                             >
-                                                {route.name}
+                                                {routeLabel}
                                             </span>
                                         )}
 
@@ -304,7 +310,10 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                             )}
                         </Link>*/}
 
-                        <div className="h-6" />
+                        <LanguageToggle
+                            compact={collapsed}
+                            className={collapsed ? "px-0" : "px-1"}
+                        />
                     </div>
                 </div>
             </aside>

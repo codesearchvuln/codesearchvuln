@@ -40,6 +40,8 @@ import {
     Search,
     Copy,
     Eye,
+    PencilLine,
+    Save,
     Code,
     AlertCircle,
     ChevronLeft,
@@ -58,6 +60,8 @@ import {
     uploadOpengrepRuleJSON,
     uploadOpengrepRulesCompressed,
     uploadOpengrepRulesDirectory,
+    createOpengrepGenericRule,
+    updateOpengrepRule,
     batchUpdateOpengrepRules,
     RULE_SOURCES,
     SEVERITIES,
@@ -81,6 +85,14 @@ export default function OpengrepRules() {
     const [selectedRule, setSelectedRule] = useState<OpengrepRuleDetail | null>(
         null,
     );
+    const [isEditingRule, setIsEditingRule] = useState(false);
+    const [savingRule, setSavingRule] = useState(false);
+    const [editRuleForm, setEditRuleForm] = useState({
+        name: "",
+        language: "",
+        severity: "ERROR",
+        pattern_yaml: "",
+    });
     const [loadingDetail, setLoadingDetail] = useState(false);
     const [availableLanguages, setAvailableLanguages] = useState<string[]>([]);
     const [showRuleTypeDialog, setShowRuleTypeDialog] = useState(false);
@@ -183,11 +195,25 @@ export default function OpengrepRules() {
         }
     };
 
-    const handleViewRule = async (rule: OpengrepRule) => {
+    const syncEditForm = (detail: OpengrepRuleDetail) => {
+        setEditRuleForm({
+            name: detail.name,
+            language: detail.language,
+            severity: detail.severity,
+            pattern_yaml: detail.pattern_yaml,
+        });
+    };
+
+    const handleViewRule = async (
+        rule: OpengrepRule,
+        options?: { edit?: boolean },
+    ) => {
         try {
             setLoadingDetail(true);
             const detail = await getOpengrepRule(rule.id);
             setSelectedRule(detail);
+            syncEditForm(detail);
+            setIsEditingRule(options?.edit ?? false);
             setShowRuleDetail(true);
         } catch (error) {
             console.error("Failed to load rule detail:", error);
@@ -221,6 +247,79 @@ export default function OpengrepRules() {
         }
     };
 
+    const handleStartEditRule = () => {
+        if (!selectedRule) return;
+        syncEditForm(selectedRule);
+        setIsEditingRule(true);
+    };
+
+    const handleCancelEditRule = () => {
+        if (selectedRule) {
+            syncEditForm(selectedRule);
+        }
+        setIsEditingRule(false);
+    };
+
+    const handleSaveRule = async () => {
+        if (!selectedRule) return;
+
+        const name = editRuleForm.name.trim();
+        const language = editRuleForm.language.trim();
+        const patternYaml = editRuleForm.pattern_yaml.trim();
+        const severity = editRuleForm.severity.trim().toUpperCase();
+
+        if (!name || !language || !patternYaml) {
+            toast.error("请填写规则名称、语言和规则文本");
+            return;
+        }
+
+        if (!["ERROR", "WARNING", "INFO"].includes(severity)) {
+            toast.error("严重程度必须是 ERROR/WARNING/INFO");
+            return;
+        }
+
+        try {
+            setSavingRule(true);
+            const result = await updateOpengrepRule(selectedRule.id, {
+                name,
+                language,
+                severity: severity as "ERROR" | "WARNING" | "INFO",
+                pattern_yaml: patternYaml,
+            });
+
+            const updatedRule = result.rule;
+            setSelectedRule(updatedRule);
+            syncEditForm(updatedRule);
+            setIsEditingRule(false);
+
+            const nextRules = rules.map((ruleItem) =>
+                ruleItem.id === updatedRule.id
+                    ? {
+                          ...ruleItem,
+                          name: updatedRule.name,
+                          language: updatedRule.language,
+                          severity: updatedRule.severity,
+                          source: updatedRule.source,
+                          correct: updatedRule.correct,
+                          is_active: updatedRule.is_active,
+                          created_at: updatedRule.created_at,
+                      }
+                    : ruleItem,
+            );
+            setRules(nextRules);
+            setOpengrepActiveRules(nextRules.filter((item) => item.is_active));
+
+            toast.success(result.message || "规则保存成功");
+            loadRuleStats();
+        } catch (error: any) {
+            console.error("Failed to update rule:", error);
+            const message = error?.response?.data?.detail || "保存规则失败";
+            toast.error(message);
+        } finally {
+            setSavingRule(false);
+        }
+    };
+
     const handleDeleteRule = async () => {
         if (!pendingDeleteRule) return;
         const deletingTarget = pendingDeleteRule;
@@ -231,6 +330,7 @@ export default function OpengrepRules() {
             await loadRules({ silent: true });
             await loadRuleStats();
             setShowRuleDetail(false);
+            setIsEditingRule(false);
             setPendingDeleteRule(null);
         } catch (error) {
             console.error("Failed to delete rule:", error);
@@ -750,13 +850,13 @@ export default function OpengrepRules() {
                                 <Button
                                     variant="outline"
                                     onClick={handleResetFilters}
-                                    className="cyber-btn-outline h-10 min-w-[110px]"
+                                    className="cyber-btn-outline h-10 min-w-[110px] whitespace-normal text-center leading-tight"
                                 >
                                     重置
                                 </Button>
                                 <Button
                                     onClick={() => setShowRuleTypeDialog(true)}
-                                    className="cyber-btn-primary h-10 min-w-[150px]"
+                                    className="cyber-btn-primary h-10 min-w-[150px] whitespace-normal text-center leading-tight"
                                 >
                                     新建规则
                                 </Button>
@@ -1066,6 +1166,21 @@ export default function OpengrepRules() {
                                                                 size="sm"
                                                                 variant="outline"
                                                                 onClick={() =>
+                                                                    handleViewRule(
+                                                                        rule,
+                                                                        {
+                                                                            edit: true,
+                                                                        },
+                                                                    )
+                                                                }
+                                                                className="cyber-btn-ghost h-8 px-3 min-w-[64px]"
+                                                            >
+                                                                <PencilLine className="w-4 h-4" />
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={() =>
                                                                     handleToggleRule(
                                                                         rule,
                                                                     )
@@ -1224,7 +1339,12 @@ export default function OpengrepRules() {
                     {/* Rule Detail Dialog */}
                     <Dialog
                         open={showRuleDetail}
-                        onOpenChange={setShowRuleDetail}
+                        onOpenChange={(open) => {
+                            setShowRuleDetail(open);
+                            if (!open) {
+                                setIsEditingRule(false);
+                            }
+                        }}
                     >
                         <DialogContent className="!w-[min(90vw,900px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
                             {/* Terminal Header */}
@@ -1235,14 +1355,14 @@ export default function OpengrepRules() {
                                     <div className="w-3 h-3 rounded-full bg-green-500/80" />
                                 </div>
                                 <span className="ml-2 font-mono text-xs text-muted-foreground tracking-wider">
-                                    rule_detail@deepaudit
+                                    rule_detail@vulhunter
                                 </span>
                             </div>
 
                             <DialogHeader className="px-6 pt-4 flex-shrink-0">
                                 <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
                                     <Code className="w-5 h-5 text-primary" />
-                                    规则详情
+                                    {isEditingRule ? "编辑规则" : "规则详情"}
                                 </DialogTitle>
                             </DialogHeader>
 
@@ -1263,9 +1383,30 @@ export default function OpengrepRules() {
                                                     <p className="text-muted-foreground">
                                                         名称
                                                     </p>
-                                                    <p className="text-foreground font-bold mt-1">
-                                                        {selectedRule.name}
-                                                    </p>
+                                                    {isEditingRule ? (
+                                                        <Input
+                                                            value={
+                                                                editRuleForm.name
+                                                            }
+                                                            onChange={(e) =>
+                                                                setEditRuleForm(
+                                                                    (
+                                                                        prev,
+                                                                    ) => ({
+                                                                        ...prev,
+                                                                        name: e
+                                                                            .target
+                                                                            .value,
+                                                                    }),
+                                                                )
+                                                            }
+                                                            className="cyber-input mt-1.5 h-9"
+                                                        />
+                                                    ) : (
+                                                        <p className="text-foreground font-bold mt-1">
+                                                            {selectedRule.name}
+                                                        </p>
+                                                    )}
                                                 </div>
                                                 <div>
                                                     <p className="text-muted-foreground">
@@ -1279,19 +1420,81 @@ export default function OpengrepRules() {
                                                     <p className="text-muted-foreground">
                                                         编程语言
                                                     </p>
-                                                    <p className="text-foreground font-bold mt-1">
-                                                        {selectedRule.language}
-                                                    </p>
+                                                    {isEditingRule ? (
+                                                        <Input
+                                                            value={
+                                                                editRuleForm.language
+                                                            }
+                                                            onChange={(e) =>
+                                                                setEditRuleForm(
+                                                                    (
+                                                                        prev,
+                                                                    ) => ({
+                                                                        ...prev,
+                                                                        language:
+                                                                            e
+                                                                                .target
+                                                                                .value,
+                                                                    }),
+                                                                )
+                                                            }
+                                                            className="cyber-input mt-1.5 h-9"
+                                                        />
+                                                    ) : (
+                                                        <p className="text-foreground font-bold mt-1">
+                                                            {
+                                                                selectedRule.language
+                                                            }
+                                                        </p>
+                                                    )}
                                                 </div>
                                                 <div>
                                                     <p className="text-muted-foreground">
                                                         严重程度
                                                     </p>
-                                                    <Badge
-                                                        className={`cyber-badge mt-1 ${getSeverityColor(selectedRule.severity)}`}
-                                                    >
-                                                        {selectedRule.severity}
-                                                    </Badge>
+                                                    {isEditingRule ? (
+                                                        <Select
+                                                            value={
+                                                                editRuleForm.severity
+                                                            }
+                                                            onValueChange={(
+                                                                val,
+                                                            ) =>
+                                                                setEditRuleForm(
+                                                                    (
+                                                                        prev,
+                                                                    ) => ({
+                                                                        ...prev,
+                                                                        severity:
+                                                                            val,
+                                                                    }),
+                                                                )
+                                                            }
+                                                        >
+                                                            <SelectTrigger className="cyber-input mt-1.5 h-9">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent className="cyber-dialog border-border">
+                                                                <SelectItem value="ERROR">
+                                                                    ERROR
+                                                                </SelectItem>
+                                                                <SelectItem value="WARNING">
+                                                                    WARNING
+                                                                </SelectItem>
+                                                                <SelectItem value="INFO">
+                                                                    INFO
+                                                                </SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    ) : (
+                                                        <Badge
+                                                            className={`cyber-badge mt-1 ${getSeverityColor(selectedRule.severity)}`}
+                                                        >
+                                                            {
+                                                                selectedRule.severity
+                                                            }
+                                                        </Badge>
+                                                    )}
                                                 </div>
                                                 <div>
                                                     <p className="text-muted-foreground">
@@ -1375,26 +1578,49 @@ export default function OpengrepRules() {
                                                 <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground">
                                                     规则模式
                                                 </h3>
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    onClick={() => {
-                                                        navigator.clipboard.writeText(
-                                                            selectedRule.pattern_yaml,
-                                                        );
-                                                        toast.success(
-                                                            "已复制到剪贴板",
-                                                        );
-                                                    }}
-                                                    className="cyber-btn-ghost h-7 text-xs"
-                                                >
-                                                    <Copy className="w-3 h-3" />
-                                                </Button>
+                                                {!isEditingRule && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText(
+                                                                selectedRule.pattern_yaml,
+                                                            );
+                                                            toast.success(
+                                                                "已复制到剪贴板",
+                                                            );
+                                                        }}
+                                                        className="cyber-btn-ghost h-7 text-xs"
+                                                    >
+                                                        <Copy className="w-3 h-3" />
+                                                    </Button>
+                                                )}
                                             </div>
                                             <div className="bg-muted border border-border rounded p-4">
-                                                <pre className="text-xs font-mono text-foreground whitespace-pre-wrap break-words">
-                                                    {selectedRule.pattern_yaml}
-                                                </pre>
+                                                {isEditingRule ? (
+                                                    <Textarea
+                                                        value={
+                                                            editRuleForm.pattern_yaml
+                                                        }
+                                                        onChange={(e) =>
+                                                            setEditRuleForm(
+                                                                (prev) => ({
+                                                                    ...prev,
+                                                                    pattern_yaml:
+                                                                        e.target
+                                                                            .value,
+                                                                }),
+                                                            )
+                                                        }
+                                                        className="cyber-input font-mono text-xs min-h-80 cursor-text"
+                                                    />
+                                                ) : (
+                                                    <pre className="text-xs font-mono text-foreground whitespace-pre-wrap break-words">
+                                                        {
+                                                            selectedRule.pattern_yaml
+                                                        }
+                                                    </pre>
+                                                )}
                                             </div>
                                         </div>
 
@@ -1435,11 +1661,45 @@ export default function OpengrepRules() {
                             <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 bg-muted border-t border-border">
                                 <Button
                                     variant="outline"
-                                    onClick={() => setShowRuleDetail(false)}
+                                    onClick={() => {
+                                        if (isEditingRule) {
+                                            handleCancelEditRule();
+                                        } else {
+                                            setShowRuleDetail(false);
+                                        }
+                                    }}
                                     className="cyber-btn-outline"
                                 >
-                                    关闭
+                                    {isEditingRule ? "取消编辑" : "关闭"}
                                 </Button>
+                                {isEditingRule ? (
+                                    <Button
+                                        onClick={handleSaveRule}
+                                        className="cyber-btn-primary"
+                                        disabled={savingRule}
+                                    >
+                                        {savingRule ? (
+                                            <>
+                                                <div className="loading-spinner mr-2" />
+                                                保存中...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save className="w-4 h-4 mr-2" />
+                                                保存规则
+                                            </>
+                                        )}
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        variant="outline"
+                                        onClick={handleStartEditRule}
+                                        className="cyber-btn-outline"
+                                    >
+                                        <PencilLine className="w-4 h-4 mr-2" />
+                                        编辑规则
+                                    </Button>
+                                )}
                                 <Button
                                     variant="outline"
                                     onClick={() =>
@@ -1449,6 +1709,7 @@ export default function OpengrepRules() {
                                             name: selectedRule.name,
                                         })
                                     }
+                                    disabled={isEditingRule || savingRule}
                                     className="cyber-btn-ghost hover:bg-rose-500/10 hover:text-rose-400"
                                 >
                                     <Trash2 className="w-4 h-4 mr-2" />

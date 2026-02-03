@@ -755,14 +755,14 @@ function AgentAuditPageContent() {
         <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
           <div className="mx-auto mb-10 w-48 h-48 rounded-[2.5rem] border border-primary/40 bg-primary/10 flex items-center justify-center shadow-[0_0_48px_rgba(59,130,246,0.4)]">
             <img
-              src="/logo_deepaudit.png"
-              alt="DeepAudit"
+              src="/logo_vulhunter.png"
+              alt="VulHunter"
               className="w-24 h-24 object-contain"
             />
           </div>
 
           <h1 className="text-6xl md:text-7xl font-mono font-bold tracking-wider text-foreground">
-            DeepAudit
+            VulHunter
           </h1>
           <p className="mt-6 text-2xl md:text-3xl text-muted-foreground leading-relaxed">
             面向代码安全与合规审计的智能分析平台。聚焦仓库级项目，

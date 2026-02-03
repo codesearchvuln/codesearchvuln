@@ -37,7 +37,7 @@
 }
 
 /*
-  DeepAudit Design System v3.1
+  VulHunter Design System v3.1
   Theme System with CSS Variables
   - Light Mode: Clean, professional
   - Dark Mode: Cyberpunk Terminal
@@ -1222,5 +1222,24 @@
 
   .animated-underline:hover::after {
     width: 100%;
+  }
+
+  /* ====== English Layout Fit ====== */
+  html[data-lang="en"] .stat-label {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    line-height: 1.3;
+    white-space: normal;
+    word-break: break-word;
+    text-transform: none;
+  }
+
+  html[data-lang="en"] .cyber-btn-primary,
+  html[data-lang="en"] .cyber-btn-outline,
+  html[data-lang="en"] .cyber-btn-ghost {
+    min-height: 2.5rem;
+    white-space: normal;
+    line-height: 1.2;
+    text-align: center;
   }
 }

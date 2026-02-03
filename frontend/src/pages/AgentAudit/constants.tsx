@@ -232,7 +232,7 @@ export const COLORS = {
 
 // ============ ASCII Art ============
 
-export const DEEPAUDIT_ASCII = `
+export const VULHUNTER_ASCII = `
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
 ║     ____  _____ _____ ____   _   _   _ ____ ___ _____         ║

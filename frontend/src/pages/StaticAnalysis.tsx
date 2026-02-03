@@ -1046,7 +1046,7 @@ export default function StaticAnalysis() {
                             <div className="w-3 h-3 rounded-full bg-green-500/80" />
                         </div>
                         <span className="ml-2 font-mono text-xs text-muted-foreground tracking-wider">
-                            static_finding@deepaudit
+                            static_finding@vulhunter
                         </span>
                     </div>
 

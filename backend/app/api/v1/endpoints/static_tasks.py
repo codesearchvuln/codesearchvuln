@@ -29,6 +29,7 @@ from app.schemas.opengrep import (
     OpengrepRulePatchResponse,
     OpengrepRuleTextCreateRequest,
     OpengrepRuleTextResponse,
+    OpengrepRuleUpdateRequest,
 )
 from app.services.rule import get_rule_by_patch, validate_generic_rule
 from app.services.upload.upload_manager import UploadManager
@@ -935,6 +936,100 @@ async def create_opengrep_generic_rule(
         "validation": validation,
         "test_yaml": result.get("test_yaml"),
         "rule_id": opengrep_rule.id,
+    }
+
+
+@router.patch("/rules/{rule_id}")
+async def edit_opengrep_rule(
+    rule_id: str,
+    request: OpengrepRuleUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """编辑 Opengrep 规则并保存。"""
+    result = await db.execute(select(OpengrepRule).where(OpengrepRule.id == rule_id))
+    rule = result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(status_code=404, detail="规则不存在")
+
+    if (
+        request.name is None
+        and request.pattern_yaml is None
+        and request.language is None
+        and request.severity is None
+        and request.is_active is None
+    ):
+        raise HTTPException(status_code=400, detail="至少需要提供一个可更新字段")
+
+    if request.name is not None:
+        rule_name = request.name.strip()
+        if not rule_name:
+            raise HTTPException(status_code=400, detail="规则名称不能为空")
+        rule.name = rule_name
+
+    if request.pattern_yaml is not None:
+        validation_result = await validate_generic_rule(request.pattern_yaml)
+        validation = validation_result.get("validation") or {}
+        if not validation.get("is_valid"):
+            raise HTTPException(
+                status_code=400,
+                detail=validation.get("message") or "规则验证失败",
+            )
+
+        parsed_rule = validation_result.get("rule") or {}
+        cleaned_yaml = validation_result.get("rule_yaml") or request.pattern_yaml
+        rule.pattern_yaml = cleaned_yaml
+        rule.correct = True
+
+        if request.name is None:
+            parsed_rule_id = str(parsed_rule.get("id") or "").strip()
+            if parsed_rule_id:
+                rule.name = parsed_rule_id
+
+        if request.language is None:
+            parsed_languages = parsed_rule.get("languages") or []
+            if isinstance(parsed_languages, list) and parsed_languages:
+                parsed_language = str(parsed_languages[0]).strip()
+                if parsed_language:
+                    rule.language = parsed_language
+
+        if request.severity is None:
+            parsed_severity = str(parsed_rule.get("severity") or "").strip().upper()
+            if parsed_severity in {"ERROR", "WARNING", "INFO"}:
+                rule.severity = parsed_severity
+
+    if request.language is not None:
+        language = request.language.strip()
+        if not language:
+            raise HTTPException(status_code=400, detail="编程语言不能为空")
+        rule.language = language
+
+    if request.severity is not None:
+        severity = request.severity.strip().upper()
+        if severity not in {"ERROR", "WARNING", "INFO"}:
+            raise HTTPException(status_code=400, detail="严重程度必须为 ERROR/WARNING/INFO")
+        rule.severity = severity
+
+    if request.is_active is not None:
+        rule.is_active = request.is_active
+
+    await db.commit()
+    await db.refresh(rule)
+
+    return {
+        "message": "规则保存成功",
+        "rule": {
+            "id": rule.id,
+            "name": rule.name,
+            "pattern_yaml": rule.pattern_yaml,
+            "language": rule.language,
+            "severity": rule.severity,
+            "source": rule.source,
+            "patch": rule.patch,
+            "correct": rule.correct,
+            "is_active": rule.is_active,
+            "created_at": rule.create_at,
+        },
     }
 
 
