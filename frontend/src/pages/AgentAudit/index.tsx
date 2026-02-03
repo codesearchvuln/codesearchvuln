@@ -10,7 +10,7 @@ import { Terminal, Bot, Loader2, Radio, Filter, Maximize2, ArrowDown } from "luc
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useAgentStream } from "@/hooks/useAgentStream";
-
+import { useLogoVariant } from "@/shared/branding/useLogoVariant";
 import {
   getAgentTask,
   getAgentFindings,
@@ -68,7 +68,7 @@ function AgentAuditPageContent() {
   // 🔥 使用 state 来标记历史事件加载状态和触发 streamOptions 重新计算
   const [afterSequence, setAfterSequence] = useState<number>(0);
   const [historicalEventsLoaded, setHistoricalEventsLoaded] = useState<boolean>(false);
-
+  const { logoSrc, cycleLogoVariant } = useLogoVariant();
   // 🔥 当 taskId 变化时立即重置状态（新建任务时清理旧日志）
   useEffect(() => {
     // 如果 taskId 发生变化，立即重置
@@ -753,13 +753,18 @@ function AgentAuditPageContent() {
         <div className="absolute inset-0 vignette pointer-events-none" />
 
         <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
-          <div className="mx-auto mb-10 w-48 h-48 rounded-[2.5rem] border border-primary/40 bg-primary/10 flex items-center justify-center shadow-[0_0_48px_rgba(59,130,246,0.4)]">
+          <button
+            type="button"
+            onClick={cycleLogoVariant}
+            className="mx-auto mb-10 w-48 h-48 rounded-[2.5rem] border border-primary/40 bg-primary/10 flex items-center justify-center shadow-[0_0_48px_rgba(59,130,246,0.4)] cursor-pointer transition-transform duration-200 hover:scale-[1.02]"
+            title="点击切换 Logo"
+          >
             <img
-              src="/logo_vulhunter.png"
+              src={logoSrc}
               alt="VulHunter"
-              className="w-24 h-24 object-contain"
+              className="w-32 h-32 object-contain"
             />
-          </div>
+          </button>
 
           <h1 className="text-6xl md:text-7xl font-mono font-bold tracking-wider text-foreground">
             VulHunter

@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import routes from "@/app/routes";
 import { useI18n } from "@/shared/i18n";
+import { useLogoVariant } from "@/shared/branding/useLogoVariant";
 
 // Icon mapping for routes with consistent sizing
 const routeIcons: Record<string, React.ReactNode> = {
@@ -52,6 +53,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
     const location = useLocation();
     const [mobileOpen, setMobileOpen] = useState(false);
     const { t, isEnglish } = useI18n();
+    const { logoSrc } = useLogoVariant();
 
     const visibleRoutes = routes.filter((route) => route.visible !== false);
 
@@ -142,7 +144,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                     }}
                                 >
                                     <img
-                                        src="/logo_vulhunter.png"
+                                        src={logoSrc}
                                         alt="VulHunter"
                                         className="w-6 h-6 object-contain transition-transform duration-300 group-hover:scale-110"
                                     />
