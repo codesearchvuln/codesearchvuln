@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -126,6 +127,7 @@ class OpengrepFindingResponse(BaseModel):
     code_snippet: Optional[str]
     severity: str
     status: str
+    confidence: Optional[str] = Field(None, description="规则置信度: HIGH, MEDIUM, LOW")
 
     class Config:
         from_attributes = True
@@ -438,9 +440,9 @@ async def _execute_opengrep_scan(
             successful_rule_count = 0
             failed_rule_count = 0
 
-            def execute_rules_batch(rules_batch: List[Dict], depth: int = 0) -> tuple[List[Dict], List[Dict], int, int]:
+            async def execute_rules_batch(rules_batch: List[Dict], depth: int = 0) -> tuple[List[Dict], List[Dict], int, int]:
                 """
-                递归执行一批规则
+                递归执行一批规则（异步版本）
                 
                 Args:
                     rules_batch: 要执行的规则列表
@@ -467,7 +469,7 @@ async def _execute_opengrep_scan(
                             yaml.dump({"rules": [rule]}, tf, sort_keys=False, default_flow_style=False)
                             rule_file = tf.name
 
-                        # 执行扫描
+                        # 执行扫描（在线程池中执行阻塞操作）
                         cmd = [
                             "opengrep",
                             "--config",
@@ -476,12 +478,16 @@ async def _execute_opengrep_scan(
                             full_target_path,
                         ]
 
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=600,
-                            env=scan_env,
+                        loop = asyncio.get_event_loop()
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda: subprocess.run(
+                                cmd,
+                                capture_output=True,
+                                text=True,
+                                timeout=600,
+                                env=scan_env,
+                            )
                         )
 
                         # 解析结果
@@ -524,7 +530,7 @@ async def _execute_opengrep_scan(
                         yaml.dump({"rules": rules_batch}, tf, sort_keys=False, default_flow_style=False)
                         rule_file = tf.name
 
-                    # 执行扫描
+                    # 执行扫描（在线程池中执行阻塞操作）
                     cmd = [
                         "opengrep",
                         "--config",
@@ -533,12 +539,16 @@ async def _execute_opengrep_scan(
                         full_target_path,
                     ]
 
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=600,
-                        env=scan_env,
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda: subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=600,
+                            env=scan_env,
+                        )
                     )
 
                     # 解析结果
@@ -581,7 +591,7 @@ async def _execute_opengrep_scan(
                 
                 for idx, chunk in enumerate(chunks):
                     logger.info(f"{indent}Processing chunk {idx + 1}/{len(chunks)} ({len(chunk)} rules)")
-                    findings, errors, success, failed = execute_rules_batch(chunk, depth + 1)
+                    findings, errors, success, failed = await execute_rules_batch(chunk, depth + 1)
                     total_findings.extend(findings)
                     total_errors.extend(errors)
                     total_success += success
@@ -591,7 +601,7 @@ async def _execute_opengrep_scan(
 
             # 执行所有规则
             logger.info(f"Starting batch execution for {len(valid_rules)} rules")
-            all_findings, all_scan_errors, successful_rule_count, failed_rule_count = execute_rules_batch(valid_rules)
+            all_findings, all_scan_errors, successful_rule_count, failed_rule_count = await execute_rules_batch(valid_rules)
 
             # 检查是否有成功执行的规则
             if successful_rule_count == 0:
@@ -853,7 +863,45 @@ async def get_static_task_findings(
 
     result = await db.execute(query)
     findings = result.scalars().all()
-    return findings
+    
+    # 为每个 finding 添加 confidence 信息（通过 rule id 查询）
+    response_findings = []
+    for finding in findings:
+        finding_dict = {
+            "id": finding.id,
+            "scan_task_id": finding.scan_task_id,
+            "rule": finding.rule,
+            "description": finding.description,
+            "file_path": finding.file_path,
+            "start_line": finding.start_line,
+            "code_snippet": finding.code_snippet,
+            "severity": finding.severity,
+            "status": finding.status,
+            "confidence": None,
+        }
+        
+        # 从 rule JSON 中提取 rule id，然后查询 OpengrepRule 表获取 confidence
+        if finding.rule and isinstance(finding.rule, dict):
+            # 获取 check_id 字段
+            check_id = finding.rule.get("check_id")
+            if check_id:
+                # 从右往左第一个 '.' 往后的字符串是规则名
+                if '.' in check_id:
+                    rule_name = check_id.rsplit('.', 1)[-1]
+                else:
+                    rule_name = check_id
+                
+                # 根据规则名查询 OpengrepRule 表获取 confidence
+                rule_result = await db.execute(
+                    select(OpengrepRule).where(OpengrepRule.name == rule_name)
+                )
+                rule = rule_result.scalar_one_or_none()
+                if rule:
+                    finding_dict["confidence"] = rule.confidence
+        
+        response_findings.append(finding_dict)
+    
+    return response_findings
 
 
 @router.post("/findings/{finding_id}/status")
@@ -1870,12 +1918,19 @@ async def _execute_gitleaks_scan(
                 )
 
                 start_time = datetime.now()
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
+                
+                # 在线程池中执行阻塞操作
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=600,
+                    )
                 )
+                
                 end_time = datetime.now()
                 scan_duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
