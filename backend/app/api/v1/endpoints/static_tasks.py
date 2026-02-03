@@ -277,23 +277,109 @@ async def _execute_opengrep_scan(
                 logger.error(f"Target path {full_target_path} not found")
                 return
 
-            # 合并规则
+            # 合并规则并验证
+            def has_deprecated_features(rule):
+                """检查规则是否包含已弃用的特性"""
+                deprecated_keys = [
+                    "pattern-where-python",  # 已弃用的 Python 条件
+                    "pattern-not-regex",     # 部分版本已弃用
+                ]
+                
+                def check_dict(obj):
+                    if isinstance(obj, dict):
+                        for key, value in obj.items():
+                            if key in deprecated_keys:
+                                return True, key
+                            result, deprecated_key = check_dict(value)
+                            if result:
+                                return True, deprecated_key
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            result, deprecated_key = check_dict(item)
+                            if result:
+                                return True, deprecated_key
+                    return False, None
+                
+                return check_dict(rule)
+            
+            def is_valid_rule(rule):
+                """验证规则是否包含必需的模式属性"""
+                if not isinstance(rule, dict):
+                    return False, "not a dict"
+                
+                # 规则必须有 id
+                if "id" not in rule:
+                    return False, "missing id"
+                
+                # 检查是否包含已弃用特性
+                has_deprecated, deprecated_key = has_deprecated_features(rule)
+                if has_deprecated:
+                    return False, f"uses deprecated feature: {deprecated_key}"
+                
+                # 检查是否是污点分析规则
+                mode = rule.get("mode")
+                if mode == "taint":
+                    # 污点分析规则必须同时有 pattern-sources 和 pattern-sinks
+                    has_sources = "pattern-sources" in rule
+                    has_sinks = "pattern-sinks" in rule
+                    if not (has_sources and has_sinks):
+                        return False, f"taint mode missing sources({has_sources}) or sinks({has_sinks})"
+                else:
+                    # 非污点分析规则需要至少一个标准模式属性
+                    pattern_keys = [
+                        "pattern", "patterns", "pattern-either", "pattern-regex"
+                    ]
+                    has_pattern = any(key in rule for key in pattern_keys)
+                    if not has_pattern:
+                        return False, "missing standard pattern attributes"
+                
+                return True, "valid"
+            
+            # 过滤掉所有 null 值（Semgrep/Opengrep 不允许 null）
+            def remove_null_values(obj):
+                """递归移除字典/列表中的 null 值"""
+                if isinstance(obj, dict):
+                    return {k: remove_null_values(v) for k, v in obj.items() if v is not None}
+                elif isinstance(obj, list):
+                    return [remove_null_values(item) for item in obj if item is not None]
+                else:
+                    return obj
+
             combined_rules = []
+            invalid_rule_count = 0
+            
             for rule in rules:
-                rule_data = yaml.safe_load(rule.pattern_yaml)
-                if rule_data and "rules" in rule_data:
-                    combined_rules.extend(rule_data["rules"])
+                try:
+                    rule_data = yaml.safe_load(rule.pattern_yaml)
+                    if rule_data and "rules" in rule_data:
+                        for r in rule_data["rules"]:
+                            # 先清理 null 值
+                            cleaned_rule = remove_null_values(r)
+                            # 再验证规则
+                            is_valid, reason = is_valid_rule(cleaned_rule)
+                            if is_valid:
+                                combined_rules.append(cleaned_rule)
+                            else:
+                                invalid_rule_count += 1
+                                rule_id = cleaned_rule.get("id", "unknown")
+                                logger.warning(f"Skipping invalid rule {rule_id}: {reason}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse rule {rule.name}: {e}")
+                    invalid_rule_count += 1
+
+            if invalid_rule_count > 0:
+                logger.warning(f"Skipped {invalid_rule_count} invalid rules for task {task_id}")
 
             if not combined_rules:
                 task.status = "failed"
                 task.error_count = 1
                 await db.commit()
-                logger.error(f"No rules to apply for task {task_id}")
+                logger.error(f"No valid rules to apply for task {task_id}")
                 return
 
             # 创建临时规则文件
             with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as tf:
-                yaml.dump({"rules": combined_rules}, tf, sort_keys=False)
+                yaml.dump({"rules": combined_rules}, tf, sort_keys=False, default_flow_style=False)
                 rule_file = tf.name
 
             try:
@@ -359,13 +445,17 @@ async def _execute_opengrep_scan(
                 if scan_errors:
                     warning_errors = [err for err in scan_errors if err.get("level") != "error"]
                     if warning_errors:
-                        logger.warning(
-                            f"Scan task {task_id} has {len(warning_errors)} warnings (e.g., PartialParsing)"
+                        # PartialParsing 等警告是正常的，不影响扫描结果
+                        logger.info(
+                            f"Scan task {task_id} has {len(warning_errors)} parsing warnings "
+                            f"(normal for complex C/C++ code, not affecting results)"
                         )
 
                 if non_fatal_scan_errors:
-                    logger.warning(
-                        f"Scan task {task_id} has non-fatal scan errors: {non_fatal_scan_errors[:3]}"
+                    # 非致命错误（如部分文件解析失败）记录为 INFO，不影响整体扫描
+                    logger.info(
+                        f"Scan task {task_id} has {len(non_fatal_scan_errors)} non-fatal parsing issues "
+                        f"(normal, scan continues with other files)"
                     )
 
                 # 无扫描结果且进程异常退出，且无可忽略扫描错误时，按执行失败处理
