@@ -215,6 +215,19 @@ export interface OpengrepFinding {
     code_snippet?: string | null;
     severity: string;
     status: string;
+    confidence?: string | null;
+}
+
+export type ConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
+
+function normalizeConfidence(
+    confidence?: string | null,
+): ConfidenceLevel | null {
+    const normalized = String(confidence || "").trim().toUpperCase();
+    if (normalized === "HIGH") return "HIGH";
+    if (normalized === "LOW") return "LOW";
+    if (normalized === "MEDIUM") return "MEDIUM";
+    return null;
 }
 
 export async function createOpengrepScanTask(params: {
@@ -237,12 +250,14 @@ export async function getOpengrepScanTask(
 export async function getOpengrepScanFindings(params: {
     taskId: string;
     severity?: string;
+    confidence?: string;
     status?: string;
     skip?: number;
     limit?: number;
 }): Promise<OpengrepFinding[]> {
     const searchParams = new URLSearchParams();
     if (params.severity) searchParams.set("severity", params.severity);
+    if (params.confidence) searchParams.set("confidence", params.confidence);
     if (params.status) searchParams.set("status", params.status);
     if (params.skip !== undefined)
         searchParams.set("skip", String(params.skip));
@@ -252,7 +267,11 @@ export async function getOpengrepScanFindings(params: {
     const response = await apiClient.get(
         `/static-tasks/tasks/${params.taskId}/findings${query ? `?${query}` : ""}`,
     );
-    return response.data;
+    const findings = Array.isArray(response.data) ? response.data : [];
+    return findings.map((item) => ({
+        ...item,
+        confidence: normalizeConfidence(item?.confidence),
+    }));
 }
 
 export async function getOpengrepScanTasks(params?: {

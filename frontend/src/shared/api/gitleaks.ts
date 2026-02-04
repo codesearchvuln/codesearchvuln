@@ -54,6 +54,24 @@ export async function getGitleaksScanTask(
     return response.data;
 }
 
+export async function getGitleaksScanTasks(params?: {
+    projectId?: string;
+    skip?: number;
+    limit?: number;
+}): Promise<GitleaksScanTask[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.projectId) searchParams.set("project_id", params.projectId);
+    if (params?.skip !== undefined)
+        searchParams.set("skip", String(params.skip));
+    if (params?.limit !== undefined)
+        searchParams.set("limit", String(params.limit));
+    const query = searchParams.toString();
+    const response = await apiClient.get(
+        `/static-tasks/gitleaks/tasks${query ? `?${query}` : ""}`,
+    );
+    return response.data;
+}
+
 export async function getGitleaksFindings(params: {
     taskId: string;
     status?: string;

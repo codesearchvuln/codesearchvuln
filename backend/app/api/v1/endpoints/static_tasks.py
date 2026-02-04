@@ -748,6 +748,81 @@ async def _execute_opengrep_scan(
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+VALID_CONFIDENCE_LEVELS = {"HIGH", "MEDIUM", "LOW"}
+
+
+def _normalize_confidence(confidence: Any) -> Optional[str]:
+    """标准化置信度字段，内部统一为 HIGH/MEDIUM/LOW。"""
+    normalized = str(confidence or "").strip().upper()
+    if normalized == "HIGH":
+        return "HIGH"
+    if normalized == "MEDIUM":
+        return "MEDIUM"
+    if normalized == "LOW":
+        return "LOW"
+    return None
+
+
+def _format_confidence_for_response(confidence: Optional[str]) -> Optional[str]:
+    """接口返回统一为 HIGH/MEDIUM/LOW。"""
+    normalized = _normalize_confidence(confidence)
+    return normalized
+
+
+def _extract_rule_lookup_keys(check_id: Any) -> List[str]:
+    """
+    从 finding.rule.check_id 里提取可用于匹配 OpengrepRule.name 的候选键。
+
+    例如:
+    - "python.security.sql-injection" -> ["python.security.sql-injection", "sql-injection"]
+    """
+    raw_check_id = str(check_id or "").strip()
+    if not raw_check_id:
+        return []
+
+    keys = [raw_check_id]
+    if "." in raw_check_id:
+        suffix = raw_check_id.rsplit(".", 1)[-1].strip()
+        if suffix and suffix not in keys:
+            keys.append(suffix)
+    return keys
+
+
+def _extract_finding_payload_confidence(rule_data: Any) -> Optional[str]:
+    """
+    从 finding.rule 结构中提取置信度。
+
+    支持以下常见位置：
+    - finding.rule.confidence
+    - finding.rule.extra.confidence
+    - finding.rule.metadata.confidence
+    - finding.rule.extra.metadata.confidence
+    """
+    if not isinstance(rule_data, dict):
+        return None
+
+    direct_confidence = _normalize_confidence(rule_data.get("confidence"))
+    if direct_confidence:
+        return direct_confidence
+
+    extra = rule_data.get("extra")
+    if isinstance(extra, dict):
+        extra_confidence = _normalize_confidence(extra.get("confidence"))
+        if extra_confidence:
+            return extra_confidence
+
+    metadata = rule_data.get("metadata")
+    if isinstance(metadata, dict):
+        metadata_confidence = _normalize_confidence(metadata.get("confidence"))
+        if metadata_confidence:
+            return metadata_confidence
+
+    if isinstance(extra, dict):
+        extra_metadata = extra.get("metadata")
+        if isinstance(extra_metadata, dict):
+            return _normalize_confidence(extra_metadata.get("confidence"))
+
+    return None
 
 
 @router.get("/tasks", response_model=List[OpengrepScanTaskResponse])
@@ -871,6 +946,7 @@ async def get_static_task(
 async def get_static_task_findings(
     task_id: str,
     severity: Optional[str] = Query(None, description="按严重程度过滤: ERROR, WARNING, INFO"),
+    confidence: Optional[str] = Query(None, description="按置信度过滤: HIGH, MEDIUM, LOW"),
     status: Optional[str] = Query(None, description="按状态过滤: open, verified, false_positive"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -883,6 +959,10 @@ async def get_static_task_findings(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="任务不存在")
 
+    confidence_filter = _normalize_confidence(confidence)
+    if confidence is not None and confidence_filter is None:
+        raise HTTPException(status_code=400, detail="置信度必须为 HIGH/MEDIUM/LOW")
+
     # 构建查询
     query = select(OpengrepFinding).where(OpengrepFinding.scan_task_id == task_id)
 
@@ -891,14 +971,45 @@ async def get_static_task_findings(
     if status:
         query = query.where(OpengrepFinding.status == status)
 
-    query = query.offset(skip).limit(limit)
+    # 无 confidence 过滤时直接走数据库分页；有 confidence 过滤时需要先解析映射后再分页
+    if confidence_filter is None:
+        query = query.offset(skip).limit(limit)
 
     result = await db.execute(query)
     findings = result.scalars().all()
-    
-    # 为每个 finding 添加 confidence 信息（通过 rule id 查询）
+
+    # 批量构建规则名候选，避免 N+1 查询
+    rule_name_candidates: set[str] = set()
+    for finding in findings:
+        if isinstance(finding.rule, dict):
+            check_id = finding.rule.get("check_id")
+            for key in _extract_rule_lookup_keys(check_id):
+                rule_name_candidates.add(key)
+
+    rule_confidence_map: Dict[str, Optional[str]] = {}
+    if rule_name_candidates:
+        rule_result = await db.execute(
+            select(OpengrepRule.name, OpengrepRule.confidence).where(
+                OpengrepRule.name.in_(rule_name_candidates)
+            )
+        )
+        for rule_name, rule_confidence in rule_result.all():
+            rule_confidence_map[str(rule_name)] = _normalize_confidence(rule_confidence)
+
     response_findings = []
     for finding in findings:
+        resolved_confidence = _extract_finding_payload_confidence(finding.rule)
+
+        if not resolved_confidence:
+            if isinstance(finding.rule, dict):
+                for key in _extract_rule_lookup_keys(finding.rule.get("check_id")):
+                    if rule_confidence_map.get(key):
+                        resolved_confidence = rule_confidence_map[key]
+                        break
+
+        if confidence_filter and resolved_confidence != confidence_filter:
+            continue
+
         finding_dict = {
             "id": finding.id,
             "scan_task_id": finding.scan_task_id,
@@ -909,30 +1020,13 @@ async def get_static_task_findings(
             "code_snippet": finding.code_snippet,
             "severity": finding.severity,
             "status": finding.status,
-            "confidence": None,
+            "confidence": _format_confidence_for_response(resolved_confidence),
         }
-        
-        # 从 rule JSON 中提取 rule id，然后查询 OpengrepRule 表获取 confidence
-        if finding.rule and isinstance(finding.rule, dict):
-            # 获取 check_id 字段
-            check_id = finding.rule.get("check_id")
-            if check_id:
-                # 从右往左第一个 '.' 往后的字符串是规则名
-                if '.' in check_id:
-                    rule_name = check_id.rsplit('.', 1)[-1]
-                else:
-                    rule_name = check_id
-                
-                # 根据规则名查询 OpengrepRule 表获取 confidence
-                rule_result = await db.execute(
-                    select(OpengrepRule).where(OpengrepRule.name == rule_name)
-                )
-                rule = rule_result.scalar_one_or_none()
-                if rule:
-                    finding_dict["confidence"] = rule.confidence
-        
         response_findings.append(finding_dict)
-    
+
+    if confidence_filter is not None:
+        response_findings = response_findings[skip : skip + limit]
+
     return response_findings
 
 

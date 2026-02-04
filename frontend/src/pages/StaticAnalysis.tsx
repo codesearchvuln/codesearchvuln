@@ -45,6 +45,7 @@ import {
     Shield,
     Loader2,
 } from "lucide-react";
+import { useI18n } from "@/shared/i18n";
 
 const STATUS_LABELS: Record<string, string> = {
     pending: "等待中",
@@ -109,6 +110,16 @@ const getCheckIdSuffix = (checkId?: string | null) => {
     return parts[parts.length - 1] || value;
 };
 
+const parseConfidenceLevel = (
+    confidence?: string | null,
+): "HIGH" | "MEDIUM" | "LOW" | null => {
+    const normalized = String(confidence || "").trim().toUpperCase();
+    if (normalized === "HIGH") return "HIGH";
+    if (normalized === "MEDIUM") return "MEDIUM";
+    if (normalized === "LOW") return "LOW";
+    return null;
+};
+
 const getRuleMeta = (finding: OpengrepFinding) => {
     const rule = (finding.rule || {}) as Record<string, any>;
     const extra = (rule.extra || {}) as Record<string, any>;
@@ -116,7 +127,6 @@ const getRuleMeta = (finding: OpengrepFinding) => {
     return {
         checkId: rule.check_id || rule.id || "unknown-rule",
         message: extra.message || finding.description || "",
-        confidence: metadata.confidence,
         references: Array.isArray(metadata.references)
             ? metadata.references
             : [],
@@ -144,6 +154,7 @@ const formatJson = (value: unknown) => {
 };
 
 export default function StaticAnalysis() {
+    const { isEnglish } = useI18n();
     const { taskId } = useParams<{ taskId: string }>();
     const location = useLocation();
     const navigate = useNavigate();
@@ -171,6 +182,7 @@ export default function StaticAnalysis() {
         useState(false);
 
     const [severityFilter, setSeverityFilter] = useState<string>("");
+    const [confidenceFilter, setConfidenceFilter] = useState<string>("");
     const [statusFilter, setStatusFilter] = useState<string>("open");
     const [gitleaksStatusFilter, setGitleaksStatusFilter] =
         useState<string>("open");
@@ -191,6 +203,7 @@ export default function StaticAnalysis() {
     );
 
     const toolParam = searchParams.get("tool");
+    const muteToast = searchParams.get("muteToast") === "1";
     const opengrepTaskId =
         searchParams.get("opengrepTaskId") ||
         (toolParam === "gitleaks" ? null : taskId || null);
@@ -214,6 +227,39 @@ export default function StaticAnalysis() {
         [gitleaksTask?.status],
     );
 
+    const getSeverityLabel = (severity: string) => {
+        const normalized = String(severity || "").toUpperCase();
+        if (isEnglish) return normalized;
+        if (normalized === "ERROR") return "严重";
+        if (normalized === "WARNING") return "警告";
+        if (normalized === "INFO") return "提示";
+        return severity;
+    };
+
+    const getStatusLabel = (status: string) => {
+        const normalized = String(status || "").toLowerCase();
+        if (isEnglish) return normalized;
+        if (normalized === "open") return "未处理";
+        if (normalized === "verified") return "已验证";
+        if (normalized === "false_positive") return "误报";
+        if (normalized === "fixed") return "已修复";
+        return status;
+    };
+
+    const getConfidenceLabel = (confidence: string) => {
+        const normalized = parseConfidenceLevel(confidence);
+        if (isEnglish) {
+            if (normalized === "HIGH") return "High";
+            if (normalized === "MEDIUM") return "Medium";
+            if (normalized === "LOW") return "Low";
+            return String(confidence || "");
+        }
+        if (normalized === "HIGH") return "高";
+        if (normalized === "MEDIUM") return "中";
+        if (normalized === "LOW") return "低";
+        return String(confidence || "");
+    };
+
     const loadOpengrepTask = async () => {
         if (!opengrepTaskId) return;
         setLoadingOpengrepTask(true);
@@ -234,6 +280,7 @@ export default function StaticAnalysis() {
             const data = await getOpengrepScanFindings({
                 taskId: opengrepTaskId,
                 severity: severityFilter || undefined,
+                confidence: confidenceFilter || undefined,
                 status: statusFilter || undefined,
                 limit: 200,
             });
@@ -295,7 +342,7 @@ export default function StaticAnalysis() {
 
     useEffect(() => {
         loadOpengrepFindings();
-    }, [opengrepTaskId, severityFilter, statusFilter]);
+    }, [opengrepTaskId, severityFilter, confidenceFilter, statusFilter]);
 
     useEffect(() => {
         loadGitleaksTask();
@@ -330,7 +377,12 @@ export default function StaticAnalysis() {
     }, [gitleaksTaskId, gitleaksTask?.status]);
 
     useEffect(() => {
+        if (muteToast) return;
         if (!opengrepTask?.status) return;
+        if (lastOpengrepNotifiedStatusRef.current === null) {
+            lastOpengrepNotifiedStatusRef.current = opengrepTask.status;
+            return;
+        }
         if (lastOpengrepNotifiedStatusRef.current === opengrepTask.status) return;
         lastOpengrepNotifiedStatusRef.current = opengrepTask.status;
 
@@ -383,10 +435,15 @@ export default function StaticAnalysis() {
                 { durationMs: 2600 },
             );
         }
-    }, [opengrepTask?.status, opengrepTask?.total_findings]);
+    }, [muteToast, opengrepTask?.status, opengrepTask?.total_findings]);
 
     useEffect(() => {
+        if (muteToast) return;
         if (!gitleaksTask?.status) return;
+        if (lastGitleaksNotifiedStatusRef.current === null) {
+            lastGitleaksNotifiedStatusRef.current = gitleaksTask.status;
+            return;
+        }
         if (lastGitleaksNotifiedStatusRef.current === gitleaksTask.status) return;
         lastGitleaksNotifiedStatusRef.current = gitleaksTask.status;
 
@@ -439,7 +496,7 @@ export default function StaticAnalysis() {
                 { durationMs: 2600 },
             );
         }
-    }, [gitleaksTask?.status, gitleaksTask?.total_findings]);
+    }, [muteToast, gitleaksTask?.status, gitleaksTask?.total_findings]);
 
     const handleUpdateStatus = async (
         findingId: string,
@@ -591,7 +648,7 @@ export default function StaticAnalysis() {
 
                 <TabsContent value="opengrep">
                     <div className="cyber-card p-4 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div>
                                 <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
                                     严重程度
@@ -610,11 +667,45 @@ export default function StaticAnalysis() {
                                     </SelectTrigger>
                                     <SelectContent className="cyber-dialog border-border">
                                         <SelectItem value="all">全部</SelectItem>
-                                        <SelectItem value="ERROR">ERROR</SelectItem>
-                                        <SelectItem value="WARNING">
-                                            WARNING
+                                        <SelectItem value="ERROR">
+                                            {getSeverityLabel("ERROR")}
                                         </SelectItem>
-                                        <SelectItem value="INFO">INFO</SelectItem>
+                                        <SelectItem value="WARNING">
+                                            {getSeverityLabel("WARNING")}
+                                        </SelectItem>
+                                        <SelectItem value="INFO">
+                                            {getSeverityLabel("INFO")}
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
+                                    置信度
+                                </label>
+                                <Select
+                                    value={confidenceFilter || "all"}
+                                    onValueChange={(val) =>
+                                        setConfidenceFilter(
+                                            val === "all" ? "" : val,
+                                        )
+                                    }
+                                    disabled={!opengrepTaskId}
+                                >
+                                    <SelectTrigger className="cyber-input">
+                                        <SelectValue placeholder="全部" />
+                                    </SelectTrigger>
+                                    <SelectContent className="cyber-dialog border-border">
+                                        <SelectItem value="all">全部</SelectItem>
+                                        <SelectItem value="HIGH">
+                                            {getConfidenceLabel("HIGH")}
+                                        </SelectItem>
+                                        <SelectItem value="MEDIUM">
+                                            {getConfidenceLabel("MEDIUM")}
+                                        </SelectItem>
+                                        <SelectItem value="LOW">
+                                            {getConfidenceLabel("LOW")}
+                                        </SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -636,12 +727,14 @@ export default function StaticAnalysis() {
                                     </SelectTrigger>
                                     <SelectContent className="cyber-dialog border-border">
                                         <SelectItem value="all">全部</SelectItem>
-                                        <SelectItem value="open">open</SelectItem>
+                                        <SelectItem value="open">
+                                            {getStatusLabel("open")}
+                                        </SelectItem>
                                         <SelectItem value="verified">
-                                            verified
+                                            {getStatusLabel("verified")}
                                         </SelectItem>
                                         <SelectItem value="false_positive">
-                                            false_positive
+                                            {getStatusLabel("false_positive")}
                                         </SelectItem>
                                     </SelectContent>
                                 </Select>
@@ -695,12 +788,12 @@ export default function StaticAnalysis() {
                                                         <Badge
                                                             className={`cyber-badge ${SEVERITY_CLASSES[finding.severity] || "bg-muted"}`}
                                                         >
-                                                            {finding.severity}
+                                                            {getSeverityLabel(finding.severity)}
                                                         </Badge>
                                                         <Badge
                                                             className={`cyber-badge ${FINDING_STATUS_CLASSES[finding.status] || "bg-muted"}`}
                                                         >
-                                                            {finding.status}
+                                                            {getStatusLabel(finding.status)}
                                                         </Badge>
                                                         <Badge
                                                             className={`cyber-badge ${isVerified ? VERIFICATION_BADGE_CLASSES.active : VERIFICATION_BADGE_CLASSES.inactive}`}
@@ -716,9 +809,13 @@ export default function StaticAnalysis() {
                                                                 ? "误报"
                                                                 : "非误报"}
                                                         </Badge>
-                                                        {meta.confidence && (
+                                                        {parseConfidenceLevel(
+                                                            finding.confidence,
+                                                        ) && (
                                                             <Badge className="cyber-badge-muted">
-                                                                CONF: {meta.confidence}
+                                                                {isEnglish
+                                                                    ? `CONF: ${getConfidenceLabel(finding.confidence || "")}`
+                                                                    : `置信度: ${getConfidenceLabel(finding.confidence || "")}`}
                                                             </Badge>
                                                         )}
                                                         <span className="text-sm text-foreground font-bold">
@@ -841,14 +938,18 @@ export default function StaticAnalysis() {
                                     </SelectTrigger>
                                     <SelectContent className="cyber-dialog border-border">
                                         <SelectItem value="all">全部</SelectItem>
-                                        <SelectItem value="open">open</SelectItem>
+                                        <SelectItem value="open">
+                                            {getStatusLabel("open")}
+                                        </SelectItem>
                                         <SelectItem value="verified">
-                                            verified
+                                            {getStatusLabel("verified")}
                                         </SelectItem>
                                         <SelectItem value="false_positive">
-                                            false_positive
+                                            {getStatusLabel("false_positive")}
                                         </SelectItem>
-                                        <SelectItem value="fixed">fixed</SelectItem>
+                                        <SelectItem value="fixed">
+                                            {getStatusLabel("fixed")}
+                                        </SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -905,7 +1006,7 @@ export default function StaticAnalysis() {
                                                         <Badge
                                                             className={`cyber-badge ${GITLEAKS_STATUS_CLASSES[finding.status] || "bg-muted"}`}
                                                         >
-                                                            {finding.status}
+                                                            {getStatusLabel(finding.status)}
                                                         </Badge>
                                                         <Badge
                                                             className={`cyber-badge ${isVerified ? VERIFICATION_BADGE_CLASSES.active : VERIFICATION_BADGE_CLASSES.inactive}`}
@@ -1071,12 +1172,12 @@ export default function StaticAnalysis() {
                                             <Badge
                                                 className={`cyber-badge ${SEVERITY_CLASSES[selectedFinding.severity] || "bg-muted"}`}
                                             >
-                                                {selectedFinding.severity}
+                                                {getSeverityLabel(selectedFinding.severity)}
                                             </Badge>
                                             <Badge
                                                 className={`cyber-badge ${FINDING_STATUS_CLASSES[selectedFinding.status] || "bg-muted"}`}
                                             >
-                                                {selectedFinding.status}
+                                                {getStatusLabel(selectedFinding.status)}
                                             </Badge>
                                             <Badge
                                                 className={`cyber-badge ${isVerified ? VERIFICATION_BADGE_CLASSES.active : VERIFICATION_BADGE_CLASSES.inactive}`}
@@ -1092,9 +1193,13 @@ export default function StaticAnalysis() {
                                                     ? "误报"
                                                     : "非误报"}
                                             </Badge>
-                                            {meta.confidence && (
+                                            {parseConfidenceLevel(
+                                                selectedFinding.confidence,
+                                            ) && (
                                                 <Badge className="cyber-badge-muted">
-                                                    CONF: {meta.confidence}
+                                                    {isEnglish
+                                                        ? `CONF: ${getConfidenceLabel(selectedFinding.confidence || "")}`
+                                                        : `置信度: ${getConfidenceLabel(selectedFinding.confidence || "")}`}
                                                 </Badge>
                                             )}
                                             <span className="text-sm text-foreground font-bold">

@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import {
   Activity, AlertTriangle, Clock, Code,
-  FileText, GitBranch, Shield, Zap,
+  FileText, Shield, Zap,
   BarChart3, Calendar,
   MessageSquare, Bot, Cpu, Terminal
 } from "lucide-react";
@@ -21,11 +21,25 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { getRuleSets } from "@/shared/api/rules";
 import { getPromptTemplates } from "@/shared/api/prompts";
+import { getAgentTasks, type AgentTask } from "@/shared/api/agentTasks";
+import { getOpengrepScanTasks, type OpengrepScanTask } from "@/shared/api/opengrep";
+import { getGitleaksScanTasks, type GitleaksScanTask } from "@/shared/api/gitleaks";
+
+type RecentActivityItem = {
+  id: string;
+  projectName: string;
+  kind: "rule_scan" | "intelligent_audit";
+  status: string;
+  gitleaksEnabled?: boolean;
+  createdAt: string;
+  route: string;
+};
 
 export default function Dashboard() {
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
-  const [recentTasks, setRecentTasks] = useState<AuditTask[]>([]);
+  const [recentActivities, setRecentActivities] = useState<RecentActivityItem[]>([]);
+  const [runningTasksCount, setRunningTasksCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [issueTypeData, setIssueTypeData] = useState<Array<{ name: string; value: number; color: string }>>([]);
   const [ruleStats, setRuleStats] = useState({ total: 0, enabled: 0 });
@@ -43,12 +57,60 @@ export default function Dashboard() {
     };
   }, []);
 
-  const sortTasksByRecent = (tasks: AuditTask[]): AuditTask[] => {
-    return [...tasks].sort((a, b) => {
-      const aTime = new Date(a.completed_at || a.started_at || a.created_at || 0).getTime();
-      const bTime = new Date(b.completed_at || b.started_at || b.created_at || 0).getTime();
-      return bTime - aTime;
-    });
+  const getRelativeTime = (time: string) => {
+    const now = new Date();
+    const taskDate = new Date(time);
+    const diffMs = now.getTime() - taskDate.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) return `${Math.max(diffMins, 1)}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+    return `${diffDays}天前`;
+  };
+
+  const getTaskStatusText = (status: string) => {
+    switch (status) {
+      case "completed":
+        return "任务完成";
+      case "running":
+        return "任务运行中";
+      case "failed":
+        return "任务失败";
+      case "pending":
+        return "任务待处理";
+      case "cancelled":
+        return "任务已取消";
+      default:
+        return status || "未知状态";
+    }
+  };
+
+  const getTaskStatusClassName = (status: string) => {
+    if (status === "completed") {
+      return "bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40";
+    }
+    if (status === "running") {
+      return "bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40";
+    }
+    if (status === "failed") {
+      return "bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40";
+    }
+    return "bg-muted/30 border-border hover:border-border";
+  };
+
+  const getTaskStatusBadgeClassName = (status: string) => {
+    if (status === "completed") {
+      return "cyber-badge-success";
+    }
+    if (status === "running") {
+      return "cyber-badge-info";
+    }
+    if (status === "failed") {
+      return "cyber-badge-danger";
+    }
+    return "cyber-badge-muted";
   };
 
   const loadDashboardData = async (options?: { silent?: boolean }) => {
@@ -84,13 +146,20 @@ export default function Dashboard() {
         setRecentProjects([]);
       }
 
+      const allProjects: Project[] =
+        results[1].status === "fulfilled" && Array.isArray(results[1].value)
+          ? results[1].value
+          : [];
+      const projectNameMap = new Map(
+        allProjects.map((project) => [project.id, project.name]),
+      );
+
       let tasks: AuditTask[] = [];
       if (results[2].status === 'fulfilled') {
-        tasks = sortTasksByRecent(Array.isArray(results[2].value) ? results[2].value : []);
-        setRecentTasks(tasks.slice(0, 10));
-      } else {
-        setRecentTasks([]);
+        tasks = Array.isArray(results[2].value) ? results[2].value : [];
       }
+      const baseRunningCount = tasks.filter((task) => task.status === "running").length;
+      setRunningTasksCount(baseRunningCount);
 
       try {
         const allIssues = await Promise.all(
@@ -127,6 +196,100 @@ export default function Dashboard() {
       }
 
       try {
+        const [agentTasks, opengrepTasks, gitleaksTasks] = await Promise.all([
+          getAgentTasks({ limit: 100 }),
+          getOpengrepScanTasks({ limit: 100 }),
+          getGitleaksScanTasks({ limit: 100 }),
+        ]);
+
+        const resolveProjectName = (projectId: string) =>
+          projectNameMap.get(projectId) || "未知项目";
+
+        const gitleaksByProject = new Map<string, GitleaksScanTask[]>();
+        for (const task of gitleaksTasks) {
+          const list = gitleaksByProject.get(task.project_id) || [];
+          list.push(task);
+          gitleaksByProject.set(task.project_id, list);
+        }
+        for (const [projectId, list] of gitleaksByProject.entries()) {
+          list.sort(
+            (a, b) =>
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+          );
+          gitleaksByProject.set(projectId, list);
+        }
+        const usedGitleaksTaskIds = new Set<string>();
+        const pairingWindowMs = 5 * 60 * 1000;
+
+        const pickPairedGitleaksTask = (opengrepTask: OpengrepScanTask) => {
+          const candidates = gitleaksByProject.get(opengrepTask.project_id) || [];
+          if (candidates.length === 0) return null;
+          const opengrepTime = new Date(opengrepTask.created_at).getTime();
+          let bestTask: GitleaksScanTask | null = null;
+          let bestDiff = Number.POSITIVE_INFINITY;
+          for (const candidate of candidates) {
+            if (usedGitleaksTaskIds.has(candidate.id)) continue;
+            const diff = Math.abs(
+              new Date(candidate.created_at).getTime() - opengrepTime,
+            );
+            if (diff <= pairingWindowMs && diff < bestDiff) {
+              bestTask = candidate;
+              bestDiff = diff;
+            }
+          }
+          if (bestTask) {
+            usedGitleaksTaskIds.add(bestTask.id);
+          }
+          return bestTask;
+        };
+
+        const ruleScanActivities: RecentActivityItem[] = opengrepTasks.map((task) => {
+          const pairedGitleaksTask = pickPairedGitleaksTask(task);
+          const params = new URLSearchParams();
+          params.set("opengrepTaskId", task.id);
+          params.set("muteToast", "1");
+          if (pairedGitleaksTask) {
+            params.set("gitleaksTaskId", pairedGitleaksTask.id);
+          }
+          return {
+            id: `opengrep-${task.id}`,
+            projectName: resolveProjectName(task.project_id),
+            kind: "rule_scan" as const,
+            status: task.status,
+            gitleaksEnabled: Boolean(pairedGitleaksTask),
+            createdAt: task.created_at,
+            route: `/static-analysis/${task.id}?${params.toString()}`,
+          };
+        });
+
+        const activityItems: RecentActivityItem[] = [
+          ...ruleScanActivities,
+          ...agentTasks.map((task: AgentTask) => ({
+            id: `agent-${task.id}`,
+            projectName: resolveProjectName(task.project_id),
+            kind: "intelligent_audit" as const,
+            status: task.status,
+            createdAt: task.created_at,
+            route: `/agent-audit/${task.id}?muteToast=1`,
+          })),
+        ].sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+
+        setRecentActivities(activityItems.slice(0, 8));
+        setRunningTasksCount(
+          baseRunningCount +
+            agentTasks.filter((task) => task.status === "running").length +
+            opengrepTasks.filter((task) => task.status === "running").length +
+            gitleaksTasks.filter((task) => task.status === "running").length,
+        );
+      } catch (error) {
+        console.error("获取最近活动失败:", error);
+        setRecentActivities([]);
+      }
+
+      try {
         const [rulesRes, promptsRes] = await Promise.all([
           getRuleSets(),
           getPromptTemplates(),
@@ -148,19 +311,6 @@ export default function Dashboard() {
       if (!silent) {
         setLoading(false);
       }
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return <Badge className="cyber-badge-success">完成</Badge>;
-      case 'running':
-        return <Badge className="cyber-badge-info">运行中</Badge>;
-      case 'failed':
-        return <Badge className="cyber-badge-danger">失败</Badge>;
-      default:
-        return <Badge className="cyber-badge-muted">待处理</Badge>;
     }
   };
 
@@ -354,57 +504,53 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Recent Tasks */}
+          {/* Recent Activity */}
           <div className="cyber-card p-4">
             <div className="section-header">
-              <Clock className="w-5 h-5 text-emerald-400" />
-              <h3 className="section-title">最近任务</h3>
-              
+              <Terminal className="w-5 h-5 text-amber-400" />
+              <h3 className="section-title">最新活动</h3>
             </div>
             <div className="space-y-2">
-              {recentTasks.length > 0 ? (
-                recentTasks.slice(0, 6).map((task) => (
-                  <Link
-                    key={task.id}
-                    to={`/tasks/${task.id}`}
-                    className="flex items-center justify-between p-3 rounded-lg transition-all group"
-                    style={{
-                      background: 'var(--cyber-bg-elevated)',
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.background = 'var(--cyber-hover-bg)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.background = 'var(--cyber-bg-elevated)';
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        task.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
-                        task.status === 'running' ? 'bg-sky-500/20 text-sky-400' :
-                        'bg-rose-500/20 text-rose-400'
-                      }`}>
-                        {task.status === 'completed' ? <Activity className="w-4 h-4" /> :
-                         task.status === 'running' ? <Clock className="w-4 h-4" /> :
-                         <AlertTriangle className="w-4 h-4" />}
-                      </div>
-                      <div>
-                        <p className="text-base font-medium text-foreground group-hover:text-primary transition-colors">
-                          {task.project?.name || '未知项目'}
+              {recentActivities.length > 0 ? (
+                recentActivities.map((activity) => {
+                  const activityName =
+                    activity.kind === "rule_scan"
+                      ? `${activity.projectName}-规则扫描`
+                      : `${activity.projectName}-智能审计`;
+                  return (
+                    <Link
+                      key={activity.id}
+                      to={activity.route}
+                      className={`block p-3 rounded-lg border transition-all ${getTaskStatusClassName(activity.status)}`}
+                    >
+                      <p className="text-base font-medium text-foreground">
+                        {activityName}
+                      </p>
+                      {activity.kind === "rule_scan" && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Gitleaks扫描：{activity.gitleaksEnabled ? "已启用" : "未启用"}
                         </p>
+                      )}
+                      <div className="mt-1">
+                        <Badge className={getTaskStatusBadgeClassName(activity.status)}>
+                          漏洞扫描状态：{getTaskStatusText(activity.status)}
+                        </Badge>
                       </div>
-                    </div>
-                    {getStatusBadge(task.status)}
-                  </Link>
-                ))
+                      <p className="text-sm text-muted-foreground/70 mt-2">
+                        {getRelativeTime(activity.createdAt)}
+                      </p>
+                    </Link>
+                  );
+                })
               ) : (
-                <div className="empty-state">
-                  <Activity className="empty-state-icon" />
-                  <p className="empty-state-title">暂无任务</p>
+                <div className="empty-state py-6">
+                  <Clock className="w-10 h-10 text-muted-foreground mb-2" />
+                  <p className="text-base text-muted-foreground">暂无活动记录</p>
                 </div>
               )}
             </div>
           </div>
+
         </div>
 
         {/* Right Sidebar */}
@@ -450,7 +596,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <span className="text-base text-muted-foreground">运行中任务</span>
                 <span className="text-base font-bold text-sky-400">
-                  {recentTasks.filter(t => t.status === 'running').length}
+                  {runningTasksCount}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -480,63 +626,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Recent Activity */}
-          <div className="cyber-card p-4">
-            <div className="section-header">
-              <Terminal className="w-5 h-5 text-amber-400" />
-              <h3 className="section-title">最新活动</h3>
-            </div>
-            <div className="space-y-2">
-              {recentTasks.length > 0 ? (
-                recentTasks.slice(0, 3).map((task) => {
-                  const timeAgo = (() => {
-                    const now = new Date();
-                    const taskDate = new Date(task.created_at);
-                    const diffMs = now.getTime() - taskDate.getTime();
-                    const diffMins = Math.floor(diffMs / 60000);
-                    const diffHours = Math.floor(diffMs / 3600000);
-                    const diffDays = Math.floor(diffMs / 86400000);
-
-                    if (diffMins < 60) return `${diffMins}分钟前`;
-                    if (diffHours < 24) return `${diffHours}小时前`;
-                    return `${diffDays}天前`;
-                  })();
-
-                  const statusText =
-                    task.status === 'completed' ? '任务完成' :
-                    task.status === 'running' ? '任务运行中' :
-                    task.status === 'failed' ? '任务失败' : '任务待处理';
-
-                  return (
-                    <Link
-                      key={task.id}
-                      to={`/tasks/${task.id}`}
-                      className={`block p-3 rounded-lg border transition-all ${
-                        task.status === 'completed' ? 'bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40' :
-                        task.status === 'running' ? 'bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40' :
-                        task.status === 'failed' ? 'bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40' :
-                        'bg-muted/30 border-border hover:border-border'
-                      }`}
-                    >
-                      <p className="text-base font-medium text-foreground">{statusText}</p>
-                      <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
-                        项目 "{task.project?.name || '未知项目'}"
-                        {task.status === 'completed' && task.issues_count > 0 &&
-                          ` - 发现 ${task.issues_count} 个问题`
-                        }
-                      </p>
-                      <p className="text-sm text-muted-foreground/70 mt-1">{timeAgo}</p>
-                    </Link>
-                  );
-                })
-              ) : (
-                <div className="empty-state py-6">
-                  <Clock className="w-10 h-10 text-muted-foreground mb-2" />
-                  <p className="text-base text-muted-foreground">暂无活动记录</p>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
     </div>
