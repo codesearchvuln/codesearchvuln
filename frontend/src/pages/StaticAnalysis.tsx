@@ -61,6 +61,7 @@ const STATUS_LABELS: Record<string, string> = {
     running: "运行中",
     completed: "已完成",
     failed: "失败",
+    interrupted: "已中断",
 };
 
 const STATUS_CLASSES: Record<string, string> = {
@@ -68,6 +69,7 @@ const STATUS_CLASSES: Record<string, string> = {
     running: "bg-sky-500/20 text-sky-300 border-sky-500/30",
     completed: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
     failed: "bg-rose-500/20 text-rose-300 border-rose-500/30",
+    interrupted: "bg-orange-500/20 text-orange-300 border-orange-500/30",
 };
 
 const SEVERITY_CLASSES: Record<string, string> = {
@@ -617,6 +619,19 @@ export default function StaticAnalysis() {
                 ],
                 { durationMs: 2600 },
             );
+            return;
+        }
+
+        if (opengrepTask.status === "interrupted") {
+            void showToastQueue(
+                [
+                    {
+                        level: "warning",
+                        message: "Opengrep 扫描已中断：服务中止或沙箱停止",
+                    },
+                ],
+                { durationMs: 2600 },
+            );
         }
     }, [muteToast, opengrepTask?.status, opengrepTask?.total_findings]);
 
@@ -674,6 +689,19 @@ export default function StaticAnalysis() {
                     {
                         level: "error",
                         message: "Gitleaks 扫描失败：执行异常或配置错误",
+                    },
+                ],
+                { durationMs: 2600 },
+            );
+            return;
+        }
+
+        if (gitleaksTask.status === "interrupted") {
+            void showToastQueue(
+                [
+                    {
+                        level: "warning",
+                        message: "Gitleaks 扫描已中断：服务中止或沙箱停止",
                     },
                 ],
                 { durationMs: 2600 },
@@ -762,6 +790,7 @@ export default function StaticAnalysis() {
         }
         if (opengrepTask?.status === "completed") return 100;
         if (opengrepTask?.status === "failed") return 100;
+        if (opengrepTask?.status === "interrupted") return 100;
         if (opengrepTask?.status === "running") return 10;
         return 0;
     }, [opengrepProgress?.progress, opengrepTask?.status]);
@@ -1031,6 +1060,9 @@ export default function StaticAnalysis() {
                                         ? "扫描进行中，请稍后刷新"
                                         : opengrepTask?.status === "completed"
                                           ? "扫描完成，未扫描到缺陷"
+                                          : opengrepTask?.status ===
+                                              "interrupted"
+                                            ? "扫描已中断，请重新发起任务"
                                           : "暂无扫描结果"}
                                 </p>
                             </div>
@@ -1251,6 +1283,9 @@ export default function StaticAnalysis() {
                                         ? "扫描进行中，请稍后刷新"
                                         : gitleaksTask?.status === "completed"
                                           ? "扫描完成，未扫描到缺陷"
+                                          : gitleaksTask?.status ===
+                                              "interrupted"
+                                            ? "扫描已中断，请重新发起任务"
                                           : "暂无扫描结果"}
                                 </p>
                             </div>

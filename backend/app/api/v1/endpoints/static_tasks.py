@@ -824,6 +824,27 @@ async def _execute_opengrep_scan(
                 f"{skipped_rule_count} rules skipped"
             )
 
+        except asyncio.CancelledError:
+            logger.warning(f"Opengrep scan task {task_id} interrupted by service shutdown")
+            _record_scan_progress(
+                task_id,
+                status="interrupted",
+                progress=100,
+                stage="interrupted",
+                message="扫描任务已中断（服务关闭或沙箱停止）",
+                level="warning",
+            )
+            try:
+                result = await db.execute(
+                    select(OpengrepScanTask).where(OpengrepScanTask.id == task_id)
+                )
+                task = result.scalar_one_or_none()
+                if task:
+                    task.status = "interrupted"
+                    task.error_count = (task.error_count or 0) + 1
+                    await db.commit()
+            except Exception as commit_error:
+                logger.error(f"Failed to update interrupted task status: {commit_error}")
         except Exception as e:
             logger.error(f"Error executing opengrep scan for task {task_id}: {e}")
             _record_scan_progress(
@@ -1141,9 +1162,7 @@ async def get_static_task_progress(
         fallback_progress = 0.0
         if task.status == "running":
             fallback_progress = 10.0
-        elif task.status == "completed":
-            fallback_progress = 100.0
-        elif task.status == "failed":
+        elif task.status in {"completed", "failed", "interrupted"}:
             fallback_progress = 100.0
         state = {
             "task_id": task_id,
@@ -2773,6 +2792,22 @@ async def _execute_gitleaks_scan(
                 except Exception as e:
                     logger.warning(f"Failed to delete temporary report file: {e}")
 
+        except asyncio.CancelledError:
+            logger.warning(f"Gitleaks scan task {task_id} interrupted by service shutdown")
+            try:
+                result = await db.execute(
+                    select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
+                )
+                task = result.scalar_one_or_none()
+                if task:
+                    task.status = "interrupted"
+                    if not task.error_message:
+                        task.error_message = "扫描任务已中断（服务关闭或沙箱停止）"
+                    await db.commit()
+            except Exception as commit_error:
+                logger.error(
+                    f"Failed to update gitleaks interrupted task status: {commit_error}"
+                )
         except Exception as e:
             logger.error(f"Error executing gitleaks scan for task {task_id}: {e}")
             try:

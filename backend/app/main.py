@@ -8,6 +8,9 @@ from app.api.v1.api import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
 from app.db.session import AsyncSessionLocal
+from app.models.gitleaks import GitleaksScanTask
+from app.models.opengrep import OpengrepScanTask
+from sqlalchemy.future import select
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +56,42 @@ async def check_agent_services():
     return issues
 
 
+async def recover_interrupted_static_scan_tasks() -> None:
+    """
+    将上次异常退出时仍处于 running 状态的静态扫描任务标记为 interrupted。
+    """
+    async with AsyncSessionLocal() as db:
+        interrupted_opengrep = 0
+        interrupted_gitleaks = 0
+
+        opengrep_result = await db.execute(
+            select(OpengrepScanTask).where(OpengrepScanTask.status == "running")
+        )
+        for task in opengrep_result.scalars().all():
+            task.status = "interrupted"
+            task.error_count = (task.error_count or 0) + 1
+            interrupted_opengrep += 1
+
+        gitleaks_result = await db.execute(
+            select(GitleaksScanTask).where(GitleaksScanTask.status == "running")
+        )
+        for task in gitleaks_result.scalars().all():
+            task.status = "interrupted"
+            if not task.error_message:
+                task.error_message = "服务中断，任务被自动标记为中断"
+            interrupted_gitleaks += 1
+
+        if interrupted_opengrep or interrupted_gitleaks:
+            await db.commit()
+            logger.warning(
+                "检测到上次中断遗留任务，已自动标记 interrupted：opengrep=%s, gitleaks=%s",
+                interrupted_opengrep,
+                interrupted_gitleaks,
+            )
+        else:
+            await db.rollback()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -74,6 +113,11 @@ async def lifespan(app: FastAPI):
             logger.info("数据库表未创建，请先运行: alembic upgrade head")
         else:
             logger.warning(f"数据库初始化跳过: {e}")
+
+    try:
+        await recover_interrupted_static_scan_tasks()
+    except Exception as e:
+        logger.warning(f"恢复静态扫描中断任务失败: {e}")
 
     # 检查 Agent 服务
     logger.info("检查 Agent 核心服务...")

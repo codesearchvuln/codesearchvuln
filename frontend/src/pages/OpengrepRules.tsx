@@ -684,7 +684,8 @@ export default function OpengrepRules() {
         const matchSeverity =
             !selectedSeverity || rule.severity === selectedSeverity;
         const matchConfidence =
-            !selectedConfidence || rule.confidence === selectedConfidence;
+            !selectedConfidence ||
+            normalizeConfidence(rule.confidence) === selectedConfidence;
         const matchActiveStatus =
             !selectedActiveStatus ||
             (selectedActiveStatus === "true" && rule.is_active) ||
@@ -724,6 +725,68 @@ export default function OpengrepRules() {
         if (normalized === "WARNING") return "警告";
         if (normalized === "INFO") return "提示";
         return severity;
+    };
+
+    function normalizeConfidence(confidence?: string | null) {
+        const normalized = confidence?.trim().toUpperCase();
+        if (!normalized) return "";
+        if (normalized === "MIDIUM" || normalized === "MIDDLE") {
+            return "MEDIUM";
+        }
+        return normalized;
+    }
+
+    const getConfidenceLabel = (confidence?: string | null) => {
+        const normalized = normalizeConfidence(confidence);
+        if (!normalized) return "";
+        if (isEnglish) {
+            if (normalized === "HIGH") return "High";
+            if (normalized === "MEDIUM") return "Medium";
+            if (normalized === "LOW") return "Low";
+            return normalized;
+        }
+        if (normalized === "HIGH") return "高";
+        if (normalized === "MEDIUM") return "中";
+        if (normalized === "LOW") return "低";
+        return normalized;
+    };
+
+    const getConfidenceColor = (confidence?: string | null) => {
+        const normalized = normalizeConfidence(confidence);
+        if (normalized === "HIGH") {
+            return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+        }
+        if (normalized === "MEDIUM") {
+            return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+        }
+        return "bg-sky-500/20 text-sky-300 border-sky-500/30";
+    };
+
+    const normalizeCweCode = (cwe?: string) => {
+        const raw = cwe?.trim();
+        if (!raw) return "";
+        const upper = raw.toUpperCase().replace(/_/g, "-");
+        const digits = upper.match(/(\d+)/)?.[1];
+        if (digits) return `CWE-${digits}`;
+        if (upper.startsWith("CWE-")) return upper;
+        if (upper.startsWith("CWE")) {
+            return upper.replace(/^CWE[-:]?/, "CWE-");
+        }
+        return `CWE-${upper}`;
+    };
+
+    const getRuleCweTitle = (rule: OpengrepRule) => {
+        const normalizedCodes = (rule.cwe ?? [])
+            .map((item) => normalizeCweCode(item))
+            .filter(Boolean);
+
+        if (normalizedCodes.length === 0) {
+            return isEnglish ? "CWE-N/A" : "CWE-未设置";
+        }
+        if (normalizedCodes.length === 1) {
+            return normalizedCodes[0];
+        }
+        return `${normalizedCodes[0]} +${normalizedCodes.length - 1}`;
     };
 
     const getSourceBadge = (source: string) => {
@@ -881,13 +944,13 @@ export default function OpengrepRules() {
                                             所有等级
                                         </SelectItem>
                                         <SelectItem value="HIGH">
-                                            高 (HIGH)
+                                            {getConfidenceLabel("HIGH")}
                                         </SelectItem>
                                         <SelectItem value="MEDIUM">
-                                            中 (MEDIUM)
+                                            {getConfidenceLabel("MEDIUM")}
                                         </SelectItem>
                                         <SelectItem value="LOW">
-                                            低 (LOW)
+                                            {getConfidenceLabel("LOW")}
                                         </SelectItem>
                                     </SelectContent>
                                 </Select>
@@ -1126,9 +1189,9 @@ export default function OpengrepRules() {
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-2 mb-2">
                                                                     <h3 className="font-bold text-foreground truncate">
-                                                                        {
-                                                                            rule.name
-                                                                        }
+                                                                        {getRuleCweTitle(
+                                                                            rule,
+                                                                        )}
                                                                     </h3>
                                                                     <Badge
                                                                         className={`cyber-badge ${getSeverityColor(rule.severity)}`}
@@ -1149,15 +1212,11 @@ export default function OpengrepRules() {
                                                                     </Badge>
                                                                     {rule.confidence && (
                                                                         <Badge
-                                                                            className={`cyber-badge ${
-                                                                                rule.confidence === "HIGH"
-                                                                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
-                                                                                    : rule.confidence === "MEDIUM"
-                                                                                      ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
-                                                                                      : "bg-sky-500/20 text-sky-300 border-sky-500/30"
-                                                                            }`}
+                                                                            className={`cyber-badge ${getConfidenceColor(rule.confidence)}`}
                                                                         >
-                                                                            {rule.confidence}
+                                                                            {getConfidenceLabel(
+                                                                                rule.confidence,
+                                                                            )}
                                                                         </Badge>
                                                                     )}
                                                                     {rule.is_active ? (
@@ -1171,31 +1230,22 @@ export default function OpengrepRules() {
                                                                     )}
                                                                 </div>
 
-                                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-muted-foreground font-mono">
+                                                                <p className="text-foreground text-base font-bold truncate">
+                                                                    {rule.name}
+                                                                </p>
+
+                                                                <div className="mt-2 flex flex-wrap sm:flex-nowrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground font-mono">
                                                                     <div>
                                                                         <span className="text-muted-foreground">
-                                                                            ID:{" "}
+                                                                            语言:
                                                                         </span>
                                                                         <span className="text-foreground font-bold">
-                                                                            {rule.id.substring(
-                                                                                0,
-                                                                                8,
-                                                                            )}
+                                                                            {rule.language}
                                                                         </span>
                                                                     </div>
                                                                     <div>
                                                                         <span className="text-muted-foreground">
-                                                                            语言:{" "}
-                                                                        </span>
-                                                                        <span className="text-foreground font-bold">
-                                                                            {
-                                                                                rule.language
-                                                                            }
-                                                                        </span>
-                                                                    </div>
-                                                                    <div>
-                                                                        <span className="text-muted-foreground">
-                                                                            状态:{" "}
+                                                                            状态:
                                                                         </span>
                                                                         <span
                                                                             className={
@@ -1211,7 +1261,7 @@ export default function OpengrepRules() {
                                                                     </div>
                                                                     <div>
                                                                         <span className="text-muted-foreground">
-                                                                            创建:{" "}
+                                                                            创建:
                                                                         </span>
                                                                         <span className="text-foreground font-bold">
                                                                             {new Date(
@@ -1584,34 +1634,54 @@ export default function OpengrepRules() {
                                                 </div>
                                                 <div>
                                                     <p className="text-muted-foreground">
-                                                        验证状态
+                                                        验证状态 / 置信度 / 相关CWE
                                                     </p>
-                                                    <p
-                                                        className={`font-bold mt-1 ${selectedRule.correct ? "text-emerald-400" : "text-amber-400"}`}
-                                                    >
-                                                        {selectedRule.correct
-                                                            ? "✓ 正确"
-                                                            : "⚠ 未验证"}
-                                                    </p>
-                                                </div>
-                                                {selectedRule.confidence && (
-                                                    <div>
-                                                        <p className="text-muted-foreground">
-                                                            置信度
-                                                        </p>
+                                                    <div className="mt-2 flex flex-wrap gap-2">
                                                         <Badge
-                                                            className={`cyber-badge mt-1 ${
-                                                                selectedRule.confidence === "HIGH"
+                                                            className={`cyber-badge ${
+                                                                selectedRule.correct
                                                                     ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
-                                                                    : selectedRule.confidence === "MEDIUM"
-                                                                      ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
-                                                                      : "bg-sky-500/20 text-sky-300 border-sky-500/30"
+                                                                    : "bg-amber-500/20 text-amber-300 border-amber-500/30"
                                                             }`}
                                                         >
-                                                            {selectedRule.confidence}
+                                                            {selectedRule.correct
+                                                                ? "✓ 正确"
+                                                                : "⚠ 未验证"}
                                                         </Badge>
+                                                        {selectedRule.confidence && (
+                                                            <Badge
+                                                                className={`cyber-badge ${getConfidenceColor(selectedRule.confidence)}`}
+                                                            >
+                                                                {getConfidenceLabel(
+                                                                    selectedRule.confidence,
+                                                                )}
+                                                            </Badge>
+                                                        )}
+                                                        {selectedRule.cwe &&
+                                                        selectedRule.cwe
+                                                            .length > 0 ? (
+                                                            selectedRule.cwe.map(
+                                                                (
+                                                                    cwe,
+                                                                    idx,
+                                                                ) => (
+                                                                    <Badge
+                                                                        key={idx}
+                                                                        className="cyber-badge bg-violet-500/20 text-violet-300 border-violet-500/30"
+                                                                    >
+                                                                        {normalizeCweCode(
+                                                                            cwe,
+                                                                        )}
+                                                                    </Badge>
+                                                                ),
+                                                            )
+                                                        ) : (
+                                                            <span className="text-xs text-muted-foreground mt-1">
+                                                                未关联CWE
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                )}
+                                                </div>
                                             </div>
                                         </div>
 
@@ -1627,26 +1697,6 @@ export default function OpengrepRules() {
                                             </div>
                                         )}
 
-                                        {/* CWE */}
-                                        {selectedRule.cwe && selectedRule.cwe.length > 0 && (
-                                            <div className="space-y-3">
-                                                <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                    相关 CWE
-                                                </h3>
-                                                <div className="flex flex-wrap gap-2">
-                                                    {selectedRule.cwe.map(
-                                                        (cwe, idx) => (
-                                                            <Badge
-                                                                key={idx}
-                                                                className="cyber-badge bg-violet-500/20 text-violet-300 border-violet-500/30"
-                                                            >
-                                                                {cwe}
-                                                            </Badge>
-                                                        ),
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
                                         <div className="space-y-3">
                                             <div className="flex items-center justify-between">
                                                 <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground">
@@ -2037,13 +2087,13 @@ export default function OpengrepRules() {
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem value="HIGH">
-                                                            HIGH
+                                                            {getConfidenceLabel("HIGH")}
                                                         </SelectItem>
                                                         <SelectItem value="MEDIUM">
-                                                            MEDIUM
+                                                            {getConfidenceLabel("MEDIUM")}
                                                         </SelectItem>
                                                         <SelectItem value="LOW">
-                                                            LOW
+                                                            {getConfidenceLabel("LOW")}
                                                         </SelectItem>
                                                     </SelectContent>
                                                 </Select>

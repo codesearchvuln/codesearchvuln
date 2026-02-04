@@ -125,4 +125,8 @@ export const opengrepRulesDictionary: DomDictionary = {
   "每页显示:": "Items per page:",
   "通用型漏洞检测规则": "Generic Vulnerability Detection Rule",
   "CVE漏洞检测规则": "CVE Vulnerability Detection Rule",
+  "置信度": "Confidence Level",
+  "所有等级": "All Levels",
+  "创建": "Created",
+  "相关CWE": "Related CWE",
 };

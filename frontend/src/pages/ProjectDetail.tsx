@@ -18,13 +18,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
     ArrowLeft,
@@ -37,7 +30,6 @@ import {
     Clock,
     XCircle,
     Upload,
-    GitBranch,
     Terminal,
 } from "lucide-react";
 import { api } from "@/shared/config/database";
@@ -65,7 +57,7 @@ import {
 } from "@/shared/utils/projectUtils";
 import { toast } from "sonner";
 import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
-import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
+import { SUPPORTED_LANGUAGES } from "@/shared/constants";
 import type {
     AggregatedAgentFinding,
     AggregatedAuditIssue,
@@ -78,7 +70,6 @@ import {
     PROJECT_DETAIL_ISSUES_MAX_TASKS as ISSUES_MAX_TASKS,
     PROJECT_DETAIL_REQUEST_TIMEOUT_MS as REQUEST_TIMEOUT_MS,
 } from "@/shared/constants";
-import { ProjectIssuesTab } from "@/pages/project-detail/components/ProjectIssuesTab";
 import { ProjectTasksTab } from "@/pages/project-detail/components/ProjectTasksTab";
 import {
     ProjectStatsCards,
@@ -855,6 +846,8 @@ export default function ProjectDetail() {
                 return <Badge className="cyber-badge-info">运行中</Badge>;
             case "failed":
                 return <Badge className="cyber-badge-danger">失败</Badge>;
+            case "interrupted":
+                return <Badge className="bg-orange-500/20 text-orange-300 border-orange-500/30">中断</Badge>;
             case "cancelled":
                 return <Badge className="cyber-badge-muted">已取消</Badge>;
             default:
@@ -870,6 +863,8 @@ export default function ProjectDetail() {
                 return <Activity className="w-4 h-4 text-sky-400" />;
             case "failed":
                 return <AlertTriangle className="w-4 h-4 text-rose-400" />;
+            case "interrupted":
+                return <AlertTriangle className="w-4 h-4 text-orange-400" />;
             case "cancelled":
                 return <XCircle className="w-4 h-4 text-muted-foreground" />;
             default:
@@ -992,7 +987,7 @@ export default function ProjectDetail() {
                 onValueChange={setActiveTab}
                 className="w-full relative z-10"
             >
-                <TabsList className="grid w-full grid-cols-4 bg-muted border border-border p-1 h-auto gap-1 rounded">
+                <TabsList className="grid w-full grid-cols-3 bg-muted border border-border p-1 h-auto gap-1 rounded">
                     <TabsTrigger
                         value="overview"
                         className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2 text-muted-foreground transition-all rounded-sm"
@@ -1004,12 +999,6 @@ export default function ProjectDetail() {
                         className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2 text-muted-foreground transition-all rounded-sm"
                     >
                         审计任务
-                    </TabsTrigger>
-                    <TabsTrigger
-                        value="issues"
-                        className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2 text-muted-foreground transition-all rounded-sm"
-                    >
-                        问题管理
                     </TabsTrigger>
                     <TabsTrigger
                         value="settings"
@@ -1268,44 +1257,112 @@ export default function ProjectDetail() {
                                                                 </>
                                                             )}
                                                         </div>
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                            {parsedLanguageInfo.items.map(
-                                                                (item) => (
-                                                                    <div
-                                                                        key={
-                                                                            item.name
-                                                                        }
-                                                                        className="flex items-center justify-between gap-3 bg-muted/60 border border-border rounded px-3 py-2"
-                                                                    >
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="text-xs font-semibold text-foreground">
-                                                                                {
+                                                        {parsedLanguageInfo
+                                                            .items.length > 0 ? (
+                                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                                                <div className="h-64">
+                                                                    <ResponsiveContainer width="100%" height="100%">
+                                                                        <PieChart>
+                                                                            <Pie
+                                                                                data={parsedLanguageInfo.items}
+                                                                                dataKey="proportion"
+                                                                                nameKey="name"
+                                                                                cx="50%"
+                                                                                cy="50%"
+                                                                                outerRadius={90}
+                                                                                innerRadius={40}
+                                                                                stroke="none"
+                                                                            >
+                                                                                {parsedLanguageInfo.items.map(
+                                                                                    (
+                                                                                        _item,
+                                                                                        index,
+                                                                                    ) => (
+                                                                                        <Cell
+                                                                                            key={`overview-lang-pie-${index}`}
+                                                                                            fill={
+                                                                                                LANGUAGE_PIE_COLORS[
+                                                                                                    index %
+                                                                                                        LANGUAGE_PIE_COLORS.length
+                                                                                                ]
+                                                                                            }
+                                                                                        />
+                                                                                    ),
+                                                                                )}
+                                                                            </Pie>
+                                                                            <ChartTooltip
+                                                                                formatter={(
+                                                                                    value: number,
+                                                                                    _name: string,
+                                                                                    payload: any,
+                                                                                ) => {
+                                                                                    const item = payload?.payload;
+                                                                                    const percent =
+                                                                                        Number(
+                                                                                            value ||
+                                                                                                0,
+                                                                                        ) *
+                                                                                        100;
+                                                                                    return [
+                                                                                        `${Number(item?.files || 0).toLocaleString()} 文件 · ${Number(item?.loc || 0).toLocaleString()} 行 · ${percent.toFixed(2)}%`,
+                                                                                        item?.name ||
+                                                                                            "未知语言",
+                                                                                    ];
+                                                                                }}
+                                                                            />
+                                                                        </PieChart>
+                                                                    </ResponsiveContainer>
+                                                                </div>
+                                                                <div className="space-y-2">
+                                                                    {parsedLanguageInfo.items.map(
+                                                                        (
+                                                                            item,
+                                                                            index,
+                                                                        ) => (
+                                                                            <div
+                                                                                key={
                                                                                     item.name
                                                                                 }
-                                                                            </span>
-                                                                            <Badge
-                                                                                variant="outline"
-                                                                                className="text-[10px]"
+                                                                                className="flex items-center justify-between gap-3 text-xs font-mono bg-muted/60 border border-border rounded px-3 py-2"
                                                                             >
-                                                                                {(
-                                                                                    item.proportion *
-                                                                                    100
-                                                                                ).toFixed(
-                                                                                    2,
-                                                                                )}
-                                                                                %
-                                                                            </Badge>
-                                                                        </div>
-                                                                        <div className="text-xs text-muted-foreground font-mono">
-                                                                            {item.files > 0
-                                                                                ? `${item.files.toLocaleString()} 文件 / `
-                                                                                : ""}
-                                                                            {item.loc.toLocaleString()} 行
-                                                                        </div>
-                                                                    </div>
-                                                                ),
-                                                            )}
-                                                        </div>
+                                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                                    <span
+                                                                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                                                        style={{
+                                                                                            backgroundColor:
+                                                                                                LANGUAGE_PIE_COLORS[
+                                                                                                    index %
+                                                                                                        LANGUAGE_PIE_COLORS.length
+                                                                                                ],
+                                                                                        }}
+                                                                                    />
+                                                                                    <span className="text-foreground truncate font-semibold">
+                                                                                        {
+                                                                                            item.name
+                                                                                        }
+                                                                                    </span>
+                                                                                </div>
+                                                                                <span className="text-muted-foreground shrink-0">
+                                                                                    {item.files.toLocaleString()} 文件 ·{" "}
+                                                                                    {item.loc.toLocaleString()} 行 ·{" "}
+                                                                                    {(
+                                                                                        item.proportion *
+                                                                                        100
+                                                                                    ).toFixed(
+                                                                                        2,
+                                                                                    )}
+                                                                                    %
+                                                                                </span>
+                                                                            </div>
+                                                                        ),
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-xs text-muted-foreground">
+                                                                暂无可展示的语言统计数据
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <pre className="text-xs text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
@@ -1336,21 +1393,6 @@ export default function ProjectDetail() {
                         renderStatusBadge={getStatusBadge}
                         renderStatusIcon={getStatusIcon}
                         getTaskRoute={getTaskDetailRoute}
-                    />
-                </TabsContent>
-
-                <TabsContent
-                    value="issues"
-                    className="flex flex-col gap-6 mt-6"
-                >
-                    <ProjectIssuesTab
-                        hasAnyTasks={
-                            auditTasks.length > 0 || agentTasks.length > 0
-                        }
-                        issuesSummary={issuesSummary}
-                        loading={loadingIssues}
-                        latestProblems={latestProblems}
-                        formatDate={formatDate}
                     />
                 </TabsContent>
 
@@ -1410,103 +1452,6 @@ export default function ProjectDetail() {
                                     />
                                 </div>
                             </div>
-
-                            {/* 仓库信息 - 仅远程仓库类型显示 */}
-                            {editForm.source_type === "repository" && (
-                                <div className="space-y-4 border-t border-border pt-4">
-                                    <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground flex items-center gap-2">
-                                        <GitBranch className="w-4 h-4" />
-                                        仓库信息
-                                    </h3>
-
-                                    <div>
-                                        <Label
-                                            htmlFor="edit-repo-url"
-                                            className="font-mono font-bold uppercase text-xs text-muted-foreground"
-                                        >
-                                            仓库地址
-                                        </Label>
-                                        <Input
-                                            id="edit-repo-url"
-                                            value={editForm.repository_url}
-                                            onChange={(e) =>
-                                                setEditForm({
-                                                    ...editForm,
-                                                    repository_url:
-                                                        e.target.value,
-                                                })
-                                            }
-                                            placeholder="https://github.com/username/repo"
-                                            className="cyber-input mt-1"
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <Label
-                                                htmlFor="edit-repo-type"
-                                                className="font-mono font-bold uppercase text-xs text-muted-foreground"
-                                            >
-                                                仓库平台
-                                            </Label>
-                                            <Select
-                                                value={editForm.repository_type}
-                                                onValueChange={(value: any) =>
-                                                    setEditForm({
-                                                        ...editForm,
-                                                        repository_type: value,
-                                                    })
-                                                }
-                                            >
-                                                <SelectTrigger
-                                                    id="edit-repo-type"
-                                                    className="cyber-input mt-1"
-                                                >
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent className="cyber-dialog border-border">
-                                                    {REPOSITORY_PLATFORMS.map(
-                                                        (platform) => (
-                                                            <SelectItem
-                                                                key={
-                                                                    platform.value
-                                                                }
-                                                                value={
-                                                                    platform.value
-                                                                }
-                                                            >
-                                                                {platform.label}
-                                                            </SelectItem>
-                                                        ),
-                                                    )}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-
-                                        <div>
-                                            <Label
-                                                htmlFor="edit-branch"
-                                                className="font-mono font-bold uppercase text-xs text-muted-foreground"
-                                            >
-                                                默认分支
-                                            </Label>
-                                            <Input
-                                                id="edit-branch"
-                                                value={editForm.default_branch}
-                                                onChange={(e) =>
-                                                    setEditForm({
-                                                        ...editForm,
-                                                        default_branch:
-                                                            e.target.value,
-                                                    })
-                                                }
-                                                placeholder="main"
-                                                className="cyber-input mt-1"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
 
                             {/* ZIP项目提示 */}
                             {editForm.source_type === "zip" && (
@@ -1568,95 +1513,6 @@ export default function ProjectDetail() {
                                         </div>
                                     ))}
                                 </div>
-
-                                {parsedLanguageInfo &&
-                                    parsedLanguageInfo.items.length > 0 && (
-                                        <div className="border border-border rounded p-4 bg-muted/40">
-                                            <h4 className="font-mono font-bold uppercase text-xs text-muted-foreground mb-3">
-                                                语言占比（静态统计）
-                                            </h4>
-                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                                <div className="h-64">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <PieChart>
-                                                            <Pie
-                                                                data={parsedLanguageInfo.items}
-                                                                dataKey="proportion"
-                                                                nameKey="name"
-                                                                cx="50%"
-                                                                cy="50%"
-                                                                outerRadius={90}
-                                                                innerRadius={40}
-                                                                stroke="none"
-                                                            >
-                                                                {parsedLanguageInfo.items.map(
-                                                                    (_item, index) => (
-                                                                        <Cell
-                                                                            key={`lang-pie-${index}`}
-                                                                            fill={
-                                                                                LANGUAGE_PIE_COLORS[
-                                                                                    index %
-                                                                                        LANGUAGE_PIE_COLORS.length
-                                                                                ]
-                                                                            }
-                                                                        />
-                                                                    ),
-                                                                )}
-                                                            </Pie>
-                                                            <ChartTooltip
-                                                                formatter={(
-                                                                    value: number,
-                                                                    _name: string,
-                                                                    payload: any,
-                                                                ) => {
-                                                                    const item = payload?.payload;
-                                                                    const percent = Number(value || 0) * 100;
-                                                                    return [
-                                                                        `${percent.toFixed(2)}% · ${Number(item?.loc || 0).toLocaleString()} 行${
-                                                                            Number(item?.files || 0) > 0
-                                                                                ? ` · ${Number(item?.files).toLocaleString()} 文件`
-                                                                                : ""
-                                                                        }`,
-                                                                        item?.name || "未知语言",
-                                                                    ];
-                                                                }}
-                                                            />
-                                                        </PieChart>
-                                                    </ResponsiveContainer>
-                                                </div>
-                                                <div className="space-y-2">
-                                                    {parsedLanguageInfo.items.map(
-                                                        (item, index) => (
-                                                            <div
-                                                                key={item.name}
-                                                                className="flex items-center justify-between gap-3 text-xs font-mono"
-                                                            >
-                                                                <div className="flex items-center gap-2 min-w-0">
-                                                                    <span
-                                                                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                                                                        style={{
-                                                                            backgroundColor:
-                                                                                LANGUAGE_PIE_COLORS[
-                                                                                    index %
-                                                                                        LANGUAGE_PIE_COLORS.length
-                                                                                ],
-                                                                        }}
-                                                                    />
-                                                                    <span className="text-foreground truncate">
-                                                                        {item.name}
-                                                                    </span>
-                                                                </div>
-                                                                <span className="text-muted-foreground shrink-0">
-                                                                    {(item.proportion * 100).toFixed(2)}% ·{" "}
-                                                                    {item.loc.toLocaleString()} 行
-                                                                </span>
-                                                            </div>
-                                                        ),
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
                             </div>
 
                             <div className="flex justify-end space-x-3 pt-6 border-t border-border">

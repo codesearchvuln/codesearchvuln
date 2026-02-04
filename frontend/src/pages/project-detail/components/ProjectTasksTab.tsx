@@ -66,6 +66,8 @@ export function ProjectTasksTab(props: {
                         ? "bg-emerald-500/20"
                         : task.status === "running"
                           ? "bg-sky-500/20"
+                          : task.status === "interrupted"
+                            ? "bg-orange-500/20"
                           : task.status === "failed"
                             ? "bg-rose-500/20"
                             : "bg-muted"

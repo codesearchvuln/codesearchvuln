@@ -20,4 +20,6 @@ export const dashboardDictionary: DomDictionary = {
   "快速操作": "Quick Actions",
   "Agent 智能审计": "Agent Smart Audit",
   "创建项目": "Create Project",
+  "漏洞扫描": "Vulnerability Scan ",
+  "扫描": " Scan",
 };
