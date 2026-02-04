@@ -377,7 +377,6 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
             if not rule_data or 'rules' not in rule_data:
                 logger.warning(f"跳过无效的规则文件: {yaml_file.name}")
                 invalid_count += 1
-                failed_files.append(yaml_file)
                 continue
             
             # 验证规则是否有效
@@ -449,7 +448,6 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
         except Exception as e:
             logger.error(f"加载规则文件失败 {yaml_file.name}: {e}")
             invalid_count += 1
-            failed_files.append(yaml_file)
             continue
     
     # 一次性批量添加所有规则
@@ -521,7 +519,6 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
             if not rule_data or 'rules' not in rule_data:
                 logger.debug(f"  ⊘ 跳过无效的规则文件: {yaml_file.relative_to(rules_dir)}")
                 error_count += 1
-                failed_files.append(yaml_file)
                 continue
             
             # 验证规则是否有效
@@ -612,7 +609,6 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
         except Exception as e:
             logger.error(f"加载规则文件失败 {yaml_file.relative_to(rules_dir)}: {e}")
             error_count += 1
-            failed_files.append(yaml_file)
             continue
     
     # 一次性批量添加所有规则
