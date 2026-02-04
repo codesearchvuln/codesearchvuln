@@ -285,6 +285,56 @@ async def _get_unique_rule_name(db: AsyncSession, base_name: str) -> str:
         counter += 1
 
 
+async def _validate_opengrep_rule(yaml_content: str) -> tuple[bool, Optional[str]]:
+    """
+    使用 opengrep --validate 验证规则是否有效
+    
+    Args:
+        yaml_content: 规则的 YAML 内容
+        
+    Returns:
+        (is_valid, error_message): 验证是否通过，失败时返回错误信息
+    """
+    try:
+        # 创建临时文件保存规则
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False, encoding="utf-8") as tmp_file:
+            tmp_file.write(yaml_content)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            # 在线程池中执行 opengrep 验证
+            loop = asyncio.get_event_loop()
+            validate_result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["opengrep", "--config", tmp_file_path, "--validate"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ),
+            )
+            
+            if validate_result.returncode == 0:
+                return True, None
+            else:
+                error_msg = validate_result.stderr or "未知错误"
+                return False, error_msg
+        finally:
+            # 删除临时文件
+            if os.path.exists(tmp_file_path):
+                try:
+                    os.unlink(tmp_file_path)
+                except Exception:
+                    pass
+    except subprocess.TimeoutExpired:
+        return False, "规则验证超时"
+    except FileNotFoundError:
+        logger.warning("opengrep 命令未找到，跳过规则验证")
+        return True, None
+    except Exception as e:
+        return False, f"规则验证异常: {str(e)}"
+
+
 def _is_fatal_rule_error(error_item: Dict[str, Any]) -> bool:
     """
     判断是否为应导致任务失败的规则错误。
@@ -1786,6 +1836,14 @@ async def upload_opengrep_rule_json(
                 detail="规则中缺少 id 字段",
             )
 
+        # 使用 opengrep 验证规则
+        is_valid, error_msg = await _validate_opengrep_rule(request.pattern_yaml)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"规则验证失败: {error_msg}",
+            )
+
         # MD5 去重检查
         md5_hash = hashlib.md5(request.pattern_yaml.encode("utf-8")).hexdigest()
         result = await db.execute(
@@ -1965,6 +2023,15 @@ async def upload_opengrep_rules(
                         failed_count += 1
                         failed_details.append(
                             {"file": os.path.basename(yaml_file), "error": "rules 字段必须是非空数组"}
+                        )
+                        continue
+
+                    # 使用 opengrep 验证规则
+                    is_valid, error_msg = await _validate_opengrep_rule(content)
+                    if not is_valid:
+                        failed_count += 1
+                        failed_details.append(
+                            {"file": os.path.basename(yaml_file), "error": f"规则验证失败: {error_msg}"}
                         )
                         continue
 
@@ -2149,6 +2216,15 @@ async def upload_opengrep_rules_directory(
                         failed_count += 1
                         failed_details.append(
                             {"file": os.path.basename(yaml_file), "error": "rules 字段必须是非空数组"}
+                        )
+                        continue
+
+                    # 使用 opengrep 验证规则
+                    is_valid, error_msg = await _validate_opengrep_rule(content)
+                    if not is_valid:
+                        failed_count += 1
+                        failed_details.append(
+                            {"file": os.path.basename(yaml_file), "error": f"规则验证失败: {error_msg}"}
                         )
                         continue
 
