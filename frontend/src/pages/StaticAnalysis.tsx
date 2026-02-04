@@ -36,12 +36,10 @@ import {
 import { toast } from "sonner";
 import {
     interruptOpengrepScanTask,
-    getOpengrepFindingContext,
     getOpengrepScanFindings,
     getOpengrepScanProgress,
     getOpengrepScanTask,
     updateOpengrepFindingStatus,
-    type OpengrepFindingContext,
     type OpengrepFinding,
     type OpengrepScanProgress,
     type OpengrepScanTask,
@@ -115,8 +113,7 @@ const FALSE_POSITIVE_BADGE_CLASSES = {
     active: "bg-amber-500/20 text-amber-300 border-amber-500/30",
     inactive: "bg-muted text-muted-foreground border-border",
 };
-const FINDINGS_PAGE_SIZE = 200;
-const FINDINGS_MAX_PAGES = 500;
+const PAGE_SIZE_OPTIONS = [10, 30, 50, 100] as const;
 
 const normalizePath = (path?: string | null) => {
     if (!path) return "";
@@ -280,6 +277,9 @@ export default function StaticAnalysis() {
     const [opengrepProgress, setOpengrepProgress] =
         useState<OpengrepScanProgress | null>(null);
     const [showProgressLogs, setShowProgressLogs] = useState(false);
+    const [opengrepPage, setOpengrepPage] = useState(1);
+    const [opengrepPageSize, setOpengrepPageSize] = useState<number>(10);
+    const [opengrepHasMore, setOpengrepHasMore] = useState(false);
 
     const [gitleaksTask, setGitleaksTask] =
         useState<GitleaksScanTask | null>(null);
@@ -289,6 +289,9 @@ export default function StaticAnalysis() {
     const [loadingGitleaksTask, setLoadingGitleaksTask] = useState(false);
     const [loadingGitleaksFindings, setLoadingGitleaksFindings] =
         useState(false);
+    const [gitleaksPage, setGitleaksPage] = useState(1);
+    const [gitleaksPageSize, setGitleaksPageSize] = useState<number>(10);
+    const [gitleaksHasMore, setGitleaksHasMore] = useState(false);
 
     const [severityFilter, setSeverityFilter] = useState<string>("");
     const [confidenceFilter, setConfidenceFilter] = useState<string>("");
@@ -305,9 +308,6 @@ export default function StaticAnalysis() {
         useState<OpengrepFinding | null>(null);
     const [showInterruptConfirm, setShowInterruptConfirm] = useState(false);
     const [interruptingTask, setInterruptingTask] = useState(false);
-    const [findingContext, setFindingContext] =
-        useState<OpengrepFindingContext | null>(null);
-    const [loadingFindingContext, setLoadingFindingContext] = useState(false);
     const lastOpengrepNotifiedStatusRef = useRef<string | null>(null);
     const lastGitleaksNotifiedStatusRef = useRef<string | null>(null);
     const opengrepSilentRefreshRef = useRef(false);
@@ -404,22 +404,20 @@ export default function StaticAnalysis() {
         try {
             const data = await runWithRefreshMode(
                 async () => {
-                    const allFindings: OpengrepFinding[] = [];
-                    let skip = 0;
-                    for (let page = 0; page < FINDINGS_MAX_PAGES; page += 1) {
-                        const pageFindings = await getOpengrepScanFindings({
-                            taskId: opengrepTaskId,
-                            severity: severityFilter || undefined,
-                            confidence: confidenceFilter || undefined,
-                            status: statusFilter || undefined,
-                            skip,
-                            limit: FINDINGS_PAGE_SIZE,
-                        });
-                        allFindings.push(...pageFindings);
-                        if (pageFindings.length < FINDINGS_PAGE_SIZE) break;
-                        skip += FINDINGS_PAGE_SIZE;
-                    }
-                    return allFindings;
+                    const skip = (opengrepPage - 1) * opengrepPageSize;
+                    const pageFindings = await getOpengrepScanFindings({
+                        taskId: opengrepTaskId,
+                        severity: severityFilter || undefined,
+                        confidence: confidenceFilter || undefined,
+                        status: statusFilter || undefined,
+                        skip,
+                        limit: opengrepPageSize + 1,
+                    });
+                    const hasMore = pageFindings.length > opengrepPageSize;
+                    setOpengrepHasMore(hasMore);
+                    return hasMore
+                        ? pageFindings.slice(0, opengrepPageSize)
+                        : pageFindings;
                 },
                 { ...options, setLoading: setLoadingOpengrepFindings },
             );
@@ -465,20 +463,18 @@ export default function StaticAnalysis() {
         try {
             const data = await runWithRefreshMode(
                 async () => {
-                    const allFindings: GitleaksFinding[] = [];
-                    let skip = 0;
-                    for (let page = 0; page < FINDINGS_MAX_PAGES; page += 1) {
-                        const pageFindings = await getGitleaksFindings({
-                            taskId: gitleaksTaskId,
-                            status: gitleaksStatusFilter || undefined,
-                            skip,
-                            limit: FINDINGS_PAGE_SIZE,
-                        });
-                        allFindings.push(...pageFindings);
-                        if (pageFindings.length < FINDINGS_PAGE_SIZE) break;
-                        skip += FINDINGS_PAGE_SIZE;
-                    }
-                    return allFindings;
+                    const skip = (gitleaksPage - 1) * gitleaksPageSize;
+                    const pageFindings = await getGitleaksFindings({
+                        taskId: gitleaksTaskId,
+                        status: gitleaksStatusFilter || undefined,
+                        skip,
+                        limit: gitleaksPageSize + 1,
+                    });
+                    const hasMore = pageFindings.length > gitleaksPageSize;
+                    setGitleaksHasMore(hasMore);
+                    return hasMore
+                        ? pageFindings.slice(0, gitleaksPageSize)
+                        : pageFindings;
                 },
                 { ...options, setLoading: setLoadingGitleaksFindings },
             );
@@ -539,16 +535,26 @@ export default function StaticAnalysis() {
     }, [opengrepTaskId]);
 
     useEffect(() => {
+        setOpengrepPage(1);
+        setOpengrepHasMore(false);
+    }, [opengrepTaskId]);
+
+    useEffect(() => {
         loadOpengrepFindings();
-    }, [opengrepTaskId, severityFilter, confidenceFilter, statusFilter]);
+    }, [opengrepTaskId, severityFilter, confidenceFilter, statusFilter, opengrepPage, opengrepPageSize]);
 
     useEffect(() => {
         loadGitleaksTask();
     }, [gitleaksTaskId]);
 
     useEffect(() => {
+        setGitleaksPage(1);
+        setGitleaksHasMore(false);
+    }, [gitleaksTaskId]);
+
+    useEffect(() => {
         loadGitleaksFindings();
-    }, [gitleaksTaskId, gitleaksStatusFilter]);
+    }, [gitleaksTaskId, gitleaksStatusFilter, gitleaksPage, gitleaksPageSize]);
 
     useEffect(() => {
         if (!opengrepTaskId) return;
@@ -792,29 +798,9 @@ export default function StaticAnalysis() {
         isInterruptibleStatus(opengrepTask?.status) ||
         isInterruptibleStatus(gitleaksTask?.status);
 
-    const loadFindingContext = async (finding: OpengrepFinding) => {
-        if (!opengrepTaskId) return;
-        setLoadingFindingContext(true);
-        try {
-            const context = await getOpengrepFindingContext({
-                taskId: opengrepTaskId,
-                findingId: finding.id,
-                before: 5,
-                after: 5,
-            });
-            setFindingContext(context);
-        } catch (error) {
-            setFindingContext(null);
-        } finally {
-            setLoadingFindingContext(false);
-        }
-    };
-
     const openDetail = (finding: OpengrepFinding) => {
         setSelectedFinding(finding);
-        setFindingContext(null);
         setShowDetail(true);
-        void loadFindingContext(finding);
     };
 
     const handleJumpToRule = (checkId: string, ruleName?: string | null) => {
@@ -1044,7 +1030,7 @@ export default function StaticAnalysis() {
                         </div>
                     )}
                     <div className="cyber-card p-4 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                             <div>
                                 <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
                                     严重程度
@@ -1052,9 +1038,12 @@ export default function StaticAnalysis() {
                                 <Select
                                     value={severityFilter || "all"}
                                     onValueChange={(val) =>
-                                        setSeverityFilter(
-                                            val === "all" ? "" : val,
-                                        )
+                                        {
+                                            setOpengrepPage(1);
+                                            setSeverityFilter(
+                                                val === "all" ? "" : val,
+                                            );
+                                        }
                                     }
                                     disabled={!opengrepTaskId}
                                 >
@@ -1082,9 +1071,12 @@ export default function StaticAnalysis() {
                                 <Select
                                     value={confidenceFilter || "all"}
                                     onValueChange={(val) =>
-                                        setConfidenceFilter(
-                                            val === "all" ? "" : val,
-                                        )
+                                        {
+                                            setOpengrepPage(1);
+                                            setConfidenceFilter(
+                                                val === "all" ? "" : val,
+                                            );
+                                        }
                                     }
                                     disabled={!opengrepTaskId}
                                 >
@@ -1112,9 +1104,12 @@ export default function StaticAnalysis() {
                                 <Select
                                     value={statusFilter || "all"}
                                     onValueChange={(val) =>
-                                        setStatusFilter(
-                                            val === "all" ? "" : val,
-                                        )
+                                        {
+                                            setOpengrepPage(1);
+                                            setStatusFilter(
+                                                val === "all" ? "" : val,
+                                            );
+                                        }
                                     }
                                     disabled={!opengrepTaskId}
                                 >
@@ -1135,11 +1130,35 @@ export default function StaticAnalysis() {
                                     </SelectContent>
                                 </Select>
                             </div>
+                            <div>
+                                <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
+                                    每页条数
+                                </label>
+                                <Select
+                                    value={String(opengrepPageSize)}
+                                    onValueChange={(val) => {
+                                        setOpengrepPage(1);
+                                        setOpengrepPageSize(Number(val));
+                                    }}
+                                    disabled={!opengrepTaskId}
+                                >
+                                    <SelectTrigger className="cyber-input">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className="cyber-dialog border-border">
+                                        {PAGE_SIZE_OPTIONS.map((size) => (
+                                            <SelectItem key={size} value={String(size)}>
+                                                {size}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             <div className="flex items-end">
                                 <div className="text-xs text-muted-foreground font-mono">
                                     {showOpengrepLoadingSkeleton
                                         ? "加载中..."
-                                        : `共 ${opengrepFindings.length} 条结果`}
+                                        : `第 ${opengrepPage} 页 · 当前 ${opengrepFindings.length} 条`}
                                     {loadingOpengrepFindings &&
                                         opengrepFindings.length > 0 &&
                                         " · 后台更新中"}
@@ -1315,17 +1334,40 @@ export default function StaticAnalysis() {
                                                         {meta.message}
                                                     </div>
                                                 )}
-
-                                                {meta.lines && (
-                                                    <pre className="text-xs font-mono text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
-                                                        {meta.lines}
-                                                    </pre>
-                                                )}
                                             </div>
                                         );
                                     })}
                                 </div>
                             </ScrollArea>
+                        )}
+                        {!showOpengrepLoadingSkeleton && opengrepFindings.length > 0 && (
+                            <div className="border-t border-border p-3 flex items-center justify-between">
+                                <div className="text-xs text-muted-foreground font-mono">
+                                    第 {opengrepPage} 页
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="cyber-btn-outline h-8"
+                                        onClick={() =>
+                                            setOpengrepPage((prev) => Math.max(1, prev - 1))
+                                        }
+                                        disabled={opengrepPage <= 1 || loadingOpengrepFindings}
+                                    >
+                                        上一页
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="cyber-btn-outline h-8"
+                                        onClick={() => setOpengrepPage((prev) => prev + 1)}
+                                        disabled={!opengrepHasMore || loadingOpengrepFindings}
+                                    >
+                                        下一页
+                                    </Button>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </TabsContent>
@@ -1333,7 +1375,7 @@ export default function StaticAnalysis() {
                 {showGitleaksTab && (
                     <TabsContent value="gitleaks">
                     <div className="cyber-card p-4 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div>
                                 <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
                                     状态
@@ -1341,9 +1383,12 @@ export default function StaticAnalysis() {
                                 <Select
                                     value={gitleaksStatusFilter || "all"}
                                     onValueChange={(val) =>
-                                        setGitleaksStatusFilter(
-                                            val === "all" ? "" : val,
-                                        )
+                                        {
+                                            setGitleaksPage(1);
+                                            setGitleaksStatusFilter(
+                                                val === "all" ? "" : val,
+                                            );
+                                        }
                                     }
                                     disabled={!gitleaksTaskId}
                                 >
@@ -1367,11 +1412,35 @@ export default function StaticAnalysis() {
                                     </SelectContent>
                                 </Select>
                             </div>
+                            <div>
+                                <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
+                                    每页条数
+                                </label>
+                                <Select
+                                    value={String(gitleaksPageSize)}
+                                    onValueChange={(val) => {
+                                        setGitleaksPage(1);
+                                        setGitleaksPageSize(Number(val));
+                                    }}
+                                    disabled={!gitleaksTaskId}
+                                >
+                                    <SelectTrigger className="cyber-input">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className="cyber-dialog border-border">
+                                        {PAGE_SIZE_OPTIONS.map((size) => (
+                                            <SelectItem key={size} value={String(size)}>
+                                                {size}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             <div className="flex items-end">
                                 <div className="text-xs text-muted-foreground font-mono">
                                     {showGitleaksLoadingSkeleton
                                         ? "加载中..."
-                                        : `共 ${gitleaksFindings.length} 条结果`}
+                                        : `第 ${gitleaksPage} 页 · 当前 ${gitleaksFindings.length} 条`}
                                     {loadingGitleaksFindings &&
                                         gitleaksFindings.length > 0 &&
                                         " · 后台更新中"}
@@ -1555,6 +1624,35 @@ export default function StaticAnalysis() {
                                 </div>
                             </ScrollArea>
                         )}
+                        {!showGitleaksLoadingSkeleton && gitleaksFindings.length > 0 && (
+                            <div className="border-t border-border p-3 flex items-center justify-between">
+                                <div className="text-xs text-muted-foreground font-mono">
+                                    第 {gitleaksPage} 页
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="cyber-btn-outline h-8"
+                                        onClick={() =>
+                                            setGitleaksPage((prev) => Math.max(1, prev - 1))
+                                        }
+                                        disabled={gitleaksPage <= 1 || loadingGitleaksFindings}
+                                    >
+                                        上一页
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="cyber-btn-outline h-8"
+                                        onClick={() => setGitleaksPage((prev) => prev + 1)}
+                                        disabled={!gitleaksHasMore || loadingGitleaksFindings}
+                                    >
+                                        下一页
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                     </TabsContent>
                 )}
@@ -1599,7 +1697,6 @@ export default function StaticAnalysis() {
                     setShowDetail(open);
                     if (!open) {
                         setSelectedFinding(null);
-                        setFindingContext(null);
                     }
                 }}
             >
@@ -1742,55 +1839,14 @@ export default function StaticAnalysis() {
                                             </div>
                                         )}
 
-                                        {(loadingFindingContext ||
-                                            findingContext?.lines?.length ||
-                                            meta.lines ||
-                                            selectedFinding.code_snippet) && (
+                                        {(meta.lines || selectedFinding.code_snippet) && (
                                             <div className="space-y-3">
                                                 <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                    代码片段
+                                                    命中代码
                                                 </h3>
-                                                {loadingFindingContext ? (
-                                                    <div className="text-xs text-muted-foreground font-mono bg-muted border border-border rounded p-3">
-                                                        正在加载上下文...
-                                                    </div>
-                                                ) : findingContext?.lines &&
-                                                  findingContext.lines.length >
-                                                      0 ? (
-                                                    <div className="bg-muted border border-border rounded overflow-hidden">
-                                                        <div className="max-h-[380px] overflow-auto">
-                                                            {findingContext.lines.map(
-                                                                (line) => (
-                                                                    <div
-                                                                        key={
-                                                                            line.line_number
-                                                                        }
-                                                                        className={`grid grid-cols-[56px_1fr] text-xs font-mono border-b border-border/60 last:border-b-0 ${
-                                                                            line.is_hit
-                                                                                ? "bg-sky-500/15"
-                                                                                : ""
-                                                                        }`}
-                                                                    >
-                                                                        <div className="px-2 py-1.5 text-right text-muted-foreground border-r border-border/60 select-none">
-                                                                            {
-                                                                                line.line_number
-                                                                            }
-                                                                        </div>
-                                                                        <div className="px-3 py-1.5 text-foreground whitespace-pre-wrap break-words">
-                                                                            {line.content ||
-                                                                                " "}
-                                                                        </div>
-                                                                    </div>
-                                                                ),
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <pre className="text-xs font-mono text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
-                                                        {meta.lines ||
-                                                            selectedFinding.code_snippet}
-                                                    </pre>
-                                                )}
+                                                <pre className="text-xs font-mono text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
+                                                    {meta.lines || selectedFinding.code_snippet}
+                                                </pre>
                                             </div>
                                         )}
 
