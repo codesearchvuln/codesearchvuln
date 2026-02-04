@@ -205,6 +205,25 @@ export interface OpengrepScanTask {
     updated_at?: string | null;
 }
 
+export interface OpengrepScanProgressLog {
+    timestamp: string;
+    stage: string;
+    message: string;
+    progress: number;
+    level: string;
+}
+
+export interface OpengrepScanProgress {
+    task_id: string;
+    status: string;
+    progress: number;
+    current_stage?: string | null;
+    message?: string | null;
+    started_at?: string | null;
+    updated_at?: string | null;
+    logs: OpengrepScanProgressLog[];
+}
+
 export interface OpengrepFinding {
     id: string;
     scan_task_id: string;
@@ -244,6 +263,16 @@ export async function getOpengrepScanTask(
     taskId: string,
 ): Promise<OpengrepScanTask> {
     const response = await apiClient.get(`/static-tasks/tasks/${taskId}`);
+    return response.data;
+}
+
+export async function getOpengrepScanProgress(
+    taskId: string,
+    includeLogs: boolean = false,
+): Promise<OpengrepScanProgress> {
+    const response = await apiClient.get(`/static-tasks/tasks/${taskId}/progress`, {
+        params: { include_logs: includeLogs },
+    });
     return response.data;
 }
 

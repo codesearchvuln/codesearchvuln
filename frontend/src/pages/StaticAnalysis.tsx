@@ -16,6 +16,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
 import {
     Tabs,
     TabsContent,
@@ -25,9 +26,11 @@ import {
 import { toast } from "sonner";
 import {
     getOpengrepScanFindings,
+    getOpengrepScanProgress,
     getOpengrepScanTask,
     updateOpengrepFindingStatus,
     type OpengrepFinding,
+    type OpengrepScanProgress,
     type OpengrepScanTask,
 } from "@/shared/api/opengrep";
 import {
@@ -41,6 +44,8 @@ import { showToastQueue } from "@/shared/utils/toastQueue";
 import {
     AlertCircle,
     ArrowLeft,
+    ChevronDown,
+    ChevronUp,
     RefreshCw,
     Shield,
     Loader2,
@@ -171,6 +176,9 @@ export default function StaticAnalysis() {
     const [loadingOpengrepTask, setLoadingOpengrepTask] = useState(false);
     const [loadingOpengrepFindings, setLoadingOpengrepFindings] =
         useState(false);
+    const [opengrepProgress, setOpengrepProgress] =
+        useState<OpengrepScanProgress | null>(null);
+    const [showProgressLogs, setShowProgressLogs] = useState(false);
 
     const [gitleaksTask, setGitleaksTask] =
         useState<GitleaksScanTask | null>(null);
@@ -292,6 +300,16 @@ export default function StaticAnalysis() {
         }
     };
 
+    const loadOpengrepProgress = async (withLogs: boolean = showProgressLogs) => {
+        if (!opengrepTaskId) return;
+        try {
+            const data = await getOpengrepScanProgress(opengrepTaskId, withLogs);
+            setOpengrepProgress(data);
+        } catch (error) {
+            // 不阻塞主流程，静默失败
+        }
+    };
+
     const loadGitleaksTask = async () => {
         if (!gitleaksTaskId) return;
         setLoadingGitleaksTask(true);
@@ -338,6 +356,7 @@ export default function StaticAnalysis() {
 
     useEffect(() => {
         loadOpengrepTask();
+        loadOpengrepProgress(false);
     }, [opengrepTaskId]);
 
     useEffect(() => {
@@ -360,9 +379,15 @@ export default function StaticAnalysis() {
         const timer = setInterval(() => {
             loadOpengrepTask();
             loadOpengrepFindings();
+            loadOpengrepProgress(showProgressLogs);
         }, 5000);
         return () => clearInterval(timer);
-    }, [opengrepTaskId, opengrepTask?.status]);
+    }, [opengrepTaskId, opengrepTask?.status, showProgressLogs]);
+
+    useEffect(() => {
+        if (!opengrepTaskId || !showProgressLogs) return;
+        loadOpengrepProgress(true);
+    }, [opengrepTaskId, showProgressLogs]);
 
     useEffect(() => {
         if (!gitleaksTaskId) return;
@@ -572,6 +597,16 @@ export default function StaticAnalysis() {
         activeTab === "opengrep"
             ? loadingOpengrepFindings
             : loadingGitleaksFindings;
+    const opengrepProgressPercent = useMemo(() => {
+        const rawProgress = opengrepProgress?.progress;
+        if (typeof rawProgress === "number") {
+            return Math.max(0, Math.min(100, rawProgress));
+        }
+        if (opengrepTask?.status === "completed") return 100;
+        if (opengrepTask?.status === "failed") return 100;
+        if (opengrepTask?.status === "running") return 10;
+        return 0;
+    }, [opengrepProgress?.progress, opengrepTask?.status]);
 
     return (
         <div className="space-y-6 p-6 bg-background min-h-screen font-mono relative">
@@ -618,6 +653,7 @@ export default function StaticAnalysis() {
                                 if (activeTab === "opengrep") {
                                     loadOpengrepTask();
                                     loadOpengrepFindings();
+                                    loadOpengrepProgress(showProgressLogs);
                                 } else {
                                     loadGitleaksTask();
                                     loadGitleaksFindings();
@@ -647,6 +683,60 @@ export default function StaticAnalysis() {
                 </TabsList>
 
                 <TabsContent value="opengrep">
+                    {opengrepTask && (
+                        <div className="cyber-card p-4 space-y-3 mb-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="text-sm font-mono text-foreground">
+                                    扫描进度
+                                </div>
+                                <div className="text-xs font-mono text-muted-foreground">
+                                    {Math.round(opengrepProgressPercent)}%
+                                </div>
+                            </div>
+                            <Progress value={opengrepProgressPercent} className="h-2" />
+                            <div className="flex items-center justify-between gap-2 text-xs font-mono text-muted-foreground">
+                                <span>
+                                    {opengrepProgress?.message ||
+                                        (opengrepTask.status === "running"
+                                            ? "扫描进行中..."
+                                            : `任务状态：${opengrepTask.status}`)}
+                                </span>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2"
+                                    onClick={() => setShowProgressLogs((prev) => !prev)}
+                                >
+                                    {showProgressLogs ? "隐藏后端进度" : "查看后端进度"}
+                                    {showProgressLogs ? (
+                                        <ChevronUp className="w-3 h-3 ml-1" />
+                                    ) : (
+                                        <ChevronDown className="w-3 h-3 ml-1" />
+                                    )}
+                                </Button>
+                            </div>
+                            {showProgressLogs && (
+                                <div className="bg-muted/40 border border-border rounded-md">
+                                    <ScrollArea className="h-36">
+                                        <div className="p-3 space-y-1 text-xs font-mono">
+                                            {(opengrepProgress?.logs || []).length === 0 ? (
+                                                <div className="text-muted-foreground">
+                                                    暂无后端进度日志
+                                                </div>
+                                            ) : (
+                                                (opengrepProgress?.logs || []).map((log, index) => (
+                                                    <div key={`${log.timestamp}-${index}`} className="text-muted-foreground">
+                                                        [{log.stage}] {log.message}
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </ScrollArea>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <div className="cyber-card p-4 space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div>

@@ -133,6 +133,29 @@ class OpengrepFindingResponse(BaseModel):
         from_attributes = True
 
 
+class OpengrepScanProgressLogEntry(BaseModel):
+    """扫描进度日志条目"""
+
+    timestamp: str
+    stage: str
+    message: str
+    progress: float
+    level: str = "info"
+
+
+class OpengrepScanProgressResponse(BaseModel):
+    """扫描进度响应"""
+
+    task_id: str
+    status: str
+    progress: float = 0
+    current_stage: Optional[str] = None
+    message: Optional[str] = None
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    logs: List[OpengrepScanProgressLogEntry] = Field(default_factory=list)
+
+
 # ============ 后台扫描执行 ============
 
 
@@ -326,6 +349,13 @@ async def _execute_opengrep_scan(
             # 更新任务状态为运行中
             task.status = "running"
             await db.commit()
+            _record_scan_progress(
+                task_id,
+                status="running",
+                progress=8,
+                stage="init",
+                message="开始准备扫描环境",
+            )
 
             # 获取活跃规则
             result = await db.execute(
@@ -339,6 +369,14 @@ async def _execute_opengrep_scan(
                 task.status = "failed"
                 task.error_count = 1
                 await db.commit()
+                _record_scan_progress(
+                    task_id,
+                    status="failed",
+                    progress=100,
+                    stage="failed",
+                    message="未找到可用的激活规则，任务失败",
+                    level="error",
+                )
                 logger.error(f"No active rules found for task {task_id}")
                 return
 
@@ -348,6 +386,14 @@ async def _execute_opengrep_scan(
                 task.status = "failed"
                 task.error_count = 1
                 await db.commit()
+                _record_scan_progress(
+                    task_id,
+                    status="failed",
+                    progress=100,
+                    stage="failed",
+                    message="扫描目标路径不存在，任务失败",
+                    level="error",
+                )
                 logger.error(f"Target path {full_target_path} not found")
                 return
 
@@ -435,8 +481,15 @@ async def _execute_opengrep_scan(
             # 解析并验证所有规则，构建有效规则列表
             valid_rules = []
             skipped_rule_count = 0
+            total_rules = len(rules)
+            _record_scan_progress(
+                task_id,
+                progress=12,
+                stage="load_rules",
+                message=f"加载规则中（0/{total_rules}）",
+            )
             
-            for rule in rules:
+            for idx, rule in enumerate(rules, start=1):
                 try:
                     rule_data = yaml.safe_load(rule.pattern_yaml)
                     if not rule_data or "rules" not in rule_data:
@@ -456,23 +509,48 @@ async def _execute_opengrep_scan(
                 except Exception as e:
                     logger.warning(f"Failed to parse rule {rule.name}: {e}")
                     skipped_rule_count += 1
+                finally:
+                    progress = 12 + (idx / max(total_rules, 1)) * 14
+                    _record_scan_progress(
+                        task_id,
+                        progress=progress,
+                        stage="load_rules",
+                        message=f"加载规则中（{idx}/{total_rules}）",
+                    )
 
             if not valid_rules:
                 task.status = "failed"
                 task.error_count = 1
                 await db.commit()
+                _record_scan_progress(
+                    task_id,
+                    status="failed",
+                    progress=100,
+                    stage="failed",
+                    message="规则验证后无可执行规则，任务失败",
+                    level="error",
+                )
                 logger.error(f"No valid rules to apply for task {task_id}")
                 return
 
             logger.info(f"Task {task_id}: {len(valid_rules)} valid rules, {skipped_rule_count} skipped")
+            _record_scan_progress(
+                task_id,
+                progress=28,
+                stage="execute_rules",
+                message=f"开始执行规则扫描（{len(valid_rules)} 条规则）",
+            )
 
             # 累积所有扫描结果
             all_findings = []
             all_scan_errors = []
             successful_rule_count = 0
             failed_rule_count = 0
+            executed_rules = 0
+            total_rules_for_execution = len(valid_rules)
 
             async def execute_rules_batch(rules_batch: List[Dict], depth: int = 0) -> tuple[List[Dict], List[Dict], int, int]:
+                nonlocal executed_rules
                 """
                 递归执行一批规则（异步版本）
                 
@@ -529,19 +607,51 @@ async def _execute_opengrep_scan(
                             
                             if fatal_errors:
                                 logger.warning(f"{indent}Rule {rule_id} has fatal errors, skipping")
+                                executed_rules += 1
+                                progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
+                                _record_scan_progress(
+                                    task_id,
+                                    progress=progress,
+                                    stage="execute_rules",
+                                    message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
+                                )
                                 return [], [], 0, 1
                             
                             if findings:
                                 logger.info(f"{indent}Rule {rule_id} found {len(findings)} findings")
                             
+                            executed_rules += 1
+                            progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
+                            _record_scan_progress(
+                                task_id,
+                                progress=progress,
+                                stage="execute_rules",
+                                message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
+                            )
                             return findings, scan_errors, 1, 0
                             
                         except ValueError as e:
                             logger.warning(f"{indent}Failed to parse output for rule {rule_id}: {e}")
+                            executed_rules += 1
+                            progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
+                            _record_scan_progress(
+                                task_id,
+                                progress=progress,
+                                stage="execute_rules",
+                                message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
+                            )
                             return [], [], 0, 1
 
                     except Exception as e:
                         logger.warning(f"{indent}Failed to execute rule {rule_id}: {e}")
+                        executed_rules += 1
+                        progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
+                        _record_scan_progress(
+                            task_id,
+                            progress=progress,
+                            stage="execute_rules",
+                            message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
+                        )
                         return [], [], 0, 1
                     
                     finally:
@@ -591,6 +701,14 @@ async def _execute_opengrep_scan(
                         if not fatal_errors:
                             # 批量执行成功
                             logger.info(f"{indent}Batch of {batch_size} rules executed successfully, {len(findings)} findings")
+                            executed_rules += batch_size
+                            progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
+                            _record_scan_progress(
+                                task_id,
+                                progress=progress,
+                                stage="execute_rules",
+                                message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
+                            )
                             return findings, scan_errors, batch_size, 0
                         else:
                             # 有致命错误，需要分块执行
@@ -634,12 +752,26 @@ async def _execute_opengrep_scan(
             # 执行所有规则
             logger.info(f"Starting batch execution for {len(valid_rules)} rules")
             all_findings, all_scan_errors, successful_rule_count, failed_rule_count = await execute_rules_batch(valid_rules)
+            _record_scan_progress(
+                task_id,
+                progress=86,
+                stage="aggregate_results",
+                message=f"扫描完成，汇总结果中（成功 {successful_rule_count} / 失败 {failed_rule_count}）",
+            )
 
             # 检查是否有成功执行的规则
             if successful_rule_count == 0:
                 task.status = "failed"
                 task.error_count = 1
                 await db.commit()
+                _record_scan_progress(
+                    task_id,
+                    status="failed",
+                    progress=100,
+                    stage="failed",
+                    message="规则执行阶段全部失败，任务失败",
+                    level="error",
+                )
                 logger.error(f"No valid rules executed successfully for task {task_id}")
                 return
 
@@ -674,6 +806,12 @@ async def _execute_opengrep_scan(
             warning_count = 0
             files_scanned = set()
             lines_scanned = 0
+            _record_scan_progress(
+                task_id,
+                progress=90,
+                stage="persist_findings",
+                message=f"写入扫描结果中（共 {len(all_findings)} 条）",
+            )
 
             for finding in all_findings:
                 try:
@@ -715,6 +853,13 @@ async def _execute_opengrep_scan(
             task.lines_scanned = lines_scanned
 
             await db.commit()
+            _record_scan_progress(
+                task_id,
+                status="completed",
+                progress=100,
+                stage="completed",
+                message=f"扫描完成：发现 {len(all_findings)} 条，扫描文件 {len(files_scanned)} 个",
+            )
             logger.info(
                 f"Scan task {task_id} completed: "
                 f"{len(all_findings)} findings from {successful_rule_count} rules, "
@@ -725,6 +870,14 @@ async def _execute_opengrep_scan(
 
         except Exception as e:
             logger.error(f"Error executing opengrep scan for task {task_id}: {e}")
+            _record_scan_progress(
+                task_id,
+                status="failed",
+                progress=100,
+                stage="failed",
+                message=f"扫描异常终止：{str(e)}",
+                level="error",
+            )
             try:
                 result = await db.execute(
                     select(OpengrepScanTask).where(OpengrepScanTask.id == task_id)
@@ -749,6 +902,55 @@ async def _execute_opengrep_scan(
 logger = logging.getLogger(__name__)
 router = APIRouter()
 VALID_CONFIDENCE_LEVELS = {"HIGH", "MEDIUM", "LOW"}
+SCAN_PROGRESS_MAX_LOGS = 120
+_scan_progress_store: Dict[str, Dict[str, Any]] = {}
+
+
+def _utc_now_iso() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def _record_scan_progress(
+    task_id: str,
+    *,
+    status: Optional[str] = None,
+    progress: Optional[float] = None,
+    stage: Optional[str] = None,
+    message: Optional[str] = None,
+    level: str = "info",
+) -> None:
+    state = _scan_progress_store.get(task_id) or {
+        "task_id": task_id,
+        "status": "pending",
+        "progress": 0.0,
+        "current_stage": "pending",
+        "message": "任务已创建，等待执行",
+        "started_at": _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+        "logs": [],
+    }
+
+    if status:
+        state["status"] = status
+    if progress is not None:
+        state["progress"] = max(0.0, min(100.0, float(progress)))
+    if stage:
+        state["current_stage"] = stage
+    if message:
+        state["message"] = message
+        state["logs"].append(
+            {
+                "timestamp": _utc_now_iso(),
+                "stage": stage or state.get("current_stage") or "unknown",
+                "message": message,
+                "progress": state.get("progress", 0.0),
+                "level": level,
+            }
+        )
+        if len(state["logs"]) > SCAN_PROGRESS_MAX_LOGS:
+            state["logs"] = state["logs"][-SCAN_PROGRESS_MAX_LOGS:]
+    state["updated_at"] = _utc_now_iso()
+    _scan_progress_store[task_id] = state
 
 
 def _normalize_confidence(confidence: Any) -> Optional[str]:
@@ -897,6 +1099,13 @@ async def create_static_task(
     db.add(scan_task)
     await db.commit()
     await db.refresh(scan_task)
+    _record_scan_progress(
+        scan_task.id,
+        status="pending",
+        progress=2,
+        stage="pending",
+        message="任务已创建，等待调度执行",
+    )
 
     # 后台执行扫描
     background_tasks.add_task(
@@ -940,6 +1149,45 @@ async def get_static_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return task
+
+
+@router.get("/tasks/{task_id}/progress", response_model=OpengrepScanProgressResponse)
+async def get_static_task_progress(
+    task_id: str,
+    include_logs: bool = Query(False, description="是否返回进度日志"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """获取静态代码扫描任务执行进度"""
+    result = await db.execute(select(OpengrepScanTask).where(OpengrepScanTask.id == task_id))
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    state = _scan_progress_store.get(task_id)
+    if not state:
+        fallback_progress = 0.0
+        if task.status == "running":
+            fallback_progress = 10.0
+        elif task.status == "completed":
+            fallback_progress = 100.0
+        elif task.status == "failed":
+            fallback_progress = 100.0
+        state = {
+            "task_id": task_id,
+            "status": task.status,
+            "progress": fallback_progress,
+            "current_stage": task.status,
+            "message": f"任务状态：{task.status}",
+            "started_at": _utc_now_iso(),
+            "updated_at": _utc_now_iso(),
+            "logs": [],
+        }
+
+    response_payload = dict(state)
+    if not include_logs:
+        response_payload["logs"] = []
+    return response_payload
 
 
 @router.get("/tasks/{task_id}/findings", response_model=List[OpengrepFindingResponse])
