@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -149,6 +150,7 @@ class OpengrepFindingResponse(BaseModel):
     status: str
     confidence: Optional[str] = Field(None, description="规则置信度: HIGH, MEDIUM, LOW")
     cwe: Optional[List[str]] = Field(None, description="CWE列表")
+    rule_name: Optional[str] = Field(None, description="命中规则名称")
 
     class Config:
         from_attributes = True
@@ -409,6 +411,90 @@ def _is_fatal_rule_error(error_item: Dict[str, Any]) -> bool:
     return False
 
 
+_static_scan_process_lock = threading.Lock()
+_static_running_scan_processes: Dict[str, subprocess.Popen] = {}
+_static_cancelled_scan_tasks: set[str] = set()
+
+
+def _scan_task_key(scan_type: str, task_id: str) -> str:
+    return f"{scan_type}:{task_id}"
+
+
+def _is_scan_task_cancelled(scan_type: str, task_id: str) -> bool:
+    key = _scan_task_key(scan_type, task_id)
+    with _static_scan_process_lock:
+        return key in _static_cancelled_scan_tasks
+
+
+def _clear_scan_task_cancel(scan_type: str, task_id: str) -> None:
+    key = _scan_task_key(scan_type, task_id)
+    with _static_scan_process_lock:
+        _static_cancelled_scan_tasks.discard(key)
+
+
+def _request_scan_task_cancel(scan_type: str, task_id: str) -> bool:
+    """请求取消扫描任务并尝试结束对应进程。"""
+    key = _scan_task_key(scan_type, task_id)
+    process = None
+    with _static_scan_process_lock:
+        _static_cancelled_scan_tasks.add(key)
+        process = _static_running_scan_processes.get(key)
+
+    if not process:
+        return False
+
+    try:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+    except Exception as e:
+        logger.warning("Failed to terminate %s scan process for task %s: %s", scan_type, task_id, e)
+    return True
+
+
+def _run_subprocess_with_tracking(
+    scan_type: str,
+    task_id: str,
+    cmd: List[str],
+    *,
+    env: Optional[Dict[str, str]] = None,
+    timeout: int = 600,
+) -> subprocess.CompletedProcess[str]:
+    """执行外部命令并记录进程句柄，便于用户中止时杀掉进程。"""
+    key = _scan_task_key(scan_type, task_id)
+    process: Optional[subprocess.Popen] = None
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        with _static_scan_process_lock:
+            _static_running_scan_processes[key] = process
+
+        stdout, stderr = process.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    except subprocess.TimeoutExpired:
+        if process:
+            process.kill()
+            process.communicate()
+        raise
+    finally:
+        with _static_scan_process_lock:
+            _static_running_scan_processes.pop(key, None)
+
+
 async def _execute_opengrep_scan(
     task_id: str,
     project_root: str,
@@ -433,6 +519,20 @@ async def _execute_opengrep_scan(
             task = result.scalar_one_or_none()
             if not task:
                 logger.error(f"Task {task_id} not found")
+                return
+
+            if _is_scan_task_cancelled("opengrep", task_id) or task.status == "interrupted":
+                task.status = "interrupted"
+                task.error_count = (task.error_count or 0) + 1
+                await db.commit()
+                _record_scan_progress(
+                    task_id,
+                    status="interrupted",
+                    progress=100,
+                    stage="interrupted",
+                    message="扫描任务已中止（用户操作）",
+                    level="warning",
+                )
                 return
 
             # 更新任务状态为运行中
@@ -567,8 +667,8 @@ async def _execute_opengrep_scan(
             scan_env["NO_PROXY"] = "*"
             scan_env["no_proxy"] = "*"
 
-            # 解析并验证所有规则，构建有效规则列表
-            valid_rules = []
+            # 解析并验证所有规则，构建有效规则列表（含语言信息）
+            valid_rule_entries: List[Dict[str, Any]] = []
             skipped_rule_count = 0
             total_rules = len(rules)
             _record_scan_progress(
@@ -590,7 +690,14 @@ async def _execute_opengrep_scan(
                         cleaned_rule = remove_null_values(r)
                         is_valid, reason = is_valid_rule(cleaned_rule)
                         if is_valid:
-                            valid_rules.append(cleaned_rule)
+                            valid_rule_entries.append(
+                                {
+                                    "rule": cleaned_rule,
+                                    "languages": _extract_rule_languages(
+                                        cleaned_rule, rule.language
+                                    ),
+                                }
+                            )
                         else:
                             rule_id = cleaned_rule.get("id", "unknown")
                             logger.warning(f"Skipping invalid rule {rule_id} from {rule.name}: {reason}")
@@ -607,7 +714,7 @@ async def _execute_opengrep_scan(
                         message=f"加载规则中（{idx}/{total_rules}）",
                     )
 
-            if not valid_rules:
+            if not valid_rule_entries:
                 task.status = "failed"
                 task.error_count = 1
                 await db.commit()
@@ -622,118 +729,159 @@ async def _execute_opengrep_scan(
                 logger.error(f"No valid rules to apply for task {task_id}")
                 return
 
-            logger.info(f"Task {task_id}: {len(valid_rules)} valid rules, {skipped_rule_count} skipped")
+            detected_languages = _detect_project_languages(full_target_path)
+            executable_rule_entries = valid_rule_entries
+            if detected_languages:
+                matched_rule_entries = [
+                    entry
+                    for entry in valid_rule_entries
+                    if _should_scan_rule_for_languages(
+                        entry.get("languages", set()), detected_languages
+                    )
+                ]
+                if matched_rule_entries:
+                    executable_rule_entries = matched_rule_entries
+
+            filtered_rule_count = len(valid_rule_entries) - len(executable_rule_entries)
+            logger.info(
+                "Task %s language-aware rule filtering: project_languages=%s, valid_rules=%s, executable_rules=%s, filtered=%s, skipped_invalid=%s",
+                task_id,
+                sorted(detected_languages),
+                len(valid_rule_entries),
+                len(executable_rule_entries),
+                filtered_rule_count,
+                skipped_rule_count,
+            )
             _record_scan_progress(
                 task_id,
                 progress=28,
                 stage="execute_rules",
-                message=f"开始执行规则扫描（{len(valid_rules)} 条规则）",
+                message=(
+                    f"开始执行规则扫描（可执行 {len(executable_rule_entries)} / "
+                    f"有效 {len(valid_rule_entries)}）"
+                ),
             )
 
-            # 累积所有扫描结果
+            # 单次执行扫描：将规则合并后运行一次 opengrep，避免重复遍历项目造成的性能损耗
             all_findings: List[Dict[str, Any]] = []
             all_scan_errors: List[Dict[str, Any]] = []
             successful_rule_count = 0
             failed_rule_count = 0
-            executed_rules = 0
-            total_rules_for_execution = len(valid_rules)
-            max_parallelism = min(MAX_PARALLEL_RULE_SCANS, max(1, total_rules_for_execution))
-            scan_semaphore = asyncio.Semaphore(max_parallelism)
-            progress_lock = asyncio.Lock()
+            total_rules_for_execution = len(executable_rule_entries)
+            rule_file = None
 
-            async def execute_single_rule(rule: Dict[str, Any]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], int, int]:
-                nonlocal executed_rules
-                rule_id = str(rule.get("id", "unknown"))
-                rule_file = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as tf:
+                    yaml.dump(
+                        {"rules": [entry["rule"] for entry in executable_rule_entries]},
+                        tf,
+                        sort_keys=False,
+                        default_flow_style=False,
+                    )
+                    rule_file = tf.name
 
-                findings: List[Dict[str, Any]] = []
-                scan_errors: List[Dict[str, Any]] = []
-                success_count = 0
-                failed_count = 1
+                jobs = _resolve_opengrep_scan_jobs()
+                cmd = [
+                    "opengrep",
+                    "--config",
+                    rule_file,
+                    "--json",
+                    "--jobs",
+                    str(jobs),
+                    full_target_path,
+                ]
+                _record_scan_progress(
+                    task_id,
+                    progress=40,
+                    stage="execute_rules",
+                    message=f"执行 opengrep 扫描（线程数 {jobs}）",
+                )
 
-                try:
-                    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as tf:
-                        yaml.dump({"rules": [rule]}, tf, sort_keys=False, default_flow_style=False)
-                        rule_file = tf.name
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: _run_subprocess_with_tracking(
+                        "opengrep",
+                        task_id,
+                        cmd,
+                        env=scan_env,
+                        timeout=900,
+                    ),
+                )
 
-                    cmd = [
+                # 兼容旧版本 opengrep 不支持 --jobs 参数
+                if result.returncode != 0 and (
+                    "unrecognized arguments: --jobs" in (result.stderr or "")
+                    or "unknown option '--jobs'" in (result.stderr or "")
+                ):
+                    fallback_cmd = [
                         "opengrep",
                         "--config",
                         rule_file,
                         "--json",
                         full_target_path,
                     ]
-
-                    loop = asyncio.get_event_loop()
-                    async with scan_semaphore:
-                        result = await loop.run_in_executor(
-                            None,
-                            lambda: subprocess.run(
-                                cmd,
-                                capture_output=True,
-                                text=True,
-                                timeout=600,
-                                env=scan_env,
-                            ),
-                        )
-
-                    findings, scan_errors = _parse_opengrep_output(result.stdout)
-                    fatal_errors = [
-                        item for item in scan_errors if _is_fatal_rule_error(item)
-                    ]
-                    if fatal_errors:
-                        logger.warning(
-                            "Rule %s has fatal errors, skipping this rule result",
-                            rule_id,
-                        )
-                        findings = []
-                        scan_errors = []
-                    else:
-                        success_count = 1
-                        failed_count = 0
-                        if findings:
-                            logger.info(
-                                "Rule %s found %s findings",
-                                rule_id,
-                                len(findings),
-                            )
-                except ValueError as e:
-                    logger.warning("Failed to parse output for rule %s: %s", rule_id, e)
-                except Exception as e:
-                    logger.warning("Failed to execute rule %s: %s", rule_id, e)
-                finally:
-                    if rule_file and os.path.exists(rule_file):
-                        try:
-                            os.unlink(rule_file)
-                        except Exception:
-                            pass
-
-                    async with progress_lock:
-                        executed_rules += 1
-                        progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
-                        _record_scan_progress(
+                    logger.warning(
+                        "opengrep does not support --jobs, fallback to single process mode"
+                    )
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda: _run_subprocess_with_tracking(
+                            "opengrep",
                             task_id,
-                            progress=progress,
-                            stage="execute_rules",
-                            message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
-                        )
+                            fallback_cmd,
+                            env=scan_env,
+                            timeout=900,
+                        ),
+                    )
 
-                return findings, scan_errors, success_count, failed_count
+                if _is_scan_task_cancelled("opengrep", task_id):
+                    task.status = "interrupted"
+                    task.error_count = (task.error_count or 0) + 1
+                    await db.commit()
+                    _record_scan_progress(
+                        task_id,
+                        status="interrupted",
+                        progress=100,
+                        stage="interrupted",
+                        message="扫描任务已中止（用户操作）",
+                        level="warning",
+                    )
+                    return
 
-            # 并发执行规则扫描（最多 5 条规则并行）
-            logger.info(
-                "Starting parallel rule execution for %s rules (max_parallel=%s)",
-                len(valid_rules),
-                max_parallelism,
-            )
-            rule_results = await asyncio.gather(
-                *(execute_single_rule(rule) for rule in valid_rules)
-            )
-            for findings, scan_errors, success_count, failed_count in rule_results:
-                all_findings.extend(findings)
-                all_scan_errors.extend(scan_errors)
-                successful_rule_count += success_count
-                failed_rule_count += failed_count
+                all_findings, all_scan_errors = _parse_opengrep_output(result.stdout)
+                fatal_scan_errors = [
+                    item for item in all_scan_errors if _is_fatal_rule_error(item)
+                ]
+                command_failed_without_output = (
+                    result.returncode != 0 and not all_findings and not all_scan_errors
+                )
+                if command_failed_without_output:
+                    logger.warning(
+                        "opengrep execution failed without parsable output: returncode=%s stderr=%s",
+                        result.returncode,
+                        (result.stderr or "").strip()[:400],
+                    )
+                    failed_rule_count = total_rules_for_execution
+                    successful_rule_count = 0
+                elif fatal_scan_errors and not all_findings:
+                    failed_rule_count = total_rules_for_execution
+                    successful_rule_count = 0
+                else:
+                    successful_rule_count = total_rules_for_execution
+                    failed_rule_count = 0
+            except ValueError as e:
+                logger.warning("Failed to parse opengrep output for task %s: %s", task_id, e)
+                failed_rule_count = total_rules_for_execution
+            except Exception as e:
+                logger.warning("Failed to execute opengrep for task %s: %s", task_id, e)
+                failed_rule_count = total_rules_for_execution
+            finally:
+                if rule_file and os.path.exists(rule_file):
+                    try:
+                        os.unlink(rule_file)
+                    except Exception:
+                        pass
 
             _record_scan_progress(
                 task_id,
@@ -761,6 +909,7 @@ async def _execute_opengrep_scan(
             logger.info(
                 f"Task {task_id}: {successful_rule_count} rules executed successfully, "
                 f"{failed_rule_count} rules failed, "
+                f"{filtered_rule_count} rules filtered by project language, "
                 f"{skipped_rule_count} rules skipped during validation"
             )
 
@@ -828,6 +977,20 @@ async def _execute_opengrep_scan(
                     error_count += 1
 
             # 更新任务统计
+            if _is_scan_task_cancelled("opengrep", task_id):
+                task.status = "interrupted"
+                task.error_count = (task.error_count or 0) + 1
+                await db.commit()
+                _record_scan_progress(
+                    task_id,
+                    status="interrupted",
+                    progress=100,
+                    stage="interrupted",
+                    message="扫描任务已中止（用户操作）",
+                    level="warning",
+                )
+                return
+
             task.status = "completed"
             task.total_findings = len(all_findings)
             task.error_count = error_count
@@ -894,6 +1057,7 @@ async def _execute_opengrep_scan(
             except Exception as commit_error:
                 logger.error(f"Failed to update task status: {commit_error}")
         finally:
+            _clear_scan_task_cancel("opengrep", task_id)
             # 清理解压的临时目录
             if project_root and project_root.startswith("/tmp") and os.path.exists(project_root):
                 try:
@@ -907,7 +1071,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 VALID_CONFIDENCE_LEVELS = {"HIGH", "MEDIUM", "LOW"}
 SCAN_PROGRESS_MAX_LOGS = 120
-MAX_PARALLEL_RULE_SCANS = 5
 _scan_progress_store: Dict[str, Dict[str, Any]] = {}
 
 
@@ -995,11 +1158,27 @@ def _extract_rule_lookup_keys(check_id: Any) -> List[str]:
     if not raw_check_id:
         return []
 
-    keys = [raw_check_id]
-    if "." in raw_check_id:
-        suffix = raw_check_id.rsplit(".", 1)[-1].strip()
-        if suffix and suffix not in keys:
-            keys.append(suffix)
+    def _strip_runtime_prefix(value: str) -> str:
+        return re.sub(r"^(?:tmp[-_]+|tem[-_]+)+", "", value, flags=re.IGNORECASE).strip()
+
+    keys: List[str] = []
+
+    def _append(value: str) -> None:
+        normalized = str(value or "").strip()
+        if normalized and normalized not in keys:
+            keys.append(normalized)
+
+    cleaned_check_id = _strip_runtime_prefix(raw_check_id)
+    _append(raw_check_id)
+    _append(cleaned_check_id)
+
+    for candidate in (raw_check_id, cleaned_check_id):
+        if "." in candidate:
+            suffix = candidate.rsplit(".", 1)[-1].strip()
+            cleaned_suffix = _strip_runtime_prefix(suffix)
+            _append(suffix)
+            _append(cleaned_suffix)
+
     return keys
 
 
@@ -1072,6 +1251,152 @@ def _build_finding_path_candidates(file_path: Optional[str]) -> List[str]:
         deduplicated.append(normalized)
         seen.add(normalized)
     return deduplicated
+
+
+LANGUAGE_EXTENSION_MAP: Dict[str, str] = {
+    ".py": "python",
+    ".pyi": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".java": "java",
+    ".go": "go",
+    ".rs": "rust",
+    ".php": "php",
+    ".rb": "ruby",
+    ".swift": "swift",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".scala": "scala",
+    ".cs": "csharp",
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".m": "objective-c",
+    ".mm": "objective-c",
+}
+
+LANGUAGE_FILENAME_MAP: Dict[str, str] = {
+    "dockerfile": "dockerfile",
+    "makefile": "make",
+}
+
+RULE_LANGUAGE_ALIASES: Dict[str, str] = {
+    "js": "javascript",
+    "node": "javascript",
+    "nodejs": "javascript",
+    "ts": "typescript",
+    "golang": "go",
+    "c#": "csharp",
+    "csharp": "csharp",
+    "c++": "cpp",
+    "objc": "objective-c",
+    "obj-c": "objective-c",
+    "objectivec": "objective-c",
+}
+
+RULE_GLOBAL_LANGUAGES = {
+    "generic",
+    "regex",
+    "all",
+    "none",
+    "yaml",
+    "json",
+}
+
+SKIP_LANGUAGE_DETECTION_DIRS = {
+    ".git",
+    ".svn",
+    ".hg",
+    "__pycache__",
+    "node_modules",
+    "vendor",
+    "target",
+    "build",
+    "dist",
+    "out",
+    "venv",
+    ".venv",
+}
+
+MAX_PROJECT_LANGUAGE_DETECTION_FILES = 120000
+
+
+def _normalize_rule_language(language: Optional[str]) -> str:
+    normalized = str(language or "").strip().lower()
+    if not normalized:
+        return ""
+    return RULE_LANGUAGE_ALIASES.get(normalized, normalized)
+
+
+def _extract_rule_languages(rule_payload: Dict[str, Any], fallback_language: Optional[str]) -> set[str]:
+    languages: set[str] = set()
+    rule_languages = rule_payload.get("languages")
+    if isinstance(rule_languages, list):
+        for item in rule_languages:
+            normalized = _normalize_rule_language(str(item))
+            if normalized:
+                languages.add(normalized)
+
+    if not languages and fallback_language:
+        normalized = _normalize_rule_language(fallback_language)
+        if normalized:
+            languages.add(normalized)
+    return languages
+
+
+def _detect_project_languages(scan_root: str) -> set[str]:
+    detected: set[str] = set()
+    scanned_files = 0
+
+    for root, dirs, files in os.walk(scan_root):
+        dirs[:] = [
+            item
+            for item in dirs
+            if item not in SKIP_LANGUAGE_DETECTION_DIRS and not item.startswith(".")
+        ]
+        for filename in files:
+            scanned_files += 1
+            if scanned_files > MAX_PROJECT_LANGUAGE_DETECTION_FILES:
+                return detected
+
+            suffix = Path(filename).suffix.lower()
+            if suffix in LANGUAGE_EXTENSION_MAP:
+                detected.add(LANGUAGE_EXTENSION_MAP[suffix])
+                continue
+
+            language_by_name = LANGUAGE_FILENAME_MAP.get(filename.lower())
+            if language_by_name:
+                detected.add(language_by_name)
+
+    return detected
+
+
+def _should_scan_rule_for_languages(
+    rule_languages: set[str], project_languages: set[str]
+) -> bool:
+    if not rule_languages:
+        return True
+    if rule_languages & RULE_GLOBAL_LANGUAGES:
+        return True
+    if not project_languages:
+        return True
+    return bool(rule_languages & project_languages)
+
+
+def _resolve_opengrep_scan_jobs() -> int:
+    configured = str(os.getenv("OPENGREP_SCAN_JOBS", "")).strip()
+    if configured.isdigit():
+        return max(1, min(16, int(configured)))
+    cpu_count = os.cpu_count() or 2
+    return max(1, min(8, cpu_count))
 
 
 @router.get("/tasks", response_model=List[OpengrepScanTaskResponse])
@@ -1205,6 +1530,41 @@ async def get_static_task(
     return task
 
 
+@router.post("/tasks/{task_id}/interrupt")
+async def interrupt_static_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """中止运行中的 Opengrep 静态扫描任务。"""
+    result = await db.execute(select(OpengrepScanTask).where(OpengrepScanTask.id == task_id))
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.status in {"completed", "failed", "interrupted"}:
+        return {
+            "message": f"任务当前状态为 {task.status}，无需中止",
+            "task_id": task_id,
+            "status": task.status,
+        }
+
+    _request_scan_task_cancel("opengrep", task_id)
+    task.status = "interrupted"
+    task.error_count = (task.error_count or 0) + 1
+    await db.commit()
+    _record_scan_progress(
+        task_id,
+        status="interrupted",
+        progress=100,
+        stage="interrupted",
+        message="扫描任务已中止（用户操作）",
+        level="warning",
+    )
+
+    return {"message": "任务已中止", "task_id": task_id, "status": "interrupted"}
+
+
 @router.get("/tasks/{task_id}/progress", response_model=OpengrepScanProgressResponse)
 async def get_static_task_progress(
     task_id: str,
@@ -1282,12 +1642,13 @@ async def get_static_task_findings(
     rule_name_candidates: set[str] = set()
     for finding in findings:
         if isinstance(finding.rule, dict):
-            check_id = finding.rule.get("check_id")
+            check_id = finding.rule.get("check_id") or finding.rule.get("id")
             for key in _extract_rule_lookup_keys(check_id):
                 rule_name_candidates.add(key)
 
     rule_confidence_map: Dict[str, Optional[str]] = {}
     rule_cwe_map: Dict[str, Optional[List[str]]] = {}
+    rule_display_name_map: Dict[str, str] = {}
     if rule_name_candidates:
         rule_result = await db.execute(
             select(OpengrepRule.name, OpengrepRule.confidence, OpengrepRule.cwe).where(
@@ -1295,28 +1656,38 @@ async def get_static_task_findings(
             )
         )
         for rule_name, rule_confidence, rule_cwe in rule_result.all():
-            rule_confidence_map[str(rule_name)] = _normalize_confidence(rule_confidence)
-            rule_cwe_map[str(rule_name)] = rule_cwe
+            normalized_rule_name = str(rule_name)
+            for lookup_key in _extract_rule_lookup_keys(normalized_rule_name):
+                rule_confidence_map[lookup_key] = _normalize_confidence(rule_confidence)
+                rule_cwe_map[lookup_key] = rule_cwe
+                rule_display_name_map[lookup_key] = normalized_rule_name
 
     response_findings = []
     for finding in findings:
         resolved_confidence = _extract_finding_payload_confidence(finding.rule)
         resolved_cwe = None
+        resolved_rule_name = None
 
         if not resolved_confidence:
             if isinstance(finding.rule, dict):
-                for key in _extract_rule_lookup_keys(finding.rule.get("check_id")):
+                check_id = finding.rule.get("check_id") or finding.rule.get("id")
+                for key in _extract_rule_lookup_keys(check_id):
                     if rule_confidence_map.get(key):
                         resolved_confidence = rule_confidence_map[key]
+                        resolved_rule_name = rule_display_name_map.get(key)
                         if not resolved_cwe and rule_cwe_map.get(key):
                             resolved_cwe = rule_cwe_map[key]
                         break
         else:
             # 即使找到了confidence，也继续查找CWE
             if isinstance(finding.rule, dict):
-                for key in _extract_rule_lookup_keys(finding.rule.get("check_id")):
+                check_id = finding.rule.get("check_id") or finding.rule.get("id")
+                for key in _extract_rule_lookup_keys(check_id):
                     if rule_cwe_map.get(key):
                         resolved_cwe = rule_cwe_map[key]
+                    if not resolved_rule_name and rule_display_name_map.get(key):
+                        resolved_rule_name = rule_display_name_map[key]
+                    if resolved_cwe and resolved_rule_name:
                         break
 
         if confidence_filter and resolved_confidence != confidence_filter:
@@ -1334,6 +1705,7 @@ async def get_static_task_findings(
             "status": finding.status,
             "confidence": _format_confidence_for_response(resolved_confidence),
             "cwe": resolved_cwe,
+            "rule_name": resolved_rule_name,
         }
         response_findings.append(finding_dict)
 
@@ -3122,6 +3494,13 @@ async def _execute_gitleaks_scan(
                 logger.error(f"Gitleaks task {task_id} not found")
                 return
 
+            if _is_scan_task_cancelled("gitleaks", task_id) or task.status == "interrupted":
+                task.status = "interrupted"
+                if not task.error_message:
+                    task.error_message = "扫描任务已中止（用户操作）"
+                await db.commit()
+                return
+
             # 更新任务状态为运行中
             task.status = "running"
             await db.commit()
@@ -3168,13 +3547,20 @@ async def _execute_gitleaks_scan(
                 loop = asyncio.get_event_loop()
                 result = await loop.run_in_executor(
                     None,
-                    lambda: subprocess.run(
+                    lambda: _run_subprocess_with_tracking(
+                        "gitleaks",
+                        task_id,
                         cmd,
-                        capture_output=True,
-                        text=True,
                         timeout=600,
                     )
                 )
+
+                if _is_scan_task_cancelled("gitleaks", task_id):
+                    task.status = "interrupted"
+                    if not task.error_message:
+                        task.error_message = "扫描任务已中止（用户操作）"
+                    await db.commit()
+                    return
                 
                 end_time = datetime.now()
                 scan_duration_ms = int((end_time - start_time).total_seconds() * 1000)
@@ -3259,6 +3645,13 @@ async def _execute_gitleaks_scan(
                         logger.error(f"Error processing gitleaks finding: {e}")
 
                 # 更新任务统计
+                if _is_scan_task_cancelled("gitleaks", task_id):
+                    task.status = "interrupted"
+                    if not task.error_message:
+                        task.error_message = "扫描任务已中止（用户操作）"
+                    await db.commit()
+                    return
+
                 task.status = "completed"
                 task.total_findings = len(findings)
                 task.scan_duration_ms = scan_duration_ms
@@ -3309,6 +3702,14 @@ async def _execute_gitleaks_scan(
                 logger.error(
                     f"Failed to update task status after error: {commit_error}"
                 )
+        finally:
+            _clear_scan_task_cancel("gitleaks", task_id)
+            if project_root and project_root.startswith("/tmp") and os.path.exists(project_root):
+                try:
+                    shutil.rmtree(project_root, ignore_errors=True)
+                    logger.info(f"Cleaned up temporary project directory: {project_root}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temporary directory {project_root}: {e}")
 
 
 @router.post("/gitleaks/scan", response_model=GitleaksScanTaskResponse)
@@ -3408,6 +3809,36 @@ async def get_gitleaks_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return task
+
+
+@router.post("/gitleaks/tasks/{task_id}/interrupt")
+async def interrupt_gitleaks_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """中止运行中的 Gitleaks 扫描任务。"""
+    result = await db.execute(
+        select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.status in {"completed", "failed", "interrupted"}:
+        return {
+            "message": f"任务当前状态为 {task.status}，无需中止",
+            "task_id": task_id,
+            "status": task.status,
+        }
+
+    _request_scan_task_cancel("gitleaks", task_id)
+    task.status = "interrupted"
+    if not task.error_message:
+        task.error_message = "扫描任务已中止（用户操作）"
+    await db.commit()
+
+    return {"message": "任务已中止", "task_id": task_id, "status": "interrupted"}
 
 
 @router.delete("/gitleaks/tasks/{task_id}")

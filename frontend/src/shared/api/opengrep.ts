@@ -299,6 +299,7 @@ export interface OpengrepFinding {
     id: string;
     scan_task_id: string;
     rule: Record<string, any>;
+    rule_name?: string | null;
     description?: string | null;
     file_path: string;
     start_line?: number | null;
@@ -352,6 +353,13 @@ export async function getOpengrepScanTask(
     taskId: string,
 ): Promise<OpengrepScanTask> {
     const response = await apiClient.get(`/static-tasks/tasks/${taskId}`);
+    return response.data;
+}
+
+export async function interruptOpengrepScanTask(
+    taskId: string,
+): Promise<{ message: string; task_id: string; status: string }> {
+    const response = await apiClient.post(`/static-tasks/tasks/${taskId}/interrupt`);
     return response.data;
 }
 

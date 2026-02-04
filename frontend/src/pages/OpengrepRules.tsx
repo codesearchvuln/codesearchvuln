@@ -154,8 +154,14 @@ export default function OpengrepRules() {
         correct: true,
         is_active: true,
     });
+    const sanitizeRuleSearchKeyword = (value?: string | null) =>
+        String(value || "")
+            .trim()
+            .replace(/^(?:tmp[-_]+|tem[-_]+)/i, "");
     const queryParams = new URLSearchParams(location.search);
-    const highlightRuleKeyword = queryParams.get("highlightRule")?.trim() || "";
+    const highlightRuleKeyword = sanitizeRuleSearchKeyword(
+        queryParams.get("highlightRule"),
+    );
     const returnTo = queryParams.get("returnTo") || "";
 
     useEffect(() => {

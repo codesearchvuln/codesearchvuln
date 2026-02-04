@@ -54,6 +54,15 @@ export async function getGitleaksScanTask(
     return response.data;
 }
 
+export async function interruptGitleaksScanTask(
+    taskId: string,
+): Promise<{ message: string; task_id: string; status: string }> {
+    const response = await apiClient.post(
+        `/static-tasks/gitleaks/tasks/${taskId}/interrupt`,
+    );
+    return response.data;
+}
+
 export async function getGitleaksScanTasks(params?: {
     projectId?: string;
     skip?: number;

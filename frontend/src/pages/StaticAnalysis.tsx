@@ -9,6 +9,16 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
     Select,
     SelectContent,
     SelectItem,
@@ -25,6 +35,7 @@ import {
 } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
+    interruptOpengrepScanTask,
     getOpengrepFindingContext,
     getOpengrepScanFindings,
     getOpengrepScanProgress,
@@ -36,6 +47,7 @@ import {
     type OpengrepScanTask,
 } from "@/shared/api/opengrep";
 import {
+    interruptGitleaksScanTask,
     getGitleaksFindings,
     getGitleaksScanTask,
     updateGitleaksFindingStatus,
@@ -50,6 +62,7 @@ import {
 import {
     AlertCircle,
     ArrowLeft,
+    Ban,
     ChevronDown,
     ChevronUp,
     RefreshCw,
@@ -118,11 +131,17 @@ const normalizePath = (path?: string | null) => {
     return path;
 };
 
+const stripRuntimeRulePrefix = (value?: string | null) =>
+    String(value || "")
+        .trim()
+        .replace(/^(?:tmp[-_]+|tem[-_]+)/i, "");
+
 const getCheckIdSuffix = (checkId?: string | null) => {
-    const value = String(checkId || "");
+    const value = String(checkId || "").trim();
     if (!value) return "";
     const parts = value.split(".");
-    return parts[parts.length - 1] || value;
+    const suffix = parts[parts.length - 1] || value;
+    return stripRuntimeRulePrefix(suffix);
 };
 
 const parseConfidenceLevel = (
@@ -201,7 +220,8 @@ const isSameOpengrepFindings = (
             a.id !== b.id ||
             a.status !== b.status ||
             a.severity !== b.severity ||
-            a.confidence !== b.confidence
+            a.confidence !== b.confidence ||
+            a.rule_name !== b.rule_name
         ) {
             return false;
         }
@@ -283,6 +303,8 @@ export default function StaticAnalysis() {
     const [showDetail, setShowDetail] = useState(false);
     const [selectedFinding, setSelectedFinding] =
         useState<OpengrepFinding | null>(null);
+    const [showInterruptConfirm, setShowInterruptConfirm] = useState(false);
+    const [interruptingTask, setInterruptingTask] = useState(false);
     const [findingContext, setFindingContext] =
         useState<OpengrepFindingContext | null>(null);
     const [loadingFindingContext, setLoadingFindingContext] = useState(false);
@@ -763,6 +785,13 @@ export default function StaticAnalysis() {
         return currentStatus === targetStatus ? "open" : targetStatus;
     };
 
+    const isInterruptibleStatus = (status?: string | null) =>
+        status === "pending" || status === "running";
+
+    const hasInterruptibleTask =
+        isInterruptibleStatus(opengrepTask?.status) ||
+        isInterruptibleStatus(gitleaksTask?.status);
+
     const loadFindingContext = async (finding: OpengrepFinding) => {
         if (!opengrepTaskId) return;
         setLoadingFindingContext(true);
@@ -788,12 +817,58 @@ export default function StaticAnalysis() {
         void loadFindingContext(finding);
     };
 
-    const handleJumpToRule = (checkId: string) => {
+    const handleJumpToRule = (checkId: string, ruleName?: string | null) => {
         const currentRoute = `${location.pathname}${location.search}`;
+        const fallbackKeyword =
+            getCheckIdSuffix(checkId) || stripRuntimeRulePrefix(checkId);
+        const highlightKeyword =
+            stripRuntimeRulePrefix(ruleName) || fallbackKeyword;
         const query = new URLSearchParams();
-        query.set("highlightRule", checkId);
+        query.set("highlightRule", highlightKeyword);
         query.set("returnTo", currentRoute);
         navigate(`/opengrep-rules?${query.toString()}`);
+    };
+
+    const handleInterruptTasks = async () => {
+        setInterruptingTask(true);
+        try {
+            const actions: Promise<unknown>[] = [];
+
+            if (opengrepTaskId && isInterruptibleStatus(opengrepTask?.status)) {
+                actions.push(interruptOpengrepScanTask(opengrepTaskId));
+            }
+            if (gitleaksTaskId && isInterruptibleStatus(gitleaksTask?.status)) {
+                actions.push(interruptGitleaksScanTask(gitleaksTaskId));
+            }
+
+            if (actions.length === 0) {
+                toast.info("当前没有可中止的运行中任务");
+                setShowInterruptConfirm(false);
+                return;
+            }
+
+            const results = await Promise.allSettled(actions);
+            const successCount = results.filter((item) => item.status === "fulfilled").length;
+            const failedCount = results.length - successCount;
+
+            if (successCount > 0) {
+                toast.success("已发送中止请求，任务状态正在更新");
+            }
+            if (failedCount > 0) {
+                toast.error("部分任务中止失败，请稍后重试");
+            }
+
+            setShowInterruptConfirm(false);
+            await Promise.all([
+                loadOpengrepTask({ silent: true }),
+                loadOpengrepFindings({ silent: true }),
+                loadOpengrepProgress(showProgressLogs),
+                loadGitleaksTask({ silent: true }),
+                loadGitleaksFindings({ silent: true }),
+            ]);
+        } finally {
+            setInterruptingTask(false);
+        }
     };
 
     const activeTask = activeTab === "opengrep" ? opengrepTask : gitleaksTask;
@@ -855,6 +930,17 @@ export default function StaticAnalysis() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                        {hasInterruptibleTask && (
+                            <Button
+                                variant="outline"
+                                className="cyber-btn-outline border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+                                onClick={() => setShowInterruptConfirm(true)}
+                                disabled={interruptingTask}
+                            >
+                                <Ban className="w-4 h-4 mr-2" />
+                                中止
+                            </Button>
+                        )}
                         <Button
                             variant="outline"
                             className="cyber-btn-outline"
@@ -1092,6 +1178,11 @@ export default function StaticAnalysis() {
                                 <div className="divide-y divide-border">
                                     {opengrepFindings.map((finding) => {
                                         const meta = getRuleMeta(finding);
+                                        const ruleDisplayId =
+                                            getCheckIdSuffix(meta.checkId) || meta.checkId;
+                                        const matchedRuleName = stripRuntimeRulePrefix(
+                                            finding.rule_name,
+                                        );
                                         const isVerified =
                                             finding.status === "verified";
                                         const isFalsePositive =
@@ -1137,10 +1228,14 @@ export default function StaticAnalysis() {
                                                             </Badge>
                                                         )}
                                                         <span className="text-sm text-foreground font-bold">
-                                                            {getCheckIdSuffix(
-                                                                meta.checkId,
-                                                            )}
+                                                            {matchedRuleName || ruleDisplayId}
                                                         </span>
+                                                        {matchedRuleName &&
+                                                            matchedRuleName !== ruleDisplayId && (
+                                                                <span className="text-xs text-muted-foreground">
+                                                                    {ruleDisplayId}
+                                                                </span>
+                                                            )}
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <Button
@@ -1465,6 +1560,39 @@ export default function StaticAnalysis() {
                 )}
             </Tabs>
 
+            <AlertDialog
+                open={showInterruptConfirm}
+                onOpenChange={(open) => {
+                    if (!interruptingTask) {
+                        setShowInterruptConfirm(open);
+                    }
+                }}
+            >
+                <AlertDialogContent className="cyber-dialog border-border">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>确认中止扫描任务？</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            中止后当前运行中的静态分析任务会被标记为“已中断”，已产生的结果会保留。
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={interruptingTask}>
+                            取消
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={(e) => {
+                                e.preventDefault();
+                                void handleInterruptTasks();
+                            }}
+                            disabled={interruptingTask}
+                            className="bg-rose-600 hover:bg-rose-700 text-white"
+                        >
+                            {interruptingTask ? "中止中..." : "确认中止"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
             <Dialog
                 open={showDetail}
                 onOpenChange={(open) => {
@@ -1491,6 +1619,9 @@ export default function StaticAnalysis() {
                                 selectedFinding.status === "false_positive";
                             const ruleDisplayId =
                                 getCheckIdSuffix(meta.checkId) || meta.checkId;
+                            const matchedRuleName = stripRuntimeRulePrefix(
+                                selectedFinding.rule_name,
+                            );
                             return (
                                 <div className="flex-1 overflow-y-auto p-6">
                                     <div className="space-y-6">
@@ -1529,8 +1660,14 @@ export default function StaticAnalysis() {
                                                 </Badge>
                                             )}
                                             <span className="text-sm text-foreground font-bold">
-                                                {ruleDisplayId}
+                                                {matchedRuleName || ruleDisplayId}
                                             </span>
+                                            {matchedRuleName &&
+                                                matchedRuleName !== ruleDisplayId && (
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {ruleDisplayId}
+                                                    </span>
+                                                )}
                                         </div>
 
                                         <div className="space-y-3">
@@ -1557,8 +1694,15 @@ export default function StaticAnalysis() {
                                                     </div>
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                         <span className="text-foreground break-all">
-                                                            {ruleDisplayId}
+                                                            {matchedRuleName || ruleDisplayId}
                                                         </span>
+                                                        {matchedRuleName &&
+                                                            matchedRuleName !==
+                                                                ruleDisplayId && (
+                                                                <span className="text-[10px] text-muted-foreground">
+                                                                    ({ruleDisplayId})
+                                                                </span>
+                                                            )}
                                                         <Button
                                                             type="button"
                                                             size="sm"
@@ -1567,6 +1711,7 @@ export default function StaticAnalysis() {
                                                             onClick={() =>
                                                                 handleJumpToRule(
                                                                     meta.checkId,
+                                                                    selectedFinding.rule_name,
                                                                 )
                                                             }
                                                         >
