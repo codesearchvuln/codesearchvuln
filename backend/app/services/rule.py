@@ -346,7 +346,7 @@ async def get_rule_by_patch(request: OpengrepRuleCreateRequest) -> Dict[str, Any
         if temp_file.exists():
             temp_file.unlink()
         shutil.rmtree(config.generated_rules_dir, ignore_errors=True)
-        # shutil.rmtree(config.repos_cache_dir, ignore_errors=True)
+        shutil.rmtree(config.repos_cache_dir, ignore_errors=True)
 
 
 def _normalize_rule_yaml(
