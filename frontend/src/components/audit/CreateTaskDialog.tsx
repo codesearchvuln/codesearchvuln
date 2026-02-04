@@ -54,6 +54,7 @@ import {
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import {
   getOpengrepActiveRules,
+  setOpengrepActiveRules,
   subscribeOpengrepActiveRules,
 } from "@/shared/stores/opengrepRulesStore";
 
@@ -85,6 +86,25 @@ const DEFAULT_EXCLUDES = [
   "build/**",
   "*.log",
 ];
+
+const extractApiErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    const detail = (error as any)?.response?.data?.detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      const msgs = detail
+        .map((item: any) =>
+          typeof item?.msg === "string" ? item.msg : String(item)
+        )
+        .filter(Boolean);
+      if (msgs.length > 0) return msgs.join("; ");
+    }
+    return error.message || "未知错误";
+  }
+  const detail = (error as any)?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  return "未知错误";
+};
 
 export default function CreateTaskDialog({
   open,
@@ -181,11 +201,16 @@ export default function CreateTaskDialog({
   useEffect(() => {
     const loadStaticRules = async () => {
       if (!open || auditMode !== "static" || !staticTools.opengrep) return;
-      if (staticRules.length > 0) return;
       setLoadingStaticRules(true);
       try {
         const rules = await getOpengrepRules({ is_active: true });
         setStaticRules(rules);
+        setOpengrepActiveRules(rules);
+        setSelectedRuleIds((prev) => {
+          if (prev.length === 0) return prev;
+          const validRuleIds = new Set(rules.map((rule) => rule.id));
+          return prev.filter((id) => validRuleIds.has(id));
+        });
       } catch (error) {
         console.error("加载静态分析规则失败:", error);
       } finally {
@@ -193,7 +218,7 @@ export default function CreateTaskDialog({
       }
     };
     loadStaticRules();
-  }, [open, auditMode, staticRules.length, staticTools.opengrep]);
+  }, [open, auditMode, staticTools.opengrep]);
 
   useEffect(() => {
     if (open) {
@@ -265,20 +290,53 @@ export default function CreateTaskDialog({
         let gitleaksTask: { id: string } | null = null;
 
         if (staticTools.opengrep) {
-          const activeRuleIds =
-            selectedRuleIds.length > 0
-              ? selectedRuleIds
-              : staticRules.map((rule) => rule.id);
+          const pickActiveRuleIds = (rules: OpengrepRule[]) => {
+            const validRuleIds = new Set(rules.map((rule) => rule.id));
+            const selected = selectedRuleIds.filter((id) =>
+              validRuleIds.has(id)
+            );
+            return selected.length > 0
+              ? selected
+              : rules.map((rule) => rule.id);
+          };
+
+          const activeRuleIds = pickActiveRuleIds(staticRules);
           if (activeRuleIds.length === 0) {
             toast.error("未找到启用的规则，请先在规则管理中启用规则");
             return;
           }
-          opengrepTask = await createOpengrepScanTask({
-            project_id: selectedProject.id,
-            name: `静态分析-Opengrep-${selectedProject.name}`,
-            rule_ids: activeRuleIds,
-            target_path: ".",
-          });
+          try {
+            opengrepTask = await createOpengrepScanTask({
+              project_id: selectedProject.id,
+              name: `静态分析-Opengrep-${selectedProject.name}`,
+              rule_ids: activeRuleIds,
+              target_path: ".",
+            });
+          } catch (error) {
+            const apiMsg = extractApiErrorMessage(error);
+            const shouldReloadRules =
+              apiMsg.includes("部分规则不存在") || apiMsg.includes("规则不存在");
+            if (!shouldReloadRules) {
+              throw error;
+            }
+
+            // 规则表在后端被重建后，前端本地缓存可能仍是旧 ID，自动刷新后重试一次
+            const freshRules = await getOpengrepRules({ is_active: true });
+            setStaticRules(freshRules);
+            setOpengrepActiveRules(freshRules);
+
+            const retryRuleIds = pickActiveRuleIds(freshRules);
+            if (retryRuleIds.length === 0) {
+              throw new Error("规则已更新，请刷新规则后重试");
+            }
+
+            opengrepTask = await createOpengrepScanTask({
+              project_id: selectedProject.id,
+              name: `静态分析-Opengrep-${selectedProject.name}`,
+              rule_ids: retryRuleIds,
+              target_path: ".",
+            });
+          }
         }
 
         if (staticTools.gitleaks) {
@@ -324,7 +382,7 @@ export default function CreateTaskDialog({
       setSelectedFiles(undefined);
       setExcludePatterns(DEFAULT_EXCLUDES);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "未知错误";
+      const msg = extractApiErrorMessage(error);
       toast.error(`启动失败: ${msg}`);
     } finally {
       setCreating(false);

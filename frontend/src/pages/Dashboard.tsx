@@ -24,6 +24,7 @@ import { getPromptTemplates } from "@/shared/api/prompts";
 import { getAgentTasks, type AgentTask } from "@/shared/api/agentTasks";
 import { getOpengrepScanTasks, type OpengrepScanTask } from "@/shared/api/opengrep";
 import { getGitleaksScanTasks, type GitleaksScanTask } from "@/shared/api/gitleaks";
+import { runWithRefreshMode } from "@/shared/utils/refreshMode";
 
 type RecentActivityItem = {
   id: string;
@@ -114,12 +115,8 @@ export default function Dashboard() {
   };
 
   const loadDashboardData = async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
     try {
-      if (!silent) {
-        setLoading(true);
-      }
-
+      await runWithRefreshMode(async () => {
       const results = await Promise.allSettled([
         api.getProjectStats(),
         api.getProjects(),
@@ -304,13 +301,10 @@ export default function Dashboard() {
       } catch (error) {
         console.error('获取规则和模板统计失败:', error);
       }
+      }, { ...options, setLoading });
     } catch (error) {
       console.error('仪表盘数据加载失败:', error);
       toast.error("数据加载失败");
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
     }
   };
 

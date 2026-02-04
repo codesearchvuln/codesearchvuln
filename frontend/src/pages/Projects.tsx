@@ -479,17 +479,6 @@ export default function Projects() {
                 </DialogTrigger>
                 <DialogContent className="!w-[min(90vw,700px)] !max-w-none max-h-[85vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
                     {/* Terminal Header */}
-                    <div className="flex items-center gap-2 px-4 py-3 cyber-bg-elevated border-b border-border flex-shrink-0">
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-green-500/80" />
-                        </div>
-                        <span className="ml-2 font-mono text-xs text-muted-foreground tracking-wider">
-                            new_project@vulhunter
-                        </span>
-                    </div>
-
                     <DialogHeader className="px-6 pt-4 flex-shrink-0">
                         <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
                             <Terminal className="w-5 h-5 text-primary" />
@@ -507,13 +496,7 @@ export default function Projects() {
                                     <GitBranch className="w-4 h-4 mr-2" />
                                     Git 仓库
                                 </TabsTrigger>
-                                <TabsTrigger
-                                    value="upload"
-                                    className="flex-1 data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2 text-muted-foreground transition-all rounded-sm"
-                                >
-                                    <Upload className="w-4 h-4 mr-2" />
-                                    上传源码
-                                </TabsTrigger>
+
                             </TabsList>
 
                             <TabsContent

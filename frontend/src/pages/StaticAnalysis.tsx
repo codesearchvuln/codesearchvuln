@@ -42,6 +42,10 @@ import {
 } from "@/shared/api/gitleaks";
 import { showToastQueue } from "@/shared/utils/toastQueue";
 import {
+    runWithRefreshMode,
+    type RefreshOptions,
+} from "@/shared/utils/refreshMode";
+import {
     AlertCircle,
     ArrowLeft,
     ChevronDown,
@@ -94,6 +98,8 @@ const FALSE_POSITIVE_BADGE_CLASSES = {
     active: "bg-amber-500/20 text-amber-300 border-amber-500/30",
     inactive: "bg-muted text-muted-foreground border-border",
 };
+const FINDINGS_PAGE_SIZE = 200;
+const FINDINGS_MAX_PAGES = 500;
 
 const normalizePath = (path?: string | null) => {
     if (!path) return "";
@@ -158,6 +164,88 @@ const formatJson = (value: unknown) => {
     }
 };
 
+const isSameOpengrepTask = (
+    prev: OpengrepScanTask | null,
+    next: OpengrepScanTask,
+) => {
+    if (!prev) return false;
+    return (
+        prev.id === next.id &&
+        prev.status === next.status &&
+        prev.total_findings === next.total_findings &&
+        prev.error_count === next.error_count &&
+        prev.warning_count === next.warning_count &&
+        prev.files_scanned === next.files_scanned &&
+        prev.lines_scanned === next.lines_scanned &&
+        prev.updated_at === next.updated_at
+    );
+};
+
+const isSameGitleaksTask = (
+    prev: GitleaksScanTask | null,
+    next: GitleaksScanTask,
+) => {
+    if (!prev) return false;
+    return (
+        prev.id === next.id &&
+        prev.status === next.status &&
+        prev.total_findings === next.total_findings &&
+        prev.files_scanned === next.files_scanned &&
+        prev.error_message === next.error_message &&
+        prev.updated_at === next.updated_at
+    );
+};
+
+const isSameOpengrepFindings = (
+    prev: OpengrepFinding[],
+    next: OpengrepFinding[],
+) => {
+    if (prev.length !== next.length) return false;
+    for (let i = 0; i < prev.length; i += 1) {
+        const a = prev[i];
+        const b = next[i];
+        if (
+            a.id !== b.id ||
+            a.status !== b.status ||
+            a.severity !== b.severity ||
+            a.confidence !== b.confidence
+        ) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const isSameGitleaksFindings = (
+    prev: GitleaksFinding[],
+    next: GitleaksFinding[],
+) => {
+    if (prev.length !== next.length) return false;
+    for (let i = 0; i < prev.length; i += 1) {
+        const a = prev[i];
+        const b = next[i];
+        if (a.id !== b.id || a.status !== b.status) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const isSameOpengrepProgress = (
+    prev: OpengrepScanProgress | null,
+    next: OpengrepScanProgress,
+) => {
+    if (!prev) return false;
+    return (
+        prev.status === next.status &&
+        prev.progress === next.progress &&
+        prev.current_stage === next.current_stage &&
+        prev.message === next.message &&
+        prev.logs.length === next.logs.length &&
+        prev.updated_at === next.updated_at
+    );
+};
+
 export default function StaticAnalysis() {
     const { isEnglish } = useI18n();
     const { taskId } = useParams<{ taskId: string }>();
@@ -204,6 +292,8 @@ export default function StaticAnalysis() {
         useState<OpengrepFinding | null>(null);
     const lastOpengrepNotifiedStatusRef = useRef<string | null>(null);
     const lastGitleaksNotifiedStatusRef = useRef<string | null>(null);
+    const opengrepSilentRefreshRef = useRef(false);
+    const gitleaksSilentRefreshRef = useRef(false);
 
     const searchParams = useMemo(
         () => new URLSearchParams(location.search),
@@ -268,35 +358,52 @@ export default function StaticAnalysis() {
         return String(confidence || "");
     };
 
-    const loadOpengrepTask = async () => {
+    const loadOpengrepTask = async (options?: RefreshOptions) => {
         if (!opengrepTaskId) return;
-        setLoadingOpengrepTask(true);
         try {
-            const data = await getOpengrepScanTask(opengrepTaskId);
-            setOpengrepTask(data);
+            const data = await runWithRefreshMode(
+                () => getOpengrepScanTask(opengrepTaskId),
+                { ...options, setLoading: setLoadingOpengrepTask },
+            );
+            setOpengrepTask((prev) => (isSameOpengrepTask(prev, data) ? prev : data));
         } catch (error) {
-            toast.error("加载 Opengrep 任务失败");
-        } finally {
-            setLoadingOpengrepTask(false);
+            if (!options?.silent) {
+                toast.error("加载 Opengrep 任务失败");
+            }
         }
     };
 
-    const loadOpengrepFindings = async () => {
+    const loadOpengrepFindings = async (options?: RefreshOptions) => {
         if (!opengrepTaskId) return;
-        setLoadingOpengrepFindings(true);
         try {
-            const data = await getOpengrepScanFindings({
-                taskId: opengrepTaskId,
-                severity: severityFilter || undefined,
-                confidence: confidenceFilter || undefined,
-                status: statusFilter || undefined,
-                limit: 200,
-            });
-            setOpengrepFindings(data);
+            const data = await runWithRefreshMode(
+                async () => {
+                    const allFindings: OpengrepFinding[] = [];
+                    let skip = 0;
+                    for (let page = 0; page < FINDINGS_MAX_PAGES; page += 1) {
+                        const pageFindings = await getOpengrepScanFindings({
+                            taskId: opengrepTaskId,
+                            severity: severityFilter || undefined,
+                            confidence: confidenceFilter || undefined,
+                            status: statusFilter || undefined,
+                            skip,
+                            limit: FINDINGS_PAGE_SIZE,
+                        });
+                        allFindings.push(...pageFindings);
+                        if (pageFindings.length < FINDINGS_PAGE_SIZE) break;
+                        skip += FINDINGS_PAGE_SIZE;
+                    }
+                    return allFindings;
+                },
+                { ...options, setLoading: setLoadingOpengrepFindings },
+            );
+            setOpengrepFindings((prev) =>
+                isSameOpengrepFindings(prev, data) ? prev : data,
+            );
         } catch (error) {
-            toast.error("加载 Opengrep 结果失败");
-        } finally {
-            setLoadingOpengrepFindings(false);
+            if (!options?.silent) {
+                toast.error("加载 Opengrep 结果失败");
+            }
         }
     };
 
@@ -304,39 +411,85 @@ export default function StaticAnalysis() {
         if (!opengrepTaskId) return;
         try {
             const data = await getOpengrepScanProgress(opengrepTaskId, withLogs);
-            setOpengrepProgress(data);
+            setOpengrepProgress((prev) =>
+                isSameOpengrepProgress(prev, data) ? prev : data,
+            );
         } catch (error) {
             // 不阻塞主流程，静默失败
         }
     };
 
-    const loadGitleaksTask = async () => {
+    const loadGitleaksTask = async (options?: RefreshOptions) => {
         if (!gitleaksTaskId) return;
-        setLoadingGitleaksTask(true);
         try {
-            const data = await getGitleaksScanTask(gitleaksTaskId);
-            setGitleaksTask(data);
+            const data = await runWithRefreshMode(
+                () => getGitleaksScanTask(gitleaksTaskId),
+                { ...options, setLoading: setLoadingGitleaksTask },
+            );
+            setGitleaksTask((prev) => (isSameGitleaksTask(prev, data) ? prev : data));
         } catch (error) {
-            toast.error("加载 Gitleaks 任务失败");
-        } finally {
-            setLoadingGitleaksTask(false);
+            if (!options?.silent) {
+                toast.error("加载 Gitleaks 任务失败");
+            }
         }
     };
 
-    const loadGitleaksFindings = async () => {
+    const loadGitleaksFindings = async (options?: RefreshOptions) => {
         if (!gitleaksTaskId) return;
-        setLoadingGitleaksFindings(true);
         try {
-            const data = await getGitleaksFindings({
-                taskId: gitleaksTaskId,
-                status: gitleaksStatusFilter || undefined,
-                limit: 200,
-            });
-            setGitleaksFindings(data);
+            const data = await runWithRefreshMode(
+                async () => {
+                    const allFindings: GitleaksFinding[] = [];
+                    let skip = 0;
+                    for (let page = 0; page < FINDINGS_MAX_PAGES; page += 1) {
+                        const pageFindings = await getGitleaksFindings({
+                            taskId: gitleaksTaskId,
+                            status: gitleaksStatusFilter || undefined,
+                            skip,
+                            limit: FINDINGS_PAGE_SIZE,
+                        });
+                        allFindings.push(...pageFindings);
+                        if (pageFindings.length < FINDINGS_PAGE_SIZE) break;
+                        skip += FINDINGS_PAGE_SIZE;
+                    }
+                    return allFindings;
+                },
+                { ...options, setLoading: setLoadingGitleaksFindings },
+            );
+            setGitleaksFindings((prev) =>
+                isSameGitleaksFindings(prev, data) ? prev : data,
+            );
         } catch (error) {
-            toast.error("加载 Gitleaks 结果失败");
+            if (!options?.silent) {
+                toast.error("加载 Gitleaks 结果失败");
+            }
+        }
+    };
+
+    const refreshOpengrepSilently = async () => {
+        if (opengrepSilentRefreshRef.current) return;
+        opengrepSilentRefreshRef.current = true;
+        try {
+            await Promise.all([
+                loadOpengrepTask({ silent: true }),
+                loadOpengrepFindings({ silent: true }),
+                loadOpengrepProgress(showProgressLogs),
+            ]);
         } finally {
-            setLoadingGitleaksFindings(false);
+            opengrepSilentRefreshRef.current = false;
+        }
+    };
+
+    const refreshGitleaksSilently = async () => {
+        if (gitleaksSilentRefreshRef.current) return;
+        gitleaksSilentRefreshRef.current = true;
+        try {
+            await Promise.all([
+                loadGitleaksTask({ silent: true }),
+                loadGitleaksFindings({ silent: true }),
+            ]);
+        } finally {
+            gitleaksSilentRefreshRef.current = false;
         }
     };
 
@@ -377,9 +530,7 @@ export default function StaticAnalysis() {
             return;
         }
         const timer = setInterval(() => {
-            loadOpengrepTask();
-            loadOpengrepFindings();
-            loadOpengrepProgress(showProgressLogs);
+            refreshOpengrepSilently();
         }, 5000);
         return () => clearInterval(timer);
     }, [opengrepTaskId, opengrepTask?.status, showProgressLogs]);
@@ -395,8 +546,7 @@ export default function StaticAnalysis() {
             return;
         }
         const timer = setInterval(() => {
-            loadGitleaksTask();
-            loadGitleaksFindings();
+            refreshGitleaksSilently();
         }, 5000);
         return () => clearInterval(timer);
     }, [gitleaksTaskId, gitleaksTask?.status]);
@@ -607,6 +757,10 @@ export default function StaticAnalysis() {
         if (opengrepTask?.status === "running") return 10;
         return 0;
     }, [opengrepProgress?.progress, opengrepTask?.status]);
+    const showOpengrepLoadingSkeleton =
+        loadingOpengrepFindings && opengrepFindings.length === 0;
+    const showGitleaksLoadingSkeleton =
+        loadingGitleaksFindings && gitleaksFindings.length === 0;
 
     return (
         <div className="space-y-6 p-6 bg-background min-h-screen font-mono relative">
@@ -651,12 +805,9 @@ export default function StaticAnalysis() {
                             className="cyber-btn-ghost"
                             onClick={() => {
                                 if (activeTab === "opengrep") {
-                                    loadOpengrepTask();
-                                    loadOpengrepFindings();
-                                    loadOpengrepProgress(showProgressLogs);
+                                    refreshOpengrepSilently();
                                 } else {
-                                    loadGitleaksTask();
-                                    loadGitleaksFindings();
+                                    refreshGitleaksSilently();
                                 }
                             }}
                             disabled={activeLoadingTask || activeLoadingFindings}
@@ -831,16 +982,19 @@ export default function StaticAnalysis() {
                             </div>
                             <div className="flex items-end">
                                 <div className="text-xs text-muted-foreground font-mono">
-                                    {loadingOpengrepFindings
+                                    {showOpengrepLoadingSkeleton
                                         ? "加载中..."
                                         : `共 ${opengrepFindings.length} 条结果`}
+                                    {loadingOpengrepFindings &&
+                                        opengrepFindings.length > 0 &&
+                                        " · 后台更新中"}
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     <div className="cyber-card relative z-10 overflow-hidden mt-4">
-                        {loadingOpengrepFindings ? (
+                        {showOpengrepLoadingSkeleton ? (
                             <div className="p-16 text-center">
                                 <div className="loading-spinner mx-auto mb-4" />
                                 <p className="text-muted-foreground font-mono text-sm">
@@ -1045,16 +1199,19 @@ export default function StaticAnalysis() {
                             </div>
                             <div className="flex items-end">
                                 <div className="text-xs text-muted-foreground font-mono">
-                                    {loadingGitleaksFindings
+                                    {showGitleaksLoadingSkeleton
                                         ? "加载中..."
                                         : `共 ${gitleaksFindings.length} 条结果`}
+                                    {loadingGitleaksFindings &&
+                                        gitleaksFindings.length > 0 &&
+                                        " · 后台更新中"}
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     <div className="cyber-card relative z-10 overflow-hidden mt-4">
-                        {loadingGitleaksFindings ? (
+                        {showGitleaksLoadingSkeleton ? (
                             <div className="p-16 text-center">
                                 <div className="loading-spinner mx-auto mb-4" />
                                 <p className="text-muted-foreground font-mono text-sm">

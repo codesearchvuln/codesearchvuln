@@ -1,6 +1,7 @@
 from .user import User
 from .user_config import UserConfig
 from .project import Project, ProjectMember
+from .project_info import ProjectInfo
 from .audit import AuditTask, AuditIssue
 from .analysis import InstantAnalysis
 from .prompt_template import PromptTemplate
@@ -11,6 +12,5 @@ from .agent_task import (
     VulnerabilitySeverity, VulnerabilityType, FindingStatus
 )
 from .gitleaks import GitleaksScanTask, GitleaksFinding
-
 
 

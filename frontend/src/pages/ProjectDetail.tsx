@@ -627,26 +627,35 @@ export default function ProjectDetail() {
                 setStaticTasks([]);
             }
 
-            try {
-                setProjectInfoStatus("loading");
-                const infoRes = await apiClient.get(`/projects/info/${id}`);
-                if (infoRes.data?.status) {
-                    setProjectInfo(infoRes.data);
-                    setProjectInfoStatus(infoRes.data.status || "completed");
-                } else if (infoRes.data?.detail) {
-                    setProjectInfo(null);
-                    setProjectInfoStatus("pending");
-                } else {
-                    setProjectInfo(infoRes.data);
-                    setProjectInfoStatus("completed");
-                }
-            } catch (infoError: any) {
-                const statusCode = infoError?.response?.status;
-                if (statusCode === 202) {
-                    setProjectInfoStatus("pending");
-                } else {
-                    console.warn("Failed to load project info:", infoError);
-                    setProjectInfoStatus("failed");
+            const shouldLoadProjectInfo =
+                projectRes.status === "fulfilled" &&
+                isRepositoryProject(projectRes.value);
+            if (!shouldLoadProjectInfo) {
+                // ZIP 项目常用于静态扫描，不需要触发 LLM 项目概览分析
+                setProjectInfo(null);
+                setProjectInfoStatus("idle");
+            } else {
+                try {
+                    setProjectInfoStatus("loading");
+                    const infoRes = await apiClient.get(`/projects/info/${id}`);
+                    if (infoRes.data?.status) {
+                        setProjectInfo(infoRes.data);
+                        setProjectInfoStatus(infoRes.data.status || "completed");
+                    } else if (infoRes.data?.detail) {
+                        setProjectInfo(null);
+                        setProjectInfoStatus("pending");
+                    } else {
+                        setProjectInfo(infoRes.data);
+                        setProjectInfoStatus("completed");
+                    }
+                } catch (infoError: any) {
+                    const statusCode = infoError?.response?.status;
+                    if (statusCode === 202) {
+                        setProjectInfoStatus("pending");
+                    } else {
+                        console.warn("Failed to load project info:", infoError);
+                        setProjectInfoStatus("failed");
+                    }
                 }
             }
         } catch (error) {

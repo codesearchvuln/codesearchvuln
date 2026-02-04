@@ -90,7 +90,7 @@ class OpengrepScanTaskCreate(BaseModel):
 
     project_id: str = Field(..., description="项目ID")
     name: Optional[str] = Field(None, description="任务名称")
-    rule_ids: Optional[List[str]] = Field(None, description="选择的规则ID列表")
+    rule_ids: List[str] = Field(default_factory=list, description="选择的规则ID列表")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
 
 
@@ -910,6 +910,14 @@ def _utc_now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
+def _dt_to_iso(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.isoformat() + "Z"
+    return dt.isoformat()
+
+
 def _record_scan_progress(
     task_id: str,
     *,
@@ -1073,10 +1081,17 @@ async def create_static_task(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    if not request.rule_ids:
+        raise HTTPException(status_code=400, detail="rule_ids 不能为空")
+
+    normalized_rule_ids = list(dict.fromkeys(request.rule_ids))
+
     # 验证规则存在
-    result = await db.execute(select(OpengrepRule).where(OpengrepRule.id.in_(request.rule_ids)))
+    result = await db.execute(
+        select(OpengrepRule).where(OpengrepRule.id.in_(normalized_rule_ids))
+    )
     rules = result.scalars().all()
-    if len(rules) != len(request.rule_ids):
+    if len(rules) != len(normalized_rule_ids):
         raise HTTPException(status_code=404, detail="部分规则不存在")
 
     # 获取项目根目录（先从 zip 文件中查找）
@@ -1094,7 +1109,7 @@ async def create_static_task(
         name=request.name or f"Scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         status="pending",
         target_path=request.target_path,
-        rulesets=json.dumps([{"rule_id": rid} for rid in request.rule_ids]),
+        rulesets=json.dumps([{"rule_id": rid} for rid in normalized_rule_ids]),
     )
     db.add(scan_task)
     await db.commit()
@@ -1113,7 +1128,7 @@ async def create_static_task(
         scan_task.id,
         project_root,
         request.target_path,
-        request.rule_ids,
+        normalized_rule_ids,
     )
 
     return scan_task
@@ -1179,8 +1194,8 @@ async def get_static_task_progress(
             "progress": fallback_progress,
             "current_stage": task.status,
             "message": f"任务状态：{task.status}",
-            "started_at": _utc_now_iso(),
-            "updated_at": _utc_now_iso(),
+            "started_at": _dt_to_iso(task.created_at) or _utc_now_iso(),
+            "updated_at": _dt_to_iso(task.updated_at) or _dt_to_iso(task.created_at) or _utc_now_iso(),
             "logs": [],
         }
 

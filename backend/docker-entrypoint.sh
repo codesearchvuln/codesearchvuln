@@ -48,6 +48,13 @@ echo "📦 执行数据库迁移..."
 
 echo "✅ 数据库迁移完成"
 
+# 可选：重置 opengrep_rules 表并重建规则（结构升级时使用）
+if [ "${RESET_STATIC_SCAN_TABLES_ON_DEPLOY}" = "true" ] || [ "${RESET_STATIC_SCAN_TABLES_ON_DEPLOY}" = "1" ]; then
+    echo "🧹 重置 opengrep_rules 表并重建规则..."
+    .venv/bin/python scripts/reset_static_scan_tables.py
+    echo "✅ opengrep_rules 表重置完成"
+fi
+
 # 启动 uvicorn
 echo "🌐 启动 API 服务..."
 exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
