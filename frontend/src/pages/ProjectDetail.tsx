@@ -1453,68 +1453,6 @@ export default function ProjectDetail() {
                                 </div>
                             </div>
 
-                            {/* ZIP项目提示 */}
-                            {editForm.source_type === "zip" && (
-                                <div className="border-t border-border pt-4">
-                                    <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded">
-                                        <div className="flex items-start space-x-3">
-                                            <Upload className="w-5 h-5 text-amber-400 mt-0.5" />
-                                            <div className="text-sm font-mono">
-                                                <p className="font-bold text-amber-300 mb-1 uppercase">
-                                                    源码归档项目
-                                                </p>
-                                                <p className="text-amber-400/80 text-xs">
-                                                    此项目通过上传源码归档文件创建。每次进行代码审计时，需要在创建任务时重新上传归档文件。
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* 编程语言 */}
-                            <div className="space-y-4 border-t border-border pt-4">
-                                <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground">
-                                    编程语言
-                                </h3>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                    {supportedLanguages.map((lang) => (
-                                        <div
-                                            key={lang}
-                                            className={`flex items-center space-x-2 p-3 border cursor-pointer transition-all rounded ${
-                                                editForm.programming_languages?.includes(
-                                                    lang,
-                                                )
-                                                    ? "border-primary bg-primary/10 text-primary"
-                                                    : "border-border hover:border-border text-muted-foreground"
-                                            }`}
-                                            onClick={() =>
-                                                handleToggleLanguage(lang)
-                                            }
-                                        >
-                                            <div
-                                                className={`w-4 h-4 border-2 rounded-sm flex items-center justify-center ${
-                                                    editForm.programming_languages?.includes(
-                                                        lang,
-                                                    )
-                                                        ? "bg-primary border-primary"
-                                                        : "border-border"
-                                                }`}
-                                            >
-                                                {editForm.programming_languages?.includes(
-                                                    lang,
-                                                ) && (
-                                                    <CheckCircle className="w-3 h-3 text-foreground" />
-                                                )}
-                                            </div>
-                                            <span className="text-sm font-bold font-mono">
-                                                {lang}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
                             <div className="flex justify-end space-x-3 pt-6 border-t border-border">
                                 <Button
                                     onClick={handleSaveSettings}

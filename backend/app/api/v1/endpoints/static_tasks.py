@@ -145,6 +145,24 @@ class OpengrepFindingResponse(BaseModel):
         from_attributes = True
 
 
+class OpengrepFindingContextLine(BaseModel):
+    line_number: int
+    content: str
+    is_hit: bool
+
+
+class OpengrepFindingContextResponse(BaseModel):
+    task_id: str
+    finding_id: str
+    file_path: str
+    start_line: int
+    end_line: int
+    before: int
+    after: int
+    total_lines: int
+    lines: List[OpengrepFindingContextLine]
+
+
 class OpengrepScanProgressLogEntry(BaseModel):
     """扫描进度日志条目"""
 
@@ -1013,6 +1031,40 @@ def _extract_finding_payload_confidence(rule_data: Any) -> Optional[str]:
     return None
 
 
+def _build_finding_path_candidates(file_path: Optional[str]) -> List[str]:
+    raw = str(file_path or "").strip().replace("\\", "/")
+    if not raw:
+        return []
+
+    candidates: List[str] = [raw]
+
+    tmp_index = raw.find("/tmp/")
+    if tmp_index >= 0:
+        trimmed = raw[tmp_index + 5 :]
+        parts = [part for part in trimmed.split("/") if part]
+        if len(parts) >= 2:
+            candidates.append("/".join(parts[1:]))
+        if len(parts) >= 3:
+            candidates.append("/".join(parts[2:]))
+
+    if raw.startswith("/"):
+        candidates.append(raw.lstrip("/"))
+
+    base_name = os.path.basename(raw)
+    if base_name:
+        candidates.append(base_name)
+
+    deduplicated: List[str] = []
+    seen = set()
+    for item in candidates:
+        normalized = item.strip()
+        if not normalized or normalized in seen:
+            continue
+        deduplicated.append(normalized)
+        seen.add(normalized)
+    return deduplicated
+
+
 @router.get("/tasks", response_model=List[OpengrepScanTaskResponse])
 async def list_static_tasks(
     project_id: Optional[str] = Query(None, description="按项目ID过滤"),
@@ -1280,6 +1332,125 @@ async def get_static_task_findings(
         response_findings = response_findings[skip : skip + limit]
 
     return response_findings
+
+
+@router.get(
+    "/tasks/{task_id}/findings/{finding_id}/context",
+    response_model=OpengrepFindingContextResponse,
+)
+async def get_static_task_finding_context(
+    task_id: str,
+    finding_id: str,
+    before: int = Query(5, ge=0, le=20),
+    after: int = Query(5, ge=0, le=20),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """获取某条静态扫描缺陷的命中上下文代码。"""
+    task_result = await db.execute(
+        select(OpengrepScanTask).where(OpengrepScanTask.id == task_id)
+    )
+    task = task_result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    finding_result = await db.execute(
+        select(OpengrepFinding).where(
+            (OpengrepFinding.id == finding_id)
+            & (OpengrepFinding.scan_task_id == task_id)
+        )
+    )
+    finding = finding_result.scalar_one_or_none()
+    if not finding:
+        raise HTTPException(status_code=404, detail="漏洞不存在")
+
+    project_root = await _get_project_root(task.project_id)
+    if not project_root:
+        raise HTTPException(status_code=404, detail="未找到项目源码，无法加载上下文")
+
+    try:
+        scan_rule = finding.rule if isinstance(finding.rule, dict) else {}
+        start_line = (
+            int(scan_rule.get("start", {}).get("line") or 0)
+            if isinstance(scan_rule, dict)
+            else 0
+        )
+        end_line = (
+            int(scan_rule.get("end", {}).get("line") or 0)
+            if isinstance(scan_rule, dict)
+            else 0
+        )
+        if not start_line:
+            start_line = int(finding.start_line or 1)
+        if not end_line or end_line < start_line:
+            end_line = start_line
+
+        resolved_file_path: Optional[str] = None
+        selected_relative_path: Optional[str] = None
+
+        for candidate in _build_finding_path_candidates(finding.file_path):
+            if os.path.isabs(candidate):
+                normalized_candidate = os.path.normpath(candidate)
+            else:
+                normalized_candidate = os.path.normpath(
+                    os.path.join(project_root, candidate)
+                )
+            if not normalized_candidate.startswith(os.path.normpath(project_root)):
+                continue
+            if os.path.isfile(normalized_candidate):
+                resolved_file_path = normalized_candidate
+                selected_relative_path = os.path.relpath(
+                    normalized_candidate, project_root
+                )
+                break
+
+        if not resolved_file_path:
+            raise HTTPException(status_code=404, detail="未找到命中源码文件")
+
+        with open(resolved_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            source_lines = f.read().splitlines()
+
+        total_lines = len(source_lines)
+        if total_lines == 0:
+            return {
+                "task_id": task_id,
+                "finding_id": finding_id,
+                "file_path": selected_relative_path or finding.file_path,
+                "start_line": start_line,
+                "end_line": end_line,
+                "before": before,
+                "after": after,
+                "total_lines": 0,
+                "lines": [],
+            }
+
+        context_start = max(1, start_line - before)
+        context_end = min(total_lines, end_line + after)
+        context_lines: List[Dict[str, Any]] = []
+
+        for line_no in range(context_start, context_end + 1):
+            context_lines.append(
+                {
+                    "line_number": line_no,
+                    "content": source_lines[line_no - 1],
+                    "is_hit": start_line <= line_no <= end_line,
+                }
+            )
+
+        return {
+            "task_id": task_id,
+            "finding_id": finding_id,
+            "file_path": selected_relative_path or finding.file_path,
+            "start_line": start_line,
+            "end_line": end_line,
+            "before": before,
+            "after": after,
+            "total_lines": total_lines,
+            "lines": context_lines,
+        }
+    finally:
+        if project_root and project_root.startswith("/tmp") and os.path.exists(project_root):
+            shutil.rmtree(project_root, ignore_errors=True)
 
 
 @router.post("/findings/{finding_id}/status")

@@ -977,7 +977,7 @@ export default function Projects() {
                                         )}
                                     </div>
                                     <div>
-                                        <h3 className="font-bold text-base text-foreground group-hover:text-primary transition-colors">
+                                        <h3 className="font-bold text-lg text-foreground group-hover:text-primary transition-colors leading-tight">
                                             <Link
                                                 to={`/projects/${project.id}`}
                                             >
@@ -1007,7 +1007,7 @@ export default function Projects() {
                             {/* Card Body */}
                             <div className="p-4 flex-1 space-y-3">
                                 {project.description && (
-                                    <p className="text-sm text-muted-foreground font-mono line-clamp-2 border-l-2 border-border pl-2">
+                                    <p className="text-base text-muted-foreground font-mono line-clamp-2 border-l-2 border-border pl-2 leading-relaxed">
                                         {project.description}
                                     </p>
                                 )}
@@ -1038,32 +1038,6 @@ export default function Projects() {
                                     </div>
                                 </div>
 
-                                {project.programming_languages && (
-                                    <div className="flex flex-wrap gap-1">
-                                        {JSON.parse(
-                                            project.programming_languages,
-                                        )
-                                            .slice(0, 4)
-                                            .map((lang: string) => (
-                                                <span
-                                                    key={lang}
-                                                    className="text-xs font-mono font-bold border border-primary/30 px-1.5 py-0.5 bg-primary/10 text-primary rounded"
-                                                >
-                                                    {lang.toUpperCase()}
-                                                </span>
-                                            ))}
-                                        {JSON.parse(
-                                            project.programming_languages,
-                                        ).length > 4 && (
-                                            <span className="text-xs font-mono font-bold border border-border px-1.5 py-0.5 bg-muted text-muted-foreground rounded">
-                                                +
-                                                {JSON.parse(
-                                                    project.programming_languages,
-                                                ).length - 4}
-                                            </span>
-                                        )}
-                                    </div>
-                                )}
                             </div>
 
                             {/* Card Footer */}
@@ -1089,26 +1063,14 @@ export default function Projects() {
                                     <Shield className="w-3 h-3 mr-2" />
                                     审计
                                 </Button>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="cyber-btn-ghost h-8 px-0"
-                                        onClick={() => handleEditClick(project)}
-                                    >
-                                        <Edit className="w-3 h-3" />
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="cyber-btn-ghost h-8 px-0 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
-                                        onClick={() =>
-                                            handleDeleteClick(project)
-                                        }
-                                    >
-                                        <Trash2 className="w-3 h-3" />
-                                    </Button>
-                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="cyber-btn-ghost h-8 px-0 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
+                                    onClick={() => handleDeleteClick(project)}
+                                >
+                                    <Trash2 className="w-3 h-3" />
+                                </Button>
                             </div>
                         </div>
                     ))

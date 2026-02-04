@@ -291,6 +291,24 @@ export interface OpengrepFinding {
     confidence?: string | null;
 }
 
+export interface OpengrepFindingContextLine {
+    line_number: number;
+    content: string;
+    is_hit: boolean;
+}
+
+export interface OpengrepFindingContext {
+    task_id: string;
+    finding_id: string;
+    file_path: string;
+    start_line: number;
+    end_line: number;
+    before: number;
+    after: number;
+    total_lines: number;
+    lines: OpengrepFindingContextLine[];
+}
+
 export type ConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
 
 function normalizeConfidence(
@@ -355,6 +373,24 @@ export async function getOpengrepScanFindings(params: {
         ...item,
         confidence: normalizeConfidence(item?.confidence),
     }));
+}
+
+export async function getOpengrepFindingContext(params: {
+    taskId: string;
+    findingId: string;
+    before?: number;
+    after?: number;
+}): Promise<OpengrepFindingContext> {
+    const response = await apiClient.get(
+        `/static-tasks/tasks/${params.taskId}/findings/${params.findingId}/context`,
+        {
+            params: {
+                before: params.before ?? 5,
+                after: params.after ?? 5,
+            },
+        },
+    );
+    return response.data;
 }
 
 export async function getOpengrepScanTasks(params?: {

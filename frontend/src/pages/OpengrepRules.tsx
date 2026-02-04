@@ -47,10 +47,12 @@ import {
     ChevronLeft,
     ChevronRight,
     AlertTriangle,
+    ArrowLeft,
     Database,
     ShieldCheck,
     ListFilter,
 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
     getOpengrepRules,
     getOpengrepRule,
@@ -76,6 +78,8 @@ import { useI18n } from "@/shared/i18n";
 
 export default function OpengrepRules() {
     const { t, isEnglish } = useI18n();
+    const navigate = useNavigate();
+    const location = useLocation();
     const [rules, setRules] = useState<OpengrepRule[]>([]);
     const [ruleStats, setRuleStats] = useState({ total: 0, active: 0 });
     const [loading, setLoading] = useState(true);
@@ -145,11 +149,20 @@ export default function OpengrepRules() {
         correct: true,
         is_active: true,
     });
+    const queryParams = new URLSearchParams(location.search);
+    const highlightRuleKeyword = queryParams.get("highlightRule")?.trim() || "";
+    const returnTo = queryParams.get("returnTo") || "";
 
     useEffect(() => {
         loadRules();
         loadRuleStats();
     }, []);
+
+    useEffect(() => {
+        if (!highlightRuleKeyword) return;
+        setSearchTerm(highlightRuleKeyword);
+        setCurrentPage(1);
+    }, [highlightRuleKeyword]);
 
     // 当筛选条件改变时，重新加载规则
     useEffect(() => {
@@ -696,6 +709,15 @@ export default function OpengrepRules() {
         );
     });
 
+    const isHighlightedRule = (rule: OpengrepRule) => {
+        if (!highlightRuleKeyword) return false;
+        const keyword = highlightRuleKeyword.toLowerCase();
+        return (
+            rule.id.toLowerCase().includes(keyword) ||
+            rule.name.toLowerCase().includes(keyword)
+        );
+    };
+
     // 分页逻辑
     const totalPages = Math.ceil(filteredRules.length / pageSize);
     const paginatedRules = filteredRules.slice(
@@ -814,6 +836,25 @@ export default function OpengrepRules() {
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto">
                 <div className="space-y-6 p-6 relative z-10">
+                    {returnTo && (
+                        <div className="cyber-card p-3 border border-primary/40 bg-primary/5 flex items-center justify-between gap-3">
+                            <div className="text-xs text-muted-foreground font-mono">
+                                {highlightRuleKeyword
+                                    ? `已跳转命中规则：${highlightRuleKeyword}`
+                                    : "已从扫描结果跳转到规则详情"}
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="cyber-btn-outline h-8"
+                                onClick={() => navigate(returnTo)}
+                            >
+                                <ArrowLeft className="w-3 h-3 mr-1" />
+                                返回扫描结果
+                            </Button>
+                        </div>
+                    )}
+
                     {/* Filters */}
                     <div className="cyber-card p-4 relative z-10 space-y-4">
                         <div>
@@ -1171,7 +1212,11 @@ export default function OpengrepRules() {
                                             {paginatedRules.map((rule) => (
                                                 <div
                                                     key={rule.id}
-                                                    className="p-4 hover:bg-muted/50 transition-colors border-b border-border last:border-0"
+                                                    className={`p-4 hover:bg-muted/50 transition-colors border-b border-border last:border-0 ${
+                                                        isHighlightedRule(rule)
+                                                            ? "bg-primary/10 border-l-2 border-l-primary"
+                                                            : ""
+                                                    }`}
                                                 >
                                                     <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
                                                         <div className="flex gap-3 flex-1 min-w-0">

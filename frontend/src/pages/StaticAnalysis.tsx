@@ -25,10 +25,12 @@ import {
 } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
+    getOpengrepFindingContext,
     getOpengrepScanFindings,
     getOpengrepScanProgress,
     getOpengrepScanTask,
     updateOpengrepFindingStatus,
+    type OpengrepFindingContext,
     type OpengrepFinding,
     type OpengrepScanProgress,
     type OpengrepScanTask,
@@ -146,24 +148,13 @@ const getRuleMeta = (finding: OpengrepFinding) => {
         path: rule.path || finding.file_path,
         line: rule.start?.line || finding.start_line,
         lines: extra.lines || finding.code_snippet || "",
-        fingerprint: extra.fingerprint,
-        engineKind: extra.engine_kind,
         validationState: extra.validation_state,
-        metavars: extra.metavars,
         start: rule.start,
         end: rule.end,
         metadata,
         extra,
         rule,
     };
-};
-
-const formatJson = (value: unknown) => {
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch {
-        return String(value ?? "");
-    }
 };
 
 const isSameOpengrepTask = (
@@ -292,6 +283,9 @@ export default function StaticAnalysis() {
     const [showDetail, setShowDetail] = useState(false);
     const [selectedFinding, setSelectedFinding] =
         useState<OpengrepFinding | null>(null);
+    const [findingContext, setFindingContext] =
+        useState<OpengrepFindingContext | null>(null);
+    const [loadingFindingContext, setLoadingFindingContext] = useState(false);
     const lastOpengrepNotifiedStatusRef = useRef<string | null>(null);
     const lastGitleaksNotifiedStatusRef = useRef<string | null>(null);
     const opengrepSilentRefreshRef = useRef(false);
@@ -769,9 +763,37 @@ export default function StaticAnalysis() {
         return currentStatus === targetStatus ? "open" : targetStatus;
     };
 
+    const loadFindingContext = async (finding: OpengrepFinding) => {
+        if (!opengrepTaskId) return;
+        setLoadingFindingContext(true);
+        try {
+            const context = await getOpengrepFindingContext({
+                taskId: opengrepTaskId,
+                findingId: finding.id,
+                before: 5,
+                after: 5,
+            });
+            setFindingContext(context);
+        } catch (error) {
+            setFindingContext(null);
+        } finally {
+            setLoadingFindingContext(false);
+        }
+    };
+
     const openDetail = (finding: OpengrepFinding) => {
         setSelectedFinding(finding);
+        setFindingContext(null);
         setShowDetail(true);
+        void loadFindingContext(finding);
+    };
+
+    const handleJumpToRule = (checkId: string) => {
+        const currentRoute = `${location.pathname}${location.search}`;
+        const query = new URLSearchParams();
+        query.set("highlightRule", checkId);
+        query.set("returnTo", currentRoute);
+        navigate(`/opengrep-rules?${query.toString()}`);
     };
 
     const activeTask = activeTab === "opengrep" ? opengrepTask : gitleaksTask;
@@ -807,7 +829,6 @@ export default function StaticAnalysis() {
                 <div className="flex items-center justify-between mb-4">
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                            <Shield className="w-6 h-6 text-primary" />
                             <h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
                                 静态分析结果
                             </h1>
@@ -1444,23 +1465,19 @@ export default function StaticAnalysis() {
                 )}
             </Tabs>
 
-            <Dialog open={showDetail} onOpenChange={setShowDetail}>
+            <Dialog
+                open={showDetail}
+                onOpenChange={(open) => {
+                    setShowDetail(open);
+                    if (!open) {
+                        setSelectedFinding(null);
+                        setFindingContext(null);
+                    }
+                }}
+            >
                 <DialogContent className="!w-[min(90vw,980px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
-                    {/* Terminal Header */}
-                    <div className="flex items-center gap-2 px-4 py-3 cyber-bg-elevated border-b border-border flex-shrink-0">
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-green-500/80" />
-                        </div>
-                        <span className="ml-2 font-mono text-xs text-muted-foreground tracking-wider">
-                            static_finding@vulhunter
-                        </span>
-                    </div>
-
                     <DialogHeader className="px-6 pt-4 flex-shrink-0">
                         <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
-                            <Shield className="w-5 h-5 text-primary" />
                             结果详情
                         </DialogTitle>
                     </DialogHeader>
@@ -1472,6 +1489,8 @@ export default function StaticAnalysis() {
                                 selectedFinding.status === "verified";
                             const isFalsePositive =
                                 selectedFinding.status === "false_positive";
+                            const ruleDisplayId =
+                                getCheckIdSuffix(meta.checkId) || meta.checkId;
                             return (
                                 <div className="flex-1 overflow-y-auto p-6">
                                     <div className="space-y-6">
@@ -1510,7 +1529,7 @@ export default function StaticAnalysis() {
                                                 </Badge>
                                             )}
                                             <span className="text-sm text-foreground font-bold">
-                                                {getCheckIdSuffix(meta.checkId)}
+                                                {ruleDisplayId}
                                             </span>
                                         </div>
 
@@ -1534,19 +1553,25 @@ export default function StaticAnalysis() {
                                                 </div>
                                                 <div>
                                                     <div className="uppercase text-[10px] text-muted-foreground mb-1">
-                                                        规则指纹
+                                                        命中规则
                                                     </div>
-                                                    <div className="text-foreground break-all">
-                                                        {meta.fingerprint ||
-                                                            "-"}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="uppercase text-[10px] text-muted-foreground mb-1">
-                                                        引擎类型
-                                                    </div>
-                                                    <div className="text-foreground">
-                                                        {meta.engineKind || "-"}
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="text-foreground break-all">
+                                                            {ruleDisplayId}
+                                                        </span>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="h-6 px-2 text-[10px] cyber-btn-outline"
+                                                            onClick={() =>
+                                                                handleJumpToRule(
+                                                                    meta.checkId,
+                                                                )
+                                                            }
+                                                        >
+                                                            查看规则
+                                                        </Button>
                                                     </div>
                                                 </div>
                                                 <div>
@@ -1572,69 +1597,57 @@ export default function StaticAnalysis() {
                                             </div>
                                         )}
 
-                                        {(meta.lines ||
+                                        {(loadingFindingContext ||
+                                            findingContext?.lines?.length ||
+                                            meta.lines ||
                                             selectedFinding.code_snippet) && (
                                             <div className="space-y-3">
                                                 <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
                                                     代码片段
                                                 </h3>
-                                                <pre className="text-xs font-mono text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
-                                                    {meta.lines ||
-                                                        selectedFinding.code_snippet}
-                                                </pre>
+                                                {loadingFindingContext ? (
+                                                    <div className="text-xs text-muted-foreground font-mono bg-muted border border-border rounded p-3">
+                                                        正在加载上下文...
+                                                    </div>
+                                                ) : findingContext?.lines &&
+                                                  findingContext.lines.length >
+                                                      0 ? (
+                                                    <div className="bg-muted border border-border rounded overflow-hidden">
+                                                        <div className="max-h-[380px] overflow-auto">
+                                                            {findingContext.lines.map(
+                                                                (line) => (
+                                                                    <div
+                                                                        key={
+                                                                            line.line_number
+                                                                        }
+                                                                        className={`grid grid-cols-[56px_1fr] text-xs font-mono border-b border-border/60 last:border-b-0 ${
+                                                                            line.is_hit
+                                                                                ? "bg-sky-500/15"
+                                                                                : ""
+                                                                        }`}
+                                                                    >
+                                                                        <div className="px-2 py-1.5 text-right text-muted-foreground border-r border-border/60 select-none">
+                                                                            {
+                                                                                line.line_number
+                                                                            }
+                                                                        </div>
+                                                                        <div className="px-3 py-1.5 text-foreground whitespace-pre-wrap break-words">
+                                                                            {line.content ||
+                                                                                " "}
+                                                                        </div>
+                                                                    </div>
+                                                                ),
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <pre className="text-xs font-mono text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
+                                                        {meta.lines ||
+                                                            selectedFinding.code_snippet}
+                                                    </pre>
+                                                )}
                                             </div>
                                         )}
-
-                                        <div className="space-y-3">
-                                            <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                结构化信息
-                                            </h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                <div className="bg-muted border border-border rounded p-3">
-                                                    <div className="text-[10px] uppercase text-muted-foreground font-mono mb-2">
-                                                        起止位置
-                                                    </div>
-                                                    <pre className="text-xs font-mono text-foreground whitespace-pre-wrap break-words">
-                                                        {formatJson({
-                                                            start: meta.start,
-                                                            end: meta.end,
-                                                        })}
-                                                    </pre>
-                                                </div>
-                                                <div className="bg-muted border border-border rounded p-3">
-                                                    <div className="text-[10px] uppercase text-muted-foreground font-mono mb-2">
-                                                        元数据
-                                                    </div>
-                                                    <pre className="text-xs font-mono text-foreground whitespace-pre-wrap break-words">
-                                                        {formatJson(
-                                                            meta.metadata,
-                                                        )}
-                                                    </pre>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                匹配变量
-                                            </h3>
-                                            <div className="bg-muted border border-border rounded p-3">
-                                                <pre className="text-xs font-mono text-foreground whitespace-pre-wrap break-words">
-                                                    {formatJson(meta.metavars)}
-                                                </pre>
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                原始规则数据
-                                            </h3>
-                                            <div className="bg-muted border border-border rounded p-3">
-                                                <pre className="text-xs font-mono text-foreground whitespace-pre-wrap break-words">
-                                                    {formatJson(meta.rule)}
-                                                </pre>
-                                            </div>
-                                        </div>
 
                                         {meta.references.length > 0 && (
                                             <div className="space-y-3">

@@ -56,6 +56,7 @@ const FRAGMENT_TRANSLATIONS: Array<[string, string]> = Object.entries({
   "确认删除": "Confirm Delete",
   "通用型": "Generic",
   "事件型": "Patch-based",
+  "创建": "Created",
 }).sort(([a], [b]) => b.length - a.length);
 
 function splitTextSegments(text: string): TextSegments {

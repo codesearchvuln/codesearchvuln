@@ -13,6 +13,7 @@ export const dashboardDictionary: DomDictionary = {
   "数据库模式": "Database Mode",
   "活跃项目": "Active Projects",
   "运行中任务": "Running Tasks",
+  "任务中止": "Aborted Tasks",
   "待解决问题": "Unresolved Issues",
   "提示词模板": "Prompt Templates",
   "最新活动": "Latest Activity",
@@ -20,6 +21,7 @@ export const dashboardDictionary: DomDictionary = {
   "快速操作": "Quick Actions",
   "Agent 智能审计": "Agent Smart Audit",
   "创建项目": "Create Project",
-  "漏洞扫描": "Vulnerability Scan ",
+  "漏洞扫描状态": "Vulnerability Scan Status",
   "扫描": " Scan",
+  "中止": "Aborted",
 };

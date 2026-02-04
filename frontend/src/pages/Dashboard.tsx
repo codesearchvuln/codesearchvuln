@@ -30,10 +30,13 @@ type RecentActivityItem = {
   route: string;
 };
 
+const INTERRUPTED_STATUSES = new Set(["interrupted", "aborted", "cancelled"]);
+
 export default function Dashboard() {
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [recentActivities, setRecentActivities] = useState<RecentActivityItem[]>([]);
   const [runningTasksCount, setRunningTasksCount] = useState(0);
+  const [interruptedTasksCount, setInterruptedTasksCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [ruleStats, setRuleStats] = useState({ total: 0, enabled: 0 });
 
@@ -73,7 +76,9 @@ export default function Dashboard() {
       case "pending":
         return "任务待处理";
       case "cancelled":
-        return "任务已取消";
+      case "interrupted":
+      case "aborted":
+        return "任务中止";
       default:
         return status || "未知状态";
     }
@@ -89,6 +94,9 @@ export default function Dashboard() {
     if (status === "failed") {
       return "bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40";
     }
+    if (INTERRUPTED_STATUSES.has(status)) {
+      return "bg-orange-500/5 border-orange-500/20 hover:border-orange-500/40";
+    }
     return "bg-muted/30 border-border hover:border-border";
   };
 
@@ -101,6 +109,9 @@ export default function Dashboard() {
     }
     if (status === "failed") {
       return "cyber-badge-danger";
+    }
+    if (INTERRUPTED_STATUSES.has(status)) {
+      return "cyber-badge-warning";
     }
     return "cyber-badge-muted";
   };
@@ -141,7 +152,11 @@ export default function Dashboard() {
         tasks = Array.isArray(results[2].value) ? results[2].value : [];
       }
       const baseRunningCount = tasks.filter((task) => task.status === "running").length;
+      const baseInterruptedCount = tasks.filter((task) =>
+        INTERRUPTED_STATUSES.has(task.status),
+      ).length;
       setRunningTasksCount(baseRunningCount);
+      setInterruptedTasksCount(baseInterruptedCount);
 
       try {
         const [agentTasks, opengrepTasks, gitleaksTasks] = await Promise.all([
@@ -232,6 +247,15 @@ export default function Dashboard() {
             opengrepTasks.filter((task) => task.status === "running").length +
             gitleaksTasks.filter((task) => task.status === "running").length,
         );
+        setInterruptedTasksCount(
+          baseInterruptedCount +
+            agentTasks.filter((task) => INTERRUPTED_STATUSES.has(task.status))
+              .length +
+            opengrepTasks.filter((task) => INTERRUPTED_STATUSES.has(task.status))
+              .length +
+            gitleaksTasks.filter((task) => INTERRUPTED_STATUSES.has(task.status))
+              .length,
+        );
       } catch (error) {
         console.error("获取最近活动失败:", error);
         setRecentActivities([]);
@@ -308,9 +332,15 @@ export default function Dashboard() {
             <div>
               <p className="stat-label">审计任务</p>
               <p className="stat-value">{stats?.total_tasks || 0}</p>
-              <p className="text-sm text-emerald-400 mt-1 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                已完成: {stats?.completed_tasks || 0}
+              <p className="text-sm mt-1 flex items-center gap-3">
+                <span className="text-emerald-400 inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  已完成: {stats?.completed_tasks || 0}
+                </span>
+                <span className="text-orange-400 inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-orange-400" />
+                  中止: {interruptedTasksCount}
+                </span>
               </p>
             </div>
             <div className="stat-icon text-emerald-400">
@@ -435,6 +465,12 @@ export default function Dashboard() {
                 <span className="text-base text-muted-foreground">运行中任务</span>
                 <span className="text-base font-bold text-sky-400">
                   {runningTasksCount}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-base text-muted-foreground">任务中止</span>
+                <span className="text-base font-bold text-orange-400">
+                  {interruptedTasksCount}
                 </span>
               </div>
               <div className="flex items-center justify-between">
