@@ -128,6 +128,7 @@ class OpengrepFindingResponse(BaseModel):
     severity: str
     status: str
     confidence: Optional[str] = Field(None, description="规则置信度: HIGH, MEDIUM, LOW")
+    cwe: Optional[List[str]] = Field(None, description="CWE列表")
 
     class Config:
         from_attributes = True
@@ -1250,24 +1251,36 @@ async def get_static_task_findings(
                 rule_name_candidates.add(key)
 
     rule_confidence_map: Dict[str, Optional[str]] = {}
+    rule_cwe_map: Dict[str, Optional[List[str]]] = {}
     if rule_name_candidates:
         rule_result = await db.execute(
-            select(OpengrepRule.name, OpengrepRule.confidence).where(
+            select(OpengrepRule.name, OpengrepRule.confidence, OpengrepRule.cwe).where(
                 OpengrepRule.name.in_(rule_name_candidates)
             )
         )
-        for rule_name, rule_confidence in rule_result.all():
+        for rule_name, rule_confidence, rule_cwe in rule_result.all():
             rule_confidence_map[str(rule_name)] = _normalize_confidence(rule_confidence)
+            rule_cwe_map[str(rule_name)] = rule_cwe
 
     response_findings = []
     for finding in findings:
         resolved_confidence = _extract_finding_payload_confidence(finding.rule)
+        resolved_cwe = None
 
         if not resolved_confidence:
             if isinstance(finding.rule, dict):
                 for key in _extract_rule_lookup_keys(finding.rule.get("check_id")):
                     if rule_confidence_map.get(key):
                         resolved_confidence = rule_confidence_map[key]
+                        if not resolved_cwe and rule_cwe_map.get(key):
+                            resolved_cwe = rule_cwe_map[key]
+                        break
+        else:
+            # 即使找到了confidence，也继续查找CWE
+            if isinstance(finding.rule, dict):
+                for key in _extract_rule_lookup_keys(finding.rule.get("check_id")):
+                    if rule_cwe_map.get(key):
+                        resolved_cwe = rule_cwe_map[key]
                         break
 
         if confidence_filter and resolved_confidence != confidence_filter:
@@ -1284,6 +1297,7 @@ async def get_static_task_findings(
             "severity": finding.severity,
             "status": finding.status,
             "confidence": _format_confidence_for_response(resolved_confidence),
+            "cwe": resolved_cwe,
         }
         response_findings.append(finding_dict)
 
