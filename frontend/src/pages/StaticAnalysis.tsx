@@ -310,6 +310,12 @@ export default function StaticAnalysis() {
         (toolParam === "gitleaks" ? taskId || null : null);
     const showOpengrepTab = Boolean(opengrepTaskId);
     const showGitleaksTab = Boolean(gitleaksTaskId);
+    const enabledToolsLabel = useMemo(() => {
+        const tools: string[] = [];
+        if (showOpengrepTab) tools.push("Opengrep");
+        if (showGitleaksTab) tools.push("Gitleaks");
+        return tools.join(" / ");
+    }, [showOpengrepTab, showGitleaksTab]);
 
     const taskStatusLabel = useMemo(
         () =>
@@ -776,6 +782,11 @@ export default function StaticAnalysis() {
                             <h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
                                 静态分析结果
                             </h1>
+                            {enabledToolsLabel && (
+                                <Badge className="cyber-badge-info">
+                                    本次启用工具：{enabledToolsLabel}
+                                </Badge>
+                            )}
                         </div>
                         {activeTask && (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">

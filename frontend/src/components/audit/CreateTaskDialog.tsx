@@ -264,7 +264,7 @@ export default function CreateTaskDialog({
 
         onOpenChange(false);
         onTaskCreated();
-        toast.success("Agent 审计任务已创建");
+        toast.success("智能审计任务已创建");
         navigate(`/agent-audit/${agentTask.id}`);
 
         setSelectedProjectId("");
@@ -700,7 +700,7 @@ export default function CreateTaskDialog({
               ) : auditMode === "agent" ? (
                 <>
                   <Bot className="w-4 h-4 mr-2" />
-                  启动 Agent 审计
+                  启动智能审计
                 </>
               ) : (
                 <>

@@ -23,7 +23,7 @@ from pycloc.exceptions import CLOCCommandError, CLOCDependencyError
 
 
 async def get_cloc_stats(project_info: ProjectInfo) -> str:
-    """获取项目代码统计（返回JSON字符串：total + 各语言行数/占比）"""
+    """获取项目代码统计（返回JSON字符串：总行数、总文件数、各语言文件数/行数/占比）"""
     zip_path = get_project_zip_path(project_info.project_id)
     if not os.path.exists(zip_path):
         logger.warning(f"项目ZIP文件不存在: {zip_path}")
@@ -51,31 +51,58 @@ async def get_cloc_stats(project_info: ProjectInfo) -> str:
             cloc_result = json.loads(output)
             # 定义需要排除的非语言字段
             exclude_fields = {"header", "SUM"}
-            # 存储各语言的行数统计
-            language_lines = {}
+            # 存储各语言统计
+            language_stats = {}
 
             # 遍历所有字段，筛选出语言相关的统计
             for key, value in cloc_result.items():
                 if key not in exclude_fields and isinstance(value, dict):
-                    language_lines[key] = {"loc_number": value.get("code", 0)}
+                    code_lines = value.get("code", 0) or 0
+                    files_count = (
+                        value.get("nFiles")
+                        or value.get("files")
+                        or value.get("file_count")
+                        or 0
+                    )
+                    language_stats[key] = {
+                        "loc_number": int(code_lines),
+                        "files_count": int(files_count),
+                    }
 
             # 把提取后的语言行数信息加入结果（方便外部使用）
             total_lines = 0
             if isinstance(cloc_result.get("SUM"), dict):
                 total_lines = cloc_result["SUM"].get("code", 0) or 0
             if total_lines <= 0:
-                total_lines = sum(v.get("loc_number", 0) for v in language_lines.values())
+                total_lines = sum(v.get("loc_number", 0) for v in language_stats.values())
+
+            total_files = sum(v.get("files_count", 0) for v in language_stats.values())
+            if total_files <= 0:
+                # pycloc 某些场景可能不返回 nFiles，回退到解压文件列表按后缀统计得到总文件数
+                total_files = len(
+                    [
+                        f
+                        for f in extracted_files
+                        if isinstance(f, str)
+                        and not f.endswith("/")
+                        and Path(f).suffix
+                    ]
+                )
+
             # 计算占比
             languages = {}
-            for lang, stats in language_lines.items():
+            for lang, stats in language_stats.items():
                 lines = stats.get("loc_number", 0)
+                files_count = stats.get("files_count", 0)
                 proportion = (lines / total_lines) if total_lines > 0 else 0
                 languages[lang] = {
                     "loc_number": lines,
+                    "files_count": files_count,
                     "proportion": round(proportion, 4),
                 }
             result_payload = {
                 "total": total_lines,
+                "total_files": total_files,
                 "languages": languages,
             }
             return json.dumps(result_payload, ensure_ascii=False)
@@ -91,6 +118,39 @@ async def get_cloc_stats(project_info: ProjectInfo) -> str:
         except Exception as e:
             logger.error(f"pycloc 执行异常: {e}", exc_info=True)
             return "{}"
+
+
+def build_static_project_description(language_info_json: str, project_name: Optional[str] = None) -> str:
+    """基于静态统计结果生成项目描述（不依赖 LLM）。"""
+    try:
+        payload = json.loads(language_info_json) if language_info_json else {}
+    except Exception:
+        payload = {}
+
+    languages = payload.get("languages") if isinstance(payload, dict) else {}
+    if not isinstance(languages, dict) or len(languages) == 0:
+        return "未检测到可统计的源码文件。"
+
+    total_lines = int(payload.get("total") or 0)
+    total_files = int(payload.get("total_files") or 0)
+
+    sorted_langs = sorted(
+        languages.items(),
+        key=lambda item: (item[1] or {}).get("loc_number", 0),
+        reverse=True,
+    )
+    top_langs = []
+    for lang, stats in sorted_langs[:3]:
+        loc = int((stats or {}).get("loc_number") or 0)
+        files_count = int((stats or {}).get("files_count") or 0)
+        top_langs.append(f"{lang}（{files_count} 文件 / {loc} 行）")
+
+    prefix = f"项目“{project_name}”" if project_name else "该项目"
+    top_desc = "、".join(top_langs) if top_langs else "无"
+    return (
+        f"{prefix}基于静态代码统计，共包含 {total_files} 个源码文件，"
+        f"累计 {total_lines} 行代码。主要语言为：{top_desc}。"
+    )
 
 
 async def generate_project_description(project_info: ProjectInfo) -> Dict[str, Any]:

@@ -160,7 +160,10 @@ from app.services.zip_storage import (
 from app.services.upload.upload_manager import UploadManager
 from app.services.upload.compression_factory import CompressionStrategyFactory
 from app.services.upload.language_detection import detect_languages_from_paths
-from app.services.upload.project_stats import get_cloc_stats, generate_project_description
+from app.services.upload.project_stats import (
+    get_cloc_stats,
+    build_static_project_description,
+)
 
 router = APIRouter()
 
@@ -407,36 +410,15 @@ async def get_project_info(
 
     # 2. 检查权限
 
-    # 3. 获取用户配置（用于LLM分析）
-    user_config = {}
-    try:
-        result = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
-        config = result.scalar_one_or_none()
-        if config and config.llm_config:
-            user_config = {"llmConfig": json.loads(config.llm_config)}
-    except Exception as e:
-        logger.warning(f"获取用户配置失败: {e}")
-
-    # 如果已存在 ProjectInfo，按状态返回或等待；失败则重新生成
+    # 3. 获取/创建 ProjectInfo（纯静态统计，无需 LLM）
     existing_info_result = await db.execute(select(ProjectInfo).where(ProjectInfo.project_id == id))
     existing_info = existing_info_result.scalars().first()
-    if existing_info:
-        if existing_info.status == "completed":
-            return existing_info
-        if existing_info.status == "pending":
-            raise HTTPException(status_code=202, detail="项目信息正在生成中，请稍后再试")
-        if existing_info.status == "failed":
-            existing_info.status = "pending"
-            existing_info.language_info = None
-            existing_info.description = None
-            existing_info.created_at = datetime.now(timezone.utc)
-            db.add(existing_info)
-            await db.commit()
-            await db.refresh(existing_info)
-            project_info = existing_info
-        else:
-            project_info = existing_info
-    else:
+    if existing_info and existing_info.status == "completed" and existing_info.language_info:
+        return existing_info
+    if existing_info and existing_info.status == "pending":
+        raise HTTPException(status_code=202, detail="项目信息正在生成中，请稍后再试")
+
+    if not existing_info:
         # 创建新的 ProjectInfo 记录并持久化为 pending 状态
         project_info = ProjectInfo(
             project_id=id,
@@ -446,23 +428,21 @@ async def get_project_info(
         db.add(project_info)
         await db.commit()
         await db.refresh(project_info)
+    else:
+        project_info = existing_info
 
     try:
-        # 生成语言统计（使用 ProjectInfo）
+        project_info.status = "pending"
+        db.add(project_info)
+        await db.commit()
+        await db.refresh(project_info)
+
+        # 生成语言统计（纯静态）
         cloc_result = await get_cloc_stats(project_info)
         project_info.language_info = cloc_result
 
-        # 生成项目描述（使用 ProjectInfo）
-        analysis_result = await generate_project_description(project_info)
-        if isinstance(analysis_result, dict):
-            project_info.description = analysis_result.get("project_description", "")
-        else:
-            # 兼容 generate_project_description 可能返回 JSON 字符串的情况
-            try:
-                parsed = json.loads(analysis_result) if isinstance(analysis_result, str) else {}
-                project_info.description = parsed.get("project_description", "")
-            except Exception:
-                project_info.description = ""
+        # 基于静态统计生成项目描述（不依赖 LLM）
+        project_info.description = build_static_project_description(cloc_result, project.name)
 
         project_info.status = "completed"
         db.add(project_info)

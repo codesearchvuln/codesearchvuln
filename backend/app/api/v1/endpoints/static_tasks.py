@@ -593,137 +593,31 @@ async def _execute_opengrep_scan(
             )
 
             # 累积所有扫描结果
-            all_findings = []
-            all_scan_errors = []
+            all_findings: List[Dict[str, Any]] = []
+            all_scan_errors: List[Dict[str, Any]] = []
             successful_rule_count = 0
             failed_rule_count = 0
             executed_rules = 0
             total_rules_for_execution = len(valid_rules)
+            max_parallelism = min(MAX_PARALLEL_RULE_SCANS, max(1, total_rules_for_execution))
+            scan_semaphore = asyncio.Semaphore(max_parallelism)
+            progress_lock = asyncio.Lock()
 
-            async def execute_rules_batch(rules_batch: List[Dict], depth: int = 0) -> tuple[List[Dict], List[Dict], int, int]:
+            async def execute_single_rule(rule: Dict[str, Any]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], int, int]:
                 nonlocal executed_rules
-                """
-                递归执行一批规则（异步版本）
-                
-                Args:
-                    rules_batch: 要执行的规则列表
-                    depth: 递归深度，用于日志
-                    
-                Returns:
-                    (findings, errors, success_count, failed_count)
-                """
-                if not rules_batch:
-                    return [], [], 0, 0
-                
-                batch_size = len(rules_batch)
-                indent = "  " * depth
-                
-                # 如果只有一条规则，直接执行
-                if batch_size == 1:
-                    rule = rules_batch[0]
-                    rule_id = rule.get("id", "unknown")
-                    rule_file = None
-                    
-                    try:
-                        # 创建临时规则文件
-                        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as tf:
-                            yaml.dump({"rules": [rule]}, tf, sort_keys=False, default_flow_style=False)
-                            rule_file = tf.name
-
-                        # 执行扫描（在线程池中执行阻塞操作）
-                        cmd = [
-                            "opengrep",
-                            "--config",
-                            rule_file,
-                            "--json",
-                            full_target_path,
-                        ]
-
-                        loop = asyncio.get_event_loop()
-                        result = await loop.run_in_executor(
-                            None,
-                            lambda: subprocess.run(
-                                cmd,
-                                capture_output=True,
-                                text=True,
-                                timeout=600,
-                                env=scan_env,
-                            )
-                        )
-
-                        # 解析结果
-                        try:
-                            findings, scan_errors = _parse_opengrep_output(result.stdout)
-                            fatal_errors = [item for item in scan_errors if _is_fatal_rule_error(item)]
-                            
-                            if fatal_errors:
-                                logger.warning(f"{indent}Rule {rule_id} has fatal errors, skipping")
-                                executed_rules += 1
-                                progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
-                                _record_scan_progress(
-                                    task_id,
-                                    progress=progress,
-                                    stage="execute_rules",
-                                    message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
-                                )
-                                return [], [], 0, 1
-                            
-                            if findings:
-                                logger.info(f"{indent}Rule {rule_id} found {len(findings)} findings")
-                            
-                            executed_rules += 1
-                            progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
-                            _record_scan_progress(
-                                task_id,
-                                progress=progress,
-                                stage="execute_rules",
-                                message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
-                            )
-                            return findings, scan_errors, 1, 0
-                            
-                        except ValueError as e:
-                            logger.warning(f"{indent}Failed to parse output for rule {rule_id}: {e}")
-                            executed_rules += 1
-                            progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
-                            _record_scan_progress(
-                                task_id,
-                                progress=progress,
-                                stage="execute_rules",
-                                message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
-                            )
-                            return [], [], 0, 1
-
-                    except Exception as e:
-                        logger.warning(f"{indent}Failed to execute rule {rule_id}: {e}")
-                        executed_rules += 1
-                        progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
-                        _record_scan_progress(
-                            task_id,
-                            progress=progress,
-                            stage="execute_rules",
-                            message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
-                        )
-                        return [], [], 0, 1
-                    
-                    finally:
-                        if rule_file and os.path.exists(rule_file):
-                            try:
-                                os.unlink(rule_file)
-                            except:
-                                pass
-                
-                # 多条规则，尝试批量执行
-                rule_ids = [r.get("id", "unknown") for r in rules_batch]
-                logger.info(f"{indent}Executing batch of {batch_size} rules")
+                rule_id = str(rule.get("id", "unknown"))
                 rule_file = None
-                
+
+                findings: List[Dict[str, Any]] = []
+                scan_errors: List[Dict[str, Any]] = []
+                success_count = 0
+                failed_count = 1
+
                 try:
-                    # 创建临时规则文件
                     with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as tf:
-                        yaml.dump({"rules": rules_batch}, tf, sort_keys=False, default_flow_style=False)
+                        yaml.dump({"rules": [rule]}, tf, sort_keys=False, default_flow_style=False)
                         rule_file = tf.name
 
-                    # 执行扫描（在线程池中执行阻塞操作）
                     cmd = [
                         "opengrep",
                         "--config",
@@ -733,76 +627,76 @@ async def _execute_opengrep_scan(
                     ]
 
                     loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=600,
-                            env=scan_env,
+                    async with scan_semaphore:
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda: subprocess.run(
+                                cmd,
+                                capture_output=True,
+                                text=True,
+                                timeout=600,
+                                env=scan_env,
+                            ),
                         )
-                    )
 
-                    # 解析结果
-                    try:
-                        findings, scan_errors = _parse_opengrep_output(result.stdout)
-                        fatal_errors = [item for item in scan_errors if _is_fatal_rule_error(item)]
-                        
-                        if not fatal_errors:
-                            # 批量执行成功
-                            logger.info(f"{indent}Batch of {batch_size} rules executed successfully, {len(findings)} findings")
-                            executed_rules += batch_size
-                            progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
-                            _record_scan_progress(
-                                task_id,
-                                progress=progress,
-                                stage="execute_rules",
-                                message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
+                    findings, scan_errors = _parse_opengrep_output(result.stdout)
+                    fatal_errors = [
+                        item for item in scan_errors if _is_fatal_rule_error(item)
+                    ]
+                    if fatal_errors:
+                        logger.warning(
+                            "Rule %s has fatal errors, skipping this rule result",
+                            rule_id,
+                        )
+                        findings = []
+                        scan_errors = []
+                    else:
+                        success_count = 1
+                        failed_count = 0
+                        if findings:
+                            logger.info(
+                                "Rule %s found %s findings",
+                                rule_id,
+                                len(findings),
                             )
-                            return findings, scan_errors, batch_size, 0
-                        else:
-                            # 有致命错误，需要分块执行
-                            logger.warning(f"{indent}Batch of {batch_size} rules has fatal errors, splitting...")
-                            
-                    except ValueError as e:
-                        # 解析失败，需要分块执行
-                        logger.warning(f"{indent}Failed to parse output for batch, splitting...")
-                
+                except ValueError as e:
+                    logger.warning("Failed to parse output for rule %s: %s", rule_id, e)
                 except Exception as e:
-                    logger.warning(f"{indent}Failed to execute batch of {batch_size} rules: {e}, splitting...")
-                
+                    logger.warning("Failed to execute rule %s: %s", rule_id, e)
                 finally:
                     if rule_file and os.path.exists(rule_file):
                         try:
                             os.unlink(rule_file)
-                        except:
+                        except Exception:
                             pass
-                
-                # 分块递归执行
-                chunk_size = max(1, batch_size // 10)  # 分成10块，向上取整
-                chunks = [rules_batch[i:i + chunk_size] for i in range(0, batch_size, chunk_size)]
-                
-                logger.info(f"{indent}Splitting {batch_size} rules into {len(chunks)} chunks")
-                
-                total_findings = []
-                total_errors = []
-                total_success = 0
-                total_failed = 0
-                
-                for idx, chunk in enumerate(chunks):
-                    logger.info(f"{indent}Processing chunk {idx + 1}/{len(chunks)} ({len(chunk)} rules)")
-                    findings, errors, success, failed = await execute_rules_batch(chunk, depth + 1)
-                    total_findings.extend(findings)
-                    total_errors.extend(errors)
-                    total_success += success
-                    total_failed += failed
-                
-                return total_findings, total_errors, total_success, total_failed
 
-            # 执行所有规则
-            logger.info(f"Starting batch execution for {len(valid_rules)} rules")
-            all_findings, all_scan_errors, successful_rule_count, failed_rule_count = await execute_rules_batch(valid_rules)
+                    async with progress_lock:
+                        executed_rules += 1
+                        progress = 30 + (executed_rules / max(total_rules_for_execution, 1)) * 55
+                        _record_scan_progress(
+                            task_id,
+                            progress=progress,
+                            stage="execute_rules",
+                            message=f"规则执行进度（{executed_rules}/{total_rules_for_execution}）",
+                        )
+
+                return findings, scan_errors, success_count, failed_count
+
+            # 并发执行规则扫描（最多 5 条规则并行）
+            logger.info(
+                "Starting parallel rule execution for %s rules (max_parallel=%s)",
+                len(valid_rules),
+                max_parallelism,
+            )
+            rule_results = await asyncio.gather(
+                *(execute_single_rule(rule) for rule in valid_rules)
+            )
+            for findings, scan_errors, success_count, failed_count in rule_results:
+                all_findings.extend(findings)
+                all_scan_errors.extend(scan_errors)
+                successful_rule_count += success_count
+                failed_rule_count += failed_count
+
             _record_scan_progress(
                 task_id,
                 progress=86,
@@ -954,6 +848,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 VALID_CONFIDENCE_LEVELS = {"HIGH", "MEDIUM", "LOW"}
 SCAN_PROGRESS_MAX_LOGS = 120
+MAX_PARALLEL_RULE_SCANS = 5
 _scan_progress_store: Dict[str, Dict[str, Any]] = {}
 
 

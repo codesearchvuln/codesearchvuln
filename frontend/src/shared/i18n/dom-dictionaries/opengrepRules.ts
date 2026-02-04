@@ -123,4 +123,6 @@ export const opengrepRulesDictionary: DomDictionary = {
   "调整筛选条件尝试": "Try adjusting filters",
   "暂无规则数据": "No rule data available",
   "每页显示:": "Items per page:",
+  "通用型漏洞检测规则": "Generic Vulnerability Detection Rule",
+  "CVE漏洞检测规则": "CVE Vulnerability Detection Rule",
 };

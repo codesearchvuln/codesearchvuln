@@ -5,6 +5,13 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
+import {
+    PieChart,
+    Pie,
+    Cell,
+    Tooltip as ChartTooltip,
+    ResponsiveContainer,
+} from "recharts";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +84,17 @@ import {
     ProjectStatsCards,
     type ProjectCombinedStats,
 } from "@/pages/project-detail/components/ProjectStatsCards";
+
+const LANGUAGE_PIE_COLORS = [
+    "#0ea5e9",
+    "#22c55e",
+    "#f59e0b",
+    "#8b5cf6",
+    "#ef4444",
+    "#14b8a6",
+    "#f97316",
+    "#a855f7",
+];
 
 export default function ProjectDetail() {
     const { id } = useParams<{ id: string }>();
@@ -502,6 +520,7 @@ export default function ProjectDetail() {
             if (!data || typeof data !== "object") return null;
 
             const total = Number(data.total ?? 0);
+            const totalFiles = Number(data.total_files ?? 0);
             const languages =
                 data.languages && typeof data.languages === "object"
                     ? data.languages
@@ -511,15 +530,22 @@ export default function ProjectDetail() {
                     const loc = Number(
                         (info as { loc_number?: number }).loc_number ?? 0,
                     );
+                    const files = Number(
+                        (info as { files_count?: number; file_count?: number })
+                            .files_count ??
+                            (info as { files_count?: number; file_count?: number })
+                                .file_count ??
+                            0,
+                    );
                     const proportion = Number(
                         (info as { proportion?: number }).proportion ?? 0,
                     );
-                    return { name, loc, proportion };
+                    return { name, loc, files, proportion };
                 })
                 .filter((item) => item.name && Number.isFinite(item.loc))
                 .sort((a, b) => b.proportion - a.proportion);
 
-            return { total, items };
+            return { total, totalFiles, items };
         } catch {
             return null;
         }
@@ -653,11 +679,8 @@ export default function ProjectDetail() {
                 setGitleaksTasks([]);
             }
 
-            const shouldLoadProjectInfo =
-                projectRes.status === "fulfilled" &&
-                isRepositoryProject(projectRes.value);
+            const shouldLoadProjectInfo = projectRes.status === "fulfilled";
             if (!shouldLoadProjectInfo) {
-                // ZIP 项目常用于静态扫描，不需要触发 LLM 项目概览分析
                 setProjectInfo(null);
                 setProjectInfoStatus("idle");
             } else {
@@ -1235,6 +1258,15 @@ export default function ProjectDetail() {
                                                             <span className="text-foreground font-semibold">
                                                                 {parsedLanguageInfo.total.toLocaleString()}
                                                             </span>
+                                                            {parsedLanguageInfo.totalFiles > 0 && (
+                                                                <>
+                                                                    {" "}
+                                                                    · 总文件数:{" "}
+                                                                    <span className="text-foreground font-semibold">
+                                                                        {parsedLanguageInfo.totalFiles.toLocaleString()}
+                                                                    </span>
+                                                                </>
+                                                            )}
                                                         </div>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                             {parsedLanguageInfo.items.map(
@@ -1265,8 +1297,10 @@ export default function ProjectDetail() {
                                                                             </Badge>
                                                                         </div>
                                                                         <div className="text-xs text-muted-foreground font-mono">
-                                                                            {item.loc.toLocaleString()}{" "}
-                                                                            行
+                                                                            {item.files > 0
+                                                                                ? `${item.files.toLocaleString()} 文件 / `
+                                                                                : ""}
+                                                                            {item.loc.toLocaleString()} 行
                                                                         </div>
                                                                     </div>
                                                                 ),
@@ -1534,6 +1568,95 @@ export default function ProjectDetail() {
                                         </div>
                                     ))}
                                 </div>
+
+                                {parsedLanguageInfo &&
+                                    parsedLanguageInfo.items.length > 0 && (
+                                        <div className="border border-border rounded p-4 bg-muted/40">
+                                            <h4 className="font-mono font-bold uppercase text-xs text-muted-foreground mb-3">
+                                                语言占比（静态统计）
+                                            </h4>
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                                <div className="h-64">
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <PieChart>
+                                                            <Pie
+                                                                data={parsedLanguageInfo.items}
+                                                                dataKey="proportion"
+                                                                nameKey="name"
+                                                                cx="50%"
+                                                                cy="50%"
+                                                                outerRadius={90}
+                                                                innerRadius={40}
+                                                                stroke="none"
+                                                            >
+                                                                {parsedLanguageInfo.items.map(
+                                                                    (_item, index) => (
+                                                                        <Cell
+                                                                            key={`lang-pie-${index}`}
+                                                                            fill={
+                                                                                LANGUAGE_PIE_COLORS[
+                                                                                    index %
+                                                                                        LANGUAGE_PIE_COLORS.length
+                                                                                ]
+                                                                            }
+                                                                        />
+                                                                    ),
+                                                                )}
+                                                            </Pie>
+                                                            <ChartTooltip
+                                                                formatter={(
+                                                                    value: number,
+                                                                    _name: string,
+                                                                    payload: any,
+                                                                ) => {
+                                                                    const item = payload?.payload;
+                                                                    const percent = Number(value || 0) * 100;
+                                                                    return [
+                                                                        `${percent.toFixed(2)}% · ${Number(item?.loc || 0).toLocaleString()} 行${
+                                                                            Number(item?.files || 0) > 0
+                                                                                ? ` · ${Number(item?.files).toLocaleString()} 文件`
+                                                                                : ""
+                                                                        }`,
+                                                                        item?.name || "未知语言",
+                                                                    ];
+                                                                }}
+                                                            />
+                                                        </PieChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    {parsedLanguageInfo.items.map(
+                                                        (item, index) => (
+                                                            <div
+                                                                key={item.name}
+                                                                className="flex items-center justify-between gap-3 text-xs font-mono"
+                                                            >
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    <span
+                                                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                                        style={{
+                                                                            backgroundColor:
+                                                                                LANGUAGE_PIE_COLORS[
+                                                                                    index %
+                                                                                        LANGUAGE_PIE_COLORS.length
+                                                                                ],
+                                                                        }}
+                                                                    />
+                                                                    <span className="text-foreground truncate">
+                                                                        {item.name}
+                                                                    </span>
+                                                                </div>
+                                                                <span className="text-muted-foreground shrink-0">
+                                                                    {(item.proportion * 100).toFixed(2)}% ·{" "}
+                                                                    {item.loc.toLocaleString()} 行
+                                                                </span>
+                                                            </div>
+                                                        ),
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                             </div>
 
                             <div className="flex justify-end space-x-3 pt-6 border-t border-border">

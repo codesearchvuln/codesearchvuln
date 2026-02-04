@@ -7,20 +7,14 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer
-} from "recharts";
-import {
   Activity, AlertTriangle, Clock, Code,
-  FileText, Shield, Zap,
-  BarChart3, Calendar,
-  MessageSquare, Bot, Cpu, Terminal
+  Zap, Cpu, Terminal
 } from "lucide-react";
 import { api, dbMode, isDemoMode } from "@/shared/config/database";
 import type { Project, AuditTask, ProjectStats } from "@/shared/types";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { getRuleSets } from "@/shared/api/rules";
-import { getPromptTemplates } from "@/shared/api/prompts";
 import { getAgentTasks, type AgentTask } from "@/shared/api/agentTasks";
 import { getOpengrepScanTasks, type OpengrepScanTask } from "@/shared/api/opengrep";
 import { getGitleaksScanTasks, type GitleaksScanTask } from "@/shared/api/gitleaks";
@@ -38,13 +32,10 @@ type RecentActivityItem = {
 
 export default function Dashboard() {
   const [stats, setStats] = useState<ProjectStats | null>(null);
-  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
   const [recentActivities, setRecentActivities] = useState<RecentActivityItem[]>([]);
   const [runningTasksCount, setRunningTasksCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [issueTypeData, setIssueTypeData] = useState<Array<{ name: string; value: number; color: string }>>([]);
   const [ruleStats, setRuleStats] = useState({ total: 0, enabled: 0 });
-  const [templateStats, setTemplateStats] = useState({ total: 0, active: 0 });
 
   useEffect(() => {
     loadDashboardData();
@@ -137,12 +128,6 @@ export default function Dashboard() {
         });
       }
 
-      if (results[1].status === 'fulfilled') {
-        setRecentProjects(Array.isArray(results[1].value) ? results[1].value.slice(0, 6) : []);
-      } else {
-        setRecentProjects([]);
-      }
-
       const allProjects: Project[] =
         results[1].status === "fulfilled" && Array.isArray(results[1].value)
           ? results[1].value
@@ -157,40 +142,6 @@ export default function Dashboard() {
       }
       const baseRunningCount = tasks.filter((task) => task.status === "running").length;
       setRunningTasksCount(baseRunningCount);
-
-      try {
-        const allIssues = await Promise.all(
-          tasks.map(task => api.getAuditIssues(task.id).catch(() => []))
-        );
-        const flatIssues = allIssues.flat();
-
-        if (flatIssues.length > 0) {
-          const typeCount: Record<string, number> = {};
-          flatIssues.forEach(issue => {
-            typeCount[issue.issue_type] = (typeCount[issue.issue_type] || 0) + 1;
-          });
-
-          const typeMap: Record<string, { name: string; color: string }> = {
-            security: { name: '安全问题', color: '#f43f5e' },
-            bug: { name: '潜在Bug', color: '#f97316' },
-            performance: { name: '性能问题', color: '#eab308' },
-            style: { name: '代码风格', color: '#3b82f6' },
-            maintainability: { name: '可维护性', color: '#8b5cf6' }
-          };
-
-          const issueData = Object.entries(typeCount).map(([type, count]) => ({
-            name: typeMap[type]?.name || type,
-            value: count,
-            color: typeMap[type]?.color || '#6b7280'
-          }));
-
-          setIssueTypeData(issueData);
-        } else {
-          setIssueTypeData([]);
-        }
-      } catch (error) {
-        setIssueTypeData([]);
-      }
 
       try {
         const [agentTasks, opengrepTasks, gitleaksTasks] = await Promise.all([
@@ -287,19 +238,12 @@ export default function Dashboard() {
       }
 
       try {
-        const [rulesRes, promptsRes] = await Promise.all([
-          getRuleSets(),
-          getPromptTemplates(),
-        ]);
+        const rulesRes = await getRuleSets();
         const totalRules = rulesRes.items.reduce((acc, rs) => acc + rs.rules_count, 0);
         const enabledRules = rulesRes.items.reduce((acc, rs) => acc + rs.enabled_rules_count, 0);
         setRuleStats({ total: totalRules, enabled: enabledRules });
-        setTemplateStats({
-          total: promptsRes.items.length,
-          active: promptsRes.items.filter(t => t.is_active).length
-        });
       } catch (error) {
-        console.error('获取规则和模板统计失败:', error);
+        console.error('获取规则统计失败:', error);
       }
       }, { ...options, setLoading });
     } catch (error) {
@@ -398,106 +342,6 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 relative z-10">
         {/* Left Content */}
         <div className="xl:col-span-3 space-y-4">
-          {/* Charts */}
-          <div className="grid grid-cols-1 gap-4">
-            {/* Issue Distribution */}
-            <div className="cyber-card p-4">
-              <div className="section-header">
-                <BarChart3 className="w-5 h-5 text-violet-400" />
-                <h3 className="section-title">问题类型分布</h3>
-              </div>
-              {issueTypeData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie
-                      data={issueTypeData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={70}
-                      dataKey="value"
-                      stroke="var(--cyber-bg)"
-                      strokeWidth={2}
-                    >
-                      {issueTypeData.map((entry) => (
-                        <Cell key={`cell-${entry.name}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'var(--cyber-bg-elevated)',
-                        border: '1px solid var(--cyber-border)',
-                        borderRadius: '4px',
-                        fontFamily: 'monospace',
-                        fontSize: '12px',
-                        color: 'var(--cyber-text)'
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="empty-state h-[220px]">
-                  <BarChart3 className="empty-state-icon" />
-                  <p className="empty-state-description">暂无问题分布数据</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Projects Overview */}
-          <div className="cyber-card p-4">
-            <div className="section-header">
-              <FileText className="w-5 h-5 text-primary" />
-              <h3 className="section-title">项目概览</h3>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {recentProjects.length > 0 ? (
-                recentProjects.map((project) => (
-                  <Link
-                    key={project.id}
-                    to={`/projects/${project.id}`}
-                    className="block p-4 rounded-lg transition-all group"
-                    style={{
-                      background: 'var(--cyber-bg-elevated)',
-                      border: '1px solid var(--cyber-border)'
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.background = 'var(--cyber-hover-bg)';
-                      e.currentTarget.style.borderColor = 'var(--cyber-border-accent)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.background = 'var(--cyber-bg-elevated)';
-                      e.currentTarget.style.borderColor = 'var(--cyber-border)';
-                    }}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <h4 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-                        {project.name}
-                      </h4>
-                      <Badge className={`ml-2 flex-shrink-0 ${project.is_active ? 'cyber-badge-success' : 'cyber-badge-muted'}`}>
-                        {project.is_active ? '活跃' : '暂停'}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                      {project.description || '暂无描述'}
-                    </p>
-                    <div className="flex items-center text-sm text-muted-foreground">
-                      <Calendar className="w-4 h-4 mr-1" />
-                      {new Date(project.created_at).toLocaleDateString('zh-CN')}
-                    </div>
-                  </Link>
-                ))
-              ) : (
-                <div className="col-span-full empty-state">
-                  <Code className="empty-state-icon" />
-                  <p className="empty-state-title">暂无项目</p>
-                  <p className="empty-state-description">创建您的第一个项目开始审计</p>
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* Recent Activity */}
           <div className="cyber-card p-4">
             <div className="section-header">
@@ -600,21 +444,9 @@ export default function Dashboard() {
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-base text-muted-foreground flex items-center gap-1">
-                  <Shield className="w-4 h-4" />
-                  审计规则
-                </span>
+                <span className="text-base text-muted-foreground">审计规则</span>
                 <span className="text-base font-bold text-violet-400">
                   {ruleStats.enabled}/{ruleStats.total}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-base text-muted-foreground flex items-center gap-1">
-                  <MessageSquare className="w-4 h-4" />
-                  提示词模板
-                </span>
-                <span className="text-base font-bold text-emerald-400">
-                  {templateStats.active}/{templateStats.total}
                 </span>
               </div>
             </div>

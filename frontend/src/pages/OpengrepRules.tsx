@@ -1794,7 +1794,7 @@ export default function OpengrepRules() {
                                         通用型规则
                                     </span>
                                     <span className="text-xs text-muted-foreground font-mono">
-                                        直接粘贴规则文本，自动校验格式
+                                        通用型漏洞检测规则
                                     </span>
                                 </Button>
                                 <Button
@@ -1809,7 +1809,7 @@ export default function OpengrepRules() {
                                         事件型规则
                                     </span>
                                     <span className="text-xs text-muted-foreground font-mono">
-                                        基于Patch生成规则
+                                        CVE漏洞检测规则
                                     </span>
                                 </Button>
                             </div>
