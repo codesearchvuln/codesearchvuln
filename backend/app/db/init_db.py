@@ -5,6 +5,7 @@
 import json
 import logging
 import os
+import sys
 import yaml
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import insert
 from tqdm import tqdm
 
 from app.core.security import get_password_hash
@@ -22,6 +24,32 @@ from app.models.analysis import InstantAnalysis
 from app.models.opengrep import OpengrepRule
 
 logger = logging.getLogger(__name__)
+
+try:
+    YAML_LOADER = yaml.CSafeLoader
+except AttributeError:
+    YAML_LOADER = yaml.SafeLoader
+
+ENABLE_RULE_IMPORT_PROGRESS = (
+    os.getenv("INIT_DB_PROGRESS", "false").strip().lower() in {"1", "true", "yes", "on"}
+)
+
+
+def _load_yaml_fast(content: str):
+    """优先使用 C Loader 解析 YAML，加快规则导入速度。"""
+    return yaml.load(content, Loader=YAML_LOADER)
+
+
+def _normalize_confidence(value: str | None) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"HIGH", "MEDIUM", "LOW"}:
+        return normalized
+    return "LOW"
+
+
+def _build_single_rule_yaml(rule: dict) -> str:
+    """每条规则独立存储，避免把整文件 YAML 重复写入数据库。"""
+    return yaml.safe_dump({"rules": [rule]}, allow_unicode=True, sort_keys=False)
 
 # 默认演示账户配置
 DEFAULT_DEMO_EMAIL = "demo@example.com"
@@ -331,14 +359,19 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
     created_count = 0
     skipped_count = 0
     invalid_count = 0
-    rules_to_add = []
-    
-    # 使用进度条显示文件处理进度
-    for yaml_file in tqdm(yaml_files, desc="处理规则文件", unit="file"):
+    rows_to_add = []
+
+    iterator = tqdm(
+        yaml_files,
+        desc="处理规则文件",
+        unit="file",
+        disable=not (ENABLE_RULE_IMPORT_PROGRESS and sys.stderr.isatty()),
+    )
+    for yaml_file in iterator:
         try:
             with open(yaml_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-                rule_data = yaml.safe_load(content)
+                rule_data = _load_yaml_fast(content)
             
             # 解析 YAML 中的规则
             if not rule_data or 'rules' not in rule_data:
@@ -354,6 +387,7 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
             
             for rule in rule_data['rules']:
                 rule_id = rule.get('id', yaml_file.stem)
+                metadata = rule.get('metadata', {}) if isinstance(rule, dict) else {}
                 
                 # 判断规则是否已在表中
                 if rule_id in existing_rule_ids:
@@ -364,8 +398,6 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
                 # 提取语言（优先从顶层查找，再从 metadata 中查找）
                 languages = rule.get('languages', [])
                 if not languages or not isinstance(languages, list):
-                    # 从 metadata 中查找 languages
-                    metadata = rule.get('metadata', {})
                     languages = metadata.get('languages', [])
                 
                 if isinstance(languages, list) and languages:
@@ -378,13 +410,10 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
                 if severity not in ['ERROR', 'WARNING', 'INFO']:
                     severity = 'INFO'
                 
-                # 提取置信度（从顶层或 metadata 中）- 如果没有则设置为 LOW
-                confidence = rule.get('confidence')
-                if not confidence:
-                    metadata = rule.get('metadata', {})
-                    confidence = metadata.get('confidence')
-                if not confidence or confidence not in ['HIGH', 'MEDIUM', 'LOW']:
-                    confidence = 'LOW'
+                # 提取置信度（从顶层或 metadata 中）
+                confidence = _normalize_confidence(
+                    rule.get('confidence') or metadata.get('confidence')
+                )
                 
                 # 提取描述 - 如果没有则置空
                 description = rule.get('message') or None
@@ -399,20 +428,21 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
                 else:
                     cwe = None
                 
-                # 创建规则记录
-                opengrep_rule = OpengrepRule(
-                    name=rule_id,
-                    pattern_yaml=content,  # 保存完整的 YAML 内容
-                    language=language,
-                    severity=severity,
-                    confidence=confidence,  # 新增字段
-                    description=description,  # 新增字段
-                    cwe=cwe,  # 新增字段
-                    source="internal",
-                    correct=True,  # 内置规则默认为正确
-                    is_active=True,
+                # 每条规则独立存储，避免重复写入整文件 YAML
+                rows_to_add.append(
+                    {
+                        "name": rule_id,
+                        "pattern_yaml": _build_single_rule_yaml(rule),
+                        "language": language,
+                        "severity": severity,
+                        "confidence": confidence,
+                        "description": description,
+                        "cwe": cwe,
+                        "source": "internal",
+                        "correct": True,
+                        "is_active": True,
+                    }
                 )
-                rules_to_add.append(opengrep_rule)
                 existing_rule_ids.add(rule_id)  # 更新本地集合，防止同一批次重复
         
         except Exception as e:
@@ -421,17 +451,17 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
             continue
     
     # 一次性批量添加所有规则
-    if rules_to_add:
+    if rows_to_add:
         try:
-            logger.info(f"正在批量入库 {len(rules_to_add)} 条新规则...")
-            db.add_all(rules_to_add)
+            logger.info(f"正在批量入库 {len(rows_to_add)} 条新规则...")
+            await db.execute(insert(OpengrepRule), rows_to_add)
             await db.commit()
-            created_count = len(rules_to_add)
+            created_count = len(rows_to_add)
             logger.info(f"  ✓ 批量加载了 {created_count} 条新规则")
         except Exception as e:
             await db.rollback()
             logger.error(f"  ✗ 规则批量入库失败: {e}")
-            invalid_count += len(rules_to_add)
+            invalid_count += len(rows_to_add)
     
     logger.info(f"✓ 内置规则加载完成: 成功创建 {created_count} 条新规则，跳过 {skipped_count} 条已存在的规则，{invalid_count} 条失败")
 
@@ -468,14 +498,19 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
     created_count = 0
     skipped_count = 0
     error_count = 0
-    rules_to_add = []
-    
-    # 使用进度条显示文件处理进度
-    for yaml_file in tqdm(yaml_files, desc="处理 Patch 规则文件", unit="file"):
+    rows_to_add = []
+
+    iterator = tqdm(
+        yaml_files,
+        desc="处理 Patch 规则文件",
+        unit="file",
+        disable=not (ENABLE_RULE_IMPORT_PROGRESS and sys.stderr.isatty()),
+    )
+    for yaml_file in iterator:
         try:
             with open(yaml_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-                rule_data = yaml.safe_load(content)
+                rule_data = _load_yaml_fast(content)
             
             # 解析 YAML 中的规则
             if not rule_data or 'rules' not in rule_data:
@@ -492,6 +527,7 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
             # 通常 Patch 规则文件只包含一条规则
             for rule in rule_data['rules']:
                 rule_id = rule.get('id', yaml_file.stem)
+                metadata = rule.get('metadata', {}) if isinstance(rule, dict) else {}
                 
                 # 判断规则是否已在表中
                 if rule_id in existing_rule_ids:
@@ -502,8 +538,6 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
                 # 提取语言（优先从顶层查找，再从 metadata 中查找）
                 languages = rule.get('languages', [])
                 if not languages or not isinstance(languages, list):
-                    # 从 metadata 中查找 languages
-                    metadata = rule.get('metadata', {})
                     languages = metadata.get('languages', [])
                 
                 if isinstance(languages, list) and languages:
@@ -518,13 +552,10 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
                 if severity not in ['ERROR', 'WARNING', 'INFO']:
                     severity = 'INFO'
                 
-                # 提取置信度（从顶层或 metadata 中）- 如果没有则设置为 LOW
-                confidence = rule.get('confidence')
-                if not confidence:
-                    metadata = rule.get('metadata', {})
-                    confidence = metadata.get('confidence')
-                if not confidence or confidence not in ['HIGH', 'MEDIUM', 'LOW']:
-                    confidence = 'LOW'
+                # 提取置信度（从顶层或 metadata 中）
+                confidence = _normalize_confidence(
+                    rule.get('confidence') or metadata.get('confidence')
+                )
                 
                 # 提取描述 - 如果没有则置空
                 description = rule.get('message') or None
@@ -539,11 +570,9 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
                     except Exception as e:
                         logger.debug(f"  ⊘ 无法读取 patch 文件 {patch_file.name}: {e}")
                         # 如果读取失败，尝试从 metadata 获取 URL
-                        metadata = rule.get('metadata', {})
                         patch_content = metadata.get('source-url') or None
                 else:
                     # 如果没有对应的 patch 文件，从 metadata 获取 URL
-                    metadata = rule.get('metadata', {})
                     patch_content = metadata.get('source-url') or None
                 
                 # 提取 CWE - 如果没有则置空
@@ -556,21 +585,22 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
                 else:
                     cwe = None
                 
-                # 创建规则记录
-                opengrep_rule = OpengrepRule(
-                    name=rule_id,
-                    pattern_yaml=content,  # 保存完整的 YAML 内容
-                    language=language,
-                    severity=severity,
-                    confidence=confidence,  # 新增字段
-                    description=description,  # 新增字段
-                    cwe=cwe,  # 新增字段
-                    source="patch",  # 标记为 patch 来源
-                    patch=patch_content,  # 保存 patch 文件内容或 URL
-                    correct=True,  # Patch 规则默认为正确
-                    is_active=True,
+                # 每条规则独立存储，避免重复写入整文件 YAML
+                rows_to_add.append(
+                    {
+                        "name": rule_id,
+                        "pattern_yaml": _build_single_rule_yaml(rule),
+                        "language": language,
+                        "severity": severity,
+                        "confidence": confidence,
+                        "description": description,
+                        "cwe": cwe,
+                        "source": "patch",
+                        "patch": patch_content,
+                        "correct": True,
+                        "is_active": True,
+                    }
                 )
-                rules_to_add.append(opengrep_rule)
                 existing_rule_ids.add(rule_id)  # 更新本地集合，防止同一批次重复
         
         except Exception as e:
@@ -579,17 +609,17 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
             continue
     
     # 一次性批量添加所有规则
-    if rules_to_add:
+    if rows_to_add:
         try:
-            logger.info(f"正在批量入库 {len(rules_to_add)} 条新规则...")
-            db.add_all(rules_to_add)
+            logger.info(f"正在批量入库 {len(rows_to_add)} 条新规则...")
+            await db.execute(insert(OpengrepRule), rows_to_add)
             await db.commit()
-            created_count = len(rules_to_add)
+            created_count = len(rows_to_add)
             logger.info(f"  ✓ 批量加载了 {created_count} 条新规则")
         except Exception as e:
             await db.rollback()
             logger.error(f"  ✗ 规则批量入库失败: {e}")
-            error_count += len(rules_to_add)
+            error_count += len(rows_to_add)
     
     logger.info(f"✓ Patch 规则导入完成: 成功创建 {created_count} 条新规则，"
                f"跳过 {skipped_count} 条已存在的规则，{error_count} 条错误")
