@@ -397,9 +397,10 @@ export default function Dashboard() {
       toast.error("请先选择项目压缩包");
       return;
     }
+    let createdProject: Project | null = null;
     try {
       setCreatingProject(true);
-      const project = await api.createProject({
+      createdProject = await api.createProject({
         name: projectName.trim(),
         description: projectDescription.trim() || undefined,
         source_type: "zip",
@@ -408,7 +409,7 @@ export default function Dashboard() {
         default_branch: "main",
         programming_languages: [],
       } as any);
-      const uploadResult = await uploadZipFile(project.id, projectZipFile);
+      const uploadResult = await uploadZipFile(createdProject.id, projectZipFile);
       if (!uploadResult.success) {
         throw new Error(uploadResult.message || "压缩包上传失败");
       }
@@ -418,7 +419,18 @@ export default function Dashboard() {
       toast.success("项目创建成功");
       await loadDashboardData({ silent: true });
     } catch (error) {
-      const msg = extractApiErrorMessage(error);
+      if (createdProject) {
+        try {
+          await api.deleteProject(createdProject.id);
+        } catch (cleanupError) {
+          console.error("回滚失败项目失败:", cleanupError);
+        }
+      }
+      await loadDashboardData({ silent: true });
+      const rawMsg = extractApiErrorMessage(error);
+      const msg = rawMsg.includes("解压文件数超过 10000")
+        ? "压缩包解压后文件数量超过 10000 个，请精简后重试"
+        : rawMsg;
       toast.error(`创建项目失败: ${msg}`);
     } finally {
       setCreatingProject(false);

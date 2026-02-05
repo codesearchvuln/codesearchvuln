@@ -234,44 +234,44 @@ export default function Projects() {
             return;
         }
 
+        let createdProject: Project | null = null;
+        let progressInterval: ReturnType<typeof setInterval> | null = null;
         try {
             setUploading(true);
             setUploadProgress(0);
 
-            const progressInterval = setInterval(() => {
+            progressInterval = setInterval(() => {
                 setUploadProgress((prev) => {
                     if (prev >= 100) {
-                        clearInterval(progressInterval);
+                        if (progressInterval) clearInterval(progressInterval);
                         return 100;
                     }
                     return prev + 20;
                 });
             }, 100);
 
-            const project = await api.createProject({
+            createdProject = await api.createProject({
                 ...createForm,
                 source_type: "zip",
                 repository_type: "other",
                 repository_url: undefined,
             } as any);
 
-            let detectedLanguages: string[] = [];
-            try {
-                const uploadResult = await uploadZipFile(
-                    project.id,
-                    selectedFile,
-                );
-                detectedLanguages = uploadResult.detected_languages || [];
-            } catch (error) {
-                console.error("保存ZIP文件失败:", error);
+            const uploadResult = await uploadZipFile(
+                createdProject.id,
+                selectedFile,
+            );
+            if (!uploadResult.success) {
+                throw new Error(uploadResult.message || "压缩包上传失败");
             }
+            const detectedLanguages = uploadResult.detected_languages || [];
 
-            clearInterval(progressInterval);
+            if (progressInterval) clearInterval(progressInterval);
             setUploadProgress(100);
 
             import("@/shared/utils/logger").then(({ logger }) => {
                 logger.logUserAction("上传ZIP文件创建项目", {
-                    projectName: project.name,
+                    projectName: createdProject?.name,
                     fileName: selectedFile.name,
                     fileSize: selectedFile.size,
                 });
@@ -281,7 +281,7 @@ export default function Projects() {
             resetCreateForm();
             loadProjects();
 
-            toast.success(`项目 "${project.name}" 已创建`, {
+            toast.success(`项目 "${createdProject.name}" 已创建`, {
                 description:
                     detectedLanguages.length > 0
                         ? `已自动识别语言: ${detectedLanguages.join(" / ")}`
@@ -290,12 +290,24 @@ export default function Projects() {
             });
         } catch (error: any) {
             console.error("Upload failed:", error);
+            if (createdProject) {
+                try {
+                    await api.deleteProject(createdProject.id);
+                } catch (cleanupError) {
+                    console.error("回滚失败项目失败:", cleanupError);
+                }
+            }
+            await loadProjects();
             import("@/shared/utils/errorHandler").then(({ handleError }) => {
                 handleError(error, "上传ZIP文件失败");
             });
-            const errorMessage = error?.message || "未知错误";
+            const rawErrorMessage = error?.message || "未知错误";
+            const errorMessage = rawErrorMessage.includes("解压文件数超过 10000")
+                ? "压缩包解压后文件数量超过 10000 个，请精简后重试"
+                : rawErrorMessage;
             toast.error(`上传失败: ${errorMessage}`);
         } finally {
+            if (progressInterval) clearInterval(progressInterval);
             setUploading(false);
             setUploadProgress(0);
         }
@@ -1111,18 +1123,6 @@ export default function Projects() {
             {/* Edit Dialog */}
             <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
                 <DialogContent className="!w-[min(90vw,700px)] !max-w-none max-h-[85vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
-                    {/* Terminal Header */}
-                    <div className="flex items-center gap-2 px-4 py-3 cyber-bg-elevated border-b border-border flex-shrink-0">
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-green-500/80" />
-                        </div>
-                        <span className="ml-2 font-mono text-xs text-muted-foreground tracking-wider">
-                            edit_project@vulhunter
-                        </span>
-                    </div>
-
                     <DialogHeader className="px-6 pt-4 flex-shrink-0">
                         <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
                             <Edit className="w-5 h-5 text-primary" />
@@ -1512,18 +1512,6 @@ export default function Projects() {
                 onOpenChange={setShowDeleteDialog}
             >
                 <AlertDialogContent className="cyber-card border-border cyber-dialog p-0 !fixed">
-                    {/* Terminal Header */}
-                    <div className="flex items-center gap-2 px-4 py-3 bg-rose-500/10 border-b border-rose-500/30">
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                            <div className="w-3 h-3 rounded-full bg-green-500/80" />
-                        </div>
-                        <span className="ml-2 font-mono text-xs text-rose-400 tracking-wider">
-                            confirm_delete@vulhunter
-                        </span>
-                    </div>
-
                     <AlertDialogHeader className="p-6">
                         <AlertDialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
                             <Trash2 className="w-5 h-5 text-rose-400" />
