@@ -482,7 +482,7 @@ export const SUPPORTED_LANGUAGES = [
 
 export const RULE_SOURCES = [
     { value: "internal", label: "内置规则" },
-    { value: "patch", label: "从Patch生成" },
+    { value: "patch", label: "补丁生成" },
 ];
 
 export const SEVERITIES = [

@@ -130,6 +130,7 @@ services:
       context: ./docker/sandbox
       dockerfile: Dockerfile
     image: deepaudit/sandbox:latest
+    profiles: ["build"]
     restart: "no"
     command: echo "Sandbox image built successfully"
 

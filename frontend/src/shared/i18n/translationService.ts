@@ -1,5 +1,8 @@
 import generatedMap from "./offlineZhEnMap.generated.json";
-import { manualDomTranslations } from "./dom-dictionaries";
+import {
+  manualDomTranslations,
+  manualFragmentTranslations,
+} from "./dom-dictionaries";
 
 interface TextSegments {
   prefix: string;
@@ -14,50 +17,7 @@ const OFFLINE_TRANSLATIONS: TranslationMap = {
   ...manualDomTranslations,
 };
 
-const FRAGMENT_TRANSLATIONS: Array<[string, string]> = Object.entries({
-  "面向代码安全与合规审计的智能分析平台。": "An intelligent platform for code security and compliance audits.",
-  "聚焦仓库级项目，": "Focused on repository-level projects,",
-  "提供任务编排、自动化审计与结果追踪，帮助团队更快定位风险与改进点。": "it provides task orchestration, automated auditing, and result tracking to help teams identify risks and improvements faster.",
-  "活跃:": "Active:",
-  "已完成:": "Completed:",
-  "已解决:": "Resolved:",
-  "保存失败:": "Save failed:",
-  "重置失败:": "Reset failed:",
-  "连接失败:": "Connection failed:",
-  "测试失败:": "Test failed:",
-  "LLM 已配置": "LLM configured",
-  "规则": "Rule",
-  "项目": "Project",
-  "审计": "Audit",
-  "启用": "Enable",
-  "禁用": "Disable",
-  "保存": "Save",
-  "删除": "Delete",
-  "取消": "Cancel",
-  "返回": "Back",
-  "成功": "Success",
-  "失败": "Failed",
-  "加载": "Loading",
-  "生成": "Generate",
-  "筛选": "Filter",
-  "搜索": "Search",
-  "状态": "Status",
-  "名称": "Name",
-  "语言": "Language",
-  "严重程度": "Severity",
-  "创建时间": "Created At",
-  "详情": "Details",
-  "基本信息": "Basic Information",
-  "编程语言": "Programming Language",
-  "所有状态": "All Status",
-  "所有来源": "All Sources",
-  "所有级别": "All Levels",
-  "所有语言": "All Languages",
-  "确认删除": "Confirm Delete",
-  "通用型": "Generic",
-  "事件型": "Patch-based",
-  "创建": "Created",
-}).sort(([a], [b]) => b.length - a.length);
+const FRAGMENT_TRANSLATIONS = manualFragmentTranslations;
 
 function splitTextSegments(text: string): TextSegments {
   const prefixMatch = text.match(/^\s*/);

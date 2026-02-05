@@ -836,7 +836,7 @@ async def _execute_opengrep_scan(
                 progress=28,
                 stage="execute_rules",
                 message=(
-                    f"开始执行规则扫描（可执行 {len(executable_rule_entries)} / "
+                    f"开始执行静态扫描（可执行 {len(executable_rule_entries)} / "
                     f"有效 {len(valid_rule_entries)}）"
                 ),
             )

@@ -435,15 +435,15 @@ export default function OpengrepRules() {
             const nextRules = rules.map((ruleItem) =>
                 ruleItem.id === updatedRule.id
                     ? {
-                          ...ruleItem,
-                          name: updatedRule.name,
-                          language: updatedRule.language,
-                          severity: updatedRule.severity,
-                          source: updatedRule.source,
-                          correct: updatedRule.correct,
-                          is_active: updatedRule.is_active,
-                          created_at: updatedRule.created_at,
-                      }
+                        ...ruleItem,
+                        name: updatedRule.name,
+                        language: updatedRule.language,
+                        severity: updatedRule.severity,
+                        source: updatedRule.source,
+                        correct: updatedRule.correct,
+                        is_active: updatedRule.is_active,
+                        created_at: updatedRule.created_at,
+                    }
                     : ruleItem,
             );
             setRules(nextRules);
@@ -692,19 +692,19 @@ export default function OpengrepRules() {
         try {
             setUploadingRules(true);
             const result = await uploadPatchArchive(patchArchive);
-            
+
             const { message, total_files } = result;
-            
+
             toast.success(`${message}`);
-            
+
             // 关闭上传对话框
             setShowEventDialog(false);
             setPatchArchive(null);
             setEventRuleUploadTab("manual");
-            
+
             // 重新加载生成中的规则列表
             await loadGeneratingRules();
-            
+
             // 设置定期轮询以更新生成队列
             setTimeout(() => loadGeneratingRules(), 2000);
         } catch (error: any) {
@@ -724,19 +724,19 @@ export default function OpengrepRules() {
         try {
             setUploadingRules(true);
             const result = await uploadPatchDirectory(patchDirectoryFiles);
-            
+
             const { message, total_files } = result;
-            
+
             toast.success(`${message}`);
-            
+
             // 关闭上传对话框
             setShowEventDialog(false);
             setPatchDirectoryFiles([]);
             setEventRuleUploadTab("manual");
-            
+
             // 重新加载生成中的规则列表
             await loadGeneratingRules();
-            
+
             // 设置定期轮询以更新生成队列
             setTimeout(() => loadGeneratingRules(), 2000);
         } catch (error: any) {
@@ -751,48 +751,48 @@ export default function OpengrepRules() {
     const startPollingRules = async (ruleIds: string[]) => {
         // 初始化生成队列显示，先获取所有规则信息
         const initialProgress = new Map<string, { name: string; progress: number; status: string }>();
-        
+
         for (const ruleId of ruleIds) {
             try {
                 const rule = await getOpengrepRule(ruleId);
-                initialProgress.set(ruleId, { 
+                initialProgress.set(ruleId, {
                     name: rule.name || ruleId,
-                    progress: 0, 
-                    status: "等待处理中..." 
+                    progress: 0,
+                    status: "等待处理中..."
                 });
             } catch (error) {
                 console.error(`获取规则信息失败 ${ruleId}:`, error);
-                initialProgress.set(ruleId, { 
+                initialProgress.set(ruleId, {
                     name: ruleId,
-                    progress: 0, 
-                    status: "加载中..." 
+                    progress: 0,
+                    status: "加载中..."
                 });
             }
         }
-        
+
         setGeneratingRules(initialProgress);
         setShowGeneratingQueue(true);
-        
+
         // 启动后台轮询任务
         const maxAttempts = 300; // 5 分钟（300 * 1000ms）
         const pollInterval = 1000; // 1 秒
-        
+
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             let allComplete = true;
             let successCount = 0;
             let failedCount = 0;
             const progressMap = new Map<string, { name: string; progress: number; status: string }>();
-            
+
             for (let index = 0; index < ruleIds.length; index++) {
                 const ruleId = ruleIds[index];
                 const elapsed = (attempt * pollInterval) / 1000;
-                
+
                 try {
                     const rule = await getOpengrepRule(ruleId);
-                    
+
                     // 获取最新的规则名称
                     const ruleName = rule.name || ruleId;
-                    
+
                     if (rule.correct === true) {
                         // 规则生成成功
                         successCount++;
@@ -816,33 +816,33 @@ export default function OpengrepRules() {
                     allComplete = false;
                 }
             }
-            
+
             // 更新进度显示
             setGeneratingRules(new Map(progressMap));
-            
+
             if (allComplete) {
                 // 所有规则处理完成
                 toast.success(
                     `规则生成完成: 成功 ${successCount}，失败 ${failedCount}`,
                     { duration: 5 }
                 );
-                
+
                 // 关闭生成队列显示
                 setTimeout(() => {
                     setShowGeneratingQueue(false);
                     setGeneratingRules(new Map());
                 }, 3000);
-                
+
                 await loadRules({ silent: true });
                 await loadRuleStats();
                 await loadGeneratingRules();
                 break;
             }
-            
+
             // 等待后再轮询
             await new Promise((resolve) => setTimeout(resolve, pollInterval));
         }
-        
+
         // 超时未完成，关闭显示但保留在队列中
         setShowGeneratingQueue(false);
         // 最后一次更新生成队列状态
@@ -1050,7 +1050,7 @@ export default function OpengrepRules() {
     };
 
     const getSourceBadge = (source: string) => {
-        return source === "patch" ? "从Patch生成" : "内置规则";
+        return source === "patch" ? "补丁生成" : "内置规则";
     };
 
     if (loading) {
@@ -1356,64 +1356,64 @@ export default function OpengrepRules() {
                         selectedLanguage ||
                         selectedSource ||
                         selectedSeverity) && (
-                        <div className="cyber-card p-4 relative z-10 bg-primary/5 border-primary/30">
-                            <div className="flex flex-wrap items-center justify-between gap-4">
-                                <p className="font-mono text-sm">
-                                    {selectedRuleIds.size > 0 ? (
-                                        <>
-                                            已选择{" "}
-                                            <span className="font-bold text-primary">
-                                                {selectedRuleIds.size}
-                                            </span>{" "}
-                                            条规则
-                                        </>
-                                    ) : (
-                                        <>
-                                            将对{" "}
-                                            <span className="font-bold text-primary">
-                                                {filteredRules.length}
-                                            </span>{" "}
-                                            条符合条件的规则进行操作
-                                        </>
-                                    )}
-                                </p>
-                                <div className="flex flex-wrap gap-2">
-                                    <Button
-                                        onClick={() =>
-                                            handleBatchUpdateRules(true)
-                                        }
-                                        disabled={batchOperating}
-                                        className="cyber-btn-primary h-9 text-sm"
-                                    >
-                                        {batchOperating
-                                            ? "处理中..."
-                                            : "批量启用"}
-                                    </Button>
-                                    <Button
-                                        onClick={() =>
-                                            handleBatchUpdateRules(false)
-                                        }
-                                        disabled={batchOperating}
-                                        className="cyber-btn-outline h-9 text-sm"
-                                    >
-                                        {batchOperating
-                                            ? "处理中..."
-                                            : "批量禁用"}
-                                    </Button>
-                                    <Button
-                                        onClick={() => {
-                                            setSelectedRuleIds(new Set());
-                                            handleResetFilters();
-                                        }}
-                                        disabled={batchOperating}
-                                        className="cyber-btn-ghost h-9 text-sm"
-                                    >
-                                        取消操作
-                                    </Button>
+                            <div className="cyber-card p-4 relative z-10 bg-primary/5 border-primary/30">
+                                <div className="flex flex-wrap items-center justify-between gap-4">
+                                    <p className="font-mono text-sm">
+                                        {selectedRuleIds.size > 0 ? (
+                                            <>
+                                                已选择{" "}
+                                                <span className="font-bold text-primary">
+                                                    {selectedRuleIds.size}
+                                                </span>{" "}
+                                                条规则
+                                            </>
+                                        ) : (
+                                            <>
+                                                将对{" "}
+                                                <span className="font-bold text-primary">
+                                                    {filteredRules.length}
+                                                </span>{" "}
+                                                条符合条件的规则进行操作
+                                            </>
+                                        )}
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        <Button
+                                            onClick={() =>
+                                                handleBatchUpdateRules(true)
+                                            }
+                                            disabled={batchOperating}
+                                            className="cyber-btn-primary h-9 text-sm"
+                                        >
+                                            {batchOperating
+                                                ? "处理中..."
+                                                : "批量启用"}
+                                        </Button>
+                                        <Button
+                                            onClick={() =>
+                                                handleBatchUpdateRules(false)
+                                            }
+                                            disabled={batchOperating}
+                                            className="cyber-btn-outline h-9 text-sm"
+                                        >
+                                            {batchOperating
+                                                ? "处理中..."
+                                                : "批量禁用"}
+                                        </Button>
+                                        <Button
+                                            onClick={() => {
+                                                setSelectedRuleIds(new Set());
+                                                handleResetFilters();
+                                            }}
+                                            disabled={batchOperating}
+                                            className="cyber-btn-ghost h-9 text-sm"
+                                        >
+                                            取消操作
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
+                        )}
 
                     {/* Generating Queue Panel */}
                     {generatingRules.size > 0 && (
@@ -1439,7 +1439,7 @@ export default function OpengrepRules() {
                                         {showGeneratingQueue ? "▼" : "▶"}
                                     </Button>
                                 </div>
-                                
+
                                 {showGeneratingQueue && (
                                     <div className="space-y-3 max-h-96 overflow-y-auto">
                                         {Array.from(generatingRules.entries()).map(([ruleId, { name, status }]) => {
@@ -1487,9 +1487,9 @@ export default function OpengrepRules() {
                                 </h3>
                                 <p className="text-muted-foreground font-mono text-sm">
                                     {searchTerm ||
-                                    selectedLanguage ||
-                                    selectedSource ||
-                                    selectedSeverity
+                                        selectedLanguage ||
+                                        selectedSource ||
+                                        selectedSeverity
                                         ? "调整筛选条件尝试"
                                         : "暂无规则数据"}
                                 </p>
@@ -1502,7 +1502,7 @@ export default function OpengrepRules() {
                                         <Checkbox
                                             checked={
                                                 selectedRuleIds.size ===
-                                                    paginatedRules.length &&
+                                                paginatedRules.length &&
                                                 paginatedRules.length > 0
                                             }
                                             onCheckedChange={
@@ -1523,11 +1523,10 @@ export default function OpengrepRules() {
                                             {paginatedRules.map((rule) => (
                                                 <div
                                                     key={rule.id}
-                                                    className={`p-4 hover:bg-muted/50 transition-colors border-b border-border last:border-0 ${
-                                                        isHighlightedRule(rule)
+                                                    className={`p-4 hover:bg-muted/50 transition-colors border-b border-border last:border-0 ${isHighlightedRule(rule)
                                                             ? "bg-primary/10 border-l-2 border-l-primary"
                                                             : ""
-                                                    }`}
+                                                        }`}
                                                 >
                                                     <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
                                                         <div className="flex gap-3 flex-1 min-w-0">
@@ -1555,12 +1554,11 @@ export default function OpengrepRules() {
                                                                         {getSeverityLabel(rule.severity)}
                                                                     </Badge>
                                                                     <Badge
-                                                                        className={`cyber-badge ${
-                                                                            rule.source ===
-                                                                            "patch"
+                                                                        className={`cyber-badge ${rule.source ===
+                                                                                "patch"
                                                                                 ? "cyber-badge-warning"
                                                                                 : "cyber-badge-info"
-                                                                        }`}
+                                                                            }`}
                                                                     >
                                                                         {getSourceBadge(
                                                                             rule.source,
@@ -1667,11 +1665,10 @@ export default function OpengrepRules() {
                                                                         rule,
                                                                     )
                                                                 }
-                                                                className={`cyber-btn-ghost h-8 px-3 min-w-[72px] ${
-                                                                    rule.is_active
+                                                                className={`cyber-btn-ghost h-8 px-3 min-w-[72px] ${rule.is_active
                                                                         ? "hover:bg-rose-500/10"
                                                                         : "hover:bg-emerald-500/10"
-                                                                }`}
+                                                                    }`}
                                                             >
                                                                 {rule.is_active
                                                                     ? "禁用"
@@ -1777,7 +1774,7 @@ export default function OpengrepRules() {
                                                             size="sm"
                                                             variant={
                                                                 page ===
-                                                                currentPage
+                                                                    currentPage
                                                                     ? "default"
                                                                     : "outline"
                                                             }
@@ -1829,18 +1826,6 @@ export default function OpengrepRules() {
                         }}
                     >
                         <DialogContent className="!w-[min(90vw,900px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
-                            {/* Terminal Header */}
-                            <div className="flex items-center gap-2 px-4 py-3 cyber-bg-elevated border-b border-border flex-shrink-0">
-                                <div className="flex items-center gap-1.5">
-                                    <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                                    <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                                    <div className="w-3 h-3 rounded-full bg-green-500/80" />
-                                </div>
-                                <span className="ml-2 font-mono text-xs text-muted-foreground tracking-wider">
-                                    rule_detail@vulhunter
-                                </span>
-                            </div>
-
                             <DialogHeader className="px-6 pt-4 flex-shrink-0">
                                 <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
                                     <Code className="w-5 h-5 text-primary" />
@@ -1994,11 +1979,10 @@ export default function OpengrepRules() {
                                                     </p>
                                                     <div className="mt-2 flex flex-wrap gap-2">
                                                         <Badge
-                                                            className={`cyber-badge ${
-                                                                selectedRule.correct
+                                                            className={`cyber-badge ${selectedRule.correct
                                                                     ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
                                                                     : "bg-amber-500/20 text-amber-300 border-amber-500/30"
-                                                            }`}
+                                                                }`}
                                                         >
                                                             {selectedRule.correct
                                                                 ? "✓ 正确"
@@ -2014,8 +1998,8 @@ export default function OpengrepRules() {
                                                             </Badge>
                                                         )}
                                                         {selectedRule.cwe &&
-                                                        selectedRule.cwe
-                                                            .length > 0 ? (
+                                                            selectedRule.cwe
+                                                                .length > 0 ? (
                                                             selectedRule.cwe.map(
                                                                 (
                                                                     cwe,
@@ -2303,31 +2287,28 @@ export default function OpengrepRules() {
                             <div className="flex-shrink-0 px-6 flex gap-2 border-b border-border">
                                 <button
                                     onClick={() => setGenericRuleUploadTab("manual")}
-                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-                                        genericRuleUploadTab === "manual"
+                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${genericRuleUploadTab === "manual"
                                             ? "border-primary text-primary"
                                             : "border-transparent text-muted-foreground hover:text-foreground"
-                                    }`}
+                                        }`}
                                 >
                                     手动上传
                                 </button>
                                 <button
                                     onClick={() => setGenericRuleUploadTab("compressed")}
-                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-                                        genericRuleUploadTab === "compressed"
+                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${genericRuleUploadTab === "compressed"
                                             ? "border-primary text-primary"
                                             : "border-transparent text-muted-foreground hover:text-foreground"
-                                    }`}
+                                        }`}
                                 >
                                     压缩包上传
                                 </button>
                                 <button
                                     onClick={() => setGenericRuleUploadTab("directory")}
-                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-                                        genericRuleUploadTab === "directory"
+                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${genericRuleUploadTab === "directory"
                                             ? "border-primary text-primary"
                                             : "border-transparent text-muted-foreground hover:text-foreground"
-                                    }`}
+                                        }`}
                                 >
                                     目录上传
                                 </button>
@@ -2674,7 +2655,7 @@ export default function OpengrepRules() {
                                                         <p className="text-sm font-mono text-primary">
                                                             ✓ 已选择{" "}
                                                             {directoryFiles.length}{" "}
-                                                             个文件
+                                                            个文件
                                                         </p>
                                                         <div className="text-xs text-muted-foreground mt-2 space-y-1 max-h-32 overflow-y-auto">
                                                             {directoryFiles
@@ -2686,13 +2667,13 @@ export default function OpengrepRules() {
                                                                 ))}
                                                             {directoryFiles.length >
                                                                 5 && (
-                                                                <p>
-                                                                    ... 及其他{" "}
-                                                                    {directoryFiles.length -
-                                                                        5}{" "}
-                                                                    个文件
-                                                                </p>
-                                                            )}
+                                                                    <p>
+                                                                        ... 及其他{" "}
+                                                                        {directoryFiles.length -
+                                                                            5}{" "}
+                                                                        个文件
+                                                                    </p>
+                                                                )}
                                                         </div>
                                                     </div>
                                                 ) : (
@@ -2779,11 +2760,10 @@ export default function OpengrepRules() {
                                                 上传中...
                                             </>
                                         ) : (
-                                            `${
-                                                genericRuleUploadTab ===
+                                            `${genericRuleUploadTab ===
                                                 "manual"
-                                                    ? "生成规则"
-                                                    : "上传规则"
+                                                ? "生成规则"
+                                                : "上传规则"
                                             }`
                                         )}
                                     </Button>
@@ -2815,31 +2795,28 @@ export default function OpengrepRules() {
                             <div className="flex-shrink-0 px-6 flex gap-2 border-b border-border">
                                 <button
                                     onClick={() => setEventRuleUploadTab("manual")}
-                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-                                        eventRuleUploadTab === "manual"
+                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${eventRuleUploadTab === "manual"
                                             ? "border-primary text-primary"
                                             : "border-transparent text-muted-foreground hover:text-foreground"
-                                    }`}
+                                        }`}
                                 >
                                     手动输入
                                 </button>
                                 <button
                                     onClick={() => setEventRuleUploadTab("archive")}
-                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-                                        eventRuleUploadTab === "archive"
+                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${eventRuleUploadTab === "archive"
                                             ? "border-primary text-primary"
                                             : "border-transparent text-muted-foreground hover:text-foreground"
-                                    }`}
+                                        }`}
                                 >
                                     压缩包上传
                                 </button>
                                 <button
                                     onClick={() => setEventRuleUploadTab("directory")}
-                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-                                        eventRuleUploadTab === "directory"
+                                    className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${eventRuleUploadTab === "directory"
                                             ? "border-primary text-primary"
                                             : "border-transparent text-muted-foreground hover:text-foreground"
-                                    }`}
+                                        }`}
                                 >
                                     目录上传
                                 </button>

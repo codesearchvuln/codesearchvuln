@@ -1,1 +1,1 @@
-export type DomDictionary = Record<string, string>;
+export type { DomDictionary } from "./index";
