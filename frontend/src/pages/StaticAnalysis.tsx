@@ -114,6 +114,8 @@ const FALSE_POSITIVE_BADGE_CLASSES = {
     inactive: "bg-muted text-muted-foreground border-border",
 };
 const PAGE_SIZE_OPTIONS = [10, 30, 50, 100] as const;
+const FINDINGS_COUNT_BATCH_SIZE = 200;
+const FINDINGS_COUNT_MAX_PAGES = 500;
 
 const normalizePath = (path?: string | null) => {
     if (!path) return "";
@@ -280,6 +282,11 @@ export default function StaticAnalysis() {
     const [opengrepPage, setOpengrepPage] = useState(1);
     const [opengrepPageSize, setOpengrepPageSize] = useState<number>(10);
     const [opengrepHasMore, setOpengrepHasMore] = useState(false);
+    const [opengrepFilteredCount, setOpengrepFilteredCount] = useState<
+        number | null
+    >(null);
+    const [countingOpengrepFilteredCount, setCountingOpengrepFilteredCount] =
+        useState(false);
 
     const [gitleaksTask, setGitleaksTask] =
         useState<GitleaksScanTask | null>(null);
@@ -292,6 +299,11 @@ export default function StaticAnalysis() {
     const [gitleaksPage, setGitleaksPage] = useState(1);
     const [gitleaksPageSize, setGitleaksPageSize] = useState<number>(10);
     const [gitleaksHasMore, setGitleaksHasMore] = useState(false);
+    const [gitleaksFilteredCount, setGitleaksFilteredCount] = useState<
+        number | null
+    >(null);
+    const [countingGitleaksFilteredCount, setCountingGitleaksFilteredCount] =
+        useState(false);
 
     const [severityFilter, setSeverityFilter] = useState<string>("");
     const [confidenceFilter, setConfidenceFilter] = useState<string>("");
@@ -312,6 +324,8 @@ export default function StaticAnalysis() {
     const lastGitleaksNotifiedStatusRef = useRef<string | null>(null);
     const opengrepSilentRefreshRef = useRef(false);
     const gitleaksSilentRefreshRef = useRef(false);
+    const opengrepCountRequestRef = useRef(0);
+    const gitleaksCountRequestRef = useRef(0);
 
     const searchParams = useMemo(
         () => new URLSearchParams(location.search),
@@ -488,6 +502,74 @@ export default function StaticAnalysis() {
         }
     };
 
+    const loadOpengrepFilteredCount = async () => {
+        if (!opengrepTaskId) {
+            setOpengrepFilteredCount(null);
+            return;
+        }
+        const requestId = ++opengrepCountRequestRef.current;
+        setCountingOpengrepFilteredCount(true);
+        try {
+            let total = 0;
+            for (let page = 0; page < FINDINGS_COUNT_MAX_PAGES; page += 1) {
+                const findings = await getOpengrepScanFindings({
+                    taskId: opengrepTaskId,
+                    severity: severityFilter || undefined,
+                    confidence: confidenceFilter || undefined,
+                    status: statusFilter || undefined,
+                    skip: page * FINDINGS_COUNT_BATCH_SIZE,
+                    limit: FINDINGS_COUNT_BATCH_SIZE,
+                });
+                total += findings.length;
+                if (findings.length < FINDINGS_COUNT_BATCH_SIZE) break;
+            }
+            if (requestId === opengrepCountRequestRef.current) {
+                setOpengrepFilteredCount(total);
+            }
+        } catch (error) {
+            if (requestId === opengrepCountRequestRef.current) {
+                setOpengrepFilteredCount(null);
+            }
+        } finally {
+            if (requestId === opengrepCountRequestRef.current) {
+                setCountingOpengrepFilteredCount(false);
+            }
+        }
+    };
+
+    const loadGitleaksFilteredCount = async () => {
+        if (!gitleaksTaskId) {
+            setGitleaksFilteredCount(null);
+            return;
+        }
+        const requestId = ++gitleaksCountRequestRef.current;
+        setCountingGitleaksFilteredCount(true);
+        try {
+            let total = 0;
+            for (let page = 0; page < FINDINGS_COUNT_MAX_PAGES; page += 1) {
+                const findings = await getGitleaksFindings({
+                    taskId: gitleaksTaskId,
+                    status: gitleaksStatusFilter || undefined,
+                    skip: page * FINDINGS_COUNT_BATCH_SIZE,
+                    limit: FINDINGS_COUNT_BATCH_SIZE,
+                });
+                total += findings.length;
+                if (findings.length < FINDINGS_COUNT_BATCH_SIZE) break;
+            }
+            if (requestId === gitleaksCountRequestRef.current) {
+                setGitleaksFilteredCount(total);
+            }
+        } catch (error) {
+            if (requestId === gitleaksCountRequestRef.current) {
+                setGitleaksFilteredCount(null);
+            }
+        } finally {
+            if (requestId === gitleaksCountRequestRef.current) {
+                setCountingGitleaksFilteredCount(false);
+            }
+        }
+    };
+
     const refreshOpengrepSilently = async () => {
         if (opengrepSilentRefreshRef.current) return;
         opengrepSilentRefreshRef.current = true;
@@ -544,6 +626,17 @@ export default function StaticAnalysis() {
     }, [opengrepTaskId, severityFilter, confidenceFilter, statusFilter, opengrepPage, opengrepPageSize]);
 
     useEffect(() => {
+        setOpengrepFilteredCount(null);
+        loadOpengrepFilteredCount();
+    }, [
+        opengrepTaskId,
+        severityFilter,
+        confidenceFilter,
+        statusFilter,
+        opengrepTask?.total_findings,
+    ]);
+
+    useEffect(() => {
         loadGitleaksTask();
     }, [gitleaksTaskId]);
 
@@ -555,6 +648,11 @@ export default function StaticAnalysis() {
     useEffect(() => {
         loadGitleaksFindings();
     }, [gitleaksTaskId, gitleaksStatusFilter, gitleaksPage, gitleaksPageSize]);
+
+    useEffect(() => {
+        setGitleaksFilteredCount(null);
+        loadGitleaksFilteredCount();
+    }, [gitleaksTaskId, gitleaksStatusFilter, gitleaksTask?.total_findings]);
 
     useEffect(() => {
         if (!opengrepTaskId) return;
@@ -746,6 +844,7 @@ export default function StaticAnalysis() {
                     item.id === findingId ? { ...item, status } : item,
                 );
             });
+            loadOpengrepFilteredCount();
             toast.success("状态已更新");
         } catch (error) {
             toast.error("更新状态失败");
@@ -769,6 +868,7 @@ export default function StaticAnalysis() {
                     item.id === findingId ? { ...item, status } : item,
                 );
             });
+            loadGitleaksFilteredCount();
             toast.success("状态已更新");
         } catch (error) {
             toast.error("更新状态失败");
@@ -1155,13 +1255,22 @@ export default function StaticAnalysis() {
                                 </Select>
                             </div>
                             <div className="flex items-end">
-                                <div className="text-xs text-muted-foreground font-mono">
-                                    {showOpengrepLoadingSkeleton
-                                        ? "加载中..."
-                                        : `第 ${opengrepPage} 页 · 当前 ${opengrepFindings.length} 条`}
-                                    {loadingOpengrepFindings &&
-                                        opengrepFindings.length > 0 &&
-                                        " · 后台更新中"}
+                                <div className="w-full text-xs text-muted-foreground font-mono flex items-center justify-between gap-3">
+                                    <span>
+                                        {showOpengrepLoadingSkeleton
+                                            ? "加载中..."
+                                            : `第 ${opengrepPage} 页 · 当前 ${opengrepFindings.length} 条`}
+                                        {loadingOpengrepFindings &&
+                                            opengrepFindings.length > 0 &&
+                                            " · 后台更新中"}
+                                    </span>
+                                    {!showOpengrepLoadingSkeleton && (
+                                        <span className="whitespace-nowrap">
+                                            {countingOpengrepFilteredCount
+                                                ? "符合筛选统计中..."
+                                                : `符合筛选 ${opengrepFilteredCount ?? 0} 条`}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1437,13 +1546,22 @@ export default function StaticAnalysis() {
                                 </Select>
                             </div>
                             <div className="flex items-end">
-                                <div className="text-xs text-muted-foreground font-mono">
-                                    {showGitleaksLoadingSkeleton
-                                        ? "加载中..."
-                                        : `第 ${gitleaksPage} 页 · 当前 ${gitleaksFindings.length} 条`}
-                                    {loadingGitleaksFindings &&
-                                        gitleaksFindings.length > 0 &&
-                                        " · 后台更新中"}
+                                <div className="w-full text-xs text-muted-foreground font-mono flex items-center justify-between gap-3">
+                                    <span>
+                                        {showGitleaksLoadingSkeleton
+                                            ? "加载中..."
+                                            : `第 ${gitleaksPage} 页 · 当前 ${gitleaksFindings.length} 条`}
+                                        {loadingGitleaksFindings &&
+                                            gitleaksFindings.length > 0 &&
+                                            " · 后台更新中"}
+                                    </span>
+                                    {!showGitleaksLoadingSkeleton && (
+                                        <span className="whitespace-nowrap">
+                                            {countingGitleaksFilteredCount
+                                                ? "符合筛选统计中..."
+                                                : `符合筛选 ${gitleaksFilteredCount ?? 0} 条`}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                         </div>

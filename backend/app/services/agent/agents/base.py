@@ -1012,7 +1012,7 @@ class BaseAgent(ABC):
                 try:
                     # 🔥 使用用户配置的超时时间
                     # 第一个 token 使用首Token超时，后续 token 使用流式超时
-                    first_token_timeout = float(self._timeout_config.get('llm_first_token_timeout', 30))
+                    first_token_timeout = float(self._timeout_config.get('llm_first_token_timeout', 90))
                     stream_timeout = float(self._timeout_config.get('llm_stream_timeout', 60))
                     timeout = first_token_timeout if not first_token_received else stream_timeout
 

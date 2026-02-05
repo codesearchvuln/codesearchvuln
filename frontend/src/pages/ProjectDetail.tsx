@@ -4,7 +4,7 @@
  */
 
 import { useMemo, useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import {
     PieChart,
     Pie,
@@ -89,6 +89,8 @@ const LANGUAGE_PIE_COLORS = [
 
 export default function ProjectDetail() {
     const { id } = useParams<{ id: string }>();
+    const location = useLocation();
+    const navigate = useNavigate();
     const [project, setProject] = useState<Project | null>(null);
     const [auditTasks, setAuditTasks] = useState<AuditTask[]>([]);
     const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
@@ -130,6 +132,21 @@ export default function ProjectDetail() {
         isLimited: false,
         maxTasks: 20,
     });
+    const fallbackBackPath = "/projects#project-browser";
+    const sourceFromState =
+        typeof (location.state as { from?: unknown } | null)?.from === "string"
+            ? ((location.state as { from?: string }).from ?? "")
+            : "";
+    const normalizedSourceFrom =
+        sourceFromState.startsWith("/") ? sourceFromState : "";
+    const backTarget =
+        normalizedSourceFrom && normalizedSourceFrom !== location.pathname
+            ? normalizedSourceFrom
+            : fallbackBackPath;
+
+    const handleBack = () => {
+        navigate(backTarget);
+    };
 
     // ============ Helpers ============
 
@@ -524,9 +541,9 @@ export default function ProjectDetail() {
                     const files = Number(
                         (info as { files_count?: number; file_count?: number })
                             .files_count ??
-                            (info as { files_count?: number; file_count?: number })
-                                .file_count ??
-                            0,
+                        (info as { files_count?: number; file_count?: number })
+                            .file_count ??
+                        0,
                     );
                     const proportion = Number(
                         (info as { proportion?: number }).proportion ?? 0,
@@ -919,12 +936,10 @@ export default function ProjectDetail() {
                     <p className="text-muted-foreground mb-4 font-mono">
                         请检查项目ID是否正确
                     </p>
-                    <Link to="/projects">
-                        <Button className="cyber-btn-primary">
-                            <ArrowLeft className="w-4 h-4 mr-2" />
-                            返回项目列表
-                        </Button>
-                    </Link>
+                    <Button className="cyber-btn-primary" onClick={handleBack}>
+                        <ArrowLeft className="w-4 h-4 mr-2" />
+                        返回
+                    </Button>
                 </div>
             </div>
         );
@@ -937,29 +952,27 @@ export default function ProjectDetail() {
 
             {/* 顶部操作栏 */}
             <div className="relative z-10 flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                    <Link to="/projects">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="cyber-btn-ghost h-10 w-10 p-0 flex items-center justify-center"
-                        >
-                            <ArrowLeft className="w-5 h-5" />
-                        </Button>
-                    </Link>
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
-                            {project.name}
-                        </h1>
-                        <Badge
-                            className={`${project.is_active ? "cyber-badge-success" : "cyber-badge-muted"}`}
-                        >
-                            {project.is_active ? "活跃" : "暂停"}
-                        </Badge>
-                    </div>
+                <div className="flex items-center gap-3">
+                    <h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
+                        {project.name}
+                    </h1>
+                    <Badge
+                        className={`${project.is_active ? "cyber-badge-success" : "cyber-badge-muted"}`}
+                    >
+                        {project.is_active ? "活跃" : "暂停"}
+                    </Badge>
                 </div>
 
                 <div className="flex items-center space-x-3">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="cyber-btn-ghost h-10 px-3 flex items-center justify-center gap-2"
+                        onClick={handleBack}
+                    >
+                        <ArrowLeft className="w-5 h-5" />
+                        返回
+                    </Button>
                     <Button
                         onClick={handleRunAudit}
                         className="cyber-btn-primary"
@@ -1124,20 +1137,19 @@ export default function ProjectDetail() {
                                             >
                                                 <div className="flex items-center space-x-3">
                                                     <div
-                                                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                                                            t.task.status ===
-                                                            "completed"
+                                                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${t.task.status ===
+                                                                "completed"
                                                                 ? "bg-emerald-500/20"
                                                                 : t.task
-                                                                        .status ===
+                                                                    .status ===
                                                                     "running"
-                                                                  ? "bg-sky-500/20"
-                                                                  : t.task
-                                                                          .status ===
-                                                                      "failed"
-                                                                    ? "bg-rose-500/20"
-                                                                    : "bg-muted"
-                                                        }`}
+                                                                    ? "bg-sky-500/20"
+                                                                    : t.task
+                                                                        .status ===
+                                                                        "failed"
+                                                                        ? "bg-rose-500/20"
+                                                                        : "bg-muted"
+                                                            }`}
                                                     >
                                                         {getStatusIcon(
                                                             t.task.status,
@@ -1149,14 +1161,14 @@ export default function ProjectDetail() {
                                                                 ? "静态分析"
                                                                 : t.kind ===
                                                                     "audit"
-                                                                  ? (
+                                                                    ? (
                                                                         t.task as AuditTask
                                                                     )
                                                                         .task_type ===
-                                                                    "repository"
-                                                                      ? "审计任务"
-                                                                      : "即时分析"
-                                                                  : "Agent 审计"}
+                                                                        "repository"
+                                                                        ? "审计任务"
+                                                                        : "即时分析"
+                                                                    : "Agent 审计"}
                                                         </p>
                                                         <p className="text-xs text-muted-foreground font-mono">
                                                             {formatDate(
@@ -1178,8 +1190,8 @@ export default function ProjectDetail() {
                                                             ? "AGENT"
                                                             : t.kind ===
                                                                 "static"
-                                                              ? "STATIC"
-                                                              : "AUDIT"}
+                                                                ? "STATIC"
+                                                                : "AUDIT"}
                                                     </Badge>
                                                     {getStatusBadge(
                                                         t.task.status,
@@ -1282,8 +1294,8 @@ export default function ProjectDetail() {
                                                                                             key={`overview-lang-pie-${index}`}
                                                                                             fill={
                                                                                                 LANGUAGE_PIE_COLORS[
-                                                                                                    index %
-                                                                                                        LANGUAGE_PIE_COLORS.length
+                                                                                                index %
+                                                                                                LANGUAGE_PIE_COLORS.length
                                                                                                 ]
                                                                                             }
                                                                                         />
@@ -1300,13 +1312,13 @@ export default function ProjectDetail() {
                                                                                     const percent =
                                                                                         Number(
                                                                                             value ||
-                                                                                                0,
+                                                                                            0,
                                                                                         ) *
                                                                                         100;
                                                                                     return [
                                                                                         `${Number(item?.files || 0).toLocaleString()} 文件 · ${Number(item?.loc || 0).toLocaleString()} 行 · ${percent.toFixed(2)}%`,
                                                                                         item?.name ||
-                                                                                            "未知语言",
+                                                                                        "未知语言",
                                                                                     ];
                                                                                 }}
                                                                             />
@@ -1331,8 +1343,8 @@ export default function ProjectDetail() {
                                                                                         style={{
                                                                                             backgroundColor:
                                                                                                 LANGUAGE_PIE_COLORS[
-                                                                                                    index %
-                                                                                                        LANGUAGE_PIE_COLORS.length
+                                                                                                index %
+                                                                                                LANGUAGE_PIE_COLORS.length
                                                                                                 ],
                                                                                         }}
                                                                                     />
@@ -1414,7 +1426,7 @@ export default function ProjectDetail() {
                                         htmlFor="edit-name"
                                         className="font-mono font-bold uppercase text-xs text-muted-foreground"
                                     >
-                                        项目名称 *
+                                        项目名称
                                     </Label>
                                     <Input
                                         id="edit-name"

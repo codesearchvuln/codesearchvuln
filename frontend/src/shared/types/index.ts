@@ -189,6 +189,9 @@ export interface ProjectStats {
   active_projects: number;
   total_tasks: number;
   completed_tasks: number;
+  interrupted_tasks: number;
+  running_tasks: number;
+  failed_tasks: number;
   total_issues: number;
   resolved_issues: number;
   avg_quality_score: number;

@@ -14,15 +14,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { BranchSelector } from "@/components/ui/branch-selector";
 import {
 	Collapsible,
@@ -68,6 +62,7 @@ import AgentModeSelector, {
 } from "@/components/agent/AgentModeSelector";
 
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
+import { uploadZipFile } from "@/shared/utils/zipStorage";
 import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
 import type { Project } from "@/shared/types";
 
@@ -76,6 +71,11 @@ interface CreateTaskDialogProps {
 	onOpenChange: (open: boolean) => void;
 	onTaskCreated: () => void;
 	preselectedProjectId?: string;
+	initialAuditMode?: AuditMode;
+	navigateOnSuccess?: boolean;
+	showReturnButton?: boolean;
+	onReturn?: () => void;
+	allowUploadProject?: boolean;
 }
 
 const DEFAULT_EXCLUDES = [
@@ -85,6 +85,25 @@ const DEFAULT_EXCLUDES = [
 	"build/**",
 	"*.log",
 ];
+
+const ARCHIVE_SUFFIXES = [
+	".tar.gz",
+	".tar.bz2",
+	".tar.xz",
+	".tgz",
+	".tbz2",
+	".zip",
+	".tar",
+	".7z",
+	".rar",
+];
+
+const stripArchiveSuffix = (filename: string) => {
+	const lower = filename.toLowerCase();
+	const matched = ARCHIVE_SUFFIXES.find((suffix) => lower.endsWith(suffix));
+	if (!matched) return filename;
+	return filename.slice(0, filename.length - matched.length);
+};
 
 const extractApiErrorMessage = (error: unknown): string => {
 	if (error instanceof Error) {
@@ -110,8 +129,16 @@ export default function CreateTaskDialog({
 	onOpenChange,
 	onTaskCreated,
 	preselectedProjectId,
+	initialAuditMode,
+	navigateOnSuccess = true,
+	showReturnButton = false,
+	onReturn,
+	allowUploadProject = false,
 }: CreateTaskDialogProps) {
 	const navigate = useNavigate();
+	const [sourceMode, setSourceMode] = useState<"existing" | "upload">(
+		"existing",
+	);
 	const [selectedProjectId, setSelectedProjectId] = useState<string>("");
 	const [searchTerm, setSearchTerm] = useState("");
 	const [branch, setBranch] = useState("main");
@@ -123,6 +150,10 @@ export default function CreateTaskDialog({
 	const [showFileSelection, setShowFileSelection] = useState(false);
 	const [creating, setCreating] = useState(false);
 	const [uploading, setUploading] = useState(false);
+	const [newProjectName, setNewProjectName] = useState("");
+	const [newProjectDescription, setNewProjectDescription] = useState("");
+	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
+	const newProjectFileInputRef = useRef<HTMLInputElement>(null);
 
 	const [auditMode, setAuditMode] = useState<AuditMode>("agent");
 	const [staticTools, setStaticTools] = useState<StaticToolSelection>({
@@ -222,16 +253,26 @@ export default function CreateTaskDialog({
 	useEffect(() => {
 		if (open) {
 			loadProjects();
-			if (preselectedProjectId) {
-				setSelectedProjectId(preselectedProjectId);
-			}
+			setSelectedProjectId(preselectedProjectId || "");
 			setSearchTerm("");
 			setShowAdvanced(false);
 			setSelectedRuleIds([]);
+			setAuditMode(initialAuditMode || "agent");
 			setStaticTools({ opengrep: true, gitleaks: false });
+			setSourceMode("existing");
+			setNewProjectName("");
+			setNewProjectDescription("");
+			setNewProjectFile(null);
 			zipState.reset();
 		}
-	}, [open, preselectedProjectId, loadProjects]);
+	}, [open, preselectedProjectId, initialAuditMode, loadProjects]);
+
+	useEffect(() => {
+		if (!open || sourceMode !== "existing") return;
+		if (selectedProjectId) return;
+		if (projects.length === 0) return;
+		setSelectedProjectId(projects[0].id);
+	}, [open, sourceMode, selectedProjectId, projects]);
 
 	const excludePatternsRef = useRef(excludePatterns);
 	useEffect(() => {
@@ -242,14 +283,215 @@ export default function CreateTaskDialog({
 		excludePatternsRef.current = excludePatterns;
 	}, [excludePatterns]);
 
-	const handleStartScan = async () => {
-		if (!selectedProject) {
-			toast.error("请选择项目");
+	const handleNewProjectFileSelect = (
+		event: React.ChangeEvent<HTMLInputElement>,
+	) => {
+		const file = event.target.files?.[0] || null;
+		if (!file) return;
+		const validation = validateZipFile(file);
+		if (!validation.valid) {
+			toast.error(validation.error || "文件无效");
+			event.target.value = "";
 			return;
 		}
 
+		const inferredName = stripArchiveSuffix(file.name).trim();
+		if (inferredName) {
+			setNewProjectName(inferredName);
+		}
+		setNewProjectFile(file);
+		event.target.value = "";
+	};
+
+	const handleSourceModeChange = (mode: "existing" | "upload") => {
+		setSourceMode(mode);
+		setSelectedFiles(undefined);
+		if (mode === "upload") {
+			setSelectedProjectId("");
+			setBranch("main");
+			zipState.reset();
+			return;
+		}
+
+		if (!selectedProjectId && projects.length > 0) {
+			setSelectedProjectId(projects[0].id);
+		}
+	};
+
+	const createStaticScanTasksForProject = async (
+		projectId: string,
+		projectName: string,
+	) => {
+		if (!staticTools.opengrep && !staticTools.gitleaks) {
+			throw new Error("请选择至少一个静态分析工具");
+		}
+
+		let opengrepTask: { id: string } | null = null;
+		let gitleaksTask: { id: string } | null = null;
+
+		if (staticTools.opengrep) {
+			const pickActiveRuleIds = (rules: OpengrepRule[]) => {
+				const validRuleIds = new Set(rules.map((rule) => rule.id));
+				const selected = selectedRuleIds.filter((id) => validRuleIds.has(id));
+				return selected.length > 0 ? selected : rules.map((rule) => rule.id);
+			};
+
+			const activeRuleIds = pickActiveRuleIds(staticRules);
+			if (activeRuleIds.length === 0) {
+				throw new Error("未找到启用的规则，请先在规则管理中启用规则");
+			}
+			try {
+				opengrepTask = await createOpengrepScanTask({
+					project_id: projectId,
+					name: `静态分析-Opengrep-${projectName}`,
+					rule_ids: activeRuleIds,
+					target_path: ".",
+				});
+			} catch (error) {
+				const apiMsg = extractApiErrorMessage(error);
+				const shouldReloadRules =
+					apiMsg.includes("部分规则不存在") || apiMsg.includes("规则不存在");
+				if (!shouldReloadRules) throw error;
+
+				const freshRules = await getOpengrepRules({ is_active: true });
+				setStaticRules(freshRules);
+				setOpengrepActiveRules(freshRules);
+
+				const retryRuleIds = pickActiveRuleIds(freshRules);
+				if (retryRuleIds.length === 0) {
+					throw new Error("规则已更新，请刷新规则后重试");
+				}
+
+				opengrepTask = await createOpengrepScanTask({
+					project_id: projectId,
+					name: `静态分析-Opengrep-${projectName}`,
+					rule_ids: retryRuleIds,
+					target_path: ".",
+				});
+			}
+		}
+
+		if (staticTools.gitleaks) {
+			gitleaksTask = await createGitleaksScanTask({
+				project_id: projectId,
+				name: `静态分析-Gitleaks-${projectName}`,
+				target_path: ".",
+				no_git: true,
+			});
+		}
+
+		const primaryTaskId = opengrepTask?.id || gitleaksTask?.id;
+		if (!primaryTaskId) {
+			throw new Error("静态分析任务创建失败");
+		}
+
+		const params = new URLSearchParams();
+		if (opengrepTask && gitleaksTask) {
+			params.set("gitleaksTaskId", gitleaksTask.id);
+			params.set("opengrepTaskId", opengrepTask.id);
+		}
+		if (!opengrepTask && gitleaksTask) {
+			params.set("tool", "gitleaks");
+		}
+
+		return {
+			primaryTaskId,
+			query: params.toString(),
+		};
+	};
+
+	const handleStartScan = async () => {
 		try {
 			setCreating(true);
+
+			if (sourceMode === "upload") {
+				if (!newProjectName.trim()) {
+					toast.error("请输入项目名称");
+					return;
+				}
+				if (!newProjectFile) {
+					toast.error("请先选择项目压缩包");
+					return;
+				}
+
+				let createdProject: Project | null = null;
+				try {
+					createdProject = await api.createProject({
+						name: newProjectName.trim(),
+						description: newProjectDescription.trim() || undefined,
+						source_type: "zip",
+						repository_type: "other",
+						repository_url: undefined,
+						default_branch: "main",
+						programming_languages: [],
+					} as any);
+
+					const uploadResult = await uploadZipFile(
+						createdProject.id,
+						newProjectFile,
+					);
+					if (!uploadResult.success) {
+						throw new Error(uploadResult.message || "压缩包上传失败");
+					}
+
+					if (auditMode === "agent") {
+						const preflightToast = toast.loading(
+							"正在检查智能审计配置（LLM / RAG）...",
+						);
+						const preflight = await runAgentPreflightCheck();
+						toast.dismiss(preflightToast);
+						if (!preflight.ok) {
+							toast.error(preflight.message);
+							return;
+						}
+
+						const agentTask = await createAgentTask({
+							project_id: createdProject.id,
+							name: `智能审计-${createdProject.name}`,
+							verification_level: "sandbox",
+						});
+
+						onOpenChange(false);
+						onTaskCreated();
+						toast.success("智能审计任务已创建");
+						if (navigateOnSuccess) {
+							navigate(`/agent-audit/${agentTask.id}`);
+						}
+						loadProjects();
+						return;
+					}
+
+					const staticResult = await createStaticScanTasksForProject(
+						createdProject.id,
+						createdProject.name,
+					);
+					onOpenChange(false);
+					onTaskCreated();
+					toast.success("静态分析任务已创建");
+					if (navigateOnSuccess) {
+						navigate(
+							`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
+							}`,
+						);
+					}
+					loadProjects();
+					return;
+				} catch (error) {
+					if (createdProject) {
+						try {
+							await api.deleteProject(createdProject.id);
+						} catch (rollbackError) {
+							console.error("回滚失败项目失败:", rollbackError);
+						}
+					}
+					throw error;
+				}
+			}
+
+			if (!selectedProject) {
+				toast.error("请选择项目");
+				return;
+			}
 
 			if (auditMode === "agent") {
 				const preflightToast = toast.loading(
@@ -276,132 +518,52 @@ export default function CreateTaskDialog({
 				onOpenChange(false);
 				onTaskCreated();
 				toast.success("智能审计任务已创建");
-				navigate(`/agent-audit/${agentTask.id}`);
-
-				setSelectedProjectId("");
-				setSelectedFiles(undefined);
-				setExcludePatterns(DEFAULT_EXCLUDES);
+				if (navigateOnSuccess) {
+					navigate(`/agent-audit/${agentTask.id}`);
+				}
 				return;
 			}
 
-			if (auditMode === "static") {
-				if (!staticTools.opengrep && !staticTools.gitleaks) {
-					toast.error("请选择至少一个静态分析工具");
-					return;
-				}
-				if (!isZipProject(selectedProject)) {
-					toast.error("静态分析仅支持源码归档项目");
-					return;
-				}
-				if (!zipState.storedZipInfo?.has_file) {
-					toast.error("请先上传源码归档");
-					return;
-				}
-				let opengrepTask: { id: string } | null = null;
-				let gitleaksTask: { id: string } | null = null;
+			if (!isZipProject(selectedProject)) {
+				toast.error("静态分析仅支持源码归档项目");
+				return;
+			}
+			if (!zipState.storedZipInfo?.has_file) {
+				toast.error("请先上传源码归档");
+				return;
+			}
 
-				if (staticTools.opengrep) {
-					const pickActiveRuleIds = (rules: OpengrepRule[]) => {
-						const validRuleIds = new Set(rules.map((rule) => rule.id));
-						const selected = selectedRuleIds.filter((id) =>
-							validRuleIds.has(id),
-						);
-						return selected.length > 0
-							? selected
-							: rules.map((rule) => rule.id);
-					};
-
-					const activeRuleIds = pickActiveRuleIds(staticRules);
-					if (activeRuleIds.length === 0) {
-						toast.error("未找到启用的规则，请先在规则管理中启用规则");
-						return;
-					}
-					try {
-						opengrepTask = await createOpengrepScanTask({
-							project_id: selectedProject.id,
-							name: `静态分析-Opengrep-${selectedProject.name}`,
-							rule_ids: activeRuleIds,
-							target_path: ".",
-						});
-					} catch (error) {
-						const apiMsg = extractApiErrorMessage(error);
-						const shouldReloadRules =
-							apiMsg.includes("部分规则不存在") ||
-							apiMsg.includes("规则不存在");
-						if (!shouldReloadRules) {
-							throw error;
-						}
-
-						// 规则表在后端被重建后，前端本地缓存可能仍是旧 ID，自动刷新后重试一次
-						const freshRules = await getOpengrepRules({ is_active: true });
-						setStaticRules(freshRules);
-						setOpengrepActiveRules(freshRules);
-
-						const retryRuleIds = pickActiveRuleIds(freshRules);
-						if (retryRuleIds.length === 0) {
-							throw new Error("规则已更新，请刷新规则后重试");
-						}
-
-						opengrepTask = await createOpengrepScanTask({
-							project_id: selectedProject.id,
-							name: `静态分析-Opengrep-${selectedProject.name}`,
-							rule_ids: retryRuleIds,
-							target_path: ".",
-						});
-					}
-				}
-
-				if (staticTools.gitleaks) {
-					gitleaksTask = await createGitleaksScanTask({
-						project_id: selectedProject.id,
-						name: `静态分析-Gitleaks-${selectedProject.name}`,
-						target_path: ".",
-						no_git: true,
-					});
-				}
-
-				const primaryTaskId = opengrepTask?.id || gitleaksTask?.id;
-				if (!primaryTaskId) {
-					toast.error("静态分析任务创建失败");
-					return;
-				}
-
-				const params = new URLSearchParams();
-				if (opengrepTask && gitleaksTask) {
-					params.set("gitleaksTaskId", gitleaksTask.id);
-					params.set("opengrepTaskId", opengrepTask.id);
-				}
-				if (!opengrepTask && gitleaksTask) {
-					params.set("tool", "gitleaks");
-				}
-
-				onOpenChange(false);
-				onTaskCreated();
-				toast.success("静态分析任务已创建");
+			const staticResult = await createStaticScanTasksForProject(
+				selectedProject.id,
+				selectedProject.name,
+			);
+			onOpenChange(false);
+			onTaskCreated();
+			toast.success("静态分析任务已创建");
+			if (navigateOnSuccess) {
 				navigate(
-					`/static-analysis/${primaryTaskId}${
-						params.toString() ? `?${params.toString()}` : ""
+					`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
 					}`,
 				);
-
-				setSelectedProjectId("");
-				setSelectedFiles(undefined);
-				setExcludePatterns(DEFAULT_EXCLUDES);
-				return;
 			}
-
-			setSelectedProjectId("");
-			setSelectedFiles(undefined);
-			setExcludePatterns(DEFAULT_EXCLUDES);
 		} catch (error) {
 			const msg = extractApiErrorMessage(error);
 			toast.error(`启动失败: ${msg}`);
 		} finally {
 			setCreating(false);
+			setSelectedFiles(undefined);
+			setExcludePatterns(DEFAULT_EXCLUDES);
 		}
 	};
 
 	const canStart = useMemo(() => {
+		if (sourceMode === "upload") {
+			if (!newProjectName.trim() || !newProjectFile) return false;
+			if (auditMode === "static") {
+				return staticTools.opengrep || staticTools.gitleaks;
+			}
+			return true;
+		}
 		if (!selectedProject) return false;
 		if (auditMode === "static") {
 			return (
@@ -418,11 +580,13 @@ export default function CreateTaskDialog({
 		}
 		return !!selectedProject.repository_url && !!branch.trim();
 	}, [
+		sourceMode,
+		newProjectName,
+		newProjectFile,
 		selectedProject,
 		zipState,
 		branch,
 		auditMode,
-		selectedRuleIds,
 		staticTools.opengrep,
 		staticTools.gitleaks,
 	]);
@@ -449,58 +613,146 @@ export default function CreateTaskDialog({
 					</DialogHeader>
 
 					<div className="flex-1 overflow-y-auto p-5 space-y-5">
-						{/* 项目选择 */}
-						<div className="space-y-3 hidden">
-							<div className="flex items-center justify-between">
+						{allowUploadProject && (
+							<div className="space-y-2">
 								<span className="text-sm font-mono font-bold uppercase text-muted-foreground">
-									选择项目
+									项目来源
 								</span>
-								<Badge className="cyber-badge-muted font-mono text-xs">
-									{filteredProjects.length} 个
-								</Badge>
+								<div className="grid grid-cols-2 gap-2">
+									<Button
+										variant={sourceMode === "existing" ? "default" : "outline"}
+										className={
+											sourceMode === "existing"
+												? "cyber-btn-primary"
+												: "cyber-btn-outline"
+										}
+										onClick={() => handleSourceModeChange("existing")}
+										disabled={creating}
+									>
+										选择已有项目
+									</Button>
+									<Button
+										variant={sourceMode === "upload" ? "default" : "outline"}
+										className={
+											sourceMode === "upload"
+												? "cyber-btn-primary"
+												: "cyber-btn-outline"
+										}
+										onClick={() => handleSourceModeChange("upload")}
+										disabled={creating}
+									>
+										上传新项目
+									</Button>
+								</div>
 							</div>
+						)}
 
-							{/* 搜索框 */}
-							<div className="relative">
-								<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-								<Input
-									placeholder="搜索项目..."
-									value={searchTerm}
-									onChange={(e) => setSearchTerm(e.target.value)}
-									className="!pl-9 h-10 cyber-input"
-								/>
+						{sourceMode === "existing" ? (
+							<div className="space-y-3">
+								<div className="flex items-center justify-between">
+									<span className="text-sm font-mono font-bold uppercase text-muted-foreground">
+										选择项目
+									</span>
+									<Badge className="cyber-badge-muted font-mono text-xs">
+										{filteredProjects.length} 个
+									</Badge>
+								</div>
+
+								<div className="relative mt-1.5">
+									<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+									<Input
+										placeholder="搜索项目..."
+										value={searchTerm}
+										onChange={(e) => setSearchTerm(e.target.value)}
+										className="!pl-10 h-10 cyber-input"
+									/>
+								</div>
+
+								<ScrollArea className="h-[180px] border border-border rounded bg-muted/50">
+									{loading ? (
+										<div className="flex items-center justify-center h-full">
+											<Loader2 className="w-5 h-5 animate-spin text-primary" />
+										</div>
+									) : filteredProjects.length === 0 ? (
+										<div className="flex flex-col items-center justify-center h-full text-muted-foreground font-mono">
+											<Package className="w-8 h-8 mb-2 opacity-50" />
+											<span className="text-sm">
+												{searchTerm ? "未找到" : "暂无项目"}
+											</span>
+										</div>
+									) : (
+										<div className="p-1">
+											{filteredProjects.map((project) => (
+												<ProjectCard
+													key={project.id}
+													project={project}
+													selected={selectedProjectId === project.id}
+													onSelect={() => setSelectedProjectId(project.id)}
+												/>
+											))}
+										</div>
+									)}
+								</ScrollArea>
 							</div>
-
-							{/* 项目列表 */}
-							<ScrollArea className="h-[180px] border border-border rounded bg-muted/50">
-								{loading ? (
-									<div className="flex items-center justify-center h-full">
-										<Loader2 className="w-5 h-5 animate-spin text-primary" />
-									</div>
-								) : filteredProjects.length === 0 ? (
-									<div className="flex flex-col items-center justify-center h-full text-muted-foreground font-mono">
-										<Package className="w-8 h-8 mb-2 opacity-50" />
-										<span className="text-sm">
-											{searchTerm ? "未找到" : "暂无项目"}
-										</span>
-									</div>
-								) : (
-									<div className="p-1">
-										{filteredProjects.map((project) => (
-											<ProjectCard
-												key={project.id}
-												project={project}
-												selected={selectedProjectId === project.id}
-												onSelect={() => setSelectedProjectId(project.id)}
-											/>
-										))}
-									</div>
-								)}
-							</ScrollArea>
-						</div>
+						) : (
+							<div className="space-y-3 border border-border rounded p-3 bg-muted/40">
+								<div className="space-y-1.5">
+									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+										项目名称
+									</Label>
+									<Input
+										value={newProjectName}
+										onChange={(e) => setNewProjectName(e.target.value)}
+										placeholder="输入项目名称"
+										className="h-10 cyber-input"
+									/>
+								</div>
+								<div className="space-y-1.5">
+									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+										描述
+									</Label>
+									<Textarea
+										value={newProjectDescription}
+										onChange={(e) =>
+											setNewProjectDescription(e.target.value)
+										}
+										placeholder="// 项目描述..."
+										rows={2}
+										className="cyber-input min-h-[70px]"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+										源码压缩包
+									</Label>
+									<input
+										ref={newProjectFileInputRef}
+										type="file"
+										accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
+										onChange={handleNewProjectFileSelect}
+										className="hidden"
+										disabled={creating}
+									/>
+									<Button
+										variant="outline"
+										className="cyber-btn-outline h-9"
+										onClick={() => newProjectFileInputRef.current?.click()}
+										disabled={creating}
+									>
+										<Upload className="w-4 h-4 mr-2" />
+										选择压缩包
+									</Button>
+									{newProjectFile && (
+										<p className="text-xs text-emerald-400 font-mono">
+											已选择: {newProjectFile.name}
+										</p>
+									)}
+								</div>
+							</div>
+						)}
 
 						{/* 审计模式选择 */}
-						{selectedProject && (
+						{(sourceMode === "upload" || selectedProject) && (
 							<AgentModeSelector
 								value={auditMode}
 								onChange={setAuditMode}
@@ -511,7 +763,7 @@ export default function CreateTaskDialog({
 						)}
 
 						{/* 配置区域 */}
-						{selectedProject && (
+						{sourceMode === "existing" && selectedProject && (
 							<div className="space-y-4">
 								<span className="text-sm font-mono font-bold uppercase text-muted-foreground">
 									配置
@@ -714,6 +966,19 @@ export default function CreateTaskDialog({
 
 					{/* Footer */}
 					<div className="flex-shrink-0 flex justify-end gap-3 px-5 py-4 bg-muted border-t border-border">
+						{showReturnButton && (
+							<Button
+								variant="outline"
+								onClick={() => {
+									onOpenChange(false);
+									onReturn?.();
+								}}
+								disabled={creating}
+								className="px-4 h-10 cyber-btn-outline font-mono"
+							>
+								返回
+							</Button>
+						)}
 						<Button
 							variant="ghost"
 							onClick={() => onOpenChange(false)}
@@ -748,14 +1013,16 @@ export default function CreateTaskDialog({
 				</DialogContent>
 			</Dialog>
 
-			<FileSelectionDialog
-				open={showFileSelection}
-				onOpenChange={setShowFileSelection}
-				projectId={selectedProjectId}
-				branch={branch}
-				excludePatterns={excludePatterns}
-				onConfirm={setSelectedFiles}
-			/>
+			{sourceMode === "existing" && selectedProjectId ? (
+				<FileSelectionDialog
+					open={showFileSelection}
+					onOpenChange={setShowFileSelection}
+					projectId={selectedProjectId}
+					branch={branch}
+					excludePatterns={excludePatterns}
+					onConfirm={setSelectedFiles}
+				/>
+			) : null}
 		</>
 	);
 }
@@ -773,11 +1040,10 @@ function ProjectCard({
 
 	return (
 		<div
-			className={`flex items-center gap-3 p-3 cursor-pointer rounded transition-all ${
-				selected
+			className={`flex items-center gap-3 p-3 cursor-pointer rounded transition-all ${selected
 					? "bg-primary/10 border border-primary/50"
 					: "hover:bg-muted border border-transparent"
-			}`}
+				}`}
 			onClick={onSelect}
 		>
 			<Checkbox
@@ -803,11 +1069,10 @@ function ProjectCard({
 						{project.name}
 					</span>
 					<Badge
-						className={`text-xs px-1 py-0 font-mono ${
-							isRepo
+						className={`text-xs px-1 py-0 font-mono ${isRepo
 								? "bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/30"
 								: "bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30"
-						}`}
+							}`}
 					>
 						{isRepo ? "REPO" : "ZIP"}
 					</Badge>

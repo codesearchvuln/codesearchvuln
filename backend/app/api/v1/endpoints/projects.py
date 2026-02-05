@@ -2,6 +2,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
@@ -157,7 +158,9 @@ from app.db.session import get_db, AsyncSessionLocal
 from app.models.project import Project
 from app.models.user import User
 from app.models.audit import AuditTask, AuditIssue
-from app.models.agent_task import AgentTask, AgentTaskStatus, AgentFinding
+from app.models.agent_task import AgentTask, AgentFinding
+from app.models.opengrep import OpengrepScanTask, OpengrepFinding
+from app.models.gitleaks import GitleaksScanTask, GitleaksFinding
 from app.models.user_config import UserConfig
 from app.models.project_info import ProjectInfo
 import zipfile
@@ -305,6 +308,9 @@ class StatsResponse(BaseModel):
     active_projects: int
     total_tasks: int
     completed_tasks: int
+    interrupted_tasks: int
+    running_tasks: int
+    failed_tasks: int
     total_issues: int
     resolved_issues: int
 
@@ -395,59 +401,100 @@ async def get_stats(
     """
     Get global statistics.
     """
-    projects_result = await db.execute(select(Project))
-    projects = projects_result.scalars().all()
-    project_ids = [p.id for p in projects]
+    interrupted_statuses = ("interrupted", "aborted", "cancelled")
 
-    # 统计旧的 AuditTask
-    tasks_result = await db.execute(
-        select(AuditTask).where(AuditTask.project_id.in_(project_ids))
-        if project_ids
-        else select(AuditTask).where(False)
-    )
-    tasks = tasks_result.scalars().all()
-    task_ids = [t.id for t in tasks]
+    async def _count(model, where_clause=None) -> int:
+        stmt = select(func.count(model.id))
+        if where_clause is not None:
+            stmt = stmt.where(where_clause)
+        result = await db.execute(stmt)
+        return int(result.scalar() or 0)
 
-    # 统计旧的 AuditIssue
-    issues_result = await db.execute(
-        select(AuditIssue).where(AuditIssue.task_id.in_(task_ids))
-        if task_ids
-        else select(AuditIssue).where(False)
-    )
-    issues = issues_result.scalars().all()
+    total_projects = await _count(Project)
+    active_projects = await _count(Project, Project.is_active == True)
 
-    # 🔥 同时统计新的 AgentTask
-    agent_tasks_result = await db.execute(
-        select(AgentTask).where(AgentTask.project_id.in_(project_ids))
-        if project_ids
-        else select(AgentTask).where(False)
+    # 任务统计（统一从数据库聚合，不再前端拼接）
+    audit_total = await _count(AuditTask)
+    audit_completed = await _count(AuditTask, func.lower(AuditTask.status) == "completed")
+    audit_running = await _count(AuditTask, func.lower(AuditTask.status) == "running")
+    audit_failed = await _count(AuditTask, func.lower(AuditTask.status) == "failed")
+    audit_interrupted = await _count(
+        AuditTask, func.lower(AuditTask.status).in_(interrupted_statuses)
     )
-    agent_tasks = agent_tasks_result.scalars().all()
-    agent_task_ids = [t.id for t in agent_tasks]
 
-    # 🔥 统计 AgentFinding
-    agent_findings_result = await db.execute(
-        select(AgentFinding).where(AgentFinding.task_id.in_(agent_task_ids))
-        if agent_task_ids
-        else select(AgentFinding).where(False)
+    agent_total = await _count(AgentTask)
+    agent_completed = await _count(AgentTask, func.lower(AgentTask.status) == "completed")
+    agent_running = await _count(AgentTask, func.lower(AgentTask.status) == "running")
+    agent_failed = await _count(AgentTask, func.lower(AgentTask.status) == "failed")
+    agent_interrupted = await _count(
+        AgentTask, func.lower(AgentTask.status).in_(interrupted_statuses)
     )
-    agent_findings = agent_findings_result.scalars().all()
 
-    # 合并统计（旧任务 + 新 Agent 任务）
-    total_tasks = len(tasks) + len(agent_tasks)
-    completed_tasks = len([t for t in tasks if t.status == "completed"]) + len(
-        [t for t in agent_tasks if t.status == AgentTaskStatus.COMPLETED]
+    opengrep_total = await _count(OpengrepScanTask)
+    opengrep_completed = await _count(
+        OpengrepScanTask, func.lower(OpengrepScanTask.status) == "completed"
     )
-    total_issues = len(issues) + len(agent_findings)
-    resolved_issues = len([i for i in issues if i.status == "resolved"]) + len(
-        [f for f in agent_findings if f.status == "resolved"]
+    opengrep_running = await _count(
+        OpengrepScanTask, func.lower(OpengrepScanTask.status) == "running"
+    )
+    opengrep_failed = await _count(
+        OpengrepScanTask, func.lower(OpengrepScanTask.status) == "failed"
+    )
+    opengrep_interrupted = await _count(
+        OpengrepScanTask, func.lower(OpengrepScanTask.status).in_(interrupted_statuses)
+    )
+
+    gitleaks_total = await _count(GitleaksScanTask)
+    gitleaks_completed = await _count(
+        GitleaksScanTask, func.lower(GitleaksScanTask.status) == "completed"
+    )
+    gitleaks_running = await _count(
+        GitleaksScanTask, func.lower(GitleaksScanTask.status) == "running"
+    )
+    gitleaks_failed = await _count(
+        GitleaksScanTask, func.lower(GitleaksScanTask.status) == "failed"
+    )
+    gitleaks_interrupted = await _count(
+        GitleaksScanTask, func.lower(GitleaksScanTask.status).in_(interrupted_statuses)
+    )
+
+    total_tasks = audit_total + agent_total + opengrep_total + gitleaks_total
+    completed_tasks = (
+        audit_completed + agent_completed + opengrep_completed + gitleaks_completed
+    )
+    running_tasks = audit_running + agent_running + opengrep_running + gitleaks_running
+    failed_tasks = audit_failed + agent_failed + opengrep_failed + gitleaks_failed
+    interrupted_tasks = (
+        audit_interrupted + agent_interrupted + opengrep_interrupted + gitleaks_interrupted
+    )
+
+    # 问题统计（统一聚合）
+    total_issues = (
+        await _count(AuditIssue)
+        + await _count(AgentFinding)
+        + await _count(OpengrepFinding)
+        + await _count(GitleaksFinding)
+    )
+    resolved_issues = (
+        await _count(AuditIssue, func.lower(AuditIssue.status) == "resolved")
+        + await _count(
+            AgentFinding,
+            func.lower(AgentFinding.status).in_(("resolved", "verified", "fixed")),
+        )
+        + await _count(OpengrepFinding, func.lower(OpengrepFinding.status) == "verified")
+        + await _count(
+            GitleaksFinding, func.lower(GitleaksFinding.status).in_(("verified", "fixed"))
+        )
     )
 
     return {
-        "total_projects": len(projects),
-        "active_projects": len([p for p in projects if p.is_active]),
+        "total_projects": total_projects,
+        "active_projects": active_projects,
         "total_tasks": total_tasks,
         "completed_tasks": completed_tasks,
+        "interrupted_tasks": interrupted_tasks,
+        "running_tasks": running_tasks,
+        "failed_tasks": failed_tasks,
         "total_issues": total_issues,
         "resolved_issues": resolved_issues,
     }

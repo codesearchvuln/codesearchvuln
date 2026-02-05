@@ -266,6 +266,9 @@ export const api = {
     active_projects: number;
     total_tasks: number;
     completed_tasks: number;
+    interrupted_tasks: number;
+    running_tasks: number;
+    failed_tasks: number;
     total_issues: number;
     resolved_issues: number;
     avg_quality_score: number;
@@ -279,6 +282,9 @@ export const api = {
         active_projects: 0,
         total_tasks: 0,
         completed_tasks: 0,
+        interrupted_tasks: 0,
+        running_tasks: 0,
+        failed_tasks: 0,
         total_issues: 0,
         resolved_issues: 0,
         avg_quality_score: 0

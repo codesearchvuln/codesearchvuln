@@ -275,7 +275,7 @@ export default function CreateAgentTaskDialog({
 								placeholder="搜索项目..."
 								value={searchTerm}
 								onChange={(e) => setSearchTerm(e.target.value)}
-								className="!pl-9 h-10 cyber-input"
+								className="!pl-12 h-10 cyber-input"
 							/>
 						</div>
 

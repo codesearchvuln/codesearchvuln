@@ -3,7 +3,7 @@
  * Cyberpunk Terminal Aesthetic
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,10 +40,9 @@ import {
     Plus,
     Search,
     GitBranch,
-    Calendar,
+    Clock,
     Code,
     Shield,
-    Activity,
     Upload,
     FileText,
     AlertCircle,
@@ -65,25 +64,102 @@ import {
     type ZipFileMeta,
 } from "@/shared/utils/zipStorage";
 import {
-    isRepositoryProject,
     isZipProject,
     getSourceTypeBadge,
 } from "@/shared/utils/projectUtils";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
+import CreateProjectAuditDialog, {
+    type AuditCreateMode,
+} from "@/components/audit/CreateProjectAuditDialog";
+import CreateStaticAuditDialog from "@/components/audit/CreateStaticAuditDialog";
+import CreateAgentAuditDialog from "@/components/audit/CreateAgentAuditDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 import { useI18n } from "@/shared/i18n";
+import {
+    getAgentTasks,
+    type AgentTask,
+} from "@/shared/api/agentTasks";
+import {
+    getOpengrepScanTasks,
+    type OpengrepScanTask,
+} from "@/shared/api/opengrep";
+import {
+    getGitleaksScanTasks,
+    type GitleaksScanTask,
+} from "@/shared/api/gitleaks";
+
+type RecentActivityItem = {
+    id: string;
+    projectName: string;
+    kind: "rule_scan" | "intelligent_audit";
+    status: string;
+    gitleaksEnabled?: boolean;
+    createdAt: string;
+    route: string;
+};
+
+const INTERRUPTED_STATUSES = new Set(["interrupted", "aborted", "cancelled"]);
+const ACTIVITY_PAGE_SIZE = 10;
+const PROJECT_PAGE_SIZE = 6;
+const MODULE_SCROLL_DELAY_MS = 80;
+const ARCHIVE_SUFFIXES = [
+    ".tar.gz",
+    ".tar.bz2",
+    ".tar.xz",
+    ".tgz",
+    ".tbz2",
+    ".zip",
+    ".tar",
+    ".7z",
+    ".rar",
+];
+
+const stripArchiveSuffix = (filename: string) => {
+    const lower = filename.toLowerCase();
+    const matched = ARCHIVE_SUFFIXES.find((suffix) => lower.endsWith(suffix));
+    if (!matched) return filename;
+    return filename.slice(0, filename.length - matched.length);
+};
+
+const PROJECT_ACTION_BTN =
+    "border border-sky-400/35 bg-gradient-to-r from-sky-500/20 via-cyan-500/16 to-blue-500/20 text-sky-100 shadow-[0_8px_22px_-14px_rgba(14,165,233,0.9)] hover:from-sky-500/30 hover:via-cyan-500/24 hover:to-blue-500/30 hover:border-sky-300/55";
+
+const PROJECT_ACTION_BTN_SUBTLE =
+    "border border-sky-500/30 bg-sky-500/12 text-sky-100 hover:bg-sky-500/22 hover:border-sky-400/55";
 
 export default function Projects() {
+    const location = useLocation();
     const { t } = useI18n();
     const [projects, setProjects] = useState<Project[]>([]);
+    const [recentActivities, setRecentActivities] = useState<
+        RecentActivityItem[]
+    >([]);
+    const [activityKeyword, setActivityKeyword] = useState("");
+    const [activityPage, setActivityPage] = useState(1);
+    const [projectPage, setProjectPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
     const [showCreateDialog, setShowCreateDialog] = useState(false);
-    const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false);
-    const [selectedProjectForTask, setSelectedProjectForTask] =
+    const [showCreateAuditDialog, setShowCreateAuditDialog] = useState(false);
+    const [showCreateStaticAuditDialog, setShowCreateStaticAuditDialog] =
+        useState(false);
+    const [showCreateAgentAuditDialog, setShowCreateAgentAuditDialog] =
+        useState(false);
+    const [auditPreselectedProjectId, setAuditPreselectedProjectId] =
         useState<string>("");
+    const [auditInitialMode, setAuditInitialMode] =
+        useState<AuditCreateMode>("static");
+    const [auditReturnTarget, setAuditReturnTarget] = useState<
+        "task-browser" | "quick-actions" | "project-browser"
+    >("task-browser");
+    const [auditNavigateOnSuccess, setAuditNavigateOnSuccess] = useState(true);
+    const [staticAuditNavigateOnSuccess, setStaticAuditNavigateOnSuccess] =
+        useState(true);
+    const [agentAuditNavigateOnSuccess, setAgentAuditNavigateOnSuccess] =
+        useState(true);
+    const [createProjectReturnTarget, setCreateProjectReturnTarget] =
+        useState<"project-browser" | "quick-actions">("project-browser");
     const [uploadProgress, setUploadProgress] = useState(0);
     const [uploading, setUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -145,17 +221,250 @@ export default function Projects() {
         loadProjects();
     }, []);
 
+    useEffect(() => {
+        const hash = window.location.hash;
+        if (
+            hash !== "#project-browser" &&
+            hash !== "#task-browser" &&
+            hash !== "#quick-actions"
+        ) {
+            return;
+        }
+        const timer = window.setTimeout(() => {
+            document.getElementById(hash.replace("#", ""))?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        }, 80);
+        return () => window.clearTimeout(timer);
+    }, []);
+
     const loadProjects = async () => {
         try {
             setLoading(true);
             const data = await api.getProjects();
             setProjects(data);
+            await loadRecentActivities(data);
         } catch (error) {
             console.error("Failed to load projects:", error);
             toast.error("加载项目失败");
         } finally {
             setLoading(false);
         }
+    };
+
+    const loadRecentActivities = async (allProjects: Project[]) => {
+        try {
+            const [agentTasks, opengrepTasks, gitleaksTasks] =
+                await Promise.all([
+                    getAgentTasks({ limit: 100 }),
+                    getOpengrepScanTasks({ limit: 100 }),
+                    getGitleaksScanTasks({ limit: 100 }),
+                ]);
+
+            const projectNameMap = new Map(
+                allProjects.map((project) => [project.id, project.name]),
+            );
+            const resolveProjectName = (projectId: string) =>
+                projectNameMap.get(projectId) || "未知项目";
+
+            const gitleaksByProject = new Map<string, GitleaksScanTask[]>();
+            for (const task of gitleaksTasks) {
+                const list = gitleaksByProject.get(task.project_id) || [];
+                list.push(task);
+                gitleaksByProject.set(task.project_id, list);
+            }
+            for (const [projectId, list] of gitleaksByProject.entries()) {
+                list.sort(
+                    (a, b) =>
+                        new Date(a.created_at).getTime() -
+                        new Date(b.created_at).getTime(),
+                );
+                gitleaksByProject.set(projectId, list);
+            }
+
+            const usedGitleaksTaskIds = new Set<string>();
+            const pairingWindowMs = 60 * 1000;
+            const pickPairedGitleaksTask = (opengrepTask: OpengrepScanTask) => {
+                const candidates =
+                    gitleaksByProject.get(opengrepTask.project_id) || [];
+                if (candidates.length === 0) return null;
+                const opengrepTime = new Date(opengrepTask.created_at).getTime();
+                let bestTask: GitleaksScanTask | null = null;
+                let bestDiff = Number.POSITIVE_INFINITY;
+                for (const candidate of candidates) {
+                    if (usedGitleaksTaskIds.has(candidate.id)) continue;
+                    const diff = Math.abs(
+                        new Date(candidate.created_at).getTime() - opengrepTime,
+                    );
+                    if (diff <= pairingWindowMs && diff < bestDiff) {
+                        bestTask = candidate;
+                        bestDiff = diff;
+                    }
+                }
+                if (bestTask) {
+                    usedGitleaksTaskIds.add(bestTask.id);
+                }
+                return bestTask;
+            };
+
+            const ruleScanActivities: RecentActivityItem[] = opengrepTasks.map(
+                (task) => {
+                    const pairedGitleaksTask = pickPairedGitleaksTask(task);
+                    const params = new URLSearchParams();
+                    params.set("opengrepTaskId", task.id);
+                    params.set("muteToast", "1");
+                    if (pairedGitleaksTask) {
+                        params.set("gitleaksTaskId", pairedGitleaksTask.id);
+                    }
+                    return {
+                        id: `opengrep-${task.id}`,
+                        projectName: resolveProjectName(task.project_id),
+                        kind: "rule_scan" as const,
+                        status: task.status,
+                        gitleaksEnabled: Boolean(pairedGitleaksTask),
+                        createdAt: task.created_at,
+                        route: `/static-analysis/${task.id}?${params.toString()}`,
+                    };
+                },
+            );
+
+            const activityItems: RecentActivityItem[] = [
+                ...ruleScanActivities,
+                ...agentTasks.map((task: AgentTask) => ({
+                    id: `agent-${task.id}`,
+                    projectName: resolveProjectName(task.project_id),
+                    kind: "intelligent_audit" as const,
+                    status: task.status,
+                    createdAt: task.created_at,
+                    route: `/agent-audit/${task.id}?muteToast=1`,
+                })),
+            ].sort(
+                (a, b) =>
+                    new Date(b.createdAt).getTime() -
+                    new Date(a.createdAt).getTime(),
+            );
+
+            setRecentActivities(activityItems);
+        } catch (error) {
+            console.error("加载任务浏览失败:", error);
+            setRecentActivities([]);
+        }
+    };
+
+    const scrollToModule = (
+        moduleId: "task-browser" | "project-browser" | "quick-actions",
+    ) => {
+        window.setTimeout(() => {
+            document.getElementById(moduleId)?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        }, MODULE_SCROLL_DELAY_MS);
+    };
+
+    const pinToModuleHash = (
+        moduleId: "task-browser" | "project-browser" | "quick-actions",
+    ) => {
+        const { pathname, search } = window.location;
+        window.history.replaceState(
+            window.history.state,
+            "",
+            `${pathname}${search}#${moduleId}`,
+        );
+    };
+
+    const closeCreateProjectDialog = (
+        target: "project-browser" | "quick-actions" = createProjectReturnTarget,
+    ) => {
+        setShowCreateDialog(false);
+        pinToModuleHash(target);
+        scrollToModule(target);
+        setCreateProjectReturnTarget("project-browser");
+    };
+
+    const handleCreateProjectDialogOpenChange = (open: boolean) => {
+        if (open) {
+            setShowCreateDialog(true);
+            return;
+        }
+        closeCreateProjectDialog();
+    };
+
+    const handleCreateAuditDialogOpenChange = (open: boolean) => {
+        setShowCreateAuditDialog(open);
+        if (!open) {
+            setAuditPreselectedProjectId("");
+            pinToModuleHash(auditReturnTarget);
+            scrollToModule(auditReturnTarget);
+            setAuditReturnTarget("task-browser");
+            setAuditNavigateOnSuccess(true);
+            setAuditInitialMode("static");
+        }
+    };
+
+    const handleCreateStaticAuditDialogOpenChange = (open: boolean) => {
+        setShowCreateStaticAuditDialog(open);
+        if (!open) {
+            pinToModuleHash("quick-actions");
+            scrollToModule("quick-actions");
+            setStaticAuditNavigateOnSuccess(true);
+        }
+    };
+
+    const handleCreateAgentAuditDialogOpenChange = (open: boolean) => {
+        setShowCreateAgentAuditDialog(open);
+        if (!open) {
+            pinToModuleHash("quick-actions");
+            scrollToModule("quick-actions");
+            setAgentAuditNavigateOnSuccess(true);
+        }
+    };
+
+    const handleOpenCreateProject = () => {
+        setCreateProjectReturnTarget("project-browser");
+        pinToModuleHash("project-browser");
+        setShowCreateDialog(true);
+    };
+
+    const openCreateProjectFromQuickActions = () => {
+        setCreateProjectReturnTarget("quick-actions");
+        pinToModuleHash("quick-actions");
+        setShowCreateDialog(true);
+    };
+
+    const openCreateAuditDialog = (
+        mode: AuditCreateMode = "static",
+        projectId = "",
+        options?: {
+            returnTarget?: "task-browser" | "quick-actions" | "project-browser";
+            navigateOnSuccess?: boolean;
+        },
+    ) => {
+        const returnTarget = options?.returnTarget || "task-browser";
+        const navigateOnSuccess = options?.navigateOnSuccess ?? true;
+        pinToModuleHash(returnTarget);
+        setAuditInitialMode(mode);
+        setAuditPreselectedProjectId(projectId);
+        setAuditReturnTarget(returnTarget);
+        setAuditNavigateOnSuccess(navigateOnSuccess);
+        setShowCreateAuditDialog(true);
+    };
+
+    const openCreateStaticAuditDialog = (
+        options?: { navigateOnSuccess?: boolean },
+    ) => {
+        pinToModuleHash("quick-actions");
+        setStaticAuditNavigateOnSuccess(options?.navigateOnSuccess ?? true);
+        setShowCreateStaticAuditDialog(true);
+    };
+
+    const openCreateAgentAuditDialog = (
+        options?: { navigateOnSuccess?: boolean },
+    ) => {
+        pinToModuleHash("quick-actions");
+        setAgentAuditNavigateOnSuccess(options?.navigateOnSuccess ?? true);
+        setShowCreateAgentAuditDialog(true);
     };
 
     const handleCreateProject = async () => {
@@ -178,9 +487,9 @@ export default function Projects() {
             });
 
             toast.success("项目创建成功");
-            setShowCreateDialog(false);
+            closeCreateProjectDialog();
             resetCreateForm();
-            loadProjects();
+            await loadProjects();
         } catch (error) {
             console.error("Failed to create project:", error);
             import("@/shared/utils/errorHandler").then(({ handleError }) => {
@@ -219,6 +528,13 @@ export default function Projects() {
             return;
         }
 
+        const autoProjectName = stripArchiveSuffix(file.name).trim();
+        if (autoProjectName) {
+            setCreateForm((prev) => ({
+                ...prev,
+                name: autoProjectName,
+            }));
+        }
         setSelectedFile(file);
         inputEl.value = "";
     };
@@ -277,9 +593,9 @@ export default function Projects() {
                 });
             });
 
-            setShowCreateDialog(false);
+            closeCreateProjectDialog();
             resetCreateForm();
-            loadProjects();
+            await loadProjects();
 
             toast.success(`项目 "${createdProject.name}" 已创建`, {
                 description:
@@ -306,7 +622,7 @@ export default function Projects() {
                 ? "压缩包解压后文件数量超过 10000 个，请精简后重试"
                 : rawErrorMessage.includes("相同内容压缩包") || rawErrorMessage.includes("相同压缩包")
                     ? "检测到重复压缩包，系统已阻止重复上传"
-                : rawErrorMessage;
+                    : rawErrorMessage;
             toast.error(`上传失败: ${errorMessage}`);
         } finally {
             if (progressInterval) clearInterval(progressInterval);
@@ -315,13 +631,140 @@ export default function Projects() {
         }
     };
 
-    const filteredProjects = projects.filter(
-        (project) =>
-            project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            project.description
-                ?.toLowerCase()
-                .includes(searchTerm.toLowerCase()),
+    const filteredActivities = useMemo(() => {
+        const keyword = activityKeyword.trim().toLowerCase();
+        if (!keyword) return recentActivities;
+        return recentActivities.filter((activity) => {
+            const kindText =
+                activity.kind === "rule_scan" ? "静态扫描" : "智能审计";
+            return (
+                activity.projectName.toLowerCase().includes(keyword) ||
+                kindText.includes(keyword) ||
+                getTaskStatusText(activity.status).includes(keyword)
+            );
+        });
+    }, [recentActivities, activityKeyword]);
+
+    const totalActivityPages = Math.max(
+        1,
+        Math.ceil(filteredActivities.length / ACTIVITY_PAGE_SIZE),
     );
+
+    useEffect(() => {
+        setActivityPage(1);
+    }, [activityKeyword]);
+
+    useEffect(() => {
+        if (activityPage > totalActivityPages) {
+            setActivityPage(totalActivityPages);
+        }
+    }, [activityPage, totalActivityPages]);
+
+    const pagedActivities = useMemo(() => {
+        const start = (activityPage - 1) * ACTIVITY_PAGE_SIZE;
+        return filteredActivities.slice(start, start + ACTIVITY_PAGE_SIZE);
+    }, [filteredActivities, activityPage]);
+
+    const filteredProjects = useMemo(() => {
+        const keyword = searchTerm.trim().toLowerCase();
+        if (!keyword) return projects;
+        return projects.filter((project) => {
+            return (
+                project.name.toLowerCase().includes(keyword) ||
+                (project.description || "").toLowerCase().includes(keyword) ||
+                (project.repository_url || "").toLowerCase().includes(keyword)
+            );
+        });
+    }, [projects, searchTerm]);
+
+    const totalProjectPages = Math.max(
+        1,
+        Math.ceil(filteredProjects.length / PROJECT_PAGE_SIZE),
+    );
+
+    useEffect(() => {
+        setProjectPage(1);
+    }, [searchTerm]);
+
+    useEffect(() => {
+        if (projectPage > totalProjectPages) {
+            setProjectPage(totalProjectPages);
+        }
+    }, [projectPage, totalProjectPages]);
+
+    const pagedProjects = useMemo(() => {
+        const start = (projectPage - 1) * PROJECT_PAGE_SIZE;
+        return filteredProjects.slice(start, start + PROJECT_PAGE_SIZE);
+    }, [filteredProjects, projectPage]);
+    const projectDetailFrom = `${location.pathname}${location.search}${location.hash}`;
+
+    const getTaskStatusText = (status: string) => {
+        switch (status) {
+            case "completed":
+                return "任务完成";
+            case "running":
+                return "任务运行中";
+            case "failed":
+                return "任务失败";
+            case "pending":
+                return "任务待处理";
+            case "cancelled":
+            case "interrupted":
+            case "aborted":
+                return "任务中止";
+            default:
+                return status || "未知状态";
+        }
+    };
+
+    const getTaskStatusClassName = (status: string) => {
+        if (status === "completed") {
+            return "bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40";
+        }
+        if (status === "running") {
+            return "bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40";
+        }
+        if (status === "failed") {
+            return "bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40";
+        }
+        if (INTERRUPTED_STATUSES.has(status)) {
+            return "bg-orange-500/5 border-orange-500/20 hover:border-orange-500/40";
+        }
+        return "bg-muted/30 border-border hover:border-border";
+    };
+
+    const getTaskStatusBadgeClassName = (status: string) => {
+        if (status === "completed") return "cyber-badge-success";
+        if (status === "running") return "cyber-badge-info";
+        if (status === "failed") return "cyber-badge-danger";
+        if (INTERRUPTED_STATUSES.has(status)) return "cyber-badge-warning";
+        return "cyber-badge-muted";
+    };
+
+    const formatCreatedAt = (time: string) => {
+        const date = new Date(time);
+        if (Number.isNaN(date.getTime())) return time;
+        return date.toLocaleString("zh-CN", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+        });
+    };
+
+    const getRelativeTime = (time: string) => {
+        const now = new Date();
+        const taskDate = new Date(time);
+        const diffMs = now.getTime() - taskDate.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+        if (diffMins < 60) return `${Math.max(diffMins, 1)}分钟前`;
+        if (diffHours < 24) return `${diffHours}小时前`;
+        return `${diffDays}天前`;
+    };
 
     const getRepositoryIcon = (type?: string) => {
         switch (type) {
@@ -338,43 +781,11 @@ export default function Projects() {
         }
     };
 
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString("zh-CN");
-    };
-
     const handleCreateTask = (projectId: string) => {
-        setSelectedProjectForTask(projectId);
-        setShowCreateTaskDialog(true);
-    };
-
-    const handleEditClick = async (project: Project) => {
-        setProjectToEdit(project);
-        setEditForm({
-            name: project.name,
-            description: project.description || "",
-            source_type: project.source_type || "repository",
-            repository_url: project.repository_url || "",
-            repository_type: project.repository_type || "github",
-            default_branch: project.default_branch || "main",
-            programming_languages: project.programming_languages
-                ? JSON.parse(project.programming_languages)
-                : [],
+        openCreateAuditDialog("agent", projectId, {
+            returnTarget: "project-browser",
+            navigateOnSuccess: true,
         });
-        setEditZipFile(null);
-        setEditZipInfo(null);
-        setShowEditDialog(true);
-
-        if (project.source_type === "zip") {
-            setLoadingEditZipInfo(true);
-            try {
-                const zipInfo = await getZipFileInfo(project.id);
-                setEditZipInfo(zipInfo);
-            } catch (error) {
-                console.error("加载ZIP文件信息失败:", error);
-            } finally {
-                setLoadingEditZipInfo(false);
-            }
-        }
     };
 
     const handleSaveEdit = async () => {
@@ -463,6 +874,7 @@ export default function Projects() {
                 "因为网络和代码文件大小等因素，审计时长通常至少需要1分钟，请耐心等待...",
             duration: 5000,
         });
+        loadProjects();
     };
 
     if (loading) {
@@ -484,7 +896,10 @@ export default function Projects() {
             <div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
 
             {/* 创建项目对话框 */}
-            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+            <Dialog
+                open={showCreateDialog}
+                onOpenChange={handleCreateProjectDialogOpenChange}
+            >
                 <DialogTrigger asChild className="hidden">
                     <Button className="cyber-btn-primary">
                         <Plus className="w-5 h-5 mr-2" />
@@ -513,7 +928,7 @@ export default function Projects() {
                                             htmlFor="name"
                                             className="font-mono font-bold uppercase text-base text-muted-foreground"
                                         >
-                                            项目名称 *
+                                            项目名称
                                         </Label>
                                         <Input
                                             id="name"
@@ -607,7 +1022,7 @@ export default function Projects() {
                                             }
                                             placeholder={
                                                 createForm.repository_type ===
-                                                "other"
+                                                    "other"
                                                     ? "git@github.com:user/repo.git"
                                                     : "https://github.com/user/repo"
                                             }
@@ -615,18 +1030,18 @@ export default function Projects() {
                                         />
                                         {createForm.repository_type ===
                                             "other" && (
-                                            <p className="text-xs text-muted-foreground font-mono">
-                                                💡 SSH Key认证请使用 git@
-                                                格式的SSH URL
-                                            </p>
-                                        )}
+                                                <p className="text-xs text-muted-foreground font-mono">
+                                                    💡 SSH Key认证请使用 git@
+                                                    格式的SSH URL
+                                                </p>
+                                            )}
                                         {createForm.repository_type !==
                                             "other" && (
-                                            <p className="text-xs text-muted-foreground font-mono">
-                                                💡 Token认证请使用 https://
-                                                格式的URL
-                                            </p>
-                                        )}
+                                                <p className="text-xs text-muted-foreground font-mono">
+                                                    💡 Token认证请使用 https://
+                                                    格式的URL
+                                                </p>
+                                            )}
                                     </div>
                                     <div className="space-y-1.5">
                                         <Label
@@ -659,13 +1074,12 @@ export default function Projects() {
                                         {supportedLanguages.map((lang) => (
                                             <label
                                                 key={lang}
-                                                className={`flex items-center space-x-2 px-3 py-1.5 border cursor-pointer transition-all rounded ${
-                                                    createForm.programming_languages.includes(
-                                                        lang,
-                                                    )
+                                                className={`flex items-center space-x-2 px-3 py-1.5 border cursor-pointer transition-all rounded ${createForm.programming_languages.includes(
+                                                    lang,
+                                                )
                                                         ? "border-primary bg-primary/10 text-primary"
                                                         : "border-border hover:border-border text-muted-foreground"
-                                                }`}
+                                                    }`}
                                             >
                                                 <input
                                                     type="checkbox"
@@ -707,16 +1121,14 @@ export default function Projects() {
                                 <div className="flex justify-end space-x-4 pt-4 border-t border-border">
                                     <Button
                                         variant="outline"
-                                        onClick={() =>
-                                            setShowCreateDialog(false)
-                                        }
+                                        onClick={closeCreateProjectDialog}
                                         className="cyber-btn-outline"
                                     >
                                         取消
                                     </Button>
                                     <Button
                                         onClick={handleCreateProject}
-                                        className="cyber-btn-primary"
+                                        className={PROJECT_ACTION_BTN_SUBTLE}
                                     >
                                         执行创建
                                     </Button>
@@ -732,7 +1144,7 @@ export default function Projects() {
                                         htmlFor="upload-name"
                                         className="font-mono font-bold uppercase text-base text-muted-foreground"
                                     >
-                                        项目名称 *
+                                        项目名称
                                     </Label>
                                     <Input
                                         id="upload-name"
@@ -802,10 +1214,7 @@ export default function Projects() {
                                                 type="button"
                                                 variant="outline"
                                                 className="cyber-btn-outline h-8 text-xs"
-                                                disabled={
-                                                    uploading ||
-                                                    !createForm.name.trim()
-                                                }
+                                                disabled={uploading}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     fileInputRef.current?.click();
@@ -882,11 +1291,10 @@ export default function Projects() {
                                 </div>
 
                                 <div className="flex justify-end space-x-4 pt-4 border-t border-border mt-auto">
+                                    
                                     <Button
                                         variant="outline"
-                                        onClick={() =>
-                                            setShowCreateDialog(false)
-                                        }
+                                        onClick={closeCreateProjectDialog}
                                         disabled={uploading}
                                         className="cyber-btn-outline"
                                     >
@@ -894,7 +1302,7 @@ export default function Projects() {
                                     </Button>
                                     <Button
                                         onClick={handleUploadAndCreate}
-                                        className="cyber-btn-primary"
+                                        className={PROJECT_ACTION_BTN_SUBTLE}
                                         disabled={!selectedFile || uploading}
                                     >
                                         {uploading ? "上传中..." : "执行创建"}
@@ -906,220 +1314,349 @@ export default function Projects() {
                 </DialogContent>
             </Dialog>
 
-            {/* Stats Section */}
-            {projects.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 relative z-10">
-                    <div className="cyber-card p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="stat-label">项目总数</p>
-                                <p className="stat-value">{projects.length}</p>
-                            </div>
-                            <div className="stat-icon text-primary">
-                                <Code className="w-6 h-6" />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="cyber-card p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="stat-label">活跃项目</p>
-                                <p className="stat-value">
-                                    {projects.filter((p) => p.is_active).length}
-                                </p>
-                            </div>
-                            <div className="stat-icon text-emerald-400">
-                                <Activity className="w-6 h-6" />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="cyber-card p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="stat-label">上传项目</p>
-                                <p className="stat-value">
-                                    {
-                                        projects.filter((p) => isZipProject(p))
-                                            .length
-                                    }
-                                </p>
-                            </div>
-                            <div className="stat-icon text-amber-400">
-                                <Upload className="w-6 h-6" />
-                            </div>
-                        </div>
-                    </div>
+            {/* Quick Actions */}
+            <div id="quick-actions" className="cyber-card p-4 relative z-10">
+                <div className="section-header">
+                    <Terminal className="w-5 h-5 text-primary" />
+                    <h3 className="section-title">快速操作</h3>
                 </div>
-            )}
-
-            {/* Search and Filter */}
-            <div className="cyber-card p-4 flex items-center gap-4 relative z-10">
-                <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4 z-10" />
-                    <Input
-                        placeholder={t("projects.searchPlaceholder", "搜索项目名称...")}
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="cyber-input !pl-10"
-                    />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                    <Button
+                        className={`${PROJECT_ACTION_BTN} h-10 justify-start`}
+                        onClick={openCreateProjectFromQuickActions}
+                    >
+                        <Plus className="w-4 h-4 mr-2" />
+                        创建项目
+                    </Button>
+                    <Button
+                        className={`${PROJECT_ACTION_BTN} h-10 justify-start`}
+                        onClick={() => openCreateStaticAuditDialog()}
+                    >
+                        <Shield className="w-4 h-4 mr-2" />
+                        创建静态扫描
+                    </Button>
+                    <Button
+                        className={`${PROJECT_ACTION_BTN} h-10 justify-start`}
+                        onClick={() => openCreateAgentAuditDialog()}
+                    >
+                        <Terminal className="w-4 h-4 mr-2" />
+                        创建智能审计
+                    </Button>
                 </div>
-                <Button
-                    className="cyber-btn-primary h-10"
-                    onClick={() => setShowCreateDialog(true)}
-                >
-                    <Plus className="w-4 h-4 mr-2" />
-                    新建项目
-                </Button>
             </div>
 
-            {/* Project List */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 relative z-10">
-                {filteredProjects.length > 0 ? (
-                    filteredProjects.map((project) => (
-                        <div
-                            key={project.id}
-                            className="cyber-card flex flex-col h-full group"
+            {/* Task Browser */}
+            <div className="relative z-10">
+                <div id="task-browser" className="cyber-card p-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="section-header">
+                            <Terminal className="w-5 h-5 text-amber-400" />
+                            <h3 className="section-title">任务浏览</h3>
+                        </div>
+                        <Button
+                            size="sm"
+                            className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 px-3`}
+                            onClick={() =>
+                                openCreateAuditDialog("static", "", {
+                                    returnTarget: "task-browser",
+                                    navigateOnSuccess: true,
+                                })
+                            }
                         >
-                            {/* Card Header */}
-                            <div className="p-4 border-b border-border bg-muted/50 flex justify-between items-start">
-                                <div className="flex items-center space-x-3">
-                                    <div className="w-10 h-10 border border-border bg-muted rounded flex items-center justify-center text-muted-foreground">
-                                        {getRepositoryIcon(
-                                            project.repository_type,
-                                        )}
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-lg text-foreground group-hover:text-primary transition-colors leading-tight">
-                                            <Link
-                                                to={`/projects/${project.id}`}
-                                            >
-                                                {project.name}
-                                            </Link>
-                                        </h3>
-                                        <div className="flex items-center mt-1 space-x-2">
-                                            <Badge
-                                                className={`cyber-badge ${project.is_active ? "cyber-badge-success" : "cyber-badge-muted"}`}
-                                            >
-                                                {project.is_active
-                                                    ? "活跃"
-                                                    : "暂停"}
+                            <Shield className="w-4 h-4 mr-2" />
+                            创建审计
+                        </Button>
+                    </div>
+                    <div className="space-y-3 mb-3">
+                        <div className="flex items-center gap-2">
+                            <Input
+                                value={activityKeyword}
+                                onChange={(e) => setActivityKeyword(e.target.value)}
+                                placeholder="按项目名/任务类型/状态搜索"
+                                className="h-9 font-mono"
+                            />
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>按时间倒序展示</span>
+                            <span>共 {filteredActivities.length} 条</span>
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        {pagedActivities.length > 0 ? (
+                            pagedActivities.map((activity) => {
+                                const activityName =
+                                    activity.kind === "rule_scan"
+                                        ? `${activity.projectName}-静态扫描`
+                                        : `${activity.projectName}-智能审计`;
+                                return (
+                                    <Link
+                                        key={activity.id}
+                                        to={activity.route}
+                                        className={`block p-3 rounded-lg border transition-all ${getTaskStatusClassName(activity.status)}`}
+                                    >
+                                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                                            <p className="text-base font-medium text-foreground">
+                                                {activityName}
+                                            </p>
+                                            {activity.kind === "rule_scan" && (
+                                                <span className="text-xs text-muted-foreground">
+                                                    Gitleaks扫描：
+                                                    {activity.gitleaksEnabled ? "已启用" : "未启用"}
+                                                </span>
+                                            )}
+                                            <Badge className={getTaskStatusBadgeClassName(activity.status)}>
+                                                漏洞扫描状态：{getTaskStatusText(activity.status)}
                                             </Badge>
-                                            <Badge
-                                                className={`cyber-badge ${isRepositoryProject(project) ? "cyber-badge-info" : "cyber-badge-warning"}`}
-                                            >
-                                                {getSourceTypeBadge(
-                                                    project.source_type,
-                                                )}
-                                            </Badge>
+                                            <span className="text-sm text-muted-foreground/80">
+                                                创建时间：{formatCreatedAt(activity.createdAt)}（
+                                                {getRelativeTime(activity.createdAt)}）
+                                            </span>
                                         </div>
+                                    </Link>
+                                );
+                            })
+                        ) : (
+                            <div className="empty-state py-6">
+                                <Clock className="w-10 h-10 text-muted-foreground mb-2" />
+                                <p className="text-base text-muted-foreground">
+                                    暂无活动记录
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                    {filteredActivities.length > 0 && (
+                        <div className="mt-4 flex items-center justify-between">
+                            <div className="text-xs text-muted-foreground">
+                                第 {activityPage} / {totalActivityPages} 页（每页{" "}
+                                {ACTIVITY_PAGE_SIZE} 条）
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="cyber-btn-outline h-8 px-3"
+                                    disabled={activityPage <= 1}
+                                    onClick={() =>
+                                        setActivityPage((prev) => Math.max(prev - 1, 1))
+                                    }
+                                >
+                                    上一页
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="cyber-btn-outline h-8 px-3"
+                                    disabled={activityPage >= totalActivityPages}
+                                    onClick={() =>
+                                        setActivityPage((prev) =>
+                                            Math.min(prev + 1, totalActivityPages),
+                                        )
+                                    }
+                                >
+                                    下一页
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Project Browser */}
+            <div id="project-browser" className="cyber-card p-4 relative z-10">
+                <div className="flex items-center justify-between gap-3">
+                    <div className="section-header">
+                        <Code className="w-5 h-5 text-primary" />
+                        <h3 className="section-title">项目浏览</h3>
+                    </div>
+                    <Button
+                        size="sm"
+                        className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 px-3`}
+                        onClick={handleOpenCreateProject}
+                    >
+                        <Plus className="w-4 h-4 mr-2" />
+                        创建项目
+                    </Button>
+                </div>
+                <div className="space-y-3 mb-3 mt-3">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder={t("projects.searchPlaceholder", "按项目名称/描述/仓库地址搜索")}
+                            className="h-9 font-mono pl-9"
+                        />
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>项目管理同源数据（新 → 旧）</span>
+                        <span>共 {filteredProjects.length} 个</span>
+                    </div>
+                </div>
+                <div className="space-y-2">
+                    {pagedProjects.length > 0 ? (
+                        pagedProjects.map((project) => (
+                            <div
+                                key={project.id}
+                                className={`block p-3 rounded-lg border transition-all ${project.is_active
+                                        ? "bg-primary/5 border-primary/20 hover:border-primary/40"
+                                        : "bg-muted/20 border-border hover:border-border"
+                                    }`}
+                            >
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                        {getRepositoryIcon(project.repository_type)}
+                                    </span>
+                                    <Link
+                                        to={`/projects/${project.id}`}
+                                        state={{ from: projectDetailFrom }}
+                                        className="text-base font-medium text-foreground hover:text-primary transition-colors"
+                                    >
+                                        {project.name}
+                                    </Link>
+                                    <Badge
+                                        className={
+                                            project.is_active
+                                                ? "cyber-badge-success"
+                                                : "cyber-badge-muted"
+                                        }
+                                    >
+                                        {project.is_active ? "活跃" : "暂停"}
+                                    </Badge>
+                                    <Badge
+                                        className={
+                                            project.source_type === "zip"
+                                                ? "cyber-badge-warning"
+                                                : "cyber-badge-info"
+                                        }
+                                    >
+                                        {getSourceTypeBadge(project.source_type)}
+                                    </Badge>
+                                    <span className="text-xs text-muted-foreground">
+                                        创建时间：{formatCreatedAt(project.created_at)}
+                                    </span>
+                                    <Link
+                                        to={`/projects/${project.id}`}
+                                        state={{ from: projectDetailFrom }}
+                                        className="text-xs text-primary inline-flex items-center gap-1"
+                                    >
+                                        查看详情 <ArrowUpRight className="w-3 h-3" />
+                                    </Link>
+                                    <div className="ml-auto flex items-center gap-2">
+                                        <Button
+                                            size="sm"
+                                            className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 text-xs`}
+                                            onClick={() => handleCreateTask(project.id)}
+                                        >
+                                            <Shield className="w-3 h-3 mr-2" />
+                                            审计
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="cyber-btn-ghost h-8 px-2 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
+                                            onClick={() => handleDeleteClick(project)}
+                                        >
+                                            <Trash2 className="w-3 h-3" />
+                                        </Button>
                                     </div>
                                 </div>
-                            </div>
-
-                            {/* Card Body */}
-                            <div className="p-4 flex-1 space-y-3">
                                 {project.description && (
-                                    <p className="text-base text-muted-foreground font-mono line-clamp-2 border-l-2 border-border pl-2 leading-relaxed">
+                                    <p className="mt-2 text-sm text-muted-foreground line-clamp-2">
                                         {project.description}
                                     </p>
                                 )}
-
-                                <div className="space-y-2">
-                                    {project.repository_url && (
-                                        <div className="flex items-center text-xs font-mono text-muted-foreground bg-muted p-2 border border-border rounded">
-                                            <GitBranch className="w-3 h-3 mr-2 flex-shrink-0 text-muted-foreground" />
-                                            <a
-                                                href={project.repository_url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="hover:text-primary transition-colors truncate"
-                                            >
-                                                {project.repository_url.replace(
-                                                    "https://",
-                                                    "",
-                                                )}
-                                            </a>
-                                        </div>
-                                    )}
-
-                                    <div className="flex items-center text-xs font-mono text-muted-foreground">
-                                        <span className="flex items-center">
-                                            <Calendar className="w-3 h-3 mr-1" />{" "}
-                                            {formatDate(project.created_at)}
-                                        </span>
-                                    </div>
-                                </div>
-
                             </div>
-
-                            {/* Card Footer */}
-                            <div className="p-4 border-t border-border bg-muted/50 grid grid-cols-2 gap-2">
-                                <Link
-                                    to={`/projects/${project.id}`}
-                                    className="col-span-2"
-                                >
-                                    <Button
-                                        variant="outline"
-                                        className="w-full cyber-btn-outline h-8 text-xs"
-                                    >
-                                        <Code className="w-3 h-3 mr-2" />
-                                        查看详情
-                                        <ArrowUpRight className="w-3 h-3 ml-auto" />
-                                    </Button>
-                                </Link>
-                                <Button
-                                    size="sm"
-                                    className="cyber-btn-primary h-8 text-xs"
-                                    onClick={() => handleCreateTask(project.id)}
-                                >
-                                    <Shield className="w-3 h-3 mr-2" />
-                                    审计
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="cyber-btn-ghost h-8 px-0 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
-                                    onClick={() => handleDeleteClick(project)}
-                                >
-                                    <Trash2 className="w-3 h-3" />
-                                </Button>
-                            </div>
-                        </div>
-                    ))
-                ) : (
-                    <div className="col-span-full">
-                        <div className="cyber-card p-16 text-center border-dashed">
-                            <Code className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                            <h3 className="text-xl font-bold text-foreground mb-2">
-                                {searchTerm ? "未找到匹配项" : "未初始化项目"}
-                            </h3>
-                            <p className="text-muted-foreground font-mono mb-6">
-                                {searchTerm
-                                    ? "调整搜索参数"
-                                    : "初始化第一个项目以开始"}
+                        ))
+                    ) : (
+                        <div className="empty-state py-10">
+                            <Code className="w-12 h-12 text-muted-foreground mb-3" />
+                            <p className="text-base text-muted-foreground">
+                                {searchTerm ? "未匹配到项目" : "暂无项目"}
                             </p>
                             {!searchTerm && (
                                 <Button
-                                    onClick={() => setShowCreateDialog(true)}
-                                    className="cyber-btn-primary"
+                                    onClick={handleOpenCreateProject}
+                                    className={`${PROJECT_ACTION_BTN} mt-4`}
                                 >
                                     <Plus className="w-4 h-4 mr-2" />
                                     初始化项目
                                 </Button>
                             )}
                         </div>
+                    )}
+                </div>
+                {filteredProjects.length > 0 && (
+                    <div className="mt-4 flex items-center justify-between">
+                        <div className="text-xs text-muted-foreground">
+                            第 {projectPage} / {totalProjectPages} 页（每页{" "}
+                            {PROJECT_PAGE_SIZE} 条）
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="cyber-btn-outline h-8 px-3"
+                                disabled={projectPage <= 1}
+                                onClick={() =>
+                                    setProjectPage((prev) => Math.max(prev - 1, 1))
+                                }
+                            >
+                                上一页
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="cyber-btn-outline h-8 px-3"
+                                disabled={projectPage >= totalProjectPages}
+                                onClick={() =>
+                                    setProjectPage((prev) =>
+                                        Math.min(prev + 1, totalProjectPages),
+                                    )
+                                }
+                            >
+                                下一页
+                            </Button>
+                        </div>
                     </div>
                 )}
             </div>
 
-            {/* Create Task Dialog */}
-            <CreateTaskDialog
-                open={showCreateTaskDialog}
-                onOpenChange={setShowCreateTaskDialog}
+            <CreateProjectAuditDialog
+                open={showCreateAuditDialog}
+                onOpenChange={handleCreateAuditDialogOpenChange}
                 onTaskCreated={handleTaskCreated}
-                preselectedProjectId={selectedProjectForTask}
+                preselectedProjectId={auditPreselectedProjectId}
+                initialMode={auditInitialMode}
+                navigateOnSuccess={auditNavigateOnSuccess}
+                showReturnButton={auditReturnTarget === "quick-actions"}
+                onReturn={() => {
+                    pinToModuleHash("quick-actions");
+                    scrollToModule("quick-actions");
+                }}
+            />
+
+            <CreateStaticAuditDialog
+                open={showCreateStaticAuditDialog}
+                onOpenChange={handleCreateStaticAuditDialogOpenChange}
+                onTaskCreated={handleTaskCreated}
+                navigateOnSuccess={staticAuditNavigateOnSuccess}
+                showReturnButton
+                onReturn={() => {
+                    pinToModuleHash("quick-actions");
+                    scrollToModule("quick-actions");
+                }}
+            />
+
+            <CreateAgentAuditDialog
+                open={showCreateAgentAuditDialog}
+                onOpenChange={handleCreateAgentAuditDialogOpenChange}
+                onTaskCreated={handleTaskCreated}
+                navigateOnSuccess={agentAuditNavigateOnSuccess}
+                showReturnButton
+                onReturn={() => {
+                    pinToModuleHash("quick-actions");
+                    scrollToModule("quick-actions");
+                }}
             />
 
             {/* Edit Dialog */}
@@ -1152,7 +1689,7 @@ export default function Projects() {
                                     htmlFor="edit-name"
                                     className="font-mono font-bold uppercase text-xs text-muted-foreground"
                                 >
-                                    项目名称 *
+                                    项目名称
                                 </Label>
                                 <Input
                                     id="edit-name"
@@ -1331,7 +1868,7 @@ export default function Projects() {
                                                             {" "}
                                                             (
                                                             {editZipInfo.file_size >=
-                                                            1024 * 1024
+                                                                1024 * 1024
                                                                 ? `${(editZipInfo.file_size / 1024 / 1024).toFixed(2)} MB`
                                                                 : `${(editZipInfo.file_size / 1024).toFixed(2)} KB`}
                                                             )
@@ -1387,7 +1924,7 @@ export default function Projects() {
                                                 if (!validation.valid) {
                                                     toast.error(
                                                         validation.error ||
-                                                            "文件无效",
+                                                        "文件无效",
                                                     );
                                                     e.target.value = "";
                                                     return;
@@ -1455,31 +1992,29 @@ export default function Projects() {
                                 {supportedLanguages.map((lang) => (
                                     <div
                                         key={lang}
-                                        className={`flex items-center space-x-2 p-2 border cursor-pointer transition-all rounded ${
-                                            editForm.programming_languages?.includes(
-                                                lang,
-                                            )
+                                        className={`flex items-center space-x-2 p-2 border cursor-pointer transition-all rounded ${editForm.programming_languages?.includes(
+                                            lang,
+                                        )
                                                 ? "border-primary bg-primary/10 text-primary"
                                                 : "border-border hover:border-border text-muted-foreground"
-                                        }`}
+                                            }`}
                                         onClick={() =>
                                             handleToggleLanguage(lang)
                                         }
                                     >
                                         <div
-                                            className={`w-4 h-4 border-2 rounded-sm flex items-center justify-center ${
-                                                editForm.programming_languages?.includes(
-                                                    lang,
-                                                )
+                                            className={`w-4 h-4 border-2 rounded-sm flex items-center justify-center ${editForm.programming_languages?.includes(
+                                                lang,
+                                            )
                                                     ? "bg-primary border-primary"
                                                     : "border-border"
-                                            }`}
+                                                }`}
                                         >
                                             {editForm.programming_languages?.includes(
                                                 lang,
                                             ) && (
-                                                <CheckCircle className="w-3 h-3 text-foreground" />
-                                            )}
+                                                    <CheckCircle className="w-3 h-3 text-foreground" />
+                                                )}
                                         </div>
                                         <span className="text-sm font-mono font-bold uppercase">
                                             {lang}
@@ -1500,7 +2035,7 @@ export default function Projects() {
                         </Button>
                         <Button
                             onClick={handleSaveEdit}
-                            className="cyber-btn-primary"
+                            className={PROJECT_ACTION_BTN_SUBTLE}
                         >
                             保存更改
                         </Button>
