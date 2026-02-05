@@ -200,6 +200,24 @@ class OpengrepScanProgressResponse(BaseModel):
 # ============ 后台扫描执行 ============
 
 
+def _is_test_like_directory(name: str) -> bool:
+    return "test" in (name or "").lower()
+
+
+def _prune_test_directories(scan_root: str) -> int:
+    removed_count = 0
+    for root, dirs, _ in os.walk(scan_root, topdown=True):
+        keep_dirs: list[str] = []
+        for dirname in dirs:
+            if _is_test_like_directory(dirname):
+                shutil.rmtree(os.path.join(root, dirname), ignore_errors=True)
+                removed_count += 1
+            else:
+                keep_dirs.append(dirname)
+        dirs[:] = keep_dirs
+    return removed_count
+
+
 async def _get_project_root(project_id: str) -> Optional[str]:
     """
     获取项目根目录
@@ -251,6 +269,15 @@ async def _get_project_root(project_id: str) -> Optional[str]:
             logger.error(f"Failed to extract zip file {zip_file}: {e}")
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
+
+        # 上传和扫描统一排除目录名包含 test 的文件夹，减少无效扫描开销
+        removed_test_dirs = _prune_test_directories(temp_dir)
+        if removed_test_dirs:
+            logger.info(
+                "Removed %s test-like directories before static scan for project %s",
+                removed_test_dirs,
+                project_id,
+            )
 
         # 检查解压后的目录是否只有一个子目录（常见的 zip 打包格式）
         items = os.listdir(temp_dir)
@@ -1662,7 +1689,9 @@ def _detect_project_languages(scan_root: str) -> set[str]:
         dirs[:] = [
             item
             for item in dirs
-            if item not in SKIP_LANGUAGE_DETECTION_DIRS and not item.startswith(".")
+            if item not in SKIP_LANGUAGE_DETECTION_DIRS
+            and not item.startswith(".")
+            and not _is_test_like_directory(item)
         ]
         for filename in files:
             scanned_files += 1

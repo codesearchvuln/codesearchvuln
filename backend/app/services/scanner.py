@@ -4,6 +4,7 @@
 
 import asyncio
 import httpx
+from pathlib import PurePosixPath
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from urllib.parse import urlparse, quote
@@ -59,8 +60,14 @@ def is_text_file(path: str) -> bool:
 
 def should_exclude(path: str, exclude_patterns: List[str] = None) -> bool:
     """检查是否应该排除该文件"""
+    normalized_path = (path or "").replace("\\", "/")
+    path_segments = [seg.lower() for seg in PurePosixPath(normalized_path).parts]
+    # 目录名包含 test 时直接排除该目录及其所有文件
+    if any("test" in segment for segment in path_segments[:-1]):
+        return True
+
     all_patterns = EXCLUDE_PATTERNS + (exclude_patterns or [])
-    return any(pattern in path for pattern in all_patterns)
+    return any(pattern in normalized_path for pattern in all_patterns)
 
 
 def get_language_from_path(path: str) -> str:

@@ -6,15 +6,19 @@ import json
 import logging
 import os
 import sys
+import hashlib
 import yaml
 import subprocess
 import tempfile
+import zipfile
 from typing import Optional, List, Any
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import insert
+from sqlalchemy import insert, text
+from sqlalchemy.exc import IntegrityError
+import httpx
 from tqdm import tqdm
 
 from app.core.security import get_password_hash
@@ -23,6 +27,8 @@ from app.models.project import Project, ProjectMember
 from app.models.audit import AuditTask, AuditIssue
 from app.models.analysis import InstantAnalysis
 from app.models.opengrep import OpengrepRule
+from app.services.zip_storage import save_project_zip, has_project_zip, delete_project_zip
+from app.services.upload.language_detection import detect_languages_from_paths
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +62,133 @@ def _build_single_rule_yaml(rule: dict) -> str:
 DEFAULT_DEMO_EMAIL = "demo@example.com"
 DEFAULT_DEMO_PASSWORD = "demo123"
 DEFAULT_DEMO_NAME = "演示用户"
+DEFAULT_LIBPLIST_NAME = "libplist"
+DEFAULT_LIBPLIST_ZIP_URL = "https://github.com/libimobiledevice/libplist/archive/refs/tags/2.7.0.zip"
+
+LEGACY_DEFAULT_PROJECT_NAMES = {
+    "电商平台后端",
+    "移动端 App",
+    "数据分析平台",
+    "微服务网关",
+    "智能客服系统",
+    "区块链钱包",
+}
+
+
+def _sha256_file(file_path: str) -> str:
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+async def _download_zip_file(url: str, target_file_path: str) -> None:
+    timeout = httpx.Timeout(60.0, connect=20.0, read=60.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        with open(target_file_path, "wb") as f:
+            f.write(resp.content)
+
+
+def _collect_zip_paths(zip_file_path: str) -> list[str]:
+    paths: list[str] = []
+    with zipfile.ZipFile(zip_file_path, "r") as zf:
+        for item in zf.infolist():
+            if item.is_dir():
+                continue
+            # 路径统一去掉末尾 /
+            paths.append(item.filename.strip("/"))
+    return paths
+
+
+async def cleanup_legacy_default_projects(db: AsyncSession, user_id: str) -> None:
+    result = await db.execute(
+        select(Project).where(
+            Project.owner_id == user_id,
+            Project.name.in_(LEGACY_DEFAULT_PROJECT_NAMES),
+        )
+    )
+    legacy_projects = result.scalars().all()
+    if not legacy_projects:
+        return
+
+    for project in legacy_projects:
+        try:
+            await delete_project_zip(project.id)
+        except Exception:
+            pass
+        await db.delete(project)
+
+    await db.commit()
+    logger.info("✓ 已清理旧默认项目: %s 个", len(legacy_projects))
+
+
+async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
+    """
+    首次初始化仅引入 libplist 默认项目，并自动下载 zip 到项目存储。
+    """
+    await cleanup_legacy_default_projects(db, user.id)
+
+    result = await db.execute(
+        select(Project).where(
+            Project.owner_id == user.id,
+            Project.name == DEFAULT_LIBPLIST_NAME,
+        )
+    )
+    project = result.scalars().first()
+
+    if not project:
+        project = Project(
+            owner_id=user.id,
+            name=DEFAULT_LIBPLIST_NAME,
+            description="默认示例项目：libplist 2.7.0",
+            source_type="zip",
+            repository_url=DEFAULT_LIBPLIST_ZIP_URL,
+            repository_type="other",
+            default_branch="main",
+            programming_languages=json.dumps([], ensure_ascii=False),
+            is_active=True,
+        )
+        db.add(project)
+        await db.commit()
+        await db.refresh(project)
+        logger.info("✓ 已创建默认项目: %s", DEFAULT_LIBPLIST_NAME)
+    elif not project.is_active:
+        project.is_active = True
+        await db.commit()
+        await db.refresh(project)
+        logger.info("✓ 已恢复默认项目: %s", DEFAULT_LIBPLIST_NAME)
+
+    if await has_project_zip(project.id):
+        return
+
+    with tempfile.TemporaryDirectory(prefix="deepaudit_", suffix="_default_zip") as temp_dir:
+        temp_zip_path = os.path.join(temp_dir, "libplist-2.7.0.zip")
+        try:
+            await _download_zip_file(DEFAULT_LIBPLIST_ZIP_URL, temp_zip_path)
+            zip_hash = _sha256_file(temp_zip_path)
+            await save_project_zip(project.id, temp_zip_path, "libplist-2.7.0.zip")
+
+            zip_paths = _collect_zip_paths(temp_zip_path)
+            detected_languages = detect_languages_from_paths(zip_paths)
+            project.programming_languages = json.dumps(
+                detected_languages or ["C"],
+                ensure_ascii=False,
+            )
+            project.zip_file_hash = zip_hash
+            try:
+                await db.commit()
+            except IntegrityError:
+                # 已存在相同 ZIP 哈希时，不阻塞默认项目初始化
+                await db.rollback()
+                project.zip_file_hash = None
+                await db.commit()
+                logger.warning("默认项目 libplist ZIP 哈希重复，已跳过去重哈希写入")
+            logger.info("✓ 默认项目 libplist ZIP 下载并导入完成")
+        except Exception as e:
+            logger.warning("默认 libplist ZIP 下载失败，仅保留项目记录: %s", e)
 
 
 async def create_demo_user(db: AsyncSession) -> User | None:
@@ -651,18 +784,46 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
                f"跳过 {skipped_count} 条已存在的规则，{error_count} 条错误并已删除")
 
 
+async def ensure_project_zip_hash_schema(db: AsyncSession) -> None:
+    """
+    兼容沙箱环境：直接在启动时补齐 projects.zip_file_hash 字段与索引。
+    避免依赖新增 alembic revision 文件。
+    """
+    await db.execute(
+        text(
+            """
+            ALTER TABLE projects
+            ADD COLUMN IF NOT EXISTS zip_file_hash VARCHAR(64)
+            """
+        )
+    )
+    await db.execute(
+        text(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_projects_zip_file_hash
+            ON projects (zip_file_hash)
+            """
+        )
+    )
+    await db.commit()
+    logger.info("✓ 已确保 projects.zip_file_hash 字段与索引存在")
+
+
 async def init_db(db: AsyncSession) -> None:
     """
     初始化数据库
     """
     logger.info("开始初始化数据库...")
+
+    # 沙箱模式下直接补齐去重字段（不依赖额外 alembic 文件）
+    await ensure_project_zip_hash_schema(db)
     
     # 创建演示用户
     demo_user = await create_demo_user(db)
     
-    # 创建演示数据
+    # 不再创建历史演示项目，统一切换为默认 libplist 项目
     if demo_user:
-        await create_demo_data(db, demo_user)
+        await ensure_default_libplist_project(db, demo_user)
     
     await db.commit()
     

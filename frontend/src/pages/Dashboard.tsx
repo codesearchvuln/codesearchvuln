@@ -492,7 +492,9 @@ export default function Dashboard() {
 			const rawMsg = extractApiErrorMessage(error);
 			const msg = rawMsg.includes("解压文件数超过 10000")
 				? "压缩包解压后文件数量超过 10000 个，请精简后重试"
-				: rawMsg;
+				: rawMsg.includes("相同内容压缩包") || rawMsg.includes("相同压缩包")
+					? "检测到重复压缩包，系统已阻止重复上传"
+					: rawMsg;
 			toast.error(`创建项目失败: ${msg}`);
 		} finally {
 			setCreatingProject(false);
@@ -650,11 +652,7 @@ export default function Dashboard() {
 					<div className="flex items-center justify-between">
 						<div>
 							<p className="stat-label">总项目数</p>
-							<p className="stat-value">{stats?.total_projects || 0}</p>
-							<p className="text-sm text-emerald-400 mt-1 flex items-center gap-1">
-								<span className="w-2 h-2 rounded-full bg-emerald-400" />
-								活跃: {stats?.active_projects || 0}
-							</p>
+							<p className="stat-value">{stats?.active_projects || 0}</p>
 						</div>
 						<div className="stat-icon text-primary">
 							<Code className="w-6 h-6" />

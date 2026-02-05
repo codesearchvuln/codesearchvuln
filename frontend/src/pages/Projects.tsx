@@ -304,6 +304,8 @@ export default function Projects() {
             const rawErrorMessage = error?.message || "未知错误";
             const errorMessage = rawErrorMessage.includes("解压文件数超过 10000")
                 ? "压缩包解压后文件数量超过 10000 个，请精简后重试"
+                : rawErrorMessage.includes("相同内容压缩包") || rawErrorMessage.includes("相同压缩包")
+                    ? "检测到重复压缩包，系统已阻止重复上传"
                 : rawErrorMessage;
             toast.error(`上传失败: ${errorMessage}`);
         } finally {

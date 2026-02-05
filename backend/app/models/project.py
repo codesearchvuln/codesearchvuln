@@ -20,6 +20,8 @@ class Project(Base):
     default_branch = Column(String, default="main")
     
     programming_languages = Column(Text, default="[]")  # Stored as JSON string
+    # ZIP 项目归档内容哈希（SHA-256），用于去重上传
+    zip_file_hash = Column(String(64), nullable=True, unique=True, index=True)
     
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
     is_active = Column(Boolean(), default=True)
@@ -55,6 +57,5 @@ class ProjectMember(Base):
     # Relationships
     project = relationship("Project", back_populates="members")
     user = relationship("User", backref="project_memberships")
-
 
 

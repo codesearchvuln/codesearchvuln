@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from datetime import datetime, timezone
 import shutil
@@ -12,6 +13,7 @@ import uuid
 import json
 import tempfile
 import logging
+import hashlib
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -78,7 +80,12 @@ EXCLUDE_PATTERNS = {
 }
 
 
-def should_exclude_file(file_path: str) -> bool:
+def _is_test_directory_name(name: str) -> bool:
+    """目录名包含 test（不区分大小写）时视为测试目录。"""
+    return "test" in (name or "").lower()
+
+
+def should_exclude_file(file_path: str, is_directory: Optional[bool] = None) -> bool:
     """
     判断文件是否应该被排除
     
@@ -90,7 +97,21 @@ def should_exclude_file(file_path: str) -> bool:
     """
     # 规范化路径
     normalized_path = file_path.replace("\\", "/").strip("/")
-    parts = normalized_path.split("/")
+    parts = [part for part in normalized_path.split("/") if part]
+    if not parts:
+        return False
+
+    # 判断用于 test 目录匹配的路径段
+    if is_directory is True:
+        directory_parts = parts
+    elif is_directory is False:
+        directory_parts = parts[:-1]
+    else:
+        # 未显式指定时，尽量按路径结构判断
+        directory_parts = parts if len(parts) == 1 else parts[:-1]
+
+    if any(_is_test_directory_name(part) for part in directory_parts):
+        return True
     
     # 检查路径中的每个部分
     for part in parts:
@@ -119,7 +140,7 @@ def create_zip_with_exclusions(source_dir: str, zip_file_path: str) -> None:
     with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(source_dir):
             # 原地修改 dirs 列表，以跳过被排除的目录
-            dirs[:] = [d for d in dirs if not should_exclude_file(d)]
+            dirs[:] = [d for d in dirs if not should_exclude_file(d, is_directory=True)]
             
             for file in files:
                 file_path = os.path.join(root, file)
@@ -127,7 +148,7 @@ def create_zip_with_exclusions(source_dir: str, zip_file_path: str) -> None:
                 arcname = os.path.relpath(file_path, source_dir)
                 
                 # 检查是否应该排除
-                if not should_exclude_file(arcname):
+                if not should_exclude_file(arcname, is_directory=False):
                     zipf.write(file_path, arcname)
 
 
@@ -164,6 +185,33 @@ from app.services.upload.project_stats import (
     get_cloc_stats,
     build_static_project_description,
 )
+
+
+def calculate_file_sha256(file_path: str) -> str:
+    """
+    计算文件 SHA-256 哈希值（用于压缩包去重）
+    """
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+async def find_duplicate_zip_project(
+    db: AsyncSession, zip_hash: str, current_project_id: str
+) -> Optional[Project]:
+    """
+    查找是否存在已上传相同压缩包内容的其他项目
+    """
+    result = await db.execute(
+        select(Project).where(
+            Project.zip_file_hash == zip_hash,
+            Project.id != current_project_id,
+        )
+    )
+    return result.scalars().first()
+
 
 router = APIRouter()
 
@@ -903,8 +951,11 @@ async def upload_project_zip(
             temp_extract_dir = os.path.join(temp_dir, "extracted")
             os.makedirs(temp_extract_dir, exist_ok=True)
 
+            # 先放宽解压文件数量上限，再通过过滤逻辑移除 test 目录及无关文件
             success, extracted_files, error = await UploadManager.extract_file(
-                temp_upload_path, temp_extract_dir
+                temp_upload_path,
+                temp_extract_dir,
+                max_files=100000,
             )
 
             if not success:
@@ -928,17 +979,48 @@ async def upload_project_zip(
             if not success:
                 raise HTTPException(status_code=400, detail=error)
 
-            # 自动识别项目语言并回写项目信息
-            detected_languages = detect_languages_from_paths(extracted_files or [])
-            project.programming_languages = json.dumps(detected_languages, ensure_ascii=False)
-            await db.commit()
-            await db.refresh(project)
+            # 计算压缩包内容哈希，避免重复上传
+            zip_hash = calculate_file_sha256(final_zip_path)
+
+            # 同一项目重复上传相同压缩包直接拒绝
+            if project.zip_file_hash and project.zip_file_hash == zip_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail="当前项目已上传相同内容压缩包，无需重复上传",
+                )
+
+            # 检查是否与其他项目重复
+            duplicate_project = await find_duplicate_zip_project(db, zip_hash, id)
+            if duplicate_project:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"检测到相同压缩包已上传到项目「{duplicate_project.name}」，请勿重复上传",
+                )
 
             # 生成最终的文件名
             archive_filename = f"{id}.zip"
 
             # 保存到项目存储
             meta = await save_project_zip(id, final_zip_path, archive_filename)
+
+            # 自动识别项目语言并回写项目信息
+            filtered_paths = [
+                path for path in (extracted_files or []) if not should_exclude_file(path)
+            ]
+            detected_languages = detect_languages_from_paths(filtered_paths)
+            project.programming_languages = json.dumps(detected_languages, ensure_ascii=False)
+            project.zip_file_hash = zip_hash
+            try:
+                await db.commit()
+                await db.refresh(project)
+            except IntegrityError:
+                await db.rollback()
+                # 并发条件下可能冲突，回滚并清理刚保存的 zip 文件
+                await delete_project_zip(id)
+                raise HTTPException(
+                    status_code=409,
+                    detail="检测到相同压缩包已存在，请勿重复上传",
+                )
 
             return {
                 "message": "文件上传成功（已转换为 ZIP 格式）",
@@ -948,6 +1030,7 @@ async def upload_project_zip(
                 "final_format": ".zip",
                 "file_size": meta["file_size"],
                 "uploaded_at": meta["uploaded_at"],
+                "file_hash": zip_hash,
                 "file_count": len(file_list),
                 "sample_files": file_list[:10],
                 "detected_languages": detected_languages,
@@ -1032,10 +1115,22 @@ async def upload_project_directory(
         try:
             total_size = 0
             file_count = 0
+            uploaded_paths: List[str] = []
 
             # 逐个保存文件，保持目录结构
             for file in files:
                 if not file.filename:
+                    continue
+
+                # 获取文件的相对路径（保持目录结构）
+                # 例如：src/main.py, tests/unit/test.py
+                file_path = file.filename
+
+                # 移除开头的 "/"（如果存在）
+                if file_path.startswith("/"):
+                    file_path = file_path[1:]
+
+                if should_exclude_file(file_path):
                     continue
 
                 # 检查文件大小
@@ -1052,14 +1147,6 @@ async def upload_project_directory(
                 if total_size > 500 * 1024 * 1024:
                     raise HTTPException(status_code=400, detail="文件总大小不能超过 500MB")
 
-                # 获取文件的相对路径（保持目录结构）
-                # 例如：src/main.py, tests/unit/test.py
-                file_path = file.filename
-
-                # 移除开头的 "/"（如果存在）
-                if file_path.startswith("/"):
-                    file_path = file_path[1:]
-
                 # 完整的目标路径
                 target_path = os.path.join(temp_base_dir, file_path)
 
@@ -1070,6 +1157,7 @@ async def upload_project_directory(
                 # 保存文件
                 with open(target_path, "wb") as f:
                     f.write(file_content)
+                uploaded_paths.append(file_path)
 
             if file_count == 0:
                 raise HTTPException(status_code=400, detail="没有有效的文件")
@@ -1107,6 +1195,28 @@ async def upload_project_directory(
                     os.remove(temp_zip_path)
                 raise HTTPException(status_code=400, detail=error)
 
+            # 计算压缩包内容哈希，避免重复上传
+            zip_hash = calculate_file_sha256(temp_zip_path)
+
+            # 同一项目重复上传相同压缩包直接拒绝
+            if project.zip_file_hash and project.zip_file_hash == zip_hash:
+                if os.path.exists(temp_zip_path):
+                    os.remove(temp_zip_path)
+                raise HTTPException(
+                    status_code=409,
+                    detail="当前项目已上传相同内容压缩包，无需重复上传",
+                )
+
+            # 检查是否与其他项目重复
+            duplicate_project = await find_duplicate_zip_project(db, zip_hash, id)
+            if duplicate_project:
+                if os.path.exists(temp_zip_path):
+                    os.remove(temp_zip_path)
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"检测到相同压缩包已上传到项目「{duplicate_project.name}」，请勿重复上传",
+                )
+
             # 生成文件名为项目ID
             archive_filename = f"{id}.zip"
 
@@ -1118,6 +1228,20 @@ async def upload_project_directory(
                 if os.path.exists(temp_zip_path):
                     os.remove(temp_zip_path)
 
+            detected_languages = detect_languages_from_paths(uploaded_paths)
+            project.programming_languages = json.dumps(detected_languages, ensure_ascii=False)
+            project.zip_file_hash = zip_hash
+            try:
+                await db.commit()
+                await db.refresh(project)
+            except IntegrityError:
+                await db.rollback()
+                await delete_project_zip(id)
+                raise HTTPException(
+                    status_code=409,
+                    detail="检测到相同压缩包已存在，请勿重复上传",
+                )
+
             return {
                 "message": "文件夹上传成功",
                 "file_count": file_count,
@@ -1126,9 +1250,11 @@ async def upload_project_directory(
                 "original_filename": meta["original_filename"],
                 "file_size": meta["file_size"],
                 "uploaded_at": meta["uploaded_at"],
+                "file_hash": zip_hash,
                 "format": ".zip",
                 "archive_file_count": len(file_list),
                 "sample_files": file_list[:10],
+                "detected_languages": detected_languages,
             }
 
         except HTTPException:
@@ -1153,6 +1279,9 @@ async def delete_project_zip_file(
     # 检查权限
 
     deleted = await delete_project_zip(id)
+    if deleted:
+        project.zip_file_hash = None
+        await db.commit()
 
     if deleted:
         return {"message": "ZIP文件已删除"}
