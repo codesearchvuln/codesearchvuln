@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import delete
+from sqlalchemy import delete, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -87,6 +87,11 @@ class OpengrepRuleBatchUpdateRequest(BaseModel):
     source: Optional[str] = Field(None, description="按来源过滤: internal, patch")
     severity: Optional[str] = Field(None, description="按严重程度过滤: ERROR, WARNING, INFO")
     confidence: Optional[str] = Field(None, description="按置信度过滤: HIGH, MEDIUM, LOW")
+    keyword: Optional[str] = Field(None, description="按规则ID或名称过滤（大小写不敏感）")
+    current_is_active: Optional[bool] = Field(
+        None,
+        description="按当前启用状态过滤（true=仅当前已启用，false=仅当前已禁用）",
+    )
     is_active: bool = Field(..., description="要设置的激活状态")
 
 
@@ -2890,38 +2895,38 @@ async def select_opengrep_rules(
     """
     批量启用或禁用 Opengrep 规则
 
-    支持通过规则ID列表、编程语言、规则来源、严重程度、置信度等条件进行过滤
-    至少需要提供一个过滤条件
+    支持通过规则ID列表、关键词、编程语言、规则来源、严重程度、置信度、当前启用状态等条件进行过滤。
+    若未提供任何过滤条件，将对全部规则执行批量更新。
     """
-    # 构建查询条件
     query = select(OpengrepRule)
-    has_filter = False
 
     if request.rule_ids:
         query = query.where(OpengrepRule.id.in_(request.rule_ids))
-        has_filter = True
+
+    if request.keyword and request.keyword.strip():
+        keyword = request.keyword.strip().lower()
+        pattern = f"%{keyword}%"
+        query = query.where(
+            or_(
+                func.lower(OpengrepRule.name).like(pattern),
+                func.lower(OpengrepRule.id).like(pattern),
+            )
+        )
 
     if request.language:
         query = query.where(OpengrepRule.language == request.language)
-        has_filter = True
 
     if request.source:
         query = query.where(OpengrepRule.source == request.source)
-        has_filter = True
 
     if request.severity:
         query = query.where(OpengrepRule.severity == request.severity)
-        has_filter = True
 
     if request.confidence:
         query = query.where(OpengrepRule.confidence == request.confidence)
-        has_filter = True
 
-    if not has_filter:
-        raise HTTPException(
-            status_code=400,
-            detail="至少需要提供一个过滤条件（rule_ids, language, source, severity, confidence）",
-        )
+    if request.current_is_active is not None:
+        query = query.where(OpengrepRule.is_active == request.current_is_active)
 
     # 查询符合条件的规则
     result = await db.execute(query)

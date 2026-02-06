@@ -900,18 +900,20 @@ export default function OpengrepRules() {
             return;
         }
 
-        // 否则，检查是否有其他过滤条件
-        if (!selectedLanguage && !selectedSource && !selectedSeverity) {
-            toast.error("请先选择要操作的规则或设定过滤条件");
-            return;
-        }
-
         try {
             setBatchOperating(true);
+            const keyword = searchTerm.trim() || undefined;
+            const currentIsActive =
+                selectedActiveStatus === ""
+                    ? undefined
+                    : selectedActiveStatus === "true";
             const result = await batchUpdateOpengrepRules({
+                keyword,
                 language: selectedLanguage || undefined,
                 source: (selectedSource as "internal" | "patch") || undefined,
                 severity: selectedSeverity || undefined,
+                confidence: selectedConfidence || undefined,
+                current_is_active: currentIsActive,
                 is_active: isActive,
             });
             toast.success(result.message);
@@ -946,6 +948,15 @@ export default function OpengrepRules() {
             matchSearch && matchLanguage && matchSeverity && matchConfidence && matchActiveStatus
         );
     });
+
+    const hasAnyFilter = Boolean(
+        searchTerm.trim() ||
+        selectedLanguage ||
+        selectedSource ||
+        selectedSeverity ||
+        selectedConfidence ||
+        selectedActiveStatus,
+    );
 
     const isHighlightedRule = (rule: OpengrepRule) => {
         if (!highlightRuleKeyword) return false;
@@ -1338,10 +1349,7 @@ export default function OpengrepRules() {
                     </div>
 
                     {/* Batch Operations */}
-                    {(selectedRuleIds.size > 0 ||
-                        selectedLanguage ||
-                        selectedSource ||
-                        selectedSeverity) && (
+                    {filteredRules.length > 0 && (
                             <div className="cyber-card p-4 relative z-10 bg-primary/5 border-primary/30">
                                 <div className="flex flex-wrap items-center justify-between gap-4">
                                     <p className="font-mono text-sm">
@@ -1353,13 +1361,21 @@ export default function OpengrepRules() {
                                                 </span>{" "}
                                                 条规则
                                             </>
-                                        ) : (
+                                        ) : hasAnyFilter ? (
                                             <>
                                                 将对{" "}
                                                 <span className="font-bold text-primary">
                                                     {filteredRules.length}
                                                 </span>{" "}
                                                 条符合条件的规则进行操作
+                                            </>
+                                        ) : (
+                                            <>
+                                                将对全部{" "}
+                                                <span className="font-bold text-primary">
+                                                    {filteredRules.length}
+                                                </span>{" "}
+                                                条规则进行操作
                                             </>
                                         )}
                                     </p>

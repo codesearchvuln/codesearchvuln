@@ -453,9 +453,12 @@ export async function updateOpengrepFindingStatus(params: {
  */
 export async function batchUpdateOpengrepRules(params: {
     rule_ids?: string[];
+    keyword?: string;
     language?: string;
     source?: "internal" | "patch";
     severity?: string;
+    confidence?: string;
+    current_is_active?: boolean;
     is_active: boolean;
 }): Promise<{ message: string; updated_count: number; is_active: boolean }> {
     const response = await apiClient.post(`/static-tasks/rules/select`, params);
