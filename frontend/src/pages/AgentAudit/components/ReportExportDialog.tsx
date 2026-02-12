@@ -76,15 +76,18 @@ interface ExportOptions {
 
 // ============ Constants ============
 
-const FORMAT_CONFIG: Record<ReportFormat, {
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  extension: string;
-  mime: string;
-  color: string;
-  bgColor: string;
-}> = {
+const FORMAT_CONFIG: Record<
+  ReportFormat,
+  {
+    label: string;
+    description: string;
+    icon: React.ReactNode;
+    extension: string;
+    mime: string;
+    color: string;
+    bgColor: string;
+  }
+> = {
   markdown: {
     label: "Markdown",
     description: "可编辑文档格式",
@@ -144,11 +147,34 @@ function formatBytes(bytes: number): string {
 }
 
 // 获取安全评分颜色
-function getScoreColor(score: number): { text: string; bg: string; glow: string } {
-  if (score >= 80) return { text: "text-emerald-600 dark:text-emerald-400", bg: "stroke-emerald-500", glow: "" };
-  if (score >= 60) return { text: "text-amber-600 dark:text-amber-400", bg: "stroke-amber-500", glow: "" };
-  if (score >= 40) return { text: "text-orange-600 dark:text-orange-400", bg: "stroke-orange-500", glow: "" };
-  return { text: "text-rose-600 dark:text-rose-400", bg: "stroke-rose-500", glow: "" };
+function getScoreColor(score: number): {
+  text: string;
+  bg: string;
+  glow: string;
+} {
+  if (score >= 80)
+    return {
+      text: "text-emerald-600 dark:text-emerald-400",
+      bg: "stroke-emerald-500",
+      glow: "",
+    };
+  if (score >= 60)
+    return {
+      text: "text-amber-600 dark:text-amber-400",
+      bg: "stroke-amber-500",
+      glow: "",
+    };
+  if (score >= 40)
+    return {
+      text: "text-orange-600 dark:text-orange-400",
+      bg: "stroke-orange-500",
+      glow: "",
+    };
+  return {
+    text: "text-rose-600 dark:text-rose-400",
+    bg: "stroke-rose-500",
+    glow: "",
+  };
 }
 
 // ============ Sub Components ============
@@ -171,7 +197,9 @@ const CircularProgress = memo(function CircularProgress({
   const colors = getScoreColor(value);
 
   return (
-    <div className={`relative inline-flex items-center justify-center ${className}`}>
+    <div
+      className={`relative inline-flex items-center justify-center ${className}`}
+    >
       <svg width={size} height={size} className="-rotate-90">
         {/* Background circle */}
         <circle
@@ -200,7 +228,9 @@ const CircularProgress = memo(function CircularProgress({
         <span className={`text-xl font-bold font-mono ${colors.text}`}>
           {value.toFixed(0)}
         </span>
-        <span className="text-[8px] text-muted-foreground uppercase tracking-wider">分</span>
+        <span className="text-[8px] text-muted-foreground uppercase tracking-wider">
+          分
+        </span>
       </div>
     </div>
   );
@@ -231,7 +261,10 @@ const EnhancedStatsPanel = memo(function EnhancedStatsPanel({
       icon: <AlertTriangle className="w-4 h-4" />,
       label: "高危问题",
       value: criticalAndHigh,
-      color: criticalAndHigh > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground",
+      color:
+        criticalAndHigh > 0
+          ? "text-rose-600 dark:text-rose-400"
+          : "text-muted-foreground",
       iconColor: "text-orange-600 dark:text-orange-400",
       trend: criticalAndHigh > 0 ? "critical" : null,
     },
@@ -260,9 +293,7 @@ const EnhancedStatsPanel = memo(function EnhancedStatsPanel({
             className="relative p-3 rounded-xl bg-gradient-to-br from-muted/40 to-background/40 border border-border backdrop-blur-sm group hover:border-border transition-all duration-300"
           >
             <div className="flex items-center gap-2 mb-1.5">
-              <div className={`${stat.iconColor} opacity-80`}>
-                {stat.icon}
-              </div>
+              <div className={`${stat.iconColor} opacity-80`}>{stat.icon}</div>
               <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
                 {stat.label}
               </span>
@@ -305,9 +336,10 @@ const FormatSelector = memo(function FormatSelector({
             onClick={() => onFormatChange(format)}
             className={`
               relative p-4 rounded-xl border transition-all duration-300 text-left group
-              ${isActive
-                ? `${config.bgColor} border-opacity-100 shadow-lg`
-                : "bg-muted border-border hover:border-border hover:bg-muted"
+              ${
+                isActive
+                  ? `${config.bgColor} border-opacity-100 shadow-lg`
+                  : "bg-muted border-border hover:border-border hover:bg-muted"
               }
             `}
           >
@@ -318,11 +350,15 @@ const FormatSelector = memo(function FormatSelector({
               </div>
             )}
 
-            <div className={`mb-2 ${isActive ? config.color : "text-muted-foreground group-hover:text-foreground"}`}>
+            <div
+              className={`mb-2 ${isActive ? config.color : "text-muted-foreground group-hover:text-foreground"}`}
+            >
               {config.icon}
             </div>
 
-            <div className={`text-sm font-semibold mb-0.5 ${isActive ? "text-foreground" : "text-foreground"}`}>
+            <div
+              className={`text-sm font-semibold mb-0.5 ${isActive ? "text-foreground" : "text-foreground"}`}
+            >
               {config.label}
             </div>
             <div className="text-xs text-muted-foreground">
@@ -356,9 +392,21 @@ const ExportOptionsPanel = memo(function ExportOptionsPanel({
   onToggle: () => void;
 }) {
   const optionItems = [
-    { key: "includeCodeSnippets", label: "包含代码片段", description: "导出相关的代码示例" },
-    { key: "includeRemediation", label: "包含修复建议", description: "导出漏洞修复方案" },
-    { key: "includeMetadata", label: "包含元数据", description: "导出任务和文件信息" },
+    {
+      key: "includeCodeSnippets",
+      label: "包含代码片段",
+      description: "导出相关的代码示例",
+    },
+    {
+      key: "includeRemediation",
+      label: "包含修复建议",
+      description: "导出漏洞修复方案",
+    },
+    {
+      key: "includeMetadata",
+      label: "包含元数据",
+      description: "导出任务和文件信息",
+    },
     { key: "compactMode", label: "紧凑模式", description: "减少空白和间距" },
   ];
 
@@ -393,8 +441,12 @@ const ExportOptionsPanel = memo(function ExportOptionsPanel({
                 className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/20 cursor-pointer transition-colors"
               >
                 <div className="flex-1">
-                  <div className="text-xs font-medium text-foreground">{item.label}</div>
-                  <div className="text-xs text-muted-foreground">{item.description}</div>
+                  <div className="text-xs font-medium text-foreground">
+                    {item.label}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {item.description}
+                  </div>
                 </div>
                 <Switch
                   checked={options[item.key as keyof ExportOptions]}
@@ -482,14 +534,19 @@ const MarkdownPreview = memo(function MarkdownPreview({
   // 高亮搜索匹配文本
   const highlightText = useCallback((text: string, query: string) => {
     if (!query) return text;
-    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const regex = new RegExp(
+      `(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
+      "gi",
+    );
     const parts = text.split(regex);
     return parts.map((part, i) =>
       regex.test(part) ? (
-        <mark key={i} className="bg-primary/40 text-foreground px-0.5 rounded">{part}</mark>
+        <mark key={i} className="bg-primary/40 text-foreground px-0.5 rounded">
+          {part}
+        </mark>
       ) : (
         part
-      )
+      ),
     );
   }, []);
 
@@ -506,7 +563,10 @@ const MarkdownPreview = memo(function MarkdownPreview({
       if (line.startsWith("```")) {
         if (inCodeBlock) {
           elements.push(
-            <div key={`code-${index}`} className="my-4 rounded-xl bg-card border border-border/50 overflow-hidden shadow-lg">
+            <div
+              key={`code-${index}`}
+              className="my-4 rounded-xl bg-card border border-border/50 overflow-hidden shadow-lg"
+            >
               <div className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-muted to-muted/40 border-b border-border/50">
                 <div className="flex items-center gap-2">
                   <div className="flex gap-1.5">
@@ -531,11 +591,13 @@ const MarkdownPreview = memo(function MarkdownPreview({
                 </div>
                 <pre className="p-3 pl-14 text-xs font-mono text-foreground overflow-x-auto leading-5 whitespace-pre-wrap break-all">
                   {codeContent.map((codeLine, i) => (
-                    <div key={i}>{highlightText(codeLine, searchQuery) || " "}</div>
+                    <div key={i}>
+                      {highlightText(codeLine, searchQuery) || " "}
+                    </div>
                   ))}
                 </pre>
               </div>
-            </div>
+            </div>,
           );
           codeContent = [];
           codeLanguage = "";
@@ -555,27 +617,36 @@ const MarkdownPreview = memo(function MarkdownPreview({
       // Headers with decorative elements
       if (line.startsWith("# ")) {
         elements.push(
-          <h1 key={index} className="text-xl font-bold text-foreground mt-8 mb-4 pb-3 border-b border-border/50 flex items-center gap-3">
+          <h1
+            key={index}
+            className="text-xl font-bold text-foreground mt-8 mb-4 pb-3 border-b border-border/50 flex items-center gap-3"
+          >
             <span className="w-1 h-6 bg-primary rounded-full" />
             {highlightText(line.slice(2), searchQuery)}
-          </h1>
+          </h1>,
         );
         return;
       }
       if (line.startsWith("## ")) {
         elements.push(
-          <h2 key={index} className="text-lg font-bold text-foreground mt-6 mb-3 flex items-center gap-2">
+          <h2
+            key={index}
+            className="text-lg font-bold text-foreground mt-6 mb-3 flex items-center gap-2"
+          >
             <Sparkles className="w-4 h-4 text-primary/60" />
             {highlightText(line.slice(3), searchQuery)}
-          </h2>
+          </h2>,
         );
         return;
       }
       if (line.startsWith("### ")) {
         elements.push(
-          <h3 key={index} className="text-base font-semibold text-foreground mt-5 mb-2 pl-2 border-l-2 border-border">
+          <h3
+            key={index}
+            className="text-base font-semibold text-foreground mt-5 mb-2 pl-2 border-l-2 border-border"
+          >
             {highlightText(line.slice(4), searchQuery)}
-          </h3>
+          </h3>,
         );
         return;
       }
@@ -587,7 +658,7 @@ const MarkdownPreview = memo(function MarkdownPreview({
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
             <div className="w-1.5 h-1.5 rounded-full bg-muted" />
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
-          </div>
+          </div>,
         );
         return;
       }
@@ -595,10 +666,17 @@ const MarkdownPreview = memo(function MarkdownPreview({
       // List items with better styling
       if (line.match(/^[-*]\s/)) {
         elements.push(
-          <div key={index} className="flex gap-3 text-sm text-foreground ml-3 my-1 group">
-            <span className="text-primary mt-1.5 text-xs group-hover:scale-125 transition-transform">●</span>
-            <span className="flex-1 break-words">{highlightText(line.slice(2), searchQuery)}</span>
-          </div>
+          <div
+            key={index}
+            className="flex gap-3 text-sm text-foreground ml-3 my-1 group"
+          >
+            <span className="text-primary mt-1.5 text-xs group-hover:scale-125 transition-transform">
+              ●
+            </span>
+            <span className="flex-1 break-words">
+              {highlightText(line.slice(2), searchQuery)}
+            </span>
+          </div>,
         );
         return;
       }
@@ -608,14 +686,21 @@ const MarkdownPreview = memo(function MarkdownPreview({
         const parts = line.split(/\*\*(.+?)\*\*/g);
         const lineElements = parts.map((part, i) => {
           if (i % 2 === 1) {
-            return <strong key={i} className="text-foreground font-semibold">{highlightText(part, searchQuery)}</strong>;
+            return (
+              <strong key={i} className="text-foreground font-semibold">
+                {highlightText(part, searchQuery)}
+              </strong>
+            );
           }
           return highlightText(part, searchQuery);
         });
         elements.push(
-          <p key={index} className="text-sm text-foreground my-1.5 leading-relaxed break-words">
+          <p
+            key={index}
+            className="text-sm text-foreground my-1.5 leading-relaxed break-words"
+          >
             {lineElements}
-          </p>
+          </p>,
         );
         return;
       }
@@ -628,9 +713,12 @@ const MarkdownPreview = memo(function MarkdownPreview({
 
       // Regular paragraphs
       elements.push(
-        <p key={index} className="text-sm text-foreground my-1.5 leading-relaxed break-words">
+        <p
+          key={index}
+          className="text-sm text-foreground my-1.5 leading-relaxed break-words"
+        >
           {highlightText(line, searchQuery)}
-        </p>
+        </p>,
       );
     });
 
@@ -663,11 +751,20 @@ const JsonPreview = memo(function JsonPreview({
         .replace(/: "([^"]+)"/g, ': <span class="text-emerald-400">"$1"</span>')
         .replace(/: (\d+\.?\d*)/g, ': <span class="text-amber-400">$1</span>')
         .replace(/: (true|false)/g, ': <span class="text-sky-400">$1</span>')
-        .replace(/: (null)/g, ': <span class="text-muted-foreground">$1</span>');
+        .replace(
+          /: (null)/g,
+          ': <span class="text-muted-foreground">$1</span>',
+        );
 
       if (searchQuery) {
-        const regex = new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-        result = result.replace(regex, '<mark class="bg-primary/40 text-foreground px-0.5 rounded">$1</mark>');
+        const regex = new RegExp(
+          `(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
+          "gi",
+        );
+        result = result.replace(
+          regex,
+          '<mark class="bg-primary/40 text-foreground px-0.5 rounded">$1</mark>',
+        );
       }
 
       return result;
@@ -676,7 +773,7 @@ const JsonPreview = memo(function JsonPreview({
     }
   };
 
-  const lines = content.split('\n');
+  const lines = content.split("\n");
 
   return (
     <div className="relative">
@@ -704,23 +801,32 @@ const HtmlPreview = memo(function HtmlPreview({
   content: string;
   searchQuery?: string;
 }) {
-  const truncatedContent = content.slice(0, 5000);
-  const isTruncated = content.length > 5000;
-
   // 简单的语法高亮
   const highlightHtml = (html: string) => {
     let result = html
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/(&lt;\/?[a-zA-Z][a-zA-Z0-9]*)/g, '<span class="text-rose-400">$1</span>')
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(
+        /(&lt;\/?[a-zA-Z][a-zA-Z0-9]*)/g,
+        '<span class="text-rose-400">$1</span>',
+      )
       .replace(/(\s[a-zA-Z-]+)=/g, '<span class="text-amber-400">$1</span>=')
       .replace(/"([^"]*)"/g, '"<span class="text-emerald-400">$1</span>"')
-      .replace(/(&lt;!DOCTYPE[^&]*&gt;)/gi, '<span class="text-muted-foreground">$1</span>');
+      .replace(
+        /(&lt;!DOCTYPE[^&]*&gt;)/gi,
+        '<span class="text-muted-foreground">$1</span>',
+      );
 
     if (searchQuery) {
-      const regex = new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-      result = result.replace(regex, '<mark class="bg-primary/40 text-foreground px-0.5 rounded">$1</mark>');
+      const regex = new RegExp(
+        `(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
+        "gi",
+      );
+      result = result.replace(
+        regex,
+        '<mark class="bg-primary/40 text-foreground px-0.5 rounded">$1</mark>',
+      );
     }
 
     return result;
@@ -730,15 +836,8 @@ const HtmlPreview = memo(function HtmlPreview({
     <div className="relative">
       <pre
         className="text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all leading-5"
-        dangerouslySetInnerHTML={{ __html: highlightHtml(truncatedContent) }}
+        dangerouslySetInnerHTML={{ __html: highlightHtml(content) }}
       />
-      {isTruncated && (
-        <div className="mt-4 pt-4 border-t border-border text-center">
-          <span className="text-xs text-muted-foreground bg-muted px-3 py-1.5 rounded-full">
-            已截断显示，完整内容请下载查看
-          </span>
-        </div>
-      )}
     </div>
   );
 });
@@ -765,7 +864,9 @@ export const ReportExportDialog = memo(function ReportExportDialog({
 
   // 增强功能状态
   const [searchQuery, setSearchQuery] = useState("");
-  const [exportOptions, setExportOptions] = useState<ExportOptions>(DEFAULT_EXPORT_OPTIONS);
+  const [exportOptions, setExportOptions] = useState<ExportOptions>(
+    DEFAULT_EXPORT_OPTIONS,
+  );
   const [optionsExpanded, setOptionsExpanded] = useState(false);
 
   // 预览缓存
@@ -774,70 +875,88 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   // 计算搜索匹配数
   const searchMatchCount = useMemo(() => {
     if (!searchQuery || !preview.content) return 0;
-    const regex = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const regex = new RegExp(
+      searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "gi",
+    );
     return (preview.content.match(regex) || []).length;
   }, [searchQuery, preview.content]);
 
   // Fetch report content for preview
-  const fetchPreview = useCallback(async (format: ReportFormat, forceRefresh = false) => {
-    if (!task) return;
+  const fetchPreview = useCallback(
+    async (format: ReportFormat, forceRefresh = false) => {
+      if (!task) return;
 
-    // 检查缓存
-    if (!forceRefresh && previewCache.current.has(format)) {
-      setPreview({
-        content: previewCache.current.get(format)!,
-        format,
-        loading: false,
-        error: null,
-      });
-      return;
-    }
-
-    setPreview(prev => ({ ...prev, loading: true, error: null }));
-
-    try {
-      let content = "";
-
-      if (format === "json") {
-        const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-          params: { format: "json" },
+      // 检查缓存
+      if (!forceRefresh && previewCache.current.has(format)) {
+        setPreview({
+          content: previewCache.current.get(format)!,
+          format,
+          loading: false,
+          error: null,
         });
-        content = JSON.stringify(response.data, null, 2);
-      } else if (format === "html") {
-        const mdResponse = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-          params: { format: "markdown" },
-          responseType: "text",
-        });
-        content = await generateHtmlReport(mdResponse.data, task);
-      } else {
-        const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-          params: { format: "markdown" },
-          responseType: "text",
-        });
-        content = response.data;
+        return;
       }
 
-      // 缓存结果
-      previewCache.current.set(format, content);
+      setPreview((prev) => ({ ...prev, loading: true, error: null }));
 
-      setPreview({
-        content,
-        format,
-        loading: false,
-        error: null,
-      });
-    } catch (err) {
-      console.error("Failed to fetch report preview:", err);
-      setPreview(prev => ({
-        ...prev,
-        loading: false,
-        error: "加载预览失败，请重试",
-      }));
-    }
-  }, [task]);
+      try {
+        let content = "";
+
+        if (format === "json") {
+          const response = await apiClient.get(
+            `/agent-tasks/${task.id}/report`,
+            {
+              params: { format: "json" },
+            },
+          );
+          content = JSON.stringify(response.data, null, 2);
+        } else if (format === "html") {
+          const mdResponse = await apiClient.get(
+            `/agent-tasks/${task.id}/report`,
+            {
+              params: { format: "markdown" },
+              responseType: "text",
+            },
+          );
+          content = await generateHtmlReport(mdResponse.data, task);
+        } else {
+          const response = await apiClient.get(
+            `/agent-tasks/${task.id}/report`,
+            {
+              params: { format: "markdown" },
+              responseType: "text",
+            },
+          );
+          content = response.data;
+        }
+
+        // 缓存结果
+        previewCache.current.set(format, content);
+
+        setPreview({
+          content,
+          format,
+          loading: false,
+          error: null,
+        });
+      } catch (err) {
+        console.error("Failed to fetch report preview:", err);
+        setPreview((prev) => ({
+          ...prev,
+          loading: false,
+          error: "加载预览失败，请重试",
+        }));
+      }
+    },
+    [task],
+  );
 
   // Generate HTML report from markdown
-  const generateHtmlReport = async (markdown: string, task: AgentTask): Promise<string> => {
+  const generateHtmlReport = async (
+    markdown: string,
+    task: AgentTask,
+  ): Promise<string> => {
     const contentHtml = await marked.parse(markdown);
     const score = task.security_score || 0;
     const scoreDisplay = score.toFixed(0);
@@ -848,21 +967,25 @@ export const ReportExportDialog = memo(function ReportExportDialog({
     const lowCount = task.low_count || 0;
     const verifiedCount = task.verified_count || 0;
     const taskName = task.name || `Task ${task.id.slice(0, 8)}`;
-    const generateDate = new Date().toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
+    const generateDate = new Date().toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
     });
 
     // 计算评分等级和颜色
     const getScoreGrade = (s: number) => {
-      if (s >= 90) return { grade: 'A', color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)' };
-      if (s >= 80) return { grade: 'B', color: '#22c55e', bg: 'rgba(34, 197, 94, 0.1)' };
-      if (s >= 70) return { grade: 'C', color: '#eab308', bg: 'rgba(234, 179, 8, 0.1)' };
-      if (s >= 60) return { grade: 'D', color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)' };
-      return { grade: 'F', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)' };
+      if (s >= 90)
+        return { grade: "A", color: "#10b981", bg: "rgba(16, 185, 129, 0.1)" };
+      if (s >= 80)
+        return { grade: "B", color: "#22c55e", bg: "rgba(34, 197, 94, 0.1)" };
+      if (s >= 70)
+        return { grade: "C", color: "#eab308", bg: "rgba(234, 179, 8, 0.1)" };
+      if (s >= 60)
+        return { grade: "D", color: "#f97316", bg: "rgba(249, 115, 22, 0.1)" };
+      return { grade: "F", color: "#ef4444", bg: "rgba(239, 68, 68, 0.1)" };
     };
     const scoreInfo = getScoreGrade(score);
 
@@ -1456,12 +1579,16 @@ export const ReportExportDialog = memo(function ReportExportDialog({
       <div class="severity-bar-wrap">
         <span class="severity-bar-title">分布</span>
         <div class="severity-bar">
-          ${totalFindings > 0 ? `
-            <div class="severity-segment critical" style="width:${(criticalCount/totalFindings)*100}%"></div>
-            <div class="severity-segment high" style="width:${(highCount/totalFindings)*100}%"></div>
-            <div class="severity-segment medium" style="width:${(mediumCount/totalFindings)*100}%"></div>
-            <div class="severity-segment low" style="width:${(lowCount/totalFindings)*100}%"></div>
-          ` : ''}
+          ${
+            totalFindings > 0
+              ? `
+            <div class="severity-segment critical" style="width:${(criticalCount / totalFindings) * 100}%"></div>
+            <div class="severity-segment high" style="width:${(highCount / totalFindings) * 100}%"></div>
+            <div class="severity-segment medium" style="width:${(mediumCount / totalFindings) * 100}%"></div>
+            <div class="severity-segment low" style="width:${(lowCount / totalFindings) * 100}%"></div>
+          `
+              : ""
+          }
         </div>
         <div class="severity-legend">
           <div class="severity-legend-item"><div class="severity-dot critical"></div>${criticalCount}</div>
@@ -1519,28 +1646,32 @@ export const ReportExportDialog = memo(function ReportExportDialog({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl/Cmd + C 复制
-      if ((e.metaKey || e.ctrlKey) && e.key === 'c' && !window.getSelection()?.toString()) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === "c" &&
+        !window.getSelection()?.toString()
+      ) {
         e.preventDefault();
         handleCopy();
       }
       // Ctrl/Cmd + S 下载
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         handleDownload();
       }
       // Ctrl/Cmd + F 搜索
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
         e.preventDefault();
         // 聚焦搜索框（如果存在）
       }
       // 数字键 1-3 切换格式
-      if (e.key === '1') setActiveFormat('markdown');
-      if (e.key === '2') setActiveFormat('json');
-      if (e.key === '3') setActiveFormat('html');
+      if (e.key === "1") setActiveFormat("markdown");
+      if (e.key === "2") setActiveFormat("json");
+      if (e.key === "3") setActiveFormat("html");
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, preview.content]);
 
   // Handle copy to clipboard
@@ -1570,21 +1701,30 @@ export const ReportExportDialog = memo(function ReportExportDialog({
       // 如果预览内容为空，重新获取
       if (!content) {
         if (activeFormat === "json") {
-          const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-            params: { format: "json" },
-          });
+          const response = await apiClient.get(
+            `/agent-tasks/${task.id}/report`,
+            {
+              params: { format: "json" },
+            },
+          );
           content = JSON.stringify(response.data, null, 2);
         } else if (activeFormat === "html") {
-          const mdResponse = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-            params: { format: "markdown" },
-            responseType: "text",
-          });
+          const mdResponse = await apiClient.get(
+            `/agent-tasks/${task.id}/report`,
+            {
+              params: { format: "markdown" },
+              responseType: "text",
+            },
+          );
           content = await generateHtmlReport(mdResponse.data, task);
         } else {
-          const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-            params: { format: "markdown" },
-            responseType: "text",
-          });
+          const response = await apiClient.get(
+            `/agent-tasks/${task.id}/report`,
+            {
+              params: { format: "markdown" },
+              responseType: "text",
+            },
+          );
           content = response.data;
         }
       }
@@ -1699,9 +1839,12 @@ export const ReportExportDialog = memo(function ReportExportDialog({
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  {activeFormat === "markdown" && "Markdown格式便于编辑和版本控制，可用任何文本编辑器打开。"}
-                  {activeFormat === "json" && "JSON格式包含完整的结构化数据，适合程序处理和数据分析。"}
-                  {activeFormat === "html" && "HTML格式可直接在浏览器中查看，包含完整样式和布局。"}
+                  {activeFormat === "markdown" &&
+                    "Markdown格式便于编辑和版本控制，可用任何文本编辑器打开。"}
+                  {activeFormat === "json" &&
+                    "JSON格式包含完整的结构化数据，适合程序处理和数据分析。"}
+                  {activeFormat === "html" &&
+                    "HTML格式可直接在浏览器中查看，包含完整样式和布局。"}
                 </p>
               </div>
             </div>
@@ -1713,7 +1856,9 @@ export const ReportExportDialog = memo(function ReportExportDialog({
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2">
                     <Eye className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground font-medium">预览</span>
+                    <span className="text-xs text-muted-foreground font-medium">
+                      预览
+                    </span>
                   </div>
                   <Badge className="text-xs bg-muted/50 text-muted-foreground border-0 font-mono">
                     {formatBytes(preview.content.length)}
@@ -1761,7 +1906,9 @@ export const ReportExportDialog = memo(function ReportExportDialog({
                     disabled={preview.loading}
                     className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${preview.loading ? 'animate-spin' : ''}`} />
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 mr-1.5 ${preview.loading ? "animate-spin" : ""}`}
+                    />
                     刷新
                   </Button>
                 </div>
@@ -1771,45 +1918,58 @@ export const ReportExportDialog = memo(function ReportExportDialog({
               <div className="flex-1 min-h-0 overflow-hidden">
                 <ScrollArea className="h-full">
                   <div className="p-5">
-                  {preview.loading ? (
-                    <PreviewSkeleton />
-                  ) : preview.error ? (
-                    <div className="flex items-center justify-center py-16">
-                      <div className="flex flex-col items-center gap-4 text-center">
-                        <div className="p-4 rounded-full bg-amber-500/10 border border-amber-500/30">
-                          <AlertTriangle className="w-8 h-8 text-amber-400" />
+                    {preview.loading ? (
+                      <PreviewSkeleton />
+                    ) : preview.error ? (
+                      <div className="flex items-center justify-center py-16">
+                        <div className="flex flex-col items-center gap-4 text-center">
+                          <div className="p-4 rounded-full bg-amber-500/10 border border-amber-500/30">
+                            <AlertTriangle className="w-8 h-8 text-amber-400" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-foreground font-medium mb-1">
+                              加载失败
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {preview.error}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => fetchPreview(activeFormat, true)}
+                            className="mt-2"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                            重试
+                          </Button>
                         </div>
-                        <div>
-                          <p className="text-sm text-foreground font-medium mb-1">加载失败</p>
-                          <p className="text-xs text-muted-foreground">{preview.error}</p>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-border overflow-hidden bg-card">
+                        <div className="p-5 min-h-[300px]">
+                          {activeFormat === "markdown" && (
+                            <MarkdownPreview
+                              content={preview.content}
+                              searchQuery={searchQuery}
+                            />
+                          )}
+                          {activeFormat === "json" && (
+                            <JsonPreview
+                              content={preview.content}
+                              searchQuery={searchQuery}
+                            />
+                          )}
+                          {activeFormat === "html" && (
+                            <HtmlPreview
+                              content={preview.content}
+                              searchQuery={searchQuery}
+                            />
+                          )}
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => fetchPreview(activeFormat, true)}
-                          className="mt-2"
-                        >
-                          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                          重试
-                        </Button>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-border overflow-hidden bg-card">
-                      <div className="p-5 min-h-[300px]">
-                        {activeFormat === "markdown" && (
-                          <MarkdownPreview content={preview.content} searchQuery={searchQuery} />
-                        )}
-                        {activeFormat === "json" && (
-                          <JsonPreview content={preview.content} searchQuery={searchQuery} />
-                        )}
-                        {activeFormat === "html" && (
-                          <HtmlPreview content={preview.content} searchQuery={searchQuery} />
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
                 </ScrollArea>
               </div>
             </div>
@@ -1820,12 +1980,15 @@ export const ReportExportDialog = memo(function ReportExportDialog({
         <div className="px-6 py-4 border-t border-border bg-card">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${FORMAT_CONFIG[activeFormat].bgColor}`}>
+              <div
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${FORMAT_CONFIG[activeFormat].bgColor}`}
+              >
                 <span className={FORMAT_CONFIG[activeFormat].color}>
                   {FORMAT_CONFIG[activeFormat].icon}
                 </span>
                 <span className="font-mono">
-                  {FORMAT_CONFIG[activeFormat].label} ({FORMAT_CONFIG[activeFormat].extension})
+                  {FORMAT_CONFIG[activeFormat].label} (
+                  {FORMAT_CONFIG[activeFormat].extension})
                 </span>
               </div>
             </div>
@@ -1844,9 +2007,10 @@ export const ReportExportDialog = memo(function ReportExportDialog({
                 disabled={downloading || preview.loading || !preview.content}
                 className={`
                   h-10 px-6 text-sm font-medium transition-all duration-300
-                  ${downloadSuccess
-                    ? "bg-emerald-600 hover:bg-emerald-600"
-                    : "bg-primary hover:bg-primary/90"
+                  ${
+                    downloadSuccess
+                      ? "bg-emerald-600 hover:bg-emerald-600"
+                      : "bg-primary hover:bg-primary/90"
                   }
                 `}
               >

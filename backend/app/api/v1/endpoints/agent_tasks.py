@@ -1148,6 +1148,20 @@ async def _collect_project_info(
     return info
 
 
+def _safe_text(value: Any) -> str:
+    """将任意结构安全转换为文本，避免保存时意外截断或类型错误。"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
 async def _save_findings(
     db: AsyncSession,
     task_id: str,
@@ -1303,6 +1317,9 @@ async def _save_findings(
                     title = f"{type_display} in {os.path.basename(file_path)}"
                 else:
                     title = f"{type_display} Vulnerability"
+            title_text = str(title).strip() if title is not None else "Unknown Vulnerability"
+            if not title_text:
+                title_text = "Unknown Vulnerability"
 
             # 🔥 Handle description (support multiple field names)
             description = (
@@ -1312,6 +1329,7 @@ async def _save_findings(
                 finding.get("impact") or
                 ""
             )
+            description_text = _safe_text(description)
 
             # 🔥 Handle suggestion/recommendation
             suggestion = (
@@ -1320,6 +1338,9 @@ async def _save_findings(
                 finding.get("remediation") or
                 finding.get("fix")
             )
+            suggestion_text = _safe_text(suggestion) if suggestion is not None else None
+            code_snippet_text = _safe_text(code_snippet) if code_snippet is not None else None
+            file_path_text = str(file_path).strip() if file_path else None
 
             # 🔥 Handle confidence (map to ai_confidence field in model)
             confidence = finding.get("confidence") or finding.get("ai_confidence") or 0.5
@@ -1368,13 +1389,13 @@ async def _save_findings(
                 task_id=task_id,
                 vulnerability_type=type_enum,
                 severity=severity_enum,
-                title=title[:500] if title else "Unknown Vulnerability",
-                description=description[:5000] if description else "",
-                file_path=file_path[:500] if file_path else None,
+                title=title_text,
+                description=description_text,
+                file_path=file_path_text,
                 line_start=line_start,
                 line_end=line_end,
-                code_snippet=code_snippet[:10000] if code_snippet else None,
-                suggestion=suggestion[:5000] if suggestion else None,
+                code_snippet=code_snippet_text,
+                suggestion=suggestion_text,
                 is_verified=is_verified,
                 ai_confidence=confidence,  # 🔥 FIX: Use ai_confidence, not confidence
                 status=FindingStatus.VERIFIED if is_verified else FindingStatus.NEW,
@@ -1391,7 +1412,7 @@ async def _save_findings(
             )
             db.add(db_finding)
             saved_count += 1
-            logger.debug(f"[SaveFindings] Prepared finding: {title[:50]}... ({severity_enum})")
+            logger.debug(f"[SaveFindings] Prepared finding: {title_text[:50]}... ({severity_enum})")
 
         except Exception as e:
             logger.warning(f"Failed to save finding: {e}, data: {finding}")
@@ -3059,6 +3080,21 @@ async def get_checkpoint_detail(
 
 # ============ Report Generation API ============
 
+
+def _escape_markdown_inline(text: Optional[str]) -> str:
+    """转义 Markdown 行内特殊字符，避免标题/位置等结构被破坏。"""
+    if text is None:
+        return ""
+    escaped = str(text).replace("\\", "\\\\")
+    for char in ("`", "*", "_", "[", "]", "(", ")", "#", "+", "-", "!", "|", ">"):
+        escaped = escaped.replace(char, f"\\{char}")
+    return escaped
+
+
+def _escape_markdown_table_cell(text: Optional[str]) -> str:
+    return _escape_markdown_inline(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
+
+
 @router.get("/{task_id}/report")
 async def generate_audit_report(
     task_id: str,
@@ -3194,10 +3230,10 @@ async def generate_audit_report(
     md_lines.append("")
     md_lines.append(f"| 属性 | 内容 |")
     md_lines.append(f"|----------|-------|")
-    md_lines.append(f"| **项目名称** | {project.name} |")
+    md_lines.append(f"| **项目名称** | {_escape_markdown_table_cell(project.name)} |")
     md_lines.append(f"| **任务 ID** | `{task.id[:8]}...` |")
     md_lines.append(f"| **生成时间** | {timestamp} |")
-    md_lines.append(f"| **任务状态** | {task.status.upper()} |")
+    md_lines.append(f"| **任务状态** | {_escape_markdown_table_cell(str(task.status).upper())} |")
     md_lines.append(f"| **耗时** | {duration_str} |")
     md_lines.append("")
 
@@ -3276,18 +3312,21 @@ async def generate_audit_report(
                 verified_badge = "[已验证]" if f.is_verified else "[未验证]"
                 poc_badge = " [含 PoC]" if f.has_poc else ""
 
-                md_lines.append(f"### {severity_level.upper()}-{i}: {f.title}")
+                md_lines.append(
+                    f"### {severity_level.upper()}-{i}: {_escape_markdown_inline(f.title)}"
+                )
                 md_lines.append("")
-                md_lines.append(f"**{verified_badge}**{poc_badge} | 类型: `{f.vulnerability_type}`")
+                md_lines.append(
+                    f"**{verified_badge}**{poc_badge} | 类型: `{_escape_markdown_inline(f.vulnerability_type)}`"
+                )
                 md_lines.append("")
 
                 if f.file_path:
-                    location = f"`{f.file_path}"
+                    location = _escape_markdown_inline(f.file_path)
                     if f.line_start:
                         location += f":{f.line_start}"
                         if f.line_end and f.line_end != f.line_start:
                             location += f"-{f.line_end}"
-                    location += "`"
                     md_lines.append(f"**位置:** {location}")
                     md_lines.append("")
 
@@ -3432,7 +3471,7 @@ async def generate_audit_report(
     from fastapi.responses import Response
     return Response(
         content=content,
-        media_type="text/markdown",
+        media_type="text/markdown; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename={filename}"
         }

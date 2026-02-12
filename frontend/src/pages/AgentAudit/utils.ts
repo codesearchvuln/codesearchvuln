@@ -13,14 +13,14 @@ export function buildAgentTree(flatNodes: AgentTreeNode[]): AgentTreeNode[] {
 
   // Create node map
   const nodeMap = new Map<string, AgentTreeNode>();
-  flatNodes.forEach(node => {
+  flatNodes.forEach((node) => {
     nodeMap.set(node.agent_id, { ...node, children: [] });
   });
 
   // Build tree structure
   const rootNodes: AgentTreeNode[] = [];
 
-  flatNodes.forEach(node => {
+  flatNodes.forEach((node) => {
     const currentNode = nodeMap.get(node.agent_id)!;
 
     if (node.parent_agent_id && nodeMap.has(node.parent_agent_id)) {
@@ -37,7 +37,10 @@ export function buildAgentTree(flatNodes: AgentTreeNode[]): AgentTreeNode[] {
 /**
  * Find agent by ID in tree
  */
-export function findAgentInTree(nodes: AgentTreeNode[], id: string): AgentTreeNode | null {
+export function findAgentInTree(
+  nodes: AgentTreeNode[],
+  id: string,
+): AgentTreeNode | null {
   for (const node of nodes) {
     if (node.agent_id === id) return node;
     const found = findAgentInTree(node.children, id);
@@ -49,7 +52,10 @@ export function findAgentInTree(nodes: AgentTreeNode[], id: string): AgentTreeNo
 /**
  * Find agent name by ID in tree
  */
-export function findAgentName(nodes: AgentTreeNode[], id: string): string | null {
+export function findAgentName(
+  nodes: AgentTreeNode[],
+  id: string,
+): string | null {
   const agent = findAgentInTree(nodes, id);
   return agent?.agent_name || null;
 }
@@ -73,18 +79,18 @@ export function resetLogIdCounter(): void {
  * Get current time string for logs
  */
 export function getTimeString(): string {
-  return new Date().toLocaleTimeString('en-US', {
+  return new Date().toLocaleTimeString("en-US", {
     hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   });
 }
 
 /**
  * Create a log item
  */
-export function createLogItem(item: Omit<LogItem, 'id' | 'time'>): LogItem {
+export function createLogItem(item: Omit<LogItem, "id" | "time">): LogItem {
   return {
     ...item,
     id: generateLogId(),
@@ -101,7 +107,9 @@ export function cleanThinkingContent(content: string): string {
   let cleaned = content;
 
   // 1. 尝试提取 Thought: 后面的内容
-  const thoughtMatch = cleaned.match(/Thought:\s*([\s\S]*?)(?=\n\s*Action\s*:|$)/i);
+  const thoughtMatch = cleaned.match(
+    /Thought:\s*([\s\S]*?)(?=\n\s*Action\s*:|$)/i,
+  );
   if (thoughtMatch && thoughtMatch[1]) {
     cleaned = thoughtMatch[1].trim();
   } else {
@@ -128,20 +136,25 @@ export function cleanThinkingContent(content: string): string {
 /**
  * Truncate output string
  */
-export function truncateOutput(output: string, maxLength: number = 1000): string {
-  if (output.length <= maxLength) return output;
-  return output.slice(0, maxLength) + '\n... (truncated)';
+export function truncateOutput(
+  output: string,
+  maxLength: number = 1000,
+): string {
+  void maxLength;
+  return output;
 }
 
 /**
  * Calculate severity counts from findings
  */
-export function calculateSeverityCounts(findings: { severity: string }[]): Record<string, number> {
+export function calculateSeverityCounts(
+  findings: { severity: string }[],
+): Record<string, number> {
   return {
-    critical: findings.filter(f => f.severity === 'critical').length,
-    high: findings.filter(f => f.severity === 'high').length,
-    medium: findings.filter(f => f.severity === 'medium').length,
-    low: findings.filter(f => f.severity === 'low').length,
+    critical: findings.filter((f) => f.severity === "critical").length,
+    high: findings.filter((f) => f.severity === "high").length,
+    medium: findings.filter((f) => f.severity === "medium").length,
+    low: findings.filter((f) => f.severity === "low").length,
   };
 }
 
@@ -149,21 +162,23 @@ export function calculateSeverityCounts(findings: { severity: string }[]): Recor
  * Check if task is in running state
  */
 export function isTaskRunning(status: string | undefined): boolean {
-  return status === 'running' || status === 'pending';
+  return status === "running" || status === "pending";
 }
 
 /**
  * Check if task is complete
  */
 export function isTaskComplete(status: string | undefined): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled';
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  );
 }
 
 /**
  * Format token count
  */
 export function formatTokens(tokens: number): string {
-  return (tokens / 1000).toFixed(1) + 'k';
+  return (tokens / 1000).toFixed(1) + "k";
 }
 
 /**
@@ -173,7 +188,7 @@ export function filterLogsByAgent(
   logs: LogItem[],
   selectedAgentId: string | null,
   treeNodes: AgentTreeNode[],
-  showAllLogs: boolean
+  showAllLogs: boolean,
 ): LogItem[] {
   if (showAllLogs || !selectedAgentId) {
     return logs;
@@ -182,9 +197,12 @@ export function filterLogsByAgent(
   const selectedAgentName = findAgentName(treeNodes, selectedAgentId);
   if (!selectedAgentName) return logs;
 
-  return logs.filter(log =>
-    log.agentName?.toLowerCase() === selectedAgentName.toLowerCase() ||
-    log.agentName?.toLowerCase().includes(selectedAgentName.toLowerCase().split('_')[0])
+  return logs.filter(
+    (log) =>
+      log.agentName?.toLowerCase() === selectedAgentName.toLowerCase() ||
+      log.agentName
+        ?.toLowerCase()
+        .includes(selectedAgentName.toLowerCase().split("_")[0]),
   );
 }
 
@@ -193,7 +211,7 @@ export function filterLogsByAgent(
  */
 export function debounce<T extends (...args: unknown[]) => unknown>(
   func: T,
-  wait: number
+  wait: number,
 ): (...args: Parameters<T>) => void {
   let timeout: ReturnType<typeof setTimeout> | null = null;
 

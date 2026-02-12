@@ -332,11 +332,11 @@ class AgentFinding(Base):
     # 漏洞基本信息
     vulnerability_type = Column(String(100), nullable=False, index=True)
     severity = Column(String(20), nullable=False, index=True)
-    title = Column(String(500), nullable=False)
+    title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     
     # 位置信息
-    file_path = Column(String(500), nullable=True, index=True)
+    file_path = Column(Text, nullable=True, index=True)
     line_start = Column(Integer, nullable=True)
     line_end = Column(Integer, nullable=True)
     column_start = Column(Integer, nullable=True)
