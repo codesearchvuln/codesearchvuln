@@ -44,7 +44,7 @@ class LLMService:
         user_llm_config = self._user_config.get('llmConfig', {})
 
         return {
-            'llm_first_token_timeout': user_llm_config.get('llmFirstTokenTimeout') or getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 30),
+            'llm_first_token_timeout': user_llm_config.get('llmFirstTokenTimeout') or getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 90),
             'llm_stream_timeout': user_llm_config.get('llmStreamTimeout') or getattr(settings, 'LLM_STREAM_TIMEOUT', 60),
             'agent_timeout': user_llm_config.get('agentTimeout') or getattr(settings, 'AGENT_TIMEOUT_SECONDS', 1800),
             'sub_agent_timeout': user_llm_config.get('subAgentTimeout') or getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),

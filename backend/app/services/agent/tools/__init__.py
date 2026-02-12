@@ -84,6 +84,9 @@ from .kunlun_tool import KunlunMTool, KunlunRuleListTool, KunlunPluginTool
 
 # 🔥 新增：通用代码执行工具 (LLM 驱动的 Fuzzing Harness)
 from .run_code import RunCodeTool, ExtractFunctionTool
+from .control_flow_tool import ControlFlowAnalysisLightTool
+from .joern_verify_tool import JoernReachabilityVerifyTool
+from .logic_authz_tool import LogicAuthzAnalysisTool
 
 __all__ = [
     # 基础
@@ -171,4 +174,9 @@ __all__ = [
     # 🔥 通用代码执行工具 (LLM 驱动的 Fuzzing Harness)
     "RunCodeTool",
     "ExtractFunctionTool",
+
+    # 三轨流分析工具
+    "ControlFlowAnalysisLightTool",
+    "JoernReachabilityVerifyTool",
+    "LogicAuthzAnalysisTool",
 ]

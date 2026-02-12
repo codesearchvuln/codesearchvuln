@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 4096
 
     # Agent 流式超时配置（秒）
-    LLM_FIRST_TOKEN_TIMEOUT: int = 30  # 等待首个Token的超时时间
+    LLM_FIRST_TOKEN_TIMEOUT: int = 90  # 等待首个Token的超时时间
     LLM_STREAM_TIMEOUT: int = 60  # 流式输出中两个Token之间的超时时间
     SUB_AGENT_TIMEOUT_SECONDS: int = 600  # 子Agent超时时间（10分钟）
     TOOL_TIMEOUT_SECONDS: int = 60  # 工具执行默认超时时间
@@ -122,6 +122,15 @@ class Settings(BaseSettings):
     RAG_CHUNK_SIZE: int = 1500  # 代码块大小（Token）
     RAG_CHUNK_OVERLAP: int = 50  # 代码块重叠（Token）
     RAG_TOP_K: int = 10  # 检索返回数量
+
+    # Flow 分析配置（三轨）
+    FLOW_LIGHTWEIGHT_ENABLED: bool = True
+    FLOW_JOERN_ENABLED: bool = True
+    FLOW_JOERN_TIMEOUT_SEC: int = 45
+    FLOW_JOERN_TRIGGER_SEVERITY: str = "high,critical"
+    FLOW_JOERN_TRIGGER_CONFIDENCE: float = 0.7
+    LOGIC_AUTHZ_ENABLED: bool = True
+    FLOW_UNREACHABLE_POLICY: str = "degrade_likely"
 
     class Config:
         case_sensitive = True

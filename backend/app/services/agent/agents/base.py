@@ -389,7 +389,7 @@ class BaseAgent(ABC):
 
         # 回退到环境变量默认值
         return {
-            'llm_first_token_timeout': getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 30),
+            'llm_first_token_timeout': getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 90),
             'llm_stream_timeout': getattr(settings, 'LLM_STREAM_TIMEOUT', 60),
             'agent_timeout': getattr(settings, 'AGENT_TIMEOUT_SECONDS', 1800),
             'sub_agent_timeout': getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),
@@ -533,7 +533,8 @@ class BaseAgent(ABC):
         if self._cancelled:
             return True
         # 检查外部回调
-        if self._cancel_callback and self._cancel_callback():
+        cancel_callback = getattr(self, "_cancel_callback", None)
+        if cancel_callback and cancel_callback():
             self._cancelled = True
             logger.info(f"[{self.name}] Detected cancellation from callback")
             return True

@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Integer, DateTime, Float, Text, ForeignKey
+from sqlalchemy import Column, String, Integer, DateTime, Float, Text, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -19,9 +19,12 @@ class InstantAnalysis(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    __table_args__ = (
+        Index("ix_instant_analyses_user_created_at", "user_id", created_at.desc()),
+    )
+
     # Relationships
     user = relationship("User", backref="instant_analyses")
-
 
 
 

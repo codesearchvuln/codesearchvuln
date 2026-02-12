@@ -82,6 +82,10 @@ export interface AgentFinding {
   reachability: string | null;
   authenticity: string | null;
   verification_evidence: string | null;
+  flow_path_score?: number | null;
+  flow_call_chain?: string[] | null;
+  flow_control_conditions?: string[] | null;
+  logic_authz_evidence?: string[] | null;
   has_poc: boolean;
   poc_code: string | null;
 
@@ -116,7 +120,8 @@ export interface CreateAgentTaskRequest {
   description?: string;
   audit_scope?: Record<string, unknown>;
   target_vulnerabilities?: string[];
-  verification_level?: "analysis_only" | "sandbox" | "generate_poc";
+  // unified mode, backend still accepts legacy values and normalizes them
+  verification_level?: "analysis_with_poc_plan";
   branch_name?: string;
   exclude_patterns?: string[];
   target_files?: string[];

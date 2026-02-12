@@ -21,6 +21,8 @@ export function Header({
 	task,
 	isRunning,
 	isCancelling,
+	phaseLabel,
+	phaseHint,
 	onBack,
 	onCancel,
 	onExport,
@@ -35,38 +37,15 @@ export function Header({
 
 			{/* Left side - Brand and task info */}
 			<div className="flex items-center gap-5 relative z-10">
-				{/* Logo section with enhanced styling */}
-				<div className="flex items-center gap-3 pr-5 border-r border-border/50">
-					<div className="relative group">
-						{/* Logo background glow */}
-						<div className="absolute inset-0 bg-primary/20 rounded-lg blur-lg opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-						<div className="relative p-2 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
-							<Cpu className="w-5 h-5 text-primary" />
-							{isRunning && (
-								<>
-									<span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.6)]" />
-									<span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping opacity-75" />
-								</>
-							)}
-						</div>
-					</div>
-					<div className="flex flex-col">
-						<span className="font-bold text-foreground tracking-wider text-base leading-tight">
-							<span className="text-primary">Vul</span>Hunter
-						</span>
-						<span className="text-[10px] text-muted-foreground tracking-[0.2em] uppercase">
-							智能审计
-						</span>
-					</div>
-				</div>
-
+				
 				{/* Task info with enhanced styling */}
 				{task && (
-					<div className="flex items-center gap-4">
-						<div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-muted/50 border border-border/50">
-							<Radio className="w-3 h-3 text-muted-foreground" />
-							<span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-								任务
+					<div className="flex flex-col gap-1">
+						<div className="flex items-center gap-4">
+							<div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-muted/50 border border-border/50">
+								<Radio className="w-3 h-3 text-muted-foreground" />
+								<span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+									任务
 							</span>
 						</div>
 						<div className="flex items-center gap-3">
@@ -74,7 +53,18 @@ export function Header({
 								{task.name || task.id.slice(0, 8)}
 							</span>
 							<StatusBadge status={task.status} />
+							{phaseLabel && (
+								<span className="text-[11px] font-mono uppercase tracking-wide text-muted-foreground">
+									阶段: {phaseLabel}
+								</span>
+							)}
 						</div>
+						</div>
+						{phaseHint && (
+							<div className="text-[11px] text-muted-foreground font-mono max-w-[360px] truncate">
+								{phaseHint}
+							</div>
+						)}
 					</div>
 				)}
 			</div>

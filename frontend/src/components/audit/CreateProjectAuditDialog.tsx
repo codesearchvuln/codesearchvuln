@@ -95,6 +95,7 @@ export default function CreateProjectAuditDialog({
 	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
 	const [generatingDescription, setGeneratingDescription] = useState(false);
 	const [mode, setMode] = useState<AuditCreateMode>("static");
+	const [targetFilesInput, setTargetFilesInput] = useState("");
 	const [branchName, setBranchName] = useState("main");
 	const [opengrepEnabled, setOpengrepEnabled] = useState(true);
 	const [gitleaksEnabled, setGitleaksEnabled] = useState(false);
@@ -119,6 +120,14 @@ export default function CreateProjectAuditDialog({
 	const selectedProject = activeProjects.find(
 		(project) => project.id === selectedProjectId,
 	);
+	const parsedTargetFiles = useMemo(
+		() =>
+			targetFilesInput
+				.split(/\n|,/g)
+				.map((item) => item.trim())
+				.filter(Boolean),
+		[targetFilesInput],
+	);
 	const dialogTitle =
 		lockMode && initialMode === "agent" ? "创建智能审计" : lockMode ? "创建静态审计" : "创建审计";
 	const dialogSubtitle =
@@ -136,9 +145,10 @@ export default function CreateProjectAuditDialog({
 		setNewProjectName("");
 		setNewProjectDescription("");
 		setNewProjectFile(null);
-		setGeneratingDescription(false);
-		setMode(initialMode || "static");
-		setBranchName("main");
+			setGeneratingDescription(false);
+			setMode(initialMode || "static");
+			setTargetFilesInput("");
+			setBranchName("main");
 		setOpengrepEnabled(true);
 		setGitleaksEnabled(false);
 
@@ -197,7 +207,8 @@ export default function CreateProjectAuditDialog({
 			return opengrepEnabled || gitleaksEnabled;
 		}
 		if (isRepositoryProject(selectedProject)) {
-			return Boolean(branchName.trim());
+			if (!branchName.trim()) return false;
+			return true;
 		}
 		return true;
 	}, [
@@ -209,6 +220,7 @@ export default function CreateProjectAuditDialog({
 		opengrepEnabled,
 		gitleaksEnabled,
 		branchName,
+		parsedTargetFiles,
 	]);
 
 	const createStaticTasksForProject = async (project: Project) => {
@@ -264,7 +276,8 @@ export default function CreateProjectAuditDialog({
 			branch_name: isRepositoryProject(project)
 				? branchName.trim() || project.default_branch || "main"
 				: undefined,
-			verification_level: "sandbox",
+			target_files: parsedTargetFiles.length > 0 ? parsedTargetFiles : undefined,
+			verification_level: "analysis_with_poc_plan",
 		});
 	};
 
@@ -684,15 +697,44 @@ export default function CreateProjectAuditDialog({
 								</label>
 							</div>
 						</div>
-					) : (
-						<div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
-							<p className="text-sm text-violet-200">执行前会自动校验 LLM / RAG 配置。</p>
-							<p className="text-xs text-violet-300/80 mt-1">校验通过后开始智能审计。</p>
-						</div>
-					)}
+						) : (
+							<div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
+								<p className="text-sm text-violet-200">执行前会自动校验 LLM / RAG 配置。</p>
+								<p className="text-xs text-violet-300/80 mt-1">校验通过后开始智能审计。</p>
+							</div>
+						)}
 
-					{mode === "agent" &&
-						selectedProject &&
+						{mode === "agent" && (
+							<div className="space-y-2 border border-border rounded-lg p-3 bg-muted/40">
+								<p className="text-xs uppercase tracking-wider text-muted-foreground">
+									验证模式
+								</p>
+								<div className="rounded border border-border bg-background px-3 py-2">
+									<p className="text-sm text-foreground font-medium">
+										分析 + PoC 思路
+									</p>
+									<p className="text-[11px] text-muted-foreground mt-1">
+										固定单档模式：输出漏洞分析与可行 PoC 思路（非武器化）
+									</p>
+								</div>
+								<Textarea
+									value={targetFilesInput}
+									onChange={(event) =>
+										setTargetFilesInput(event.target.value)
+									}
+									placeholder="目标文件（可选，每行或逗号分隔）"
+									rows={3}
+									className="cyber-input text-xs font-mono"
+									disabled={creating || generatingDescription}
+								/>
+								<p className="text-[11px] text-muted-foreground">
+									当前目标文件数量: {parsedTargetFiles.length}
+								</p>
+							</div>
+						)}
+
+						{mode === "agent" &&
+							selectedProject &&
 						isRepositoryProject(selectedProject) && (
 							<div className="space-y-2">
 								<p className="text-xs uppercase tracking-wider text-muted-foreground">审计分支</p>

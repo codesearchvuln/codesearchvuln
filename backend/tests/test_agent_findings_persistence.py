@@ -37,6 +37,8 @@ async def test_save_findings_keeps_long_text_fields_without_truncation(tmp_path)
             "line_start": 10,
             "line_end": 11,
             "suggestion": long_suggestion,
+            "fix_code": "safe_query = \"SELECT * FROM users WHERE id = %s\"\ncursor.execute(safe_query, (user_id,))",
+            "fix_description": "改为参数化查询，避免拼接 SQL 字符串。",
             "code_snippet": long_snippet,
             "verdict": "confirmed",
             "reachability": "reachable",
@@ -62,5 +64,7 @@ async def test_save_findings_keeps_long_text_fields_without_truncation(tmp_path)
     assert saved_finding.suggestion == long_suggestion
     assert saved_finding.code_snippet
     assert saved_finding.code_context
+    assert saved_finding.fix_code
+    assert "参数化查询" in (saved_finding.fix_description or "")
     assert saved_finding.verification_result["authenticity"] == "confirmed"
     assert saved_finding.verification_result["reachability"] == "reachable"

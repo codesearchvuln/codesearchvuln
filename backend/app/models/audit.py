@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Float
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Float, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -29,6 +29,16 @@ class AuditTask(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_audit_tasks_created_by_created_at", "created_by", created_at.desc()),
+        Index(
+            "ix_audit_tasks_project_status_created_at",
+            "project_id",
+            "status",
+            created_at.desc(),
+        ),
+    )
 
     # Relationships
     project = relationship("Project", back_populates="tasks")
@@ -61,6 +71,11 @@ class AuditIssue(Base):
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_audit_issues_task_status", "task_id", "status"),
+        Index("ix_audit_issues_task_severity", "task_id", "severity"),
+    )
 
     # Relationships
     task = relationship("AuditTask", back_populates="issues")

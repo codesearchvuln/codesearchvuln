@@ -82,7 +82,7 @@ const DEFAULT_CONFIG: SystemConfigData = {
   llmTimeout: 150000,
   llmTemperature: 0.1,
   llmMaxTokens: 4096,
-  llmFirstTokenTimeout: 30,
+  llmFirstTokenTimeout: 90,
   llmStreamTimeout: 60,
   agentTimeout: 1800,
   subAgentTimeout: 600,

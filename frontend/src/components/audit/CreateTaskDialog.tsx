@@ -264,12 +264,12 @@ export default function CreateTaskDialog({
 			setStaticTools({ opengrep: true, gitleaks: false });
 			setSourceMode("existing");
 			setNewProjectName("");
-			setNewProjectDescription("");
-			setNewProjectFile(null);
-			setGeneratingDescription(false);
-			zipState.reset();
-		}
-	}, [open, preselectedProjectId, initialAuditMode, loadProjects]);
+				setNewProjectDescription("");
+				setNewProjectFile(null);
+				setGeneratingDescription(false);
+				zipState.reset();
+			}
+		}, [open, preselectedProjectId, initialAuditMode, loadProjects]);
 
 	useEffect(() => {
 		if (!open || sourceMode !== "existing") return;
@@ -323,6 +323,13 @@ export default function CreateTaskDialog({
 			setSelectedProjectId(projects[0].id);
 		}
 	};
+
+	const effectiveTargetFiles = useMemo(() => {
+		if (selectedFiles && selectedFiles.length > 0) {
+			return selectedFiles;
+		}
+		return [];
+	}, [selectedFiles]);
 
 	const handleGenerateNewProjectDescription = async () => {
 		if (!newProjectFile) {
@@ -435,7 +442,6 @@ export default function CreateTaskDialog({
 	const handleStartScan = async () => {
 		try {
 			setCreating(true);
-
 			if (sourceMode === "upload") {
 				if (!newProjectName.trim()) {
 					toast.error("请输入项目名称");
@@ -480,7 +486,11 @@ export default function CreateTaskDialog({
 						const agentTask = await createAgentTask({
 							project_id: createdProject.id,
 							name: `智能审计-${createdProject.name}`,
-							verification_level: "sandbox",
+							target_files:
+								effectiveTargetFiles.length > 0
+									? effectiveTargetFiles
+									: undefined,
+							verification_level: "analysis_with_poc_plan",
 						});
 
 						onOpenChange(false);
@@ -543,8 +553,9 @@ export default function CreateTaskDialog({
 						? branch
 						: undefined,
 					exclude_patterns: excludePatterns,
-					target_files: selectedFiles,
-					verification_level: "sandbox",
+					target_files:
+						effectiveTargetFiles.length > 0 ? effectiveTargetFiles : undefined,
+					verification_level: "analysis_with_poc_plan",
 				});
 
 				onOpenChange(false);
@@ -588,40 +599,43 @@ export default function CreateTaskDialog({
 		}
 	};
 
-	const canStart = useMemo(() => {
-		if (sourceMode === "upload") {
-			if (!newProjectName.trim() || !newProjectFile) return false;
-			if (auditMode === "static") {
-				return staticTools.opengrep || staticTools.gitleaks;
+		const canStart = useMemo(() => {
+			if (sourceMode === "upload") {
+				if (!newProjectName.trim() || !newProjectFile) return false;
+				if (auditMode === "static") {
+					return staticTools.opengrep || staticTools.gitleaks;
+				}
+				return true;
 			}
-			return true;
-		}
-		if (!selectedProject) return false;
-		if (auditMode === "static") {
-			return (
-				isZipProject(selectedProject) &&
+			if (!selectedProject) return false;
+			if (auditMode === "static") {
+				return (
+					isZipProject(selectedProject) &&
 				!!zipState.storedZipInfo?.has_file &&
 				(staticTools.opengrep || staticTools.gitleaks)
 			);
 		}
-		if (isZipProject(selectedProject)) {
-			return (
-				(zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
-				!!zipState.zipFile
-			);
-		}
-		return !!selectedProject.repository_url && !!branch.trim();
-	}, [
-		sourceMode,
-		newProjectName,
-		newProjectFile,
-		selectedProject,
-		zipState,
-		branch,
-		auditMode,
-		staticTools.opengrep,
-		staticTools.gitleaks,
-	]);
+			if (isZipProject(selectedProject)) {
+				const ready =
+					(zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
+					!!zipState.zipFile;
+				if (!ready) return false;
+				return true;
+			}
+			if (!selectedProject.repository_url || !branch.trim()) return false;
+			return true;
+		}, [
+			sourceMode,
+			newProjectName,
+			newProjectFile,
+			selectedProject,
+			zipState,
+			branch,
+			auditMode,
+			effectiveTargetFiles,
+			staticTools.opengrep,
+			staticTools.gitleaks,
+		]);
 
 	return (
 		<>
@@ -802,17 +816,33 @@ export default function CreateTaskDialog({
 						)}
 
 						{/* 审计模式选择 */}
-						{(sourceMode === "upload" || selectedProject) && (
-							<AgentModeSelector
-								value={auditMode}
-								onChange={setAuditMode}
+							{(sourceMode === "upload" || selectedProject) && (
+								<AgentModeSelector
+									value={auditMode}
+									onChange={setAuditMode}
 								disabled={creating || generatingDescription}
 								staticTools={staticTools}
 								onStaticToolsChange={setStaticTools}
-							/>
-						)}
+								/>
+							)}
 
-						{/* 配置区域 */}
+							{auditMode === "agent" && (sourceMode === "upload" || selectedProject) && (
+								<div className="space-y-2 border border-border rounded p-3 bg-muted/40">
+									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+										验证模式
+									</Label>
+									<div className="rounded border border-border bg-background px-3 py-2">
+										<p className="text-sm text-foreground font-medium">
+											分析 + PoC 思路
+										</p>
+										<p className="text-[11px] text-muted-foreground mt-1">
+											固定单档模式：输出漏洞分析与可行 PoC 思路（非武器化）
+										</p>
+									</div>
+								</div>
+							)}
+
+							{/* 配置区域 */}
 						{sourceMode === "existing" && selectedProject && (
 							<div className="space-y-4">
 								<span className="text-sm font-mono font-bold uppercase text-muted-foreground">

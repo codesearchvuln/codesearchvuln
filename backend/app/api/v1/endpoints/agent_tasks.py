@@ -11,14 +11,14 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, List, Optional, Dict, Set, Tuple
+from typing import Any, Callable, List, Optional, Dict, Set, Tuple
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import case
+from sqlalchemy import case, func
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, Field
@@ -65,8 +65,12 @@ class AgentTaskCreate(BaseModel):
         description="目标漏洞类型"
     )
     verification_level: str = Field(
-        "sandbox", 
-        description="验证级别: analysis_only, sandbox, generate_poc"
+        "analysis_with_poc_plan",
+        description="验证级别（统一语义）: analysis_with_poc_plan"
+    )
+    authorization_confirmed: Optional[bool] = Field(
+        False,
+        description="兼容字段：保留请求结构，不再作为强制门禁",
     )
     
     # 分支
@@ -196,13 +200,26 @@ class AgentFindingResponse(BaseModel):
     
     is_verified: bool
     # 🔥 FIX: Map from ai_confidence in ORM, make Optional with default
-    confidence: Optional[float] = Field(default=0.5, validation_alias="ai_confidence")
+    confidence: Optional[float] = Field(
+        default=0.5,
+        validation_alias="ai_confidence",
+    )
     reachability: Optional[str] = None
     authenticity: Optional[str] = None
     verification_evidence: Optional[str] = None
+    flow_path_score: Optional[float] = None
+    flow_call_chain: Optional[List[str]] = None
+    flow_control_conditions: Optional[List[str]] = None
+    logic_authz_evidence: Optional[List[str]] = None
     status: str
     
     suggestion: Optional[str] = None
+    fix_code: Optional[str] = None
+    fix_description: Optional[str] = None
+    has_poc: bool = False
+    poc_code: Optional[str] = None
+    poc_description: Optional[str] = None
+    poc_steps: Optional[List[str]] = None
     poc: Optional[dict] = None
     
     created_at: datetime
@@ -243,6 +260,112 @@ def is_task_cancelled(task_id: str) -> bool:
     """检查任务是否已被取消"""
     return task_id in _cancelled_tasks
 
+
+class StepRetryExceededError(RuntimeError):
+    """关键步骤重试耗尽"""
+
+    def __init__(
+        self,
+        step_name: str,
+        attempts: int,
+        last_error: Exception,
+        *,
+        max_attempts: int,
+    ):
+        self.step_name = step_name
+        self.attempts = attempts
+        self.max_attempts = max_attempts
+        self.last_error = last_error
+        self.final_message = (
+            f"[{step_name}] 第 {attempts}/{max_attempts} 次失败: "
+            f"{_safe_retry_error(last_error)}; 已中止任务"
+        )
+        super().__init__(self.final_message)
+
+
+def _safe_retry_error(error: Exception, limit: int = 320) -> str:
+    text = str(error or "").strip() or error.__class__.__name__
+    return text[:limit]
+
+
+def _build_retry_message(
+    step_name: str,
+    attempt: int,
+    max_attempts: int,
+    error: Exception,
+    *,
+    is_terminal: bool,
+) -> str:
+    suffix = "已中止任务" if is_terminal else "准备重试"
+    return (
+        f"[{step_name}] 第 {attempt}/{max_attempts} 次失败: "
+        f"{_safe_retry_error(error)}; {suffix}"
+    )
+
+
+_VERIFICATION_LEVEL_ALIASES = {
+    "analysis_with_poc_plan": "analysis_with_poc_plan",
+    "analysis_only": "analysis_with_poc_plan",
+    "sandbox": "analysis_with_poc_plan",
+    "generate_poc": "analysis_with_poc_plan",
+    "poc_plan": "analysis_with_poc_plan",
+}
+
+
+def _normalize_verification_level(value: Optional[str]) -> str:
+    raw_value = str(value or "").strip().lower()
+    if not raw_value:
+        return "analysis_with_poc_plan"
+    return _VERIFICATION_LEVEL_ALIASES.get(raw_value, "analysis_with_poc_plan")
+
+
+async def _run_with_retries(
+    step_name: str,
+    task_id: str,
+    event_emitter: Any,
+    func: Callable[[], Any],
+    *,
+    max_attempts: int = 3,
+    retryable_predicate: Optional[Callable[[Exception], bool]] = None,
+):
+    """执行关键步骤并在失败时重试，重试耗尽后抛出 StepRetryExceededError。"""
+    safe_attempts = max(1, int(max_attempts))
+
+    for attempt in range(1, safe_attempts + 1):
+        try:
+            return await func()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            retryable = True if retryable_predicate is None else bool(retryable_predicate(exc))
+            is_terminal = attempt >= safe_attempts or not retryable
+            message = _build_retry_message(
+                step_name,
+                attempt,
+                safe_attempts,
+                exc,
+                is_terminal=is_terminal,
+            )
+            metadata = {
+                "task_id": task_id,
+                "step_name": step_name,
+                "attempt": attempt,
+                "max_attempts": safe_attempts,
+                "is_terminal": is_terminal,
+            }
+            if event_emitter:
+                if is_terminal:
+                    await event_emitter.emit_error(message, metadata=metadata)
+                else:
+                    await event_emitter.emit_warning(message, metadata=metadata)
+            if is_terminal:
+                raise StepRetryExceededError(
+                    step_name,
+                    attempt,
+                    exc,
+                    max_attempts=safe_attempts,
+                ) from exc
+            await asyncio.sleep(min(2, attempt))
 
 def _normalize_bootstrap_confidence(confidence: Any) -> Optional[str]:
     normalized = str(confidence or "").strip().upper()
@@ -496,31 +619,15 @@ async def _prepare_bootstrap_opengrep_findings(
     project_root: str,
     event_emitter: Any,
 ) -> Tuple[List[Dict[str, Any]], Optional[str], str]:
-    latest_task_result = await db.execute(
-        select(OpengrepScanTask)
-        .where(OpengrepScanTask.project_id == project_id)
-        .where(OpengrepScanTask.status == "completed")
-        .order_by(OpengrepScanTask.created_at.desc())
-        .limit(1)
-    )
-    latest_task = latest_task_result.scalar_one_or_none()
-
-    if latest_task:
-        candidates = await _collect_bootstrap_findings_for_task(db, latest_task)
-        await event_emitter.emit_info(
-            f"🔁 OpenGrep 预处理复用最近结果: task={latest_task.id}, 候选={len(candidates)}"
-        )
-        return candidates, latest_task.id, "reuse"
-
     active_rules_result = await db.execute(
         select(OpengrepRule).where(OpengrepRule.is_active == True)
     )
     active_rules = active_rules_result.scalars().all()
     if not active_rules:
-        await event_emitter.emit_warning(
-            "⚠️ OpenGrep 预处理降级：当前没有启用规则，跳过预扫描"
+        await event_emitter.emit_error(
+            "❌ OpenGrep 预处理失败：当前没有启用规则，无法继续智能审计"
         )
-        return [], None, "degraded_no_rules"
+        raise RuntimeError("OpenGrep 预处理失败：当前没有启用规则")
 
     scan_task = OpengrepScanTask(
         project_id=project_id,
@@ -534,7 +641,7 @@ async def _prepare_bootstrap_opengrep_findings(
     await db.refresh(scan_task)
 
     await event_emitter.emit_info(
-        f"🧪 OpenGrep 预处理开始：未发现可复用结果，启动阻塞式预扫描（task={scan_task.id}）"
+        f"🧪 OpenGrep 预处理开始：已禁用历史复用，启动阻塞式预扫描（task={scan_task.id}）"
     )
 
     try:
@@ -592,23 +699,23 @@ async def _prepare_bootstrap_opengrep_findings(
         await event_emitter.emit_info(
             f"✅ OpenGrep 预扫描完成: findings={len(parsed_findings)}, 候选={len(candidates)}"
         )
-        return candidates, scan_task.id, "scan"
-    except FileNotFoundError:
+        return candidates, scan_task.id, "scan_forced"
+    except FileNotFoundError as exc:
         scan_task.status = "failed"
         scan_task.error_count = 1
         await db.commit()
-        await event_emitter.emit_warning(
-            "⚠️ OpenGrep 预处理降级：未安装 opengrep，继续执行智能审计"
+        await event_emitter.emit_error(
+            "❌ OpenGrep 预处理失败：未安装 opengrep"
         )
-        return [], scan_task.id, "degraded_tool_missing"
+        raise RuntimeError("OpenGrep 预处理失败：未安装 opengrep") from exc
     except Exception as exc:
         scan_task.status = "failed"
         scan_task.error_count = (scan_task.error_count or 0) + 1
         await db.commit()
-        await event_emitter.emit_warning(
-            f"⚠️ OpenGrep 预处理降级：预扫描失败（{str(exc)[:160]}）"
+        await event_emitter.emit_error(
+            f"❌ OpenGrep 预处理失败：{str(exc)[:160]}"
         )
-        return [], scan_task.id, "degraded_scan_failed"
+        raise RuntimeError(f"OpenGrep 预处理失败：{str(exc)[:200]}") from exc
 
 
 async def _execute_agent_task(task_id: str):
@@ -686,15 +793,23 @@ async def _execute_agent_task(task_id: str):
 
             # 获取项目根目录（传递任务指定的分支和认证 token/SSH密钥）
             # 🔥 传递 event_emitter 以发送克隆进度
-            project_root = await _get_project_root(
-                project,
+            async def _prepare_project_root_once():
+                return await _get_project_root(
+                    project,
+                    task_id,
+                    task.branch_name,
+                    github_token=github_token,
+                    gitlab_token=gitlab_token,
+                    gitea_token=gitea_token,  # 🔥 新增
+                    ssh_private_key=ssh_private_key,  # 🔥 新增SSH密钥
+                    event_emitter=event_emitter,  # 🔥 新增
+                )
+
+            project_root = await _run_with_retries(
+                "PROJECT_PREPARATION",
                 task_id,
-                task.branch_name,
-                github_token=github_token,
-                gitlab_token=gitlab_token,
-                gitea_token=gitea_token,  # 🔥 新增
-                ssh_private_key=ssh_private_key,  # 🔥 新增SSH密钥
-                event_emitter=event_emitter,  # 🔥 新增
+                event_emitter,
+                _prepare_project_root_once,
             )
 
             # 🔥 自动修正 target_files 路径
@@ -775,17 +890,31 @@ async def _execute_agent_task(task_id: str):
 
             # 初始化工具集 - 传递排除模式和目标文件以及预初始化的 sandbox_manager
             # 🔥 传递 event_emitter 以发送索引进度，传递 task_id 以支持取消
-            tools = await _initialize_tools(
-                project_root,
-                llm_service,
-                user_config,
-                sandbox_manager=sandbox_manager,
-                exclude_patterns=task.exclude_patterns,
-                target_files=task.target_files,
-                project_id=str(project.id),  # 🔥 传递 project_id 用于 RAG
-                event_emitter=event_emitter,  # 🔥 新增
-                task_id=task_id,  # 🔥 新增：用于取消检查
+            task.current_phase = AgentTaskPhase.INDEXING
+            await db.commit()
+
+            async def _initialize_tools_once():
+                return await _initialize_tools(
+                    project_root,
+                    llm_service,
+                    user_config,
+                    sandbox_manager=sandbox_manager,
+                    verification_level=task.verification_level or "analysis_with_poc_plan",
+                    exclude_patterns=task.exclude_patterns,
+                    target_files=task.target_files,
+                    project_id=str(project.id),  # 🔥 传递 project_id 用于 RAG
+                    event_emitter=event_emitter,  # 🔥 新增
+                    task_id=task_id,  # 🔥 新增：用于取消检查
+                )
+
+            tools = await _run_with_retries(
+                "RAG_INDEX_AND_TOOLS_INIT",
+                task_id,
+                event_emitter,
+                _initialize_tools_once,
             )
+            task.current_step = "索引已完成，进入分析阶段"
+            await db.commit()
 
             # 🔥 初始化工具后检查取消
             if is_task_cancelled(task_id):
@@ -856,29 +985,30 @@ async def _execute_agent_task(task_id: str):
                 exclude_patterns=task.exclude_patterns,
                 target_files=task.target_files,
             )
+            task.current_phase = AgentTaskPhase.RECONNAISSANCE
+            await db.commit()
 
             bootstrap_findings: List[Dict[str, Any]] = []
             bootstrap_task_id: Optional[str] = None
             bootstrap_source = "none"
-            try:
-                (
-                    bootstrap_findings,
-                    bootstrap_task_id,
-                    bootstrap_source,
-                ) = await _prepare_bootstrap_opengrep_findings(
+            async def _prepare_bootstrap_once():
+                return await _prepare_bootstrap_opengrep_findings(
                     db=db,
                     project_id=str(project.id),
                     project_root=project_root,
                     event_emitter=event_emitter,
                 )
-            except Exception as bootstrap_error:
-                logger.warning(
-                    "[AgentTask] Bootstrap OpenGrep stage failed and downgraded: %s",
-                    bootstrap_error,
-                )
-                await event_emitter.emit_warning(
-                    f"⚠️ OpenGrep 预处理降级：{str(bootstrap_error)[:160]}"
-                )
+
+            (
+                bootstrap_findings,
+                bootstrap_task_id,
+                bootstrap_source,
+            ) = await _run_with_retries(
+                "OPENGREP_BOOTSTRAP",
+                task_id,
+                event_emitter,
+                _prepare_bootstrap_once,
+            )
             
             # 更新任务文件统计
             task.total_files = project_info.get("file_count", 0)
@@ -889,7 +1019,7 @@ async def _execute_agent_task(task_id: str):
                 "project_info": project_info,
                 "config": {
                     "target_vulnerabilities": task.target_vulnerabilities or [],
-                    "verification_level": task.verification_level or "sandbox",
+                    "verification_level": task.verification_level or "analysis_with_poc_plan",
                     "exclude_patterns": task.exclude_patterns or [],
                     "target_files": task.target_files or [],
                     "max_iterations": task.max_iterations or 50,
@@ -904,16 +1034,28 @@ async def _execute_agent_task(task_id: str):
             # 执行 Orchestrator
             await event_emitter.emit_phase_start("orchestration", "🎯 Orchestrator 开始编排审计流程")
             task.current_phase = AgentTaskPhase.ANALYSIS
+            task.current_step = "分析阶段进行中"
             await db.commit()
-            
-            # 🔥 将 orchestrator.run() 包装在 asyncio.Task 中，以便可以强制取消
-            run_task = asyncio.create_task(orchestrator.run(input_data))
-            _running_asyncio_tasks[task_id] = run_task
-            
-            try:
-                result = await run_task
-            finally:
-                _running_asyncio_tasks.pop(task_id, None)
+
+            async def _run_orchestrator_once():
+                # 🔥 将 orchestrator.run() 包装在 asyncio.Task 中，以便可以强制取消
+                run_task = asyncio.create_task(orchestrator.run(input_data))
+                _running_asyncio_tasks[task_id] = run_task
+                try:
+                    run_result = await run_task
+                finally:
+                    _running_asyncio_tasks.pop(task_id, None)
+
+                if not run_result.success and run_result.error != "任务已取消":
+                    raise RuntimeError(run_result.error or "Orchestrator returned unsuccessful result")
+                return run_result
+
+            result = await _run_with_retries(
+                "ORCHESTRATOR_RUN",
+                task_id,
+                event_emitter,
+                _run_orchestrator_once,
+            )
             
             # 处理结果
             duration_ms = int((time.time() - start_time) * 1000)
@@ -923,6 +1065,16 @@ async def _execute_agent_task(task_id: str):
             if result.success:
                 # 🔥 CRITICAL FIX: Log and save findings with detailed debugging
                 findings = result.data.get("findings", [])
+                if not isinstance(findings, list):
+                    findings = []
+                if not findings:
+                    fallback_findings = getattr(orchestrator, "_all_findings", None)
+                    if isinstance(fallback_findings, list) and fallback_findings:
+                        findings = fallback_findings
+                        logger.warning(
+                            "[AgentTask] result.data.findings is empty, fallback to orchestrator._all_findings (%s)",
+                            len(findings),
+                        )
                 logger.info(f"[AgentTask] Task {task_id} completed with {len(findings)} findings from Orchestrator")
 
                 # 🔥 Debug: Log each finding for verification
@@ -930,8 +1082,39 @@ async def _execute_agent_task(task_id: str):
                     if isinstance(f, dict):
                         logger.debug(f"[AgentTask] Finding {i+1}: {f.get('title', 'N/A')[:50]} - {f.get('severity', 'N/A')}")
 
+                # 三轨流分析增强：轻量主链 + Joern 复核 + 逻辑漏洞图规则
+                flow_summary: Dict[str, Any] = {}
+                findings, flow_summary = await _enrich_findings_with_flow_and_logic(
+                    findings=findings,
+                    project_root=project_root,
+                    target_files=task.target_files,
+                    event_emitter=event_emitter,
+                )
+                logger.info(
+                    "[AgentTask] Flow enrichment summary: %s",
+                    json.dumps(flow_summary, ensure_ascii=False),
+                )
+
                 # 🔥 v2.1: 传递 project_root 用于文件路径验证
-                saved_count = await _save_findings(db, task_id, findings, project_root=project_root)
+                finding_save_diagnostics: Dict[str, Any] = {}
+                async def _persist_findings_once():
+                    return await _save_findings(
+                        db,
+                        task_id,
+                        findings,
+                        project_root=project_root,
+                        save_diagnostics=finding_save_diagnostics,
+                    )
+
+                task.current_phase = AgentTaskPhase.VERIFICATION
+                task.current_step = "验证与结果归档中"
+                await db.commit()
+                saved_count = await _run_with_retries(
+                    "PERSIST_FINDINGS",
+                    task_id,
+                    event_emitter,
+                    _persist_findings_once,
+                )
                 logger.info(f"[AgentTask] Saved {saved_count}/{len(findings)} findings (filtered {len(findings) - saved_count} hallucinations)")
 
                 persisted_findings_result = await db.execute(
@@ -959,6 +1142,33 @@ async def _execute_agent_task(task_id: str):
                 task.current_phase = AgentTaskPhase.REPORTING
                 task.findings_count = len(effective_findings)
                 task.false_positive_count = len(false_positive_findings)
+                orchestrator_findings_count = len(findings)
+                persisted_findings_count = len(effective_findings)
+                filtered_findings_count = max(
+                    orchestrator_findings_count - persisted_findings_count,
+                    0,
+                )
+                filter_reason_text = ""
+                filtered_reasons = (
+                    finding_save_diagnostics.get("filtered_reasons")
+                    if isinstance(finding_save_diagnostics, dict)
+                    else {}
+                )
+                if isinstance(filtered_reasons, dict) and filtered_reasons:
+                    sorted_reasons = sorted(
+                        filtered_reasons.items(),
+                        key=lambda item: item[1],
+                        reverse=True,
+                    )[:3]
+                    filter_reason_text = "，".join(
+                        [f"{key}:{value}" for key, value in sorted_reasons]
+                    )
+                task.current_step = (
+                    f"编排发现 {orchestrator_findings_count} / 入库 {persisted_findings_count} / "
+                    f"过滤 {filtered_findings_count}"
+                )
+                if filter_reason_text:
+                    task.current_step += f"（主要过滤原因：{filter_reason_text}）"
 
                 # 🔥 CRITICAL FIX: 累加所有子 Agent 的统计，而不仅仅是 Orchestrator 的
                 total_iterations = result.iterations
@@ -1014,12 +1224,42 @@ async def _execute_agent_task(task_id: str):
                 # 🔥 注意: progress_percentage 是计算属性，不需要手动设置
                 # 当 status = COMPLETED 时会自动返回 100.0
                 
-                await db.commit()
+                async def _commit_summary_once():
+                    await db.commit()
+
+                await _run_with_retries(
+                    "PERSIST_TASK_SUMMARY",
+                    task_id,
+                    event_emitter,
+                    _commit_summary_once,
+                )
                 
                 await event_emitter.emit_task_complete(
-                    findings_count=len(effective_findings),
+                    findings_count=persisted_findings_count,
                     duration_ms=duration_ms,
+                    message=(
+                        f"✅ 审计完成：编排发现 {orchestrator_findings_count}，"
+                        f"入库 {persisted_findings_count}，过滤 {filtered_findings_count}，"
+                        f"耗时 {duration_ms/1000:.1f} 秒"
+                    ),
+                    extra_metadata={
+                        "orchestrator_findings_count": orchestrator_findings_count,
+                        "persisted_findings_count": persisted_findings_count,
+                        "filtered_findings_count": filtered_findings_count,
+                        "filtered_reasons": filtered_reasons or {},
+                    },
                 )
+                if orchestrator_findings_count > 0 and persisted_findings_count == 0:
+                    await event_emitter.emit_warning(
+                        "⚠️ 编排阶段识别到漏洞，但入库结果为 0，疑似全部被门禁过滤",
+                        metadata={
+                            "orchestrator_findings_count": orchestrator_findings_count,
+                            "persisted_findings_count": persisted_findings_count,
+                            "filtered_findings_count": filtered_findings_count,
+                            "filtered_reasons": filtered_reasons or {},
+                            "is_terminal": True,
+                        },
+                    )
                 
                 logger.info(
                     f"✅ Task {task_id} completed: "
@@ -1040,8 +1280,22 @@ async def _execute_agent_task(task_id: str):
                     task.error_message = result.error or "Unknown error"
                     task.completed_at = datetime.now(timezone.utc)
                     await db.commit()
-                    
-                    await event_emitter.emit_error(result.error or "Unknown error")
+
+                    failure_message = task.error_message
+                    failure_metadata = {
+                        "step_name": "ORCHESTRATOR_RUN",
+                        "attempt": 1,
+                        "max_attempts": 1,
+                        "is_terminal": True,
+                    }
+                    await event_emitter.emit_task_error(
+                        failure_message,
+                        message=f"❌ 任务失败: {failure_message}",
+                    )
+                    await event_emitter.emit_error(
+                        failure_message,
+                        metadata=failure_metadata,
+                    )
                     logger.error(f"❌ Task {task_id} failed: {result.error}")
             
         except asyncio.CancelledError:
@@ -1057,16 +1311,43 @@ async def _execute_agent_task(task_id: str):
                 
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}", exc_info=True)
-            
+            failure_metadata = {
+                "step_name": "UNKNOWN",
+                "attempt": 1,
+                "max_attempts": 1,
+                "is_terminal": True,
+            }
+            failure_message = str(e)[:1000]
+            if isinstance(e, StepRetryExceededError):
+                failure_metadata = {
+                    "step_name": e.step_name,
+                    "attempt": e.attempts,
+                    "max_attempts": e.max_attempts,
+                    "is_terminal": True,
+                }
+                failure_message = e.final_message[:1000]
+
             try:
                 task = await db.get(AgentTask, task_id)
                 if task:
                     task.status = AgentTaskStatus.FAILED
-                    task.error_message = str(e)[:1000]
+                    task.error_message = failure_message
                     task.completed_at = datetime.now(timezone.utc)
                     await db.commit()
             except Exception as db_error:
                 logger.error(f"Failed to update task status: {db_error}")
+
+            try:
+                await event_emitter.emit_task_error(
+                    failure_message,
+                    message=f"❌ 任务失败: {failure_message}",
+                )
+                await event_emitter.emit_error(
+                    failure_message,
+                    metadata=failure_metadata,
+                )
+            except Exception as emit_error:
+                logger.warning(f"Failed to emit terminal task error event: {emit_error}")
         
         finally:
             # 🔥 在清理之前保存 Agent 树到数据库
@@ -1127,6 +1408,7 @@ async def _initialize_tools(
     llm_service,
     user_config: Optional[Dict[str, Any]],
     sandbox_manager: Any, # 传递预初始化的 SandboxManager
+    verification_level: str = "analysis_with_poc_plan",
     exclude_patterns: Optional[List[str]] = None,
     target_files: Optional[List[str]] = None,
     project_id: Optional[str] = None,  # 🔥 用于 RAG collection_name
@@ -1140,6 +1422,7 @@ async def _initialize_tools(
         llm_service: LLM 服务
         user_config: 用户配置
         sandbox_manager: 沙箱管理器
+        verification_level: 验证级别（统一为 analysis_with_poc_plan）
         exclude_patterns: 排除模式列表
         target_files: 目标文件列表
         project_id: 项目 ID（用于 RAG collection_name）
@@ -1154,6 +1437,9 @@ async def _initialize_tools(
         ThinkTool, ReflectTool,
         CreateVulnerabilityReportTool,
         VulnerabilityValidationTool,
+        ControlFlowAnalysisLightTool,
+        JoernReachabilityVerifyTool,
+        LogicAuthzAnalysisTool,
         # 🔥 RAG 工具
         RAGQueryTool, SecurityCodeSearchTool, FunctionContextTool,
     )
@@ -1309,6 +1595,7 @@ async def _initialize_tools(
             )
             logger.info(summary)
             await emit(summary)
+            await emit("✅ 索引已完成，进入分析阶段")
 
         # 创建 CodeRetriever（用于搜索）
         # 🔥 传递 api_key，用于自动适配 collection 的 embedding 配置
@@ -1323,11 +1610,11 @@ async def _initialize_tools(
         await emit(f"✅ RAG 系统初始化成功")
 
     except Exception as e:
-        logger.warning(f"⚠️ RAG 系统初始化失败: {e}")
-        await emit(f"⚠️ RAG 系统初始化失败: {e}", "warning")
+        logger.error(f"❌ RAG 系统初始化失败: {e}")
+        await emit(f"❌ RAG 系统初始化失败: {e}", "error")
         import traceback
         logger.debug(f"RAG 初始化异常详情:\n{traceback.format_exc()}")
-        retriever = None
+        raise RuntimeError(f"RAG 系统初始化失败: {str(e)[:300]}") from e
 
     # 基础工具 - 传递排除模式和目标文件
     base_tools = {
@@ -1369,6 +1656,15 @@ async def _initialize_tools(
         "pattern_match": PatternMatchTool(project_root),
         # 数据流分析
         "dataflow_analysis": DataFlowAnalysisTool(llm_service),
+        # 三轨流分析主链
+        "controlflow_analysis_light": ControlFlowAnalysisLightTool(
+            project_root=project_root,
+            target_files=target_files,
+        ),
+        "logic_authz_analysis": LogicAuthzAnalysisTool(
+            project_root=project_root,
+            target_files=target_files,
+        ),
         # 外部安全工具 (传入共享的 sandbox_manager)
         # "opengrep_scan": OpengrepTool(project_root, sandbox_manager),
         # "bandit_scan": BanditTool(project_root, sandbox_manager),
@@ -1402,8 +1698,8 @@ async def _initialize_tools(
         CommandInjectionTestTool, SqlInjectionTestTool, XssTestTool,
         PathTraversalTestTool, SstiTestTool, DeserializationTestTool,
         UniversalVulnTestTool,
-        # 🔥 新增：通用代码执行工具 (LLM 驱动的 Fuzzing Harness)
-        RunCodeTool, ExtractFunctionTool,
+        # 🔥 新增：函数提取工具
+        ExtractFunctionTool,
     )
 
     verification_tools = {
@@ -1433,13 +1729,21 @@ async def _initialize_tools(
         "universal_vuln_test": UniversalVulnTestTool(sandbox_manager, project_root),
 
         # 🔥 新增：通用代码执行工具 (LLM 驱动的 Fuzzing Harness)
-        #"run_code": RunCodeTool(sandbox_manager, project_root),
         "extract_function": ExtractFunctionTool(project_root),
+        "joern_reachability_verify": JoernReachabilityVerifyTool(
+            project_root=project_root,
+            enabled=bool(getattr(settings, "FLOW_JOERN_ENABLED", True)),
+            timeout_sec=int(getattr(settings, "FLOW_JOERN_TIMEOUT_SEC", 45)),
+        ),
+        "logic_authz_analysis": LogicAuthzAnalysisTool(
+            project_root=project_root,
+            target_files=target_files,
+        ),
 
         # 报告工具 - 🔥 v2.1: 传递 project_root 用于文件验证
         "create_vulnerability_report": CreateVulnerabilityReportTool(project_root),
     }
-    
+
     # Orchestrator 工具（主要是思考工具）
     orchestrator_tools = {
         "think": ThinkTool(),
@@ -1650,6 +1954,48 @@ def _resolve_finding_file_path(
             stored = _normalize_relative_file_path(str(resolved), project_root)
             return stored, str(resolved)
 
+    # Fallback: 尝试按后缀路径或 basename 在项目根目录中匹配，降低模型路径漂移导致的全量过滤
+    if project_root:
+        try:
+            root_path = Path(project_root).resolve()
+            normalized_candidate = candidate.lstrip("./")
+            candidate_parts = [part for part in normalized_candidate.split("/") if part]
+
+            # 1) 逐级裁剪前缀，按 suffix 尝试匹配
+            for idx in range(len(candidate_parts)):
+                suffix_candidate = root_path.joinpath(*candidate_parts[idx:])
+                if suffix_candidate.is_file():
+                    resolved = suffix_candidate.resolve()
+                    stored = _normalize_relative_file_path(str(resolved), project_root)
+                    return stored, str(resolved)
+
+            # 2) basename 唯一匹配兜底（限制匹配数量避免大仓库扫描过慢）
+            if candidate_parts:
+                basename = candidate_parts[-1]
+                matches: List[Path] = []
+                for matched in root_path.rglob(basename):
+                    if matched.is_file():
+                        matches.append(matched)
+                    if len(matches) > 8:
+                        break
+
+                if len(matches) == 1:
+                    resolved = matches[0].resolve()
+                    stored = _normalize_relative_file_path(str(resolved), project_root)
+                    return stored, str(resolved)
+
+                if len(matches) > 1:
+                    suffix_text = "/".join(candidate_parts[-3:]) if len(candidate_parts) >= 3 else normalized_candidate
+                    normalized_suffix = suffix_text.replace("\\", "/")
+                    for matched in matches:
+                        matched_posix = matched.as_posix()
+                        if matched_posix.endswith(normalized_suffix):
+                            resolved = matched.resolve()
+                            stored = _normalize_relative_file_path(str(resolved), project_root)
+                            return stored, str(resolved)
+        except Exception:
+            pass
+
     return None, None
 
 
@@ -1740,11 +2086,16 @@ def _normalize_authenticity_verdict(
 
     if finding.get("is_verified") is True:
         return "confirmed"
+    source_value = str(finding.get("source") or "").lower()
+    if source_value in {"verification", "verification_agent", "agent_verification"}:
+        return "confirmed"
+    if source_value in {"analysis", "analysis_agent", "recon_high_risk", "bootstrap"}:
+        return "likely"
     if confidence >= 0.85:
         return "likely"
     if confidence <= 0.2:
         return "false_positive"
-    return None
+    return "likely"
 
 
 def _normalize_reachability(
@@ -1763,7 +2114,92 @@ def _normalize_reachability(
         return "likely_reachable"
     if verdict == "false_positive":
         return "unreachable"
-    return None
+    return "likely_reachable"
+
+
+def _build_default_remediation(vuln_type: str) -> Tuple[str, str]:
+    normalized = (vuln_type or "").lower()
+    mapping: Dict[str, Tuple[str, str]] = {
+        "sql_injection": (
+            "使用参数化查询并对输入进行严格校验，避免字符串拼接 SQL。",
+            'query = "SELECT * FROM users WHERE id = %s"\ncursor.execute(query, (user_id,))',
+        ),
+        "xss": (
+            "对输出到页面的用户输入进行转义或使用安全模板 API。",
+            "safe_output = html.escape(user_input)\nrender(safe_output)",
+        ),
+        "command_injection": (
+            "禁止将用户输入直接拼接命令；改用白名单参数与安全 API。",
+            "subprocess.run([\"cmd\", safe_arg], check=True)",
+        ),
+        "path_traversal": (
+            "规范化并校验路径，限制访问在允许目录内。",
+            "resolved = (base_dir / user_path).resolve()\nif not str(resolved).startswith(str(base_dir.resolve())):\n    raise ValueError(\"invalid path\")",
+        ),
+        "ssrf": (
+            "对目标地址做白名单校验并阻断内网地址访问。",
+            "if not is_allowed_url(target_url):\n    raise ValueError(\"blocked url\")",
+        ),
+    }
+    if normalized in mapping:
+        return mapping[normalized]
+    return (
+        "补充输入校验与边界检查，移除危险调用并增加安全防护。",
+        "// TODO: apply secure validation and safe API usage here",
+    )
+
+
+async def _enrich_findings_with_flow_and_logic(
+    findings: List[Dict[str, Any]],
+    *,
+    project_root: Optional[str],
+    target_files: Optional[List[str]],
+    event_emitter: Optional[Any] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """三轨流分析增强（轻量主链 + Joern复核 + 逻辑漏洞图规则）。"""
+    summary: Dict[str, Any] = {
+        "total": len(findings or []),
+        "path_found": 0,
+        "logic_hits": 0,
+        "joern_upgrades": 0,
+        "enabled": bool(project_root),
+    }
+
+    if not findings:
+        return findings, summary
+    if not project_root:
+        summary["enabled"] = False
+        summary["blocked_reason"] = "missing_project_root"
+        return findings, summary
+
+    try:
+        from app.services.agent.flow.pipeline import FlowEvidencePipeline
+
+        pipeline = FlowEvidencePipeline(
+            project_root=project_root,
+            target_files=target_files or [],
+        )
+        enriched, counters = await pipeline.enrich_findings(findings)
+        summary.update(counters or {})
+        summary["enabled"] = True
+
+        if event_emitter:
+            await event_emitter.emit_info(
+                "🧭 流分析证据已生成: "
+                f"path_found={summary.get('path_found', 0)}/{summary.get('total', len(findings))}, "
+                f"logic_hits={summary.get('logic_hits', 0)}, "
+                f"joern_upgrades={summary.get('joern_upgrades', 0)}"
+            )
+        return enriched, summary
+    except Exception as exc:
+        logger.warning("Flow/Logic enrichment failed: %s", exc, exc_info=True)
+        summary["enabled"] = False
+        summary["blocked_reason"] = f"enrichment_failed:{type(exc).__name__}"
+        if event_emitter:
+            await event_emitter.emit_warning(
+                f"⚠️ 流分析增强未完成，回退基础结果：{str(exc)[:160]}"
+            )
+        return findings, summary
 
 
 async def _save_findings(
@@ -1771,6 +2207,7 @@ async def _save_findings(
     task_id: str,
     findings: List[Dict],
     project_root: Optional[str] = None,
+    save_diagnostics: Optional[Dict[str, Any]] = None,
 ) -> int:
     """
     保存发现到数据库
@@ -1894,13 +2331,11 @@ async def _save_findings(
             # 4) normalize authenticity + reachability
             authenticity = _normalize_authenticity_verdict(finding, confidence)
             if not authenticity:
-                mark_filtered("missing_or_invalid_authenticity", finding)
-                continue
+                authenticity = "likely"
 
             reachability = _normalize_reachability(finding, authenticity)
             if not reachability:
-                mark_filtered("missing_or_invalid_reachability", finding)
-                continue
+                reachability = "likely_reachable"
 
             # 5) normalize file location
             location_file, location_line = _extract_location_parts(finding)
@@ -1995,6 +2430,25 @@ async def _save_findings(
                 finding.get("fix")
             )
             suggestion_text = _safe_text(suggestion) if suggestion is not None else None
+            fix_code_text = _normalize_optional_text(
+                finding.get("fix_code")
+                or finding.get("patch")
+                or finding.get("patch_snippet")
+            )
+            fix_description_text = _normalize_optional_text(
+                finding.get("fix_description")
+                or finding.get("fix_explanation")
+                or finding.get("remediation_details")
+            )
+
+            if not suggestion_text or not fix_code_text:
+                default_suggestion, default_fix_code = _build_default_remediation(raw_type)
+                if not suggestion_text:
+                    suggestion_text = default_suggestion
+                if not fix_code_text:
+                    fix_code_text = default_fix_code
+                if not fix_description_text:
+                    fix_description_text = "基于漏洞类型自动补全修复建议，请结合业务逻辑复核。"
 
             # 9) verification metadata
             is_verified = authenticity in {"confirmed", "likely"}
@@ -2017,6 +2471,17 @@ async def _save_findings(
                     "context_end_line": context_end_line,
                 }
             )
+            dataflow_path = finding.get("dataflow_path")
+            if not isinstance(dataflow_path, list):
+                flow_payload = verification_result_payload.get("flow")
+                if isinstance(flow_payload, dict):
+                    chain = flow_payload.get("call_chain")
+                    if isinstance(chain, list):
+                        dataflow_path = [str(item) for item in chain if str(item).strip()]
+            if not isinstance(dataflow_path, list):
+                dataflow_path = None
+            source_text = _normalize_optional_text(finding.get("source"))
+            sink_text = _normalize_optional_text(finding.get("sink"))
 
             # 10) PoC info
             poc_data = finding.get("poc", {})
@@ -2031,6 +2496,13 @@ async def _save_findings(
                 poc_code = poc_data.get("payload") or poc_data.get("code")
             elif isinstance(poc_data, str):
                 poc_description = poc_data
+
+            allow_poc = authenticity == "confirmed" and str(severity_enum).lower() in {"critical", "high"}
+            if not allow_poc:
+                has_poc = False
+                poc_code = None
+                poc_description = None
+                poc_steps = None
 
             # 11) optional CVSS/CWE
             cwe_id = finding.get("cwe_id") or finding.get("cwe")
@@ -2053,7 +2525,12 @@ async def _save_findings(
                 line_end=line_end,
                 code_snippet=snippet_text,
                 code_context=context_text,
+                source=source_text,
+                sink=sink_text,
+                dataflow_path=dataflow_path,
                 suggestion=suggestion_text,
+                fix_code=fix_code_text,
+                fix_description=fix_description_text,
                 is_verified=is_verified,
                 ai_confidence=confidence,
                 status=FindingStatus.FALSE_POSITIVE if authenticity == "false_positive" else FindingStatus.VERIFIED,
@@ -2081,6 +2558,16 @@ async def _save_findings(
             "[SaveFindings] Filter summary for task %s: %s",
             task_id,
             json.dumps(filtered_reasons, ensure_ascii=False),
+        )
+    if isinstance(save_diagnostics, dict):
+        save_diagnostics.clear()
+        save_diagnostics.update(
+            {
+                "input_count": len(findings),
+                "saved_count": saved_count,
+                "filtered_count": sum(filtered_reasons.values()),
+                "filtered_reasons": dict(filtered_reasons),
+            }
         )
 
     try:
@@ -2219,6 +2706,13 @@ async def create_agent_task(
     project = await db.get(Project, request.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+
+    verification_level = _normalize_verification_level(request.verification_level)
+    normalized_target_files = [
+        item.strip()
+        for item in (request.target_files or [])
+        if isinstance(item, str) and item.strip()
+    ]
     
     # 创建任务
     task = AgentTask(
@@ -2229,10 +2723,13 @@ async def create_agent_task(
         status=AgentTaskStatus.PENDING,
         current_phase=AgentTaskPhase.PLANNING,
         target_vulnerabilities=request.target_vulnerabilities,
-        verification_level=request.verification_level or "sandbox",
+        verification_level=verification_level,
         branch_name=request.branch_name,  # 保存用户选择的分支
         exclude_patterns=request.exclude_patterns,
-        target_files=request.target_files,
+        target_files=normalized_target_files or None,
+        agent_config={
+            "authorization_confirmed": bool(request.authorization_confirmed),
+        },
         max_iterations=request.max_iterations or 50,
         timeout_seconds=request.timeout_seconds or 1800,
         created_by=current_user.id,
@@ -2289,7 +2786,10 @@ async def list_agent_tasks(
     
     result = await db.execute(query)
     tasks = result.scalars().all()
-    
+
+    for task in tasks:
+        task.verification_level = _normalize_verification_level(task.verification_level)
+
     return tasks
 
 
@@ -2379,7 +2879,7 @@ async def get_agent_task(
             "error_message": task.error_message,
             "audit_scope": task.audit_scope,
             "target_vulnerabilities": task.target_vulnerabilities,
-            "verification_level": task.verification_level,
+            "verification_level": _normalize_verification_level(task.verification_level),
             "exclude_patterns": task.exclude_patterns,
             "target_files": task.target_files,
         }
@@ -2830,6 +3330,30 @@ async def list_agent_findings(
         verification_evidence = verification_payload.get("evidence") or verification_payload.get("details")
         context_start_line = _to_int(verification_payload.get("context_start_line"))
         context_end_line = _to_int(verification_payload.get("context_end_line"))
+        flow_payload = verification_payload.get("flow") if isinstance(verification_payload, dict) else None
+        flow_path_score = None
+        flow_call_chain = None
+        flow_control_conditions = None
+        if isinstance(flow_payload, dict):
+            try:
+                flow_path_score = float(flow_payload.get("path_score")) if flow_payload.get("path_score") is not None else None
+            except Exception:
+                flow_path_score = None
+            raw_chain = flow_payload.get("call_chain")
+            if isinstance(raw_chain, list):
+                flow_call_chain = [str(item) for item in raw_chain if str(item).strip()]
+            raw_controls = flow_payload.get("control_conditions")
+            if isinstance(raw_controls, list):
+                flow_control_conditions = [str(item) for item in raw_controls if str(item).strip()]
+
+        logic_payload = verification_payload.get("logic_authz") if isinstance(verification_payload, dict) else None
+        logic_authz_evidence = None
+        if isinstance(logic_payload, dict):
+            raw_logic_evidence = logic_payload.get("evidence")
+            if isinstance(raw_logic_evidence, list):
+                logic_authz_evidence = [str(item) for item in raw_logic_evidence if str(item).strip()]
+            elif isinstance(raw_logic_evidence, str) and raw_logic_evidence.strip():
+                logic_authz_evidence = [raw_logic_evidence.strip()]
 
         responses.append(
             AgentFindingResponse.model_validate(
@@ -2852,8 +3376,18 @@ async def list_agent_findings(
                     "reachability": reachability,
                     "authenticity": authenticity,
                     "verification_evidence": verification_evidence,
+                    "flow_path_score": flow_path_score,
+                    "flow_call_chain": flow_call_chain,
+                    "flow_control_conditions": flow_control_conditions,
+                    "logic_authz_evidence": logic_authz_evidence,
                     "status": item.status,
                     "suggestion": item.suggestion,
+                    "fix_code": item.fix_code,
+                    "fix_description": item.fix_description,
+                    "has_poc": bool(item.has_poc),
+                    "poc_code": item.poc_code,
+                    "poc_description": item.poc_description,
+                    "poc_steps": item.poc_steps if isinstance(item.poc_steps, list) else None,
                     "poc": {
                         "code": item.poc_code,
                         "description": item.poc_description,
@@ -3903,6 +4437,17 @@ async def generate_audit_report(
                     "confidence": f.ai_confidence,
                     "suggestion": f.suggestion,
                     "fix_code": f.fix_code,
+                    "verification_result": f.verification_result if isinstance(f.verification_result, dict) else None,
+                    "flow": (
+                        f.verification_result.get("flow")
+                        if isinstance(f.verification_result, dict)
+                        else None
+                    ),
+                    "logic_authz": (
+                        f.verification_result.get("logic_authz")
+                        if isinstance(f.verification_result, dict)
+                        else None
+                    ),
                     "created_at": f.created_at.isoformat() if f.created_at else None,
                 } for f in findings
             ]
@@ -3934,7 +4479,7 @@ async def generate_audit_report(
     md_lines = []
 
     # Header
-    md_lines.append("# DeepAudit 安全审计报告")
+    md_lines.append("# 安全审计报告")
     md_lines.append("")
     md_lines.append("---")
     md_lines.append("")
@@ -4047,6 +4592,34 @@ async def generate_audit_report(
                 if f.ai_confidence:
                     md_lines.append(f"**AI 置信度:** {int(f.ai_confidence * 100)}%")
                     md_lines.append("")
+
+                if isinstance(f.verification_result, dict):
+                    flow_payload = f.verification_result.get("flow")
+                    if isinstance(flow_payload, dict):
+                        flow_score = flow_payload.get("path_score")
+                        chain = flow_payload.get("call_chain")
+                        if flow_score is not None:
+                            try:
+                                md_lines.append(f"**可达性评分:** {float(flow_score) * 100:.1f}%")
+                            except Exception:
+                                md_lines.append(f"**可达性评分:** {flow_score}")
+                            md_lines.append("")
+                        if isinstance(chain, list) and chain:
+                            md_lines.append("**可达性调用链:**")
+                            md_lines.append("")
+                            for call_item in chain[:12]:
+                                md_lines.append(f"- `{_escape_markdown_inline(str(call_item))}`")
+                            md_lines.append("")
+
+                    logic_payload = f.verification_result.get("logic_authz")
+                    if isinstance(logic_payload, dict):
+                        evidence = logic_payload.get("evidence")
+                        if isinstance(evidence, list) and evidence:
+                            md_lines.append("**逻辑漏洞证据:**")
+                            md_lines.append("")
+                            for evidence_item in evidence[:10]:
+                                md_lines.append(f"- {_escape_markdown_inline(str(evidence_item))}")
+                            md_lines.append("")
 
                 if f.description:
                     md_lines.append("**漏洞描述:**")
@@ -4176,7 +4749,7 @@ async def generate_audit_report(
     # Footer
     md_lines.append("---")
     md_lines.append("")
-    md_lines.append("*本报告由 DeepAudit - AI 驱动的安全分析系统生成*")
+    md_lines.append("*本报告由自动化安全审计系统生成*")
     md_lines.append("")
     content = "\n".join(md_lines)
     

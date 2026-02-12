@@ -259,6 +259,15 @@ export const TASK_STATUS_CONFIG: Record<
 	},
 };
 
+export const TASK_PHASE_LABELS: Record<string, string> = {
+	planning: "规划",
+	indexing: "索引",
+	reconnaissance: "侦察",
+	analysis: "分析",
+	verification: "验证",
+	reporting: "报告",
+};
+
 // ============ Polling Intervals ============
 
 export const POLLING_INTERVALS = {

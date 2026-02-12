@@ -19,6 +19,7 @@ export type LogType =
   | 'progress';
 
 export type ToolStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+export type ProgressStatus = 'running' | 'completed';
 
 export interface LogItem {
   id: string;
@@ -37,6 +38,7 @@ export interface LogItem {
   severity?: string;
   agentName?: string;
   progressKey?: string; // 用于标识进度日志的唯一键，如 "index_progress"
+  progressStatus?: ProgressStatus;
 }
 
 // ============ Connection Types ============
@@ -80,7 +82,15 @@ export type AgentAuditAction =
   | { type: 'SET_LOGS'; payload: LogItem[] }
   | { type: 'ADD_LOG'; payload: Omit<LogItem, 'id' | 'time'> & { id?: string } }
   | { type: 'UPDATE_LOG'; payload: { id: string; updates: Partial<LogItem> } }
-  | { type: 'UPDATE_OR_ADD_PROGRESS_LOG'; payload: { progressKey: string; title: string; agentName?: string } }
+  | {
+      type: 'UPDATE_OR_ADD_PROGRESS_LOG';
+      payload: {
+        progressKey: string;
+        title: string;
+        agentName?: string;
+        progressStatus?: ProgressStatus;
+      };
+    }
   | { type: 'COMPLETE_TOOL_LOG'; payload: { toolName: string; output: string; duration: number } }
   | { type: 'REMOVE_LOG'; payload: string }
   | { type: 'SELECT_AGENT'; payload: string | null }
@@ -118,12 +128,20 @@ export interface AgentDetailPanelProps {
 export interface StatsPanelProps {
   task: AgentTask | null;
   findings: AgentFinding[];
+  resultConsistency?: {
+    orchestrator: number;
+    persisted: number;
+    filtered: number;
+    filteredReasons?: Record<string, number> | null;
+  } | null;
 }
 
 export interface HeaderProps {
   task: AgentTask | null;
   isRunning: boolean;
   isCancelling: boolean;
+  phaseLabel?: string | null;
+  phaseHint?: string | null;
   onBack: () => void;
   onCancel: () => void;
   onExport: () => void;

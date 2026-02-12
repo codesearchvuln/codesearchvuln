@@ -188,6 +188,49 @@ export function AuditDetailDialog({
                 </Section>
               )}
 
+              {(typeof finding.flow_path_score === "number" ||
+                (finding.flow_call_chain && finding.flow_call_chain.length > 0) ||
+                (finding.flow_control_conditions &&
+                  finding.flow_control_conditions.length > 0)) && (
+                <Section title="可达性证据">
+                  {typeof finding.flow_path_score === "number" && (
+                    <div className="text-sm text-muted-foreground">
+                      路径评分: {(finding.flow_path_score * 100).toFixed(1)}%
+                    </div>
+                  )}
+                  {finding.flow_call_chain && finding.flow_call_chain.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                        调用链
+                      </div>
+                      <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[28vh]">
+                        {finding.flow_call_chain.join("\n")}
+                      </pre>
+                    </div>
+                  )}
+                  {finding.flow_control_conditions &&
+                    finding.flow_control_conditions.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                          控制条件
+                        </div>
+                        <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[24vh]">
+                          {finding.flow_control_conditions.join("\n")}
+                        </pre>
+                      </div>
+                    )}
+                </Section>
+              )}
+
+              {finding.logic_authz_evidence &&
+                finding.logic_authz_evidence.length > 0 && (
+                  <Section title="逻辑漏洞证据">
+                    <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[24vh]">
+                      {finding.logic_authz_evidence.join("\n")}
+                    </pre>
+                  </Section>
+                )}
+
               {finding.suggestion && (
                 <Section title="修复建议">
                   <div className="text-sm whitespace-pre-wrap break-words">

@@ -138,6 +138,7 @@ function MetricCard({
 export const StatsPanel = memo(function StatsPanel({
 	task,
 	findings,
+	resultConsistency,
 }: StatsPanelProps) {
 	if (!task) return null;
 
@@ -161,6 +162,44 @@ export const StatsPanel = memo(function StatsPanel({
 
 	return (
 		<div className="space-y-3">
+			{resultConsistency && (
+				<div className="p-3 rounded-lg border border-border/50 bg-card/80">
+					<div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+						结果一致性
+					</div>
+					<div className="grid grid-cols-3 gap-2 text-center">
+						<div className="rounded-md border border-border/40 px-2 py-2">
+							<div className="text-[10px] text-muted-foreground">编排</div>
+							<div className="text-sm font-mono font-semibold text-foreground">
+								{resultConsistency.orchestrator}
+							</div>
+						</div>
+						<div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-2">
+							<div className="text-[10px] text-muted-foreground">入库</div>
+							<div className="text-sm font-mono font-semibold text-emerald-600 dark:text-emerald-300">
+								{resultConsistency.persisted}
+							</div>
+						</div>
+						<div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-2">
+							<div className="text-[10px] text-muted-foreground">过滤</div>
+							<div className="text-sm font-mono font-semibold text-amber-600 dark:text-amber-300">
+								{resultConsistency.filtered}
+							</div>
+						</div>
+					</div>
+					{resultConsistency.filteredReasons &&
+						Object.keys(resultConsistency.filteredReasons).length > 0 && (
+							<div className="mt-2 text-[11px] text-muted-foreground truncate">
+								主要过滤原因:{" "}
+								{Object.entries(resultConsistency.filteredReasons)
+									.sort((a, b) => b[1] - a[1])
+									.slice(0, 2)
+									.map(([reason, count]) => `${reason}:${count}`)
+									.join("，")}
+							</div>
+						)}
+				</div>
+			)}
 			{/* Progress Section with enhanced styling */}
 			<div className="p-4 rounded-lg border border-border/50 bg-card/80 backdrop-blur-sm relative overflow-hidden">
 				{/* Background gradient */}

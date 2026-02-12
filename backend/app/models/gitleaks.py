@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     JSON,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -37,6 +38,16 @@ class GitleaksScanTask(Base):
     error_message = Column(Text, nullable=True, comment="错误信息")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_gitleaks_tasks_project_created_at", "project_id", created_at.desc()),
+        Index(
+            "ix_gitleaks_tasks_project_lower_status_created_at",
+            "project_id",
+            func.lower(status),
+            created_at.desc(),
+        ),
+    )
 
     # Relationships
     project = relationship("Project", back_populates="gitleaks_scan_tasks")
@@ -65,6 +76,22 @@ class GitleaksFinding(Base):
     fingerprint = Column(String, nullable=True, comment="Gitleaks 指纹")
     status = Column(String, default="open", comment="open, verified, false_positive, fixed")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index(
+            "ix_gitleaks_findings_scan_task_status_created",
+            "scan_task_id",
+            "status",
+            created_at.desc(),
+        ),
+        Index(
+            "ix_gitleaks_findings_scan_task_file_line",
+            "scan_task_id",
+            "file_path",
+            "start_line",
+        ),
+        Index("ix_gitleaks_findings_fingerprint", "fingerprint"),
+    )
 
     # Relationships
     scan_task = relationship("GitleaksScanTask", back_populates="findings")

@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime
+from sqlalchemy import Column, String, Boolean, DateTime, Index
 from sqlalchemy.sql import func
 from app.db.base import Base
 
@@ -23,6 +23,14 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    __table_args__ = (
+        Index(
+            "ix_users_role_active_created_at",
+            "role",
+            "is_active",
+            created_at.desc(),
+        ),
+    )
 
 
 

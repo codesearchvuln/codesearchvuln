@@ -249,7 +249,7 @@ class MockAgentTask:
     status: str = "pending"
     current_phase: str = "planning"
     target_vulnerabilities: list = None
-    verification_level: str = "sandbox"
+    verification_level: str = "analysis_with_poc_plan"
     exclude_patterns: list = None
     target_files: list = None
     max_iterations: int = 50
@@ -292,4 +292,3 @@ def count_findings_by_type(findings: list, vuln_type: str) -> int:
 def count_findings_by_severity(findings: list, severity: str) -> int:
     """统计特定严重程度的漏洞数量"""
     return sum(1 for f in findings if f.get("severity") == severity)
-

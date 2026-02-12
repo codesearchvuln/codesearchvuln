@@ -236,15 +236,19 @@ class AgentEventEmitter:
         findings_count: int,
         duration_ms: int,
         message: Optional[str] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
     ):
         """发射任务完成事件"""
+        metadata = {
+            "findings_count": findings_count,
+            "duration_ms": duration_ms,
+        }
+        if isinstance(extra_metadata, dict):
+            metadata.update(extra_metadata)
         await self.emit(AgentEventData(
             event_type="task_complete",
             message=message or f"✅ 审计完成！发现 {findings_count} 个漏洞，耗时 {duration_ms/1000:.1f}秒",
-            metadata={
-                "findings_count": findings_count,
-                "duration_ms": duration_ms,
-            },
+            metadata=metadata,
         ))
     
     async def emit_task_error(self, error: str, message: Optional[str] = None):

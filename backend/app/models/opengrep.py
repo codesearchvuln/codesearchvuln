@@ -17,6 +17,8 @@ from sqlalchemy import (
     ForeignKey,
     Enum as SQLEnum,
     JSON,
+    Index,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -42,6 +44,16 @@ class OpengrepScanTask(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    __table_args__ = (
+        Index("ix_opengrep_tasks_project_created_at", "project_id", created_at.desc()),
+        Index(
+            "ix_opengrep_tasks_project_lower_status_created_at",
+            "project_id",
+            func.lower(status),
+            created_at.desc(),
+        ),
+    )
+
     # Relationships
     project = relationship("Project", back_populates="opengrep_scan_tasks")
     findings = relationship(
@@ -64,6 +76,17 @@ class OpengrepFinding(Base):
     )  # error, warning, info
     status = Column(String, default="open", comment="open, verified, false_positive")
 
+    __table_args__ = (
+        Index("ix_opengrep_findings_scan_task_status", "scan_task_id", "status"),
+        Index(
+            "ix_opengrep_findings_scan_task_sev_status_line",
+            "scan_task_id",
+            "severity",
+            "status",
+            "start_line",
+        ),
+    )
+
     # Relationships
     scan_task = relationship("OpengrepScanTask", back_populates="findings")
 
@@ -84,3 +107,16 @@ class OpengrepRule(Base):
     correct = Column(Boolean, default=False, comment="是否是正确的语法")
     is_active = Column(Boolean, default=True, comment="是否启用")
     create_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_opengrep_rules_name"),
+        Index(
+            "ix_opengrep_rules_active_filters",
+            "is_active",
+            "language",
+            "source",
+            "severity",
+            "confidence",
+        ),
+        Index("ix_opengrep_rules_source_correct", "source", "correct"),
+    )

@@ -106,11 +106,18 @@ export default function CreateAgentTaskDialog({
 			setBranch("main");
 			setExcludePatterns(DEFAULT_EXCLUDES);
 			setShowAdvanced(false);
-			setZipFile(null);
-			setStoredZipInfo(null);
-			setSelectedFiles(undefined);
+				setZipFile(null);
+				setStoredZipInfo(null);
+				setSelectedFiles(undefined);
+			}
+		}, [open]);
+
+	const effectiveTargetFiles = useMemo(() => {
+		if (selectedFiles && selectedFiles.length > 0) {
+			return selectedFiles;
 		}
-	}, [open]);
+		return [];
+	}, [selectedFiles]);
 
 	// 加载分支列表
 	useEffect(() => {
@@ -180,10 +187,20 @@ export default function CreateAgentTaskDialog({
 	const canStart = useMemo(() => {
 		if (!selectedProject) return false;
 		if (isZipProject(selectedProject)) {
-			return (useStoredZip && storedZipInfo?.has_file) || !!zipFile;
+			if (!((useStoredZip && storedZipInfo?.has_file) || !!zipFile)) {
+				return false;
+			}
+		} else if (!selectedProject.repository_url || !branch.trim()) {
+			return false;
 		}
-		return !!selectedProject.repository_url && !!branch.trim();
-	}, [selectedProject, useStoredZip, storedZipInfo, zipFile, branch]);
+		return true;
+	}, [
+		selectedProject,
+		useStoredZip,
+		storedZipInfo,
+		zipFile,
+		branch,
+	]);
 
 	// 创建任务
 	const handleCreate = async () => {
@@ -206,8 +223,8 @@ export default function CreateAgentTaskDialog({
 				name: `智能审计-${selectedProject.name}`,
 				branch_name: isRepositoryProject(selectedProject) ? branch : undefined,
 				exclude_patterns: excludePatterns,
-				target_files: selectedFiles,
-				verification_level: "sandbox",
+				target_files: effectiveTargetFiles.length ? effectiveTargetFiles : undefined,
+				verification_level: "analysis_with_poc_plan",
 			});
 
 			onOpenChange(false);
@@ -337,7 +354,7 @@ export default function CreateAgentTaskDialog({
 							)}
 
 							{/* ZIP 项目：文件选择 */}
-							{isZipProject(selectedProject) && (
+								{isZipProject(selectedProject) && (
 								<div className="p-3 border border-border rounded bg-amber-950/20 space-y-3">
 									<div className="flex items-center gap-3">
 										<Package className="w-5 h-5 text-amber-400" />
@@ -401,9 +418,21 @@ export default function CreateAgentTaskDialog({
 										</label>
 									</div>
 								</div>
-							)}
+								)}
 
-							{/* 高级选项 */}
+								<div className="p-3 border border-border rounded bg-muted/50 space-y-2">
+									<p className="font-mono text-xs uppercase font-bold text-muted-foreground">
+										验证模式
+									</p>
+									<p className="text-sm text-foreground font-medium">
+										分析 + PoC 思路
+									</p>
+									<p className="text-[11px] text-muted-foreground">
+										固定单档模式：输出漏洞分析与可行 PoC 思路（非武器化）
+									</p>
+								</div>
+
+								{/* 高级选项 */}
 							<Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
 								<CollapsibleTrigger className="flex items-center gap-2 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors">
 									<ChevronRight

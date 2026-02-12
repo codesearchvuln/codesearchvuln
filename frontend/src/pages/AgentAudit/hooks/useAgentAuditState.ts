@@ -32,6 +32,31 @@ const initialState: AgentAuditState = {
   expandedLogIds: new Set(),
 };
 
+const INDEX_PROGRESS_PATTERN = /索引进度[:：]?\s*(\d+)\s*\/\s*(\d+)/;
+
+function inferProgressStatus(
+  progressKey: string,
+  title: string,
+): "running" | "completed" {
+  const normalizedTitle = String(title || "").trim();
+
+  if (progressKey === "index_progress") {
+    if (/索引.*完成/.test(normalizedTitle) || /index(?:ing)?\s+(?:complete|completed)/i.test(normalizedTitle)) {
+      return "completed";
+    }
+    const matched = normalizedTitle.match(INDEX_PROGRESS_PATTERN);
+    if (matched) {
+      const current = Number(matched[1]);
+      const total = Number(matched[2]);
+      if (Number.isFinite(current) && Number.isFinite(total) && total > 0 && current >= total) {
+        return "completed";
+      }
+    }
+  }
+
+  return "running";
+}
+
 // ============ Reducer ============
 
 function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): AgentAuditState {
@@ -129,7 +154,8 @@ function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): Ag
     }
 
     case 'UPDATE_OR_ADD_PROGRESS_LOG': {
-      const { progressKey, title, agentName } = action.payload;
+      const { progressKey, title, agentName, progressStatus } = action.payload;
+      const nextStatus = progressStatus || inferProgressStatus(progressKey, title);
       // 查找是否已存在相同 progressKey 的进度日志
       const existingIndex = state.logs.findIndex(
         log => log.type === 'progress' && log.progressKey === progressKey
@@ -142,6 +168,10 @@ function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): Ag
           ...updatedLogs[existingIndex],
           title,
           time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+          progressStatus:
+            updatedLogs[existingIndex].progressStatus === "completed"
+              ? "completed"
+              : nextStatus,
         };
         return { ...state, logs: updatedLogs };
       } else {
@@ -151,6 +181,7 @@ function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): Ag
           title,
           progressKey,
           agentName,
+          progressStatus: nextStatus,
         });
         return { ...state, logs: [...state.logs, newLog] };
       }
@@ -304,8 +335,10 @@ export function useAgentAuditState() {
   }, [state.logs, state.selectedAgentId, treeNodes, state.showAllLogs]);
 
   const isRunning = useMemo(() => {
-    return state.task?.status === 'running' || state.task?.status === 'pending';
-  }, [state.task?.status]);
+    if (!state.task) return false;
+    if (state.task.completed_at) return false;
+    return state.task.status === "running" || state.task.status === "pending";
+  }, [state.task]);
 
   const isComplete = useMemo(() => {
     const status = state.task?.status;

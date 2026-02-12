@@ -41,7 +41,7 @@ import {
 } from "./components";
 import ReportExportDialog from "./components/ReportExportDialog";
 import { useAgentAuditState } from "./hooks";
-import { ACTION_VERBS, POLLING_INTERVALS } from "./constants";
+import { ACTION_VERBS, POLLING_INTERVALS, TASK_PHASE_LABELS } from "./constants";
 import { cleanThinkingContent } from "./utils";
 import type { DetailViewState, FindingsViewFilters } from "./types";
 
@@ -108,6 +108,11 @@ function extractToolOutputText(value: unknown): string {
   return eventToString(value);
 }
 
+function extractStepName(message: string): string | null {
+  const matched = message.trim().match(/^\[([A-Z0-9_]+)\]/);
+  return matched?.[1] ?? null;
+}
+
 function normalizeToolStatus(
   statusValue: unknown,
   fallbackEventType: string,
@@ -123,6 +128,19 @@ function normalizeToolStatus(
     return "failed";
   }
   return "completed";
+}
+
+function toSafeNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function AgentAuditPageContent() {
@@ -181,6 +199,7 @@ function AgentAuditPageContent() {
     type: "log" | "finding" | "agent";
     id: string;
   } | null>(null);
+  const [terminalFailureReason, setTerminalFailureReason] = useState<string | null>(null);
   const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
   const [highlightedFindingId, setHighlightedFindingId] = useState<string | null>(null);
   const [highlightedAgentId, setHighlightedAgentId] = useState<string | null>(null);
@@ -237,6 +256,81 @@ function AgentAuditPageContent() {
         : null,
     [detailDialog, treeNodes],
   );
+  const failedReason = useMemo(() => {
+    if (task?.status !== "failed") return null;
+    const reason = terminalFailureReason || task.error_message || "";
+    const normalized = reason.trim();
+    return normalized || "任务执行失败";
+  }, [task?.status, task?.error_message, terminalFailureReason]);
+  const failedStep = useMemo(
+    () => (failedReason ? extractStepName(failedReason) : null),
+    [failedReason],
+  );
+  const currentPhaseLabel = useMemo(() => {
+    const phaseKey = String(task?.current_phase || "")
+      .trim()
+      .toLowerCase();
+    if (phaseKey && TASK_PHASE_LABELS[phaseKey]) {
+      return TASK_PHASE_LABELS[phaseKey];
+    }
+    if (task?.status === "completed") return "完成";
+    if (task?.status === "failed") return "失败";
+    if (task?.status === "cancelled") return "已取消";
+    return null;
+  }, [task?.current_phase, task?.status]);
+  const phaseHint = useMemo(() => {
+    const currentStep = String(task?.current_step || "").trim();
+    if (currentStep) return currentStep;
+    if (!isRunning) return null;
+    if (currentPhaseLabel) return `当前阶段：${currentPhaseLabel}`;
+    return null;
+  }, [task?.current_step, isRunning, currentPhaseLabel]);
+  const resultConsistency = useMemo(() => {
+    const currentStep = String(task?.current_step || "");
+    const match = currentStep.match(
+      /编排发现\s*(\d+)\s*\/\s*入库\s*(\d+)\s*\/\s*过滤\s*(\d+)/,
+    );
+    if (match) {
+      return {
+        orchestrator: Number(match[1]),
+        persisted: Number(match[2]),
+        filtered: Number(match[3]),
+        filteredReasons: null,
+      };
+    }
+
+    for (let i = logs.length - 1; i >= 0; i -= 1) {
+      const candidate = logs[i];
+      const detail = candidate.detail;
+      if (!detail || detail.event_type !== "task_complete") {
+        continue;
+      }
+      const metadata = detail.metadata as Record<string, unknown> | undefined;
+      const orchestrator = toSafeNumber(metadata?.orchestrator_findings_count);
+      const persisted = toSafeNumber(metadata?.persisted_findings_count);
+      const filtered = toSafeNumber(metadata?.filtered_findings_count);
+      if (orchestrator !== null && persisted !== null && filtered !== null) {
+        const rawReasons = metadata?.filtered_reasons;
+        const filteredReasons =
+          rawReasons && typeof rawReasons === "object" && !Array.isArray(rawReasons)
+            ? (rawReasons as Record<string, number>)
+            : null;
+        return {
+          orchestrator,
+          persisted,
+          filtered,
+          filteredReasons,
+        };
+      }
+    }
+    return null;
+  }, [logs, task?.current_step]);
+  const runningStatusText = useMemo(() => {
+    const phaseText = currentPhaseLabel ? `当前阶段：${currentPhaseLabel}` : "";
+    if (phaseHint) return phaseHint;
+    if (phaseText) return phaseText;
+    return `${statusVerb}${".".repeat(statusDots)}`;
+  }, [currentPhaseLabel, phaseHint, statusDots, statusVerb]);
 
   const setDetailQuery = useCallback(
     (nextDetail: { type: "log" | "finding" | "agent"; id: string } | null) => {
@@ -376,6 +470,7 @@ function AgentAuditPageContent() {
       setHighlightedLogId(null);
       setHighlightedFindingId(null);
       setHighlightedAgentId(null);
+      setTerminalFailureReason(null);
       toolLogIdByCallIdRef.current.clear();
     }
     previousTaskIdRef.current = taskId;
@@ -413,6 +508,12 @@ function AgentAuditPageContent() {
     try {
       const data = await getAgentTask(taskId);
       setTask(data);
+      if (data.status === "failed" && typeof data.error_message === "string") {
+        const message = data.error_message.trim();
+        if (message) {
+          setTerminalFailureReason(message);
+        }
+      }
     } catch {
       toast.error("加载任务失败");
     }
@@ -765,11 +866,18 @@ function AgentAuditPageContent() {
         return;
       }
       if (eventType === "task_error") {
+        const taskErrorMessage =
+          message ||
+          eventToString(metadata?.error).trim() ||
+          "任务执行出错";
+        if (taskErrorMessage) {
+          setTerminalFailureReason(taskErrorMessage);
+        }
         dispatch({
           type: "ADD_LOG",
           payload: {
             type: "error",
-            title: message || "任务执行出错",
+            title: taskErrorMessage,
             agentName,
             detail: baseDetail,
           },
@@ -822,6 +930,19 @@ function AgentAuditPageContent() {
           return;
         }
 
+        if (/索引.*完成/.test(fallback) || /index(?:ing)?\s+(?:complete|completed)/i.test(fallback)) {
+          dispatch({
+            type: "UPDATE_OR_ADD_PROGRESS_LOG",
+            payload: {
+              progressKey: "index_progress",
+              title: fallback,
+              agentName,
+              progressStatus: "completed",
+            },
+          });
+          return;
+        }
+
         dispatch({
           type: "ADD_LOG",
           payload: {
@@ -831,6 +952,13 @@ function AgentAuditPageContent() {
             detail: baseDetail,
           },
         });
+        if (
+          eventType === "error" &&
+          Boolean(metadata?.is_terminal) &&
+          fallback
+        ) {
+          setTerminalFailureReason(fallback);
+        }
         return;
       }
 
@@ -1305,6 +1433,8 @@ function AgentAuditPageContent() {
         task={task}
         isRunning={isRunning}
         isCancelling={isCancelling}
+        phaseLabel={currentPhaseLabel}
+        phaseHint={phaseHint}
         onBack={handleBack}
         onCancel={handleCancel}
         onExport={handleExportReport}
@@ -1315,6 +1445,16 @@ function AgentAuditPageContent() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Panel - Activity Log / Findings */}
         <div className="w-3/4 flex flex-col border-r border-border relative">
+          {failedReason && (
+            <div className="mx-4 mt-3 mb-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3">
+              <div className="text-sm font-semibold text-rose-600 dark:text-rose-300">
+                智能审计失败{failedStep ? `（${failedStep}）` : ""}
+              </div>
+              <div className="mt-1 text-xs font-mono text-rose-700 dark:text-rose-200 whitespace-pre-wrap break-words">
+                {failedReason}
+              </div>
+            </div>
+          )}
           <div className="flex-shrink-0 h-12 border-b border-border flex items-center justify-between px-4 bg-card">
             <div className="flex items-center gap-2">
               <button
@@ -1485,8 +1625,7 @@ function AgentAuditPageContent() {
                   <span className="flex items-center gap-2.5 text-emerald-600 dark:text-emerald-400">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                     <span className="font-mono font-semibold">
-                      {statusVerb}
-                      {".".repeat(statusDots)}
+                      运行中（{runningStatusText}）
                     </span>
                   </span>
                 ) : isComplete ? (
@@ -1498,7 +1637,7 @@ function AgentAuditPageContent() {
                     {task.status === "completed"
                       ? "已完成"
                       : task.status === "failed"
-                        ? "失败"
+                        ? `失败${failedStep ? `（${failedStep}）` : ""}`
                         : task.status === "cancelled"
                           ? "已取消"
                           : task.status === "aborted"
@@ -1615,7 +1754,11 @@ function AgentAuditPageContent() {
 
           {/* Bottom section - Stats */}
           <div className="flex-shrink-0 p-4 bg-card">
-            <StatsPanel task={task} findings={findings} />
+            <StatsPanel
+              task={task}
+              findings={findings}
+              resultConsistency={resultConsistency}
+            />
           </div>
         </div>
       </div>

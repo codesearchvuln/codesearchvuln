@@ -3,7 +3,18 @@
 """
 
 import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Float
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    DateTime,
+    ForeignKey,
+    Boolean,
+    Integer,
+    Float,
+    Index,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -40,6 +51,15 @@ class AuditRuleSet(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "ix_audit_rule_sets_active_language_type",
+            "is_active",
+            "language",
+            "rule_type",
+        ),
+    )
 
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
@@ -85,6 +105,11 @@ class AuditRule(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("rule_set_id", "rule_code", name="uq_audit_rules_rule_set_code"),
+        Index("ix_audit_rules_rule_set_enabled_sort", "rule_set_id", "enabled", "sort_order"),
+    )
 
     # Relationships
     rule_set = relationship("AuditRuleSet", back_populates="rules")

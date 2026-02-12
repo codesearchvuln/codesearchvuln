@@ -3,7 +3,7 @@
 """
 
 import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -40,6 +40,10 @@ class PromptTemplate(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_prompt_templates_active_type_sort", "is_active", "template_type", "sort_order"),
+    )
 
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])

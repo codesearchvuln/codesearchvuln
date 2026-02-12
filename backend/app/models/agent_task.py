@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from sqlalchemy import (
     Column, String, Integer, Float, Text, Boolean, 
-    DateTime, ForeignKey, Enum as SQLEnum, JSON
+    DateTime, ForeignKey, Enum as SQLEnum, JSON, Index, text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -60,7 +60,7 @@ class AgentTask(Base):
     # 任务配置
     audit_scope = Column(JSON, nullable=True)  # 审计范围配置
     target_vulnerabilities = Column(JSON, nullable=True)  # 目标漏洞类型
-    verification_level = Column(String(50), default="sandbox")  # analysis_only, sandbox, generate_poc
+    verification_level = Column(String(50), default="analysis_with_poc_plan")  # unified mode: analysis + PoC plan
     
     # 分支信息（仓库项目）
     branch_name = Column(String(255), nullable=True)
@@ -124,6 +124,16 @@ class AgentTask(Base):
     
     # 创建者
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_agent_tasks_project_status_created",
+            "project_id",
+            "status",
+            created_at.desc(),
+        ),
+        Index("ix_agent_tasks_created_by_created", "created_by", created_at.desc()),
+    )
     
     # 关联关系
     project = relationship("Project", back_populates="agent_tasks")
@@ -252,6 +262,12 @@ class AgentEvent(Base):
     
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_agent_events_task_sequence", "task_id", "sequence"),
+        Index("ix_agent_events_task_created_at", "task_id", created_at.desc()),
+        Index("ix_agent_events_task_type_sequence", "task_id", "event_type", "sequence"),
+    )
     
     # 关联关系
     task = relationship("AgentTask", back_populates="events")
@@ -400,6 +416,23 @@ class AgentFinding(Base):
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_agent_findings_task_status_created", "task_id", "status", created_at.desc()),
+        Index(
+            "ix_agent_findings_task_verified_created",
+            "task_id",
+            "is_verified",
+            created_at.desc(),
+        ),
+        Index(
+            "ix_agent_findings_task_severity_created_active",
+            "task_id",
+            "severity",
+            created_at.desc(),
+            postgresql_where=text("status <> 'false_positive'"),
+        ),
+    )
     
     # 关联关系
     task = relationship("AgentTask", back_populates="findings")
@@ -486,6 +519,16 @@ class AgentCheckpoint(Base):
     
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_agent_checkpoints_task_created", "task_id", created_at.desc()),
+        Index(
+            "ix_agent_checkpoints_task_agent_created",
+            "task_id",
+            "agent_id",
+            created_at.desc(),
+        ),
+    )
     
     def __repr__(self):
         return f"<AgentCheckpoint {self.agent_id} - iter {self.iteration}>"
@@ -554,6 +597,10 @@ class AgentTreeNode(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_agent_tree_nodes_task_depth_created", "task_id", "depth", "created_at"),
+    )
     
     def __repr__(self):
         return f"<AgentTreeNode {self.agent_name} ({self.agent_id})>"

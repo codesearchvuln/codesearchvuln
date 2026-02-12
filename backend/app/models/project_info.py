@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Float, ForeignKey, DateTime, JSON
+from sqlalchemy import Column, String, Integer, Float, ForeignKey, DateTime, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.db.base import Base
@@ -15,6 +15,11 @@ class ProjectInfo(Base):
     description = Column(String, nullable=True, comment="项目描述, 由大模型生成")
     status = Column(String, default="pending", comment="信息状态: pending, completed, failed")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
+
+    __table_args__ = (
+        UniqueConstraint("project_id", name="uq_project_info_project_id"),
+        Index("ix_project_info_project_created_at", "project_id", created_at.desc()),
+    )
 
     # Relationships
     project = relationship("Project", back_populates="infos")

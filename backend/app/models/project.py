@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -29,6 +29,16 @@ class Project(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    __table_args__ = (
+        Index(
+            "ix_projects_owner_active_created_at",
+            "owner_id",
+            "is_active",
+            created_at.desc(),
+        ),
+        Index("ix_projects_active_updated_at", "is_active", updated_at.desc()),
+    )
+
     # Relationships
     owner = relationship("User", backref="projects")
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
@@ -54,8 +64,13 @@ class ProjectMember(Base):
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_project_members_project_user"),
+        Index("ix_project_members_project_joined_at", "project_id", joined_at.desc()),
+        Index("ix_project_members_user_project", "user_id", "project_id"),
+    )
+
     # Relationships
     project = relationship("Project", back_populates="members")
     user = relationship("User", backref="project_memberships")
-
 

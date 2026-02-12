@@ -1066,27 +1066,6 @@ export const ReportExportDialog = memo(function ReportExportDialog({
       align-items: center;
     }
 
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .brand-logo {
-      width: 28px;
-      height: 28px;
-      background: linear-gradient(135deg, var(--accent), #ff8f5a);
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: 0.9rem;
-      color: white;
-    }
-
-    .brand-text { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
-
     .header-title {
       font-size: 1.25rem;
       font-weight: 700;
@@ -1453,27 +1432,6 @@ export const ReportExportDialog = memo(function ReportExportDialog({
       color: var(--text-muted);
     }
 
-    .footer-brand {
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
-      color: var(--text-secondary);
-      font-weight: 600;
-    }
-
-    .footer-brand-icon {
-      width: 16px;
-      height: 16px;
-      background: linear-gradient(135deg, var(--accent), #ff8f5a);
-      border-radius: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.6rem;
-      color: white;
-      font-weight: 800;
-    }
-
     /* Responsive */
     @media (max-width: 768px) {
       .container { padding: 0 1rem; }
@@ -1514,10 +1472,6 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   <header class="header">
     <div class="container">
       <div class="header-content">
-        <div class="brand">
-          <div class="brand-logo">D</div>
-          <span class="brand-text">VulHunter</span>
-        </div>
         <h1 class="header-title">${taskName}</h1>
         <div class="header-meta">${generateDate}</div>
       </div>
@@ -1611,10 +1565,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   <footer class="report-footer">
     <div class="container">
       <div class="footer-content">
-        <div class="footer-brand">
-          <div class="footer-brand-icon">D</div>
-          VulHunter
-        </div>
+        <span>安全审计报告</span>
         <span>·</span>
         <span>${generateDate}</span>
       </div>

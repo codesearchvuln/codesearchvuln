@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { LOG_TYPE_CONFIG, SEVERITY_COLORS } from "../constants";
 import type { LogEntryProps, ToolStatus } from "../types";
@@ -47,6 +47,18 @@ export const LogEntry = memo(function LogEntry({
   const config = LOG_TYPE_CONFIG[item.type] || LOG_TYPE_CONFIG.info;
   const typeLabel = LOG_TYPE_LABELS[item.type] || "日志";
   const toolStatus = item.tool?.status;
+  const isProgressCompleted =
+    item.type === "progress" && item.progressStatus === "completed";
+  const typeIcon =
+    item.type === "progress" ? (
+      isProgressCompleted ? (
+        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+      ) : (
+        <Loader2 className="w-4 h-4 text-cyan-600 dark:text-cyan-400 animate-spin" />
+      )
+    ) : (
+      config.icon
+    );
   const formattedTitle = formatTitle(item.title) || item.title;
   const contentPreview = item.content
     ? item.content.slice(0, 220) + (item.content.length > 220 ? "..." : "")
@@ -68,7 +80,7 @@ export const LogEntry = memo(function LogEntry({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground/80">{config.icon}</span>
+            <span className="text-muted-foreground/80">{typeIcon}</span>
             <span className="text-xs font-mono uppercase text-muted-foreground tracking-wide">
               {typeLabel}
             </span>
@@ -108,6 +120,17 @@ export const LogEntry = memo(function LogEntry({
                   <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                 )}
                 {TOOL_STATUS_LABELS[toolStatus]}
+              </Badge>
+            ) : item.type === "progress" ? (
+              <Badge
+                variant="outline"
+                className={`h-6 px-2 text-[11px] font-medium ${
+                  isProgressCompleted
+                    ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10"
+                    : "border-cyan-500/40 text-cyan-600 dark:text-cyan-300 bg-cyan-500/10"
+                }`}
+              >
+                {isProgressCompleted ? "已完成" : "进行中"}
               </Badge>
             ) : item.severity ? (
               <Badge
