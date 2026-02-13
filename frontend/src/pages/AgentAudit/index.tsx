@@ -30,6 +30,7 @@ import {
   cancelAgentTask,
   getAgentTree,
   getAgentEvents,
+  type AgentFinding,
   AgentEvent,
 } from "@/shared/api/agentTasks";
 import {
@@ -50,7 +51,7 @@ import {
 } from "./components";
 import ReportExportDialog from "./components/ReportExportDialog";
 import { useAgentAuditState } from "./hooks";
-import { ACTION_VERBS, POLLING_INTERVALS, TASK_PHASE_LABELS } from "./constants";
+import { POLLING_INTERVALS, TASK_PHASE_LABELS } from "./constants";
 import { cleanThinkingContent } from "./utils";
 import type {
   BootstrapInputsSummary,
@@ -200,18 +201,188 @@ function toSafeNumber(value: unknown): number | null {
   return null;
 }
 
+function toSafeTrimmedString(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function buildFindingFingerprint(input: {
+  vulnerability_type: unknown;
+  file_path: unknown;
+  line_start: unknown;
+  title: unknown;
+}): string {
+  const vulnerabilityType = toSafeTrimmedString(input.vulnerability_type) || "unknown";
+  const filePath = toSafeTrimmedString(input.file_path);
+  const lineStart =
+    typeof input.line_start === "number" && Number.isFinite(input.line_start)
+      ? String(input.line_start)
+      : "";
+  const title = toSafeTrimmedString(input.title);
+  return [vulnerabilityType, filePath, lineStart, title].join("|");
+}
+
+function pickNewerIsoTimestamp(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): string | null {
+  const left = typeof a === "string" ? a : "";
+  const right = typeof b === "string" ? b : "";
+  if (!left && !right) return null;
+  if (!left) return right || null;
+  if (!right) return left || null;
+  return right.localeCompare(left) > 0 ? right : left;
+}
+
+function agentFindingToRealtimeItem(finding: AgentFinding): RealtimeMergedFindingItem | null {
+  // Default: do not surface false positives in "potential defects".
+  if (finding.status === "false_positive" || finding.authenticity === "false_positive") {
+    return null;
+  }
+
+  const fingerprint = buildFindingFingerprint({
+    vulnerability_type: finding.vulnerability_type,
+    file_path: finding.file_path,
+    line_start: finding.line_start,
+    title: finding.title,
+  });
+
+  return {
+    id: finding.id,
+    fingerprint,
+    title: toSafeTrimmedString(finding.title) || "发现缺陷",
+    severity: toSafeTrimmedString(finding.severity) || "medium",
+    vulnerability_type: toSafeTrimmedString(finding.vulnerability_type) || "unknown",
+    file_path: finding.file_path ?? null,
+    line_start: finding.line_start ?? null,
+    timestamp: finding.created_at ?? null,
+    is_verified: Boolean(finding.is_verified),
+  };
+}
+
+function agentEventToRealtimeItem(event: AgentEvent): RealtimeMergedFindingItem | null {
+  const eventType = toSafeTrimmedString(event.event_type).toLowerCase();
+  if (
+    eventType !== "finding_new" &&
+    eventType !== "finding_verified" &&
+    eventType !== "finding_update" &&
+    eventType !== "finding"
+  ) {
+    return null;
+  }
+
+  const md = event.metadata ?? {};
+  const title =
+    toSafeTrimmedString((md as any).title) ||
+    toSafeTrimmedString(event.message) ||
+    "发现缺陷";
+  const vulnerabilityType = toSafeTrimmedString((md as any).vulnerability_type) || "unknown";
+  const filePath = toSafeTrimmedString((md as any).file_path) || null;
+  const lineStart =
+    typeof (md as any).line_start === "number" && Number.isFinite((md as any).line_start)
+      ? ((md as any).line_start as number)
+      : null;
+  const severity = toSafeTrimmedString((md as any).severity) || "medium";
+  const mdTimestamp =
+    typeof (md as any).timestamp === "string" ? ((md as any).timestamp as string) : null;
+  const timestamp = event.timestamp || mdTimestamp || null;
+  const isVerified =
+    eventType === "finding_verified" || (md as any).is_verified === true;
+
+  const fingerprint = buildFindingFingerprint({
+    vulnerability_type: vulnerabilityType,
+    file_path: filePath || "",
+    line_start: lineStart,
+    title,
+  });
+
+  const id =
+    toSafeTrimmedString(event.finding_id) ||
+    toSafeTrimmedString((md as any).id) ||
+    toSafeTrimmedString(event.id) ||
+    `finding-${Date.now()}`;
+
+  return {
+    id,
+    fingerprint,
+    title,
+    severity,
+    vulnerability_type: vulnerabilityType,
+    file_path: filePath,
+    line_start: lineStart,
+    timestamp,
+    is_verified: Boolean(isVerified),
+  };
+}
+
+function mergeRealtimeFindingsBatch(
+  prev: RealtimeMergedFindingItem[],
+  incoming: RealtimeMergedFindingItem[],
+  options: { source: "db" | "event" },
+): RealtimeMergedFindingItem[] {
+  if (!incoming.length) return prev;
+
+  const byFingerprint = new Map<string, RealtimeMergedFindingItem>();
+  for (const item of prev) {
+    if (!item?.fingerprint) continue;
+    if (!byFingerprint.has(item.fingerprint)) {
+      byFingerprint.set(item.fingerprint, item);
+    }
+  }
+
+  for (const item of incoming) {
+    if (!item?.fingerprint) continue;
+    const existing = byFingerprint.get(item.fingerprint);
+    if (!existing) {
+      byFingerprint.set(item.fingerprint, item);
+      continue;
+    }
+
+    const preferIncoming = options.source === "db";
+    const merged: RealtimeMergedFindingItem = {
+      ...existing,
+      // Prefer DB fields; event backfill only fills blanks.
+      id: preferIncoming ? (item.id || existing.id) : (existing.id || item.id),
+      title: preferIncoming
+        ? (item.title || existing.title)
+        : (existing.title || item.title),
+      severity: preferIncoming
+        ? (item.severity || existing.severity)
+        : (existing.severity || item.severity),
+      vulnerability_type: preferIncoming
+        ? (item.vulnerability_type || existing.vulnerability_type)
+        : (existing.vulnerability_type || item.vulnerability_type),
+      file_path: preferIncoming
+        ? (item.file_path ?? existing.file_path)
+        : (existing.file_path ?? item.file_path),
+      line_start: preferIncoming
+        ? (item.line_start ?? existing.line_start)
+        : (existing.line_start ?? item.line_start),
+      timestamp: pickNewerIsoTimestamp(existing.timestamp, item.timestamp),
+      is_verified: Boolean(existing.is_verified) || Boolean(item.is_verified),
+    };
+
+    byFingerprint.set(item.fingerprint, merged);
+  }
+
+  const merged = Array.from(byFingerprint.values());
+  merged.sort((a, b) =>
+    String(b.timestamp || "").localeCompare(String(a.timestamp || "")),
+  );
+  return merged.slice(0, 500);
+}
+
 function AgentAuditPageContent() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-	  const {
-	    task,
-	    findings,
-	    agentTree,
-	    logs,
-	    isLoading,
-	    isAutoScroll,
-	    treeNodes,
+  const {
+    task,
+    findings,
+    agentTree,
+    logs,
+    isLoading,
+    isAutoScroll,
+    treeNodes,
     filteredLogs,
     isRunning,
     isComplete,
@@ -236,8 +407,6 @@ function AgentAuditPageContent() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [statusVerb, setStatusVerb] = useState(ACTION_VERBS[0]);
-  const [statusDots, setStatusDots] = useState(0);
   const [activeMainTab, setActiveMainTab] = useState<"logs" | "findings">(
     "logs",
   );
@@ -272,6 +441,7 @@ function AgentAuditPageContent() {
 
   // Realtime panels state
   const [realtimeFindings, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
+  const potentialFindingsManuallyClearedRef = useRef(false);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement | null>(null);
@@ -354,12 +524,13 @@ function AgentAuditPageContent() {
     if (currentPhaseLabel) return `当前阶段：${currentPhaseLabel}`;
     return null;
   }, [task?.current_step, isRunning, currentPhaseLabel]);
-  const runningStatusText = useMemo(() => {
-    const phaseText = currentPhaseLabel ? `当前阶段：${currentPhaseLabel}` : "";
-    if (phaseHint) return phaseHint;
-    if (phaseText) return phaseText;
-    return `${statusVerb}${".".repeat(statusDots)}`;
-  }, [currentPhaseLabel, phaseHint, statusDots, statusVerb]);
+  const agentCardStatusText = useMemo(() => {
+    if (isRunning) return "运行中";
+    if (task?.status === "completed") return "完成";
+    if (task?.status === "failed") return "失败";
+    if (task?.status === "cancelled") return "已取消";
+    return "就绪";
+  }, [isRunning, task?.status]);
 
   const setDetailQuery = useCallback(
     (nextDetail: { type: "log" | "finding" | "agent"; id: string } | null) => {
@@ -481,6 +652,7 @@ function AgentAuditPageContent() {
 
       // 2.1 重置 realtime 面板
       setRealtimeFindings([]);
+      potentialFindingsManuallyClearedRef.current = false;
       // 3. 重置事件序列号和加载状态
       lastEventSequenceRef.current = 0;
       hasConnectedRef.current = false; // 🔥 重置 SSE 连接标志
@@ -612,10 +784,10 @@ function AgentAuditPageContent() {
       setBootstrapInputsSummary((prev) =>
         prev && prev.taskId === scanTaskId
           ? {
-              ...prev,
-              candidateCount: Math.max(prev.candidateCount, filtered.length),
-              totalFindings: Math.max(prev.totalFindings, allFindings.length),
-            }
+            ...prev,
+            candidateCount: Math.max(prev.candidateCount, filtered.length),
+            totalFindings: Math.max(prev.totalFindings, allFindings.length),
+          }
           : prev,
       );
     } catch (error) {
@@ -1107,6 +1279,18 @@ function AgentAuditPageContent() {
         if (events.length === 0) {
           return;
         }
+
+        if (!potentialFindingsManuallyClearedRef.current) {
+          const findingItems = events
+            .map(agentEventToRealtimeItem)
+            .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+          if (findingItems.length) {
+            setRealtimeFindings((prev) =>
+              mergeRealtimeFindingsBatch(prev, findingItems, { source: "event" }),
+            );
+          }
+        }
+
         events.forEach((event) => appendLogFromEvent(event));
         const lastSequence = events[events.length - 1]?.sequence ?? startAfter;
         lastEventSequenceRef.current = Math.max(
@@ -1144,6 +1328,18 @@ function AgentAuditPageContent() {
       if (!events.length) {
         return 0;
       }
+
+      if (!potentialFindingsManuallyClearedRef.current) {
+        const findingItems = events
+          .map(agentEventToRealtimeItem)
+          .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+        if (findingItems.length) {
+          setRealtimeFindings((prev) =>
+            mergeRealtimeFindingsBatch(prev, findingItems, { source: "event" }),
+          );
+        }
+      }
+
       events.forEach((event) => appendLogFromEvent(event));
       lastEventSequenceRef.current = Math.max(
         lastEventSequenceRef.current,
@@ -1170,6 +1366,19 @@ function AgentAuditPageContent() {
     bootstrapInputsSummary?.totalFindings,
     loadBootstrapInputFindings,
   ]);
+
+  // Backfill "potential findings" from DB findings so they persist across reloads.
+  useEffect(() => {
+    if (potentialFindingsManuallyClearedRef.current) return;
+    if (!findings.length) return;
+    const items = findings
+      .map(agentFindingToRealtimeItem)
+      .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+    if (!items.length) return;
+    setRealtimeFindings((prev) =>
+      mergeRealtimeFindingsBatch(prev, items, { source: "db" }),
+    );
+  }, [findings]);
 
   // ============ Stream Event Handling ============
 
@@ -1249,6 +1458,7 @@ function AgentAuditPageContent() {
         }
       },
       onFinding: (finding: Record<string, unknown>, isVerified: boolean) => {
+        potentialFindingsManuallyClearedRef.current = false;
         const safeText = (value: unknown) => String(value ?? "").trim();
         const title = safeText(finding.title) || "发现漏洞";
         const vulnerabilityType = safeText(finding.vulnerability_type) || "unknown";
@@ -1349,21 +1559,6 @@ function AgentAuditPageContent() {
   }, [disconnectStream]);
 
   // ============ Effects ============
-
-  // Status animation
-  useEffect(() => {
-    if (!isRunning) return;
-    const dotTimer = setInterval(() => setStatusDots((d) => (d + 1) % 4), 500);
-    const verbTimer = setInterval(() => {
-      setStatusVerb(
-        ACTION_VERBS[Math.floor(Math.random() * ACTION_VERBS.length)],
-      );
-    }, 5000);
-    return () => {
-      clearInterval(dotTimer);
-      clearInterval(verbTimer);
-    };
-  }, [isRunning]);
 
   // Initial load - 🔥 加载任务数据和历史事件
   useEffect(() => {
@@ -1495,6 +1690,11 @@ function AgentAuditPageContent() {
 
   // ============ Handlers ============
 
+  const handleClearPotentialFindings = useCallback(() => {
+    potentialFindingsManuallyClearedRef.current = true;
+    setRealtimeFindings([]);
+  }, []);
+
   const handleCancel = async () => {
     if (!taskId || isCancelling) return;
     setIsCancelling(true);
@@ -1580,7 +1780,7 @@ function AgentAuditPageContent() {
         if (item.tool?.name) {
           lines.push(
             `- tool: ${item.tool.name} (${item.tool.status || "-"})` +
-              (item.tool.duration ? `, ${item.tool.duration}ms` : ""),
+            (item.tool.duration ? `, ${item.tool.duration}ms` : ""),
           );
         }
         if (item.content) {
@@ -1678,7 +1878,7 @@ function AgentAuditPageContent() {
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Column - Event Logs */}
-        <div className="w-[60%] min-w-0 flex flex-col border-r border-border bg-muted/20">
+        <div className="w-[55%] min-w-0 flex flex-col border-r border-border bg-muted/20">
           <div className="flex-shrink-0 px-4 py-3 border-b border-border bg-card">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -1726,10 +1926,9 @@ function AgentAuditPageContent() {
                   onClick={() => setAutoScroll(!isAutoScroll)}
                   className={`
                     flex items-center gap-2 text-xs px-3 py-1.5 rounded-md font-mono uppercase tracking-wider
-                    ${
-                      isAutoScroll
-                        ? "bg-primary/15 text-primary border border-primary/50"
-                        : "text-muted-foreground hover:text-foreground border border-border hover:bg-muted"
+                    ${isAutoScroll
+                      ? "bg-primary/15 text-primary border border-primary/50"
+                      : "text-muted-foreground hover:text-foreground border border-border hover:bg-muted"
                     }
                   `}
                 >
@@ -1798,46 +1997,19 @@ function AgentAuditPageContent() {
         </div>
 
         {/* Right Column - Findings (top) + Agent (bottom) */}
-        <div className="w-[40%] min-w-0 flex flex-col bg-muted/10">
+        <div className="w-[45%] min-w-0 flex flex-col bg-muted/10">
           <div className="flex-1 min-h-0 p-3">
             <RealtimeFindingsPanel
               items={realtimeFindings}
               isRunning={isRunning}
-              onClear={() => setRealtimeFindings([])}
+              onClear={handleClearPotentialFindings}
             />
           </div>
 
-          <div className="h-[40%] min-h-0 border-t border-border bg-card/50 p-3">
-            <div className="h-full overflow-y-auto custom-scrollbar">
-              <div className="space-y-3">
-                <div className="rounded-xl border border-border bg-card/70 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Bot className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                      <span className="text-sm font-semibold">Agent</span>
-                      <Badge variant="outline" className="text-[11px]">
-                        {agentTree?.total_agents || treeNodes.length}
-                      </Badge>
-                    </div>
-                    <Badge variant="outline" className="text-[11px]">
-                      {isRunning ? `运行中：${runningStatusText}` : "就绪"}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-2 text-xs text-muted-foreground font-mono">
-                    阶段: {currentPhaseLabel || "-"} / 步骤: {phaseHint || "-"}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground font-mono">
-                    当前 Agent:{" "}
-                    {getCurrentAgentName()
-                      ? toChineseAgentName(getCurrentAgentName() || "")
-                      : "-"}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <StatsPanel task={task} findings={findings} />
-                </div>
+          <div className="flex-shrink-0 border-t border-border bg-card/50 p-3">
+            <div className="max-h-[42vh] overflow-y-auto custom-scrollbar">
+              <div className="rounded-xl border border-border bg-card p-4">
+                <StatsPanel task={task} findings={findings} />
               </div>
             </div>
           </div>

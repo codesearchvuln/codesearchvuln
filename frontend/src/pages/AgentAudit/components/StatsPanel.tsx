@@ -11,11 +11,9 @@ import {
 	FileCode,
 	Repeat,
 	Zap,
-	Bug,
 	AlertTriangle,
 	TrendingUp,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import type { StatsPanelProps } from "../types";
 
 // Enhanced Metric card component with premium styling
@@ -68,19 +66,10 @@ function MetricCard({
 
 export const StatsPanel = memo(function StatsPanel({
 	task,
-	findings,
+	findings: _findings,
 }: StatsPanelProps) {
 	if (!task) return null;
 
-	// 🔥 Use task's reliable statistics instead of computing from findings array
-	// This ensures consistency even when findings array is empty or not loaded
-	const severityCounts = {
-		critical: task.critical_count || 0,
-		high: task.high_count || 0,
-		medium: task.medium_count || 0,
-		low: task.low_count || 0,
-	};
-	const totalFindings = task.findings_count || 0;
 	const progressPercent = task.progress_percentage || 0;
 
 	return (
@@ -182,58 +171,7 @@ export const StatsPanel = memo(function StatsPanel({
 					suffix="k"
 					colorClass="text-violet-500"
 				/>
-				<MetricCard
-					icon={<Bug className="w-4 h-4" />}
-					label="缺陷数"
-					value={totalFindings}
-					colorClass={
-						totalFindings > 0 ? "text-rose-500" : "text-muted-foreground"
-					}
-					bgClass={totalFindings > 0 ? "border-rose-500/20" : ""}
-				/>
 			</div>
-
-			{/* Findings breakdown with enhanced styling */}
-			{totalFindings > 0 && (
-				<div className="p-4 rounded-lg border border-rose-500/20 bg-card/80 backdrop-blur-sm relative overflow-hidden">
-					{/* Background gradient */}
-					<div className="absolute inset-0 bg-gradient-to-br from-rose-500/5 to-transparent pointer-events-none" />
-
-					<div className="relative z-10">
-						<div className="flex items-center gap-2.5 mb-3">
-							<div className="p-1.5 rounded-md bg-rose-500/15 border border-rose-500/30">
-								<AlertTriangle className="w-4 h-4 text-rose-500" />
-							</div>
-							<span className="text-sm text-foreground uppercase tracking-wider font-semibold">
-								严重级别分布
-							</span>
-						</div>
-
-						<div className="flex flex-wrap gap-2">
-							{severityCounts.critical > 0 && (
-								<Badge className="bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-500/40 text-xs font-mono font-bold px-2.5 py-1 shadow-[0_0_10px_rgba(244,63,94,0.15)]">
-									严重: {severityCounts.critical}
-								</Badge>
-							)}
-							{severityCounts.high > 0 && (
-								<Badge className="bg-orange-500/20 text-orange-600 dark:text-orange-300 border border-orange-500/40 text-xs font-mono font-bold px-2.5 py-1 shadow-[0_0_10px_rgba(249,115,22,0.15)]">
-									高危: {severityCounts.high}
-								</Badge>
-							)}
-							{severityCounts.medium > 0 && (
-								<Badge className="bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 text-xs font-mono font-bold px-2.5 py-1 shadow-[0_0_10px_rgba(245,158,11,0.15)]">
-									中危: {severityCounts.medium}
-								</Badge>
-							)}
-							{severityCounts.low > 0 && (
-								<Badge className="bg-sky-500/20 text-sky-600 dark:text-sky-300 border border-sky-500/40 text-xs font-mono font-bold px-2.5 py-1 shadow-[0_0_10px_rgba(14,165,233,0.15)]">
-									低危: {severityCounts.low}
-								</Badge>
-							)}
-						</div>
-					</div>
-				</div>
-			)}
 
 			{/* Inline animation */}
 			<style>{`

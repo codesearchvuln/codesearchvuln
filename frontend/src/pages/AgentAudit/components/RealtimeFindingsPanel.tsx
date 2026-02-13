@@ -39,11 +39,24 @@ const SEVERITY_BADGE_CLASS: Record<string, string> = {
   info: "bg-zinc-500/20 text-zinc-700 dark:text-zinc-300 border-zinc-500/40",
 };
 
+const SEVERITY_LABEL_ZH: Record<string, string> = {
+  critical: "严重",
+  high: "高危",
+  medium: "中危",
+  low: "低危",
+  info: "信息",
+};
+
 function normalizeSeverity(value: string): string {
   const key = String(value || "").trim().toLowerCase();
   if (!key) return "info";
   if (key in SEVERITY_ORDER) return key;
   return "info";
+}
+
+function severityToZh(value: string): string {
+  const key = normalizeSeverity(value);
+  return SEVERITY_LABEL_ZH[key] || SEVERITY_LABEL_ZH.info;
 }
 
 function formatLocation(item: RealtimeMergedFindingItem): string {
@@ -71,6 +84,25 @@ export default function RealtimeFindingsPanel(props: {
       if (item.is_verified) verified += 1;
     }
     return { total: props.items.length, verified, unverified: props.items.length - verified };
+  }, [props.items]);
+
+  const severityCounts = useMemo(() => {
+    const next = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      info: 0,
+    };
+    for (const item of props.items) {
+      const key = normalizeSeverity(item.severity);
+      if (key === "critical") next.critical += 1;
+      else if (key === "high") next.high += 1;
+      else if (key === "medium") next.medium += 1;
+      else if (key === "low") next.low += 1;
+      else next.info += 1;
+    }
+    return next;
   }, [props.items]);
 
   const filtered = useMemo(() => {
@@ -103,7 +135,7 @@ export default function RealtimeFindingsPanel(props: {
       <div className="flex-shrink-0 px-4 py-3 border-b border-border bg-card">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold">运行中实时漏洞</span>
+            <span className="text-sm font-semibold">潜在缺陷</span>
             <Badge variant="outline" className="text-[11px]">
               {counts.total}
             </Badge>
@@ -164,30 +196,93 @@ export default function RealtimeFindingsPanel(props: {
               variant={severity === "critical" ? "default" : "outline"}
               onClick={() => setSeverity("critical")}
             >
-              CRIT
+              严重
             </Button>
             <Button
               size="sm"
               variant={severity === "high" ? "default" : "outline"}
               onClick={() => setSeverity("high")}
             >
-              HIGH
+              高危
             </Button>
             <Button
               size="sm"
               variant={severity === "medium" ? "default" : "outline"}
               onClick={() => setSeverity("medium")}
             >
-              MED
+              中危
             </Button>
             <Button
               size="sm"
               variant={severity === "low" ? "default" : "outline"}
               onClick={() => setSeverity("low")}
             >
-              LOW
+              低危
             </Button>
           </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {severityCounts.critical > 0 ? (
+            <button type="button" onClick={() => setSeverity("critical")}>
+              <Badge
+                variant="outline"
+                className={`text-[11px] border ${SEVERITY_BADGE_CLASS.critical} ${
+                  severity === "critical" ? "ring-1 ring-primary/40" : ""
+                }`}
+              >
+                严重 {severityCounts.critical}
+              </Badge>
+            </button>
+          ) : null}
+          {severityCounts.high > 0 ? (
+            <button type="button" onClick={() => setSeverity("high")}>
+              <Badge
+                variant="outline"
+                className={`text-[11px] border ${SEVERITY_BADGE_CLASS.high} ${
+                  severity === "high" ? "ring-1 ring-primary/40" : ""
+                }`}
+              >
+                高危 {severityCounts.high}
+              </Badge>
+            </button>
+          ) : null}
+          {severityCounts.medium > 0 ? (
+            <button type="button" onClick={() => setSeverity("medium")}>
+              <Badge
+                variant="outline"
+                className={`text-[11px] border ${SEVERITY_BADGE_CLASS.medium} ${
+                  severity === "medium" ? "ring-1 ring-primary/40" : ""
+                }`}
+              >
+                中危 {severityCounts.medium}
+              </Badge>
+            </button>
+          ) : null}
+          {severityCounts.low > 0 ? (
+            <button type="button" onClick={() => setSeverity("low")}>
+              <Badge
+                variant="outline"
+                className={`text-[11px] border ${SEVERITY_BADGE_CLASS.low} ${
+                  severity === "low" ? "ring-1 ring-primary/40" : ""
+                }`}
+              >
+                低危 {severityCounts.low}
+              </Badge>
+            </button>
+          ) : null}
+          {severityCounts.info > 0 ? (
+            <button type="button" onClick={() => setSeverity("info")}>
+              <Badge
+                variant="outline"
+                className={`text-[11px] border ${SEVERITY_BADGE_CLASS.info} ${
+                  severity === "info" ? "ring-1 ring-primary/40" : ""
+                }`}
+              >
+                信息 {severityCounts.info}
+              </Badge>
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -197,7 +292,7 @@ export default function RealtimeFindingsPanel(props: {
             <div className="flex flex-col items-center gap-2 text-center px-6">
               <AlertTriangle className="w-5 h-5 opacity-60" />
               <span className="text-sm">
-                {props.isRunning ? "等待实时发现..." : "暂无实时发现"}
+                {props.isRunning ? "等待新缺陷..." : "暂无缺陷"}
               </span>
             </div>
           </div>
@@ -217,10 +312,10 @@ export default function RealtimeFindingsPanel(props: {
                           <Badge
                             className={`border text-[11px] ${SEVERITY_BADGE_CLASS[sevKey] || SEVERITY_BADGE_CLASS.info}`}
                           >
-                            {sevKey.toUpperCase()}
+                            {severityToZh(sevKey)}
                           </Badge>
                           <span className="text-sm font-semibold break-words line-clamp-2">
-                            {item.title || "未命名漏洞"}
+                            {item.title || "未命名缺陷"}
                           </span>
                         </div>
 
@@ -277,7 +372,7 @@ export default function RealtimeFindingsPanel(props: {
             <div className="flex items-center justify-between gap-3">
               <DialogTitle className="flex items-center gap-2">
                 <ExternalLink className="w-4 h-4" />
-                漏洞详情
+                缺陷详情
               </DialogTitle>
               <button
                 type="button"
@@ -295,7 +390,7 @@ export default function RealtimeFindingsPanel(props: {
               <section className="rounded-lg border border-border bg-card/70 p-3.5 space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant="outline">
-                    {normalizeSeverity(detailItem.severity).toUpperCase()}
+                    {severityToZh(detailItem.severity)}
                   </Badge>
                   <Badge
                     variant="outline"
@@ -313,7 +408,7 @@ export default function RealtimeFindingsPanel(props: {
                 </div>
 
                 <h3 className="text-sm font-semibold break-words">
-                  {detailItem.title || "未命名漏洞"}
+                  {detailItem.title || "未命名缺陷"}
                 </h3>
 
                 <div className="text-xs text-muted-foreground space-y-1">
