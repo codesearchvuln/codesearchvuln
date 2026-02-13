@@ -174,6 +174,8 @@ class AgentEventEmitter:
         title: str,
         severity: str,
         vulnerability_type: str,
+        file_path: Optional[str] = None,
+        line_start: Optional[int] = None,
         is_verified: bool = False,
     ):
         """发射漏洞发现事件"""
@@ -187,6 +189,8 @@ class AgentEventEmitter:
                 "title": title,
                 "severity": severity,
                 "vulnerability_type": vulnerability_type,
+                "file_path": file_path,
+                "line_start": line_start,
                 "is_verified": is_verified,
             },
         ))

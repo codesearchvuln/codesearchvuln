@@ -735,6 +735,36 @@ class VerificationAgent(BaseAgent):
 
                     await self.emit_llm_decision("完成漏洞验证", "LLM 判断验证已充分")
                     final_result = repaired_answer
+
+                    # 🔥 实时推送已验证漏洞事件（用于前端“实时漏洞报告”）
+                    # 说明：此处的 finding_id 是事件 id，不等于最终入库的 AgentFinding.id。
+                    try:
+                        if isinstance(final_result, dict) and isinstance(final_result.get("findings"), list):
+                            for item in final_result["findings"]:
+                                if not isinstance(item, dict):
+                                    continue
+                                verdict = item.get("verdict") or item.get("authenticity")
+                                verdict = str(verdict or "").strip().lower()
+                                if verdict not in {"confirmed", "likely", "false_positive"}:
+                                    verdict = "likely"
+
+                                if verdict == "false_positive":
+                                    continue
+
+                                await self.emit_finding(
+                                    title=str(item.get("title") or "已验证漏洞"),
+                                    severity=str(item.get("severity") or "medium"),
+                                    vuln_type=str(item.get("vulnerability_type") or "unknown"),
+                                    file_path=str(item.get("file_path") or ""),
+                                    line_start=item.get("line_start"),
+                                    is_verified=True,
+                                )
+                    except Exception as emit_error:
+                        logger.warning(
+                            "[%s] Failed to emit finding_verified events: %s",
+                            self.name,
+                            emit_error,
+                        )
                     
                     # 🔥 记录洞察和工作
                     if final_result and "findings" in final_result:

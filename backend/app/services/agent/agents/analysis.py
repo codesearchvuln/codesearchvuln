@@ -393,13 +393,15 @@ Final Answer: {{"findings": [...], "summary": "..."}}"""
                     if step.final_answer and "findings" in step.final_answer:
                         all_findings = step.final_answer["findings"]
                         logger.info(f"[{self.name}] Final Answer contains {len(all_findings)} findings")
-                        # 🔥 发射每个发现的事件
-                        for finding in all_findings[:5]:  # 限制数量
+                        # 🔥 发射每个发现的事件（用于前端实时未验证列表）
+                        # 限制数量避免日志风暴，但需要足够覆盖面来体现“实时发现”。
+                        for finding in all_findings[:50]:
                             await self.emit_finding(
                                 finding.get("title", "Unknown"),
                                 finding.get("severity", "medium"),
                                 finding.get("vulnerability_type", "other"),
-                                finding.get("file_path", "")
+                                finding.get("file_path", ""),
+                                finding.get("line_start"),
                             )
                             # 🔥 记录洞察
                             self.add_insight(
