@@ -3,7 +3,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertTriangle, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ExternalLink, Search, Trash2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export type RealtimeMergedFindingItem = {
   id: string;
@@ -57,6 +63,7 @@ export default function RealtimeFindingsPanel(props: {
 }) {
   const [keyword, setKeyword] = useState("");
   const [severity, setSeverity] = useState<"all" | string>("all");
+  const [detailItem, setDetailItem] = useState<RealtimeMergedFindingItem | null>(null);
 
   const counts = useMemo(() => {
     let verified = 0;
@@ -223,21 +230,33 @@ export default function RealtimeFindingsPanel(props: {
                         </div>
                       </div>
 
-                      {item.is_verified ? (
-                        <Badge
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {item.is_verified ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10"
+                          >
+                            已验证
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/10"
+                          >
+                            未验证
+                          </Badge>
+                        )}
+
+                        <Button
+                          size="sm"
                           variant="outline"
-                          className="text-[11px] border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10"
+                          className="h-7 px-2.5 text-[11px]"
+                          onClick={() => setDetailItem(item)}
                         >
-                          已验证
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="text-[11px] border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/10"
-                        >
-                          未验证
-                        </Badge>
-                      )}
+                          查看详情
+                          <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -246,7 +265,69 @@ export default function RealtimeFindingsPanel(props: {
           </ScrollArea>
         )}
       </div>
+
+      <Dialog
+        open={detailItem !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailItem(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader className="border-b border-border pb-3">
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle className="flex items-center gap-2">
+                <ExternalLink className="w-4 h-4" />
+                漏洞详情
+              </DialogTitle>
+              <button
+                type="button"
+                onClick={() => setDetailItem(null)}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-border hover:border-primary/40 hover:text-primary"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                返回
+              </button>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar py-4 space-y-4">
+            {detailItem ? (
+              <section className="rounded-lg border border-border bg-card/70 p-3.5 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline">
+                    {normalizeSeverity(detailItem.severity).toUpperCase()}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={
+                      detailItem.is_verified
+                        ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10"
+                        : "border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/10"
+                    }
+                  >
+                    {detailItem.is_verified ? "已验证" : "未验证"}
+                  </Badge>
+                  {detailItem.timestamp ? (
+                    <Badge variant="outline">{detailItem.timestamp}</Badge>
+                  ) : null}
+                </div>
+
+                <h3 className="text-sm font-semibold break-words">
+                  {detailItem.title || "未命名漏洞"}
+                </h3>
+
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div>类型: {detailItem.vulnerability_type || "-"}</div>
+                  <div>定位: {formatLocation(detailItem)}</div>
+                  <div className="font-mono break-all">
+                    fingerprint: {detailItem.fingerprint || "-"}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-

@@ -354,46 +354,6 @@ function AgentAuditPageContent() {
     if (currentPhaseLabel) return `当前阶段：${currentPhaseLabel}`;
     return null;
   }, [task?.current_step, isRunning, currentPhaseLabel]);
-  const resultConsistency = useMemo(() => {
-    const currentStep = String(task?.current_step || "");
-    const match = currentStep.match(
-      /编排发现\s*(\d+)\s*\/\s*入库\s*(\d+)\s*\/\s*过滤\s*(\d+)/,
-    );
-    if (match) {
-      return {
-        orchestrator: Number(match[1]),
-        persisted: Number(match[2]),
-        filtered: Number(match[3]),
-        filteredReasons: null,
-      };
-    }
-
-    for (let i = logs.length - 1; i >= 0; i -= 1) {
-      const candidate = logs[i];
-      const detail = candidate.detail;
-      if (!detail || detail.event_type !== "task_complete") {
-        continue;
-      }
-      const metadata = detail.metadata as Record<string, unknown> | undefined;
-      const orchestrator = toSafeNumber(metadata?.orchestrator_findings_count);
-      const persisted = toSafeNumber(metadata?.persisted_findings_count);
-      const filtered = toSafeNumber(metadata?.filtered_findings_count);
-      if (orchestrator !== null && persisted !== null && filtered !== null) {
-        const rawReasons = metadata?.filtered_reasons;
-        const filteredReasons =
-          rawReasons && typeof rawReasons === "object" && !Array.isArray(rawReasons)
-            ? (rawReasons as Record<string, number>)
-            : null;
-        return {
-          orchestrator,
-          persisted,
-          filtered,
-          filteredReasons,
-        };
-      }
-    }
-    return null;
-  }, [logs, task?.current_step]);
   const runningStatusText = useMemo(() => {
     const phaseText = currentPhaseLabel ? `当前阶段：${currentPhaseLabel}` : "";
     if (phaseHint) return phaseHint;
@@ -1718,7 +1678,7 @@ function AgentAuditPageContent() {
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Column - Event Logs */}
-        <div className="w-[38%] min-w-0 flex flex-col border-r border-border bg-muted/20">
+        <div className="w-[60%] min-w-0 flex flex-col border-r border-border bg-muted/20">
           <div className="flex-shrink-0 px-4 py-3 border-b border-border bg-card">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -1838,7 +1798,7 @@ function AgentAuditPageContent() {
         </div>
 
         {/* Right Column - Findings (top) + Agent (bottom) */}
-        <div className="flex-1 min-w-0 flex flex-col bg-muted/10">
+        <div className="w-[40%] min-w-0 flex flex-col bg-muted/10">
           <div className="flex-1 min-h-0 p-3">
             <RealtimeFindingsPanel
               items={realtimeFindings}
@@ -1876,7 +1836,7 @@ function AgentAuditPageContent() {
                 </div>
 
                 <div className="rounded-xl border border-border bg-card p-4">
-                  <StatsPanel task={task} findings={findings} resultConsistency={resultConsistency} />
+                  <StatsPanel task={task} findings={findings} />
                 </div>
               </div>
             </div>
