@@ -818,7 +818,15 @@ class BaseAgent(ABC):
     
     # ============ 发现相关事件 ============
 
-    async def emit_finding(self, title: str, severity: str, vuln_type: str, file_path: str = "", is_verified: bool = False):
+    async def emit_finding(
+        self,
+        title: str,
+        severity: str,
+        vuln_type: str,
+        file_path: str = "",
+        line_start: Optional[int] = None,
+        is_verified: bool = False,
+    ):
         """发射漏洞发现事件"""
         import uuid
         finding_id = str(uuid.uuid4())
@@ -830,6 +838,8 @@ class BaseAgent(ABC):
                 title=title,
                 severity=severity,
                 vulnerability_type=vuln_type,
+                file_path=file_path or None,
+                line_start=line_start,
                 is_verified=is_verified,
             )
         else:
@@ -851,6 +861,7 @@ class BaseAgent(ABC):
                     "severity": severity,
                     "vulnerability_type": vuln_type,
                     "file_path": file_path,
+                    "line_start": line_start,
                     "is_verified": is_verified,
                 }
             )
