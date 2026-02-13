@@ -125,7 +125,7 @@ export function AuditDetailDialog({
 
               {logItem.content && (
                 <Section title="详细内容">
-                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[35vh]">
+                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh]">
                     {logItem.content}
                   </pre>
                 </Section>
@@ -133,7 +133,7 @@ export function AuditDetailDialog({
 
               {logItem.detail && (
                 <Section title="原始事件元数据">
-                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[35vh]">
+                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh]">
                     {prettyJson(logItem.detail)}
                   </pre>
                 </Section>
@@ -188,11 +188,20 @@ export function AuditDetailDialog({
                 </Section>
               )}
 
-              {(typeof finding.flow_path_score === "number" ||
+              {(Boolean(finding.reachability_file || finding.reachability_function) ||
+                typeof finding.flow_path_score === "number" ||
                 (finding.flow_call_chain && finding.flow_call_chain.length > 0) ||
                 (finding.flow_control_conditions &&
                   finding.flow_control_conditions.length > 0)) && (
                 <Section title="可达性证据">
+                  {(finding.reachability_file || finding.reachability_function) && (
+                    <div className="text-sm whitespace-pre-wrap break-words">
+                      <div>
+                        文件: {finding.reachability_file || finding.file_path || "-"}
+                      </div>
+                      <div>函数: {finding.reachability_function || "-"}</div>
+                    </div>
+                  )}
                   {typeof finding.flow_path_score === "number" && (
                     <div className="text-sm text-muted-foreground">
                       路径评分: {(finding.flow_path_score * 100).toFixed(1)}%
@@ -239,19 +248,11 @@ export function AuditDetailDialog({
                 </Section>
               )}
 
-              {finding.code_snippet && (
-                <Section title="代码片段">
-                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[35vh]">
-                    {finding.code_snippet}
-                  </pre>
-                </Section>
-              )}
-
               {finding.code_context && (
                 <Section
                   title={`代码上下文 (${finding.context_start_line ?? "-"} - ${finding.context_end_line ?? "-"})`}
                 >
-                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[40vh]">
+                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh]">
                     {finding.code_context}
                   </pre>
                 </Section>

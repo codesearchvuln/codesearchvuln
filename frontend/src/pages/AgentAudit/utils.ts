@@ -199,8 +199,8 @@ export function filterLogsByAgent(
 
   return logs.filter(
     (log) =>
-      log.agentName?.toLowerCase() === selectedAgentName.toLowerCase() ||
-      log.agentName
+      log.agentRawName?.toLowerCase() === selectedAgentName.toLowerCase() ||
+      log.agentRawName
         ?.toLowerCase()
         .includes(selectedAgentName.toLowerCase().split("_")[0]),
   );

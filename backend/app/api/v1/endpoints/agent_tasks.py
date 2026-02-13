@@ -211,6 +211,8 @@ class AgentFindingResponse(BaseModel):
     flow_call_chain: Optional[List[str]] = None
     flow_control_conditions: Optional[List[str]] = None
     logic_authz_evidence: Optional[List[str]] = None
+    reachability_file: Optional[str] = None
+    reachability_function: Optional[str] = None
     status: str
     
     suggestion: Optional[str] = None
@@ -641,7 +643,7 @@ async def _prepare_bootstrap_opengrep_findings(
     await db.refresh(scan_task)
 
     await event_emitter.emit_info(
-        f"🧪 OpenGrep 预处理开始：已禁用历史复用，启动阻塞式预扫描（task={scan_task.id}）",
+        f"🧪 OpenGrep 预处理开始：（task={scan_task.id}）",
         metadata={
             "bootstrap": True,
             "bootstrap_task_id": scan_task.id,
@@ -2281,6 +2283,34 @@ async def _save_findings(
     filtered_reasons: Dict[str, int] = {}
     logger.info(f"Saving {len(findings)} findings for task {task_id}")
 
+    # Build an AST index once for all candidate files to enforce: file + enclosing function.
+    ast_index = None
+    if project_root:
+        try:
+            from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
+
+            candidate_files: Set[str] = set()
+            for raw in findings:
+                if not isinstance(raw, dict):
+                    continue
+                location_file, _location_line = _extract_location_parts(raw)
+                raw_file_path = raw.get("file_path") or raw.get("file") or location_file
+                stored_file_path, _full_file_path = _resolve_finding_file_path(
+                    str(raw_file_path) if raw_file_path else None,
+                    project_root,
+                )
+                if stored_file_path:
+                    candidate_files.add(stored_file_path)
+
+            ast_index = ASTCallIndex(
+                project_root=project_root,
+                target_files=sorted(candidate_files) if candidate_files else None,
+            )
+            ast_index.build()
+        except Exception as exc:
+            logger.warning("[SaveFindings] AST index build failed: %s", exc)
+            ast_index = None
+
     def mark_filtered(reason: str, payload: Optional[Dict[str, Any]] = None) -> None:
         filtered_reasons[reason] = filtered_reasons.get(reason, 0) + 1
         if payload:
@@ -2405,7 +2435,7 @@ async def _save_findings(
                 file_lines=file_lines,
                 line_start=line_start,
                 line_end=line_end,
-                radius=3,
+                radius=12,
             )
             if not context_text or context_start_line is None or context_end_line is None:
                 mark_filtered("missing_code_context", finding)
@@ -2413,7 +2443,63 @@ async def _save_findings(
             if not snippet_text:
                 snippet_text = code_snippet_text
             if not snippet_text:
-                mark_filtered("missing_code_snippet", finding)
+                snippet_text = "\n".join(file_lines[line_start - 1 : line_end]).strip()
+
+            # 7.5) enforce enclosing function evidence (file + function)
+            def _fallback_infer_function_name() -> Optional[str]:
+                # Heuristic fallback to avoid dropping all findings if AST index is unavailable.
+                # Still enforces "file + function" requirement.
+                import re
+                if not file_lines:
+                    return None
+                start_idx = max(0, min(len(file_lines) - 1, line_start - 1))
+                patterns = [
+                    # python
+                    (re.compile(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("), 1),
+                    # js/ts
+                    (re.compile(r"^\s*(?:export\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("), 1),
+                    # c/cpp/java-like
+                    (re.compile(r"^\s*[A-Za-z_][\w\s\*:&<>]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{"), 1),
+                ]
+                for idx in range(start_idx, -1, -1):
+                    line = file_lines[idx]
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    if stripped.startswith(("//", "#")):
+                        continue
+                    for pattern, group in patterns:
+                        m = pattern.match(line)
+                        if m:
+                            name = m.group(group).strip()
+                            if name:
+                                return name
+                return None
+
+            reachability_target_function = None
+            if ast_index:
+                try:
+                    normalized_file = str(stored_file_path).replace("\\", "/")
+                    candidates = [
+                        sym
+                        for sym in ast_index.symbols_by_id.values()
+                        if sym.file_path == normalized_file
+                        and sym.start_line <= line_start <= sym.end_line
+                    ]
+                    if candidates:
+                        best = min(
+                            candidates,
+                            key=lambda s: (max(0, s.end_line - s.start_line), s.start_line),
+                        )
+                        reachability_target_function = str(best.name).strip() or None
+                except Exception:
+                    reachability_target_function = None
+
+            if not reachability_target_function:
+                reachability_target_function = _fallback_infer_function_name()
+
+            if not reachability_target_function:
+                mark_filtered("missing_enclosing_function", finding)
                 continue
 
             # 8) title/description/suggestion
@@ -2483,6 +2569,10 @@ async def _save_findings(
                     "evidence": verification_details_text,
                     "context_start_line": context_start_line,
                     "context_end_line": context_end_line,
+                    "reachability_target": {
+                        "file_path": stored_file_path,
+                        "function": reachability_target_function,
+                    },
                 }
             )
             dataflow_path = finding.get("dataflow_path")
@@ -3344,6 +3434,20 @@ async def list_agent_findings(
         verification_evidence = verification_payload.get("evidence") or verification_payload.get("details")
         context_start_line = _to_int(verification_payload.get("context_start_line"))
         context_end_line = _to_int(verification_payload.get("context_end_line"))
+        reachability_file = None
+        reachability_function = None
+        reachability_target = (
+            verification_payload.get("reachability_target")
+            if isinstance(verification_payload, dict)
+            else None
+        )
+        if isinstance(reachability_target, dict):
+            file_value = reachability_target.get("file_path")
+            func_value = reachability_target.get("function")
+            if isinstance(file_value, str) and file_value.strip():
+                reachability_file = file_value.strip()
+            if isinstance(func_value, str) and func_value.strip():
+                reachability_function = func_value.strip()
         flow_payload = verification_payload.get("flow") if isinstance(verification_payload, dict) else None
         flow_path_score = None
         flow_call_chain = None
@@ -3394,6 +3498,8 @@ async def list_agent_findings(
                     "flow_call_chain": flow_call_chain,
                     "flow_control_conditions": flow_control_conditions,
                     "logic_authz_evidence": logic_authz_evidence,
+                    "reachability_file": reachability_file,
+                    "reachability_function": reachability_function,
                     "status": item.status,
                     "suggestion": item.suggestion,
                     "fix_code": item.fix_code,

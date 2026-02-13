@@ -13,7 +13,9 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-MAX_EVENT_PAYLOAD_CHARS = 120000
+# Keep full-fidelity logs for UI detail dialog and export.
+# Still protects DB/SSE from extreme payloads via `truncated` marker.
+MAX_EVENT_PAYLOAD_CHARS = 2000000
 
 
 def _truncate_payload(value: str, max_chars: int = MAX_EVENT_PAYLOAD_CHARS) -> tuple[str, bool]:

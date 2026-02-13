@@ -82,6 +82,8 @@ export interface AgentFinding {
   reachability: string | null;
   authenticity: string | null;
   verification_evidence: string | null;
+  reachability_file?: string | null;
+  reachability_function?: string | null;
   flow_path_score?: number | null;
   flow_call_chain?: string[] | null;
   flow_control_conditions?: string[] | null;

@@ -13,8 +13,16 @@ import {
   Filter,
   ArrowDown,
   ShieldAlert,
+  Download,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { useLogoVariant } from "@/shared/branding/useLogoVariant";
@@ -76,6 +84,18 @@ const PROGRESS_PATTERNS: { pattern: RegExp; key: string }[] = [
   { pattern: /分析进度[:：]?\s*\d+/, key: "analyze_progress" },
 ];
 
+const LOG_TYPE_LABELS: Record<string, string> = {
+  thinking: "思考",
+  tool: "工具",
+  phase: "阶段",
+  finding: "漏洞",
+  dispatch: "调度",
+  info: "信息",
+  error: "错误",
+  user: "用户",
+  progress: "进度",
+};
+
 type UnifiedAgentEvent = {
   type?: string;
   event_type?: string;
@@ -89,6 +109,17 @@ type UnifiedAgentEvent = {
   tool_duration_ms?: number | null;
   error?: string | null;
 };
+
+function toChineseAgentName(raw: string): string {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  const lower = text.toLowerCase();
+  if (lower.includes("orchestrator")) return "编排";
+  if (lower.includes("recon")) return "侦查";
+  if (lower.includes("analysis")) return "分析";
+  if (lower.includes("verification")) return "验证";
+  return text;
+}
 
 function matchProgressKey(message: string): string | null {
   const matched = PROGRESS_PATTERNS.find((item) => item.pattern.test(message));
@@ -138,6 +169,24 @@ function normalizeToolStatus(
     return "failed";
   }
   return "completed";
+}
+
+function toSafeFilename(value: string): string {
+  const text = String(value || "").trim();
+  if (!text) return "task";
+  return text.replace(/[^\w.-]+/g, "_").slice(0, 60) || "task";
+}
+
+function downloadTextFile(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function toSafeNumber(value: unknown): number | null {
@@ -679,10 +728,14 @@ function AgentAuditPageContent() {
       ).toLowerCase();
       const message = eventToString(event.message).trim();
       const metadata = event.metadata ?? undefined;
-      const agentName =
+      const agentRawName =
         (typeof metadata?.agent_name === "string" && metadata.agent_name) ||
         (typeof metadata?.agent === "string" && metadata.agent) ||
         undefined;
+      const agentName =
+        typeof agentRawName === "string" && agentRawName.trim()
+          ? toChineseAgentName(agentRawName)
+          : undefined;
       const baseDetail = {
         event_type: eventType,
         message,
@@ -737,7 +790,9 @@ function AgentAuditPageContent() {
       }
 
       if (eventType.startsWith("llm_") || eventType === "thinking") {
-        const content = message || eventToString(metadata?.thought);
+        const thought =
+          typeof metadata?.thought === "string" ? metadata.thought : "";
+        const content = thought || message || "";
         if (!content) {
           return;
         }
@@ -749,6 +804,7 @@ function AgentAuditPageContent() {
               content.length > 100 ? `${content.slice(0, 100)}...` : content,
             content,
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -801,6 +857,7 @@ function AgentAuditPageContent() {
             content: inputText ? `输入：\n${inputText}` : "",
             tool: { name: toolName, status: "running", callId: toolCallId || undefined },
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -895,6 +952,7 @@ function AgentAuditPageContent() {
               callId: toolCallId || undefined,
             },
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -914,6 +972,7 @@ function AgentAuditPageContent() {
             title: message || eventToString(metadata?.title) || "发现漏洞",
             severity: eventToString(metadata?.severity) || "medium",
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -936,6 +995,7 @@ function AgentAuditPageContent() {
             type: "dispatch",
             title: message || `事件：${eventType}`,
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -950,6 +1010,7 @@ function AgentAuditPageContent() {
             type: "info",
             title: message || "任务已完成",
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -969,6 +1030,7 @@ function AgentAuditPageContent() {
             type: "error",
             title: taskErrorMessage,
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -981,6 +1043,7 @@ function AgentAuditPageContent() {
             type: "info",
             title: message || "任务已取消",
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -994,6 +1057,7 @@ function AgentAuditPageContent() {
             type: "info",
             title: message || `任务流已结束${status}`,
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -1039,6 +1103,7 @@ function AgentAuditPageContent() {
             type: eventType === "error" ? "error" : "info",
             title: fallback,
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -1059,6 +1124,7 @@ function AgentAuditPageContent() {
             type: "info",
             title: message,
             agentName,
+            agentRawName: agentRawName || undefined,
             detail: baseDetail,
           },
         });
@@ -1172,6 +1238,8 @@ function AgentAuditPageContent() {
         if (!cleanContent) return;
 
         const currentId = getCurrentThinkingId();
+        const rawAgent = getCurrentAgentName();
+        const displayAgent = rawAgent ? toChineseAgentName(rawAgent) : undefined;
         if (!currentId) {
           // 预生成 ID，这样我们可以跟踪这个日志
           const newLogId = `thinking-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -1183,7 +1251,8 @@ function AgentAuditPageContent() {
               title: "思考中...",
               content: cleanContent,
               isStreaming: true,
-              agentName: getCurrentAgentName() || undefined,
+              agentName: displayAgent,
+              agentRawName: rawAgent || undefined,
             },
           });
           setCurrentThinkingId(newLogId);
@@ -1471,6 +1540,81 @@ function AgentAuditPageContent() {
     setShowExportDialog(true);
   };
 
+  const handleExportLogs = useCallback(
+    (format: "json" | "markdown") => {
+      if (!task) {
+        toast.error("任务信息未加载，无法导出");
+        return;
+      }
+      const date = new Date();
+      const ymd = date.toISOString().slice(0, 10);
+      const taskName = toSafeFilename(task.name || task.id.slice(0, 8));
+      const base = `agent_audit_logs_${taskName}_${ymd}`;
+
+      if (format === "json") {
+        const payload = {
+          meta: {
+            task_id: task.id,
+            task_name: task.name,
+            project_id: task.project_id,
+            exported_at: date.toISOString(),
+            status: task.status,
+            current_phase: task.current_phase,
+            current_step: task.current_step,
+          },
+          logs,
+        };
+        downloadTextFile(
+          JSON.stringify(payload, null, 2),
+          `${base}.json`,
+          "application/json",
+        );
+        toast.success("活动日志已导出为 JSON");
+        return;
+      }
+
+      const lines: string[] = [];
+      lines.push(`# 智能审计活动日志`);
+      lines.push(`- task_id: ${task.id}`);
+      lines.push(`- task_name: ${task.name || "-"}`);
+      lines.push(`- project_id: ${task.project_id}`);
+      lines.push(`- status: ${task.status}`);
+      lines.push(`- phase: ${task.current_phase || "-"}`);
+      lines.push(`- step: ${task.current_step || "-"}`);
+      lines.push(`- exported_at: ${date.toISOString()}`);
+      lines.push("");
+
+      for (const item of logs) {
+        const typeLabel = LOG_TYPE_LABELS[item.type] || item.type;
+        const agentLabel = item.agentName ? `【${item.agentName}】` : "";
+        lines.push(`## [${item.time}] [${typeLabel}] ${agentLabel} ${item.title}`);
+        if (item.tool?.name) {
+          lines.push(
+            `- tool: ${item.tool.name} (${item.tool.status || "-"})` +
+              (item.tool.duration ? `, ${item.tool.duration}ms` : ""),
+          );
+        }
+        if (item.content) {
+          lines.push("");
+          lines.push("```text");
+          lines.push(item.content);
+          lines.push("```");
+        }
+        if (item.detail) {
+          lines.push("");
+          lines.push("```json");
+          lines.push(JSON.stringify(item.detail, null, 2));
+          lines.push("```");
+        }
+        lines.push("");
+      }
+
+      downloadTextFile(lines.join("\n"), `${base}.md`, "text/markdown");
+      toast.success("活动日志已导出为 Markdown");
+    },
+    [logs, task],
+  );
+
   // ============ Render ============
 
   if (showSplash && !taskId) {
@@ -1605,9 +1749,36 @@ function AgentAuditPageContent() {
             </div>
 
             {activeMainTab === "logs" ? (
-              <button
-                onClick={() => setAutoScroll(!isAutoScroll)}
-                className={`
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md font-mono uppercase tracking-wider border border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>导出日志</span>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleExportLogs("json")}>
+                      导出为 JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleExportLogs("markdown")}>
+                      导出为 Markdown
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => toast.info("导出范围：全部活动日志")}
+                    >
+                      当前为全部导出
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <button
+                  onClick={() => setAutoScroll(!isAutoScroll)}
+                  className={`
                     flex items-center gap-2 text-xs px-3 py-1.5 rounded-md font-mono uppercase tracking-wider
                     ${
                       isAutoScroll
@@ -1615,10 +1786,11 @@ function AgentAuditPageContent() {
                         : "text-muted-foreground hover:text-foreground border border-border hover:bg-muted"
                     }
                   `}
-              >
-                <ArrowDown className="w-3.5 h-3.5" />
-                <span>自动滚动</span>
-              </button>
+                >
+                  <ArrowDown className="w-3.5 h-3.5" />
+                  <span>自动滚动</span>
+                </button>
+              </div>
             ) : (
               <div className="text-xs text-muted-foreground font-mono">
                 直接查看漏洞详情

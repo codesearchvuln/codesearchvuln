@@ -13,6 +13,7 @@ async def test_save_findings_strict_validation_filters_invalid_and_keeps_enriche
     source_file.write_text(
         "\n".join(
             [
+                "x = 1",
                 "def run(user_input):",
                 "    prefix = 'ok'",
                 "    dangerous_call(user_input)",
@@ -54,6 +55,15 @@ async def test_save_findings_strict_validation_filters_invalid_and_keeps_enriche
             "reachability": "likely_reachable",
         },
         {
+            "title": "global scope finding should be filtered",
+            "file_path": "app.py",
+            "line_start": 1,
+            "line_end": 1,
+            "description": "not inside any function",
+            "verdict": "likely",
+            "reachability": "likely_reachable",
+        },
+        {
             "title": "valid inferred finding",
             "file_path": "app.py",
             "description": "dangerous call is reachable",
@@ -77,8 +87,8 @@ async def test_save_findings_strict_validation_filters_invalid_and_keeps_enriche
 
     saved_finding = db.add.call_args.args[0]
     assert saved_finding.file_path == "app.py"
-    assert saved_finding.line_start == 3
-    assert saved_finding.line_end == 3
+    assert saved_finding.line_start == 4
+    assert saved_finding.line_end == 4
     assert "dangerous_call(user_input)" in saved_finding.code_snippet
     assert saved_finding.code_context
     assert saved_finding.verification_result["authenticity"] == "likely"

@@ -186,17 +186,38 @@ class ASTCallIndex:
                 continue
 
             start = idx + 1
-            depth = 0
             end = start
             body_lines: List[str] = []
-            for j in range(idx, len(lines)):
-                current = lines[j]
-                depth += current.count("{")
-                depth -= current.count("}")
-                body_lines.append(current)
-                end = j + 1
-                if j > idx and depth <= 0:
-                    break
+
+            if language == "python":
+                # Indentation-based block end for python fallback.
+                indent = len(line) - len(line.lstrip(" "))
+                for j in range(idx, len(lines)):
+                    current = lines[j]
+                    body_lines.append(current)
+                    end = j + 1
+                    if j == idx:
+                        continue
+                    if not current.strip():
+                        continue
+                    if current.lstrip().startswith("#"):
+                        continue
+                    current_indent = len(current) - len(current.lstrip(" "))
+                    # stop when we hit a sibling/parent block
+                    if current_indent <= indent and (current.lstrip().startswith("def ") or current.lstrip().startswith("class ")):
+                        body_lines.pop()
+                        end = j
+                        break
+            else:
+                depth = 0
+                for j in range(idx, len(lines)):
+                    current = lines[j]
+                    depth += current.count("{")
+                    depth -= current.count("}")
+                    body_lines.append(current)
+                    end = j + 1
+                    if j > idx and depth <= 0:
+                        break
 
             defs.append((matched_name, start, end, "\n".join(body_lines)))
 

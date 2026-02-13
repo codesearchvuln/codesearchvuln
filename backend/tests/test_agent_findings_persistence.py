@@ -18,7 +18,7 @@ async def test_save_findings_keeps_long_text_fields_without_truncation(tmp_path)
     target_file = tmp_path / "src" / "module" / "vuln.py"
     target_file.parent.mkdir(parents=True, exist_ok=True)
     target_file.write_text(
-        "\n".join([f"line {i}" for i in range(1, 60)]),
+        "\n".join(["def handler():", *[f"    line {i}" for i in range(1, 60)]]),
         encoding="utf-8",
     )
 
