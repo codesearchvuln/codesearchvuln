@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime, timezone
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -313,6 +314,9 @@ class BaseAgent(ABC):
         self._incoming_handoff: Optional[TaskHandoff] = None
         self._insights: List[str] = []  # 收集的洞察
         self._work_completed: List[str] = []  # 完成的工作记录
+
+        # 🔥 最近一次工具输出快照（用于避免 llm_observation 复写同一段 tool_result）
+        self._last_tool_result_snapshot: Optional[Dict[str, Any]] = None
         
         # 🔥 是否已注册到注册表
         self._registered = False
@@ -759,15 +763,35 @@ class BaseAgent(ABC):
     
     async def emit_llm_observation(self, observation: str):
         """发射 LLM 观察事件"""
+        obs_text = observation or ""
+
+        # If the observation mostly repeats the latest tool_result output, avoid logging it twice.
+        snapshot = self._last_tool_result_snapshot if isinstance(self._last_tool_result_snapshot, dict) else None
+        deduped = False
+        observation_ref: Optional[Dict[str, Any]] = None
+        if snapshot and isinstance(obs_text, str) and obs_text.strip():
+            snap_prefix = str(snapshot.get("prefix") or "")
+            # Heuristic: if the tool output prefix shows up inside observation, treat as duplicate.
+            if snap_prefix and len(snap_prefix) >= 80 and snap_prefix in obs_text:
+                deduped = True
+                observation_ref = {
+                    "tool_call_id": snapshot.get("tool_call_id"),
+                    "tool_name": snapshot.get("tool_name"),
+                    "digest": snapshot.get("digest"),
+                }
+                obs_text = obs_text[:300] + "...(omitted duplicate tool output)" if len(obs_text) > 300 else obs_text
+
         # 截断过长的观察结果
-        display_obs = observation[:300] + "..." if len(observation) > 300 else observation
-        safe_observation, truncated = _truncate_with_flag(observation)
+        display_obs = obs_text[:300] + "..." if len(obs_text) > 300 else obs_text
+        safe_observation, truncated = _truncate_with_flag(obs_text)
         await self.emit_event(
             "llm_observation",
             f"[{self.name}] 观察结果: {display_obs}",
             metadata={
                 "observation": safe_observation,
                 "truncated": truncated,
+                "deduped": bool(deduped),
+                "observation_ref": observation_ref,
             }
         )
     
@@ -804,6 +828,19 @@ class BaseAgent(ABC):
         safe_result = result if result and result != "None" else ""
         stored_result, truncated = _truncate_with_flag(safe_result)
         tool_output_dict = {"result": stored_result if stored_result else "", "truncated": truncated}
+
+        # Snapshot the latest tool output so llm_observation can avoid duplicating it.
+        try:
+            digest = hashlib.sha1(stored_result.encode("utf-8", errors="ignore")).hexdigest() if stored_result else ""
+        except Exception:
+            digest = ""
+        self._last_tool_result_snapshot = {
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "digest": digest,
+            "prefix": stored_result[:256] if isinstance(stored_result, str) else "",
+        }
+
         metadata: Dict[str, Any] = {"tool_status": tool_status}
         if tool_call_id:
             metadata["tool_call_id"] = tool_call_id

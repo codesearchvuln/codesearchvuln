@@ -135,6 +135,15 @@ class Settings(BaseSettings):
     LOGIC_AUTHZ_ENABLED: bool = True
     FLOW_UNREACHABLE_POLICY: str = "degrade_likely"
 
+    # Joern MCP (CodeBadger) configuration
+    # - Default: prefer local `joern` binary if present.
+    # - When local `joern` is missing, JoernClient can fall back to CodeBadger MCP.
+    JOERN_MCP_ENABLED: bool = False
+    JOERN_MCP_URL: str = "http://codebadger-mcp:4242/mcp"
+    JOERN_MCP_CPG_TIMEOUT_SEC: int = 600
+    JOERN_MCP_QUERY_TIMEOUT_SEC: int = 60
+    JOERN_MCP_PREFER: bool = False
+
     # PoC trigger chain (source -> sink) extraction (Joern preferred, LLM fallback)
     POC_TRIGGER_CHAIN_ENABLED: bool = True
     POC_TRIGGER_CHAIN_MAX_FLOWS: int = 3

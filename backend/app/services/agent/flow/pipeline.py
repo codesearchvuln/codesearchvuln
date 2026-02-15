@@ -8,6 +8,7 @@ from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
 from app.services.agent.flow.lightweight.callgraph_code2flow import Code2FlowCallGraph
 from app.services.agent.flow.lightweight.path_scorer import build_lightweight_flow_evidence
 from app.services.agent.flow.joern.joern_client import JoernClient
+from app.services.agent.flow.joern.codebadger_poc_query import infer_codebadger_language
 from app.services.agent.flow.models import FlowEvidence, merge_flow_evidence
 from app.services.agent.logic.authz_rules import AuthzRuleEngine
 
@@ -88,6 +89,11 @@ class FlowEvidencePipeline:
 
     def _should_trigger_joern(self, finding: Dict[str, Any], lightweight: FlowEvidence) -> bool:
         if not self.joern_enabled:
+            return False
+
+        # Smart audit policy: only allow Joern for Java / C / C++.
+        file_path = str(finding.get("file_path") or "").strip()
+        if not infer_codebadger_language(file_path):
             return False
 
         severity = str(finding.get("severity") or "").strip().lower()

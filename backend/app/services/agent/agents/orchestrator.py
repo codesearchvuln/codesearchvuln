@@ -1,13 +1,12 @@
 """
-Orchestrator Agent (编排层) - LLM 驱动版
+Orchestrator Agent (编排层) - Deterministic TODO 模式
 
-LLM 是真正的大脑，全程参与决策！
-- LLM 决定下一步做什么
-- LLM 决定调度哪个子 Agent
-- LLM 决定何时完成
-- LLM 根据中间结果动态调整策略
+策略：
+- 固定 TODO List（中粒度 8-12 项），默认 done=false
+- 按固定顺序调度 subagent（recon/analysis/verification），由 Orchestrator 用确定性规则验收并更新 done
+- 每项最多重试 max_attempts，超过后按降级完成继续推进（blocked_reason=degraded_after_retries）
 
-类型: Autonomous Agent with Dynamic Planning
+注：此模式下 Orchestrator 不再依赖 LLM 进行每轮决策；LLM 只可能出现在子 Agent 内部。
 """
 
 import asyncio
@@ -126,16 +125,38 @@ class AgentStep:
     sub_agent_result: Optional[AgentResult] = None
 
 
+@dataclass
+class TodoItem:
+    id: str
+    title: str
+    agent: str  # recon|analysis|verification|orchestrator|system
+    task: str
+    context: str = ""
+    done: bool = False
+    attempts: int = 0
+    max_attempts: int = 2
+    blocked_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "agent": self.agent,
+            "task": self.task,
+            "context": self.context,
+            "done": bool(self.done),
+            "attempts": int(self.attempts),
+            "max_attempts": int(self.max_attempts),
+            "blocked_reason": self.blocked_reason,
+        }
+
+
 class OrchestratorAgent(BaseAgent):
     """
-    编排 Agent - LLM 驱动版
-    
-    LLM 全程参与决策：
-    1. LLM 思考当前状态
-    2. LLM 决定下一步操作
-    3. 执行操作，获取结果
-    4. LLM 分析结果，决定下一步
-    5. 重复直到 LLM 决定完成
+    编排 Agent - Deterministic TODO 模式
+
+    - 不做 per-iteration 的 LLM 决策循环
+    - 只负责：调度、验收、状态更新、汇总
     """
     
     def __init__(
@@ -181,6 +202,31 @@ class OrchestratorAgent(BaseAgent):
     def register_sub_agent(self, name: str, agent: BaseAgent):
         """注册子 Agent"""
         self.sub_agents[name] = agent
+
+    def _dedup_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Best-effort dedup to keep deterministic persistence stable.
+
+        Key: (file_path, line_start, vulnerability_type)
+        """
+        if not isinstance(findings, list) or not findings:
+            return []
+        out: List[Dict[str, Any]] = []
+        seen: set[tuple[str, int, str]] = set()
+        for item in findings:
+            if not isinstance(item, dict):
+                continue
+            fp = str(item.get("file_path") or "").strip()
+            vt = str(item.get("vulnerability_type") or "").strip()
+            try:
+                ln = int(item.get("line_start") or 0)
+            except Exception:
+                ln = 0
+            key = (fp, ln, vt)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+        return out
     
     def cancel(self):
         """
@@ -199,7 +245,7 @@ class OrchestratorAgent(BaseAgent):
     
     async def run(self, input_data: Dict[str, Any]) -> AgentResult:
         """
-        执行编排任务 - LLM 全程参与！
+        执行编排任务 - Deterministic TODO 模式
         
         Args:
             input_data: {
@@ -211,10 +257,11 @@ class OrchestratorAgent(BaseAgent):
         """
         import time
         start_time = time.time()
-        
-        project_info = input_data.get("project_info", {})
-        config = input_data.get("config", {})
-        
+
+        project_info = input_data.get("project_info", {}) if isinstance(input_data, dict) else {}
+        config = input_data.get("config", {}) if isinstance(input_data, dict) else {}
+        persist_findings = input_data.get("persist_findings") if isinstance(input_data, dict) else None
+
         # 🔥 保存运行时上下文，用于传递给子 Agent
         self._runtime_context = {
             "project_info": project_info,
@@ -222,315 +269,253 @@ class OrchestratorAgent(BaseAgent):
             "project_root": input_data.get("project_root", project_info.get("root", ".")),
             "task_id": input_data.get("task_id"),
         }
-        
-        # 构建初始消息
-        initial_message = self._build_initial_message(project_info, config)
-        
-        # 初始化对话历史
-        self._conversation_history = [
-            {"role": "system", "content": self.config.system_prompt},
-            {"role": "user", "content": initial_message},
-        ]
-        
+
+        # Reset runtime state
         self._steps = []
         self._all_findings = []
-        self._agent_results = {}  # 🔥 重置 Agent 结果缓存
-        self._agent_handoffs = {}  # 🔥 重置 Agent handoff 缓存
-        final_result = None
-        error_message = None  # 🔥 跟踪错误信息
-        
-        await self.emit_thinking("🧠 Orchestrator Agent 启动，LLM 开始自主编排决策...")
-        
+        self._agent_results = {}
+        self._agent_handoffs = {}
+        self._iteration = 0
+        self._total_tokens = 0
+        self._tool_calls = 0
+
+        # Seed findings: keep bootstrap candidates visible to downstream and persistence step.
+        bootstrap_findings = config.get("bootstrap_findings") if isinstance(config, dict) else None
+        if isinstance(bootstrap_findings, list) and bootstrap_findings:
+            for f in bootstrap_findings:
+                if isinstance(f, dict):
+                    payload = dict(f)
+                    payload.setdefault("source", "bootstrap_seed")
+                    self._all_findings.append(payload)
+
+        todo_list: List[TodoItem] = [
+            TodoItem(
+                id="recon_1",
+                title="Recon-1：项目结构/语言/入口点/高风险区域",
+                agent="recon",
+                task="分析项目结构、技术栈、主要入口点与高风险区域（必须带 file_path:line）。",
+            ),
+            TodoItem(
+                id="recon_2",
+                title="Recon-2：输入面/信任边界/关键解析点",
+                agent="recon",
+                task="识别输入面、信任边界与关键解析点（文件解析、反序列化、命令行、环境变量等），输出可操作审计线索。",
+            ),
+            TodoItem(
+                id="analysis_1",
+                title="Analysis-1：快速扫描产出候选 findings",
+                agent="analysis",
+                task="使用 smart_scan/quick_audit + read_file 证据，产出结构化候选 findings（必须含 file_path/line_start/confidence）。",
+            ),
+            TodoItem(
+                id="analysis_2",
+                title="Analysis-2：深挖 Top 风险区域并补齐证据",
+                agent="analysis",
+                task="围绕高风险区域/候选种子深挖，补齐证据链并输出高价值 findings（避免无证据推测）。",
+            ),
+            TodoItem(
+                id="verification_1",
+                title="Verification-1：验证 bootstrap_findings（最多 8）并回填结论",
+                agent="verification",
+                task="仅验证 bootstrap_findings（最多 8 条），回填真实性/可达性/修复建议/PoC 思路（不输出可直接利用 payload）。",
+            ),
+            TodoItem(
+                id="orchestrator_merge",
+                title="Orchestrator-1：合并并去重 findings",
+                agent="orchestrator",
+                task="合并 recon/analysis/verification 结果并按 (file_path,line_start,vulnerability_type) 去重。",
+                max_attempts=1,
+            ),
+            TodoItem(
+                id="orchestrator_normalize",
+                title="Orchestrator-2：规范化字段并准备入库",
+                agent="orchestrator",
+                task="对 findings 做字段补齐与规范化（severity/type/confidence/location/snippets）。",
+                max_attempts=1,
+            ),
+            TodoItem(
+                id="persist_findings",
+                title="System：持久化入库",
+                agent="system",
+                task="调用持久化回调保存 findings（best-effort；失败则降级继续）。",
+                max_attempts=2,
+            ),
+            TodoItem(
+                id="finalize",
+                title="Orchestrator-3：生成最终汇总",
+                agent="orchestrator",
+                task="生成最终汇总（统计、过滤原因、TODO 完成表）。",
+                max_attempts=1,
+            ),
+        ]
+
+        async def emit_todo_update(message: str) -> None:
+            lines = []
+            for item in todo_list:
+                check = "x" if item.done else " "
+                suffix = f" (degraded:{item.blocked_reason})" if item.blocked_reason else ""
+                lines.append(f"- [{check}] {item.title}{suffix}")
+            await self.emit_event(
+                "todo_update",
+                message,
+                metadata={"todo_list": [t.to_dict() for t in todo_list], "render": "\n".join(lines)},
+            )
+
+        def validate_recon_done() -> bool:
+            data = self._agent_results.get("recon")
+            if not isinstance(data, dict):
+                return False
+            tech_stack = data.get("tech_stack")
+            high_risk = data.get("high_risk_areas")
+            if isinstance(tech_stack, dict):
+                langs = tech_stack.get("languages")
+                if isinstance(langs, list) and langs:
+                    return True
+            return isinstance(high_risk, list) and len(high_risk) > 0
+
+        def validate_analysis_done() -> bool:
+            data = self._agent_results.get("analysis")
+            if not isinstance(data, dict):
+                return False
+            findings = data.get("findings")
+            if not isinstance(findings, list) or not findings:
+                return False
+            for f in findings:
+                if not isinstance(f, dict):
+                    continue
+                fp = f.get("file_path")
+                ln = f.get("line_start")
+                conf = f.get("confidence")
+                if isinstance(fp, str) and fp.strip() and isinstance(ln, int) and ln > 0:
+                    try:
+                        float(conf)
+                    except Exception:
+                        continue
+                    return True
+            return False
+
+        def validate_verification_done() -> tuple[bool, Optional[str]]:
+            bootstrap = config.get("bootstrap_findings") if isinstance(config, dict) else None
+            if not isinstance(bootstrap, list) or not bootstrap:
+                return True, "no_bootstrap_findings"
+            data = self._agent_results.get("verification")
+            if not isinstance(data, dict):
+                return False, None
+            summary = data.get("summary")
+            if not isinstance(summary, str) or not summary.strip():
+                return False, None
+            # Findings may be empty in unit tests; summary is the minimal requirement.
+            return True, None
+
+        await self.emit_thinking("🧠 Orchestrator（TODO 模式）启动：按固定清单顺序调度子 Agent 并验收结果。")
+        await emit_todo_update("📋 初始化 TODO List")
+
         try:
-            for iteration in range(self.config.max_iterations):
+            for item in todo_list:
                 if self.is_cancelled:
                     break
-                
-                self._iteration = iteration + 1
-                
-                # 🔥 再次检查取消标志（在LLM调用之前）
-                if self.is_cancelled:
-                    await self.emit_thinking("🛑 任务已取消，停止执行")
-                    break
-                
-                # 调用 LLM 进行思考和决策（流式输出）
-                try:
-                    llm_output, tokens_this_round = await self.stream_llm_call(
-                        self._conversation_history,
-                        # 🔥 不传递 temperature 和 max_tokens，使用用户配置
-                    )
-                except asyncio.CancelledError:
-                    logger.info(f"[{self.name}] LLM call cancelled")
-                    break
-                
-                self._total_tokens += tokens_this_round
-                
-                # 🔥 检测空响应
-                if not llm_output or not llm_output.strip():
-                    logger.warning(f"[{self.name}] Empty LLM response")
-                    empty_retry_count = getattr(self, '_empty_retry_count', 0) + 1
-                    self._empty_retry_count = empty_retry_count
-                    if empty_retry_count >= 5:  # 🔥 增加重试次数到5次
-                        logger.error(f"[{self.name}] Too many empty responses, stopping")
-                        error_message = "连续收到空响应，停止编排"
-                        await self.emit_event("error", error_message)
-                        break
 
-                    # 🔥 添加短暂延迟，避免快速重试
-                    await asyncio.sleep(1.0)
+                while not item.done and item.attempts < item.max_attempts:
+                    item.attempts += 1
+                    await emit_todo_update(f"▶️ 开始执行：{item.title} (attempt {item.attempts}/{item.max_attempts})")
 
-                    # 🔥 更详细的重试提示
-                    retry_prompt = f"""收到空响应（第 {empty_retry_count} 次）。请严格按照以下格式输出你的决策：
+                    if item.agent in {"recon", "analysis", "verification"}:
+                        _ = await self._dispatch_agent(
+                            {"agent": item.agent, "task": item.task, "context": item.context}
+                        )
+                        if item.agent == "recon":
+                            if validate_recon_done():
+                                item.done = True
+                        elif item.agent == "analysis":
+                            if validate_analysis_done():
+                                item.done = True
+                        elif item.agent == "verification":
+                            ok, reason = validate_verification_done()
+                            if ok:
+                                item.done = True
+                                if reason:
+                                    item.blocked_reason = reason
 
-Thought: [你对当前审计状态的思考]
-Action: [dispatch_agent|summarize|finish]
-Action Input: {{"参数": "值"}}
+                    elif item.agent == "orchestrator":
+                        if item.id == "orchestrator_merge":
+                            self._all_findings = self._dedup_findings(self._all_findings)
+                            item.done = True
+                        elif item.id == "orchestrator_normalize":
+                            self._all_findings = [
+                                self._normalize_finding(f) for f in self._all_findings if isinstance(f, dict)
+                            ]
+                            item.done = True
+                        elif item.id == "finalize":
+                            item.done = True
+                        else:
+                            item.done = True
+                            item.blocked_reason = "unknown_orchestrator_step"
 
-当前可调度的子 Agent: {list(self.sub_agents.keys())}
-当前已收集发现: {len(self._all_findings)} 个
+                    elif item.agent == "system":
+                        if callable(persist_findings):
+                            try:
+                                await persist_findings(self._all_findings)
+                                item.done = True
+                            except Exception as exc:
+                                if item.attempts >= item.max_attempts:
+                                    item.done = True
+                                    item.blocked_reason = f"degraded_after_retries:{type(exc).__name__}"
+                        else:
+                            item.done = True
+                            item.blocked_reason = "missing_persist_callback"
 
-请立即输出你的下一步决策。"""
+                    if not item.done and item.attempts >= item.max_attempts:
+                        item.done = True
+                        if not item.blocked_reason:
+                            item.blocked_reason = "degraded_after_retries"
 
-                    self._conversation_history.append({
-                        "role": "user",
-                        "content": retry_prompt,
-                    })
-                    continue
-                
-                # 重置空响应计数器
-                self._empty_retry_count = 0
+                await emit_todo_update(f"✅ 完成：{item.title}")
 
-                # 🔥 检查是否是 API 错误（而非格式错误）
-                if llm_output.startswith("[API_ERROR:"):
-                    # 提取错误类型和消息
-                    match = re.match(r"\[API_ERROR:(\w+)\]\s*(.*)", llm_output)
-                    if match:
-                        error_type = match.group(1)
-                        error_message = match.group(2)
-
-                        if error_type == "rate_limit":
-                            # 速率限制 - 等待后重试
-                            api_retry_count = getattr(self, '_api_retry_count', 0) + 1
-                            self._api_retry_count = api_retry_count
-                            if api_retry_count >= 3:
-                                logger.error(f"[{self.name}] Too many rate limit errors, stopping")
-                                await self.emit_event("error", f"API 速率限制重试次数过多: {error_message}")
-                                break
-                            logger.warning(f"[{self.name}] Rate limit hit, waiting before retry ({api_retry_count}/3)")
-                            await self.emit_event("warning", f"API 速率限制，等待后重试 ({api_retry_count}/3)")
-                            await asyncio.sleep(30)  # 等待 30 秒后重试
-                            continue
-
-                        elif error_type == "quota_exceeded":
-                            # 配额用尽 - 终止任务
-                            logger.error(f"[{self.name}] API quota exceeded: {error_message}")
-                            await self.emit_event("error", f"API 配额已用尽: {error_message}")
-                            break
-
-                        elif error_type == "authentication":
-                            # 认证错误 - 终止任务
-                            logger.error(f"[{self.name}] API authentication error: {error_message}")
-                            await self.emit_event("error", f"API 认证失败: {error_message}")
-                            break
-
-                        elif error_type == "connection":
-                            # 连接错误 - 重试
-                            api_retry_count = getattr(self, '_api_retry_count', 0) + 1
-                            self._api_retry_count = api_retry_count
-                            if api_retry_count >= 3:
-                                logger.error(f"[{self.name}] Too many connection errors, stopping")
-                                await self.emit_event("error", f"API 连接错误重试次数过多: {error_message}")
-                                break
-                            logger.warning(f"[{self.name}] Connection error, retrying ({api_retry_count}/3)")
-                            await self.emit_event("warning", f"API 连接错误，重试中 ({api_retry_count}/3)")
-                            await asyncio.sleep(5)  # 等待 5 秒后重试
-                            continue
-
-                # 重置 API 重试计数器（成功获取响应后）
-                self._api_retry_count = 0
-
-                # 解析 LLM 的决策
-                step = self._parse_llm_response(llm_output)
-                
-                if not step:
-                    # LLM 输出格式不正确，提示重试
-                    format_retry_count = getattr(self, '_format_retry_count', 0) + 1
-                    self._format_retry_count = format_retry_count
-                    if format_retry_count >= 3:
-                        logger.error(f"[{self.name}] Too many format errors, stopping")
-                        error_message = "连续格式错误，停止编排"
-                        await self.emit_event("error", error_message)
-                        break
-                    await self.emit_llm_decision("格式错误", "需要重新输出")
-                    self._conversation_history.append({
-                        "role": "assistant",
-                        "content": llm_output,
-                    })
-                    self._conversation_history.append({
-                        "role": "user",
-                        "content": "请按照规定格式输出：Thought + Action + Action Input",
-                    })
-                    continue
-                
-                # 重置格式重试计数器
-                self._format_retry_count = 0
-                
-                self._steps.append(step)
-                
-                # 🔥 发射 LLM 思考内容事件 - 展示编排决策的思考过程
-                if step.thought:
-                    await self.emit_llm_thought(step.thought, iteration + 1)
-                
-                # 添加 LLM 响应到历史
-                self._conversation_history.append({
-                    "role": "assistant",
-                    "content": llm_output,
-                })
-                
-                # 执行 LLM 决定的操作
-                if step.action == "finish":
-                    # 🔥 LLM 决定完成审计
-                    await self.emit_llm_decision("完成审计", "LLM 判断审计已充分完成")
-                    await self.emit_llm_complete(
-                        f"编排完成，发现 {len(self._all_findings)} 个漏洞",
-                        self._total_tokens
-                    )
-                    final_result = step.action_input
-                    break
-                
-                elif step.action == "dispatch_agent":
-                    # 🔥 LLM 决定调度子 Agent
-                    agent_name = step.action_input.get("agent", "unknown")
-                    task_desc = step.action_input.get("task", "")
-                    await self.emit_llm_decision(
-                        f"调度 {agent_name} Agent",
-                        f"任务: {task_desc[:100]}"
-                    )
-                    await self.emit_llm_action("dispatch_agent", step.action_input)
-                    
-                    observation = await self._dispatch_agent(step.action_input)
-                    step.observation = observation
-                    
-                    # 🔥 子 Agent 执行完成后检查取消状态
-                    if self.is_cancelled:
-                        logger.info(f"[{self.name}] Cancelled after sub-agent dispatch")
-                        break
-                    
-                    # 🔥 发射观察事件
-                    await self.emit_llm_observation(observation)
-                    
-                elif step.action == "summarize":
-                    # LLM 要求汇总
-                    await self.emit_llm_decision("汇总发现", "LLM 请求查看当前发现汇总")
-                    observation = self._summarize_findings()
-                    step.observation = observation
-                    await self.emit_llm_observation(observation)
-                    
-                else:
-                    observation = f"未知操作: {step.action}，可用操作: dispatch_agent, summarize, finish"
-                    await self.emit_llm_decision("未知操作", observation)
-                
-                # 添加观察结果到历史
-                self._conversation_history.append({
-                    "role": "user",
-                    "content": f"Observation:\n{step.observation}",
-                })
-            
-            # 生成最终结果
             duration_ms = int((time.time() - start_time) * 1000)
-            
-            # 🔥 如果被取消，返回取消结果
+
             if self.is_cancelled:
-                await self.emit_event(
-                    "info",
-                    f"🛑 Orchestrator 已取消: {len(self._all_findings)} 个发现, {self._iteration} 轮决策"
-                )
+                await emit_todo_update("🛑 任务已取消，停止执行")
                 return AgentResult(
                     success=False,
                     error="任务已取消",
-                    data={
-                        "findings": self._all_findings,
-                        "steps": [
-                            {
-                                "thought": s.thought,
-                                "action": s.action,
-                                "action_input": s.action_input,
-                                "observation": s.observation[:500] if s.observation else None,
-                            }
-                            for s in self._steps
-                        ],
-                    },
+                    data={"findings": self._all_findings, "todo_list": [t.to_dict() for t in todo_list]},
                     iterations=self._iteration,
                     tool_calls=self._tool_calls,
                     tokens_used=self._total_tokens,
                     duration_ms=duration_ms,
                 )
-            
-            # 🔥 如果有错误，返回失败结果
-            if error_message:
-                await self.emit_event(
-                    "error",
-                    f"❌ Orchestrator 失败: {error_message}"
-                )
-                return AgentResult(
-                    success=False,
-                    error=error_message,
-                    data={
-                        "findings": self._all_findings,
-                        "steps": [
-                            {
-                                "thought": s.thought,
-                                "action": s.action,
-                                "action_input": s.action_input,
-                                "observation": s.observation[:500] if s.observation else None,
-                            }
-                            for s in self._steps
-                        ],
-                    },
-                    iterations=self._iteration,
-                    tool_calls=self._tool_calls,
-                    tokens_used=self._total_tokens,
-                    duration_ms=duration_ms,
-                )
-            
-            await self.emit_event(
-                "info",
-                f"🎯 Orchestrator 完成: {len(self._all_findings)} 个发现, {self._iteration} 轮决策"
-            )
 
-            # 🔥 CRITICAL: Log final findings count before returning
-            logger.info(f"[Orchestrator] Final result: {len(self._all_findings)} findings collected")
-            if len(self._all_findings) == 0:
-                logger.warning(f"[Orchestrator] ⚠️ No findings collected! Dispatched agents: {list(self._dispatched_tasks.keys())}, Iterations: {self._iteration}")
-            for i, f in enumerate(self._all_findings[:5]):  # Log first 5 for debugging
-                logger.debug(f"[Orchestrator] Finding {i+1}: {f.get('title', 'N/A')} - {f.get('vulnerability_type', 'N/A')}")
+            summary = {
+                "todo_total": len(todo_list),
+                "todo_done": sum(1 for t in todo_list if t.done),
+                "findings_collected": len(self._all_findings),
+            }
+            await emit_todo_update("🎯 TODO List 全部执行完成")
 
             return AgentResult(
                 success=True,
                 data={
                     "findings": self._all_findings,
-                    "summary": final_result or self._generate_default_summary(),
-                    "steps": [
-                        {
-                            "thought": s.thought,
-                            "action": s.action,
-                            "action_input": s.action_input,
-                            "observation": s.observation[:500] if s.observation else None,
-                        }
-                        for s in self._steps
-                    ],
+                    "summary": summary,
+                    "todo_list": [t.to_dict() for t in todo_list],
                 },
                 iterations=self._iteration,
                 tool_calls=self._tool_calls,
                 tokens_used=self._total_tokens,
                 duration_ms=duration_ms,
             )
-            
+
         except Exception as e:
-            logger.error(f"Orchestrator failed: {e}", exc_info=True)
+            logger.error("Orchestrator TODO mode failed: %s", e, exc_info=True)
+            duration_ms = int((time.time() - start_time) * 1000)
             return AgentResult(
                 success=False,
                 error=str(e),
+                data={"findings": self._all_findings, "todo_list": [t.to_dict() for t in todo_list]},
+                iterations=self._iteration,
+                tool_calls=self._tool_calls,
+                tokens_used=self._total_tokens,
+                duration_ms=duration_ms,
             )
     
     def _build_initial_message(
@@ -713,21 +698,9 @@ Action Input: {{"参数": "值"}}
             logger.warning(f"[Orchestrator] Agent '{agent_name}' 不存在，可用: {available}")
             return f"错误: Agent '{agent_name}' 不存在。可用的 Agent: {available}"
         
-        # 🔥 检查是否重复调度同一个 Agent
+        # NOTE: TODO 模式用「每个 todo item 的 attempts」控制重试与降级完成。
+        # 不再使用“同一 agent 调度次数上限”作为门禁（否则会阻断 todo 重试逻辑）。
         dispatch_count = self._dispatched_tasks.get(agent_name, 0)
-        if dispatch_count >= 2:
-            return f"""## ⚠️ 重复调度警告
-
-你已经调度 {agent_name} Agent {dispatch_count} 次了。
-
-如果之前的调度没有返回有用的结果，请考虑：
-1. 尝试调度其他 Agent（如 analysis 或 verification）
-2. 使用 finish 操作结束审计并汇总已有发现
-3. 提供更具体的任务描述
-
-当前已收集的发现数量: {len(self._all_findings)}
-"""
-        
         self._dispatched_tasks[agent_name] = dispatch_count + 1
         
         # 🔥 设置父 Agent ID 并注册到注册表（动态 Agent 树）

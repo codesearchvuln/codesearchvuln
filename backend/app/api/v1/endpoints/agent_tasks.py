@@ -1496,6 +1496,27 @@ async def _execute_agent_task(task_id: str):
                 "project_root": project_root,
                 "task_id": task_id,
             }
+
+            # Provide deterministic persistence callback for Orchestrator TODO mode.
+            # The callback is idempotent per task run to avoid double inserts on retries.
+            finding_save_diagnostics: Dict[str, Any] = {}
+            persist_state: Dict[str, Any] = {"saved_count": None}
+
+            async def _persist_findings_callback(findings_payload: Any) -> int:
+                if persist_state.get("saved_count") is not None:
+                    return int(persist_state["saved_count"])
+                findings_list = findings_payload if isinstance(findings_payload, list) else []
+                saved = await _save_findings(
+                    db,
+                    task_id,
+                    findings_list,
+                    project_root=project_root,
+                    save_diagnostics=finding_save_diagnostics,
+                )
+                persist_state["saved_count"] = int(saved)
+                return int(saved)
+
+            input_data["persist_findings"] = _persist_findings_callback
             
             # 执行 Orchestrator
             await event_emitter.emit_phase_start("orchestration", "🎯 Orchestrator 开始编排审计流程")
@@ -1544,6 +1565,26 @@ async def _execute_agent_task(task_id: str):
 
                 # 🔥 Fixed-First 合并：确保 seed_findings 不会因 LLM 空输出而丢失
                 findings = _merge_seed_and_agent_findings(seed_findings, findings)
+
+                # Best-effort dedup to avoid double inserts when seeds overlap with agent findings.
+                # Key: (file_path, line_start, vulnerability_type)
+                deduped: List[Dict[str, Any]] = []
+                seen: Set[Tuple[str, int, str]] = set()
+                for f in findings:
+                    if not isinstance(f, dict):
+                        continue
+                    fp = str(f.get("file_path") or "").strip()
+                    vt = str(f.get("vulnerability_type") or "").strip()
+                    try:
+                        ln = int(f.get("line_start") or 0)
+                    except Exception:
+                        ln = 0
+                    key = (fp, ln, vt)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    deduped.append(f)
+                findings = deduped
                 logger.info(
                     "[AgentTask] Task %s completed: merged_findings=%s (seeds=%s, orchestrator=%s)",
                     task_id,
@@ -1557,40 +1598,41 @@ async def _execute_agent_task(task_id: str):
                     if isinstance(f, dict):
                         logger.debug(f"[AgentTask] Finding {i+1}: {f.get('title', 'N/A')[:50]} - {f.get('severity', 'N/A')}")
 
-                # 三轨流分析增强：轻量主链 + Joern 复核 + 逻辑漏洞图规则
-                flow_summary: Dict[str, Any] = {}
-                findings, flow_summary = await _enrich_findings_with_flow_and_logic(
-                    findings=findings,
-                    project_root=project_root,
-                    target_files=task.target_files,
-                    llm_service=llm_service,
-                    event_emitter=event_emitter,
-                )
+                # Smart audit policy: disable automatic flow enrichment / evidence generation.
+                flow_summary: Dict[str, Any] = {
+                    "enabled": False,
+                    "blocked_reason": "disabled_by_policy",
+                }
                 logger.info(
-                    "[AgentTask] Flow enrichment summary: %s",
+                    "[AgentTask] Flow enrichment summary (disabled): %s",
                     json.dumps(flow_summary, ensure_ascii=False),
                 )
-
-                # 🔥 v2.1: 传递 project_root 用于文件路径验证
-                finding_save_diagnostics: Dict[str, Any] = {}
-                async def _persist_findings_once():
-                    return await _save_findings(
-                        db,
-                        task_id,
-                        findings,
-                        project_root=project_root,
-                        save_diagnostics=finding_save_diagnostics,
-                    )
 
                 task.current_phase = AgentTaskPhase.VERIFICATION
                 task.current_step = "验证与结果归档中"
                 await db.commit()
-                saved_count = await _run_with_retries(
-                    "PERSIST_FINDINGS",
-                    task_id,
-                    event_emitter,
-                    _persist_findings_once,
-                )
+                if persist_state.get("saved_count") is not None:
+                    saved_count = int(persist_state["saved_count"])
+                    logger.info(
+                        "[AgentTask] Findings were already persisted by Orchestrator TODO step: saved_count=%s",
+                        saved_count,
+                    )
+                else:
+                    async def _persist_findings_once():
+                        return await _save_findings(
+                            db,
+                            task_id,
+                            findings,
+                            project_root=project_root,
+                            save_diagnostics=finding_save_diagnostics,
+                        )
+
+                    saved_count = await _run_with_retries(
+                        "PERSIST_FINDINGS",
+                        task_id,
+                        event_emitter,
+                        _persist_findings_once,
+                    )
                 logger.info(f"[AgentTask] Saved {saved_count}/{len(findings)} findings (filtered {len(findings) - saved_count} hallucinations)")
 
                 persisted_findings_result = await db.execute(
@@ -2205,7 +2247,9 @@ async def _initialize_tools(
         # 🔥 外部侦察工具 (Recon 阶段也需要使用这些工具来收集初步信息)
         # "opengrep_scan": OpengrepTool(project_root, sandbox_manager),
         # "bandit_scan": BanditTool(project_root, sandbox_manager),
-        "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
+        # NOTE: Smart audit policy: gitleaks_scan is disabled in orchestrated audit flow.
+        # Keep the tool implementation for other entrypoints / manual usage.
+        # "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
         # "npm_audit": NpmAuditTool(project_root, sandbox_manager),
         # "safety_scan": SafetyTool(project_root, sandbox_manager),
         # "trufflehog_scan": TruffleHogTool(project_root, sandbox_manager),
@@ -2242,7 +2286,8 @@ async def _initialize_tools(
         # 外部安全工具 (传入共享的 sandbox_manager)
         # "opengrep_scan": OpengrepTool(project_root, sandbox_manager),
         # "bandit_scan": BanditTool(project_root, sandbox_manager),
-        "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
+        # NOTE: Smart audit policy: gitleaks_scan is disabled in orchestrated audit flow.
+        # "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
         # "npm_audit": NpmAuditTool(project_root, sandbox_manager),
         # "safety_scan": SafetyTool(project_root, sandbox_manager),
         # "trufflehog_scan": TruffleHogTool(project_root, sandbox_manager),
@@ -2731,598 +2776,22 @@ async def _enrich_findings_with_flow_and_logic(
     llm_service: Optional[Any] = None,
     event_emitter: Optional[Any] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """三轨流分析增强（轻量主链 + Joern复核 + 逻辑漏洞图规则）。"""
+    """三轨流分析增强（Smart Audit 已禁用）。
+
+    Smart audit policy disables the whole "flow enrichment / evidence generation" stage:
+    - do not auto-run flow enrichment at the end of the audit
+    - do not auto-generate trigger_flow / poc_trigger_chain evidence
+
+    This function is kept as a stable API surface for backward compatibility, but always
+    returns the input findings unchanged with a disabled summary.
+    """
+    _ = (project_root, target_files, llm_service, event_emitter)  # keep signature stable
     summary: Dict[str, Any] = {
         "total": len(findings or []),
-        "path_found": 0,
-        "logic_hits": 0,
-        "joern_upgrades": 0,
-        "enabled": bool(project_root),
+        "enabled": False,
+        "blocked_reason": "disabled_by_policy",
     }
-
-    if not findings:
-        return findings, summary
-    if not project_root:
-        summary["enabled"] = False
-        summary["blocked_reason"] = "missing_project_root"
-        return findings, summary
-
-    try:
-        from app.services.agent.flow.pipeline import FlowEvidencePipeline
-
-        pipeline = FlowEvidencePipeline(
-            project_root=project_root,
-            target_files=target_files or [],
-        )
-        enriched, counters = await pipeline.enrich_findings(findings)
-
-        # Build "trigger flow" diagram evidence (file/function/code) for each finding.
-        # This is later used as a strict persistence gate in _save_findings().
-        try:
-            from datetime import datetime, timezone
-            from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
-
-            def _truncate_code(
-                text: str,
-                *,
-                max_lines: int = 160,
-                max_chars: int = 15000,
-            ) -> tuple[str, bool]:
-                if not isinstance(text, str):
-                    text = str(text)
-                lines = text.splitlines()
-                truncated = False
-                if len(lines) > max_lines:
-                    lines = lines[:max_lines]
-                    truncated = True
-                out = "\n".join(lines)
-                if len(out) > max_chars:
-                    out = out[:max_chars]
-                    truncated = True
-                return out, truncated
-
-            def _parse_call_chain_item(raw: object) -> tuple[str, str] | None:
-                if not isinstance(raw, str):
-                    return None
-                value = raw.strip()
-                if not value or ":" not in value:
-                    return None
-                file_part, func_part = value.split(":", 1)
-                file_part = file_part.strip().replace("\\", "/")
-                func_part = func_part.strip()
-                if not file_part or not func_part:
-                    return None
-                return file_part, func_part
-
-            chain_files: set[str] = set()
-            for payload in enriched:
-                if not isinstance(payload, dict):
-                    continue
-                verification_result = payload.get("verification_result")
-                if not isinstance(verification_result, dict):
-                    continue
-                flow = verification_result.get("flow")
-                if not isinstance(flow, dict):
-                    continue
-                call_chain = flow.get("call_chain")
-                if not isinstance(call_chain, list) or not call_chain:
-                    continue
-                for raw_node in call_chain:
-                    parsed = _parse_call_chain_item(raw_node)
-                    if parsed:
-                        chain_files.add(parsed[0])
-
-            ast_index = ASTCallIndex(
-                project_root=project_root,
-                target_files=sorted(chain_files) if chain_files else None,
-            )
-            ast_index.build()
-
-            for payload in enriched:
-                if not isinstance(payload, dict):
-                    continue
-
-                verification_result = payload.get("verification_result")
-                if not isinstance(verification_result, dict):
-                    verification_result = {}
-                    payload["verification_result"] = verification_result
-
-                flow = verification_result.get("flow")
-                if not isinstance(flow, dict):
-                    verification_result["trigger_flow_error"] = "missing_flow"
-                    continue
-
-                call_chain = flow.get("call_chain")
-                if not isinstance(call_chain, list) or not call_chain:
-                    verification_result["trigger_flow_error"] = "missing_call_chain"
-                    continue
-
-                parsed_chain: list[tuple[str, str]] = []
-                for raw_node in call_chain:
-                    parsed = _parse_call_chain_item(raw_node)
-                    if not parsed:
-                        parsed_chain = []
-                        break
-                    parsed_chain.append(parsed)
-                if not parsed_chain:
-                    verification_result["trigger_flow_error"] = "invalid_call_chain_item"
-                    continue
-
-                line_start = payload.get("line_start")
-                try:
-                    finding_line = int(line_start) if line_start is not None else 1
-                except Exception:
-                    finding_line = 1
-
-                nodes: list[dict] = []
-                try:
-                    for idx, (file_path, func_name) in enumerate(parsed_chain):
-                        candidates = [
-                            sym
-                            for sym in ast_index.symbols_by_name.get(func_name, [])
-                            if sym.file_path == file_path
-                        ]
-
-                        chosen = None
-                        if len(candidates) == 1:
-                            chosen = candidates[0]
-                        elif len(candidates) > 1:
-                            if idx == len(parsed_chain) - 1:
-                                exact = ast_index.find_symbol_by_location(file_path, finding_line)
-                                if exact and exact.name == func_name:
-                                    chosen = exact
-                            if not chosen:
-                                chosen = min(
-                                    candidates,
-                                    key=lambda s: (
-                                        max(0, s.end_line - s.start_line),
-                                        s.start_line,
-                                    ),
-                                )
-
-                        if not chosen:
-                            raise ValueError(f"symbol_not_found:{file_path}:{func_name}")
-
-                        code_text, code_truncated = _truncate_code(chosen.content)
-                        if not code_text.strip():
-                            raise ValueError(f"empty_code:{file_path}:{func_name}")
-
-                        nodes.append(
-                            {
-                                "index": idx,
-                                "file_path": file_path,
-                                "function": func_name,
-                                "start_line": int(chosen.start_line),
-                                "end_line": int(chosen.end_line),
-                                "code": code_text,
-                                "code_truncated": bool(code_truncated),
-                            }
-                        )
-                except Exception as exc:
-                    verification_result["trigger_flow_error"] = str(exc)[:200]
-                    continue
-
-                verification_result["trigger_flow"] = {
-                    "version": 1,
-                    "path_found": bool(flow.get("path_found")),
-                    "path_score": flow.get("path_score"),
-                    "engine": flow.get("engine"),
-                    "call_chain": [
-                        str(x) for x in call_chain if isinstance(x, str) and x.strip()
-                    ],
-                    "control_conditions": [
-                        str(x)
-                        for x in (flow.get("control_conditions") or [])
-                        if isinstance(x, str) and x.strip()
-                    ],
-                    "nodes": nodes,
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                }
-        except Exception as exc:
-            logger.warning("[Flow] trigger_flow generation failed: %s", exc)
-
-        # Build PoC trigger chain (source -> sink). Joern preferred, LLM fallback (validated).
-        try:
-            from app.core.config import settings
-            from app.services.agent.flow.joern.joern_client import JoernClient
-
-            if bool(getattr(settings, "POC_TRIGGER_CHAIN_ENABLED", True)):
-                max_flows = int(getattr(settings, "POC_TRIGGER_CHAIN_MAX_FLOWS", 3))
-                max_nodes = int(getattr(settings, "POC_TRIGGER_CHAIN_MAX_NODES", 80))
-                allow_llm_fallback = bool(getattr(settings, "POC_TRIGGER_CHAIN_LLM_FALLBACK", True))
-
-                eligible: list[tuple[str, dict]] = []
-                for idx, payload in enumerate(enriched):
-                    if not isinstance(payload, dict):
-                        continue
-                    severity = str(payload.get("severity") or "").strip().lower()
-                    if severity not in {"high", "critical"} and payload.get("has_poc") is not True:
-                        continue
-                    file_path = payload.get("file_path")
-                    line_start = payload.get("line_start")
-                    if not isinstance(file_path, str) or not file_path.strip():
-                        continue
-                    try:
-                        sink_line = int(line_start)
-                    except Exception:
-                        continue
-                    if sink_line <= 0:
-                        continue
-                    key = str(payload.get("id") or idx)
-                    eligible.append((key, payload))
-
-                if eligible:
-                    items: list[dict] = []
-                    for key, payload in eligible:
-                        verification_result = payload.get("verification_result")
-                        if not isinstance(verification_result, dict):
-                            verification_result = {}
-                            payload["verification_result"] = verification_result
-
-                        sink_hint = None
-                        raw_sink = payload.get("sink")
-                        if isinstance(raw_sink, str) and raw_sink.strip():
-                            sink_hint = raw_sink.strip()[:80]
-                        if not sink_hint:
-                            raw_snippet = payload.get("code_snippet")
-                            if isinstance(raw_snippet, str) and raw_snippet.strip():
-                                sink_hint = raw_snippet.strip()[:80]
-
-                        entry_file = None
-                        entry_func = None
-                        trigger_flow = verification_result.get("trigger_flow")
-                        if isinstance(trigger_flow, dict):
-                            tf_nodes = trigger_flow.get("nodes")
-                            if isinstance(tf_nodes, list) and tf_nodes:
-                                n0 = tf_nodes[0]
-                                if isinstance(n0, dict):
-                                    ef = n0.get("file_path")
-                                    en = n0.get("function")
-                                    if isinstance(ef, str) and ef.strip():
-                                        entry_file = ef.strip()
-                                    if isinstance(en, str) and en.strip():
-                                        entry_func = en.strip()
-
-                        items.append(
-                            {
-                                "key": key,
-                                "sink_file": str(payload.get("file_path") or "").strip(),
-                                "sink_line": int(payload.get("line_start") or 0),
-                                "sink_hint": sink_hint or "",
-                                "entry_file": entry_file or "",
-                                "entry_func": entry_func or "",
-                            }
-                        )
-
-                    joern = JoernClient(
-                        enabled=bool(getattr(settings, "FLOW_JOERN_ENABLED", True)),
-                        timeout_sec=int(getattr(settings, "FLOW_JOERN_TIMEOUT_SEC", 45)),
-                    )
-                    batch = await joern.build_poc_trigger_chains_batch(
-                        project_root=project_root,
-                        items=items,
-                        max_flows=max_flows,
-                        max_nodes=max_nodes,
-                    )
-
-                    results = batch.get("results") if isinstance(batch, dict) else None
-                    errors = batch.get("errors") if isinstance(batch, dict) else None
-                    if not isinstance(results, dict):
-                        results = {}
-                    if not isinstance(errors, dict):
-                        errors = {}
-
-                    file_cache: dict[str, list[str]] = {}
-
-                    def _read_lines(rel_path: str) -> list[str] | None:
-                        rel = str(rel_path or "").replace("\\", "/").strip()
-                        if not rel:
-                            return None
-                        if rel in file_cache:
-                            return file_cache[rel]
-                        try:
-                            p = Path(project_root) / rel
-                            text = p.read_text(encoding="utf-8", errors="replace")
-                            lines = text.splitlines()
-                            file_cache[rel] = lines
-                            return lines
-                        except Exception:
-                            return None
-
-                    def _context_window(lines: list[str], line: int, radius: int = 6) -> tuple[str, int, int]:
-                        if not lines:
-                            return "", 0, 0
-                        total = len(lines)
-                        ln = max(1, min(int(line), total))
-                        start = max(1, ln - radius)
-                        end = min(total, ln + radius)
-                        ctx = "\n".join(lines[start - 1 : end])
-                        return ctx, start, end
-
-                    def _infer_function_name(lines: list[str], line: int) -> str | None:
-                        import re
-
-                        if not lines:
-                            return None
-                        idx0 = max(0, min(len(lines) - 1, int(line) - 1))
-                        patterns = [
-                            (re.compile(r"^\\s*def\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\("), 1),
-                            (re.compile(r"^\\s*(?:export\\s+)?function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\("), 1),
-                            (re.compile(r"^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\([^)]*\\)\\s*\\{\\s*$"), 1),
-                            (re.compile(r"^\\s*class\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"), 1),
-                        ]
-                        for i in range(idx0, -1, -1):
-                            line_text = lines[i]
-                            stripped = line_text.strip()
-                            if not stripped:
-                                continue
-                            if stripped.startswith(("//", "#")):
-                                continue
-                            for pat, group in patterns:
-                                m = pat.match(line_text)
-                                if m:
-                                    name = m.group(group).strip()
-                                    if name:
-                                        return name
-                        return None
-
-                    def _validate_code_at_line(lines: list[str], line: int, code: str) -> bool:
-                        if not lines or not code or not str(code).strip():
-                            return False
-                        total = len(lines)
-                        ln = max(1, min(int(line), total))
-                        start = max(1, ln - 2)
-                        end = min(total, ln + 2)
-                        region = "\n".join(lines[start - 1 : end])
-                        return str(code).strip() in region
-
-                    for key, payload in eligible:
-                        verification_result = payload.get("verification_result")
-                        if not isinstance(verification_result, dict):
-                            verification_result = {}
-                            payload["verification_result"] = verification_result
-
-                        chain = results.get(key)
-                        if isinstance(chain, dict):
-                            nodes = chain.get("nodes")
-                            if isinstance(nodes, list) and len(nodes) >= 2:
-                                fixed_nodes: list[dict] = []
-                                for i, node in enumerate(nodes[:max_nodes]):
-                                    if not isinstance(node, dict):
-                                        continue
-                                    fp = str(node.get("file_path") or "").replace("\\", "/").strip()
-                                    ln = node.get("line")
-                                    cd = str(node.get("code") or "")
-                                    try:
-                                        ln_i = int(ln)
-                                    except Exception:
-                                        continue
-                                    if not fp or ln_i <= 0:
-                                        continue
-                                    lines = _read_lines(fp)
-                                    if not lines:
-                                        continue
-                                    if not _validate_code_at_line(lines, ln_i, cd):
-                                        continue
-                                    ctx, ctx_s, ctx_e = _context_window(lines, ln_i, radius=6)
-                                    func_name = _infer_function_name(lines, ln_i) or ""
-                                    fixed_nodes.append(
-                                        {
-                                            "index": i,
-                                            "file_path": fp,
-                                            "line": ln_i,
-                                            "function": func_name,
-                                            "code": cd[:400],
-                                            "context": ctx,
-                                            "context_start_line": ctx_s,
-                                            "context_end_line": ctx_e,
-                                        }
-                                    )
-
-                                if len(fixed_nodes) >= 2:
-                                    verification_result["poc_trigger_chain"] = {
-                                        "version": 1,
-                                        "engine": "joern_dataflow",
-                                        "source": {
-                                            "file_path": fixed_nodes[0]["file_path"],
-                                            "line": fixed_nodes[0]["line"],
-                                            "function": fixed_nodes[0]["function"],
-                                            "code": fixed_nodes[0]["code"],
-                                        },
-                                        "sink": {
-                                            "file_path": fixed_nodes[-1]["file_path"],
-                                            "line": fixed_nodes[-1]["line"],
-                                            "function": fixed_nodes[-1]["function"],
-                                            "code": fixed_nodes[-1]["code"],
-                                        },
-                                        "nodes": fixed_nodes,
-                                        "generated_at": chain.get("generated_at"),
-                                    }
-                                    continue
-
-                        reason = errors.get(key)
-                        if isinstance(reason, str) and reason.strip():
-                            verification_result["poc_trigger_chain_error"] = f"joern:{reason.strip()}"
-                        elif chain is None:
-                            verification_result["poc_trigger_chain_error"] = "joern:no_result"
-
-                    if allow_llm_fallback and llm_service:
-                        async def _build_llm_chain(payload: dict) -> dict | None:
-                            verification_result = payload.get("verification_result")
-                            if not isinstance(verification_result, dict):
-                                return None
-                            sink_file = payload.get("file_path")
-                            sink_line = payload.get("line_start")
-                            if not isinstance(sink_file, str) or not sink_file.strip():
-                                return None
-                            try:
-                                sink_ln = int(sink_line)
-                            except Exception:
-                                return None
-
-                            sink_lines = _read_lines(sink_file.strip())
-                            if not sink_lines:
-                                return None
-                            sink_ctx, sink_ctx_s, sink_ctx_e = _context_window(sink_lines, sink_ln, radius=12)
-
-                            trigger_flow = verification_result.get("trigger_flow")
-                            trigger_nodes = []
-                            if isinstance(trigger_flow, dict):
-                                raw_nodes = trigger_flow.get("nodes")
-                                if isinstance(raw_nodes, list):
-                                    for n in raw_nodes[:6]:
-                                        if isinstance(n, dict):
-                                            code = n.get("code")
-                                            fp = n.get("file_path")
-                                            fn = n.get("function")
-                                            if isinstance(code, str) and isinstance(fp, str):
-                                                trigger_nodes.append(
-                                                    {
-                                                        "file_path": fp,
-                                                        "function": fn,
-                                                        "code": code[:3000],
-                                                    }
-                                                )
-
-                            allowed_files = sorted(
-                                {
-                                    sink_file.strip(),
-                                    *[
-                                        str(n.get("file_path"))
-                                        for n in trigger_nodes
-                                        if n.get("file_path")
-                                    ],
-                                }
-                            )
-
-                            prompt = f"""你是安全审计助手。请基于给定的真实代码上下文，输出一个 PoC 触发链条（source->sink）的估算路径。
-
-约束（必须遵守）：
-- 只能使用我提供的文件与代码片段，不允许猜测不存在的文件/行号。
-- 输出的每个节点必须给出 file_path、line、code，其中 code 必须是该行附近真实出现的子串。
-- file_path 必须在允许列表内。
-- nodes 至少 2 个（source + sink）。
-
-允许的 file_path 列表：
-{allowed_files}
-
-Sink 位置上下文（含行号范围 {sink_ctx_s}-{sink_ctx_e}）：
-文件：{sink_file}
-```
-{sink_ctx}
-```
-
-已知触发相关函数（仅供推理，不代表完整）：
-{json.dumps(trigger_nodes, ensure_ascii=False)}
-
-请只返回 JSON（不要额外文字），格式：
-{{
-  "source": {{"file_path": "...", "line": 0, "code": "..."}},
-  "sink": {{"file_path": "...", "line": 0, "code": "..."}},
-  "nodes": [{{"file_path": "...", "line": 0, "code": "..."}}],
-  "confidence": 0.0
-}}
-"""
-                            try:
-                                result = await llm_service.analyze_code_with_custom_prompt(
-                                    code=sink_ctx,
-                                    language="text",
-                                    custom_prompt=prompt,
-                                )
-                            except Exception:
-                                return None
-                            if not isinstance(result, dict):
-                                return None
-                            nodes = result.get("nodes")
-                            if not isinstance(nodes, list) or len(nodes) < 2:
-                                return None
-                            fixed_nodes: list[dict] = []
-                            for i, node in enumerate(nodes[:max_nodes]):
-                                if not isinstance(node, dict):
-                                    continue
-                                fp = str(node.get("file_path") or "").replace("\\", "/").strip()
-                                try:
-                                    ln_i = int(node.get("line"))
-                                except Exception:
-                                    continue
-                                cd = str(node.get("code") or "")
-                                if not fp or fp not in allowed_files:
-                                    continue
-                                lines = _read_lines(fp)
-                                if not lines:
-                                    continue
-                                if not _validate_code_at_line(lines, ln_i, cd):
-                                    continue
-                                ctx, ctx_s, ctx_e = _context_window(lines, ln_i, radius=6)
-                                func_name = _infer_function_name(lines, ln_i) or ""
-                                fixed_nodes.append(
-                                    {
-                                        "index": i,
-                                        "file_path": fp,
-                                        "line": ln_i,
-                                        "function": func_name,
-                                        "code": cd[:400],
-                                        "context": ctx,
-                                        "context_start_line": ctx_s,
-                                        "context_end_line": ctx_e,
-                                    }
-                                )
-                            if len(fixed_nodes) < 2:
-                                return None
-                            return {
-                                "version": 1,
-                                "engine": "llm_dataflow_estimate",
-                                "source": {
-                                    "file_path": fixed_nodes[0]["file_path"],
-                                    "line": fixed_nodes[0]["line"],
-                                    "function": fixed_nodes[0]["function"],
-                                    "code": fixed_nodes[0]["code"],
-                                },
-                                "sink": {
-                                    "file_path": fixed_nodes[-1]["file_path"],
-                                    "line": fixed_nodes[-1]["line"],
-                                    "function": fixed_nodes[-1]["function"],
-                                    "code": fixed_nodes[-1]["code"],
-                                },
-                                "nodes": fixed_nodes,
-                                "generated_at": None,
-                            }
-
-                        for _key, payload in eligible:
-                            verification_result = payload.get("verification_result")
-                            if not isinstance(verification_result, dict):
-                                continue
-                            if isinstance(verification_result.get("poc_trigger_chain"), dict):
-                                continue
-                            chain = await _build_llm_chain(payload)
-                            if chain:
-                                verification_result["poc_trigger_chain"] = chain
-                            else:
-                                if not verification_result.get("poc_trigger_chain_error"):
-                                    verification_result["poc_trigger_chain_error"] = "llm_invalid_or_unverifiable"
-        except Exception as exc:
-            logger.warning("[Flow] poc_trigger_chain generation failed: %s", exc)
-
-        summary.update(counters or {})
-        summary["enabled"] = True
-
-        if event_emitter:
-            await event_emitter.emit_info(
-                "🧭 流分析证据已生成: "
-                f"path_found={summary.get('path_found', 0)}/{summary.get('total', len(findings))}, "
-                f"logic_hits={summary.get('logic_hits', 0)}, "
-                f"joern_upgrades={summary.get('joern_upgrades', 0)}"
-            )
-        return enriched, summary
-    except Exception as exc:
-        logger.warning("Flow/Logic enrichment failed: %s", exc, exc_info=True)
-        summary["enabled"] = False
-        summary["blocked_reason"] = f"enrichment_failed:{type(exc).__name__}"
-        if event_emitter:
-            await event_emitter.emit_warning(
-                f"⚠️ 流分析增强未完成，回退基础结果：{str(exc)[:160]}"
-            )
-        return findings, summary
+    return findings, summary
 
 
 async def _save_findings(
@@ -3425,29 +2894,6 @@ async def _save_findings(
                 f"[SaveFindings] 🚫 Filtered finding ({reason}): "
                 f"title={str(payload.get('title', 'N/A'))[:80]}"
             )
-
-    def has_valid_trigger_flow(value: object) -> bool:
-        if not isinstance(value, dict):
-            return False
-        call_chain = value.get("call_chain")
-        nodes = value.get("nodes")
-        if not isinstance(call_chain, list) or not call_chain:
-            return False
-        if not isinstance(nodes, list) or len(nodes) != len(call_chain):
-            return False
-        for node in nodes:
-            if not isinstance(node, dict):
-                return False
-            file_path = node.get("file_path")
-            func_name = node.get("function")
-            code = node.get("code")
-            if not isinstance(file_path, str) or not file_path.strip():
-                return False
-            if not isinstance(func_name, str) or not func_name.strip():
-                return False
-            if not isinstance(code, str) or not code.strip():
-                return False
-        return True
 
     for finding in findings:
         if not isinstance(finding, dict):
@@ -3706,11 +3152,7 @@ async def _save_findings(
                 }
             )
 
-            # 9.5) strict gate: must provide trigger flow diagram (file + function + code) or drop.
-            trigger_flow_payload = verification_result_payload.get("trigger_flow")
-            if not has_valid_trigger_flow(trigger_flow_payload):
-                mark_filtered("missing_trigger_flow", finding)
-                continue
+            # 9.5) Smart audit policy: do not require trigger_flow evidence as a persistence gate.
 
             dataflow_path = finding.get("dataflow_path")
             if not isinstance(dataflow_path, list):

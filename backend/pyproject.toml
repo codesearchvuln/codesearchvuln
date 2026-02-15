@@ -31,7 +31,9 @@ dependencies = [
     "python-multipart>=0.0.6",
     "bcrypt>=4.0.0,<5.0.0",
     # ============ HTTP Client ============
-    "httpx>=0.25.0",
+    "httpx>=0.28.1",
+    # ============ MCP Client (CodeBadger) ============
+    "fastmcp>=2.14.4",
     # ============ LLM Integration ============
     "litellm>=1.0.0",
     "tiktoken>=0.5.2",

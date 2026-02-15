@@ -131,6 +131,22 @@ private def nodeObj(idx: Int, filePath: String, line: Int, code: String): Obj = 
             errors.put(key, Str("sink_not_found"))
           } else {
             val sinkCall = sinkCallOpt.get
+            val sinkFileRel = normPath(sinkFile)
+            val sinkFileAbs = normPath(firstFilename(sinkCall))
+            val rootPrefix =
+              if (sinkFileRel.nonEmpty && sinkFileAbs.endsWith(sinkFileRel)) sinkFileAbs.substring(0, sinkFileAbs.length - sinkFileRel.length)
+              else ""
+
+            def relPath(abs: String): String = {
+              val a = normPath(abs)
+              if (rootPrefix.nonEmpty && a.startsWith(rootPrefix)) {
+                val rel0 = a.substring(rootPrefix.length)
+                if (rel0.startsWith("/")) rel0.substring(1) else rel0
+              } else {
+                a
+              }
+            }
+
             val methodOpt = pickEntryMethod(entryFile, entryFunc).orElse(Option(sinkCall.method))
             if (methodOpt.isEmpty) {
               errors.put(key, Str("enclosing_method_not_found"))
@@ -152,11 +168,11 @@ private def nodeObj(idx: Int, filePath: String, line: Int, code: String): Obj = 
                   val rawNodes = elements.flatMap { e =>
                     val line = e.lineNumber.getOrElse(-1)
                     if (line <= 0) None
-                    else Some((normPath(firstFilename(e)), line, e.code))
+                    else Some((relPath(firstFilename(e)), line, e.code))
                   }.toList
 
                   // Ensure the sink call is included as the last node.
-                  val sinkFileNorm = normPath(firstFilename(sinkCall))
+                  val sinkFileNorm = relPath(firstFilename(sinkCall))
                   val sinkLineNorm = sinkCall.lineNumber.getOrElse(-1)
                   val sinkCode = sinkCall.code
                   val nodesWithSink =
