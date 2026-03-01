@@ -429,6 +429,7 @@ class VerificationAgent(BaseAgent):
             description=finding.get("description"),
             code_snippet=finding.get("code_snippet"),
             fallback_vulnerability_name=finding.get("title"),
+            localization_status=finding.get("localization_status"),
         )
 
     def _build_default_fix_code(self, finding: Dict[str, Any]) -> str:
@@ -1860,6 +1861,7 @@ class VerificationAgent(BaseAgent):
             line_start=line_start,
             line_end=line_end,
             verification_evidence=description_text,
+            localization_status=finding.get("localization_status"),
         )
         await self.emit_event(
             "finding_new" if status == "new" else "finding_update",
