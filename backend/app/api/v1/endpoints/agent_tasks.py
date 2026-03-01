@@ -4288,6 +4288,7 @@ async def _initialize_tools(
             project_root=project_root,
             llm_service=llm_service,
             tools_registry=None,
+            event_emitter=event_emitter,
         ),
         # 模式匹配工具（增强版）
         "pattern_match": PatternMatchTool(project_root),
