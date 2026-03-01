@@ -644,8 +644,52 @@ class MCPDaemonManager:
         if dist_entry.exists():
             return True, "ready"
 
+        env = dict(os.environ)
+        env.setdefault("NODE_ENV", "production")
+        env.setdefault("NPM_CONFIG_REGISTRY", "https://registry.npmmirror.com")
+
+        pnpm_executable = _resolve_executable("pnpm")
+        pnpm_error: Optional[Exception] = None
+        if pnpm_executable:
+            pnpm_install_cmd = (
+                [pnpm_executable, "install", "--frozen-lockfile"]
+                if (source_path / "pnpm-lock.yaml").exists()
+                else [pnpm_executable, "install"]
+            )
+            pnpm_build_cmd = [pnpm_executable, "run", "build"]
+            try:
+                subprocess.run(
+                    pnpm_install_cmd,
+                    cwd=str(source_path),
+                    env=env,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=180,
+                )
+                subprocess.run(
+                    pnpm_build_cmd,
+                    cwd=str(source_path),
+                    env=env,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=180,
+                )
+                if dist_entry.exists():
+                    return True, "ready"
+            except Exception as exc:
+                pnpm_error = exc
+                logger.warning(
+                    "Prepare node source with pnpm failed (%s): %s; fallback to npm",
+                    name,
+                    exc.__class__.__name__,
+                )
+
         npm_executable = _resolve_executable("npm")
         if not npm_executable:
+            if pnpm_error is not None:
+                return False, f"{name}_pnpm_failed_and_npm_missing:{pnpm_error.__class__.__name__}"
             return False, f"{name}_npm_missing"
 
         install_cmd = (
@@ -654,8 +698,6 @@ class MCPDaemonManager:
             else [npm_executable, "install"]
         )
         build_cmd = [npm_executable, "run", "build"]
-        env = dict(os.environ)
-        env.setdefault("NODE_ENV", "production")
 
         try:
             subprocess.run(

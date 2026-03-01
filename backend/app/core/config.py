@@ -189,11 +189,11 @@ class Settings(BaseSettings):
     # MCP adapters (stdio)
     MCP_FILESYSTEM_ENABLED: bool = False
     MCP_FILESYSTEM_RUNTIME_MODE: str = "sandbox_only"
-    MCP_FILESYSTEM_COMMAND: str = "npx"
-    MCP_FILESYSTEM_ARGS: str = "-y @modelcontextprotocol/server-filesystem"
+    MCP_FILESYSTEM_COMMAND: str = "pnpm"
+    MCP_FILESYSTEM_ARGS: str = "dlx @modelcontextprotocol/server-filesystem"
     MCP_FILESYSTEM_SANDBOX_ENABLED: bool = True
-    MCP_FILESYSTEM_SANDBOX_COMMAND: str = "npx"
-    MCP_FILESYSTEM_SANDBOX_ARGS: str = "-y @modelcontextprotocol/server-filesystem"
+    MCP_FILESYSTEM_SANDBOX_COMMAND: str = "pnpm"
+    MCP_FILESYSTEM_SANDBOX_ARGS: str = "dlx @modelcontextprotocol/server-filesystem"
     MCP_FILESYSTEM_FORCE_STDIO: bool = True
     MCP_FILESYSTEM_BACKEND_URL: Optional[str] = None
     MCP_FILESYSTEM_SANDBOX_URL: Optional[str] = None
@@ -217,6 +217,10 @@ class Settings(BaseSettings):
 
     MCP_DAEMON_AUTOSTART: bool = True
     MCP_DAEMON_LOG_DIR: str = "/tmp/deepaudit/mcp-daemons"
+    GIT_MIRROR_ENABLED: bool = True
+    GIT_MIRROR_PREFIX: str = "https://ghfast.top"
+    GIT_MIRROR_HOSTS: str = "github.com"
+    GIT_MIRROR_ALLOW_AUTH_URL: bool = False
 
     MCP_CODE_INDEX_DAEMON_HOST: str = "127.0.0.1"
     MCP_CODE_INDEX_DAEMON_PORT: int = 8765
@@ -228,11 +232,11 @@ class Settings(BaseSettings):
 
     MCP_SEQUENTIAL_THINKING_ENABLED: bool = True
     MCP_SEQUENTIAL_THINKING_RUNTIME_MODE: str = "backend_then_sandbox"
-    MCP_SEQUENTIAL_THINKING_COMMAND: str = "npx"
-    MCP_SEQUENTIAL_THINKING_ARGS: str = "-y @modelcontextprotocol/server-sequential-thinking"
+    MCP_SEQUENTIAL_THINKING_COMMAND: str = "pnpm"
+    MCP_SEQUENTIAL_THINKING_ARGS: str = "dlx @modelcontextprotocol/server-sequential-thinking"
     MCP_SEQUENTIAL_THINKING_SANDBOX_ENABLED: bool = True
-    MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND: str = "npx"
-    MCP_SEQUENTIAL_THINKING_SANDBOX_ARGS: str = "-y @modelcontextprotocol/server-sequential-thinking"
+    MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND: str = "pnpm"
+    MCP_SEQUENTIAL_THINKING_SANDBOX_ARGS: str = "dlx @modelcontextprotocol/server-sequential-thinking"
     MCP_SEQUENTIAL_THINKING_BACKEND_URL: Optional[str] = None
     MCP_SEQUENTIAL_THINKING_SANDBOX_URL: Optional[str] = None
     MCP_SEQUENTIAL_THINKING_DAEMON_HOST: str = "127.0.0.1"
@@ -262,7 +266,7 @@ class Settings(BaseSettings):
     QMD_LAZY_INDEX_ENABLED: bool = True
     QMD_AUTO_EMBED_ON_FIRST_USE: bool = False
     QMD_DATA_DIR: str = "./data/qmd"
-    QMD_CLI_COMMAND: str = "npx -y @tobilu/qmd"
+    QMD_CLI_COMMAND: str = "pnpm dlx @tobilu/qmd"
     QMD_CLI_TIMEOUT_SECONDS: int = 120
     QMD_TASK_KB_ENABLED: bool = True
     QMD_TASK_ROOT_REL: str = ".deepaudit/qmd"

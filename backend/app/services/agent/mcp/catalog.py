@@ -234,7 +234,7 @@ def build_mcp_catalog(
         enabled=runtime_enabled and _domain_enabled_for("filesystem", "backend", "MCP_FILESYSTEM_ENABLED"),
         checker=_http_endpoint_ready(filesystem_backend_url)
         if filesystem_backend_url
-        else _command_ready(str(getattr(settings, "MCP_FILESYSTEM_COMMAND", "npx"))),
+        else _command_ready(str(getattr(settings, "MCP_FILESYSTEM_COMMAND", "pnpm"))),
     )
     filesystem_sandbox_url = str(getattr(settings, "MCP_FILESYSTEM_SANDBOX_URL", "") or "").strip()
     if not filesystem_sandbox_url:
@@ -244,7 +244,7 @@ def build_mcp_catalog(
         and _domain_enabled_for("filesystem", "sandbox", "MCP_FILESYSTEM_SANDBOX_ENABLED"),
         checker=_http_endpoint_ready(filesystem_sandbox_url)
         if filesystem_sandbox_url
-        else _command_ready(str(getattr(settings, "MCP_FILESYSTEM_SANDBOX_COMMAND", "npx"))),
+        else _command_ready(str(getattr(settings, "MCP_FILESYSTEM_SANDBOX_COMMAND", "pnpm"))),
     )
     filesystem_enabled = bool(filesystem_backend.enabled or filesystem_sandbox.enabled)
     filesystem_startup_ready, filesystem_startup_error = _combine_startup_status(
@@ -284,7 +284,7 @@ def build_mcp_catalog(
             "MCP_SEQUENTIAL_THINKING_ENABLED",
         ),
         http_checker=_http_endpoint_ready(seq_backend_url),
-        stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_COMMAND", "npx")),
+        stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_COMMAND", "pnpm")),
     )
     seq_sandbox_url = str(getattr(settings, "MCP_SEQUENTIAL_THINKING_SANDBOX_URL", "") or "").strip()
     if not seq_sandbox_url:
@@ -297,7 +297,7 @@ def build_mcp_catalog(
             "MCP_SEQUENTIAL_THINKING_SANDBOX_ENABLED",
         ),
         http_checker=_http_endpoint_ready(seq_sandbox_url),
-        stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND", "npx")),
+        stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND", "pnpm")),
     )
     seq_enabled = bool(seq_backend.enabled or seq_sandbox.enabled)
     seq_startup_ready, seq_startup_error = _combine_startup_status(

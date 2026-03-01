@@ -21,7 +21,7 @@ def _safe_name(value: Any, *, fallback: str) -> str:
 
 
 def _split_qmd_command(raw_command: Any) -> list[str]:
-    fallback = "npx -y @tobilu/qmd"
+    fallback = "pnpm dlx @tobilu/qmd"
     text = str(raw_command or "").strip() or fallback
     try:
         parts = shlex.split(text)

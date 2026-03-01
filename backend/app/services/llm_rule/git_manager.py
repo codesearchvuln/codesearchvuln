@@ -6,6 +6,7 @@ from .patch_processor import PatchInfo
 from typing import Optional
 import logging
 import subprocess
+from app.services.git_mirror import get_mirror_candidates
 
 
 class GitManager:
@@ -43,7 +44,31 @@ class GitManager:
                 # Try HTTPS first
                 repo_url = f"https://github.com/{patch_info.repo_owner}/{patch_info.repo_name}"
                 try:
-                    repo = git.Repo.clone_from(repo_url, repo_path, progress=git.RemoteProgress())
+                    repo = None
+                    clone_error = None
+                    clone_candidates = get_mirror_candidates(repo_url)
+                    for idx, candidate_url in enumerate(clone_candidates):
+                        using_mirror = idx == 0 and len(clone_candidates) > 1
+                        try:
+                            repo = git.Repo.clone_from(candidate_url, repo_path, progress=git.RemoteProgress())
+                            if candidate_url != repo_url:
+                                try:
+                                    repo.remote().set_url(repo_url)
+                                except Exception:
+                                    pass
+                            break
+                        except git.exc.GitCommandError as inner_exc:
+                            clone_error = inner_exc
+                            if using_mirror:
+                                logging.warning(
+                                    "Git mirror clone failed, reason=%s; fallback origin=%s",
+                                    inner_exc,
+                                    repo_url,
+                                )
+                            if repo_path.exists():
+                                shutil.rmtree(repo_path)
+                    if repo is None and clone_error is not None:
+                        raise clone_error
                 except git.exc.GitCommandError as e:
                     # If HTTPS fails, clean up and try SSH
                     if repo_path.exists():
@@ -55,7 +80,27 @@ class GitManager:
                 logging.info(f"Using cached repository at {repo_path}")
                 repo = git.Repo(repo_path)
                 try:
-                    repo.remote().fetch()
+                    remote = repo.remote()
+                    origin_url = str(remote.url or "")
+                    fetch_ok = False
+                    fetch_error = None
+                    fetch_candidates = get_mirror_candidates(origin_url)
+                    for idx, candidate_url in enumerate(fetch_candidates):
+                        using_mirror = idx == 0 and len(fetch_candidates) > 1
+                        try:
+                            repo.git.fetch(candidate_url)
+                            fetch_ok = True
+                            break
+                        except git.exc.GitCommandError as inner_exc:
+                            fetch_error = inner_exc
+                            if using_mirror:
+                                logging.warning(
+                                    "Git mirror fetch failed, reason=%s; fallback origin=%s",
+                                    inner_exc,
+                                    origin_url,
+                                )
+                    if not fetch_ok and fetch_error is not None:
+                        raise fetch_error
                 except git.exc.GitCommandError as e:
                     logging.warning(f"Failed to fetch updates: {e}")
                     # Continue with cached version

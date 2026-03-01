@@ -68,6 +68,7 @@ from app.services.agent.mcp.daemon_manager import (
     resolve_qmd_backend_url,
     resolve_sequential_backend_url,
 )
+from app.services.git_mirror import get_mirror_candidates
 from app.services.git_ssh_service import GitSSHOperations
 from app.core.encryption import decrypt_sensitive_data
 
@@ -757,7 +758,7 @@ def _build_task_mcp_runtime(
     def _build_filesystem_args(raw_args: Any) -> List[str]:
         parsed = _parse_mcp_args(raw_args)
         if not parsed:
-            parsed = ["-y", "@modelcontextprotocol/server-filesystem"]
+            parsed = ["dlx", "@modelcontextprotocol/server-filesystem"]
         last = str(parsed[-1] or "").strip() if parsed else ""
         looks_like_package_name = bool(last.startswith("@") and "/" in last)
         looks_like_mount_path = bool(
@@ -863,12 +864,12 @@ def _build_task_mcp_runtime(
                     mcp_name="filesystem",
                     domain="backend",
                     url=filesystem_backend_url,
-                    stdio_command=str(getattr(settings, "MCP_FILESYSTEM_COMMAND", "npx") or "npx"),
+                    stdio_command=str(getattr(settings, "MCP_FILESYSTEM_COMMAND", "pnpm") or "pnpm"),
                     stdio_args=_build_filesystem_args(
                         getattr(
                             settings,
                             "MCP_FILESYSTEM_ARGS",
-                            "-y @modelcontextprotocol/server-filesystem",
+                            "dlx @modelcontextprotocol/server-filesystem",
                         )
                     ),
                 ),
@@ -881,12 +882,12 @@ def _build_task_mcp_runtime(
                     mcp_name="filesystem",
                     domain="sandbox",
                     url=filesystem_sandbox_url,
-                    stdio_command=str(getattr(settings, "MCP_FILESYSTEM_SANDBOX_COMMAND", "npx") or "npx"),
+                    stdio_command=str(getattr(settings, "MCP_FILESYSTEM_SANDBOX_COMMAND", "pnpm") or "pnpm"),
                     stdio_args=_build_filesystem_args(
                         getattr(
                             settings,
                             "MCP_FILESYSTEM_SANDBOX_ARGS",
-                            "-y @modelcontextprotocol/server-filesystem",
+                            "dlx @modelcontextprotocol/server-filesystem",
                         )
                     ),
                 ),
@@ -993,12 +994,12 @@ def _build_task_mcp_runtime(
                     mcp_name="sequentialthinking",
                     domain="backend",
                     url=sequential_backend_url,
-                    stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_COMMAND", "npx") or "npx"),
+                    stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_COMMAND", "pnpm") or "pnpm"),
                     stdio_args=_parse_mcp_args(
                         getattr(
                             settings,
                             "MCP_SEQUENTIAL_THINKING_ARGS",
-                            "-y @modelcontextprotocol/server-sequential-thinking",
+                            "dlx @modelcontextprotocol/server-sequential-thinking",
                         )
                     ),
                 ),
@@ -1011,12 +1012,12 @@ def _build_task_mcp_runtime(
                     mcp_name="sequentialthinking",
                     domain="sandbox",
                     url=sequential_sandbox_url,
-                    stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND", "npx") or "npx"),
+                    stdio_command=str(getattr(settings, "MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND", "pnpm") or "pnpm"),
                     stdio_args=_parse_mcp_args(
                         getattr(
                             settings,
                             "MCP_SEQUENTIAL_THINKING_SANDBOX_ARGS",
-                            "-y @modelcontextprotocol/server-sequential-thinking",
+                            "dlx @modelcontextprotocol/server-sequential-thinking",
                         )
                     ),
                 ),
@@ -2509,7 +2510,9 @@ async def _execute_agent_task(task_id: str):
                     qmd_task_kb = QmdTaskKnowledgeBase(
                         project_root=project_root,
                         task_id=task_id,
-                        command=str(getattr(settings, "QMD_CLI_COMMAND", "npx -y @tobilu/qmd") or "npx -y @tobilu/qmd"),
+                        command=str(
+                            getattr(settings, "QMD_CLI_COMMAND", "pnpm dlx @tobilu/qmd") or "pnpm dlx @tobilu/qmd"
+                        ),
                         task_root_rel=str(getattr(settings, "QMD_TASK_ROOT_REL", ".deepaudit/qmd") or ".deepaudit/qmd"),
                         collection_prefix=str(getattr(settings, "QMD_TASK_COLLECTION_PREFIX", "task") or "task"),
                         doc_glob=str(
@@ -6821,34 +6824,58 @@ async def _get_project_root(
                     # 其他平台，跳过 ZIP 下载
                     break
 
+                zip_url_candidates = get_mirror_candidates(
+                    zip_url,
+                    enabled=getattr(settings, "GIT_MIRROR_ENABLED", True),
+                    mirror_prefix=getattr(settings, "GIT_MIRROR_PREFIX", "https://ghfast.top"),
+                    allow_hosts=getattr(settings, "GIT_MIRROR_HOSTS", "github.com"),
+                    allow_auth_url=getattr(settings, "GIT_MIRROR_ALLOW_AUTH_URL", False),
+                )
+
                 logger.info(f"📦 尝试下载 ZIP 归档 (分支: {branch})...")
                 await emit(f"📦 尝试下载 ZIP 归档 (分支: {branch})")
 
                 try:
                     zip_temp_path = f"/tmp/repo_{task_id}_{branch}.zip"
+                    success = False
+                    error = None
 
-                    async def download_zip():
-                        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                            resp = await client.get(zip_url, headers=headers)
-                            if resp.status_code == 200:
-                                with open(zip_temp_path, 'wb') as f:
-                                    f.write(resp.content)
-                                return True, None
-                            else:
+                    for idx, candidate_zip_url in enumerate(zip_url_candidates):
+                        using_mirror = idx == 0 and len(zip_url_candidates) > 1
+
+                        async def download_zip():
+                            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                                resp = await client.get(candidate_zip_url, headers=headers)
+                                if resp.status_code == 200:
+                                    with open(zip_temp_path, "wb") as f:
+                                        f.write(resp.content)
+                                    return True, None
                                 return False, f"HTTP {resp.status_code}"
 
-                    # 使用取消检查循环
-                    download_task = asyncio.create_task(download_zip())
-                    while not download_task.done():
-                        check_cancelled()
-                        try:
-                            success, error = await asyncio.wait_for(asyncio.shield(download_task), timeout=1.0)
-                            break
-                        except asyncio.TimeoutError:
-                            continue
+                        # 使用取消检查循环
+                        download_task = asyncio.create_task(download_zip())
+                        while not download_task.done():
+                            check_cancelled()
+                            try:
+                                success, error = await asyncio.wait_for(
+                                    asyncio.shield(download_task),
+                                    timeout=1.0,
+                                )
+                                break
+                            except asyncio.TimeoutError:
+                                continue
 
-                    if download_task.done():
-                        success, error = download_task.result()
+                        if download_task.done():
+                            success, error = download_task.result()
+
+                        if success:
+                            break
+                        if using_mirror:
+                            logger.warning(
+                                "ZIP 镜像下载失败，原因: %s，回源重试: %s",
+                                error,
+                                zip_url_candidates[-1],
+                            )
 
                     if success and os.path.exists(zip_temp_path):
                         # 解压 ZIP
@@ -6957,7 +6984,15 @@ async def _get_project_root(
                 await emit(f"🔐 使用 Gitea Token 认证")
             elif is_ssh_url and ssh_private_key:
                 await emit(f"🔐 使用 SSH Key 认证")
-                
+
+            clone_url_candidates = [auth_url] if is_ssh_url else get_mirror_candidates(
+                auth_url,
+                enabled=getattr(settings, "GIT_MIRROR_ENABLED", True),
+                mirror_prefix=getattr(settings, "GIT_MIRROR_PREFIX", "https://ghfast.top"),
+                allow_hosts=getattr(settings, "GIT_MIRROR_HOSTS", "github.com"),
+                allow_auth_url=getattr(settings, "GIT_MIRROR_ALLOW_AUTH_URL", False),
+            )
+
             for branch in branches_to_try:
                 check_cancelled()
 
@@ -7000,37 +7035,51 @@ async def _get_project_root(
                             logger.warning(f"SSH克隆失败 (分支 {branch}): {last_error[:200]}")
                             await emit(f"⚠️ 分支 {branch} SSH克隆失败...", "warning")
                     else:
-                        # HTTPS URL使用标准git clone
-                        async def run_clone():
-                            return await asyncio.to_thread(
-                                subprocess.run,
-                                ["git", "clone", "--depth", "1", "--branch", branch, auth_url, base_path],
-                                capture_output=True,
-                                text=True,
-                                timeout=120,
-                            )
+                        result = None
+                        for idx, candidate_clone_url in enumerate(clone_url_candidates):
+                            using_mirror = idx == 0 and len(clone_url_candidates) > 1
 
-                        clone_task = asyncio.create_task(run_clone())
-                        while not clone_task.done():
-                            check_cancelled()
-                            try:
-                                result = await asyncio.wait_for(asyncio.shield(clone_task), timeout=1.0)
+                            async def run_clone():
+                                return await asyncio.to_thread(
+                                    subprocess.run,
+                                    ["git", "clone", "--depth", "1", "--branch", branch, candidate_clone_url, base_path],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=120,
+                                )
+
+                            clone_task = asyncio.create_task(run_clone())
+                            while not clone_task.done():
+                                check_cancelled()
+                                try:
+                                    result = await asyncio.wait_for(asyncio.shield(clone_task), timeout=1.0)
+                                    break
+                                except asyncio.TimeoutError:
+                                    continue
+
+                            if clone_task.done():
+                                result = clone_task.result()
+
+                            if result.returncode == 0:
                                 break
-                            except asyncio.TimeoutError:
-                                continue
 
-                        if clone_task.done():
-                            result = clone_task.result()
+                            last_error = result.stderr
+                            if using_mirror:
+                                logger.warning(
+                                    "Git 镜像 clone 失败 (分支 %s): %s，回源重试: %s",
+                                    branch,
+                                    (last_error or "")[:200],
+                                    clone_url_candidates[-1],
+                                )
 
-                        if result.returncode == 0:
+                        if result is not None and result.returncode == 0:
                             logger.info(f"✅ Git 克隆成功 (分支: {branch})")
                             await emit(f"✅ 仓库获取成功 (Git克隆, 分支: {branch})")
                             download_success = True
                             break
-                        else:
-                            last_error = result.stderr
-                            logger.warning(f"克隆失败 (分支 {branch}): {last_error[:200]}")
-                            await emit(f"⚠️ 分支 {branch} 克隆失败...", "warning")
+
+                        logger.warning(f"克隆失败 (分支 {branch}): {str(last_error or '')[:200]}")
+                        await emit(f"⚠️ 分支 {branch} 克隆失败...", "warning")
                 except subprocess.TimeoutExpired:
                     last_error = f"克隆分支 {branch} 超时"
                     logger.warning(last_error)
@@ -7076,34 +7125,48 @@ async def _get_project_root(
                         else:
                             last_error = result.get('message', '未知错误')
                     else:
-                        # HTTPS URL使用标准git clone
-                        async def run_default_clone():
-                            return await asyncio.to_thread(
-                                subprocess.run,
-                                ["git", "clone", "--depth", "1", auth_url, base_path],
-                                capture_output=True,
-                                text=True,
-                                timeout=120,
-                            )
+                        result = None
+                        for idx, candidate_clone_url in enumerate(clone_url_candidates):
+                            using_mirror = idx == 0 and len(clone_url_candidates) > 1
 
-                        clone_task = asyncio.create_task(run_default_clone())
-                        while not clone_task.done():
-                            check_cancelled()
-                            try:
-                                result = await asyncio.wait_for(asyncio.shield(clone_task), timeout=1.0)
+                            async def run_default_clone():
+                                return await asyncio.to_thread(
+                                    subprocess.run,
+                                    ["git", "clone", "--depth", "1", candidate_clone_url, base_path],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=120,
+                                )
+
+                            clone_task = asyncio.create_task(run_default_clone())
+                            while not clone_task.done():
+                                check_cancelled()
+                                try:
+                                    result = await asyncio.wait_for(asyncio.shield(clone_task), timeout=1.0)
+                                    break
+                                except asyncio.TimeoutError:
+                                    continue
+
+                            if clone_task.done():
+                                result = clone_task.result()
+
+                            if result.returncode == 0:
                                 break
-                            except asyncio.TimeoutError:
-                                continue
 
-                        if clone_task.done():
-                            result = clone_task.result()
+                            last_error = result.stderr
+                            if using_mirror:
+                                logger.warning(
+                                    "Git 镜像默认分支 clone 失败: %s，回源重试: %s",
+                                    (last_error or "")[:200],
+                                    clone_url_candidates[-1],
+                                )
 
-                        if result.returncode == 0:
+                        if result is not None and result.returncode == 0:
                             logger.info(f"✅ Git 克隆成功 (默认分支)")
                             await emit(f"✅ 仓库获取成功 (Git克隆, 默认分支)")
                             download_success = True
                         else:
-                            last_error = result.stderr
+                            last_error = str(last_error or "")
                 except subprocess.TimeoutExpired:
                     last_error = "克隆超时"
                 except asyncio.CancelledError:

@@ -49,6 +49,10 @@ $TRUFFLEHOG_VERSION = "3.80.0"
 # 重试配置
 $MAX_RETRIES = 3
 $RETRY_DELAY = 2
+$PYPI_MIRROR_URL = if ($env:PYPI_MIRROR_URL) { $env:PYPI_MIRROR_URL } else { "https://mirrors.aliyun.com/pypi/simple/" }
+$PYPI_TRUSTED_HOST = if ($env:PYPI_TRUSTED_HOST) { $env:PYPI_TRUSTED_HOST } else { "mirrors.aliyun.com" }
+$GIT_MIRROR_ENABLED = if ($env:GIT_MIRROR_ENABLED) { $env:GIT_MIRROR_ENABLED } else { "true" }
+$GIT_MIRROR_PREFIX = if ($env:GIT_MIRROR_PREFIX) { $env:GIT_MIRROR_PREFIX } else { "https://ghfast.top" }
 
 # 获取脚本目录
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -89,6 +93,19 @@ function Test-Command {
     return [bool]$result
 }
 
+function Test-BoolTrue {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    return @("1", "true", "yes", "on").Contains($Value.Trim().ToLowerInvariant())
+}
+
+function Get-MirroredUrl {
+    param([string]$Url)
+    if (-not (Test-BoolTrue -Value $GIT_MIRROR_ENABLED)) { return $Url }
+    if (-not $Url.StartsWith("https://github.com/")) { return $Url }
+    return "$($GIT_MIRROR_PREFIX.TrimEnd('/'))/$Url"
+}
+
 function Test-AdminPrivilege {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -110,6 +127,8 @@ function Download-WithRetry {
         [string]$Description
     )
 
+    $primaryUrl = Get-MirroredUrl -Url $Url
+
     for ($attempt = 1; $attempt -le $MAX_RETRIES; $attempt++) {
         Write-ColorOutput "下载 $Description (尝试 $attempt/$MAX_RETRIES)..." "Info"
 
@@ -125,12 +144,25 @@ function Download-WithRetry {
                 $webClient.Proxy = $proxy
             }
 
-            $webClient.DownloadFile($Url, $OutFile)
+            $webClient.DownloadFile($primaryUrl, $OutFile)
             Write-ColorOutput "$Description 下载成功" "Success"
             return $true
         }
         catch {
             Write-ColorOutput "下载失败: $_" "Warning"
+
+            if ($primaryUrl -ne $Url) {
+                try {
+                    Write-ColorOutput "$Description 镜像下载失败，回源重试..." "Warning"
+                    $webClient = New-Object System.Net.WebClient
+                    $webClient.DownloadFile($Url, $OutFile)
+                    Write-ColorOutput "$Description 回源下载成功" "Success"
+                    return $true
+                }
+                catch {
+                    Write-ColorOutput "回源下载失败: $_" "Debug"
+                }
+            }
 
             if ($attempt -lt $MAX_RETRIES) {
                 Write-ColorOutput "${RETRY_DELAY}秒后重试..." "Info"
@@ -152,14 +184,14 @@ function Install-PipPackageWithRetry {
 
         try {
             # 尝试常规安装
-            $result = & $script:PipCmd install $Package --quiet 2>&1
+            $result = & $script:PipCmd install $Package --quiet --index-url $PYPI_MIRROR_URL --trusted-host $PYPI_TRUSTED_HOST 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-ColorOutput "$Package 安装成功" "Success"
                 return $true
             }
 
             # 尝试 --user 安装
-            $result = & $script:PipCmd install $Package --user --quiet 2>&1
+            $result = & $script:PipCmd install $Package --user --quiet --index-url $PYPI_MIRROR_URL --trusted-host $PYPI_TRUSTED_HOST 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-ColorOutput "$Package 安装成功 (--user)" "Success"
                 return $true
@@ -168,7 +200,7 @@ function Install-PipPackageWithRetry {
             # 第一次失败后尝试升级 pip
             if ($attempt -eq 1) {
                 Write-ColorOutput "升级 pip 后重试..." "Debug"
-                & $script:PipCmd install --upgrade pip --quiet 2>&1 | Out-Null
+                & $script:PipCmd install --upgrade pip --quiet --index-url $PYPI_MIRROR_URL --trusted-host $PYPI_TRUSTED_HOST 2>&1 | Out-Null
             }
         }
         catch {
@@ -232,6 +264,8 @@ function Detect-PythonEnvironment {
     try {
         $version = & $script:PythonCmd --version 2>&1
         Write-ColorOutput "Python: $version" "Success"
+        $env:PIP_INDEX_URL = $PYPI_MIRROR_URL
+        $env:PIP_TRUSTED_HOST = $PYPI_TRUSTED_HOST
 
         # 确保 pip 可用
         $pipVersion = & $script:PipCmd --version 2>&1
@@ -633,6 +667,8 @@ RUN groupadd -g 1000 sandbox \
     && useradd -u 1000 -g sandbox -m -s /bin/bash sandbox
 
 RUN pip install --no-cache-dir \
+    --index-url https://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com \
     requests httpx aiohttp beautifulsoup4 lxml \
     pycryptodome paramiko pyjwt python-jose sqlparse
 

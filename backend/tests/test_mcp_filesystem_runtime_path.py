@@ -10,7 +10,7 @@ def test_filesystem_runtime_uses_project_root_as_mount_path(tmp_path, monkeypatc
     monkeypatch.setattr(
         settings,
         "MCP_FILESYSTEM_SANDBOX_ARGS",
-        "-y @modelcontextprotocol/server-filesystem .",
+        "dlx @modelcontextprotocol/server-filesystem .",
     )
     monkeypatch.setattr(settings, "MCP_CODE_INDEX_ENABLED", False)
     monkeypatch.setattr(settings, "MCP_SEQUENTIAL_THINKING_ENABLED", False)
@@ -27,12 +27,12 @@ def test_filesystem_runtime_uses_project_root_as_mount_path(tmp_path, monkeypatc
     assert "." not in filesystem_adapter.args
 
 
-def test_filesystem_runtime_keeps_npx_package_token_when_no_mount_arg(tmp_path, monkeypatch):
+def test_filesystem_runtime_keeps_package_token_when_no_mount_arg(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "MCP_ENABLED", True)
     monkeypatch.setattr(settings, "MCP_DAEMON_AUTOSTART", False)
     monkeypatch.setattr(settings, "MCP_FILESYSTEM_ENABLED", False)
     monkeypatch.setattr(settings, "MCP_FILESYSTEM_SANDBOX_ENABLED", True)
-    monkeypatch.setattr(settings, "MCP_FILESYSTEM_SANDBOX_ARGS", "-y @modelcontextprotocol/server-filesystem")
+    monkeypatch.setattr(settings, "MCP_FILESYSTEM_SANDBOX_ARGS", "dlx @modelcontextprotocol/server-filesystem")
     monkeypatch.setattr(settings, "MCP_CODE_INDEX_ENABLED", False)
     monkeypatch.setattr(settings, "MCP_SEQUENTIAL_THINKING_ENABLED", False)
     monkeypatch.setattr(settings, "MCP_QMD_ENABLED", False)
@@ -45,5 +45,5 @@ def test_filesystem_runtime_keeps_npx_package_token_when_no_mount_arg(tmp_path, 
 
     filesystem_adapter = runtime.domain_adapters["filesystem"]["sandbox"]
     assert filesystem_adapter.args[-1] == str(tmp_path)
-    if str(filesystem_adapter.command).endswith("npx"):
+    if str(filesystem_adapter.command).endswith(("npx", "pnpm")):
         assert "@modelcontextprotocol/server-filesystem" in filesystem_adapter.args

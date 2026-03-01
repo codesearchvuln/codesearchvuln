@@ -155,7 +155,7 @@ def test_resolve_sequential_backend_url_defaults_when_autostart_enabled():
     assert resolve_sequential_backend_url(settings) == get_default_sequential_daemon_url(settings)
 
 
-def test_prepare_filesystem_source_requires_fastmcp(tmp_path):
+def test_prepare_filesystem_source_requires_fastmcp(tmp_path, monkeypatch):
     manager = MCPDaemonManager()
     spec = MCPDaemonSpec(
         name="filesystem",
@@ -163,6 +163,11 @@ def test_prepare_filesystem_source_requires_fastmcp(tmp_path):
         command="fastmcp",
         args=[],
         cwd=str(tmp_path / "filesystem-src"),
+    )
+
+    monkeypatch.setattr(
+        "app.services.agent.mcp.daemon_manager._resolve_executable",
+        lambda command: None if command == "fastmcp" else "/usr/bin/node",
     )
 
     prepared, reason = manager._prepare_spec(spec)

@@ -2,6 +2,20 @@
 
 ## 📋 生产部署前必须完成的检查
 
+### 0. Compose 默认加载口径
+
+默认在仓库根目录执行 `docker-compose up --build` 时，会加载：
+
+1. `docker-compose.yml`
+2. `docker-compose.override.yml`
+
+可用以下命令自检当前生效配置：
+
+```bash
+docker-compose config --services
+docker-compose config
+```
+
 ### 1. 环境依赖 ✅
 
 ```bash
@@ -112,7 +126,7 @@ bandit --version
 ### 测试 4: 端到端测试
 
 1. 启动后端：`cd backend && uv run uvicorn app.main:app --reload`
-2. 启动前端：`cd frontend && npm run dev`
+2. 启动前端：`cd frontend && pnpm dev`
 3. 创建一个项目并上传代码
 4. 选择 "Agent 审计模式" 创建任务
 5. 观察执行日志和发现

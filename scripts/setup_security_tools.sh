@@ -29,6 +29,10 @@ RETRY_DELAY=2
 # 超时配置
 DOWNLOAD_TIMEOUT=60
 INSTALL_TIMEOUT=120
+PYPI_MIRROR_URL="${PYPI_MIRROR_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+PYPI_TRUSTED_HOST="${PYPI_TRUSTED_HOST:-mirrors.aliyun.com}"
+GIT_MIRROR_ENABLED="${GIT_MIRROR_ENABLED:-true}"
+GIT_MIRROR_PREFIX="${GIT_MIRROR_PREFIX:-https://ghfast.top}"
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -147,6 +151,8 @@ detect_python() {
     PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
     log_info "Python 版本: $PYTHON_VERSION (命令: $PYTHON_CMD)"
     log_debug "pip 命令: $PIP_CMD"
+    export PIP_INDEX_URL="${PYPI_MIRROR_URL}"
+    export PIP_TRUSTED_HOST="${PYPI_TRUSTED_HOST}"
 
     # 确保 pip 可用
     if ! $PIP_CMD --version &>/dev/null; then
@@ -157,24 +163,49 @@ detect_python() {
     return 0
 }
 
+bool_true() {
+    local value
+    value="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
+    [[ "$value" == "1" || "$value" == "true" || "$value" == "yes" || "$value" == "on" ]]
+}
+
 # 带重试的下载函数
 download_with_retry() {
     local url="$1"
     local output="$2"
     local description="$3"
+    local primary_url="$url"
+
+    if bool_true "${GIT_MIRROR_ENABLED}" && [[ "$url" == https://github.com/* ]]; then
+        primary_url="${GIT_MIRROR_PREFIX%/}/${url}"
+    fi
 
     for attempt in $(seq 1 $MAX_RETRIES); do
         log_info "下载 $description (尝试 $attempt/$MAX_RETRIES)..."
 
         if command_exists curl; then
-            if curl -fsSL --connect-timeout 10 --max-time $DOWNLOAD_TIMEOUT -o "$output" "$url" 2>/dev/null; then
+            if curl -fsSL --connect-timeout 10 --max-time $DOWNLOAD_TIMEOUT -o "$output" "$primary_url" 2>/dev/null; then
                 log_success "$description 下载成功"
                 return 0
             fi
+            if [[ "$primary_url" != "$url" ]]; then
+                log_warning "$description 镜像下载失败，回源重试..."
+                if curl -fsSL --connect-timeout 10 --max-time $DOWNLOAD_TIMEOUT -o "$output" "$url" 2>/dev/null; then
+                    log_success "$description 回源下载成功"
+                    return 0
+                fi
+            fi
         elif command_exists wget; then
-            if wget -q --timeout=$DOWNLOAD_TIMEOUT -O "$output" "$url" 2>/dev/null; then
+            if wget -q --timeout=$DOWNLOAD_TIMEOUT -O "$output" "$primary_url" 2>/dev/null; then
                 log_success "$description 下载成功"
                 return 0
+            fi
+            if [[ "$primary_url" != "$url" ]]; then
+                log_warning "$description 镜像下载失败，回源重试..."
+                if wget -q --timeout=$DOWNLOAD_TIMEOUT -O "$output" "$url" 2>/dev/null; then
+                    log_success "$description 回源下载成功"
+                    return 0
+                fi
             fi
         else
             log_error "未找到 curl 或 wget"
@@ -197,21 +228,21 @@ pip_install_with_retry() {
         log_info "安装 $package (尝试 $attempt/$MAX_RETRIES)..."
 
         # 尝试方式 1: 普通安装
-        if $PIP_CMD install "$package" --timeout 60 2>&1; then
+        if $PIP_CMD install "$package" --timeout 60 --index-url "$PYPI_MIRROR_URL" --trusted-host "$PYPI_TRUSTED_HOST" 2>&1; then
             log_success "$package 安装成功"
             return 0
         fi
 
         # 尝试方式 2: --user 标志
         log_debug "尝试 --user 安装..."
-        if $PIP_CMD install "$package" --user --timeout 60 2>&1; then
+        if $PIP_CMD install "$package" --user --timeout 60 --index-url "$PYPI_MIRROR_URL" --trusted-host "$PYPI_TRUSTED_HOST" 2>&1; then
             log_success "$package 安装成功 (--user)"
             return 0
         fi
 
         # 尝试方式 3: --break-system-packages (Python 3.11+ PEP 668)
         log_debug "尝试 --break-system-packages..."
-        if $PIP_CMD install "$package" --break-system-packages --timeout 60 2>&1; then
+        if $PIP_CMD install "$package" --break-system-packages --timeout 60 --index-url "$PYPI_MIRROR_URL" --trusted-host "$PYPI_TRUSTED_HOST" 2>&1; then
             log_success "$package 安装成功 (--break-system-packages)"
             return 0
         fi
@@ -219,7 +250,7 @@ pip_install_with_retry() {
         # 尝试升级 pip 后重试
         if [[ $attempt -eq 1 ]]; then
             log_debug "升级 pip 后重试..."
-            $PIP_CMD install --upgrade pip --quiet 2>/dev/null || true
+            $PIP_CMD install --upgrade pip --quiet --index-url "$PYPI_MIRROR_URL" --trusted-host "$PYPI_TRUSTED_HOST" 2>/dev/null || true
         fi
 
         sleep $RETRY_DELAY
@@ -650,6 +681,8 @@ RUN groupadd -g 1000 sandbox \
 
 # 安装 Python 安全测试库
 RUN pip install --no-cache-dir \
+    --index-url https://mirrors.aliyun.com/pypi/simple/ \
+    --trusted-host mirrors.aliyun.com \
     requests httpx aiohttp beautifulsoup4 lxml \
     pycryptodome paramiko pyjwt python-jose sqlparse
 

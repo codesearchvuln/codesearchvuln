@@ -7,7 +7,7 @@ def test_task_kb_upsert_deduplicates_and_uses_mask(tmp_path):
     kb = QmdTaskKnowledgeBase(
         project_root=str(tmp_path),
         task_id="task-1",
-        command="npx -y @tobilu/qmd",
+        command="pnpm dlx @tobilu/qmd",
     )
     calls: list[list[str]] = []
 
@@ -36,7 +36,7 @@ def test_task_kb_query_falls_back_to_search(tmp_path):
     kb = QmdTaskKnowledgeBase(
         project_root=str(tmp_path),
         task_id="task-2",
-        command="npx -y @tobilu/qmd",
+        command="pnpm dlx @tobilu/qmd",
     )
     kb._collection_ready = True
 
@@ -69,7 +69,7 @@ def test_task_kb_prevents_path_escape(tmp_path):
     kb = QmdTaskKnowledgeBase(
         project_root=str(tmp_path),
         task_id="task-3",
-        command="npx -y @tobilu/qmd",
+        command="pnpm dlx @tobilu/qmd",
     )
     kb._collection_ready = True
     kb.ensure_ready = lambda: {"success": True}  # type: ignore[method-assign]

@@ -59,7 +59,7 @@ if (!fs.existsSync('.env') && !fs.existsSync('.env.example')) {
 
 // 检查node_modules
 if (!fs.existsSync('node_modules')) {
-  console.log('❌ 缺少 node_modules，请运行 npm install');
+  console.log('❌ 缺少 node_modules，请运行 pnpm install');
   process.exit(1);
 } else {
   console.log('✅ 依赖已安装');
@@ -98,5 +98,5 @@ console.log('🎉 项目设置检查完成！');
 console.log('');
 console.log('📝 下一步:');
 console.log('   1. 确保 .env 文件中配置了 VITE_GEMINI_API_KEY');
-console.log('   2. 运行 npm run dev 启动开发服务器');
+console.log('   2. 运行 pnpm dev 启动开发服务器');
 console.log('   3. 在浏览器中访问 http://localhost:5173');

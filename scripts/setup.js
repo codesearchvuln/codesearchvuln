@@ -23,21 +23,27 @@ function checkNodeVersion() {
 // 检查包管理器
 function detectPackageManager() {
   console.log('📦 检查包管理器...');
-  
-  const managers = ['pnpm', 'yarn', 'npm'];
-  
-  for (const manager of managers) {
-    try {
-      execSync(`${manager} --version`, { stdio: 'ignore' });
-      console.log(`✅ 使用 ${manager}`);
-      return manager;
-    } catch (error) {
-      // 继续检查下一个
-    }
+
+  try {
+    execSync('pnpm --version', { stdio: 'ignore' });
+    console.log('✅ 使用 pnpm');
+    return 'pnpm';
+  } catch (error) {
+    // 尝试 corepack 激活 pnpm
   }
-  
-  console.error('❌ 未找到包管理器，请安装 npm、yarn 或 pnpm');
-  process.exit(1);
+
+  try {
+    execSync('corepack --version', { stdio: 'ignore' });
+    console.log('ℹ️ 未检测到 pnpm，尝试通过 corepack 启用...');
+    execSync('corepack enable', { stdio: 'inherit' });
+    execSync('corepack prepare pnpm@9.15.4 --activate', { stdio: 'inherit' });
+    execSync('pnpm --version', { stdio: 'ignore' });
+    console.log('✅ 使用 pnpm');
+    return 'pnpm';
+  } catch (error) {
+    console.error('❌ 未找到 pnpm，请先安装 pnpm（或执行 corepack enable）');
+    process.exit(1);
+  }
 }
 
 // 安装依赖

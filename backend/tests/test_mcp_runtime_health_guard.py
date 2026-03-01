@@ -296,6 +296,24 @@ def test_fastmcp_stdio_adapter_keeps_npx_when_local_binary_missing(monkeypatch):
     assert adapter.args == ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project-root"]
 
 
+def test_fastmcp_stdio_adapter_prefers_local_filesystem_binary_for_pnpm_dlx(monkeypatch):
+    def _which(name: str):
+        mapping = {
+            "pnpm": "/usr/bin/pnpm",
+            "mcp-server-filesystem": "/usr/local/bin/mcp-server-filesystem",
+        }
+        return mapping.get(name)
+
+    monkeypatch.setattr("app.services.agent.mcp.runtime.shutil.which", _which)
+    adapter = FastMCPStdioAdapter(
+        command="pnpm",
+        args=["dlx", "@modelcontextprotocol/server-filesystem", "/tmp/project-root"],
+    )
+
+    assert adapter.command == "/usr/local/bin/mcp-server-filesystem"
+    assert adapter.args == ["/tmp/project-root"]
+
+
 def test_fastmcp_stdio_adapter_prefers_local_sequential_binary_for_npm_exec(monkeypatch):
     def _which(name: str):
         mapping = {

@@ -153,6 +153,7 @@ class FastMCPStdioAdapter:
     }
     _NPX_ONLY_FLAGS = {"-y", "--yes"}
     _NPX_PACKAGE_FLAGS = {"-p", "--package"}
+    _PNPM_EXEC_MODES = {"dlx", "exec"}
 
     def __init__(
         self,
@@ -191,7 +192,7 @@ class FastMCPStdioAdapter:
             return normalized_command, normalized_args
 
         command_basename = os.path.basename(normalized_command).strip().lower()
-        if command_basename not in {"npx", "npm"}:
+        if command_basename not in {"npx", "npm", "pnpm"}:
             return normalized_command, normalized_args
 
         matched_package = ""
@@ -229,6 +230,8 @@ class FastMCPStdioAdapter:
                 skip_next = True
                 continue
             if npm_exec_mode and lowered in {"exec", "x"}:
+                continue
+            if command_basename == "pnpm" and lowered in cls._PNPM_EXEC_MODES:
                 continue
             if token == "--":
                 continue

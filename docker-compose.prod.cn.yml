@@ -108,8 +108,12 @@ services:
       - MCP_QMD_DAEMON_ARGS=dist/index.js mcp --transport streamable-http --port 8181
       - MCP_QMD_DAEMON_SOURCE_DIR=${MCP_QMD_DAEMON_SOURCE_DIR:-/app/mcp-src/qmd}
       - MCP_QMD_DAEMON_STARTUP_TIMEOUT_SECONDS=60
+      - GIT_MIRROR_ENABLED=${GIT_MIRROR_ENABLED:-true}
+      - GIT_MIRROR_PREFIX=${GIT_MIRROR_PREFIX:-https://ghfast.top}
+      - GIT_MIRROR_HOSTS=${GIT_MIRROR_HOSTS:-github.com}
+      - GIT_MIRROR_ALLOW_AUTH_URL=${GIT_MIRROR_ALLOW_AUTH_URL:-false}
       - QMD_DATA_DIR=/app/data/qmd
-      - QMD_CLI_COMMAND=npx -y @tobilu/qmd
+      - QMD_CLI_COMMAND=pnpm dlx @tobilu/qmd
       - QMD_CLI_TIMEOUT_SECONDS=120
       - QMD_TASK_KB_ENABLED=true
       - QMD_TASK_ROOT_REL=.deepaudit/qmd

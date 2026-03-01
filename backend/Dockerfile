@@ -18,14 +18,21 @@ ENV ALL_PROXY=""
 ENV no_proxy="*"
 ENV NO_PROXY="*"
 
-# 清除 apt 代理配置并配置重试，使用阿里云镜像
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && \
-    rm -f /etc/apt/apt.conf.d/proxy.conf 2>/dev/null || true && \
-    echo 'Acquire::http::Proxy "false";' > /etc/apt/apt.conf.d/99-no-proxy && \
-    echo 'Acquire::https::Proxy "false";' >> /etc/apt/apt.conf.d/99-no-proxy && \
-    echo 'Acquire::Retries "5";' >> /etc/apt/apt.conf.d/99-no-proxy && \
-    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/99-no-proxy
+# 清除 apt 代理配置并配置重试，使用阿里云镜像（包含 security 源）
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -ri 's|https?://deb.debian.org|https://mirrors.aliyun.com|g; s|https?://security.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -ri 's|https?://deb.debian.org|https://mirrors.aliyun.com|g; s|https?://security.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    fi; \
+    rm -f /etc/apt/apt.conf.d/proxy.conf 2>/dev/null || true; \
+    { \
+      echo 'Acquire::http::Proxy "false";'; \
+      echo 'Acquire::https::Proxy "false";'; \
+      echo 'Acquire::Retries "5";'; \
+      echo 'Acquire::http::Timeout "60";'; \
+    } > /etc/apt/apt.conf.d/99-no-proxy
 
 # 安装构建依赖（gcc 只在构建阶段需要）
 RUN apt-get update && \
@@ -34,6 +41,7 @@ RUN apt-get update && \
         libpq-dev \
         libffi-dev \
         wget \
+        gitleaks \
     && rm -rf /var/lib/apt/lists/*
 
 # 下载并安装 Gitleaks 预编译二进制文件
@@ -44,14 +52,13 @@ RUN apt-get update && \
 #     chmod +x /usr/local/bin/gitleaks && \
 #     rm gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
 
-RUN apt-get update && apt-get install -y --no-install-recommends gitleaks \
- && rm -rf /var/lib/apt/lists/*
-
 # 安装 uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# 配置 uv 使用官方 PyPI（国内镜像不稳定时使用）
-ENV UV_INDEX_URL=https://pypi.org/simple/
+# 配置 uv/pip 使用阿里云 PyPI 镜像
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
 
 # 复制依赖文件
 COPY pyproject.toml uv.lock README.md ./
@@ -78,17 +85,25 @@ ENV all_proxy=""
 ENV ALL_PROXY=""
 ENV no_proxy="*"
 ENV NO_PROXY="*"
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
 
-# 配置使用阿里云 Debian 镜像源
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
-
-# 清除 apt 代理配置
-RUN rm -f /etc/apt/apt.conf.d/proxy.conf 2>/dev/null || true && \
-    echo 'Acquire::http::Proxy "false";' > /etc/apt/apt.conf.d/99-no-proxy && \
-    echo 'Acquire::https::Proxy "false";' >> /etc/apt/apt.conf.d/99-no-proxy && \
-    echo 'Acquire::Retries "5";' >> /etc/apt/apt.conf.d/99-no-proxy && \
-    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/99-no-proxy
+# 配置使用阿里云 Debian 镜像源并清除 apt 代理（包含 security 源）
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -ri 's|https?://deb.debian.org|https://mirrors.aliyun.com|g; s|https?://security.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -ri 's|https?://deb.debian.org|https://mirrors.aliyun.com|g; s|https?://security.debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    fi; \
+    rm -f /etc/apt/apt.conf.d/proxy.conf 2>/dev/null || true; \
+    { \
+      echo 'Acquire::http::Proxy "false";'; \
+      echo 'Acquire::https::Proxy "false";'; \
+      echo 'Acquire::Retries "5";'; \
+      echo 'Acquire::http::Timeout "60";'; \
+    } > /etc/apt/apt.conf.d/99-no-proxy
 
 # 只安装运行时依赖（不需要 gcc）
 RUN apt-get update && \
@@ -104,18 +119,42 @@ RUN apt-get update && \
         libglib2.0-0 \
         shared-mime-info \
         fonts-noto-cjk \
+        xz-utils \
     && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# 安装 Node.js 22+（qmd 要求 >=22）
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends nodejs && \
-    node --version && npm --version && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt-get clean
+# 安装 Node.js 22+（qmd 要求 >=22），使用国内镜像下载二进制包，避免新增非阿里 apt 源
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "$ARCH" in \
+      amd64) NODE_ARCH="x64" ;; \
+      arm64) NODE_ARCH="arm64" ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac; \
+    NODE_BASE_URL_PRIMARY="https://npmmirror.com/mirrors/node/latest-v22.x"; \
+    NODE_BASE_URL_FALLBACK="https://nodejs.org/dist/latest-v22.x"; \
+    NODE_BASE_URL="${NODE_BASE_URL_PRIMARY}"; \
+    NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" 2>/dev/null | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
+    if [ -z "${NODE_TARBALL}" ]; then \
+      NODE_BASE_URL="${NODE_BASE_URL_FALLBACK}"; \
+      NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
+    fi; \
+    test -n "${NODE_TARBALL}"; \
+    if ! curl -fL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 600 "${NODE_BASE_URL}/${NODE_TARBALL}" -o /tmp/node.tar.xz; then \
+      NODE_BASE_URL="${NODE_BASE_URL_FALLBACK}"; \
+      NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
+      test -n "${NODE_TARBALL}"; \
+      curl -fL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 600 "${NODE_BASE_URL}/${NODE_TARBALL}" -o /tmp/node.tar.xz; \
+    fi; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
+    rm -f /tmp/node.tar.xz; \
+    export COREPACK_NPM_REGISTRY="https://registry.npmmirror.com"; \
+    corepack enable; \
+    corepack prepare pnpm@9.15.4 --activate; \
+    pnpm --version; \
+    node --version; \
+    npm --version
 
 # 安装 Opengrep CLI（仅使用官方安装脚本）
 ARG OPENGREP_VERSION=v1.15.1
@@ -136,17 +175,18 @@ RUN set -eux; \
     chmod +x /usr/local/bin/opengrep; \
     opengrep --version
 
-# 安装 MCP 相关运行时（npx + qmd CLI）
-RUN npm config set registry https://registry.npmmirror.com && \
-    npm install -g \
+# 安装 MCP 相关运行时（pnpm + qmd CLI）
+RUN pnpm config set registry https://registry.npmmirror.com && \
+    pnpm add -g \
       @modelcontextprotocol/server-filesystem \
       @modelcontextprotocol/server-memory \
       @modelcontextprotocol/server-sequential-thinking \
       @tobilu/qmd && \
+    PNPM_GLOBAL_ROOT="$(pnpm root -g)" && \
     mkdir -p /app/mcp-src && \
-    cp -R "$(npm root -g)/@modelcontextprotocol/server-filesystem" /app/mcp-src/filesystem && \
-    cp -R "$(npm root -g)/@modelcontextprotocol/server-sequential-thinking" /app/mcp-src/sequential-thinking && \
-    cp -R "$(npm root -g)/@tobilu/qmd" /app/mcp-src/qmd
+    cp -R "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-filesystem" /app/mcp-src/filesystem && \
+    cp -R "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-sequential-thinking" /app/mcp-src/sequential-thinking && \
+    cp -R "${PNPM_GLOBAL_ROOT}/@tobilu/qmd" /app/mcp-src/qmd
 
 # MCP / QMD 持久化目录
 ENV XDG_DATA_HOME=/app/data/mcp/xdg-data

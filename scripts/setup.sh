@@ -22,21 +22,21 @@ fi
 
 echo "✅ Node.js 版本检查通过: $(node -v)"
 
-# 检查包管理器
+# 检查包管理器（统一使用 pnpm）
 echo "📦 检查包管理器..."
-if command -v pnpm &> /dev/null; then
-    PKG_MANAGER="pnpm"
-    echo "✅ 使用 pnpm"
-elif command -v yarn &> /dev/null; then
-    PKG_MANAGER="yarn"
-    echo "✅ 使用 yarn"
-elif command -v npm &> /dev/null; then
-    PKG_MANAGER="npm"
-    echo "✅ 使用 npm"
-else
-    echo "❌ 未找到包管理器，请安装 npm、yarn 或 pnpm"
+PKG_MANAGER="pnpm"
+if ! command -v pnpm &> /dev/null; then
+    if command -v corepack &> /dev/null; then
+        echo "ℹ️ 未检测到 pnpm，尝试通过 corepack 启用..."
+        corepack enable || true
+        corepack prepare pnpm@9.15.4 --activate || true
+    fi
+fi
+if ! command -v pnpm &> /dev/null; then
+    echo "❌ 未找到 pnpm，请先安装 pnpm（或执行 corepack enable）"
     exit 1
 fi
+echo "✅ 使用 pnpm"
 
 # 安装依赖
 echo "📥 安装项目依赖..."

@@ -30,23 +30,52 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     cmake \
     clang \
     llvm \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Node.js 22+ (用于 JavaScript/TypeScript 代码执行、npm audit、qmd)
-# 使用淘宝/阿里云镜像加速
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && npm config set registry https://registry.npmmirror.com \
-    && node --version && npm --version \
-    && rm -rf /var/lib/apt/lists/*
+# 统一 Python 包镜像源（uv/pip）
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
+
+# 安装 Node.js 22+ 与 pnpm（用于 JavaScript/TypeScript 代码执行、npm audit、qmd）
+# 使用 npmmirror 节点二进制下载，避免额外 apt 源
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "$ARCH" in \
+      amd64) NODE_ARCH="x64" ;; \
+      arm64) NODE_ARCH="arm64" ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac; \
+    NODE_BASE_URL_PRIMARY="https://npmmirror.com/mirrors/node/latest-v22.x"; \
+    NODE_BASE_URL_FALLBACK="https://nodejs.org/dist/latest-v22.x"; \
+    NODE_BASE_URL="${NODE_BASE_URL_PRIMARY}"; \
+    NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" 2>/dev/null | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
+    if [ -z "${NODE_TARBALL}" ]; then \
+      NODE_BASE_URL="${NODE_BASE_URL_FALLBACK}"; \
+      NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
+    fi; \
+    test -n "${NODE_TARBALL}"; \
+    if ! curl -fL "${NODE_BASE_URL}/${NODE_TARBALL}" -o /tmp/node.tar.xz; then \
+      NODE_BASE_URL="${NODE_BASE_URL_FALLBACK}"; \
+      NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
+      test -n "${NODE_TARBALL}"; \
+      curl -fL "${NODE_BASE_URL}/${NODE_TARBALL}" -o /tmp/node.tar.xz; \
+    fi; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
+    rm -f /tmp/node.tar.xz; \
+    export COREPACK_NPM_REGISTRY="https://registry.npmmirror.com"; \
+    corepack enable; \
+    corepack prepare pnpm@9.15.4 --activate; \
+    pnpm config set registry https://registry.npmmirror.com; \
+    node --version; npm --version; pnpm --version
 
 # bullseye 自带 cmake 版本过低（arm64 下 qmd 依赖 node-llama-cpp 需要 >=3.19）
 RUN python3 -m pip install --no-cache-dir "cmake>=3.27,<4" && \
     cmake --version
 
 # 安装 MCP 与 qmd CLI（供沙盒域运行时调用）
-RUN npm install -g \
+RUN pnpm add -g \
     @modelcontextprotocol/server-filesystem \
     @modelcontextprotocol/server-memory \
     @modelcontextprotocol/server-sequential-thinking \
@@ -72,7 +101,7 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
 
 # 安装 Python 安全工具
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    pip install --no-cache-dir \
     requests \
     httpx \
     aiohttp \
@@ -88,7 +117,7 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
 
 # code-index-mcp 是 Python 包（非 npm 包）
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    pip install --no-cache-dir -i https://pypi.org/simple code-index-mcp
+    pip install --no-cache-dir code-index-mcp
 
 # 安装 Opengrep CLI（仅使用官方安装脚本）
 ARG OPENGREP_VERSION=v1.15.1
