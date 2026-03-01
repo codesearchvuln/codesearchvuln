@@ -4274,7 +4274,25 @@ async def _initialize_tools(
 
     # Analysis 工具
     # 🔥 导入智能扫描工具
-    from app.services.agent.tools import SmartScanTool, QuickAuditTool, BusinessLogicScanTool
+    from app.services.agent.tools import SmartScanTool, QuickAuditTool, BusinessLogicScanTool, ExtractFunctionTool, PatternMatchTool
+    
+    # 🔥 业务逻辑扫描核心工具集
+    # BusinessLogicScanAgent 5 个阶段需要的分析工具
+    # Phase 1 (HTTP 入口发现): search_code, read_file, extract_function
+    # Phase 2 (入口分析): read_file, extract_function, logic_authz_analysis
+    # Phase 3 (敏感操作): read_file, search_code, pattern_match
+    # Phase 4 (污点分析): dataflow_analysis, controlflow_analysis_light, read_file
+    # Phase 5 (漏洞确认): read_file, 综合前4阶段结果
+    business_logic_scan_core_tools = {
+        # 基础工具（所有阶段）
+        "read_file": base_tools["read_file"],
+        "search_code": base_tools["search_code"],
+        "list_files": base_tools["list_files"],
+        "think": base_tools["think"],
+        "reflect": base_tools["reflect"],
+        # MCP 工具（如果启用）
+        **mcp_read_tools,
+    }
     
     analysis_tools = {
         **base_tools,
@@ -4287,11 +4305,13 @@ async def _initialize_tools(
         "business_logic_scan": BusinessLogicScanTool(
             project_root=project_root,
             llm_service=llm_service,
-            tools_registry=None,
+            tools_registry=business_logic_scan_core_tools,
             event_emitter=event_emitter,
         ),
         # 模式匹配工具（增强版）
         "pattern_match": PatternMatchTool(project_root),
+        # 函数提取工具（用于业务逻辑扫描等分析任务）
+        "extract_function": ExtractFunctionTool(project_root=project_root),
         # 数据流分析
         "dataflow_analysis": DataFlowAnalysisTool(llm_service, project_root=project_root),
         # 三轨流分析主链
@@ -4313,8 +4333,22 @@ async def _initialize_tools(
         # "trufflehog_scan": TruffleHogTool(project_root, sandbox_manager),
         # "osv_scan": OSVScannerTool(project_root, sandbox_manager),
     }
-    analysis_tools["business_logic_scan"].tools_registry = analysis_tools
-    logger.info("[Tools] Business Logic Scanner enabled: %s", project_root)
+    
+    # 🔥 完成工具集构建后，补充完整工具集给 business_logic_scan
+    # 这确保 Sub Agent 有足够的工具在各个分析阶段使用
+    business_logic_scan_core_tools.update({
+        "extract_function": analysis_tools["extract_function"],
+        "pattern_match": analysis_tools["pattern_match"],
+        "dataflow_analysis": analysis_tools["dataflow_analysis"],
+        "controlflow_analysis_light": analysis_tools["controlflow_analysis_light"],
+        "logic_authz_analysis": analysis_tools["logic_authz_analysis"],
+    })
+    analysis_tools["business_logic_scan"].tools_registry = business_logic_scan_core_tools
+    logger.info(
+        "[Tools] Business Logic Scanner enabled with %d tools: %s",
+        len(business_logic_scan_core_tools),
+        project_root,
+    )
     # 🔥 导入沙箱工具
     from app.services.agent.tools import (
         SandboxTool, SandboxHttpTool, VulnerabilityVerifyTool,
