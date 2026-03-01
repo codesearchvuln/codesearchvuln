@@ -27,7 +27,7 @@ class _DummyReadFileTool:
 def _prepare_javaseclab_target_and_llm() -> tuple[Path, Path, LLMService]:
     backend_root = Path(__file__).resolve().parents[1]
     env_path = backend_root / ".env"
-    zip_path = backend_root / "uploads" / "zip_files" / "JavaSecLab-1.4.zip"
+    zip_path = backend_root / "tests" / "resources" / "JavaSecLab-1.4.zip"
 
     assert env_path.exists(), f".env 文件不存在: {env_path}"
     assert zip_path.exists(), f"ZIP 文件不存在: {zip_path}"
