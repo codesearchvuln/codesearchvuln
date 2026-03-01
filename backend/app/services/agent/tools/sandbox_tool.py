@@ -831,12 +831,14 @@ class VulnerabilityVerifyTool(AgentTool):
 # ============ PHP 测试工具 ============
 
 class PhpTestInput(BaseModel):
-    """PHP 测试输入"""
-    php_code: Optional[str] = Field(default=None, description="要执行的 PHP 代码（可选，与 file_path 二选一）")
-    file_path: Optional[str] = Field(default=None, description="要测试的 PHP 文件路径（可选，与 php_code 二选一）")
-    get_params: Optional[Dict[str, str]] = Field(default=None, description="模拟的 GET 参数，如 {'cmd': 'whoami'}")
-    post_params: Optional[Dict[str, str]] = Field(default=None, description="模拟的 POST 参数")
-    timeout: int = Field(default=30, description="超时时间（秒）")
+    """PHP 测试输入 - 已对齐 php_test.md"""
+    # 将 php_code 改为 code
+    code: Optional[str] = Field(default=None, description="要执行的 PHP 代码")
+    file_path: Optional[str] = Field(default=None, description="要测试的 PHP 文件路径")
+    # 统一使用 params 替代原有的 get/post 分离
+    params: Optional[Dict[str, str]] = Field(default=None, description="模拟的请求参数")
+    env_vars: Optional[Dict[str, str]] = Field(default=None, description="环境变量")
+    timeout: int = Field(default=30, description="超时时间")
 
 
 class PhpTestTool(AgentTool):
@@ -882,132 +884,83 @@ class PhpTestTool(AgentTool):
 
     async def _execute(
         self,
-        php_code: Optional[str] = None,
+        code: Optional[str] = None,
         file_path: Optional[str] = None,
-        get_params: Optional[Dict[str, str]] = None,
-        post_params: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, str]] = None,
         timeout: int = 30,
+        env_vars: Optional[Dict[str, str]] = None,
         **kwargs
     ) -> ToolResult:
-        """执行 PHP 测试"""
+        """执行 PHP 测试并注入全量 Mock 环境"""
         try:
             await self.sandbox_manager.initialize()
         except Exception as e:
             logger.warning(f"Sandbox init failed: {e}")
 
         if not self.sandbox_manager.is_available:
-            return ToolResult(
-                success=False,
-                error="沙箱环境不可用 (Docker Unavailable)",
-            )
+            return ToolResult(success=False, error="沙箱环境不可用")
 
-        # 构建 PHP 代码
+        # 1. 代码读取逻辑
         if file_path:
-            # 从文件读取
-            import os
             full_path = os.path.join(self.project_root, file_path)
             if not os.path.exists(full_path):
-                return ToolResult(
-                    success=False,
-                    error=f"文件不存在: {file_path}",
-                )
+                return ToolResult(success=False, error=f"文件不存在: {file_path}")
             with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                php_code = f.read()
+                code = f.read()
 
-        if not php_code:
-            return ToolResult(
-                success=False,
-                error="必须提供 php_code 或 file_path",
-            )
+        if not code:
+            return ToolResult(success=False, error="必须提供 code 或 file_path")
 
-        # 构建模拟 $_GET 和 $_POST 的包装代码
+        # 2. 核心 Mock 注入逻辑
         wrapper_parts = ["<?php"]
+        if params:
+            for key, value in params.items():
+                escaped_value = str(value).replace("'", "\\'")
+                # 同时注入 GET/POST/REQUEST，确保数据流必达
+                wrapper_parts.append(f"$_GET['{key}'] = $_POST['{key}'] = $_REQUEST['{key}'] = '{escaped_value}';")
 
-        # 模拟 $_GET
-        if get_params:
-            for key, value in get_params.items():
-                # 安全转义
-                escaped_value = value.replace("'", "\\'")
-                wrapper_parts.append(f"$_GET['{key}'] = '{escaped_value}';")
-
-        # 模拟 $_POST
-        if post_params:
-            for key, value in post_params.items():
-                escaped_value = value.replace("'", "\\'")
-                wrapper_parts.append(f"$_POST['{key}'] = '{escaped_value}';")
-
-        # 移除 php_code 开头的 <?php 标签
-        clean_code = php_code.strip()
-        if clean_code.startswith("<?php"):
-            clean_code = clean_code[5:].strip()
-        if clean_code.startswith("<?"):
-            clean_code = clean_code[2:].strip()
-        if clean_code.endswith("?>"):
-            clean_code = clean_code[:-2].strip()
+        # 3. 清理并合并代码
+        clean_code = code.strip()
+        if clean_code.startswith("<?php"): clean_code = clean_code[5:].strip()
+        elif clean_code.startswith("<?"): clean_code = clean_code[2:].strip()
+        if clean_code.endswith("?>"): clean_code = clean_code[:-2].strip()
 
         wrapper_parts.append(clean_code)
         wrapper_parts.append("?>")
-
         full_php_code = "\n".join(wrapper_parts)
 
-        # 在沙箱中执行
-        # 使用 php -r 直接执行代码
-        import shlex
+        # 4. 执行物理命令
         escaped_code = full_php_code.replace("'", "'\"'\"'")
-        command = f"php -r '{escaped_code}'"
-
         result = await self.sandbox_manager.execute_command(
-            command=command,
+            command=f"php -r '{escaped_code}'",
             timeout=timeout,
+            env=env_vars
         )
 
-        # 格式化输出
-        output_parts = ["🐘 PHP 测试结果\n"]
-
-        if get_params:
-            output_parts.append(f"模拟 GET 参数: {get_params}")
-        if post_params:
-            output_parts.append(f"模拟 POST 参数: {post_params}")
-
-        output_parts.append(f"\n退出码: {result['exit_code']}")
-
-        if result["stdout"]:
-            stdout = result["stdout"][:3000]
-            output_parts.append(f"\n输出:\n```\n{stdout}\n```")
-
-        if result["stderr"]:
-            stderr = result["stderr"][:1000]
-            output_parts.append(f"\n错误:\n```\n{stderr}\n```")
-
-        # 判断是否执行成功
+        # 5. 判定与格式化输出
         is_vulnerable = False
         evidence = None
+        stdout = result.get("stdout", "")
+        stdout_lower = stdout.lower()
 
-        if result["exit_code"] == 0 and result["stdout"]:
-            # 检查是否有命令执行输出
-            stdout_lower = result["stdout"].lower()
-            if get_params and "cmd" in get_params:
-                cmd_value = get_params["cmd"].lower()
-                # 检查常见命令输出
-                if cmd_value in ["whoami", "id"]:
-                    if "root" in stdout_lower or "uid=" in stdout_lower or "www-data" in stdout_lower:
-                        is_vulnerable = True
-                        evidence = f"命令 '{get_params['cmd']}' 执行成功，输出: {result['stdout'][:200]}"
-                elif cmd_value.startswith("echo "):
-                    expected = cmd_value[5:].lower()
-                    if expected in stdout_lower:
-                        is_vulnerable = True
-                        evidence = f"Echo 命令执行成功"
-                else:
-                    # 通用检查：有输出就可能成功
-                    if len(result["stdout"].strip()) > 0:
-                        is_vulnerable = True
-                        evidence = f"命令可能执行成功，输出: {result['stdout'][:200]}"
+        # 改进的通用信号检测
+        if result["exit_code"] == 0 and stdout:
+            signals = ["uid=", "root:", "www-data", "nobody", "[vuln]"]
+            for s in signals:
+                if s in stdout_lower:
+                    is_vulnerable = True
+                    evidence = f"捕获到漏洞信号: {s}"
+                    break
 
+        output_parts = ["🐘 PHP 测试结果\n"]
+        if params: output_parts.append(f"模拟参数: {params}")
+        output_parts.append(f"\n退出码: {result['exit_code']}")
+        if stdout: output_parts.append(f"\n输出:\n```\n{stdout[:2000]}\n```")
+        
         if is_vulnerable:
             output_parts.append(f"\n🔴 **漏洞确认**: {evidence}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞执行（可能需要检查输出）")
+            output_parts.append("\n🟡 未能确认漏洞执行")
 
         return ToolResult(
             success=True,
@@ -1016,7 +969,8 @@ class PhpTestTool(AgentTool):
                 "exit_code": result["exit_code"],
                 "is_vulnerable": is_vulnerable,
                 "evidence": evidence,
-                "stdout": result["stdout"][:500] if result["stdout"] else None,
+                "language": "PHP", # 补全文档要求的字段
+                "stdout": stdout[:500]
             }
         )
 

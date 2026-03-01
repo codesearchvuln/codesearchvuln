@@ -442,6 +442,40 @@ class MockRequest:
                 "language": "Python",
             }
         )
+    def _analyze_output(self, result: Dict[str, Any], params: Optional[Dict]) -> Dict[str, Any]:
+        """分析沙箱输出，判定漏洞是否存在"""
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        combined_output = (stdout + stderr).lower()
+    
+        is_vulnerable = False
+        evidence = None
+    
+        # 1. 检查常见的系统权限信号 (针对命令注入)
+        vulnerable_patterns = ["uid=", "root:", "www-data", "nobody", "daemon"]
+        for pattern in vulnerable_patterns:
+            if pattern in combined_output:
+                is_vulnerable = True
+                evidence = f"Match system signal: {pattern}"
+                break
+            
+        # 2. 如果提供了 params，检查是否有输入反射 (针对 XSS/SSTI)
+        if not is_vulnerable and params:
+            for val in params.values():
+                if str(val).lower() in combined_output and len(str(val)) > 3:
+                    is_vulnerable = True
+                    evidence = f"Input value '{val}' reflected in output"
+                    break
+
+        # 3. 检查是否存在 Python 特有的异常信号 (辅助判断)
+        if "render_template_string" in combined_output or "pickle.load" in combined_output:
+            is_vulnerable = True
+            evidence = "Dangerous function execution detected in output"
+
+        return {
+            "is_vulnerable": is_vulnerable,
+            "evidence": evidence
+        }
 
 
 # ============ JavaScript/Node.js 测试工具 ============
@@ -449,6 +483,7 @@ class MockRequest:
 class JavaScriptTestInput(LanguageTestInput):
     """JavaScript 测试输入"""
     express_mode: bool = Field(default=False, description="是否模拟 Express.js 请求环境")
+    client_ip: Optional[str] = Field(default=None, description="模拟的客户端来源 IP") # 添加这一行
 
 
 class JavaScriptTestTool(BaseLanguageTestTool):
@@ -482,38 +517,47 @@ class JavaScriptTestTool(BaseLanguageTestTool):
         return JavaScriptTestInput
 
     def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]],
-                           express_mode: bool = False) -> str:
-        """构建 JavaScript 包装代码"""
+                           express_mode: bool = False, client_ip: Optional[str] = None) -> str:
+        """构建 JavaScript 包装代码,仅在需要时注入 IP"""
         wrapper_parts = []
 
         if params:
+            params_json = json.dumps(params, ensure_ascii=False)
             if express_mode:
+                # 使用 client_ip 动态生成配置，如果未提供则为 undefined
+                ip_value = f"'{client_ip}'" if client_ip else "undefined"
                 # 模拟 Express request 对象
-                params_json = json.dumps(params)
                 wrapper_parts.append(f"""
 const req = {{
     query: {params_json},
     body: {params_json},
     params: {params_json},
-    get: function(header) {{ return this.headers[header]; }},
-    headers: {{}},
+    headers: {{'user-agent': 'DeepAudit-Scanner/1.0', 'content-type': 'application/json','x-forwarded-for': {ip_value}}},
+    get: function(h) {{ return this.headers[h.toLowerCase()]; }},
+    header: function(h) {{ return this.headers[h.toLowerCase()]; }},
     method: 'GET',
-    path: '/',
     url: '/',
+    path: '/',
+    ip: {ip_value}, // 动态注入，不再硬编码
+    ips: {ip_value} ? [{ip_value}] : [],
+    protocol: 'http',
+    secure: false
 }};
 const res = {{
     send: function(data) {{ console.log(data); return this; }},
     json: function(data) {{ console.log(JSON.stringify(data)); return this; }},
-    status: function(code) {{ return this; }},
+    status: function(code) {{ this.statusCode = code;return this; }},
+    set: function() {{ return this; }},
     end: function() {{ return this; }},
 }};
 """)
             else:
                 # 普通模式：设置进程参数
-                wrapper_parts.append("const params = " + json.dumps(params) + ";")
+                wrapper_parts.append(f"const params = {params_json};")
                 args = ["node", "script.js"] + list(params.values())
                 wrapper_parts.append(f"process.argv = {json.dumps(args)};")
 
+        wrapper_parts.append("// --- Original Code ---")
         wrapper_parts.append(code)
         return "\n".join(wrapper_parts)
 
@@ -530,9 +574,10 @@ const res = {{
         env_vars: Optional[Dict[str, str]] = None,
         timeout: int = 30,
         express_mode: bool = False,
+        client_ip: Optional[str] = None, # 这里默认为 None
         **kwargs
     ) -> ToolResult:
-        """执行 JavaScript 测试"""
+        """执行 JavaScript 测试，支持动态 IP 注入"""
         try:
             await self.sandbox_manager.initialize()
         except Exception as e:
@@ -549,7 +594,7 @@ const res = {{
         if not code:
             return ToolResult(success=False, error="必须提供 code 或 file_path")
 
-        wrapped_code = self._build_wrapper_code(code, params, express_mode)
+        wrapped_code = self._build_wrapper_code(code, params, express_mode, client_ip)
         command = self._build_command(wrapped_code)
 
         result = await self.sandbox_manager.execute_command(
@@ -561,6 +606,9 @@ const res = {{
         analysis = self._analyze_output(result, params)
 
         output_parts = [f"📜 JavaScript 测试结果\n"]
+        output_parts.append(f"模式: {'Express.js' if express_mode else 'Standard Node'}")
+        if client_ip:
+            output_parts.append(f"模拟客户端 IP: {client_ip}")
         if file_path:
             output_parts.append(f"文件: {file_path}")
         if express_mode:
@@ -620,7 +668,7 @@ class JavaTestTool(BaseLanguageTestTool):
 注意: Java 代码会被包装在 main 方法中执行。"""
 
     def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]]) -> str:
-        """构建 Java 包装代码"""
+        """构建 Java 包装代码，增强 Mock 仿真度"""
         # 检测是否是完整类
         if "class " in code and "public static void main" in code:
             return code
@@ -628,32 +676,44 @@ class JavaTestTool(BaseLanguageTestTool):
         # 构建模拟请求参数
         param_init = ""
         if params:
-            params_entries = ", ".join([f'"{k}", "{v}"' for k, v in params.items()])
+            map_puts = "\n".join([f'        request.put("{k}", "{v}");' for k, v in params.items()])
+            args_values = ", ".join([f'"{v}"' for v in params.values()])
             param_init = f"""
-        java.util.Map<String, String> request = new java.util.HashMap<>();
-        String[][] entries = {{{params_entries.replace(', ', '}, {')}}};
-        for (String[] e : entries) {{ request.put(e[0], e[1]); }}
-        String[] args = new String[]{{{', '.join([f'"{v}"' for v in params.values()])}}};
+        // 模拟 Servlet/Spring 的请求参数 Map
+        Map<String, String> request = new HashMap<>();
+        {map_puts}
+        String[] args = new String[]{{{args_values}}};
 """
 
         wrapper = f"""
 import java.io.*;
 import java.util.*;
+import java.net.*;
 
 public class Test {{
     public static void main(String[] argv) throws Exception {{
         {param_init}
-        {code}
+        try {{
+            {code}
+        }} catch (Exception e) {{
+            System.err.println("Execution Exception: " + e.getMessage());
+            e.printStackTrace();
+        }}
     }}
 }}
 """
         return wrapper
 
     def _build_command(self, code: str) -> str:
-        """构建 Java 执行命令"""
+        """构建 Java 编译与执行命令"""
         # Java 需要先编译再执行
-        escaped_code = code.replace("'", "'\"'\"'").replace("\\", "\\\\")
-        return f"echo '{escaped_code}' > /tmp/Test.java && javac /tmp/Test.java && java -cp /tmp Test"
+        escaped_code = code.replace("\\", "\\\\").replace("'", "'\"'\"'")
+        return (
+            f"mkdir -p /tmp/test_java && "
+            f"echo '{escaped_code}' > /tmp/test_java/Test.java && "
+            f"javac /tmp/test_java/Test.java && "
+            f"java -cp /tmp/test_java Test"
+        )
 
     async def _execute(
         self,
@@ -664,7 +724,7 @@ public class Test {{
         timeout: int = 60,  # Java 编译需要更长时间
         **kwargs
     ) -> ToolResult:
-        """执行 Java 测试"""
+        """执行 Java 测试，适配函数级验证"""
         try:
             await self.sandbox_manager.initialize()
         except Exception as e:
@@ -696,14 +756,16 @@ public class Test {{
         if file_path:
             output_parts.append(f"文件: {file_path}")
         if params:
-            output_parts.append(f"参数: {json.dumps(params, ensure_ascii=False)}")
+            output_parts.append(f"模拟输入: {json.dumps(params, ensure_ascii=False)}")
 
+        output_parts.append(f"状态: {'编译/执行成功' if result['exit_code'] == 0 else '执行失败'}")
         output_parts.append(f"\n退出码: {result['exit_code']}")
 
         if result["stdout"]:
-            output_parts.append(f"\n输出:\n```\n{result['stdout'][:3000]}\n```")
+            output_parts.append(f"\n标准输出:\n```\n{result['stdout'][:3000]}\n```")
         if result["stderr"]:
-            output_parts.append(f"\n错误:\n```\n{result['stderr'][:1000]}\n```")
+            label = "编译/运行错误" if result['exit_code'] != 0 else "标准错误"
+            output_parts.append(f"\n{label}:\n```\n{result['stderr'][:1000]}\n```")
 
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
@@ -748,12 +810,12 @@ class GoTestTool(BaseLanguageTestTool):
 {"code": "exec.Command(os.Args[1]).Output()", "params": {"cmd": "whoami"}}"""
 
     def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]]) -> str:
-        """构建 Go 包装代码"""
+        """构建 Go 包装代码，处理未使用导入报错并增强 Mock"""
         # 检测是否是完整包
         if "package main" in code and "func main()" in code:
             return code
 
-        imports = ["fmt", "os"]
+        imports = ["fmt", "os", "os/exec", "io", "net/http"]
         if "exec." in code:
             imports.append("os/exec")
         if "http." in code:
@@ -762,13 +824,16 @@ class GoTestTool(BaseLanguageTestTool):
             imports.append("io")
 
         imports_str = "\n".join([f'    "{imp}"' for imp in imports])
+        unused_placeholders = "\n".join([f'    _ = {imp.split("/")[-1]}.Args' if "os" in imp else f'    _ = {imp.split("/")[-1]}.EOF' if "io" in imp else "" for imp in imports if "/" not in imp or "os/" in imp])
+        # 针对 net/http 特殊处理
+        unused_placeholders += '\n    _ = http.MethodGet'
 
         # 模拟参数
         param_code = ""
         if params:
             args = ["program"] + list(params.values())
             args_str = ', '.join([f'"{a}"' for a in args])
-            param_code = "    os.Args = []string{{{}}}\n".format(args_str)
+            param_code += f'    os.Args = []string{{{args_str}}}\n'
             # param_code = f"    os.Args = []string{{{', '.join([f'\"{a}\"' for a in args])}}}\n"
             for key, value in params.items():
                 param_code += f'    os.Setenv("{key.upper()}", "{value}")\n'
@@ -780,7 +845,11 @@ import (
 )
 
 func main() {{
+// 强制占位防止 Unused Import 错误
+{unused_placeholders}
+// --- Mock 数据注入 ---
 {param_code}
+// --- 用户代码开始 ---
     {code}
 }}
 """
@@ -788,8 +857,12 @@ func main() {{
 
     def _build_command(self, code: str) -> str:
         """构建 Go 执行命令"""
-        escaped_code = code.replace("'", "'\"'\"'").replace("\\", "\\\\")
-        return f"echo '{escaped_code}' > /tmp/main.go && go run /tmp/main.go"
+        escaped_code = code.replace("\\", "\\\\").replace("'", "'\"'\"'")
+        return (
+            f"mkdir -p /tmp/go_test && "
+            f"echo '{escaped_code}' > /tmp/go_test/main.go && "
+            f"cd /tmp/go_test && go run main.go"
+        )
 
     async def _execute(
         self,
@@ -800,7 +873,7 @@ func main() {{
         timeout: int = 60,
         **kwargs
     ) -> ToolResult:
-        """执行 Go 测试"""
+        """执行 Go 测试，适配命令执行与逻辑验证"""
         try:
             await self.sandbox_manager.initialize()
         except Exception as e:
@@ -834,12 +907,13 @@ func main() {{
         if params:
             output_parts.append(f"参数: {json.dumps(params, ensure_ascii=False)}")
 
+        output_parts.append(f"状态: {'运行成功' if result['exit_code'] == 0 else '编译或执行失败'}")
         output_parts.append(f"\n退出码: {result['exit_code']}")
 
         if result["stdout"]:
-            output_parts.append(f"\n输出:\n```\n{result['stdout'][:3000]}\n```")
+            output_parts.append(f"\n标准输出:\n```\n{result['stdout'][:3000]}\n```")
         if result["stderr"]:
-            output_parts.append(f"\n错误:\n```\n{result['stderr'][:1000]}\n```")
+            output_parts.append(f"\n标准错误/编译信息:\n```\n{result['stderr'][:1000]}\n```")
 
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
@@ -1041,21 +1115,113 @@ class ShellTestTool(BaseLanguageTestTool):
         wrapper_parts = ["#!/bin/bash"]
 
         if params:
+            # 分离位置参数 (数字键) 和环境变量 (字母键)
+            positional_args = {}
+            env_vars = {}
             for key, value in params.items():
                 # 设置位置参数和环境变量
                 if key.isdigit():
                     # 位置参数需要特殊处理
-                    pass
+                    positional_args[int(key)] = value
                 else:
-                    wrapper_parts.append(f'export {key.upper()}="{value}"')
+                    env_vars[key.upper()] = value
+                    
+            # 1. 注入环境变量
+            for key, value in env_vars.items():
+                # 对值进行转义，防止双引号注入
+                safe_val = value.replace('"', '\\"')
+                wrapper_parts.append(f'export {key}="{safe_val}"')
+            # 2. 注入位置参数 ($1, $2...)
+            if positional_args:
+                # 按照数字顺序排列参数
+                max_idx = max(positional_args.keys())
+                args_list = []
+                for i in range(1, max_idx + 1):
+                    # 如果中间有缺失的数字，补空字符串
+                    val = positional_args.get(i, "")
+                    args_list.append(f'"{val.replace(\'"\', \'\\\\"\')}"')
+                
+                # set -- "arg1" "arg2" 会重置当前 shell 的 $1, $2...
+                wrapper_parts.append(f"set -- {' '.join(args_list)}")
 
+        wrapper_parts.append("# --- User Code Start ---")
         wrapper_parts.append(code)
         return "\n".join(wrapper_parts)
 
     def _build_command(self, code: str) -> str:
         """构建 Shell 执行命令"""
-        escaped_code = code.replace("'", "'\"'\"'")
-        return f"bash -c '{escaped_code}'"
+        # 对代码中的反斜杠和单引号进行转义
+        escaped_code = code.replace("\\", "\\\\").replace("'", "'\"'\"'")
+        # 写入临时脚本并执行，这样比直接 bash -c 更稳定
+        return (
+            f"mkdir -p /tmp/shell_test && "
+            f"echo '{escaped_code}' > /tmp/shell_test/test.sh && "
+            f"bash /tmp/shell_test/test.sh"
+        )
+    async def _execute(
+        self,
+        code: Optional[str] = None,
+        file_path: Optional[str] = None,
+        params: Optional[Dict[str, str]] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+        timeout: int = 30,
+        **kwargs
+    ) -> ToolResult:
+        """执行 Shell 测试，适配脚本级验证场景"""
+        try:
+            await self.sandbox_manager.initialize()
+        except Exception as e:
+            logger.warning(f"Sandbox init failed: {e}")
+
+        if not self.sandbox_manager.is_available:
+            return ToolResult(success=False, error="沙箱环境不可用")
+
+        if file_path:
+            code = self._read_file(file_path)
+            if code is None:
+                return ToolResult(success=False, error=f"文件不存在: {file_path}")
+
+        if not code:
+            return ToolResult(success=False, error="必须提供 code 或 file_path")
+
+        wrapped_code = self._build_wrapper_code(code, params)
+        command = self._build_command(wrapped_code)
+
+        result = await self.sandbox_manager.execute_command(
+            command=command,
+            timeout=timeout,
+            env=env_vars,
+        )
+
+        analysis = self._analyze_output(result, params)
+
+        output_parts = [f"🐚 Shell 测试结果\n"]
+        if file_path: output_parts.append(f"脚本: {file_path}")
+        if params: output_parts.append(f"模拟参数: {json.dumps(params, ensure_ascii=False)}")
+        
+        output_parts.append(f"状态: {'执行成功' if result['exit_code'] == 0 else '执行失败'}")
+        output_parts.append(f"退出码: {result['exit_code']}")
+
+        if result["stdout"]:
+            output_parts.append(f"\n标准输出:\n```\n{result['stdout'][:3000]}\n```")
+        if result["stderr"]:
+            output_parts.append(f"\n标准错误:\n```\n{result['stderr'][:1000]}\n```")
+
+        if analysis["is_vulnerable"]:
+            output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
+        else:
+            output_parts.append(f"\n🟡 未能确认漏洞")
+
+        return ToolResult(
+            success=True,
+            data="\n".join(output_parts),
+            metadata={
+                "exit_code": result["exit_code"],
+                "is_vulnerable": analysis["is_vulnerable"],
+                "evidence": analysis["evidence"],
+                "language": "Shell",
+            }
+        )
 
 
 # ============ 通用多语言测试工具 ============
@@ -1071,51 +1237,44 @@ class UniversalCodeTestInput(BaseModel):
 
 
 class UniversalCodeTestTool(AgentTool):
-    """通用多语言代码测试工具 - 自动选择合适的语言测试器"""
+    """通用多语言代码测试工具 - 已对齐统一参数名与 Mock 逻辑"""
 
     def __init__(self, sandbox_manager: Optional[SandboxManager] = None, project_root: str = "."):
         super().__init__()
         self.sandbox_manager = sandbox_manager or SandboxManager()
         self.project_root = project_root
 
-        # 初始化所有语言测试器
+        # 初始化所有语言测试器，确保它们共享同一个沙箱管理器
         self._testers = {
-            "php": PhpTestTool(sandbox_manager, project_root),
-            "python": PythonTestTool(sandbox_manager, project_root),
-            "javascript": JavaScriptTestTool(sandbox_manager, project_root),
-            "js": JavaScriptTestTool(sandbox_manager, project_root),
-            "node": JavaScriptTestTool(sandbox_manager, project_root),
-            "java": JavaTestTool(sandbox_manager, project_root),
-            "go": GoTestTool(sandbox_manager, project_root),
-            "golang": GoTestTool(sandbox_manager, project_root),
-            "ruby": RubyTestTool(sandbox_manager, project_root),
-            "rb": RubyTestTool(sandbox_manager, project_root),
-            "shell": ShellTestTool(sandbox_manager, project_root),
-            "bash": ShellTestTool(sandbox_manager, project_root),
+            "php": PhpTestTool(self.sandbox_manager, project_root),
+            "python": PythonTestTool(self.sandbox_manager, project_root),
+            "javascript": JavaScriptTestTool(self.sandbox_manager, project_root),
+            "js": JavaScriptTestTool(self.sandbox_manager, project_root),
+            "node": JavaScriptTestTool(self.sandbox_manager, project_root),
+            "java": JavaTestTool(self.sandbox_manager, project_root),
+            "go": GoTestTool(self.sandbox_manager, project_root),
+            "golang": GoTestTool(self.sandbox_manager, project_root),
+            "ruby": RubyTestTool(self.sandbox_manager, project_root),
+            "rb": RubyTestTool(self.sandbox_manager, project_root),
+            "shell": ShellTestTool(self.sandbox_manager, project_root),
+            "bash": ShellTestTool(self.sandbox_manager, project_root),
         }
 
     @property
     def name(self) -> str:
-        return "code_test"
+        # 对齐 universal_code_test.md 中的外部标识符
+        return "universal_code_test"
 
     @property
     def description(self) -> str:
-        return """通用多语言代码测试工具，支持 PHP, Python, JavaScript, Java, Go, Ruby, Shell。
-
-自动根据语言选择合适的测试环境，支持各种框架的请求模拟。
+        return """通用多语言代码测试工具，支持通过统一接口验证多语言漏洞。
 
 输入:
 - language: 编程语言 (php, python, javascript, java, go, ruby, shell)
-- code: 代码内容（与 file_path 二选一）
-- file_path: 文件路径
-- params: 模拟参数
+- code: 代码内容
+- params: 模拟请求参数 (自动注入 GET/POST/REQUEST)
 - framework_mode: 框架模式 (flask, django, express, rails)
-- timeout: 超时秒数
-
-示例:
-1. PHP: {"language": "php", "file_path": "vuln.php", "params": {"cmd": "id"}}
-2. Python Flask: {"language": "python", "code": "os.system(request.args.get('cmd'))", "params": {"cmd": "whoami"}, "framework_mode": "flask"}
-3. Node.js: {"language": "javascript", "code": "require('child_process').execSync(req.query.cmd)", "params": {"cmd": "id"}, "framework_mode": "express"}"""
+- timeout: 超时秒数"""
 
     @property
     def args_schema(self):
@@ -1131,7 +1290,7 @@ class UniversalCodeTestTool(AgentTool):
         timeout: int = 30,
         **kwargs
     ) -> ToolResult:
-        """执行通用代码测试"""
+        """执行通用代码测试并转发至对应语言测试器"""
         language = language.lower().strip()
 
         tester = self._testers.get(language)
@@ -1141,15 +1300,15 @@ class UniversalCodeTestTool(AgentTool):
                 error=f"不支持的语言: {language}。支持: {list(self._testers.keys())}",
             )
 
-        # 构建测试参数
+        # 核心转发参数：确保参数名与子工具修改后的 _execute 签名完全一致
         test_kwargs = {
-            "code": code,
+            "code": code,           # 统一使用 code
             "file_path": file_path,
-            "params": params,
+            "params": params,       # 统一使用 params，触发子工具 Mock 注入
             "timeout": timeout,
         }
 
-        # 处理框架模式
+        # 处理框架模式映射：将 framework_mode 转换为子工具的布尔开关
         if framework_mode:
             fm = framework_mode.lower()
             if fm == "flask":
@@ -1161,4 +1320,5 @@ class UniversalCodeTestTool(AgentTool):
             elif fm == "rails":
                 test_kwargs["rails_mode"] = True
 
+        # 调用对应语言子工具的 _execute 方法
         return await tester._execute(**test_kwargs)

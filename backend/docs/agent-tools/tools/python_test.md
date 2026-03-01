@@ -1,7 +1,7 @@
 # Tool: `python_test`
 
 ## Tool Purpose
-在沙箱执行 Python 代码/文件，支持 Flask/Django 请求上下文模拟。
+在沙箱执行 Python 代码/文件，该工具通过注入 Mock 对象（如 MockRequest）来模拟 Flask 或 Django 的请求上下文，从而实现对数据流漏洞（如命令注入、SSTI）的动态验证。
 
 ## Inputs
 - `code` (string, optional) 或 `file_path` (string, optional): 二选一
