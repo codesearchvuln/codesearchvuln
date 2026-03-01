@@ -1889,10 +1889,32 @@ class MCPRuntime:
                 domain_key = str(domain or "").strip().lower()
                 if domain_key and domain_key not in normalized_domains:
                     normalized_domains.append(domain_key)
+            domain_checks: List[Tuple[str, bool, str]] = []
             for domain in normalized_domains:
                 ready, reason = self._check_mcp_ready_for_domain(mcp_name, domain)
                 mcp_details[domain] = {"ready": ready, "reason": reason}
-                if not ready:
+                domain_checks.append((domain, bool(ready), str(reason or "")))
+
+            if domain_value == "all":
+                ready_domains = [domain for domain, ready, _reason in domain_checks if ready]
+                mcp_details["ready_domain"] = ready_domains[0] if ready_domains else None
+                mcp_details["ready_domains"] = ready_domains
+                if not ready_domains:
+                    reason_text = "; ".join(
+                        f"{domain}:{reason}"
+                        for domain, _ready, reason in domain_checks
+                    ) or "all_domains_unavailable"
+                    not_ready.append(
+                        {
+                            "mcp": mcp_name,
+                            "runtime_domain": "all",
+                            "reason": reason_text,
+                        }
+                    )
+            else:
+                for domain, ready, reason in domain_checks:
+                    if ready:
+                        continue
                     not_ready.append(
                         {
                             "mcp": mcp_name,
