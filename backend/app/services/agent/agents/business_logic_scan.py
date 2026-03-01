@@ -107,6 +107,11 @@ class BusinessLogicFinding:
 
 class BusinessLogicScanAgent(BaseAgent):
     """业务逻辑漏洞扫描子 Agent。"""
+    
+    # 类级别的调用缓存：确保整个应用生命周期内只执行一次
+    _scan_executed = False
+    _cached_result: Optional[Dict[str, Any]] = None
+    _scan_lock = asyncio.Lock()
 
     def __init__(self, llm_service, tools: Dict[str, Any], event_emitter=None):
         tool_whitelist = ", ".join(sorted(tools.keys())) if tools else "无"
@@ -131,8 +136,84 @@ class BusinessLogicScanAgent(BaseAgent):
             ScanPhase(5, "Logic Vulnerability Confirm", "确认漏洞类型、严重程度与修复建议"),
         ]
 
+    @classmethod
+    def reset_cache(cls) -> None:
+        """
+        重置扫描缓存状态。
+        用于测试、调试或需要重新执行扫描的场景。
+        """
+        cls._scan_executed = False
+        cls._cached_result = None
+        logger.info("[BusinessLogicScanAgent] 缓存状态已重置，下次调用将重新执行扫描")
+
+    @classmethod
+    def is_scan_cached(cls) -> bool:
+        """检查是否已有缓存的扫描结果"""
+        return cls._scan_executed and cls._cached_result is not None
+
+    @classmethod
+    def get_cache_info(cls) -> Dict[str, Any]:
+        """获取缓存信息（用于诊断）"""
+        if not cls._cached_result:
+            return {"cached": False, "reason": "no_cache"}
+        
+        cached = cls._cached_result
+        return {
+            "cached": True,
+            "success": cached.get("success"),
+            "cached_at": cached.get("cached_at"),
+            "findings_count": len(cached.get("data", {}).get("findings", [])),
+            "total_findings": cached.get("data", {}).get("total_findings", 0),
+        }
+
     async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+        """执行业务逻辑扫描 - 仅第一次实际执行，后续调用返回缓存结果"""
         start_time = time.time()
+        
+        # === 缓存检查机制 ===
+        async with self._scan_lock:
+            if BusinessLogicScanAgent._scan_executed:
+                # 已经执行过，返回缓存结果
+                logger.info(
+                    "[BusinessLogicScanAgent] 业务逻辑扫描已执行过，返回缓存结果"
+                )
+                await self.emit_event(
+                    "info",
+                    "业务逻辑扫描已在本应用会话中执行过，返回之前的缓存结果"
+                )
+                
+                if BusinessLogicScanAgent._cached_result:
+                    cached = BusinessLogicScanAgent._cached_result
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    # 标记为缓存调用
+                    cached_data = dict(cached.get("data", {}))
+                    cached_data["from_cache"] = True
+                    cached_data["cached_at"] = cached.get("cached_at")
+                    return AgentResult(
+                        success=cached["success"],
+                        data=cached_data,
+                        iterations=cached.get("iterations", 0),
+                        tool_calls=cached.get("tool_calls", 0),
+                        tokens_used=cached.get("tokens_used", 0),
+                        duration_ms=duration_ms,
+                        handoff=cached.get("handoff"),
+                    )
+                else:
+                    # 标记为执行过但无结果
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    return AgentResult(
+                        success=False,
+                        error="业务逻辑扫描已执行，但缓存结果为空",
+                        data={"findings": [], "from_cache": True},
+                        iterations=0,
+                        tool_calls=0,
+                        tokens_used=0,
+                        duration_ms=duration_ms,
+                    )
+            
+            # 第一次调用，标记为已执行
+            BusinessLogicScanAgent._scan_executed = True
+            logger.info("[BusinessLogicScanAgent] 首次执行业务逻辑扫描")
 
         target = str(input_data.get("target") or ".")
         framework_hint = input_data.get("framework_hint")
@@ -211,7 +292,7 @@ class BusinessLogicScanAgent(BaseAgent):
             )
 
             duration_ms = int((time.time() - start_time) * 1000)
-            return AgentResult(
+            result = AgentResult(
                 success=not self.is_cancelled,
                 data={
                     "report": report["text"],
@@ -228,10 +309,28 @@ class BusinessLogicScanAgent(BaseAgent):
                 duration_ms=duration_ms,
                 handoff=handoff,
             )
+            
+            # === 缓存本次结果供后续调用使用 ===
+            BusinessLogicScanAgent._cached_result = {
+                "success": result.success,
+                "data": result.data,
+                "iterations": result.iterations,
+                "tool_calls": result.tool_calls,
+                "tokens_used": result.tokens_used,
+                "duration_ms": result.duration_ms,
+                "handoff": result.handoff,
+                "cached_at": time.time(),
+            }
+            logger.info(
+                "[BusinessLogicScanAgent] 业务逻辑扫描完成，结果已缓存。"
+                "后续调用将返回此缓存结果。"
+            )
+            
+            return result
         except Exception as exc:
             duration_ms = int((time.time() - start_time) * 1000)
             logger.error("BusinessLogicScanAgent failed: %s", exc, exc_info=True)
-            return AgentResult(
+            result = AgentResult(
                 success=False,
                 error=str(exc),
                 data={"findings": []},
@@ -240,6 +339,24 @@ class BusinessLogicScanAgent(BaseAgent):
                 tokens_used=self._total_tokens,
                 duration_ms=duration_ms,
             )
+            
+            # === 即使失败也缓存结果，但标记为失败状态 ===
+            BusinessLogicScanAgent._cached_result = {
+                "success": False,
+                "data": {"findings": [], "error": str(exc)},
+                "iterations": self._iteration,
+                "tool_calls": self._tool_calls,
+                "tokens_used": self._total_tokens,
+                "duration_ms": duration_ms,
+                "handoff": None,
+                "cached_at": time.time(),
+            }
+            logger.warning(
+                "[BusinessLogicScanAgent] 业务逻辑扫描执行失败，失败结果已缓存。"
+                "后续调用将返回此失败状态。"
+            )
+            
+            return result
 
     async def _run_phase_with_react(self, phase: ScanPhase, context: Dict[str, Any]) -> Dict[str, Any]:
         if not self.llm_service:
