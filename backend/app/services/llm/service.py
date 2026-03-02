@@ -7,7 +7,7 @@ import json
 import re
 import logging
 from typing import Dict, Any, Optional, List
-from .types import LLMConfig, LLMProvider, LLMMessage, LLMRequest, DEFAULT_MODELS
+from .types import LLMConfig, LLMProvider, LLMMessage, LLMRequest
 from .factory import LLMFactory, NATIVE_ONLY_PROVIDERS
 from app.core.config import settings
 
@@ -19,6 +19,15 @@ except ImportError:
     JSON_REPAIR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+class LLMConfigError(ValueError):
+    """LLM 配置校验错误（用于向上层返回可读配置错误）。"""
+
+    def __init__(self, field: str, message: str, provider: Optional[str] = None):
+        super().__init__(message)
+        self.field = field
+        self.provider = provider
 
 
 class LLMService:
@@ -55,41 +64,58 @@ class LLMService:
     def config(self) -> LLMConfig:
         """
         获取LLM配置
-        
-        🔥 优先级（从高到低）：
-        1. 数据库用户配置（系统配置页面保存的配置）
-        2. 环境变量配置（.env 文件中的配置）
-        
-        如果用户配置中某个字段为空，则自动回退到环境变量。
+
+        严格模式：
+        - provider / api_key / model / base_url 仅从用户 llmConfig 解析
+        - 不回退环境变量
+        - 必填项缺失时抛出 LLMConfigError
         """
         if self._config is None:
             user_llm_config = self._user_config.get('llmConfig', {})
-            
-            # 🔥 Provider 优先级：用户配置 > 环境变量
-            provider_str = user_llm_config.get('llmProvider') or getattr(settings, 'LLM_PROVIDER', 'openai')
+
+            # provider 仅使用用户配置；为空时使用 openai 作为兼容默认值
+            provider_str = user_llm_config.get('llmProvider') or 'openai'
             provider = self._parse_provider(provider_str)
-            
-            # 🔥 API Key 优先级：用户配置 > 环境变量通用配置 > 环境变量平台专属配置
-            api_key = (
-                user_llm_config.get('llmApiKey') or
-                getattr(settings, 'LLM_API_KEY', '') or
-                self._get_provider_api_key_from_user_config(provider, user_llm_config) or
-                self._get_provider_api_key(provider)
-            )
-            
-            # 🔥 Base URL 优先级：用户配置 > 环境变量
-            base_url = (
-                user_llm_config.get('llmBaseUrl') or
-                getattr(settings, 'LLM_BASE_URL', None) or
-                self._get_provider_base_url(provider)
-            )
-            
-            # 🔥 Model 优先级：用户配置 > 环境变量 > 默认模型
-            model = (
-                user_llm_config.get('llmModel') or
-                getattr(settings, 'LLM_MODEL', '') or
-                DEFAULT_MODELS.get(provider, 'gpt-4o-mini')
-            )
+
+            # 仅从用户配置取 key；允许 provider 专属 key 作为 llmApiKey 的兜底
+            api_key = str(user_llm_config.get('llmApiKey') or '').strip()
+            if not api_key:
+                api_key = str(
+                    self._get_provider_api_key_from_user_config(provider, user_llm_config) or ''
+                ).strip()
+
+            # 仅从用户配置取 base_url/model（兼容旧字段 ollamaBaseUrl）
+            base_url = str(
+                user_llm_config.get('llmBaseUrl')
+                or user_llm_config.get('ollamaBaseUrl')
+                or ''
+            ).strip()
+            model = str(user_llm_config.get('llmModel') or '').strip()
+
+            if not model:
+                raise LLMConfigError(
+                    field='llmModel',
+                    provider=provider.value,
+                    message='LLM配置错误：缺少 llmModel，请在系统配置中填写模型。',
+                )
+            if not base_url:
+                raise LLMConfigError(
+                    field='llmBaseUrl',
+                    provider=provider.value,
+                    message='LLM配置错误：缺少 llmBaseUrl，请在系统配置中填写 Base URL。',
+                )
+            if provider != LLMProvider.OLLAMA and not api_key:
+                raise LLMConfigError(
+                    field='llmApiKey',
+                    provider=provider.value,
+                    message=(
+                        f'LLM配置错误：提供商 {provider.value} 缺少 API Key，'
+                        '请填写 llmApiKey 或对应平台专属 key。'
+                    ),
+                )
+            if provider == LLMProvider.OLLAMA and not api_key:
+                # 兼容基类 validate_config（仍要求存在 api_key 字段）
+                api_key = "ollama"
             
             # 🔥 Timeout 优先级：用户配置（毫秒） > 环境变量（秒）
             timeout_ms = user_llm_config.get('llmTimeout')
@@ -134,34 +160,6 @@ class LLMService:
         key_name = provider_key_map.get(provider)
         if key_name:
             return user_llm_config.get(key_name)
-        return None
-    
-    def _get_provider_api_key(self, provider: LLMProvider) -> str:
-        """根据提供商获取API Key"""
-        provider_key_map = {
-            LLMProvider.OPENAI: 'OPENAI_API_KEY',
-            LLMProvider.GEMINI: 'GEMINI_API_KEY',
-            LLMProvider.CLAUDE: 'CLAUDE_API_KEY',
-            LLMProvider.QWEN: 'QWEN_API_KEY',
-            LLMProvider.DEEPSEEK: 'DEEPSEEK_API_KEY',
-            LLMProvider.ZHIPU: 'ZHIPU_API_KEY',
-            LLMProvider.MOONSHOT: 'MOONSHOT_API_KEY',
-            LLMProvider.BAIDU: 'BAIDU_API_KEY',
-            LLMProvider.MINIMAX: 'MINIMAX_API_KEY',
-            LLMProvider.DOUBAO: 'DOUBAO_API_KEY',
-            LLMProvider.OLLAMA: None,  # Ollama 不需要 API Key
-        }
-        key_name = provider_key_map.get(provider)
-        if key_name:
-            return getattr(settings, key_name, '') or ''
-        return 'ollama'  # Ollama的默认值
-    
-    def _get_provider_base_url(self, provider: LLMProvider) -> Optional[str]:
-        """根据提供商获取Base URL"""
-        if provider == LLMProvider.OPENAI:
-            return getattr(settings, 'OPENAI_BASE_URL', None)
-        elif provider == LLMProvider.OLLAMA:
-            return getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:11434/v1')
         return None
     
     def _parse_provider(self, provider_str: str) -> LLMProvider:

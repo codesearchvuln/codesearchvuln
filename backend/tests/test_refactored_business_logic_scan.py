@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from app.services.agent.tools.business_logic_scan_tool import BusinessLogicScanTool
 from app.services.agent.tools.base import ToolResult
 from app.services.llm.service import LLMService
+from app.services.llm.types import DEFAULT_BASE_URLS, LLMProvider
 from app.services.agent.tools import (
     FileReadTool,
     FileSearchTool,
@@ -33,7 +34,47 @@ def _prepare_javaseclab_target_and_llm() -> tuple[Path, Path, LLMService]:
     assert zip_path.exists(), f"ZIP 文件不存在: {zip_path}"
 
     load_dotenv(dotenv_path=env_path, override=False)
-    llm_service = LLMService()
+    provider = (os.getenv("LLM_PROVIDER", "openai") or "openai").strip().lower()
+    model = (os.getenv("LLM_MODEL", "") or "").strip()
+    base_url = (os.getenv("LLM_BASE_URL", "") or "").strip()
+    api_key = (os.getenv("LLM_API_KEY", "") or "").strip()
+
+    provider_key_map = {
+        "openai": "OPENAI_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "claude": "CLAUDE_API_KEY",
+        "anthropic": "CLAUDE_API_KEY",
+        "qwen": "QWEN_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "zhipu": "ZHIPU_API_KEY",
+        "moonshot": "MOONSHOT_API_KEY",
+        "baidu": "BAIDU_API_KEY",
+        "minimax": "MINIMAX_API_KEY",
+        "doubao": "DOUBAO_API_KEY",
+    }
+    if not api_key and provider in provider_key_map:
+        api_key = (os.getenv(provider_key_map[provider], "") or "").strip()
+
+    if not base_url:
+        try:
+            runtime_provider = LLMProvider.CLAUDE if provider == "anthropic" else LLMProvider(provider)
+            base_url = DEFAULT_BASE_URLS.get(runtime_provider, "") or ""
+        except Exception:
+            base_url = ""
+
+    if not model:
+        model = "gpt-5" if provider != "ollama" else "llama3.3"
+
+    llm_service = LLMService(
+        user_config={
+            "llmConfig": {
+                "llmProvider": provider,
+                "llmApiKey": api_key,
+                "llmModel": model,
+                "llmBaseUrl": base_url,
+            }
+        }
+    )
     return backend_root, zip_path, llm_service
 
 

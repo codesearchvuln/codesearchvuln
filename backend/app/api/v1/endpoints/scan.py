@@ -19,13 +19,17 @@ from app.models.user import User
 from app.models.project import Project
 from app.models.analysis import InstantAnalysis
 from app.models.user_config import UserConfig
-from app.services.llm.service import LLMService
+from app.services.llm.service import LLMService, LLMConfigError
 from app.services.scanner import task_control, is_text_file, should_exclude, get_language_from_path, get_analysis_config
 from app.services.zip_storage import load_project_zip, save_project_zip, has_project_zip
 from app.services.upload.upload_manager import UploadManager
 from app.core.config import settings
 
 router = APIRouter()
+
+
+def _llm_config_http_exception(error: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=f"LLM配置错误: {error}")
 
 
 def normalize_path(path: str) -> str:
@@ -59,6 +63,15 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
             
             # 创建使用用户配置的LLM服务实例
             llm_service = LLMService(user_config=user_config or {})
+            try:
+                _ = llm_service.config
+            except LLMConfigError as cfg_exc:
+                task.status = "failed"
+                task.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                print(f"❌ ZIP任务 {task_id} 失败: LLM配置错误 - {cfg_exc}")
+                task_control.cleanup_task(task_id)
+                return
 
             # Extract ZIP
             extract_dir = Path(f"/tmp/{task_id}")
@@ -447,6 +460,10 @@ async def instant_analysis(
     
     # 创建使用用户配置的LLM服务实例
     llm_service = LLMService(user_config=user_config)
+    try:
+        _ = llm_service.config
+    except LLMConfigError as cfg_exc:
+        raise _llm_config_http_exception(cfg_exc) from cfg_exc
     
     start_time = datetime.now(timezone.utc)
     
@@ -459,6 +476,8 @@ async def instant_analysis(
             db_session=db,
             use_default_template=True  # 没有指定模板时使用数据库中的默认模板
         )
+    except LLMConfigError as cfg_exc:
+        raise _llm_config_http_exception(cfg_exc) from cfg_exc
     except Exception as e:
         # 分析失败，返回错误信息
         error_msg = str(e)

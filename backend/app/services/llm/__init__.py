@@ -9,7 +9,7 @@ LLM 服务模块
 - 智能重试
 """
 
-from .service import LLMService
+from .service import LLMService, LLMConfigError
 from .types import (
     LLMConfig,
     LLMProvider,
@@ -32,6 +32,7 @@ from .memory_compressor import MemoryCompressor
 __all__ = [
     # Service
     "LLMService",
+    "LLMConfigError",
     # Types
     "LLMConfig",
     "LLMProvider",

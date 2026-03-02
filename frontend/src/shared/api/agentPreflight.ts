@@ -11,14 +11,59 @@ export interface AgentPreflightResult {
 const normalizeProvider = (provider: string | undefined | null) =>
 	(provider || "").trim().toLowerCase();
 
+const resolveEffectiveApiKey = (
+	provider: string,
+	llmConfig: Record<string, unknown>,
+): string => {
+	const directKey = String(llmConfig.llmApiKey || "").trim();
+	if (directKey) return directKey;
+
+	const providerKeyMap: Record<string, string> = {
+		openai: "openaiApiKey",
+		openrouter: "openaiApiKey",
+		azure_openai: "openaiApiKey",
+		custom: "openaiApiKey",
+		anthropic: "claudeApiKey",
+		claude: "claudeApiKey",
+		gemini: "geminiApiKey",
+		qwen: "qwenApiKey",
+		deepseek: "deepseekApiKey",
+		zhipu: "zhipuApiKey",
+		moonshot: "moonshotApiKey",
+		baidu: "baiduApiKey",
+		minimax: "minimaxApiKey",
+		doubao: "doubaoApiKey",
+	};
+	const providerKeyField = providerKeyMap[provider];
+	if (!providerKeyField) return "";
+	return String(llmConfig[providerKeyField] || "").trim();
+};
+
 export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 	const userConfig = await api.getUserConfig();
 	const llmConfig = userConfig?.llmConfig || {};
 
 	const llmProvider = normalizeProvider(llmConfig.llmProvider) || "openai";
-	const llmApiKey = (llmConfig.llmApiKey || "").trim();
+	const llmApiKey = resolveEffectiveApiKey(llmProvider, llmConfig);
 	const llmModel = (llmConfig.llmModel || "").trim();
 	const llmBaseUrl = (llmConfig.llmBaseUrl || "").trim();
+
+	if (!llmModel) {
+		return {
+			ok: false,
+			stage: "llm_config",
+			message:
+				"智能审计初始化失败：LLM 未配置模型（llmModel），请先在系统配置中完成配置并测试。",
+		};
+	}
+	if (!llmBaseUrl) {
+		return {
+			ok: false,
+			stage: "llm_config",
+			message:
+				"智能审计初始化失败：LLM 未配置 Base URL（llmBaseUrl），请先在系统配置中完成配置并测试。",
+		};
+	}
 
 	if (llmProvider !== "ollama" && !llmApiKey) {
 		return {
@@ -33,8 +78,8 @@ export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 		const llmResult = await api.testLLMConnection({
 			provider: llmProvider,
 			apiKey: llmApiKey,
-			model: llmModel || undefined,
-			baseUrl: llmBaseUrl || undefined,
+			model: llmModel,
+			baseUrl: llmBaseUrl,
 		});
 
 		if (!llmResult.success) {

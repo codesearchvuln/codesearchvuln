@@ -806,6 +806,36 @@ export function SystemConfig({
     return providerId !== "ollama";
   };
 
+  const validateStrictLlmInputs = (source: "save" | "test"): {
+    ok: boolean;
+    providerId: string;
+    apiKey: string;
+    model: string;
+    baseUrl: string;
+  } => {
+    if (!config) {
+      return { ok: false, providerId: "openai", apiKey: "", model: "", baseUrl: "" };
+    }
+    const providerId = normalizeLlmProviderId(config.llmProvider);
+    const apiKey = String(config.llmApiKey || "").trim();
+    const model = String(config.llmModel || "").trim();
+    const baseUrl = String(config.llmBaseUrl || "").trim();
+
+    if (!model) {
+      toast.error(`无法${source === "save" ? "保存" : "测试"}：请先填写模型（llmModel）`);
+      return { ok: false, providerId, apiKey, model, baseUrl };
+    }
+    if (!baseUrl) {
+      toast.error(`无法${source === "save" ? "保存" : "测试"}：请先填写 Base URL（llmBaseUrl）`);
+      return { ok: false, providerId, apiKey, model, baseUrl };
+    }
+    if (shouldRequireApiKey(providerId) && !apiKey) {
+      toast.error(`无法${source === "save" ? "保存" : "测试"}：当前提供商必须配置 API Key`);
+      return { ok: false, providerId, apiKey, model, baseUrl };
+    }
+    return { ok: true, providerId, apiKey, model, baseUrl };
+  };
+
   const applyLongReasoningPreset = () => {
     setConfig((prev) => {
       if (!prev) return prev;
@@ -838,7 +868,7 @@ export function SystemConfig({
       return {
         ...prev,
         llmProvider: newProvider,
-        llmModel: "",
+        llmModel: defaultModel || prev.llmModel,
         llmBaseUrl: shouldUpdateBaseUrl ? defaultBaseUrl : prev.llmBaseUrl,
       };
     });
@@ -944,7 +974,7 @@ export function SystemConfig({
     const defaultModel = getDefaultModelForProvider(providerId);
 
     if (value === "__default__") {
-      updateConfig("llmModel", "");
+      updateConfig("llmModel", defaultModel);
       applyRecommendedMaxTokens(providerId, defaultModel, {
         force: false,
         markChanges: true,
@@ -985,14 +1015,16 @@ export function SystemConfig({
 
   const saveConfig = async () => {
     if (!config) return;
+    const validated = validateStrictLlmInputs("save");
+    if (!validated.ok) return;
 
     try {
       const savedConfig = await api.updateUserConfig({
         llmConfig: {
-          llmProvider: normalizeLlmProviderId(config.llmProvider),
-          llmApiKey: config.llmApiKey,
-          llmModel: config.llmModel,
-          llmBaseUrl: config.llmBaseUrl,
+          llmProvider: validated.providerId,
+          llmApiKey: validated.apiKey,
+          llmModel: validated.model,
+          llmBaseUrl: validated.baseUrl,
           llmTimeout: config.llmTimeout,
           llmTemperature: config.llmTemperature,
           llmMaxTokens: config.llmMaxTokens,
@@ -1079,21 +1111,17 @@ export function SystemConfig({
 
   const testLLMConnection = async () => {
     if (!config) return;
-    const providerId = normalizeLlmProviderId(config.llmProvider);
-    const requiresApiKey = shouldRequireApiKey(providerId);
-    if (requiresApiKey && !config.llmApiKey) {
-      toast.error("请先配置 API Key");
-      return;
-    }
+    const validated = validateStrictLlmInputs("test");
+    if (!validated.ok) return;
 
     setTestingLLM(true);
     setLlmTestResult(null);
     try {
       const result = await api.testLLMConnection({
-        provider: providerId,
-        apiKey: config.llmApiKey,
-        model: config.llmModel || undefined,
-        baseUrl: config.llmBaseUrl || undefined,
+        provider: validated.providerId,
+        apiKey: validated.apiKey,
+        model: validated.model,
+        baseUrl: validated.baseUrl,
       });
       setLlmTestResult(result);
       if (result.success) {
@@ -1122,8 +1150,12 @@ export function SystemConfig({
   }
 
   const selectedProviderInfo = getProviderInfo(config.llmProvider);
+  const hasModelConfigured = String(config.llmModel || "").trim().length > 0;
+  const hasBaseUrlConfigured = String(config.llmBaseUrl || "").trim().length > 0;
   const isConfigured =
-    !shouldRequireApiKey(config.llmProvider) || config.llmApiKey.trim() !== "";
+    (!shouldRequireApiKey(config.llmProvider) || config.llmApiKey.trim() !== "") &&
+    hasModelConfigured &&
+    hasBaseUrlConfigured;
 
   return (
     <div className="space-y-6">
@@ -1208,7 +1240,10 @@ export function SystemConfig({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs font-bold text-muted-foreground uppercase">API 站口</Label>
+                <Label className="text-xs font-bold text-muted-foreground uppercase">
+                  API 站口
+                  <span className="text-rose-400 ml-1">*</span>
+                </Label>
                 <Input
                   value={config.llmBaseUrl}
                   onChange={(event) => {
@@ -1217,8 +1252,8 @@ export function SystemConfig({
                   }}
                   placeholder={(() => {
                     const baseUrl = getDefaultBaseUrlForProvider(config.llmProvider);
-                    if (baseUrl) return `留空使用默认站口，例如：${baseUrl}`;
-                    return "留空使用官方地址，或填入中转站地址";
+                    if (baseUrl) return `必填，例如：${baseUrl}`;
+                    return "必填：请输入完整 Base URL";
                   })()}
                   className="h-10 cyber-input"
                 />
@@ -1226,7 +1261,10 @@ export function SystemConfig({
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="text-xs font-bold text-muted-foreground uppercase">模型选择</Label>
+                  <Label className="text-xs font-bold text-muted-foreground uppercase">
+                    模型选择
+                    <span className="text-rose-400 ml-1">*</span>
+                  </Label>
                   <Button
                     type="button"
                     variant="outline"
@@ -1260,7 +1298,7 @@ export function SystemConfig({
                         <Input
                           value={config.llmModel}
                           onChange={(event) => updateConfig("llmModel", event.target.value)}
-                          placeholder={`默认: ${defaultModel}`}
+                          placeholder={`请输入模型名称，例如：${defaultModel}`}
                           className="h-10 cyber-input"
                         />
                         {currentModelRecommendation ? (

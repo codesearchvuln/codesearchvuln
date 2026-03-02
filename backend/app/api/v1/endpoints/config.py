@@ -1595,7 +1595,7 @@ async def verify_qmd_cli_runtime(
 class LLMTestRequest(BaseModel):
     """LLM测试请求"""
     provider: str
-    apiKey: str
+    apiKey: Optional[str] = None
     model: Optional[str] = None
     baseUrl: Optional[str] = None
 
@@ -1706,9 +1706,22 @@ async def test_llm_connection(
         debug_info["provider_resolved"] = resolved_provider_id
         debug_info["provider_runtime"] = provider.value
 
-        # 获取默认模型
-        model = request.model or _get_provider_default_model(resolved_provider_id, provider)
-        base_url = request.baseUrl or _get_provider_default_base_url(resolved_provider_id, provider)
+        model = str(request.model or "").strip()
+        base_url = str(request.baseUrl or "").strip()
+        api_key = str(request.apiKey or "").strip()
+
+        if not model:
+            raise HTTPException(status_code=400, detail="LLM 配置缺失：`model` 必填。")
+        if not base_url:
+            raise HTTPException(status_code=400, detail="LLM 配置缺失：`baseUrl` 必填。")
+        if provider != LLMProvider.OLLAMA and not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"LLM 配置缺失：提供商 `{resolved_provider_id}` 必须提供 `apiKey`。",
+            )
+        if provider == LLMProvider.OLLAMA and not api_key:
+            # 兼容基类 validate_config 的 API Key 必填校验
+            api_key = "ollama"
 
         # 测试时使用用户保存的所有配置参数
         test_timeout = int(saved_timeout_ms / 1000) if saved_timeout_ms else settings.LLM_TIMEOUT
@@ -1729,7 +1742,7 @@ async def test_llm_connection(
         # 创建配置
         config = LLMConfig(
             provider=provider,
-            api_key=request.apiKey,
+            api_key=api_key,
             model=model,
             base_url=base_url or None,
             timeout=test_timeout,
@@ -1794,6 +1807,8 @@ async def test_llm_connection(
             debug=debug_info
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         elapsed_time = time.time() - start_time
         error_msg = str(e)

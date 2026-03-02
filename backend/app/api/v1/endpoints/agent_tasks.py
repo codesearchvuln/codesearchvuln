@@ -2484,7 +2484,7 @@ async def _execute_agent_task(task_id: str):
     """
     from app.services.agent.agents import OrchestratorAgent, ReconAgent, AnalysisAgent, VerificationAgent
     from app.services.agent.event_manager import EventManager, AgentEventEmitter
-    from app.services.llm.service import LLMService
+    from app.services.llm.service import LLMService, LLMConfigError
     from app.services.agent.core import agent_registry
     from app.services.agent.tools import SandboxManager
     from app.core.config import settings
@@ -2760,6 +2760,18 @@ async def _execute_agent_task(task_id: str):
 
             # 创建 LLM 服务
             llm_service = LLMService(user_config=user_config)
+            try:
+                _ = llm_service.config
+            except LLMConfigError as cfg_exc:
+                cfg_message = f"LLM配置校验失败：{cfg_exc}"
+                await event_emitter.emit_error(
+                    cfg_message,
+                    metadata={
+                        "step_name": "LLM_CONFIG_VALIDATION",
+                        "is_terminal": True,
+                    },
+                )
+                raise RuntimeError(cfg_message) from cfg_exc
 
             # 初始化工具集 - 传递排除模式和目标文件以及预初始化的 sandbox_manager
             # 🔥 传递 event_emitter 以发送索引进度，传递 task_id 以支持取消

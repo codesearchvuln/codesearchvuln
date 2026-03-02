@@ -39,6 +39,7 @@ from app.schemas.opengrep import (
 from app.services.rule import get_rule_by_patch, validate_generic_rule
 from app.services.upload.upload_manager import UploadManager
 from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
+from app.services.llm.service import LLMService, LLMConfigError
 
 # ============ Schemas ============
 
@@ -2351,6 +2352,22 @@ async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional
     return None
 
 
+def _normalize_llm_config_error_message(exc: Exception) -> str:
+    return f"LLM配置错误: {exc}"
+
+
+def _is_llm_config_error(exc: Exception) -> bool:
+    if isinstance(exc, LLMConfigError):
+        return True
+    msg = str(exc)
+    return "LLM配置错误" in msg or "llmModel" in msg or "llmBaseUrl" in msg or "llmApiKey" in msg
+
+
+def _validate_user_llm_config(user_config: Optional[Dict[str, Any]]) -> None:
+    llm_service = LLMService(user_config=user_config or {})
+    _ = llm_service.config
+
+
 async def _process_patch_files_background(
     patch_files: List[tuple],
     user_id: str,
@@ -2372,6 +2389,15 @@ async def _process_patch_files_background(
             logger.info(f"已为用户 {user_id} 加载 LLM 配置")
         else:
             logger.warning(f"获取用户 {user_id} 的配置失败或为空，将使用默认配置")
+
+        try:
+            _validate_user_llm_config(user_config)
+        except Exception as exc:
+            error_message = _normalize_llm_config_error_message(exc)
+            logger.error(error_message)
+            for _, _, rule_id in patch_files:
+                await _update_rule_status(db, rule_id, False, error_message)
+            return
         
         try:
             logger.info(f"开始后台处理 {len(patch_files)} 个 patch 文件 (task_type={task_type})...")
@@ -2627,12 +2653,13 @@ async def _process_single_patch_file(
         except Exception as rollback_error:
             logger.debug(f"无法回滚事务: {rollback_error}")
         logger.error(f"Error processing patch file {filename}: {e}")
+        message = _normalize_llm_config_error_message(e) if _is_llm_config_error(e) else str(e)
         return {
             "filename": filename,
             "rule_id": rule_id,
             "status": "error",
             "attempts": 0,
-            "message": str(e)
+            "message": message
         }
 
 
@@ -2656,7 +2683,11 @@ async def create_opengrep_rule(
         )
     else:
         logger.info(f"⚠️ 未找到用户 {current_user.id} 的 LLM 配置，将使用默认配置")
-    
+    try:
+        _validate_user_llm_config(user_config)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=_normalize_llm_config_error_message(exc)) from exc
+
     result = await get_rule_by_patch(request, user_config=user_config)
 
     attempts = result.get("attempts", [])
@@ -3138,6 +3169,13 @@ async def _create_rules_and_generate_background(
             )
         else:
             logger.info(f"⚠️ 未找到用户 {user_id} 的 LLM 配置，将使用默认配置")
+
+        llm_config_error_message: Optional[str] = None
+        try:
+            _validate_user_llm_config(user_config)
+        except Exception as exc:
+            llm_config_error_message = _normalize_llm_config_error_message(exc)
+            logger.error(llm_config_error_message)
         
         try:
             logger.info(f"开始后台创建占位符规则和处理 {len(patch_files)} 个 patch 文件 (task_type={task_type})...")
@@ -3161,6 +3199,12 @@ async def _create_rules_and_generate_background(
                 return
             
             logger.info(f"创建 {len(rule_ids)} 个占位符规则，开始处理生成...")
+
+            if llm_config_error_message:
+                for rule_id in rule_ids:
+                    await _update_rule_status(db, rule_id, False, llm_config_error_message)
+                logger.error("后台规则生成已终止：%s", llm_config_error_message)
+                return
             
             # 第二步：处理 patch 文件生成规则
             success_count = 0
@@ -3215,7 +3259,10 @@ async def _create_rules_and_generate_background(
                     logger.info(f"处理完成: {filename} - {result['status']}")
                 except Exception as e:
                     logger.error(f"处理文件失败 {filename}: {e}")
-                    await _update_rule_status(db, rule_id, False, str(e))
+                    if _is_llm_config_error(e):
+                        await _update_rule_status(db, rule_id, False, _normalize_llm_config_error_message(e))
+                    else:
+                        await _update_rule_status(db, rule_id, False, str(e))
                     failed_count += 1
             
             logger.info(

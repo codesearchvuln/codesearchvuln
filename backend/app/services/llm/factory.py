@@ -27,24 +27,13 @@ NATIVE_ONLY_PROVIDERS = {
 class LLMFactory:
     """LLM工厂类"""
 
+    # 保留该字段仅为兼容 clear_cache 等既有调用；create_adapter 不再复用缓存。
     _adapters: Dict[str, BaseLLMAdapter] = {}
 
     @classmethod
     def create_adapter(cls, config: LLMConfig) -> BaseLLMAdapter:
-        """创建LLM适配器实例"""
-        cache_key = cls._get_cache_key(config)
-
-        # 从缓存中获取
-        if cache_key in cls._adapters:
-            return cls._adapters[cache_key]
-
-        # 创建新的适配器实例
-        adapter = cls._instantiate_adapter(config)
-
-        # 缓存实例
-        cls._adapters[cache_key] = adapter
-
-        return adapter
+        """创建LLM适配器实例（严格按当前配置即时创建，不走缓存）。"""
+        return cls._instantiate_adapter(config)
 
     @classmethod
     def _instantiate_adapter(cls, config: LLMConfig) -> BaseLLMAdapter:
