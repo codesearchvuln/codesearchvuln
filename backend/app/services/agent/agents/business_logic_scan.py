@@ -62,12 +62,20 @@ BUSINESS_LOGIC_SYSTEM_PROMPT = """你是业务逻辑漏洞扫描子 Agent。
 4. Final Answer 必须是 JSON。
 5. findings 的 title/description/poc_plan/fix_suggestion 使用简体中文。
 
+## 执行模式
+- **全局模式**：当未指定 entry_points_hint 时，执行完整的 5 阶段扫描（入口发现 → 功能分析 → 敏感操作 → 污点分析 → 漏洞确认）
+- **聚焦模式**：当指定了 entry_points_hint 时，跳过全局入口发现，直接分析给定的接口列表（简化为 3-4 阶段），提高效率
+
 ## 阶段目标
+### 全局模式（标准 5 阶段）
 1. HTTP 入口发现：识别路由、控制器与处理函数。
 2. 入口功能分析：识别鉴权、权限检查、参数验证。
 3. 敏感操作锚点：识别数据更新、权限变更、资金相关操作。
 4. 轻量级污点分析：追踪入口参数到敏感操作的数据路径，识别缺失校验。
 5. 漏洞确认：输出结构化业务逻辑漏洞 findings。
+
+### 聚焦模式（3-4 阶段）
+当指定了 entry_points_hint 时，跳过第 1 阶段，直接从第 2 阶段开始分析给定的接口。
 
 ## 结果 JSON 最低要求
 可按阶段输出以下键之一：
@@ -76,6 +84,10 @@ BUSINESS_LOGIC_SYSTEM_PROMPT = """你是业务逻辑漏洞扫描子 Agent。
 - sensitive_operations
 - taint_paths
 - findings
+
+## 参数化缓存机制
+当同一 entry_points_hint 被再次分析时，系统将返回缓存结果而不重复执行。
+不同的 entry_points_hint 列表将被单独缓存。
 """
 
 
@@ -108,10 +120,11 @@ class BusinessLogicFinding:
 class BusinessLogicScanAgent(BaseAgent):
     """业务逻辑漏洞扫描子 Agent。"""
     
-    # 类级别的调用缓存：确保整个应用生命周期内只执行一次
-    _scan_executed = False
-    _cached_result: Optional[Dict[str, Any]] = None
-    _scan_lock = asyncio.Lock()
+    # 类级别的参数化缓存：根据 entry_points_hint 独立缓存
+    # key: 缓存 key（通过 entry_points_hint 生成）
+    # value: 缓存的 AgentResult 数据
+    _cache_dict: Dict[str, Dict[str, Any]] = {}
+    _cache_lock = asyncio.Lock()
 
     def __init__(self, llm_service, tools: Dict[str, Any], event_emitter=None):
         tool_whitelist = ", ".join(sorted(tools.keys())) if tools else "无"
@@ -135,91 +148,151 @@ class BusinessLogicScanAgent(BaseAgent):
             ScanPhase(4, "Lightweight Taint Analysis", "追踪参数传播并识别缺失校验"),
             ScanPhase(5, "Logic Vulnerability Confirm", "确认漏洞类型、严重程度与修复建议"),
         ]
+        # 聚焦模式下的简化阶段（跳过第 1 阶段全局入口发现）
+        self.focused_phases: List[ScanPhase] = [
+            ScanPhase(2, "Entry Function Analysis", "分析指定接口的业务逻辑、鉴权和权限检查"),
+            ScanPhase(3, "Sensitive Operation Anchors", "识别敏感操作与关键检查点"),
+            ScanPhase(4, "Lightweight Taint Analysis", "追踪参数传播并识别缺失校验"),
+            ScanPhase(5, "Logic Vulnerability Confirm", "确认漏洞类型、严重程度与修复建议"),
+        ]
+        self._focused_mode = False  # 标记是否为聚焦模式
+
+    @staticmethod
+    def _get_cache_key(entry_points_hint: Optional[List[str]]) -> str:
+        """
+        根据 entry_points_hint 生成缓存 key。
+        
+        - 如果 entry_points_hint 为空或 None，返回 "global_scan"
+        - 如果 entry_points_hint 非空，生成基于内容的 key
+        
+        这允许不同的接口列表被独立缓存。
+        """
+        if not entry_points_hint:
+            return "global_scan"
+        
+        # 创建标准化类型
+        normalized = sorted([str(ep).strip() for ep in entry_points_hint if ep])
+        if not normalized:
+            return "global_scan"
+        
+        # 使用简单的字符串连接作为 key（而非复杂的哈希）
+        key_str = "::".join(normalized)
+        # 如果 key 太长，使用 hash
+        if len(key_str) > 256:
+            import hashlib
+            return f"focused_scan_{hashlib.md5(key_str.encode()).hexdigest()}"
+        return f"focused_scan_{key_str}"
 
     @classmethod
-    def reset_cache(cls) -> None:
+    def reset_cache(cls, entry_points_hint: Optional[List[str]] = None) -> None:
         """
         重置扫描缓存状态。
+        
+        Args:
+            entry_points_hint: 如果指定，仅重置该 entry_points_hint 对应的缓存；
+                              如果为 None，重置所有缓存。
+        
         用于测试、调试或需要重新执行扫描的场景。
         """
-        cls._scan_executed = False
-        cls._cached_result = None
-        logger.info("[BusinessLogicScanAgent] 缓存状态已重置，下次调用将重新执行扫描")
+        if entry_points_hint is None:
+            # 重置所有缓存
+            cls._cache_dict.clear()
+            logger.info("[BusinessLogicScanAgent] 所有缓存已重置")
+        else:
+            # 重置特定的缓存
+            cache_key = cls._get_cache_key(entry_points_hint)
+            if cache_key in cls._cache_dict:
+                del cls._cache_dict[cache_key]
+                logger.info(
+                    "[BusinessLogicScanAgent] 缓存已重置: %s",
+                    cache_key,
+                )
 
     @classmethod
-    def is_scan_cached(cls) -> bool:
-        """检查是否已有缓存的扫描结果"""
-        return cls._scan_executed and cls._cached_result is not None
+    def is_scan_cached(cls, entry_points_hint: Optional[List[str]] = None) -> bool:
+        """检查指定的 entry_points_hint 是否已有缓存的扫描结果"""
+        cache_key = cls._get_cache_key(entry_points_hint)
+        return cache_key in cls._cache_dict
 
     @classmethod
     def get_cache_info(cls) -> Dict[str, Any]:
         """获取缓存信息（用于诊断）"""
-        if not cls._cached_result:
-            return {"cached": False, "reason": "no_cache"}
+        if not cls._cache_dict:
+            return {"cached_entries": 0, "total_keys": 0}
         
-        cached = cls._cached_result
-        return {
-            "cached": True,
-            "success": cached.get("success"),
-            "cached_at": cached.get("cached_at"),
-            "findings_count": len(cached.get("data", {}).get("findings", [])),
-            "total_findings": cached.get("data", {}).get("total_findings", 0),
+        info = {
+            "cached_entries": len(cls._cache_dict),
+            "total_keys": len(cls._cache_dict),
+            "caches": {}
         }
+        
+        for key, cached in cls._cache_dict.items():
+            info["caches"][key] = {
+                "success": cached.get("success"),
+                "cached_at": cached.get("cached_at"),
+                "findings_count": len(cached.get("data", {}).get("findings", [])),
+            }
+        
+        return info
 
     async def run(self, input_data: Dict[str, Any]) -> AgentResult:
-        """执行业务逻辑扫描 - 仅第一次实际执行，后续调用返回缓存结果"""
+        """执行业务逻辑扫描 - 支持参数化缓存和聚焦模式"""
         start_time = time.time()
         
-        # === 缓存检查机制 ===
-        async with self._scan_lock:
-            if BusinessLogicScanAgent._scan_executed:
-                # 已经执行过，返回缓存结果
-                logger.info(
-                    "[BusinessLogicScanAgent] 业务逻辑扫描已执行过，返回缓存结果"
-                )
-                await self.emit_event(
-                    "info",
-                    "业务逻辑扫描已在本应用会话中执行过，返回之前的缓存结果"
-                )
-                
-                if BusinessLogicScanAgent._cached_result:
-                    cached = BusinessLogicScanAgent._cached_result
-                    duration_ms = int((time.time() - start_time) * 1000)
-                    # 标记为缓存调用
-                    cached_data = dict(cached.get("data", {}))
-                    cached_data["from_cache"] = True
-                    cached_data["cached_at"] = cached.get("cached_at")
-                    return AgentResult(
-                        success=cached["success"],
-                        data=cached_data,
-                        iterations=cached.get("iterations", 0),
-                        tool_calls=cached.get("tool_calls", 0),
-                        tokens_used=cached.get("tokens_used", 0),
-                        duration_ms=duration_ms,
-                        handoff=cached.get("handoff"),
-                    )
-                else:
-                    # 标记为执行过但无结果
-                    duration_ms = int((time.time() - start_time) * 1000)
-                    return AgentResult(
-                        success=False,
-                        error="业务逻辑扫描已执行，但缓存结果为空",
-                        data={"findings": [], "from_cache": True},
-                        iterations=0,
-                        tool_calls=0,
-                        tokens_used=0,
-                        duration_ms=duration_ms,
-                    )
-            
-            # 第一次调用，标记为已执行
-            BusinessLogicScanAgent._scan_executed = True
-            logger.info("[BusinessLogicScanAgent] 首次执行业务逻辑扫描")
-
         target = str(input_data.get("target") or ".")
         framework_hint = input_data.get("framework_hint")
         entry_points_hint = input_data.get("entry_points_hint") or []
         quick_mode = bool(input_data.get("quick_mode", False))
         max_iterations = int(input_data.get("max_iterations") or self.config.max_iterations)
+        
+        # 生成缓存 key
+        cache_key = self._get_cache_key(entry_points_hint)
+        
+        # === 参数化缓存检查机制 ===
+        async with self._cache_lock:
+            if cache_key in self._cache_dict:
+                # 缓存命中，返回缓存结果
+                logger.info(
+                    "[BusinessLogicScanAgent] 缓存命中: %s，返回缓存结果",
+                    cache_key,
+                )
+                await self.emit_event(
+                    "info",
+                    f"业务逻辑扫描缓存命中 ({cache_key})，返回之前的扫描结果"
+                )
+                
+                cached = self._cache_dict[cache_key]
+                duration_ms = int((time.time() - start_time) * 1000)
+                # 标记为缓存调用
+                cached_data = dict(cached.get("data", {}))
+                cached_data["from_cache"] = True
+                cached_data["cached_at"] = cached.get("cached_at")
+                return AgentResult(
+                    success=cached["success"],
+                    data=cached_data,
+                    iterations=cached.get("iterations", 0),
+                    tool_calls=cached.get("tool_calls", 0),
+                    tokens_used=cached.get("tokens_used", 0),
+                    duration_ms=duration_ms,
+                    handoff=cached.get("handoff"),
+                )
+            
+            logger.info(
+                "[BusinessLogicScanAgent] 缓存不存在: %s，执行新的扫描",
+                cache_key,
+            )
+        
+        # === 判断执行模式 ===
+        self._focused_mode = bool(entry_points_hint)
+        if self._focused_mode:
+            await self.emit_thinking(f"🎯 业务逻辑扫描聚焦模式：分析 {len(entry_points_hint)} 个接口")
+            logger.info(
+                "[BusinessLogicScanAgent] 进入聚焦模式，分析 %d 个接口",
+                len(entry_points_hint),
+            )
+        else:
+            await self.emit_thinking("🌍 业务逻辑扫描全局模式：完整 5 阶段分析")
+            logger.info("[BusinessLogicScanAgent] 进入全局模式，执行完整扫描")
 
         scan_context: Dict[str, Any] = {
             "target": target,
@@ -236,10 +309,13 @@ class BusinessLogicScanAgent(BaseAgent):
             "taint_paths": [],
         }
 
-        self.record_work(f"开始业务逻辑扫描: target={target}")
+        self.record_work(f"开始业务逻辑扫描: target={target}, mode={'focused' if self._focused_mode else 'global'}")
 
         try:
-            for phase in self.phases:
+            # 根据模式选择要执行的阶段
+            phases_to_run = self.focused_phases if self._focused_mode else self.phases
+            
+            for phase in phases_to_run:
                 if self.is_cancelled:
                     break
 
@@ -288,6 +364,7 @@ class BusinessLogicScanAgent(BaseAgent):
                     "phase_1_entries": len(scan_context["discovered_entries"]),
                     "phase_3_sensitive_ops": len(scan_context["sensitive_operations"]),
                     "phase_4_taint_paths": len(scan_context["taint_paths"]),
+                    "scan_mode": "focused" if self._focused_mode else "global",
                 },
             )
 
@@ -302,6 +379,7 @@ class BusinessLogicScanAgent(BaseAgent):
                     "phase_4_taint_paths": scan_context["taint_paths"],
                     "total_findings": len(findings_dict),
                     "by_severity": self._count_by_severity(),
+                    "scan_mode": "focused" if self._focused_mode else "global",
                 },
                 iterations=self._iteration,
                 tool_calls=self._tool_calls,
@@ -311,7 +389,7 @@ class BusinessLogicScanAgent(BaseAgent):
             )
             
             # === 缓存本次结果供后续调用使用 ===
-            BusinessLogicScanAgent._cached_result = {
+            self._cache_dict[cache_key] = {
                 "success": result.success,
                 "data": result.data,
                 "iterations": result.iterations,
@@ -322,8 +400,9 @@ class BusinessLogicScanAgent(BaseAgent):
                 "cached_at": time.time(),
             }
             logger.info(
-                "[BusinessLogicScanAgent] 业务逻辑扫描完成，结果已缓存。"
-                "后续调用将返回此缓存结果。"
+                "[BusinessLogicScanAgent] 扫描完成，结果已缓存于 %s。"
+                "后续同样的 entry_points_hint 调用将返回此缓存结果。",
+                cache_key,
             )
             
             return result
@@ -341,7 +420,7 @@ class BusinessLogicScanAgent(BaseAgent):
             )
             
             # === 即使失败也缓存结果，但标记为失败状态 ===
-            BusinessLogicScanAgent._cached_result = {
+            self._cache_dict[cache_key] = {
                 "success": False,
                 "data": {"findings": [], "error": str(exc)},
                 "iterations": self._iteration,
@@ -352,8 +431,9 @@ class BusinessLogicScanAgent(BaseAgent):
                 "cached_at": time.time(),
             }
             logger.warning(
-                "[BusinessLogicScanAgent] 业务逻辑扫描执行失败，失败结果已缓存。"
-                "后续调用将返回此失败状态。"
+                "[BusinessLogicScanAgent] 扫描执行失败，失败结果已缓存于 %s。"
+                "后续同样的 entry_points_hint 调用将返回此失败状态。",
+                cache_key,
             )
             
             return result
@@ -420,6 +500,7 @@ class BusinessLogicScanAgent(BaseAgent):
 ## 当前阶段
 - 阶段: {phase.phase_name}
 - 描述: {phase.description}
+- 模式: {'聚焦模式' if self._focused_mode else '全局模式'}
 
 ## 项目信息
 - target: {context['target']}
@@ -434,6 +515,43 @@ class BusinessLogicScanAgent(BaseAgent):
 
 先进行 Thought，然后调用工具（Action）获取证据。证据充分后再输出 Final Answer JSON。
 """
+
+        # === 聚焦模式：阶段 2 - 直接分析指定的接口 ===
+        if self._focused_mode and phase.phase_num == 2:
+            entry_points_str = json.dumps(context.get("entry_points_hint", [])[:10], ensure_ascii=False, indent=2)
+            return (
+                base_prompt
+                + f"""
+## 目标
+分析以下指定接口的业务逻辑、鉴权和权限检查（聚焦模式）。
+
+## 待分析的接口列表
+{entry_points_str}
+
+## 分析重点
+1. 定位每个接口的处理函数
+2. 分析其中的鉴权逻辑（是否有 @login_required 等装饰器）
+3. 分析权限检查（是否验证用户身份和权限）
+4. 识别输入参数中包含的用户/资源标识符
+5. 评估接口风险等级
+
+## Final Answer JSON
+{{
+  "entry_analysis": [
+    {{
+      "entry": "接口路径",
+      "handler": "文件:函数",
+      "logic": "业务逻辑描述",
+      "auth_checks": ["鉴权检查列表"],
+      "permission_checks": ["权限检查列表"],
+      "input_params": ["输入参数列表"],
+      "risk": "风险评估"
+    }}
+  ],
+  "summary": "分析总结"
+}}
+"""
+            )
 
         if phase.phase_num == 1:
             return (
@@ -455,13 +573,13 @@ class BusinessLogicScanAgent(BaseAgent):
 """
             )
 
-        if phase.phase_num == 2:
+        if phase.phase_num == 2 and not self._focused_mode:
             seed_entries = json.dumps(context.get("discovered_entries", [])[:8], ensure_ascii=False, indent=2)
             return (
                 base_prompt
                 + f"""
 ## 目标
-分析关键入口的业务逻辑、鉴权和权限检查。
+分析关键入口的业务逻辑、鉴权和权限检查（全局模式）。
 
 ## 入口样例
 {seed_entries}
