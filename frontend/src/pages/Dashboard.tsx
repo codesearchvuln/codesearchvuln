@@ -10,7 +10,6 @@ import {
 	BarChart,
 	CartesianGrid,
 	Legend,
-	ReferenceLine,
 	ResponsiveContainer,
 	Tooltip,
 	XAxis,
@@ -63,15 +62,8 @@ type RulesChartScope = "all" | "enabled";
 type RuleLanguageChartItem = {
 	language: string;
 	total: number;
-	severityError: number;
-	severityWarning: number;
-	severityInfo: number;
-	confidenceHigh: number;
-	confidenceMedium: number;
-	confidenceLow: number;
-	confidenceUnknown: number;
-	severityTotal: number;
-	confidenceTotal: number;
+	highCount: number;
+	mediumCount: number;
 };
 
 const formatDateTime = (dateText: string) => {
@@ -98,8 +90,8 @@ const normalizeConfidence = (confidence?: string | null) => {
 	return "UNKNOWN";
 };
 
-const formatAbsTick = (value: number | string) =>
-	Math.abs(Number(value || 0)).toLocaleString();
+const formatTick = (value: number | string) =>
+	Number(value || 0).toLocaleString();
 
 export default function Dashboard() {
 	const location = useLocation();
@@ -266,86 +258,57 @@ export default function Dashboard() {
 
 		for (const rule of filteredRulesByScope) {
 			const language = String(rule.language || "unknown").trim() || "unknown";
-			if (!aggregate.has(language)) {
-				aggregate.set(language, {
-					language,
-					total: 0,
-					severityError: 0,
-					severityWarning: 0,
-					severityInfo: 0,
-					confidenceHigh: 0,
-					confidenceMedium: 0,
-					confidenceLow: 0,
-					confidenceUnknown: 0,
-					severityTotal: 0,
-					confidenceTotal: 0,
-				});
-			}
-			const entry = aggregate.get(language);
-			if (!entry) continue;
+				if (!aggregate.has(language)) {
+					aggregate.set(language, {
+						language,
+						total: 0,
+						highCount: 0,
+						mediumCount: 0,
+					});
+				}
+				const entry = aggregate.get(language);
+				if (!entry) continue;
 
-			const severity = String(rule.severity || "").toUpperCase();
-			if (severity === "ERROR") {
-				entry.severityError += 1;
-			} else if (severity === "WARNING") {
-				entry.severityWarning += 1;
-			} else {
-				entry.severityInfo += 1;
+				const severity = String(rule.severity || "").toUpperCase();
+				if (severity !== "ERROR") continue;
+
+				const confidence = normalizeConfidence(rule.confidence);
+				if (confidence === "HIGH") {
+					entry.highCount += 1;
+				} else if (confidence === "MEDIUM") {
+					entry.mediumCount += 1;
+				}
 			}
 
-			const confidence = normalizeConfidence(rule.confidence);
-			if (confidence === "HIGH") {
-				entry.confidenceHigh += 1;
-			} else if (confidence === "MEDIUM") {
-				entry.confidenceMedium += 1;
-			} else if (confidence === "LOW") {
-				entry.confidenceLow += 1;
-			} else {
-				entry.confidenceUnknown += 1;
-			}
-
-			entry.severityTotal =
-				entry.severityError + entry.severityWarning + entry.severityInfo;
-			entry.confidenceTotal =
-				entry.confidenceHigh +
-				entry.confidenceMedium +
-				entry.confidenceLow +
-				entry.confidenceUnknown;
-			entry.total = entry.severityTotal;
-		}
-
-		const languageKeyword = rulesLanguageKeyword.trim().toLowerCase();
-		return Array.from(aggregate.values())
-			.filter((item) =>
-				languageKeyword
-					? item.language.toLowerCase().includes(languageKeyword)
-					: true,
-			)
-			.map((item) => ({
-				...item,
-				severityError: -item.severityError,
-				severityWarning: -item.severityWarning,
-				severityInfo: -item.severityInfo,
-			}))
-			.sort((a, b) => {
-				if (b.total !== a.total) return b.total - a.total;
-				return a.language.localeCompare(b.language, "zh-CN");
+			const languageKeyword = rulesLanguageKeyword.trim().toLowerCase();
+			return Array.from(aggregate.values())
+				.map((item) => ({
+					...item,
+					total: item.highCount + item.mediumCount,
+				}))
+				.filter((item) => item.total > 0)
+				.filter((item) =>
+					languageKeyword
+						? item.language.toLowerCase().includes(languageKeyword)
+						: true,
+				)
+				.sort((a, b) => {
+					if (b.total !== a.total) return b.total - a.total;
+					return a.language.localeCompare(b.language, "zh-CN");
 			});
 	}, [filteredRulesByScope, rulesLanguageKeyword]);
 
 	const chartMax = useMemo(() => {
 		if (rulesByLanguageData.length === 0) return 1;
 		const maxSide = Math.max(
-			...rulesByLanguageData.map((item) =>
-				Math.max(item.severityTotal, item.confidenceTotal),
-			),
+			...rulesByLanguageData.map((item) => item.total),
 		);
 		return Math.max(1, maxSide);
 	}, [rulesByLanguageData]);
 
 	const rulesChartHeight = useMemo(() => {
 		const rowCount = Math.max(1, rulesByLanguageData.length);
-		return Math.min(760, Math.max(420, rowCount * 52));
+		return Math.min(760, Math.max(360, rowCount * 48));
 	}, [rulesByLanguageData.length]);
 
 	const totalOverviewPages = Math.max(1, overviewData.total_pages || 1);
@@ -485,14 +448,14 @@ export default function Dashboard() {
 					<AlertTriangle className="w-5 h-5 text-sky-400" />
 					<div className="w-full">
 						<div className="flex items-center justify-between gap-3 flex-wrap">
-							<h3 className="section-title">规则分布蝴蝶图</h3>
+							<h3 className="section-title">规则分布横向条形统计图</h3>
 							<span className="text-sm text-muted-foreground">
 								语言数：{rulesByLanguageData.length}
 							</span>
 						</div>
-						<p className="text-sm text-muted-foreground mt-1">
-							按语言展示严重程度（左）与置信度（右）
-						</p>
+							<p className="text-sm text-muted-foreground mt-1">
+								仅统计严重(ERROR)且中/高置信度规则
+							</p>
 					</div>
 				</div>
 
@@ -536,100 +499,59 @@ export default function Dashboard() {
 					className="mt-4 border border-border/60 rounded-lg bg-muted/15 p-3"
 					style={{ height: rulesChartHeight }}
 				>
-					{rulesByLanguageData.length === 0 ? (
-						<div className="h-full flex items-center justify-center text-base text-muted-foreground">
-							暂无可展示的规则分布数据
-						</div>
-					) : (
-						<ResponsiveContainer width="100%" height="100%">
-							<BarChart
-								data={rulesByLanguageData}
-								layout="vertical"
+						{rulesByLanguageData.length === 0 ? (
+							<div className="h-full flex items-center justify-center text-base text-muted-foreground">
+								暂无符合条件的规则分布数据
+							</div>
+						) : (
+							<ResponsiveContainer width="100%" height="100%">
+								<BarChart
+									data={rulesByLanguageData}
+									layout="vertical"
 								margin={{ top: 6, right: 6, left: 4, bottom: 6 }}
 								barCategoryGap={16}
 								barGap={6}
 								barSize={18}
 							>
 								<CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-								<XAxis
-									type="number"
-									domain={[-chartMax, chartMax]}
-									tickFormatter={formatAbsTick}
-									tick={{ fontSize: 13 }}
-								/>
+									<XAxis
+										type="number"
+										domain={[0, chartMax]}
+										tickFormatter={formatTick}
+										tick={{ fontSize: 13 }}
+									/>
 								<YAxis
 									type="category"
 									dataKey="language"
 									width={96}
 									tick={{ fontSize: 13 }}
 								/>
-								<ReferenceLine x={0} stroke="hsl(var(--border))" />
-								<Tooltip
-									formatter={(value: number | string, name: string) => [
-										Math.abs(Number(value || 0)).toLocaleString(),
-										name,
-									]}
-									contentStyle={{ fontSize: 13 }}
-								/>
-								<Legend wrapperStyle={{ fontSize: 13 }} />
-								<Bar
-									dataKey="severityError"
-									stackId="severity"
-									fill="#f43f5e"
-									name="严重(ERROR)"
-									radius={[2, 2, 2, 2]}
-									minPointSize={6}
-								/>
-								<Bar
-									dataKey="severityWarning"
-									stackId="severity"
-									fill="#f59e0b"
-									name="提示(WARNING)"
-									radius={[2, 2, 2, 2]}
-									minPointSize={6}
-								/>
-								<Bar
-									dataKey="severityInfo"
-									stackId="severity"
-									fill="#0ea5e9"
-									name="信息(INFO)"
-									radius={[2, 2, 2, 2]}
-									minPointSize={6}
-								/>
-								<Bar
-									dataKey="confidenceHigh"
-									stackId="confidence"
-									fill="#22c55e"
-									name="高置信度"
-									radius={[2, 2, 2, 2]}
-									minPointSize={6}
-								/>
-								<Bar
-									dataKey="confidenceMedium"
-									stackId="confidence"
-									fill="#facc15"
-									name="中置信度"
-									radius={[2, 2, 2, 2]}
-									minPointSize={6}
-								/>
-								<Bar
-									dataKey="confidenceLow"
-									stackId="confidence"
-									fill="#60a5fa"
-									name="低置信度"
-									radius={[2, 2, 2, 2]}
-									minPointSize={6}
-								/>
-								<Bar
-									dataKey="confidenceUnknown"
-									stackId="confidence"
-									fill="#94a3b8"
-									name="未设置置信度"
-									radius={[2, 2, 2, 2]}
-									minPointSize={6}
-								/>
-							</BarChart>
-						</ResponsiveContainer>
+									<Tooltip
+										formatter={(value: number | string, name: string) => [
+											Number(value || 0).toLocaleString(),
+											name,
+										]}
+										contentStyle={{ fontSize: 13 }}
+									/>
+									<Legend wrapperStyle={{ fontSize: 13 }} />
+									<Bar
+										dataKey="highCount"
+										stackId="confidence"
+										fill="#22c55e"
+										name="高置信度"
+										radius={[2, 2, 2, 2]}
+										minPointSize={6}
+									/>
+									<Bar
+										stackId="confidence"
+										dataKey="mediumCount"
+										fill="#facc15"
+										name="中置信度"
+										radius={[2, 2, 2, 2]}
+										minPointSize={6}
+									/>
+								</BarChart>
+							</ResponsiveContainer>
 					)}
 				</div>
 			</div>

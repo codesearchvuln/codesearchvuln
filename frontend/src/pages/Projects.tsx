@@ -40,7 +40,6 @@ import {
     Plus,
     Search,
     GitBranch,
-    Clock,
     Code,
     Shield,
     Upload,
@@ -77,34 +76,6 @@ import CreateStaticAuditDialog from "@/components/audit/CreateStaticAuditDialog"
 import CreateAgentAuditDialog from "@/components/audit/CreateAgentAuditDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 import { useI18n } from "@/shared/i18n";
-import {
-    getAgentTasks,
-    type AgentTask,
-} from "@/shared/api/agentTasks";
-import {
-    getOpengrepScanTasks,
-    type OpengrepScanTask,
-} from "@/shared/api/opengrep";
-import {
-    getGitleaksScanTasks,
-    type GitleaksScanTask,
-} from "@/shared/api/gitleaks";
-
-type RecentActivityItem = {
-    id: string;
-    projectName: string;
-    kind: "rule_scan" | "intelligent_audit";
-    status: string;
-    gitleaksEnabled?: boolean;
-    createdAt: string;
-    startedAt?: string | null;
-    completedAt?: string | null;
-    durationMs?: number | null;
-    route: string;
-};
-
-const INTERRUPTED_STATUSES = new Set(["interrupted", "aborted", "cancelled"]);
-const ACTIVITY_PAGE_SIZE = 10;
 const PROJECT_PAGE_SIZE = 6;
 const MODULE_SCROLL_DELAY_MS = 80;
 const ARCHIVE_SUFFIXES = [
@@ -126,18 +97,6 @@ const stripArchiveSuffix = (filename: string) => {
     return filename.slice(0, filename.length - matched.length);
 };
 
-function formatDurationMs(durationMs: number): string {
-    const safe = Number.isFinite(durationMs)
-        ? Math.max(0, Math.floor(durationMs))
-        : 0;
-    const totalSeconds = Math.floor(safe / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-}
-
 const PROJECT_ACTION_BTN =
     "border border-sky-400/35 bg-gradient-to-r from-sky-500/20 via-cyan-500/16 to-blue-500/20 text-sky-100 shadow-[0_8px_22px_-14px_rgba(14,165,233,0.9)] hover:from-sky-500/30 hover:via-cyan-500/24 hover:to-blue-500/30 hover:border-sky-300/55";
 
@@ -148,12 +107,6 @@ export default function Projects() {
     const location = useLocation();
     const { t } = useI18n();
     const [projects, setProjects] = useState<Project[]>([]);
-    const [recentActivities, setRecentActivities] = useState<
-        RecentActivityItem[]
-    >([]);
-    const [activityKeyword, setActivityKeyword] = useState("");
-    const [activityPage, setActivityPage] = useState(1);
-    const [nowTick, setNowTick] = useState(0);
     const [projectPage, setProjectPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
@@ -168,8 +121,8 @@ export default function Projects() {
     const [auditInitialMode, setAuditInitialMode] =
         useState<AuditCreateMode>("static");
     const [auditReturnTarget, setAuditReturnTarget] = useState<
-        "task-browser" | "quick-actions" | "project-browser"
-    >("task-browser");
+        "quick-actions" | "project-browser"
+    >("project-browser");
     const [auditNavigateOnSuccess, setAuditNavigateOnSuccess] = useState(true);
     const [staticAuditNavigateOnSuccess, setStaticAuditNavigateOnSuccess] =
         useState(true);
@@ -240,19 +193,8 @@ export default function Projects() {
     }, []);
 
     useEffect(() => {
-        const interval = window.setInterval(() => {
-            setNowTick((prev) => prev + 1);
-        }, 1000);
-        return () => window.clearInterval(interval);
-    }, []);
-
-    useEffect(() => {
         const hash = window.location.hash;
-        if (
-            hash !== "#project-browser" &&
-            hash !== "#task-browser" &&
-            hash !== "#quick-actions"
-        ) {
+        if (hash !== "#project-browser" && hash !== "#quick-actions") {
             return;
         }
         const timer = window.setTimeout(() => {
@@ -269,7 +211,6 @@ export default function Projects() {
             setLoading(true);
             const data = await api.getProjects();
             setProjects(data);
-            await loadRecentActivities(data);
         } catch (error) {
             console.error("Failed to load projects:", error);
             toast.error("加载项目失败");
@@ -278,116 +219,8 @@ export default function Projects() {
         }
     };
 
-    const loadRecentActivities = async (allProjects: Project[]) => {
-        try {
-            const [agentTasks, opengrepTasks, gitleaksTasks] =
-                await Promise.all([
-                    getAgentTasks({ limit: 100 }),
-                    getOpengrepScanTasks({ limit: 100 }),
-                    getGitleaksScanTasks({ limit: 100 }),
-                ]);
-
-            const projectNameMap = new Map(
-                allProjects.map((project) => [project.id, project.name]),
-            );
-            const resolveProjectName = (projectId: string) =>
-                projectNameMap.get(projectId) || "未知项目";
-
-            const gitleaksByProject = new Map<string, GitleaksScanTask[]>();
-            for (const task of gitleaksTasks) {
-                const list = gitleaksByProject.get(task.project_id) || [];
-                list.push(task);
-                gitleaksByProject.set(task.project_id, list);
-            }
-            for (const [projectId, list] of gitleaksByProject.entries()) {
-                list.sort(
-                    (a, b) =>
-                        new Date(a.created_at).getTime() -
-                        new Date(b.created_at).getTime(),
-                );
-                gitleaksByProject.set(projectId, list);
-            }
-
-            const usedGitleaksTaskIds = new Set<string>();
-            const pairingWindowMs = 60 * 1000;
-            const pickPairedGitleaksTask = (opengrepTask: OpengrepScanTask) => {
-                const candidates =
-                    gitleaksByProject.get(opengrepTask.project_id) || [];
-                if (candidates.length === 0) return null;
-                const opengrepTime = new Date(opengrepTask.created_at).getTime();
-                let bestTask: GitleaksScanTask | null = null;
-                let bestDiff = Number.POSITIVE_INFINITY;
-                for (const candidate of candidates) {
-                    if (usedGitleaksTaskIds.has(candidate.id)) continue;
-                    const diff = Math.abs(
-                        new Date(candidate.created_at).getTime() - opengrepTime,
-                    );
-                    if (diff <= pairingWindowMs && diff < bestDiff) {
-                        bestTask = candidate;
-                        bestDiff = diff;
-                    }
-                }
-                if (bestTask) {
-                    usedGitleaksTaskIds.add(bestTask.id);
-                }
-                return bestTask;
-            };
-
-            const visibleOpengrepTasks = opengrepTasks.filter(
-                (task) => !task.name.startsWith("Agent Bootstrap OpenGrep"),
-            );
-
-            const ruleScanActivities: RecentActivityItem[] = visibleOpengrepTasks.map(
-                (task) => {
-                    const pairedGitleaksTask = pickPairedGitleaksTask(task);
-                    const params = new URLSearchParams();
-                    params.set("opengrepTaskId", task.id);
-                    params.set("muteToast", "1");
-                    if (pairedGitleaksTask) {
-                        params.set("gitleaksTaskId", pairedGitleaksTask.id);
-                    }
-                    return {
-                        id: `opengrep-${task.id}`,
-                        projectName: resolveProjectName(task.project_id),
-                        kind: "rule_scan" as const,
-                        status: task.status,
-                        gitleaksEnabled: Boolean(pairedGitleaksTask),
-                        createdAt: task.created_at,
-                        durationMs:
-                            (task.scan_duration_ms || 0) +
-                            (pairedGitleaksTask?.scan_duration_ms || 0),
-                        route: `/static-analysis/${task.id}?${params.toString()}`,
-                    };
-                },
-            );
-
-            const activityItems: RecentActivityItem[] = [
-                ...ruleScanActivities,
-                ...agentTasks.map((task: AgentTask) => ({
-                    id: `agent-${task.id}`,
-                    projectName: resolveProjectName(task.project_id),
-                    kind: "intelligent_audit" as const,
-                    status: task.status,
-                    createdAt: task.created_at,
-                    startedAt: task.started_at,
-                    completedAt: task.completed_at,
-                    route: `/agent-audit/${task.id}?muteToast=1`,
-                })),
-            ].sort(
-                (a, b) =>
-                    new Date(b.createdAt).getTime() -
-                    new Date(a.createdAt).getTime(),
-            );
-
-            setRecentActivities(activityItems);
-        } catch (error) {
-            console.error("加载任务浏览失败:", error);
-            setRecentActivities([]);
-        }
-    };
-
     const scrollToModule = (
-        moduleId: "task-browser" | "project-browser" | "quick-actions",
+        moduleId: "project-browser" | "quick-actions",
     ) => {
         window.setTimeout(() => {
             document.getElementById(moduleId)?.scrollIntoView({
@@ -398,7 +231,7 @@ export default function Projects() {
     };
 
     const pinToModuleHash = (
-        moduleId: "task-browser" | "project-browser" | "quick-actions",
+        moduleId: "project-browser" | "quick-actions",
     ) => {
         const { pathname, search } = window.location;
         window.history.replaceState(
@@ -431,7 +264,7 @@ export default function Projects() {
             setAuditPreselectedProjectId("");
             pinToModuleHash(auditReturnTarget);
             scrollToModule(auditReturnTarget);
-            setAuditReturnTarget("task-browser");
+            setAuditReturnTarget("project-browser");
             setAuditNavigateOnSuccess(true);
             setAuditInitialMode("static");
         }
@@ -471,11 +304,11 @@ export default function Projects() {
         mode: AuditCreateMode = "static",
         projectId = "",
         options?: {
-            returnTarget?: "task-browser" | "quick-actions" | "project-browser";
+            returnTarget?: "quick-actions" | "project-browser";
             navigateOnSuccess?: boolean;
         },
     ) => {
-        const returnTarget = options?.returnTarget || "task-browser";
+        const returnTarget = options?.returnTarget || "project-browser";
         const navigateOnSuccess = options?.navigateOnSuccess ?? true;
         pinToModuleHash(returnTarget);
         setAuditInitialMode(mode);
@@ -698,40 +531,6 @@ export default function Projects() {
         }
     };
 
-    const filteredActivities = useMemo(() => {
-        const keyword = activityKeyword.trim().toLowerCase();
-        if (!keyword) return recentActivities;
-        return recentActivities.filter((activity) => {
-            const kindText =
-                activity.kind === "rule_scan" ? "静态扫描" : "智能审计";
-            return (
-                activity.projectName.toLowerCase().includes(keyword) ||
-                kindText.includes(keyword) ||
-                getTaskStatusText(activity.status).includes(keyword)
-            );
-        });
-    }, [recentActivities, activityKeyword]);
-
-    const totalActivityPages = Math.max(
-        1,
-        Math.ceil(filteredActivities.length / ACTIVITY_PAGE_SIZE),
-    );
-
-    useEffect(() => {
-        setActivityPage(1);
-    }, [activityKeyword]);
-
-    useEffect(() => {
-        if (activityPage > totalActivityPages) {
-            setActivityPage(totalActivityPages);
-        }
-    }, [activityPage, totalActivityPages]);
-
-    const pagedActivities = useMemo(() => {
-        const start = (activityPage - 1) * ACTIVITY_PAGE_SIZE;
-        return filteredActivities.slice(start, start + ACTIVITY_PAGE_SIZE);
-    }, [filteredActivities, activityPage]);
-
     const filteredProjects = useMemo(() => {
         const keyword = searchTerm.trim().toLowerCase();
         if (!keyword) return projects;
@@ -765,49 +564,6 @@ export default function Projects() {
     }, [filteredProjects, projectPage]);
     const projectDetailFrom = `${location.pathname}${location.search}${location.hash}`;
 
-    const getTaskStatusText = (status: string) => {
-        switch (status) {
-            case "completed":
-                return "任务完成";
-            case "running":
-                return "任务运行中";
-            case "failed":
-                return "任务失败";
-            case "pending":
-                return "任务待处理";
-            case "cancelled":
-            case "interrupted":
-            case "aborted":
-                return "任务中止";
-            default:
-                return status || "未知状态";
-        }
-    };
-
-    const getTaskStatusClassName = (status: string) => {
-        if (status === "completed") {
-            return "bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40";
-        }
-        if (status === "running") {
-            return "bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40";
-        }
-        if (status === "failed") {
-            return "bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40";
-        }
-        if (INTERRUPTED_STATUSES.has(status)) {
-            return "bg-orange-500/5 border-orange-500/20 hover:border-orange-500/40";
-        }
-        return "bg-muted/30 border-border hover:border-border";
-    };
-
-    const getTaskStatusBadgeClassName = (status: string) => {
-        if (status === "completed") return "cyber-badge-success";
-        if (status === "running") return "cyber-badge-info";
-        if (status === "failed") return "cyber-badge-danger";
-        if (INTERRUPTED_STATUSES.has(status)) return "cyber-badge-warning";
-        return "cyber-badge-muted";
-    };
-
     const formatCreatedAt = (time: string) => {
         const date = new Date(time);
         if (Number.isNaN(date.getTime())) return time;
@@ -819,18 +575,6 @@ export default function Projects() {
             minute: "2-digit",
             hour12: false,
         });
-    };
-
-    const getRelativeTime = (time: string) => {
-        const now = new Date();
-        const taskDate = new Date(time);
-        const diffMs = now.getTime() - taskDate.getTime();
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMs / 3600000);
-        const diffDays = Math.floor(diffMs / 86400000);
-        if (diffMins < 60) return `${Math.max(diffMins, 1)}分钟前`;
-        if (diffHours < 24) return `${diffHours}小时前`;
-        return `${diffDays}天前`;
     };
 
     const getRepositoryIcon = (type?: string) => {
@@ -846,43 +590,6 @@ export default function Projects() {
             default:
                 return <Folder className="w-5 h-5 text-muted-foreground" />;
         }
-    };
-
-    const getActivityDurationLabel = (activity: RecentActivityItem): string => {
-        // ensure tick is referenced so running items refresh
-        void nowTick;
-
-        if (activity.kind === "rule_scan") {
-            if (
-                typeof activity.durationMs === "number" &&
-                Number.isFinite(activity.durationMs)
-            ) {
-                return `用时：${formatDurationMs(activity.durationMs)}`;
-            }
-            return "用时：-";
-        }
-
-        const started = activity.startedAt || activity.createdAt || null;
-        const completed = activity.completedAt || null;
-
-        if (started && completed) {
-            const duration =
-                new Date(completed).getTime() - new Date(started).getTime();
-            if (Number.isFinite(duration) && duration >= 0) {
-                return `用时：${formatDurationMs(duration)}`;
-            }
-            return "用时：-";
-        }
-
-        if (activity.status === "running" && started) {
-            const elapsed = Date.now() - new Date(started).getTime();
-            if (Number.isFinite(elapsed) && elapsed >= 0) {
-                return `已运行：${formatDurationMs(elapsed)}`;
-            }
-            return "已运行：-";
-        }
-
-        return "用时：-";
     };
 
     const handleCreateTask = (projectId: string) => {
@@ -1225,7 +932,7 @@ export default function Projects() {
                                 <div className="flex justify-end space-x-4 pt-4 border-t border-border">
                                     <Button
                                         variant="outline"
-                                        onClick={closeCreateProjectDialog}
+                                        onClick={() => closeCreateProjectDialog()}
                                         className="cyber-btn-outline"
                                     >
                                         取消
@@ -1418,7 +1125,7 @@ export default function Projects() {
                                     
                                     <Button
                                         variant="outline"
-                                        onClick={closeCreateProjectDialog}
+                                        onClick={() => closeCreateProjectDialog()}
                                         disabled={uploading || generatingDescription}
                                         className="cyber-btn-outline"
                                     >
@@ -1470,125 +1177,6 @@ export default function Projects() {
                         <Terminal className="w-4 h-4 mr-2" />
                         创建智能审计
                     </Button>
-                </div>
-            </div>
-
-            {/* Task Browser */}
-            <div className="relative z-10">
-                <div id="task-browser" className="cyber-card p-4">
-                    <div className="flex items-center justify-between gap-3">
-                        <div className="section-header">
-                            <Terminal className="w-5 h-5 text-amber-400" />
-                            <h3 className="section-title">任务浏览</h3>
-                        </div>
-                        <Button
-                            size="sm"
-                            className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 px-3`}
-                            onClick={() =>
-                                openCreateAuditDialog("static", "", {
-                                    returnTarget: "task-browser",
-                                    navigateOnSuccess: true,
-                                })
-                            }
-                        >
-                            <Shield className="w-4 h-4 mr-2" />
-                            创建审计
-                        </Button>
-                    </div>
-                    <div className="space-y-3 mb-3">
-                        <div className="flex items-center gap-2">
-                            <Input
-                                value={activityKeyword}
-                                onChange={(e) => setActivityKeyword(e.target.value)}
-                                placeholder="按项目名/任务类型/状态搜索"
-                                className="h-9 font-mono"
-                            />
-                        </div>
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>按时间倒序展示</span>
-                            <span>共 {filteredActivities.length} 条</span>
-                        </div>
-                    </div>
-                    <div className="space-y-2">
-                        {pagedActivities.length > 0 ? (
-                            pagedActivities.map((activity) => {
-                                const activityName =
-                                    activity.kind === "rule_scan"
-                                        ? `${activity.projectName}-静态扫描`
-                                        : `${activity.projectName}-智能审计`;
-                                return (
-                                    <Link
-                                        key={activity.id}
-                                        to={activity.route}
-                                        className={`block p-3 rounded-lg border transition-all ${getTaskStatusClassName(activity.status)}`}
-                                    >
-                                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                                            <p className="text-base font-medium text-foreground">
-                                                {activityName}
-                                            </p>
-                                            {activity.kind === "rule_scan" && (
-                                                <span className="text-xs text-muted-foreground">
-                                                    Gitleaks扫描：
-                                                    {activity.gitleaksEnabled ? "已启用" : "未启用"}
-                                                </span>
-                                            )}
-                                            <Badge className={getTaskStatusBadgeClassName(activity.status)}>
-                                                漏洞扫描状态：{getTaskStatusText(activity.status)}
-                                            </Badge>
-                                            <span className="text-sm text-muted-foreground/80">
-                                                创建时间：{formatCreatedAt(activity.createdAt)}（
-                                                {getRelativeTime(activity.createdAt)}）
-                                            </span>
-                                            <span className="text-sm text-muted-foreground/80">
-                                                {getActivityDurationLabel(activity)}
-                                            </span>
-                                        </div>
-                                    </Link>
-                                );
-                            })
-                        ) : (
-                            <div className="empty-state py-6">
-                                <Clock className="w-10 h-10 text-muted-foreground mb-2" />
-                                <p className="text-base text-muted-foreground">
-                                    暂无活动记录
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                    {filteredActivities.length > 0 && (
-                        <div className="mt-4 flex items-center justify-between">
-                            <div className="text-xs text-muted-foreground">
-                                第 {activityPage} / {totalActivityPages} 页（每页{" "}
-                                {ACTIVITY_PAGE_SIZE} 条）
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="cyber-btn-outline h-8 px-3"
-                                    disabled={activityPage <= 1}
-                                    onClick={() =>
-                                        setActivityPage((prev) => Math.max(prev - 1, 1))
-                                    }
-                                >
-                                    上一页
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="cyber-btn-outline h-8 px-3"
-                                    disabled={activityPage >= totalActivityPages}
-                                    onClick={() =>
-                                        setActivityPage((prev) =>
-                                            Math.min(prev + 1, totalActivityPages),
-                                        )
-                                    }
-                                >
-                                    下一页
-                                </Button>
-                            </div>
-                        </div>
-                    )}
                 </div>
             </div>
 

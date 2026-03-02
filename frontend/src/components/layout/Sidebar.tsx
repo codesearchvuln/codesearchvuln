@@ -24,6 +24,7 @@ import {
     Code,
     // MessageSquare,
     Bot,
+    ListChecks,
 } from "lucide-react";
 import routes from "@/app/routes";
 import { useI18n } from "@/shared/i18n";
@@ -39,6 +40,10 @@ const routeIcons: Record<string, React.ReactNode> = {
     "/audit-rules": <Shield className="w-[18px] h-[18px]" />,
     "/opengrep-rules": <Code className="w-[18px] h-[18px]" />,
     "/intelligent-audit": <Bot className="w-[18px] h-[18px]" />,
+    "/tasks/overview": <ListChecks className="w-[18px] h-[18px]" />,
+    "/tasks/static": <Shield className="w-[18px] h-[18px]" />,
+    "/tasks/intelligent": <Bot className="w-[18px] h-[18px]" />,
+    "/tasks/hybrid": <ListChecks className="w-[18px] h-[18px]" />,
     // "/prompts": <MessageSquare className="w-[18px] h-[18px]" />,
     "/admin": <Settings className="w-[18px] h-[18px]" />,
     // "/recycle-bin": <Trash2 className="w-[18px] h-[18px]" />,
@@ -55,7 +60,92 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
     const { t, isEnglish } = useI18n();
     const { logoSrc } = useLogoVariant();
 
-    const visibleRoutes = routes.filter((route) => route.visible !== false);
+    const sidebarRoutes = routes.filter(
+        (route) => (route.navVisible ?? route.visible) !== false,
+    );
+    const mainRoutes = sidebarRoutes
+        .filter((route) => (route.navGroup ?? "main") === "main")
+        .sort((a, b) => (a.navOrder ?? 999) - (b.navOrder ?? 999));
+    const taskRoutes = sidebarRoutes
+        .filter((route) => route.navGroup === "task")
+        .sort((a, b) => (a.navOrder ?? 999) - (b.navOrder ?? 999));
+    const isTaskGroupActive = taskRoutes.some(
+        (route) => location.pathname === route.path,
+    );
+
+    const renderRouteLink = (
+        route: (typeof routes)[number],
+        options?: { compact?: boolean },
+    ) => {
+        const isActive = location.pathname === route.path;
+        const routeLabel = route.nameKey
+            ? t(route.nameKey, route.name)
+            : route.name;
+        const compact = options?.compact ?? false;
+        return (
+            <Link
+                key={route.path}
+                to={route.path}
+                className={`
+                    flex items-center gap-3 transition-all duration-300 group relative rounded-lg
+                    ${compact ? "px-2 py-2" : "px-3 py-2"}
+                    ${
+                        isActive
+                            ? "bg-primary/15 border border-primary/40 shadow-[0_0_15px_rgba(255,107,44,0.1)]"
+                            : "border border-transparent hover:bg-card/60 hover:border-border/50"
+                    }
+                `}
+                style={{
+                    color: isActive
+                        ? "hsl(var(--primary))"
+                        : "var(--cyber-text-muted)",
+                }}
+                onClick={() => setMobileOpen(false)}
+                title={collapsed ? routeLabel : undefined}
+                onMouseEnter={(e) => {
+                    if (!isActive) {
+                        e.currentTarget.style.color = "var(--cyber-text)";
+                    }
+                }}
+                onMouseLeave={(e) => {
+                    if (!isActive) {
+                        e.currentTarget.style.color = "var(--cyber-text-muted)";
+                    }
+                }}
+            >
+                {isActive && (
+                    <div
+                        className={`absolute top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-[0_0_8px_rgba(255,107,44,0.5)] ${compact ? "left-0" : "left-0"}`}
+                    />
+                )}
+
+                <span
+                    className={`
+                        flex-shrink-0 transition-all duration-300 p-1.5 rounded-md
+                        ${isActive ? "bg-primary/20" : "group-hover:bg-muted/50"}
+                    `}
+                >
+                    {routeIcons[route.path] || (
+                        <LayoutDashboard className="w-[18px] h-[18px]" />
+                    )}
+                </span>
+
+                {!collapsed && (
+                    <span
+                        className={`tracking-wide transition-all duration-300 break-words leading-snug ${isEnglish ? "text-sm" : "text-base"} ${isActive ? "font-semibold" : "font-medium"} ${compact ? "font-mono text-sm" : "font-mono"}`}
+                    >
+                        {routeLabel}
+                    </span>
+                )}
+
+                {!isActive && !collapsed && (
+                    <span className="absolute right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 group-hover:translate-x-1">
+                        <ChevronRight className="w-4 h-4 text-primary" />
+                    </span>
+                )}
+            </Link>
+        );
+    };
 
     return (
         <>
@@ -196,81 +286,34 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                     {/* Navigation */}
                     <nav className="flex-1 min-h-0 py-3 px-3 relative">
                         <div className="space-y-1">
-                            {visibleRoutes.map((route) => {
-                                const isActive =
-                                    location.pathname === route.path;
-                                const routeLabel = route.nameKey
-                                    ? t(route.nameKey, route.name)
-                                    : route.name;
-                                return (
-                                    <Link
-                                        key={route.path}
-                                        to={route.path}
-                                        className={`
-                                            flex items-center gap-3 px-3 py-2 transition-all duration-300 group relative rounded-lg
-                                            ${
-                                                isActive
-                                                    ? "bg-primary/15 border border-primary/40 shadow-[0_0_15px_rgba(255,107,44,0.1)]"
-                                                    : "border border-transparent hover:bg-card/60 hover:border-border/50"
-                                            }
-                                        `}
-                                        style={{
-                                            color: isActive
-                                                ? "hsl(var(--primary))"
-                                                : "var(--cyber-text-muted)",
-                                        }}
-                                        onClick={() => setMobileOpen(false)}
-                                        title={
-                                            collapsed ? routeLabel : undefined
-                                        }
-                                        onMouseEnter={(e) => {
-                                            if (!isActive) {
-                                                e.currentTarget.style.color =
-                                                    "var(--cyber-text)";
-                                            }
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            if (!isActive) {
-                                                e.currentTarget.style.color =
-                                                    "var(--cyber-text-muted)";
-                                            }
-                                        }}
+                            {mainRoutes.map((route) => renderRouteLink(route))}
+
+                            {taskRoutes.length > 0 && (
+                                <div className="pt-1">
+                                    <div
+                                        className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all duration-300 ${isTaskGroupActive ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/20 border-border/40 text-muted-foreground"}`}
                                     >
-                                        {/* Active indicator */}
-                                        {isActive && (
-                                            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r shadow-[0_0_8px_rgba(255,107,44,0.5)]" />
-                                        )}
-
-                                        {/* Icon */}
-                                        <span
-                                            className={`
-                                            flex-shrink-0 transition-all duration-300 p-1.5 rounded-md
-                                            ${isActive ? "bg-primary/20" : "group-hover:bg-muted/50"}
-                                        `}
-                                        >
-                                            {routeIcons[route.path] || (
-                                                <LayoutDashboard className="w-[18px] h-[18px]" />
-                                            )}
+                                        <span className={`p-1.5 rounded-md ${isTaskGroupActive ? "bg-primary/20" : "bg-muted/50"}`}>
+                                            <ListChecks className="w-[18px] h-[18px]" />
                                         </span>
-
-                                        {/* Label */}
                                         {!collapsed && (
-                                            <span
-                                                className={`font-mono tracking-wide transition-all duration-300 break-words leading-snug ${isEnglish ? "text-sm" : "text-base"} ${isActive ? "font-semibold" : "font-medium"}`}
-                                            >
-                                                {routeLabel}
+                                            <span className={`font-mono tracking-wide ${isEnglish ? "text-sm" : "text-base"} ${isTaskGroupActive ? "font-semibold" : "font-medium"}`}>
+                                                {t("route.taskManagement", "任务管理")}
                                             </span>
                                         )}
+                                    </div>
 
-                                        {/* Hover indicator */}
-                                        {!isActive && !collapsed && (
-                                            <span className="absolute right-3 opacity-0 group-hover:opacity-100 transition-all duration-300 group-hover:translate-x-1">
-                                                <ChevronRight className="w-4 h-4 text-primary" />
-                                            </span>
-                                        )}
-                                    </Link>
-                                );
-                            })}
+                                    {!collapsed && (
+                                        <div className="mt-1 pl-4 space-y-1">
+                                            {taskRoutes.map((route) =>
+                                                renderRouteLink(route, {
+                                                    compact: true,
+                                                }),
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </nav>
 
