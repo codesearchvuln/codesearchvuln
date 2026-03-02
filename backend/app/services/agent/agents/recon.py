@@ -179,6 +179,8 @@ class ReconAgent(BaseAgent):
         # 🔥 获取目标文件列表
         target_files = config.get("target_files", [])
         exclude_patterns = config.get("exclude_patterns", [])
+        self._empty_retry_count = 0
+        targeted_empty_recovery_used = False
         
         # 构建初始消息
         initial_message = f"""请开始收集项目信息。
@@ -295,22 +297,63 @@ class ReconAgent(BaseAgent):
                 if not llm_output or not llm_output.strip():
                     empty_retry_count = getattr(self, '_empty_retry_count', 0) + 1
                     self._empty_retry_count = empty_retry_count
+                    stream_meta = getattr(self, "_last_llm_stream_meta", {}) or {}
+                    empty_reason = str(stream_meta.get("empty_reason") or "").strip()
+                    finish_reason = stream_meta.get("finish_reason")
+                    chunk_count = int(stream_meta.get("chunk_count") or 0)
+                    empty_from_stream = empty_reason in {"empty_response", "empty_stream", "empty_done"}
+                    conversation_tokens_estimate = self._estimate_conversation_tokens(self._conversation_history)
                     
                     # 🔥 记录更详细的诊断信息
                     logger.warning(
                         f"[{self.name}] Empty LLM response in iteration {self._iteration} "
-                        f"(retry {empty_retry_count}/3, tokens_this_round={tokens_this_round})"
+                        f"(retry {empty_retry_count}/3, tokens_this_round={tokens_this_round}, "
+                        f"finish_reason={finish_reason}, empty_reason={empty_reason}, chunk_count={chunk_count})"
                     )
                     
+                    if empty_from_stream and targeted_empty_recovery_used:
+                        error_message = "连续收到空响应，使用回退结果"
+                        await self.emit_event(
+                            "warning",
+                            error_message,
+                            metadata={
+                                "empty_retry_count": empty_retry_count,
+                                "last_finish_reason": finish_reason,
+                                "chunk_count": chunk_count,
+                                "empty_reason": empty_reason,
+                                "conversation_tokens_estimate": conversation_tokens_estimate,
+                            },
+                        )
+                        break
+
                     if empty_retry_count >= 3:
                         logger.error(f"[{self.name}] Too many empty responses, generating fallback result")
                         error_message = "连续收到空响应，使用回退结果"
-                        await self.emit_event("warning", error_message)
+                        await self.emit_event(
+                            "warning",
+                            error_message,
+                            metadata={
+                                "empty_retry_count": empty_retry_count,
+                                "last_finish_reason": finish_reason,
+                                "chunk_count": chunk_count,
+                                "empty_reason": empty_reason,
+                                "conversation_tokens_estimate": conversation_tokens_estimate,
+                            },
+                        )
                         # 🔥 不是直接 break，而是尝试生成一个回退结果
                         break
                     
-                    # 🔥 更有针对性的重试提示
-                    retry_prompt = f"""收到空响应。请根据以下格式输出你的思考和行动：
+                    if empty_from_stream:
+                        targeted_empty_recovery_used = True
+                        retry_prompt = (
+                            "上一轮模型返回了空响应（无有效文本）。请不要空输出，必须二选一立即返回：\n"
+                            "1) 输出可执行 Action（含 Action Input）继续推进；\n"
+                            "2) 若证据已充分，直接输出 Final Answer（JSON）。\n"
+                            "禁止仅输出空白或无结构文本。"
+                        )
+                    else:
+                        # 🔥 更有针对性的重试提示
+                        retry_prompt = f"""收到空响应。请根据以下格式输出你的思考和行动：
 
 Thought: [你对当前情况的分析]
 Action: [工具名称，如 list_files, read_file, search_code]
@@ -381,7 +424,7 @@ Final Answer: [JSON格式的结果]"""
                         self._conversation_history.append(
                             {
                                 "role": "user",
-                                "content": f"Observation:\n{observation}",
+                                "content": f"Observation:\n{self._prepare_observation_for_history(observation)}",
                             }
                         )
                         continue
@@ -436,9 +479,10 @@ Final Answer: [JSON格式的结果]"""
                     await self.emit_llm_observation(observation)
                     
                     # 添加观察结果到历史
+                    history_observation = self._prepare_observation_for_history(observation)
                     self._conversation_history.append({
                         "role": "user",
-                        "content": f"Observation:\n{observation}",
+                        "content": f"Observation:\n{history_observation}",
                     })
                 else:
                     no_action_streak += 1

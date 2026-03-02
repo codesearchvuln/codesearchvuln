@@ -210,6 +210,10 @@ class AgentConfig(BaseSettings):
         default=50000,
         description="Maximum length of tool output"
     )
+    max_history_observation_chars: int = Field(
+        default=12000,
+        description="Maximum chars of a single Observation written into LLM conversation history"
+    )
 
     # ============ Checkpoint & Persistence ============
     checkpoint_enabled: bool = Field(

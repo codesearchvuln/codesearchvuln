@@ -144,6 +144,48 @@ class TestAnalysisAgent:
         # 注意：具体数量取决于分析逻辑
         assert isinstance(findings, list)
 
+    @pytest.mark.asyncio
+    async def test_analysis_observation_history_is_trimmed(self, analysis_agent, monkeypatch):
+        """Observation 写入 history 前应裁剪，避免上下文膨胀。"""
+        analysis_agent._max_history_observation_chars = 200
+
+        long_observation = "A" * 1000 + "B" * 1000
+        monkeypatch.setattr(analysis_agent, "execute_tool", AsyncMock(return_value=long_observation))
+        monkeypatch.setattr(
+            analysis_agent,
+            "stream_llm_call",
+            AsyncMock(
+                side_effect=[
+                    (
+                        "Thought: 读取代码证据\n"
+                        "Action: read_file\n"
+                        'Action Input: {"file_path":"src/sql_vuln.py","start_line":1,"end_line":30}',
+                        12,
+                    ),
+                    # 首次 Final Answer 会被“必须先有工具证据”门禁拦截并触发最小工具调用
+                    ('Thought: 完成分析\nFinal Answer: {"findings": [], "summary": "ok"}', 8),
+                    ('Thought: 完成分析\nFinal Answer: {"findings": [], "summary": "ok"}', 8),
+                ]
+            ),
+        )
+
+        result = await analysis_agent.run(
+            {
+                "project_info": {"name": "demo", "root": "/tmp/demo"},
+                "config": {"target_files": ["src/sql_vuln.py"]},
+                "previous_results": {"recon": {"data": {"high_risk_areas": ["src/sql_vuln.py"]}}},
+            }
+        )
+        assert result.success is True
+
+        observation_entries = [
+            msg["content"]
+            for msg in analysis_agent.get_conversation_history()
+            if msg.get("role") == "user" and str(msg.get("content", "")).startswith("Observation:\n")
+        ]
+        assert observation_entries
+        assert any("Observation 已裁剪" in content for content in observation_entries)
+
 
 class TestAgentResult:
     """Agent 结果测试"""

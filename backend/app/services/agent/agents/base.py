@@ -382,6 +382,7 @@ class BaseAgent(ABC):
 
         # 🔥 最近一次工具输出快照（用于避免 llm_observation 复写同一段 tool_result）
         self._last_tool_result_snapshot: Optional[Dict[str, Any]] = None
+        self._last_llm_stream_meta: Dict[str, Any] = {}
         self._last_llm_thought_digest: Optional[str] = None
         self._llm_thought_repeat_count: int = 0
         self._llm_thought_suppressed_count: int = 0
@@ -397,6 +398,15 @@ class BaseAgent(ABC):
         self._recent_search_directories: deque[str] = deque(maxlen=12)
         self._mcp_runtime: Optional["MCPRuntime"] = None
         self._write_scope_guard: Optional["TaskWriteScopeGuard"] = None
+        self._max_history_observation_chars: int = 12000
+        try:
+            from app.services.agent.config import get_agent_config
+
+            agent_cfg = get_agent_config()
+            configured_value = int(getattr(agent_cfg, "max_history_observation_chars", 12000) or 12000)
+            self._max_history_observation_chars = max(200, configured_value)
+        except Exception:
+            self._max_history_observation_chars = 12000
         
         # 🔥 是否已注册到注册表
         self._registered = False
@@ -1425,27 +1435,65 @@ class BaseAgent(ABC):
             "tool_calls": self._tool_calls,
             "tokens_used": self._total_tokens,
         }
+
+    def _prepare_observation_for_history(
+        self,
+        observation: str,
+        max_chars: Optional[int] = None,
+    ) -> str:
+        """
+        Prepare observation text for conversation history.
+
+        Keep event output intact, but cap history payload to reduce context bloat.
+        """
+        text = str(observation or "")
+        limit = int(max_chars or self._max_history_observation_chars or 12000)
+        limit = max(200, limit)
+        if len(text) <= limit:
+            return text
+
+        marker = (
+            f"\n\n...[Observation 已裁剪，原始长度 {len(text)} 字符]...\n\n"
+        )
+        keep = max(200, limit - len(marker))
+        head_keep = int(keep * 0.7)
+        tail_keep = keep - head_keep
+        return f"{text[:head_keep]}{marker}{text[-tail_keep:]}"
+
+    @staticmethod
+    def _estimate_conversation_tokens(messages: List[Dict[str, Any]]) -> int:
+        """A lightweight token estimate for diagnostics."""
+        total_chars = 0
+        for msg in messages or []:
+            content = msg.get("content", "") if isinstance(msg, dict) else ""
+            total_chars += len(str(content or ""))
+        return max(0, total_chars // 4)
     
     # ============ Memory Compression ============
     
     def compress_messages_if_needed(
         self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 100000,
+        max_tokens: Optional[int] = None,
     ) -> List[Dict[str, str]]:
         """
         如果消息历史过长，自动压缩
         
         Args:
             messages: 消息列表
-            max_tokens: 最大token数
+            max_tokens: 最大token数（None 时自动按模型窗口动态计算）
             
         Returns:
             压缩后的消息列表
         """
         from ...llm.memory_compressor import MemoryCompressor
+
+        effective_max_tokens = max_tokens
+        if effective_max_tokens is None:
+            model_budget = int((self.config.max_tokens or 4096) * 4)
+            effective_max_tokens = max(6000, min(24000, model_budget))
         
-        compressor = MemoryCompressor(max_total_tokens=max_tokens)
+        compressor = MemoryCompressor(max_total_tokens=effective_max_tokens)
         
         if compressor.should_compress(messages):
             logger.info(f"[{self.name}] Compressing conversation history...")
@@ -1484,6 +1532,14 @@ class BaseAgent(ABC):
 
         accumulated = ""
         total_tokens = 0
+        chunk_count = 0
+        self._last_llm_stream_meta = {
+            "chunk_count": 0,
+            "finish_reason": None,
+            "empty_reason": None,
+            "error_type": None,
+            "error": None,
+        }
 
         # 🔥 在开始 LLM 调用前检查取消
         if self.is_cancelled:
@@ -1522,6 +1578,8 @@ class BaseAgent(ABC):
                     timeout = first_token_timeout if not first_token_received else stream_timeout
 
                     chunk = await asyncio.wait_for(iterator.__anext__(), timeout=timeout)
+                    chunk_count += 1
+                    self._last_llm_stream_meta["chunk_count"] = chunk_count
 
                     last_activity = time.time()
                     
@@ -1551,8 +1609,11 @@ class BaseAgent(ABC):
 
                     elif chunk["type"] == "done":
                         accumulated = chunk["content"]
+                        self._last_llm_stream_meta["finish_reason"] = chunk.get("finish_reason")
                         if chunk.get("usage"):
                             total_tokens = chunk["usage"].get("total_tokens", 0)
+                        if not str(accumulated or "").strip():
+                            self._last_llm_stream_meta["empty_reason"] = "empty_done"
                         break
 
                     elif chunk["type"] == "error":
@@ -1560,6 +1621,14 @@ class BaseAgent(ABC):
                         error_msg = chunk.get("error", "Unknown error")
                         error_type = chunk.get("error_type", "unknown")
                         user_message = chunk.get("user_message", error_msg)
+                        self._last_llm_stream_meta.update(
+                            {
+                                "finish_reason": chunk.get("finish_reason"),
+                                "empty_reason": error_type if error_type in ("empty_response", "empty_stream") else None,
+                                "error_type": error_type,
+                                "error": error_msg,
+                            }
+                        )
                         logger.error(f"[{self.name}] Stream error ({error_type}): {error_msg}")
 
                         if chunk.get("usage"):
@@ -1569,6 +1638,13 @@ class BaseAgent(ABC):
                         # 格式：[API_ERROR:error_type] user_message
                         if error_type in ("rate_limit", "quota_exceeded", "authentication", "connection"):
                             accumulated = f"[API_ERROR:{error_type}] {user_message}"
+                        elif error_type in ("empty_response", "empty_stream"):
+                            finish_reason = chunk.get("finish_reason")
+                            finish_hint = f", finish_reason={finish_reason}" if finish_reason else ""
+                            accumulated = (
+                                f"[API_ERROR:{error_type}] {user_message}"
+                                f" (chunks={chunk_count}{finish_hint})"
+                            )
                         elif not accumulated:
                             accumulated = f"[系统错误: {error_msg}] 请重新思考并输出你的决策。"
                         break
@@ -1580,6 +1656,15 @@ class BaseAgent(ABC):
                     logger.error(f"[{self.name}] LLM {timeout_type} Timeout ({timeout}s)")
                     error_msg = f"LLM 响应超时 ({timeout_type}, {timeout}s)"
                     await self.emit_event("error", error_msg)
+                    self._last_llm_stream_meta.update(
+                        {
+                            "finish_reason": None,
+                            "empty_reason": "timeout",
+                            "error_type": "timeout",
+                            "error": error_msg,
+                            "chunk_count": chunk_count,
+                        }
+                    )
                     if not accumulated:
                          accumulated = f"[超时错误: {timeout}s 无响应] 请尝试简化请求或重试。"
                     break
@@ -1591,13 +1676,39 @@ class BaseAgent(ABC):
             # 🔥 增强异常处理，避免吞掉错误
             logger.error(f"[{self.name}] Unexpected error in stream_llm_call: {e}", exc_info=True)
             await self.emit_event("error", f"LLM 调用错误: {str(e)}")
+            self._last_llm_stream_meta.update(
+                {
+                    "finish_reason": None,
+                    "empty_reason": "exception",
+                    "error_type": "exception",
+                    "error": str(e),
+                    "chunk_count": chunk_count,
+                }
+            )
             accumulated = f"[LLM调用错误: {str(e)}] 请重试。"
         finally:
             await self.emit_thinking_end(accumulated)
         
         # 🔥 记录空响应警告，帮助调试
         if not accumulated or not accumulated.strip():
-            logger.warning(f"[{self.name}] Empty LLM response returned (total_tokens: {total_tokens})")
+            finish_reason = self._last_llm_stream_meta.get("finish_reason")
+            empty_reason = self._last_llm_stream_meta.get("empty_reason")
+            logger.warning(
+                f"[{self.name}] Empty LLM response returned "
+                f"(total_tokens: {total_tokens}, finish_reason: {finish_reason}, empty_reason: {empty_reason}, chunks: {chunk_count})"
+            )
+            # Ensure caller does not receive a silent empty string.
+            if empty_reason in ("empty_response", "empty_stream", "empty_done"):
+                finish_hint = f", finish_reason={finish_reason}" if finish_reason else ""
+                accumulated = (
+                    f"[API_ERROR:empty_response] 模型返回空响应"
+                    f" (chunks={chunk_count}{finish_hint})"
+                )
+            elif empty_reason == "timeout":
+                accumulated = "[API_ERROR:timeout] 模型超时未返回有效内容"
+            elif self._last_llm_stream_meta.get("error_type"):
+                err = self._last_llm_stream_meta.get("error_type")
+                accumulated = f"[API_ERROR:{err}] 模型返回空响应"
         
         return accumulated, total_tokens
 

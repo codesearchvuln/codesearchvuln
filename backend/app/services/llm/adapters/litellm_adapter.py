@@ -343,6 +343,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
         accumulated_content = ""
         final_usage = None  # 🔥 存储最终的 usage 信息
         chunk_count = 0  # 🔥 跟踪 chunk 数量
+        terminal_emitted = False  # 防止结束后重复补发 empty_stream
 
         try:
             response = await litellm.acompletion(**kwargs)
@@ -364,7 +365,13 @@ class LiteLLMAdapter(BaseLLMAdapter):
                     continue
 
                 delta = chunk.choices[0].delta
-                content = getattr(delta, "content", "") or ""
+                # Some providers place text in non-standard delta fields.
+                content = (
+                    getattr(delta, "content", None)
+                    or getattr(delta, "reasoning_content", None)
+                    or getattr(delta, "text", None)
+                    or ""
+                )
                 finish_reason = chunk.choices[0].finish_reason
 
                 if content:
@@ -391,9 +398,28 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         }
                         logger.debug(f"Estimated usage: {final_usage}")
 
-                    # 🔥 ENHANCED: 如果累积内容为空但有 finish_reason，记录警告
+                    # 🔥 ENHANCED: 如果累积内容为空但有 finish_reason，转为空响应错误而不是 done("")
                     if not accumulated_content:
-                        logger.warning(f"Stream completed with no content after {chunk_count} chunks, finish_reason={finish_reason}")
+                        logger.warning(
+                            "Stream completed with no content after %s chunks, finish_reason=%s",
+                            chunk_count,
+                            finish_reason,
+                        )
+                        yield {
+                            "type": "error",
+                            "error_type": "empty_response",
+                            "error": (
+                                f"LLM流式返回空内容: finish_reason={finish_reason}, "
+                                f"chunks={chunk_count}, provider={self.config.provider.value}, model={self.config.model}"
+                            ),
+                            "user_message": "模型返回空响应，请重试或切换模型。",
+                            "accumulated": accumulated_content,
+                            "usage": final_usage,
+                            "finish_reason": finish_reason,
+                            "chunk_count": chunk_count,
+                        }
+                        terminal_emitted = True
+                        break
 
                     yield {
                         "type": "done",
@@ -401,10 +427,13 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         "usage": final_usage,
                         "finish_reason": finish_reason,
                     }
+                    terminal_emitted = True
                     break
 
-            # 🔥 ENHANCED: 如果循环结束但没有收到 finish_reason，也需要返回 done
-            if accumulated_content:
+            # 🔥 ENHANCED: 如果循环结束但没有收到 finish_reason，补发 done 或 error，避免静默空串
+            if terminal_emitted:
+                pass
+            elif accumulated_content:
                 logger.warning(f"Stream ended without finish_reason, returning accumulated content ({len(accumulated_content)} chars)")
                 if not final_usage:
                     output_tokens_estimate = estimate_tokens(
@@ -420,6 +449,20 @@ class LiteLLMAdapter(BaseLLMAdapter):
                     "content": accumulated_content,
                     "usage": final_usage,
                     "finish_reason": "complete",
+                }
+            else:
+                yield {
+                    "type": "error",
+                    "error_type": "empty_stream",
+                    "error": (
+                        "LLM流式返回在无 content 且无 finish_reason 的情况下结束: "
+                        f"chunks={chunk_count}, provider={self.config.provider.value}, model={self.config.model}"
+                    ),
+                    "user_message": "模型流式响应异常中止，请重试。",
+                    "accumulated": "",
+                    "usage": final_usage,
+                    "finish_reason": None,
+                    "chunk_count": chunk_count,
                 }
 
         except litellm.exceptions.RateLimitError as e:

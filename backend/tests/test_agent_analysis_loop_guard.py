@@ -47,3 +47,38 @@ async def test_analysis_loop_guard_degrades_after_repeated_no_action(monkeypatch
     assert isinstance(result.data, dict)
     assert result.data.get("degraded_reason") == "analysis_stagnation"
     assert result.tool_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_analysis_resets_empty_retry_counter_each_run(monkeypatch):
+    agent = AnalysisAgent(
+        llm_service=SimpleNamespace(),
+        tools={"read_file": _DummyReadFileTool()},
+        event_emitter=None,
+    )
+    # Simulate polluted state from a previous attempt.
+    agent._empty_retry_count = 2
+
+    llm_side_effects = [
+        ("", 0),
+        (
+            "Thought: 先读取证据\n"
+            "Action: read_file\n"
+            'Action Input: {"file_path":"src/time64.c","start_line":1,"end_line":20}',
+            10,
+        ),
+        ('Thought: 收敛完成\nFinal Answer: {"findings": [], "summary": "ok"}', 12),
+    ]
+    monkeypatch.setattr(agent, "stream_llm_call", AsyncMock(side_effect=llm_side_effects))
+
+    result = await agent.run(
+        {
+            "project_info": {"name": "demo", "root": "/tmp/demo"},
+            "config": {"target_files": ["src/time64.c"]},
+            "previous_results": {"bootstrap_findings": []},
+            "task": "analysis",
+        }
+    )
+
+    assert result.success is True
+    assert agent._empty_retry_count == 0
