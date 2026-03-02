@@ -3,14 +3,14 @@ import Projects from "@/pages/Projects";
 import AgentAudit from "@/pages/AgentAudit";
 import AdminDashboard from "@/pages/AdminDashboard";
 import ProjectDetail from "@/pages/ProjectDetail";
-// import AuditRules from "@/pages/AuditRules";
 import OpengrepRules from "@/pages/OpengrepRules";
-import IntelligentAudit from "@/pages/IntelligentAudit";
 import StaticAnalysis from "@/pages/StaticAnalysis";
 import TaskManagementOverview from "@/pages/TaskManagementOverview";
 import TaskManagementStatic from "@/pages/TaskManagementStatic";
 import TaskManagementIntelligent from "@/pages/TaskManagementIntelligent";
 import TaskManagementHybrid from "@/pages/TaskManagementHybrid";
+import ScanConfigEngines from "@/pages/ScanConfigEngines";
+import ScanConfigExternalTools from "@/pages/ScanConfigExternalTools";
 import type { ReactNode } from "react";
 import type { I18nKey } from "@/shared/i18n";
 
@@ -21,7 +21,7 @@ export interface RouteConfig {
     element: ReactNode;
     visible?: boolean;
     navVisible?: boolean;
-    navGroup?: "main" | "task";
+    navGroup?: "main" | "task" | "scanConfig";
     navOrder?: number;
 }
 
@@ -83,16 +83,6 @@ const routes: RouteConfig[] = [
         navOrder: 40,
     },
     {
-        name: "智能审计",
-        nameKey: "route.intelligentAudit",
-        path: "/intelligent-audit",
-        element: <IntelligentAudit />,
-        visible: true,
-        navVisible: true,
-        navGroup: "main",
-        navOrder: 50,
-    },
-    {
         name: "任务概览",
         nameKey: "route.taskOverview",
         path: "/tasks/overview",
@@ -133,6 +123,26 @@ const routes: RouteConfig[] = [
         navOrder: 40,
     },
     {
+        name: "扫描引擎",
+        nameKey: "route.scanEngines",
+        path: "/scan-config/engines",
+        element: <ScanConfigEngines />,
+        visible: true,
+        navVisible: true,
+        navGroup: "scanConfig",
+        navOrder: 10,
+    },
+    {
+        name: "外部工具",
+        nameKey: "route.scanExternalTools",
+        path: "/scan-config/external-tools",
+        element: <ScanConfigExternalTools />,
+        visible: true,
+        navVisible: true,
+        navGroup: "scanConfig",
+        navOrder: 20,
+    },
+    {
         name: "静态分析结果",
         nameKey: "route.staticAnalysis",
         path: "/static-analysis/:taskId",
@@ -146,7 +156,7 @@ const routes: RouteConfig[] = [
         path: "/admin",
         element: <AdminDashboard />,
         visible: true,
-        navVisible: true,
+        navVisible: false,
         navGroup: "main",
         navOrder: 60,
     },
