@@ -2778,6 +2778,12 @@ async def _execute_agent_task(task_id: str):
             task.current_phase = AgentTaskPhase.INDEXING
             await db.commit()
 
+            # 🔥 创建漏洞队列服务
+            from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
+            queue_service = InMemoryVulnerabilityQueue()
+            logger.info(f"[Queue] Created InMemoryVulnerabilityQueue for task {task_id}")
+            await event_emitter.emit_info("🔄 漏洞队列服务已初始化（内存模式）")
+
             async def _initialize_tools_once():
                 return await _initialize_tools(
                     project_root,
@@ -2791,6 +2797,7 @@ async def _execute_agent_task(task_id: str):
                     event_emitter=event_emitter,  # 🔥 新增
                     task_id=task_id,  # 🔥 新增：用于取消检查
                     qmd_task_kb=qmd_task_kb,
+                    queue_service=queue_service,  # 🔥 新增：漏洞队列服务
                 )
 
             tools = await _run_with_retries(
@@ -4114,6 +4121,7 @@ async def _initialize_tools(
     event_emitter: Optional[Any] = None,  # 🔥 新增：用于发送实时日志
     task_id: Optional[str] = None,  # 🔥 新增：用于取消检查
     qmd_task_kb: Optional[Any] = None,
+    queue_service: Optional[Any] = None,  # 🔥 新增：漏洞队列服务
 ) -> Dict[str, Dict[str, Any]]:
     """初始化工具集
 
@@ -4145,6 +4153,12 @@ async def _initialize_tools(
         ExtractFunctionTool,
         OpengrepTool, BanditTool, GitleaksTool,
         NpmAuditTool, SafetyTool, TruffleHogTool, OSVScannerTool,
+    )
+    from app.services.agent.tools.queue_tools import (
+        GetQueueStatusTool, DequeueFindinGTool, PushFindingToQueueTool
+    )
+    from app.services.agent.vulnerability_queue import (
+        RedisVulnerabilityQueue, InMemoryVulnerabilityQueue
     )
     from app.services.agent.tools.qmd_cli_tools import (
         QmdGetTool,
@@ -4600,6 +4614,17 @@ async def _initialize_tools(
         **mcp_write_tools,
         **deprecated_skill_tools,
     }
+    
+    # 🔥 为 Orchestrator 添加队列管理工具
+    if queue_service and task_id:
+        orchestrator_tools["get_queue_status"] = GetQueueStatusTool(queue_service, task_id)
+        orchestrator_tools["dequeue_finding"] = DequeueFindinGTool(queue_service, task_id)
+        logger.info(f"[Tools] Added queue management tools for task {task_id}")
+    
+    # 🔥 为 Analysis 添加队列推送工具
+    if queue_service and task_id:
+        analysis_tools["push_finding_to_queue"] = PushFindingToQueueTool(queue_service, task_id)
+        logger.info(f"[Tools] Added push_finding_to_queue tool for task {task_id}")
     
     return {
         "recon": recon_tools,
@@ -8311,3 +8336,115 @@ async def generate_audit_report(
             "Content-Disposition": f"attachment; filename={filename}"
         }
     )
+
+
+# ==================== 🔥 漏洞队列管理 API ====================
+
+@router.get("/tasks/{task_id}/vulnerability_queue/status", response_model=Dict[str, Any])
+async def get_vulnerability_queue_status(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    获取任务的漏洞队列状态
+    
+    返回队列中待验证漏洞的数量和统计信息
+    """
+    from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
+    
+    # 检查任务是否存在
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # 检查权限
+    project = await db.get(Project, task.project_id)
+    if not project or project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # 创建队列服务实例（使用内存队列）
+    queue_service = InMemoryVulnerabilityQueue()
+    
+    # 获取队列统计
+    stats = queue_service.get_queue_stats(task_id)
+    
+    return {
+        "success": True,
+        "task_id": task_id,
+        "queue_stats": stats,
+    }
+
+
+@router.get("/tasks/{task_id}/vulnerability_queue/peek", response_model=Dict[str, Any])
+async def peek_vulnerability_queue(
+    task_id: str,
+    limit: int = 3,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    查看任务漏洞队列的前N条记录
+    
+    不会移除队列中的项目，仅用于预览
+    """
+    from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
+    
+    # 检查任务是否存在
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # 检查权限
+    project = await db.get(Project, task.project_id)
+    if not project or project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # 创建队列服务实例
+    queue_service = InMemoryVulnerabilityQueue()
+    
+    # 查看队列前几项
+    findings = queue_service.peek_queue(task_id, limit=min(limit, 10))
+    
+    return {
+        "success": True,
+        "task_id": task_id,
+        "findings": findings,
+        "count": len(findings),
+    }
+
+
+@router.delete("/tasks/{task_id}/vulnerability_queue", response_model=Dict[str, Any])
+async def clear_vulnerability_queue(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    清空任务的漏洞队列
+    
+    用于手动清理或重置队列状态
+    """
+    from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
+    
+    # 检查任务是否存在
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # 检查权限
+    project = await db.get(Project, task.project_id)
+    if not project or project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # 创建队列服务实例
+    queue_service = InMemoryVulnerabilityQueue()
+    
+    # 清空队列
+    success = queue_service.clear_queue(task_id)
+    
+    return {
+        "success": success,
+        "task_id": task_id,
+        "message": "队列已清空" if success else "清空队列失败",
+    }
