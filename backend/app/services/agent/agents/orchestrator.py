@@ -29,10 +29,11 @@ ORCHESTRATOR_SYSTEM_PROMPT = """你是安全审计编排 Agent，负责**自主*
 
 ## 你的角色
 你是整个审计流程的**大脑**，不是一个机械执行者。你需要：
-1. 自主思考和决策
-2. 根据观察结果动态调整策略
-3. 决定何时调用哪个子 Agent
-4. 判断何时审计完成
+1. 对整个项目进行审计，尝试发现项目中所有潜在的安全问题，而不是仅仅满足于发现几个表面漏洞。
+2. 自主思考和决策
+3. 根据观察结果动态调整策略
+4. 决定何时调用哪个子 Agent
+5. 判断何时审计完成
 
 ## 你可以调度的子 Agent
 1. **recon**: 信息收集 Agent - 分析项目结构、技术栈、入口点。**  
@@ -1327,10 +1328,10 @@ Action Input: {{"参数": "值"}}
 
             # 🔥 执行子 Agent - 支持取消和超时
             # 使用用户配置的子Agent超时时间
-            default_sub_agent_timeout = self._timeout_config.get('sub_agent_timeout', 600)
+            default_sub_agent_timeout = self._timeout_config.get('sub_agent_timeout', 3000)
             # 设置子 Agent 超时（根据 Agent 类型，recon稍短）
             agent_timeouts = {
-                "recon": min(300, default_sub_agent_timeout),  # recon 通常较快
+                "recon": min(3000, default_sub_agent_timeout), 
                 "analysis": default_sub_agent_timeout,
                 "verification": default_sub_agent_timeout,
             }
