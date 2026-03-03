@@ -28,7 +28,7 @@ export function ProjectTasksTab(props: {
       <div className="flex items-center justify-between">
         <div className="section-header mb-0 pb-0 border-0">
           <FileText className="w-5 h-5 text-primary" />
-          <h3 className="section-title">审计任务列表</h3>
+          <h3 className="section-title">审计任务</h3>
         </div>
         <Button onClick={onCreateTask} className="cyber-btn-primary">
           <Play className="w-4 h-4 mr-2" />

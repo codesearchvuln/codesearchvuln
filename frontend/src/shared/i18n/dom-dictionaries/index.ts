@@ -58,6 +58,17 @@ export const dashboardDictionary: DomDictionary = {
   "下一页": "Next",
   "规则分布横向条形统计图": "Rule Distribution Horizontal Bar Chart",
   "仅统计严重(ERROR)且中/高置信度规则": "Only severe (ERROR) rules with medium/high confidence are counted",
+  "项目扫描次数横向统计图": "Project Scan Runs Horizontal Bar Chart",
+  "按项目统计已完成扫描次数（静态/智能/混合）":
+    "Completed scan runs by project (Static/Intelligent/Hybrid)",
+  "项目漏洞数量横向统计图": "Project Vulnerability Counts Horizontal Bar Chart",
+  "按项目统计已完成任务漏洞数（静态+智能）":
+    "Completed-task vulnerability totals by project (Static + Intelligent)",
+  "混合扫描功能未上线，当前按 0 统计":
+    "Hybrid scan is not implemented yet, currently counted as 0",
+  "暂无项目扫描次数数据": "No project scan-run data",
+  "暂无项目漏洞数量数据": "No project vulnerability-count data",
+  "漏洞总数": "Total Vulnerabilities",
   "语言数：": "Languages:",
   "全部规则": "All Rules",
   "仅启用规则": "Enabled Only",
@@ -90,6 +101,16 @@ export const projectsDictionary: DomDictionary = {
   "混合扫描": "Hybrid Scan",
   "扫描引擎": "Scan Engines",
   "外部工具": "External Tools",
+  "扫描配置总览": "Scan Config Overview",
+  "统一管理扫描引擎入口，点击右侧按钮进入对应配置或使用页面。":
+    "Manage scan engine entry points in one place. Use the right button to open configuration or usage pages.",
+  "代码规则扫描引擎，适合做语义规则匹配与漏洞模式检测。":
+    "Code-rule scanning engine for semantic rule matching and vulnerability pattern detection.",
+  "仓库密钥与敏感信息检测引擎，聚焦凭证泄露风险识别。":
+    "Repository secret and sensitive data scanning engine focused on credential leak detection.",
+  "智能分析引擎，支撑智能审计、总结归纳与上下文推理。":
+    "Intelligent analysis engine for smart auditing, summarization, and context reasoning.",
+  "引擎配置": "Engine Config",
   "智能引擎（LLM）": "Smart Engine (LLM)",
   "项目详情": "Project Detail",
   "加载项目数据...": "Loading project data...",

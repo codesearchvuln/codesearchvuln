@@ -944,14 +944,38 @@ async def get_project_info(
 
     # 2. 检查权限
 
+    empty_language_info = '{"total": 0, "total_files": 0, "languages": {}}'
+
     # 3. 获取/创建 ProjectInfo（纯静态统计）
-    existing_info_result = await db.execute(select(ProjectInfo).where(ProjectInfo.project_id == id))
+    existing_info_result = await db.execute(
+        select(ProjectInfo).where(ProjectInfo.project_id == id)
+    )
     existing_info = existing_info_result.scalars().first()
+
+    source_type = getattr(project, "source_type", None)
+
+    # 仓库项目暂不执行语言统计，统一返回 unsupported
+    if source_type == "repository":
+        project_info = existing_info or ProjectInfo(
+            project_id=id,
+            created_at=datetime.now(timezone.utc),
+        )
+        project_info.status = "unsupported"
+        project_info.language_info = project_info.language_info or empty_language_info
+        project_info.description = project_info.description or ""
+        db.add(project_info)
+        await db.commit()
+        await db.refresh(project_info)
+        return project_info
+
     if existing_info and existing_info.status == "completed" and existing_info.language_info:
         existing_info.description = existing_info.description or ""
         return existing_info
+
     if existing_info and existing_info.status == "pending":
-        raise HTTPException(status_code=202, detail="项目信息正在生成中，请稍后再试")
+        existing_info.language_info = existing_info.language_info or empty_language_info
+        existing_info.description = existing_info.description or ""
+        return existing_info
 
     if not existing_info:
         # 创建新的 ProjectInfo 记录并持久化为 pending 状态
@@ -959,6 +983,7 @@ async def get_project_info(
             project_id=id,
             status="pending",
             created_at=datetime.now(timezone.utc),
+            language_info=empty_language_info,
         )
         db.add(project_info)
         await db.commit()
@@ -974,7 +999,7 @@ async def get_project_info(
 
         # 生成语言统计（纯静态）
         cloc_result = await get_cloc_stats(project_info)
-        project_info.language_info = cloc_result
+        project_info.language_info = cloc_result or empty_language_info
 
         # 兼容字段：不在该接口生成描述，仅保证响应字段非空
         project_info.description = project_info.description or ""

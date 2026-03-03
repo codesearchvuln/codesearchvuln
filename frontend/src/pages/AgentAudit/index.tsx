@@ -2875,7 +2875,7 @@ function AgentAuditPageContent() {
                   <div
                     className={`pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100 ${card.accentClassName}`}
                   />
-                  <div className="relative z-10 flex h-full flex-col">
+                  <div className="relative z-10 flex h-full flex-col items-start text-left">
                     <div className="flex-1 space-y-3">
                       <div className="flex items-center gap-3">
                         <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-primary/35 bg-primary/10 text-primary">
@@ -2885,18 +2885,18 @@ function AgentAuditPageContent() {
                           {card.title}
                         </h3>
                       </div>
-                      <p className="text-sm md:text-base text-muted-foreground leading-relaxed whitespace-nowrap overflow-hidden text-ellipsis">
+                      <p className="w-full text-sm md:text-base text-muted-foreground leading-relaxed text-left break-words">
                         {card.intro}
                       </p>
-                      <p className="text-sm md:text-base text-foreground/90 leading-relaxed whitespace-nowrap overflow-hidden text-ellipsis">
+                      <p className="w-full text-sm md:text-base text-foreground/90 leading-relaxed text-left break-words">
                         {card.strengths}
                       </p>
-                      <p className="text-sm md:text-base text-muted-foreground leading-relaxed whitespace-nowrap overflow-hidden text-ellipsis">
+                      <p className="w-full text-sm md:text-base text-muted-foreground leading-relaxed text-left break-words">
                         {card.limitations}
                       </p>
                     </div>
                     <div className="mt-4 flex items-center justify-between gap-2 border-t border-primary/20 pt-3 text-sm font-medium text-muted-foreground transition-colors duration-200 group-hover:text-primary group-focus-visible:text-primary">
-                      <span className="whitespace-nowrap overflow-hidden text-ellipsis">
+                      <span className="text-left break-words">
                         {card.quickStartHint}
                       </span>
                       <ArrowRight className="h-4 w-4 flex-shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5" />
@@ -2929,10 +2929,11 @@ function AgentAuditPageContent() {
         <CreateProjectAuditDialog
           open={showHomeMixedDialog}
           onOpenChange={setShowHomeMixedDialog}
-          initialMode="static"
+          initialMode="hybrid"
+          lockMode
           allowUploadProject
           navigateOnSuccess
-          primaryCreateLabel="开始扫描"
+          primaryCreateLabel="开始混合扫描"
         />
       </div>
     );

@@ -1,11 +1,14 @@
 import { api } from "@/shared/config/database";
 
 type PreflightStage = "llm_config" | "llm_test";
+export type PreflightMissingField = "llmModel" | "llmBaseUrl" | "llmApiKey";
 
 export interface AgentPreflightResult {
 	ok: boolean;
 	stage?: PreflightStage;
 	message: string;
+	reasonCode?: "missing_fields" | "llm_test_failed" | "llm_test_exception";
+	missingFields?: PreflightMissingField[];
 }
 
 const normalizeProvider = (provider: string | undefined | null) =>
@@ -47,30 +50,27 @@ export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 	const llmApiKey = resolveEffectiveApiKey(llmProvider, llmConfig);
 	const llmModel = (llmConfig.llmModel || "").trim();
 	const llmBaseUrl = (llmConfig.llmBaseUrl || "").trim();
+	const missingFields: PreflightMissingField[] = [];
+	if (!llmModel) missingFields.push("llmModel");
+	if (!llmBaseUrl) missingFields.push("llmBaseUrl");
+	if (llmProvider !== "ollama" && !llmApiKey) missingFields.push("llmApiKey");
 
-	if (!llmModel) {
-		return {
-			ok: false,
-			stage: "llm_config",
-			message:
-				"智能审计初始化失败：LLM 未配置模型（llmModel），请先在系统配置中完成配置并测试。",
+	if (missingFields.length > 0) {
+		const fieldLabelMap: Record<PreflightMissingField, string> = {
+			llmModel: "模型（llmModel）",
+			llmBaseUrl: "Base URL（llmBaseUrl）",
+			llmApiKey: "API Key（llmApiKey）",
 		};
-	}
-	if (!llmBaseUrl) {
+		const message = missingFields
+			.map((field) => fieldLabelMap[field])
+			.filter(Boolean)
+			.join("、");
 		return {
 			ok: false,
 			stage: "llm_config",
-			message:
-				"智能审计初始化失败：LLM 未配置 Base URL（llmBaseUrl），请先在系统配置中完成配置并测试。",
-		};
-	}
-
-	if (llmProvider !== "ollama" && !llmApiKey) {
-		return {
-			ok: false,
-			stage: "llm_config",
-			message:
-				"智能审计初始化失败：LLM 未配置 API Key，请先在系统配置中完成 LLM 配置并测试。",
+			reasonCode: "missing_fields",
+			missingFields,
+			message: `智能审计初始化失败：LLM 缺少必填配置 ${message}，请先补全并测试。`,
 		};
 	}
 
@@ -86,6 +86,7 @@ export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 			return {
 				ok: false,
 				stage: "llm_test",
+				reasonCode: "llm_test_failed",
 				message: `智能审计初始化失败：LLM 测试未通过（${llmResult.message || "未知错误"}）。`,
 			};
 		}
@@ -94,12 +95,13 @@ export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 		return {
 			ok: false,
 			stage: "llm_test",
+			reasonCode: "llm_test_exception",
 			message: `智能审计初始化失败：LLM 测试异常（${message}）。`,
 		};
 	}
 
 	return {
 		ok: true,
-		message: "LLM 配置测试通过（RAG 可选，未检查）。",
+		message: "LLM 配置测试通过。",
 	};
 }

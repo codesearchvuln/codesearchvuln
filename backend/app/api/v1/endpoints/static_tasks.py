@@ -622,6 +622,34 @@ def _run_subprocess_with_tracking(
             _static_running_scan_processes.pop(key, None)
 
 
+def _as_utc_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _calc_scan_duration_ms_from_created_at(
+    created_at: Optional[datetime],
+    finished_at: Optional[datetime] = None,
+) -> int:
+    start_at = _as_utc_datetime(created_at)
+    if start_at is None:
+        return 0
+
+    end_at = _as_utc_datetime(finished_at) or datetime.now(timezone.utc)
+    duration_ms = int((end_at - start_at).total_seconds() * 1000)
+    return max(0, duration_ms)
+
+
+def _sync_task_scan_duration(task: Any, finished_at: Optional[datetime] = None) -> None:
+    task.scan_duration_ms = _calc_scan_duration_ms_from_created_at(
+        getattr(task, "created_at", None),
+        finished_at=finished_at,
+    )
+
+
 async def _execute_opengrep_scan(
     task_id: str,
     project_root: str,
@@ -651,6 +679,7 @@ async def _execute_opengrep_scan(
             if _is_scan_task_cancelled("opengrep", task_id) or task.status == "interrupted":
                 task.status = "interrupted"
                 task.error_count = (task.error_count or 0) + 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -684,6 +713,7 @@ async def _execute_opengrep_scan(
             if not rules:
                 task.status = "failed"
                 task.error_count = 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -701,6 +731,7 @@ async def _execute_opengrep_scan(
             if not os.path.exists(full_target_path):
                 task.status = "failed"
                 task.error_count = 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -844,6 +875,7 @@ async def _execute_opengrep_scan(
             if not valid_rule_entries:
                 task.status = "failed"
                 task.error_count = 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -1172,6 +1204,7 @@ async def _execute_opengrep_scan(
             if _is_scan_task_cancelled("opengrep", task_id):
                 task.status = "interrupted"
                 task.error_count = (task.error_count or 0) + 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -1229,6 +1262,7 @@ async def _execute_opengrep_scan(
             if _is_scan_task_cancelled("opengrep", task_id):
                 task.status = "interrupted"
                 task.error_count = (task.error_count or 0) + 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -1244,6 +1278,7 @@ async def _execute_opengrep_scan(
             if successful_rule_count == 0:
                 task.status = "failed"
                 task.error_count = 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -1330,6 +1365,7 @@ async def _execute_opengrep_scan(
             if _is_scan_task_cancelled("opengrep", task_id):
                 task.status = "interrupted"
                 task.error_count = (task.error_count or 0) + 1
+                _sync_task_scan_duration(task)
                 await db.commit()
                 _record_scan_progress(
                     task_id,
@@ -1347,6 +1383,7 @@ async def _execute_opengrep_scan(
             task.warning_count = warning_count + len(non_fatal_scan_errors)
             task.files_scanned = len(files_scanned)
             task.lines_scanned = lines_scanned
+            _sync_task_scan_duration(task)
 
             await db.commit()
             _record_scan_progress(
@@ -1382,6 +1419,7 @@ async def _execute_opengrep_scan(
                 if task:
                     task.status = "interrupted"
                     task.error_count = (task.error_count or 0) + 1
+                    _sync_task_scan_duration(task)
                     await db.commit()
             except Exception as commit_error:
                 logger.error(f"Failed to update interrupted task status: {commit_error}")
@@ -1402,7 +1440,8 @@ async def _execute_opengrep_scan(
                 task = result.scalar_one_or_none()
                 if task:
                     task.status = "failed"
-                    task.error_count += 1
+                    task.error_count = (task.error_count or 0) + 1
+                    _sync_task_scan_duration(task)
                     await db.commit()
             except Exception as commit_error:
                 logger.error(f"Failed to update task status: {commit_error}")
@@ -1904,6 +1943,7 @@ async def interrupt_static_task(
     _request_scan_task_cancel("opengrep", task_id)
     task.status = "interrupted"
     task.error_count = (task.error_count or 0) + 1
+    _sync_task_scan_duration(task)
     await db.commit()
     _record_scan_progress(
         task_id,
@@ -3973,6 +4013,7 @@ async def _execute_gitleaks_scan(
                 task.status = "interrupted"
                 if not task.error_message:
                     task.error_message = "扫描任务已中止（用户操作）"
+                _sync_task_scan_duration(task)
                 await db.commit()
                 return
 
@@ -3985,6 +4026,7 @@ async def _execute_gitleaks_scan(
             if not os.path.exists(full_target_path):
                 task.status = "failed"
                 task.error_message = f"Target path {full_target_path} not found"
+                _sync_task_scan_duration(task)
                 await db.commit()
                 logger.error(f"Target path {full_target_path} not found")
                 return
@@ -4015,8 +4057,6 @@ async def _execute_gitleaks_scan(
                 logger.info(
                     f"Executing gitleaks for task {task_id}: {' '.join(cmd)}"
                 )
-
-                start_time = datetime.now()
                 
                 # 在线程池中执行阻塞操作
                 loop = asyncio.get_event_loop()
@@ -4034,18 +4074,16 @@ async def _execute_gitleaks_scan(
                     task.status = "interrupted"
                     if not task.error_message:
                         task.error_message = "扫描任务已中止（用户操作）"
+                    _sync_task_scan_duration(task)
                     await db.commit()
                     return
-                
-                end_time = datetime.now()
-                scan_duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
                 # 检查执行结果
                 if result.returncode != 0:
                     error_msg = result.stderr or result.stdout or "Unknown error"
                     task.status = "failed"
                     task.error_message = error_msg[:500]
-                    task.scan_duration_ms = scan_duration_ms
+                    _sync_task_scan_duration(task)
                     await db.commit()
                     logger.error(
                         f"Gitleaks scan task {task_id} failed: {error_msg}"
@@ -4056,7 +4094,7 @@ async def _execute_gitleaks_scan(
                 if not os.path.exists(report_file):
                     task.status = "completed"
                     task.total_findings = 0
-                    task.scan_duration_ms = scan_duration_ms
+                    _sync_task_scan_duration(task)
                     await db.commit()
                     logger.info(
                         f"Gitleaks scan task {task_id} completed with no findings"
@@ -4078,7 +4116,7 @@ async def _execute_gitleaks_scan(
                             )
                             task.status = "failed"
                             task.error_message = f"Failed to parse JSON output: {str(e)}"
-                            task.scan_duration_ms = scan_duration_ms
+                            _sync_task_scan_duration(task)
                             await db.commit()
                             return
 
@@ -4124,13 +4162,14 @@ async def _execute_gitleaks_scan(
                     task.status = "interrupted"
                     if not task.error_message:
                         task.error_message = "扫描任务已中止（用户操作）"
+                    _sync_task_scan_duration(task)
                     await db.commit()
                     return
 
                 task.status = "completed"
                 task.total_findings = len(findings)
-                task.scan_duration_ms = scan_duration_ms
                 task.files_scanned = len(files_scanned)
+                _sync_task_scan_duration(task)
 
                 await db.commit()
                 logger.info(
@@ -4157,6 +4196,7 @@ async def _execute_gitleaks_scan(
                     task.status = "interrupted"
                     if not task.error_message:
                         task.error_message = "扫描任务已中断（服务关闭或沙箱停止）"
+                    _sync_task_scan_duration(task)
                     await db.commit()
             except Exception as commit_error:
                 logger.error(
@@ -4172,6 +4212,7 @@ async def _execute_gitleaks_scan(
                 if task:
                     task.status = "failed"
                     task.error_message = str(e)[:500]
+                    _sync_task_scan_duration(task)
                     await db.commit()
             except Exception as commit_error:
                 logger.error(
@@ -4311,6 +4352,7 @@ async def interrupt_gitleaks_task(
     task.status = "interrupted"
     if not task.error_message:
         task.error_message = "扫描任务已中止（用户操作）"
+    _sync_task_scan_duration(task)
     await db.commit()
 
     return {"message": "任务已中止", "task_id": task_id, "status": "interrupted"}

@@ -836,22 +836,6 @@ export default function CreateTaskDialog({
 								/>
 							)}
 
-							{auditMode === "agent" && (sourceMode === "upload" || selectedProject) && (
-								<div className="space-y-2 border border-border rounded p-3 bg-muted/40">
-									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-										验证模式
-									</Label>
-									<div className="rounded border border-border bg-background px-3 py-2">
-										<p className="text-sm text-foreground font-medium">
-											分析 + PoC 思路
-										</p>
-										<p className="text-[11px] text-muted-foreground mt-1">
-											固定单档模式：输出漏洞分析与可行 PoC 思路（非武器化）
-										</p>
-									</div>
-								</div>
-							)}
-
 							{/* 配置区域 */}
 						{sourceMode === "existing" && selectedProject && (
 							<div className="space-y-4">

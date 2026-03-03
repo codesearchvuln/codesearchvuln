@@ -84,8 +84,8 @@ export default function TaskManagementHybrid() {
 						<span className="font-semibold">功能占位</span>
 					</div>
 					<p className="text-sm text-muted-foreground leading-relaxed">
-						当前版本先提供混合扫描入口与页面骨架，暂不引入新的后端任务类型或聚合协议。
-						后续将基于统一任务视图补充混合扫描规则与数据筛选策略。
+						当前混合扫描会一次创建“静态扫描 + 智能扫描”两条任务。
+						后续将基于统一任务视图继续补充混合策略与筛选能力。
 					</p>
 					<p className="text-xs text-muted-foreground">
 						{loading
@@ -101,7 +101,8 @@ export default function TaskManagementHybrid() {
 				onTaskCreated={() => {
 					void loadData();
 				}}
-				initialMode="static"
+				initialMode="hybrid"
+				lockMode
 				allowUploadProject
 				primaryCreateLabel="创建混合扫描任务"
 			/>

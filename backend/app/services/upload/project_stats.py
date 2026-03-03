@@ -5,6 +5,7 @@ import tempfile
 import re
 import ast
 import asyncio
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
@@ -20,6 +21,161 @@ logger = logging.getLogger(__name__)
 
 from pycloc import CLOC
 from pycloc.exceptions import CLOCCommandError, CLOCDependencyError
+
+FALLBACK_EXCLUDED_DIRS = {
+    "__pycache__",
+    "node_modules",
+    ".git",
+    ".hg",
+    ".svn",
+    ".idea",
+    ".vscode",
+    ".venv",
+    "venv",
+    "env",
+    "dist",
+    "build",
+    "target",
+    "out",
+    "coverage",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".next",
+    ".nuxt",
+    ".cache",
+}
+
+EXTENSION_LANGUAGE_MAP = {
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".mjs": "JavaScript",
+    ".cjs": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".java": "Java",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".c": "C",
+    ".h": "C",
+    ".cc": "C++",
+    ".cpp": "C++",
+    ".cxx": "C++",
+    ".hpp": "C++",
+    ".hxx": "C++",
+    ".cs": "C#",
+    ".php": "PHP",
+    ".rb": "Ruby",
+    ".swift": "Swift",
+    ".kt": "Kotlin",
+    ".kts": "Kotlin",
+    ".scala": "Scala",
+    ".vue": "Vue",
+    ".svelte": "Svelte",
+    ".m": "Objective-C",
+    ".mm": "Objective-C++",
+    ".sql": "SQL",
+    ".sh": "Shell",
+    ".bash": "Shell",
+    ".zsh": "Shell",
+    ".ps1": "PowerShell",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".xml": "XML",
+    ".html": "HTML",
+    ".htm": "HTML",
+    ".css": "CSS",
+    ".scss": "SCSS",
+    ".less": "LESS",
+    ".dart": "Dart",
+    ".lua": "Lua",
+    ".r": "R",
+    ".pl": "Perl",
+    ".ex": "Elixir",
+    ".exs": "Elixir",
+    ".erl": "Erlang",
+    ".hrl": "Erlang",
+    ".proto": "Protocol Buffers",
+    ".md": "Markdown",
+    ".dockerfile": "Dockerfile",
+}
+
+
+def _count_file_lines(file_path: Path) -> int:
+    try:
+        with file_path.open("r", encoding="utf-8", errors="ignore") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
+
+def _build_suffix_fallback_payload(project_dir: str) -> str:
+    language_stats: Dict[str, Dict[str, int]] = defaultdict(
+        lambda: {"loc_number": 0, "files_count": 0}
+    )
+
+    root_path = Path(project_dir)
+    if not root_path.exists():
+        return json.dumps({"total": 0, "total_files": 0, "languages": {}}, ensure_ascii=False)
+
+    for dirpath, dirnames, filenames in os.walk(root_path):
+        dirnames[:] = [
+            d for d in dirnames if d not in FALLBACK_EXCLUDED_DIRS and "test" not in d.lower()
+        ]
+
+        for filename in filenames:
+            file_path = Path(dirpath) / filename
+            suffix = file_path.suffix.lower()
+            if filename.lower() == "dockerfile":
+                suffix = ".dockerfile"
+            language = EXTENSION_LANGUAGE_MAP.get(suffix)
+            if not language:
+                continue
+
+            line_count = _count_file_lines(file_path)
+            language_stats[language]["files_count"] += 1
+            language_stats[language]["loc_number"] += line_count
+
+    total_lines = sum(item["loc_number"] for item in language_stats.values())
+    total_files = sum(item["files_count"] for item in language_stats.values())
+
+    languages: Dict[str, Dict[str, float | int]] = {}
+    for language, stats in sorted(
+        language_stats.items(),
+        key=lambda pair: pair[1]["loc_number"],
+        reverse=True,
+    ):
+        loc_number = int(stats["loc_number"])
+        files_count = int(stats["files_count"])
+        proportion = (loc_number / total_lines) if total_lines > 0 else 0
+        languages[language] = {
+            "loc_number": loc_number,
+            "files_count": files_count,
+            "proportion": round(proportion, 4),
+        }
+
+    return json.dumps(
+        {
+            "total": int(total_lines),
+            "total_files": int(total_files),
+            "languages": languages,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _is_non_empty_language_payload(payload: str) -> bool:
+    try:
+        parsed = json.loads(payload or "{}")
+    except Exception:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    languages = parsed.get("languages")
+    if not isinstance(languages, dict) or len(languages) == 0:
+        return False
+    total_files = int(parsed.get("total_files") or 0)
+    return total_files > 0
 
 
 def _build_cloc_payload(output: str, extracted_files: Optional[List[str]] = None) -> str:
@@ -106,7 +262,11 @@ def _run_cloc_on_directory(project_dir: str, extracted_files: Optional[List[str]
 async def get_cloc_stats_from_extracted_dir(
     extracted_dir: str, extracted_files: Optional[List[str]] = None
 ) -> str:
-    return _run_cloc_on_directory(extracted_dir, extracted_files=extracted_files)
+    cloc_payload = _run_cloc_on_directory(extracted_dir, extracted_files=extracted_files)
+    if _is_non_empty_language_payload(cloc_payload):
+        return cloc_payload
+    logger.warning("cloc 统计结果为空，回退到后缀统计: %s", extracted_dir)
+    return _build_suffix_fallback_payload(extracted_dir)
 
 
 async def get_cloc_stats_from_archive(archive_path: str) -> str:
@@ -120,7 +280,11 @@ async def get_cloc_stats_from_archive(archive_path: str) -> str:
         if not extracted_files:
             logger.error("解压失败：无文件被解压")
             return "{}"
-        return _run_cloc_on_directory(temp_dir, extracted_files=extracted_files)
+        cloc_payload = _run_cloc_on_directory(temp_dir, extracted_files=extracted_files)
+        if _is_non_empty_language_payload(cloc_payload):
+            return cloc_payload
+        logger.warning("cloc 统计结果为空，回退到后缀统计: %s", archive_path)
+        return _build_suffix_fallback_payload(temp_dir)
 
 
 async def get_cloc_stats(project_info: ProjectInfo) -> str:

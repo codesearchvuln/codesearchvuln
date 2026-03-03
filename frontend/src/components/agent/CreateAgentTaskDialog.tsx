@@ -420,18 +420,6 @@ export default function CreateAgentTaskDialog({
 								</div>
 								)}
 
-								<div className="p-3 border border-border rounded bg-muted/50 space-y-2">
-									<p className="font-mono text-xs uppercase font-bold text-muted-foreground">
-										验证模式
-									</p>
-									<p className="text-sm text-foreground font-medium">
-										分析 + PoC 思路
-									</p>
-									<p className="text-[11px] text-muted-foreground">
-										固定单档模式：输出漏洞分析与可行 PoC 思路（非武器化）
-									</p>
-								</div>
-
 								{/* 高级选项 */}
 							<Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
 								<CollapsibleTrigger className="flex items-center gap-2 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors">

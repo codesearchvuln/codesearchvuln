@@ -194,3 +194,76 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
     assert info.language_info == '{"total": 1, "total_files": 1, "languages": {}}'
     assert info.description == ""
     assert info.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_get_project_info_repository_returns_unsupported(monkeypatch):
+    from app.api.v1.endpoints import projects as projects_endpoint
+
+    project = SimpleNamespace(
+        id="project-1",
+        name="demo",
+        source_type="repository",
+    )
+
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarFirstResult(project),
+            _ScalarFirstResult(None),
+        ]
+    )
+    db.add = Mock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    def _fail_if_called(*_args, **_kwargs):
+        raise AssertionError("get_cloc_stats should not be called for repository projects")
+
+    monkeypatch.setattr(projects_endpoint, "get_cloc_stats", _fail_if_called)
+
+    info = await get_project_info(
+        id="project-1",
+        db=db,
+        current_user=SimpleNamespace(id="u-1"),
+    )
+
+    assert info.project_id == "project-1"
+    assert info.status == "unsupported"
+    assert info.language_info == '{"total": 0, "total_files": 0, "languages": {}}'
+    assert info.description == ""
+
+
+@pytest.mark.asyncio
+async def test_get_project_info_pending_returns_pending_payload():
+    project = SimpleNamespace(
+        id="project-1",
+        name="demo",
+        source_type="zip",
+    )
+    existing_info = SimpleNamespace(
+        id="info-1",
+        project_id="project-1",
+        language_info=None,
+        description=None,
+        status="pending",
+        created_at="2026-01-01T00:00:00Z",
+    )
+
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarFirstResult(project),
+            _ScalarFirstResult(existing_info),
+        ]
+    )
+
+    info = await get_project_info(
+        id="project-1",
+        db=db,
+        current_user=SimpleNamespace(id="u-1"),
+    )
+
+    assert info.status == "pending"
+    assert info.language_info == '{"total": 0, "total_files": 0, "languages": {}}'
+    assert info.description == ""

@@ -3,7 +3,14 @@
  * Cyberpunk Terminal Aesthetic
  */
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import {
+    PieChart,
+    Pie,
+    Cell,
+    ResponsiveContainer,
+    Tooltip as ChartTooltip,
+} from "recharts";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +64,7 @@ import {
 } from "lucide-react";
 import { api } from "@/shared/config/database";
 import { validateZipFile } from "@/features/projects/services";
-import type { Project, CreateProjectForm } from "@/shared/types";
+import type { Project, CreateProjectForm, AuditTask } from "@/shared/types";
 import {
     uploadZipFile,
     getZipFileInfo,
@@ -72,12 +79,40 @@ import { toast } from "sonner";
 import CreateProjectAuditDialog, {
     type AuditCreateMode,
 } from "@/components/audit/CreateProjectAuditDialog";
-import CreateStaticAuditDialog from "@/components/audit/CreateStaticAuditDialog";
-import CreateAgentAuditDialog from "@/components/audit/CreateAgentAuditDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 import { useI18n } from "@/shared/i18n";
+import { apiClient } from "@/shared/api/serverClient";
+import { getAgentTasks, type AgentTask } from "@/shared/api/agentTasks";
+import {
+    getGitleaksScanTasks,
+    type GitleaksScanTask,
+} from "@/shared/api/gitleaks";
+import {
+    getOpengrepScanTasks,
+    type OpengrepScanTask,
+} from "@/shared/api/opengrep";
+import {
+    getProjectCardSummaryStats,
+    getProjectCardRecentTasks,
+    normalizeProjectCardLanguageStats,
+    type ProjectCardLanguageStats,
+} from "@/features/projects/services/projectCardPreview";
 const PROJECT_PAGE_SIZE = 6;
 const MODULE_SCROLL_DELAY_MS = 80;
+const TASK_POOL_MAX_TOTAL = 800;
+const AGENT_TASK_PAGE_LIMIT = 100;
+const OPENGREP_TASK_PAGE_LIMIT = 200;
+const GITLEAKS_TASK_PAGE_LIMIT = 200;
+const LANGUAGE_STATS_RETRY_INTERVAL_MS = 2500;
+const LANGUAGE_STATS_MAX_RETRIES = 6;
+const PROJECT_CARD_PIE_COLORS = [
+    "#0ea5e9",
+    "#22c55e",
+    "#f59e0b",
+    "#a855f7",
+    "#ef4444",
+    "#14b8a6",
+];
 const ARCHIVE_SUFFIXES = [
     ".tar.gz",
     ".tar.bz2",
@@ -112,24 +147,11 @@ export default function Projects() {
     const [searchTerm, setSearchTerm] = useState("");
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [showCreateAuditDialog, setShowCreateAuditDialog] = useState(false);
-    const [showCreateStaticAuditDialog, setShowCreateStaticAuditDialog] =
-        useState(false);
-    const [showCreateAgentAuditDialog, setShowCreateAgentAuditDialog] =
-        useState(false);
     const [auditPreselectedProjectId, setAuditPreselectedProjectId] =
         useState<string>("");
     const [auditInitialMode, setAuditInitialMode] =
         useState<AuditCreateMode>("static");
-    const [auditReturnTarget, setAuditReturnTarget] = useState<
-        "quick-actions" | "project-browser"
-    >("project-browser");
     const [auditNavigateOnSuccess, setAuditNavigateOnSuccess] = useState(true);
-    const [staticAuditNavigateOnSuccess, setStaticAuditNavigateOnSuccess] =
-        useState(true);
-    const [agentAuditNavigateOnSuccess, setAgentAuditNavigateOnSuccess] =
-        useState(true);
-    const [createProjectReturnTarget, setCreateProjectReturnTarget] =
-        useState<"project-browser" | "quick-actions">("project-browser");
     const [uploadProgress, setUploadProgress] = useState(0);
     const [uploading, setUploading] = useState(false);
     const [generatingDescription, setGeneratingDescription] = useState(false);
@@ -166,6 +188,19 @@ export default function Projects() {
     const [editZipFile, setEditZipFile] = useState<File | null>(null);
     const [loadingEditZipInfo, setLoadingEditZipInfo] = useState(false);
     const editZipInputRef = useRef<HTMLInputElement>(null);
+    const [auditTaskPool, setAuditTaskPool] = useState<AuditTask[]>([]);
+    const [agentTaskPool, setAgentTaskPool] = useState<AgentTask[]>([]);
+    const [opengrepTaskPool, setOpengrepTaskPool] = useState<OpengrepScanTask[]>(
+        [],
+    );
+    const [gitleaksTaskPool, setGitleaksTaskPool] = useState<GitleaksScanTask[]>(
+        [],
+    );
+    const [projectLanguageStatsMap, setProjectLanguageStatsMap] = useState<
+        Record<string, ProjectCardLanguageStats>
+    >({});
+    const languageStatsRetryCountRef = useRef<Record<string, number>>({});
+    const languageStatsPollTimerRef = useRef<Record<string, number>>({});
 
     // 将小写语言名转换为显示格式
     const formatLanguageName = (lang: string): string => {
@@ -194,7 +229,7 @@ export default function Projects() {
 
     useEffect(() => {
         const hash = window.location.hash;
-        if (hash !== "#project-browser" && hash !== "#quick-actions") {
+        if (hash !== "#project-browser") {
             return;
         }
         const timer = window.setTimeout(() => {
@@ -206,48 +241,222 @@ export default function Projects() {
         return () => window.clearTimeout(timer);
     }, []);
 
+    const clearLanguageStatsPollTimer = useCallback((projectId: string) => {
+        const timer = languageStatsPollTimerRef.current[projectId];
+        if (timer) {
+            window.clearTimeout(timer);
+            delete languageStatsPollTimerRef.current[projectId];
+        }
+    }, []);
+
+    const fetchProjectLanguageStats = useCallback(
+        async (projectId: string) => {
+            try {
+                const response = await apiClient.get(`/projects/info/${projectId}`);
+                const stats = normalizeProjectCardLanguageStats(response.data);
+                setProjectLanguageStatsMap((previous) => ({
+                    ...previous,
+                    [projectId]: stats,
+                }));
+
+                if (stats.status === "pending") {
+                    const retriedCount =
+                        languageStatsRetryCountRef.current[projectId] ?? 0;
+                    if (retriedCount < LANGUAGE_STATS_MAX_RETRIES) {
+                        clearLanguageStatsPollTimer(projectId);
+                        languageStatsRetryCountRef.current[projectId] =
+                            retriedCount + 1;
+                        languageStatsPollTimerRef.current[projectId] =
+                            window.setTimeout(() => {
+                                delete languageStatsPollTimerRef.current[projectId];
+                                void fetchProjectLanguageStats(projectId);
+                            }, LANGUAGE_STATS_RETRY_INTERVAL_MS);
+                    } else {
+                        setProjectLanguageStatsMap((previous) => ({
+                            ...previous,
+                            [projectId]: {
+                                status: "failed",
+                                total: 0,
+                                totalFiles: 0,
+                                slices: [],
+                            },
+                        }));
+                        clearLanguageStatsPollTimer(projectId);
+                    }
+                } else {
+                    languageStatsRetryCountRef.current[projectId] = 0;
+                    clearLanguageStatsPollTimer(projectId);
+                }
+            } catch (error: any) {
+                const statusCode = Number(error?.response?.status || 0);
+                if (statusCode === 202) {
+                    setProjectLanguageStatsMap((previous) => ({
+                        ...previous,
+                        [projectId]: {
+                            status: "pending",
+                            total: 0,
+                            totalFiles: 0,
+                            slices: [],
+                        },
+                    }));
+                    const retriedCount =
+                        languageStatsRetryCountRef.current[projectId] ?? 0;
+                    if (retriedCount < LANGUAGE_STATS_MAX_RETRIES) {
+                        clearLanguageStatsPollTimer(projectId);
+                        languageStatsRetryCountRef.current[projectId] =
+                            retriedCount + 1;
+                        languageStatsPollTimerRef.current[projectId] =
+                            window.setTimeout(() => {
+                                delete languageStatsPollTimerRef.current[projectId];
+                                void fetchProjectLanguageStats(projectId);
+                            }, LANGUAGE_STATS_RETRY_INTERVAL_MS);
+                    }
+                    return;
+                }
+
+                setProjectLanguageStatsMap((previous) => ({
+                    ...previous,
+                    [projectId]: {
+                        status: "failed",
+                        total: 0,
+                        totalFiles: 0,
+                        slices: [],
+                    },
+                }));
+                clearLanguageStatsPollTimer(projectId);
+            }
+        },
+        [clearLanguageStatsPollTimer],
+    );
+
+    const fetchAgentTaskPool = useCallback(async (): Promise<AgentTask[]> => {
+        const taskPool: AgentTask[] = [];
+        let skip = 0;
+        while (taskPool.length < TASK_POOL_MAX_TOTAL) {
+            const batch = await getAgentTasks({
+                skip,
+                limit: AGENT_TASK_PAGE_LIMIT,
+            });
+            if (!Array.isArray(batch) || batch.length === 0) break;
+            taskPool.push(...batch);
+            if (batch.length < AGENT_TASK_PAGE_LIMIT) break;
+            skip += batch.length;
+        }
+        return taskPool.slice(0, TASK_POOL_MAX_TOTAL);
+    }, []);
+
+    const fetchOpengrepTaskPool = useCallback(async (): Promise<OpengrepScanTask[]> => {
+        const taskPool: OpengrepScanTask[] = [];
+        let skip = 0;
+        while (taskPool.length < TASK_POOL_MAX_TOTAL) {
+            const batch = await getOpengrepScanTasks({
+                skip,
+                limit: OPENGREP_TASK_PAGE_LIMIT,
+            });
+            if (!Array.isArray(batch) || batch.length === 0) break;
+            taskPool.push(...batch);
+            if (batch.length < OPENGREP_TASK_PAGE_LIMIT) break;
+            skip += batch.length;
+        }
+        return taskPool.slice(0, TASK_POOL_MAX_TOTAL);
+    }, []);
+
+    const fetchGitleaksTaskPool = useCallback(async (): Promise<GitleaksScanTask[]> => {
+        const taskPool: GitleaksScanTask[] = [];
+        let skip = 0;
+        while (taskPool.length < TASK_POOL_MAX_TOTAL) {
+            const batch = await getGitleaksScanTasks({
+                skip,
+                limit: GITLEAKS_TASK_PAGE_LIMIT,
+            });
+            if (!Array.isArray(batch) || batch.length === 0) break;
+            taskPool.push(...batch);
+            if (batch.length < GITLEAKS_TASK_PAGE_LIMIT) break;
+            skip += batch.length;
+        }
+        return taskPool.slice(0, TASK_POOL_MAX_TOTAL);
+    }, []);
+
     const loadProjects = async () => {
         try {
             setLoading(true);
-            const data = await api.getProjects();
-            setProjects(data);
+            const projectData = await api.getProjects();
+            setProjects(Array.isArray(projectData) ? projectData : []);
+            setProjectLanguageStatsMap({});
+            for (const timer of Object.values(languageStatsPollTimerRef.current)) {
+                window.clearTimeout(timer);
+            }
+            languageStatsPollTimerRef.current = {};
+            languageStatsRetryCountRef.current = {};
+
+            // 任务池属于增强信息，不应阻断项目浏览主列表渲染
+            const [auditResult, agentResult, opengrepResult, gitleaksResult] =
+                await Promise.allSettled([
+                    api.getAuditTasks(),
+                    fetchAgentTaskPool(),
+                    fetchOpengrepTaskPool(),
+                    fetchGitleaksTaskPool(),
+                ]);
+
+            setAuditTaskPool(
+                auditResult.status === "fulfilled" &&
+                    Array.isArray(auditResult.value)
+                    ? auditResult.value
+                    : [],
+            );
+            setAgentTaskPool(
+                agentResult.status === "fulfilled" &&
+                    Array.isArray(agentResult.value)
+                    ? agentResult.value
+                    : [],
+            );
+            setOpengrepTaskPool(
+                opengrepResult.status === "fulfilled" &&
+                    Array.isArray(opengrepResult.value)
+                    ? opengrepResult.value
+                    : [],
+            );
+            setGitleaksTaskPool(
+                gitleaksResult.status === "fulfilled" &&
+                    Array.isArray(gitleaksResult.value)
+                    ? gitleaksResult.value
+                    : [],
+            );
         } catch (error) {
             console.error("Failed to load projects:", error);
             toast.error("加载项目失败");
+            setProjects([]);
+            setAuditTaskPool([]);
+            setAgentTaskPool([]);
+            setOpengrepTaskPool([]);
+            setGitleaksTaskPool([]);
         } finally {
             setLoading(false);
         }
     };
 
-    const scrollToModule = (
-        moduleId: "project-browser" | "quick-actions",
-    ) => {
+    const scrollToProjectBrowser = () => {
         window.setTimeout(() => {
-            document.getElementById(moduleId)?.scrollIntoView({
+            document.getElementById("project-browser")?.scrollIntoView({
                 behavior: "smooth",
                 block: "start",
             });
         }, MODULE_SCROLL_DELAY_MS);
     };
 
-    const pinToModuleHash = (
-        moduleId: "project-browser" | "quick-actions",
-    ) => {
+    const pinToProjectBrowserHash = () => {
         const { pathname, search } = window.location;
         window.history.replaceState(
             window.history.state,
             "",
-            `${pathname}${search}#${moduleId}`,
+            `${pathname}${search}#project-browser`,
         );
     };
 
-    const closeCreateProjectDialog = (
-        target: "project-browser" | "quick-actions" = createProjectReturnTarget,
-    ) => {
+    const closeCreateProjectDialog = () => {
         setShowCreateDialog(false);
-        pinToModuleHash(target);
-        scrollToModule(target);
-        setCreateProjectReturnTarget("project-browser");
+        pinToProjectBrowserHash();
+        scrollToProjectBrowser();
     };
 
     const handleCreateProjectDialogOpenChange = (open: boolean) => {
@@ -262,76 +471,29 @@ export default function Projects() {
         setShowCreateAuditDialog(open);
         if (!open) {
             setAuditPreselectedProjectId("");
-            pinToModuleHash(auditReturnTarget);
-            scrollToModule(auditReturnTarget);
-            setAuditReturnTarget("project-browser");
+            pinToProjectBrowserHash();
+            scrollToProjectBrowser();
             setAuditNavigateOnSuccess(true);
             setAuditInitialMode("static");
         }
     };
 
-    const handleCreateStaticAuditDialogOpenChange = (open: boolean) => {
-        setShowCreateStaticAuditDialog(open);
-        if (!open) {
-            pinToModuleHash("quick-actions");
-            scrollToModule("quick-actions");
-            setStaticAuditNavigateOnSuccess(true);
-        }
-    };
-
-    const handleCreateAgentAuditDialogOpenChange = (open: boolean) => {
-        setShowCreateAgentAuditDialog(open);
-        if (!open) {
-            pinToModuleHash("quick-actions");
-            scrollToModule("quick-actions");
-            setAgentAuditNavigateOnSuccess(true);
-        }
-    };
-
     const handleOpenCreateProject = () => {
-        setCreateProjectReturnTarget("project-browser");
-        pinToModuleHash("project-browser");
-        setShowCreateDialog(true);
-    };
-
-    const openCreateProjectFromQuickActions = () => {
-        setCreateProjectReturnTarget("quick-actions");
-        pinToModuleHash("quick-actions");
+        pinToProjectBrowserHash();
         setShowCreateDialog(true);
     };
 
     const openCreateAuditDialog = (
         mode: AuditCreateMode = "static",
         projectId = "",
-        options?: {
-            returnTarget?: "quick-actions" | "project-browser";
-            navigateOnSuccess?: boolean;
-        },
+        options?: { navigateOnSuccess?: boolean },
     ) => {
-        const returnTarget = options?.returnTarget || "project-browser";
         const navigateOnSuccess = options?.navigateOnSuccess ?? true;
-        pinToModuleHash(returnTarget);
+        pinToProjectBrowserHash();
         setAuditInitialMode(mode);
         setAuditPreselectedProjectId(projectId);
-        setAuditReturnTarget(returnTarget);
         setAuditNavigateOnSuccess(navigateOnSuccess);
         setShowCreateAuditDialog(true);
-    };
-
-    const openCreateStaticAuditDialog = (
-        options?: { navigateOnSuccess?: boolean },
-    ) => {
-        pinToModuleHash("quick-actions");
-        setStaticAuditNavigateOnSuccess(options?.navigateOnSuccess ?? true);
-        setShowCreateStaticAuditDialog(true);
-    };
-
-    const openCreateAgentAuditDialog = (
-        options?: { navigateOnSuccess?: boolean },
-    ) => {
-        pinToModuleHash("quick-actions");
-        setAgentAuditNavigateOnSuccess(options?.navigateOnSuccess ?? true);
-        setShowCreateAgentAuditDialog(true);
     };
 
     const handleCreateProject = async () => {
@@ -562,6 +724,105 @@ export default function Projects() {
         const start = (projectPage - 1) * PROJECT_PAGE_SIZE;
         return filteredProjects.slice(start, start + PROJECT_PAGE_SIZE);
     }, [filteredProjects, projectPage]);
+
+    useEffect(() => {
+        const visibleProjectIds = pagedProjects.map((project) => project.id);
+        if (visibleProjectIds.length === 0) {
+            return;
+        }
+
+        const pendingFetchIds = visibleProjectIds.filter((projectId) => {
+            const current = projectLanguageStatsMap[projectId];
+            return !current;
+        });
+
+        if (pendingFetchIds.length > 0) {
+            setProjectLanguageStatsMap((previous) => {
+                const next = { ...previous };
+                for (const projectId of pendingFetchIds) {
+                    if (!next[projectId]) {
+                        next[projectId] = {
+                            status: "loading",
+                            total: 0,
+                            totalFiles: 0,
+                            slices: [],
+                        };
+                    }
+                }
+                return next;
+            });
+
+            for (const projectId of pendingFetchIds) {
+                void fetchProjectLanguageStats(projectId);
+            }
+        }
+    }, [pagedProjects, projectLanguageStatsMap, fetchProjectLanguageStats]);
+
+    useEffect(() => {
+        return () => {
+            for (const timer of Object.values(languageStatsPollTimerRef.current)) {
+                window.clearTimeout(timer);
+            }
+            languageStatsPollTimerRef.current = {};
+        };
+    }, []);
+
+    const projectRecentTasksMap = useMemo(() => {
+        return new Map(
+            filteredProjects.map((project) => [
+                project.id,
+                getProjectCardRecentTasks({
+                    projectId: project.id,
+                    auditTasks: auditTaskPool,
+                    agentTasks: agentTaskPool,
+                    opengrepTasks: opengrepTaskPool,
+                    gitleaksTasks: gitleaksTaskPool,
+                    limit: 3,
+                }),
+            ]),
+        );
+    }, [
+        filteredProjects,
+        auditTaskPool,
+        agentTaskPool,
+        opengrepTaskPool,
+        gitleaksTaskPool,
+    ]);
+
+    const projectSummaryStatsMap = useMemo(() => {
+        return new Map(
+            filteredProjects.map((project) => [
+                project.id,
+                getProjectCardSummaryStats({
+                    projectId: project.id,
+                    auditTasks: auditTaskPool,
+                    agentTasks: agentTaskPool,
+                    opengrepTasks: opengrepTaskPool,
+                }),
+            ]),
+        );
+    }, [filteredProjects, auditTaskPool, agentTaskPool, opengrepTaskPool]);
+
+    const projectLanguagesMap = useMemo(() => {
+        return new Map(
+            filteredProjects.map((project) => {
+                try {
+                    const parsed = JSON.parse(project.programming_languages || "[]");
+                    return [
+                        project.id,
+                        Array.isArray(parsed)
+                            ? parsed.filter(
+                                (item): item is string => typeof item === "string",
+                            )
+                            : [],
+                    ];
+                } catch {
+                    return [project.id, [] as string[]];
+                }
+            }),
+        );
+    }, [filteredProjects]);
+
     const projectDetailFrom = `${location.pathname}${location.search}${location.hash}`;
 
     const formatCreatedAt = (time: string) => {
@@ -592,9 +853,37 @@ export default function Projects() {
         }
     };
 
+    const getTaskStatusBadgeClassName = (status: string) => {
+        if (status === "completed") return "cyber-badge-success";
+        if (status === "running") return "cyber-badge-info";
+        if (status === "failed") return "cyber-badge-danger";
+        if (status === "interrupted" || status === "cancelled" || status === "aborted") {
+            return "cyber-badge-warning";
+        }
+        return "cyber-badge-muted";
+    };
+
+    const getTaskStatusText = (status: string) => {
+        switch (status) {
+            case "completed":
+                return "完成";
+            case "running":
+                return "运行中";
+            case "failed":
+                return "失败";
+            case "interrupted":
+            case "cancelled":
+            case "aborted":
+                return "已中断";
+            case "pending":
+                return "等待中";
+            default:
+                return status || "未知";
+        }
+    };
+
     const handleCreateTask = (projectId: string) => {
         openCreateAuditDialog("agent", projectId, {
-            returnTarget: "project-browser",
             navigateOnSuccess: true,
         });
     };
@@ -1149,37 +1438,6 @@ export default function Projects() {
                 </DialogContent>
             </Dialog>
 
-            {/* Quick Actions */}
-            <div id="quick-actions" className="cyber-card p-4 relative z-10">
-                <div className="section-header">
-                    <Terminal className="w-5 h-5 text-primary" />
-                    <h3 className="section-title">快速操作</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-                    <Button
-                        className={`${PROJECT_ACTION_BTN} h-10 justify-start`}
-                        onClick={openCreateProjectFromQuickActions}
-                    >
-                        <Plus className="w-4 h-4 mr-2" />
-                        创建项目
-                    </Button>
-                    <Button
-                        className={`${PROJECT_ACTION_BTN} h-10 justify-start`}
-                        onClick={() => openCreateStaticAuditDialog()}
-                    >
-                        <Shield className="w-4 h-4 mr-2" />
-                        创建静态扫描
-                    </Button>
-                    <Button
-                        className={`${PROJECT_ACTION_BTN} h-10 justify-start`}
-                        onClick={() => openCreateAgentAuditDialog()}
-                    >
-                        <Terminal className="w-4 h-4 mr-2" />
-                        创建智能审计
-                    </Button>
-                </div>
-            </div>
-
             {/* Project Browser */}
             <div id="project-browser" className="cyber-card p-4 relative z-10">
                 <div className="flex items-center justify-between gap-3">
@@ -1221,6 +1479,18 @@ export default function Projects() {
                                         : "bg-muted/20 border-border hover:border-border"
                                     }`}
                             >
+                                {(() => {
+                                    const languageStats = projectLanguageStatsMap[project.id];
+                                    const recentTasks = projectRecentTasksMap.get(project.id) || [];
+                                    const programmingLanguages = projectLanguagesMap.get(project.id) || [];
+                                    const summaryStats = projectSummaryStatsMap.get(project.id) || {
+                                        totalTasks: 0,
+                                        completedTasks: 0,
+                                        totalIssues: 0,
+                                    };
+
+                                    return (
+                                        <>
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                                     <span className="inline-flex items-center gap-1 text-muted-foreground">
                                         {getRepositoryIcon(project.repository_type)}
@@ -1279,11 +1549,196 @@ export default function Projects() {
                                         </Button>
                                     </div>
                                 </div>
-                                {project.description && (
-                                    <p className="mt-2 text-sm text-muted-foreground line-clamp-2">
-                                        {project.description}
+
+                                <div className="mt-3 space-y-3">
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {t("projects.card.totalIssues")}
+                                            </p>
+                                            <p className="text-sm font-semibold text-amber-300">
+                                                {summaryStats.totalIssues}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {t("projects.card.totalTasks")}
+                                            </p>
+                                            <p className="text-sm font-semibold text-foreground">
+                                                {summaryStats.totalTasks}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {t("projects.card.completedTasks")}
+                                            </p>
+                                            <p className="text-sm font-semibold text-emerald-400">
+                                                {summaryStats.completedTasks}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <p className="text-sm text-muted-foreground line-clamp-2">
+                                        {project.description?.trim() || "暂无项目描述"}
                                     </p>
-                                )}
+
+                                    <div className="flex flex-wrap gap-2">
+                                        {programmingLanguages.length > 0 ? (
+                                            programmingLanguages.slice(0, 5).map((language) => (
+                                                <Badge key={`${project.id}-${language}`} className="cyber-badge-primary">
+                                                    {language}
+                                                </Badge>
+                                            ))
+                                        ) : (
+                                            <Badge className="cyber-badge-muted">语言未识别</Badge>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                                        <div className="rounded-lg border border-border bg-muted/40 p-3">
+                                            <div className="flex items-center justify-between gap-2 mb-2">
+                                                <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                                                    语言统计
+                                                </p>
+                                                {languageStats?.status === "ready" && (
+                                                    <span className="text-[11px] text-muted-foreground">
+                                                        {languageStats.total.toLocaleString()} 行
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {languageStats?.status === "loading" ||
+                                            languageStats?.status === "pending" ? (
+                                                <p className="text-xs text-muted-foreground">
+                                                    语言统计生成中...
+                                                </p>
+                                            ) : languageStats?.status === "unsupported" ? (
+                                                <p className="text-xs text-muted-foreground">
+                                                    {t("projects.language.unsupported")}
+                                                </p>
+                                            ) : languageStats?.status === "failed" ? (
+                                                <p className="text-xs text-rose-400">
+                                                    语言统计加载失败
+                                                </p>
+                                            ) : languageStats?.status === "ready" ? (
+                                                <div className="grid grid-cols-[120px,1fr] gap-3 items-center">
+                                                    <div className="h-[120px]">
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <PieChart>
+                                                                <Pie
+                                                                    data={languageStats.slices}
+                                                                    dataKey="proportion"
+                                                                    nameKey="name"
+                                                                    cx="50%"
+                                                                    cy="50%"
+                                                                    outerRadius={52}
+                                                                    innerRadius={22}
+                                                                    stroke="none"
+                                                                >
+                                                                    {languageStats.slices.map((slice, index) => (
+                                                                        <Cell
+                                                                            key={`${project.id}-${slice.name}`}
+                                                                            fill={
+                                                                                PROJECT_CARD_PIE_COLORS[
+                                                                                    index % PROJECT_CARD_PIE_COLORS.length
+                                                                                ]
+                                                                            }
+                                                                        />
+                                                                    ))}
+                                                                </Pie>
+                                                                <ChartTooltip
+                                                                    formatter={(value: number, _name, payload: any) => {
+                                                                        const item = payload?.payload;
+                                                                        return [
+                                                                            `${(Number(value || 0) * 100).toFixed(2)}% · ${Number(item?.loc || 0).toLocaleString()} 行`,
+                                                                            item?.name || "未知语言",
+                                                                        ];
+                                                                    }}
+                                                                />
+                                                            </PieChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {languageStats.slices.slice(0, 3).map((slice, index) => (
+                                                            <div
+                                                                key={`${project.id}-lang-item-${slice.name}`}
+                                                                className="flex items-center justify-between text-[11px] gap-2"
+                                                            >
+                                                                <span className="inline-flex items-center gap-1.5 min-w-0">
+                                                                    <span
+                                                                        className="w-2 h-2 rounded-full shrink-0"
+                                                                        style={{
+                                                                            backgroundColor:
+                                                                                PROJECT_CARD_PIE_COLORS[
+                                                                                    index % PROJECT_CARD_PIE_COLORS.length
+                                                                                ],
+                                                                        }}
+                                                                    />
+                                                                    <span className="truncate text-foreground font-semibold">
+                                                                        {slice.name}
+                                                                    </span>
+                                                                </span>
+                                                                <span className="inline-flex items-center gap-2 shrink-0">
+                                                                    <span className="text-muted-foreground">
+                                                                        {(slice.proportion * 100).toFixed(1)}%
+                                                                    </span>
+                                                                    <span className="text-foreground/80">
+                                                                        {slice.loc.toLocaleString()} 行
+                                                                    </span>
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-muted-foreground">
+                                                    暂无语言统计
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <div className="rounded-lg border border-border bg-muted/40 p-3">
+                                            <div className="flex items-center justify-between gap-2 mb-2">
+                                                <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                                                    最近任务
+                                                </p>
+                                                <span className="text-[11px] text-muted-foreground">
+                                                    最近 3 条
+                                                </span>
+                                            </div>
+                                            {recentTasks.length > 0 ? (
+                                                <div className="space-y-2">
+                                                    {recentTasks.map((task) => (
+                                                        <Link
+                                                            key={`${project.id}-${task.kind}-${task.id}`}
+                                                            to={task.route}
+                                                            className="block rounded border border-border bg-background/80 px-2.5 py-2 hover:border-primary/40 transition-colors"
+                                                        >
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <p className="text-sm text-foreground font-semibold truncate">
+                                                                    {task.label}
+                                                                </p>
+                                                                <Badge className={getTaskStatusBadgeClassName(task.status)}>
+                                                                    {getTaskStatusText(task.status)}
+                                                                </Badge>
+                                                            </div>
+                                                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                                                {formatCreatedAt(task.createdAt)}
+                                                            </p>
+                                                        </Link>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-muted-foreground">
+                                                    暂无任务记录
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                        </>
+                                    );
+                                })()}
                             </div>
                         ))
                     ) : (
@@ -1347,35 +1802,6 @@ export default function Projects() {
                 preselectedProjectId={auditPreselectedProjectId}
                 initialMode={auditInitialMode}
                 navigateOnSuccess={auditNavigateOnSuccess}
-                showReturnButton={auditReturnTarget === "quick-actions"}
-                onReturn={() => {
-                    pinToModuleHash("quick-actions");
-                    scrollToModule("quick-actions");
-                }}
-            />
-
-            <CreateStaticAuditDialog
-                open={showCreateStaticAuditDialog}
-                onOpenChange={handleCreateStaticAuditDialogOpenChange}
-                onTaskCreated={handleTaskCreated}
-                navigateOnSuccess={staticAuditNavigateOnSuccess}
-                showReturnButton
-                onReturn={() => {
-                    pinToModuleHash("quick-actions");
-                    scrollToModule("quick-actions");
-                }}
-            />
-
-            <CreateAgentAuditDialog
-                open={showCreateAgentAuditDialog}
-                onOpenChange={handleCreateAgentAuditDialogOpenChange}
-                onTaskCreated={handleTaskCreated}
-                navigateOnSuccess={agentAuditNavigateOnSuccess}
-                showReturnButton
-                onReturn={() => {
-                    pinToModuleHash("quick-actions");
-                    scrollToModule("quick-actions");
-                }}
             />
 
             {/* Edit Dialog */}

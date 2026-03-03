@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -15,19 +15,23 @@ import { Badge } from "@/components/ui/badge";
 import {
 	Bot,
 	CheckCircle2,
+	Layers,
 	Loader2,
-	Search,
 	Shield,
+	Sparkles,
 	TerminalSquare,
 	Upload,
 	Zap,
-	Sparkles,
 } from "lucide-react";
 import { api } from "@/shared/config/database";
 import type { Project } from "@/shared/types";
 import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
 import { createAgentTask } from "@/shared/api/agentTasks";
-import { runAgentPreflightCheck } from "@/shared/api/agentPreflight";
+import {
+	runAgentPreflightCheck,
+	type AgentPreflightResult,
+	type PreflightMissingField,
+} from "@/shared/api/agentPreflight";
 import {
 	createOpengrepScanTask,
 	getOpengrepRules,
@@ -37,7 +41,7 @@ import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { getZipFileInfo, uploadZipFile } from "@/shared/utils/zipStorage";
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 
-export type AuditCreateMode = "static" | "agent";
+export type AuditCreateMode = "static" | "agent" | "hybrid";
 
 interface CreateProjectAuditDialogProps {
 	open: boolean;
@@ -56,6 +60,54 @@ interface CreateProjectAuditDialogProps {
 	onReturn?: () => void;
 }
 
+interface StaticTaskCreateResult {
+	primaryTaskId: string;
+	params: URLSearchParams;
+}
+
+interface LlmQuickConfig {
+	provider: string;
+	model: string;
+	baseUrl: string;
+	apiKey: string;
+}
+
+const PROVIDER_KEY_FIELD_MAP: Record<string, string> = {
+	openai: "openaiApiKey",
+	openrouter: "openaiApiKey",
+	azure_openai: "openaiApiKey",
+	custom: "openaiApiKey",
+	anthropic: "claudeApiKey",
+	claude: "claudeApiKey",
+	gemini: "geminiApiKey",
+	qwen: "qwenApiKey",
+	deepseek: "deepseekApiKey",
+	zhipu: "zhipuApiKey",
+	moonshot: "moonshotApiKey",
+	baidu: "baiduApiKey",
+	minimax: "minimaxApiKey",
+	doubao: "doubaoApiKey",
+};
+
+const normalizeProvider = (provider: string | undefined | null) => {
+	const normalized = (provider || "").trim().toLowerCase();
+	if (!normalized) return "openai";
+	if (normalized === "claude") return "anthropic";
+	return normalized;
+};
+
+const resolveEffectiveApiKey = (
+	provider: string,
+	llmConfig: Record<string, unknown>,
+): string => {
+	const directKey = String(llmConfig.llmApiKey || "").trim();
+	if (directKey) return directKey;
+
+	const providerKeyField = PROVIDER_KEY_FIELD_MAP[provider];
+	if (!providerKeyField) return "";
+	return String(llmConfig[providerKeyField] || "").trim();
+};
+
 const extractApiErrorMessage = (error: unknown): string => {
 	if (error instanceof Error) {
 		const detail = (error as any)?.response?.data?.detail;
@@ -69,6 +121,11 @@ const extractApiErrorMessage = (error: unknown): string => {
 
 const isSevereRule = (rule: OpengrepRule) =>
 	String(rule.severity || "").toUpperCase() === "ERROR";
+
+const buildStaticTaskRoute = (result: StaticTaskCreateResult) =>
+	`/static-analysis/${result.primaryTaskId}${
+		result.params.toString() ? `?${result.params.toString()}` : ""
+	}`;
 
 export default function CreateProjectAuditDialog({
 	open,
@@ -105,6 +162,25 @@ export default function CreateProjectAuditDialog({
 	const [activeRules, setActiveRules] = useState<OpengrepRule[]>([]);
 	const [loadingRules, setLoadingRules] = useState(false);
 
+	const [showLlmQuickFixPanel, setShowLlmQuickFixPanel] = useState(false);
+	const [llmQuickConfig, setLlmQuickConfig] = useState<LlmQuickConfig>({
+		provider: "openai",
+		model: "",
+		baseUrl: "",
+		apiKey: "",
+	});
+	const [quickFixMissingFields, setQuickFixMissingFields] = useState<
+		PreflightMissingField[]
+	>([]);
+	const [quickFixTesting, setQuickFixTesting] = useState(false);
+	const [quickFixSaving, setQuickFixSaving] = useState(false);
+	const [quickFixTestResult, setQuickFixTestResult] = useState<{
+		success: boolean;
+		message: string;
+		model?: string;
+	} | null>(null);
+	const [lastPreflightMessage, setLastPreflightMessage] = useState("");
+
 	const activeProjects = useMemo(
 		() => projects.filter((project) => project.is_active),
 		[projects],
@@ -123,6 +199,7 @@ export default function CreateProjectAuditDialog({
 	const selectedProject = activeProjects.find(
 		(project) => project.id === selectedProjectId,
 	);
+
 	const parsedTargetFiles = useMemo(
 		() =>
 			targetFilesInput
@@ -131,14 +208,13 @@ export default function CreateProjectAuditDialog({
 				.filter(Boolean),
 		[targetFilesInput],
 	);
-	const dialogTitle =
-		lockMode && initialMode === "agent" ? "创建智能审计" : lockMode ? "创建静态审计" : "创建审计";
-	const dialogSubtitle =
-		lockMode && initialMode === "agent"
-			? "Create Intelligent Audit Task"
-			: lockMode
-				? "Create Static Audit Task"
-				: "Create Audit Task";
+
+	const dialogTitle = useMemo(() => {
+		if (!lockMode) return "创建审计";
+		if (initialMode === "agent") return "创建智能审计";
+		if (initialMode === "hybrid") return "创建混合扫描";
+		return "创建静态审计";
+	}, [initialMode, lockMode]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -148,12 +224,16 @@ export default function CreateProjectAuditDialog({
 		setNewProjectName("");
 		setNewProjectDescription("");
 		setNewProjectFile(null);
-			setGeneratingDescription(false);
-			setMode(initialMode || "static");
-			setTargetFilesInput("");
-			setBranchName("main");
+		setGeneratingDescription(false);
+		setMode(initialMode || "static");
+		setTargetFilesInput("");
+		setBranchName("main");
 		setOpengrepEnabled(true);
 		setGitleaksEnabled(false);
+		setShowLlmQuickFixPanel(false);
+		setQuickFixMissingFields([]);
+		setQuickFixTestResult(null);
+		setLastPreflightMessage("");
 
 		const loadProjects = async () => {
 			try {
@@ -181,8 +261,8 @@ export default function CreateProjectAuditDialog({
 			}
 		};
 
-		loadProjects();
-		loadRules();
+		void loadProjects();
+		void loadRules();
 	}, [open, preselectedProjectId, initialMode]);
 
 	useEffect(() => {
@@ -200,18 +280,19 @@ export default function CreateProjectAuditDialog({
 	const canCreate = useMemo(() => {
 		if (sourceMode === "upload") {
 			if (!newProjectName.trim() || !newProjectFile) return false;
-			if (mode === "static") {
-				return opengrepEnabled || gitleaksEnabled;
-			}
-			return true;
-		}
-		if (!selectedProject) return false;
-		if (mode === "static") {
+			if (mode === "agent") return true;
 			return opengrepEnabled || gitleaksEnabled;
 		}
-		if (isRepositoryProject(selectedProject)) {
-			if (!branchName.trim()) return false;
-			return true;
+
+		if (!selectedProject) return false;
+		if (mode === "static" || mode === "hybrid") {
+			if (!opengrepEnabled && !gitleaksEnabled) return false;
+		}
+		if (mode === "agent" && isRepositoryProject(selectedProject)) {
+			return Boolean(branchName.trim());
+		}
+		if (mode === "hybrid" && !isZipProject(selectedProject)) {
+			return false;
 		}
 		return true;
 	}, [
@@ -223,10 +304,11 @@ export default function CreateProjectAuditDialog({
 		opengrepEnabled,
 		gitleaksEnabled,
 		branchName,
-		parsedTargetFiles,
 	]);
 
-	const createStaticTasksForProject = async (project: Project) => {
+	const createStaticTasksForProject = async (
+		project: Project,
+	): Promise<StaticTaskCreateResult> => {
 		let opengrepTask: { id: string } | null = null;
 		let gitleaksTask: { id: string } | null = null;
 
@@ -256,6 +338,7 @@ export default function CreateProjectAuditDialog({
 		if (!primaryTaskId) {
 			throw new Error("静态审计任务创建失败");
 		}
+
 		const params = new URLSearchParams();
 		if (opengrepTask && gitleaksTask) {
 			params.set("opengrepTaskId", opengrepTask.id);
@@ -266,28 +349,198 @@ export default function CreateProjectAuditDialog({
 		return { primaryTaskId, params };
 	};
 
-	const runAgentTaskForProject = async (project: Project) => {
+	const buildAgentTaskPayload = (project: Project) => ({
+		project_id: project.id,
+		name: `智能审计-${project.name}`,
+		branch_name: isRepositoryProject(project)
+			? branchName.trim() || project.default_branch || "main"
+			: undefined,
+		target_files: parsedTargetFiles.length > 0 ? parsedTargetFiles : undefined,
+		verification_level: "analysis_with_poc_plan" as const,
+	});
+
+	const loadQuickFixConfigFromUser = async () => {
+		const userConfig = await api.getUserConfig();
+		const llmConfig = (userConfig?.llmConfig || {}) as Record<string, unknown>;
+		const provider = normalizeProvider(String(llmConfig.llmProvider || "openai"));
+		setLlmQuickConfig({
+			provider,
+			model: String(llmConfig.llmModel || ""),
+			baseUrl: String(llmConfig.llmBaseUrl || ""),
+			apiKey: resolveEffectiveApiKey(provider, llmConfig),
+		});
+	};
+
+	const openLlmQuickFixPanel = async (preflight: AgentPreflightResult) => {
+		setShowLlmQuickFixPanel(true);
+		setQuickFixTestResult(null);
+		setQuickFixMissingFields(preflight.missingFields || []);
+		setLastPreflightMessage(preflight.message || "");
+		try {
+			await loadQuickFixConfigFromUser();
+		} catch (error) {
+			console.error("加载 LLM 快速补配配置失败:", error);
+		}
+	};
+
+	const ensureLlmPreflightPassed = async () => {
 		const checkToast = toast.loading("正在检查智能审计配置（LLM）...");
 		const preflight = await runAgentPreflightCheck();
 		toast.dismiss(checkToast);
+
 		if (!preflight.ok) {
+			await openLlmQuickFixPanel(preflight);
 			throw new Error(preflight.message || "智能审计配置检查未通过");
 		}
-		return createAgentTask({
-			project_id: project.id,
-			name: `智能审计-${project.name}`,
-			branch_name: isRepositoryProject(project)
-				? branchName.trim() || project.default_branch || "main"
-				: undefined,
-			target_files: parsedTargetFiles.length > 0 ? parsedTargetFiles : undefined,
-			verification_level: "analysis_with_poc_plan",
-		});
+	};
+
+	const runAgentTaskForProject = async (project: Project) => {
+		await ensureLlmPreflightPassed();
+		return createAgentTask(buildAgentTaskPayload(project));
+	};
+
+	const handleQuickFixConfigChange = (key: keyof LlmQuickConfig, value: string) => {
+		setLlmQuickConfig((prev) => ({ ...prev, [key]: value }));
+		if (key === "model") {
+			setQuickFixMissingFields((prev) => prev.filter((field) => field !== "llmModel"));
+		}
+		if (key === "baseUrl") {
+			setQuickFixMissingFields((prev) => prev.filter((field) => field !== "llmBaseUrl"));
+		}
+		if (key === "apiKey") {
+			setQuickFixMissingFields((prev) => prev.filter((field) => field !== "llmApiKey"));
+		}
+	};
+
+	const validateQuickFixFields = (): { ok: boolean; message?: string } => {
+		const provider = normalizeProvider(llmQuickConfig.provider);
+		const model = llmQuickConfig.model.trim();
+		const baseUrl = llmQuickConfig.baseUrl.trim();
+		const apiKey = llmQuickConfig.apiKey.trim();
+		if (!model) {
+			setQuickFixMissingFields((prev) => Array.from(new Set([...prev, "llmModel"])));
+			return { ok: false, message: "请先填写模型" };
+		}
+		if (!baseUrl) {
+			setQuickFixMissingFields((prev) => Array.from(new Set([...prev, "llmBaseUrl"])));
+			return { ok: false, message: "请先填写 Base URL" };
+		}
+		if (provider !== "ollama" && !apiKey) {
+			setQuickFixMissingFields((prev) => Array.from(new Set([...prev, "llmApiKey"])));
+			return { ok: false, message: "请先填写 API Key" };
+		}
+		return { ok: true };
+	};
+
+	const handleQuickFixTest = async () => {
+		const validation = validateQuickFixFields();
+		if (!validation.ok) {
+			if (validation.message) toast.error(validation.message);
+			return;
+		}
+
+		const provider = normalizeProvider(llmQuickConfig.provider);
+		const payload = {
+			provider,
+			apiKey: llmQuickConfig.apiKey.trim(),
+			model: llmQuickConfig.model.trim(),
+			baseUrl: llmQuickConfig.baseUrl.trim(),
+		};
+
+		setQuickFixTesting(true);
+		setQuickFixTestResult(null);
+		try {
+			const result = await api.testLLMConnection(payload);
+			setQuickFixTestResult(result);
+			if (result.success) {
+				toast.success(`测试成功：${result.model || payload.model}`);
+			} else {
+				toast.error(`测试失败：${result.message || "未知错误"}`);
+			}
+		} catch (error) {
+			const message = extractApiErrorMessage(error);
+			setQuickFixTestResult({ success: false, message });
+			toast.error(`测试失败：${message}`);
+		} finally {
+			setQuickFixTesting(false);
+		}
+	};
+
+	const handleQuickFixSave = async () => {
+		const validation = validateQuickFixFields();
+		if (!validation.ok) {
+			if (validation.message) toast.error(validation.message);
+			return;
+		}
+
+		setQuickFixSaving(true);
+		try {
+			const currentConfig = await api.getUserConfig();
+			const currentLlmConfig =
+				(currentConfig?.llmConfig as Record<string, unknown>) || {};
+			const provider = normalizeProvider(llmQuickConfig.provider);
+			const apiKey = llmQuickConfig.apiKey.trim();
+			const providerKeyField = PROVIDER_KEY_FIELD_MAP[provider];
+
+			const nextLlmConfig: Record<string, unknown> = {
+				...currentLlmConfig,
+				llmProvider: provider,
+				llmModel: llmQuickConfig.model.trim(),
+				llmBaseUrl: llmQuickConfig.baseUrl.trim(),
+				llmApiKey: apiKey,
+			};
+			if (providerKeyField) {
+				nextLlmConfig[providerKeyField] = apiKey;
+			}
+
+			await api.updateUserConfig({ llmConfig: nextLlmConfig });
+			setShowLlmQuickFixPanel(false);
+			setQuickFixMissingFields([]);
+			setLastPreflightMessage("");
+			toast.success("LLM 配置已保存，请重新创建任务");
+		} catch (error) {
+			toast.error(`保存失败：${extractApiErrorMessage(error)}`);
+		} finally {
+			setQuickFixSaving(false);
+		}
+	};
+
+	const handleCreateHybridForProject = async (
+		project: Project,
+		action: "primary" | "secondary",
+	) => {
+		const staticResult = await createStaticTasksForProject(project);
+		const staticRoute = buildStaticTaskRoute(staticResult);
+
+		try {
+			await ensureLlmPreflightPassed();
+			const agentTask = await createAgentTask(buildAgentTaskPayload(project));
+			onOpenChange(false);
+			onTaskCreated?.();
+			toast.success("混合扫描任务已创建（静态 + 智能）");
+			if (action === "secondary") {
+				onSecondaryCreateSuccess?.();
+			} else if (navigateOnSuccess) {
+				navigate(`/agent-audit/${agentTask.id}`);
+			}
+			return;
+		} catch (error) {
+			onOpenChange(false);
+			onTaskCreated?.();
+			const message = extractApiErrorMessage(error);
+			toast.error(`静态扫描已创建，智能扫描失败：${message}`);
+			if (action === "secondary") {
+				onSecondaryCreateSuccess?.();
+			} else if (navigateOnSuccess) {
+				navigate(staticRoute);
+			}
+		}
 	};
 
 	const stripArchiveSuffix = (fileName: string) =>
 		fileName.replace(/\.(tar\.gz|tar\.bz2|tar\.xz|tgz|tbz2|zip|tar|7z|rar)$/i, "");
 
-	const handleNewProjectFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+	const handleNewProjectFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0] || null;
 		if (!file) return;
 		const validation = validateZipFile(file);
@@ -336,6 +589,7 @@ export default function CreateProjectAuditDialog({
 					toast.error("请先上传项目并填写项目名");
 					return;
 				}
+
 				let createdProject: Project | null = null;
 				try {
 					createdProject = await api.createProject({
@@ -347,35 +601,39 @@ export default function CreateProjectAuditDialog({
 						default_branch: "main",
 						programming_languages: [],
 					} as any);
+
 					const uploadResult = await uploadZipFile(createdProject.id, newProjectFile);
 					if (!uploadResult.success) {
 						throw new Error(uploadResult.message || "压缩包上传失败");
 					}
 
-						if (mode === "static") {
-							const result = await createStaticTasksForProject(createdProject);
-							onOpenChange(false);
-							onTaskCreated?.();
-							toast.success("静态审计任务已创建");
-							if (action === "secondary") {
-								onSecondaryCreateSuccess?.();
-							} else if (navigateOnSuccess) {
-								navigate(
-									`/static-analysis/${result.primaryTaskId}${result.params.toString() ? `?${result.params.toString()}` : ""
-									}`,
-								);
-							}
-						} else {
-							const agentTask = await runAgentTaskForProject(createdProject);
-							onOpenChange(false);
-							onTaskCreated?.();
-							toast.success("智能审计任务已创建");
-							if (action === "secondary") {
-								onSecondaryCreateSuccess?.();
-							} else if (navigateOnSuccess) {
-								navigate(`/agent-audit/${agentTask.id}`);
-							}
+					if (mode === "static") {
+						const result = await createStaticTasksForProject(createdProject);
+						onOpenChange(false);
+						onTaskCreated?.();
+						toast.success("静态审计任务已创建");
+						if (action === "secondary") {
+							onSecondaryCreateSuccess?.();
+						} else if (navigateOnSuccess) {
+							navigate(buildStaticTaskRoute(result));
 						}
+						return;
+					}
+
+					if (mode === "hybrid") {
+						await handleCreateHybridForProject(createdProject, action);
+						return;
+					}
+
+					const agentTask = await runAgentTaskForProject(createdProject);
+					onOpenChange(false);
+					onTaskCreated?.();
+					toast.success("智能审计任务已创建");
+					if (action === "secondary") {
+						onSecondaryCreateSuccess?.();
+					} else if (navigateOnSuccess) {
+						navigate(`/agent-audit/${agentTask.id}`);
+					}
 					return;
 				} catch (error) {
 					if (createdProject) {
@@ -394,9 +652,13 @@ export default function CreateProjectAuditDialog({
 				return;
 			}
 
-			if (mode === "static") {
+			if (mode === "static" || mode === "hybrid") {
 				if (!isZipProject(selectedProject)) {
-					toast.error("静态审计仅支持源码压缩包项目");
+					toast.error(
+						mode === "hybrid"
+							? "混合扫描当前仅支持源码压缩包项目"
+							: "静态审计仅支持源码压缩包项目",
+					);
 					return;
 				}
 				const zipInfo = await getZipFileInfo(selectedProject.id);
@@ -408,20 +670,23 @@ export default function CreateProjectAuditDialog({
 					toast.error("请至少启用一个扫描引擎");
 					return;
 				}
+			}
 
+			if (mode === "static") {
 				const result = await createStaticTasksForProject(selectedProject);
-
 				onOpenChange(false);
 				onTaskCreated?.();
 				toast.success("静态审计任务已创建");
 				if (action === "secondary") {
 					onSecondaryCreateSuccess?.();
 				} else if (navigateOnSuccess) {
-					navigate(
-						`/static-analysis/${result.primaryTaskId}${result.params.toString() ? `?${result.params.toString()}` : ""
-						}`,
-					);
+					navigate(buildStaticTaskRoute(result));
 				}
+				return;
+			}
+
+			if (mode === "hybrid") {
+				await handleCreateHybridForProject(selectedProject, action);
 				return;
 			}
 
@@ -434,7 +699,6 @@ export default function CreateProjectAuditDialog({
 			}
 
 			const agentTask = await runAgentTaskForProject(selectedProject);
-
 			onOpenChange(false);
 			onTaskCreated?.();
 			toast.success("智能审计任务已创建");
@@ -450,6 +714,13 @@ export default function CreateProjectAuditDialog({
 		}
 	};
 
+	const missingFieldClass = (field: PreflightMissingField) =>
+		quickFixMissingFields.includes(field)
+			? "border-rose-500/60 focus-visible:ring-rose-500"
+			: "";
+
+	const shouldShowAgentPrecheckHint = mode === "agent" || mode === "hybrid";
+
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="!w-[min(92vw,760px)] !max-w-none max-h-[88vh] p-0 gap-0 flex flex-col cyber-dialog border border-border rounded-lg">
@@ -462,7 +733,6 @@ export default function CreateProjectAuditDialog({
 							<p className="text-base font-bold uppercase tracking-wider text-foreground">
 								{dialogTitle}
 							</p>
-							{/* <p className="text-xs text-muted-foreground">{dialogSubtitle}</p> */}
 						</div>
 					</DialogTitle>
 				</DialogHeader>
@@ -475,7 +745,11 @@ export default function CreateProjectAuditDialog({
 								<Button
 									type="button"
 									variant={sourceMode === "existing" ? "default" : "outline"}
-									className={sourceMode === "existing" ? "cyber-btn-primary h-10" : "cyber-btn-outline h-10"}
+									className={
+										sourceMode === "existing"
+											? "cyber-btn-primary h-10"
+											: "cyber-btn-outline h-10"
+									}
 									onClick={() => {
 										setSourceMode("existing");
 										setGeneratingDescription(false);
@@ -487,7 +761,11 @@ export default function CreateProjectAuditDialog({
 								<Button
 									type="button"
 									variant={sourceMode === "upload" ? "default" : "outline"}
-									className={sourceMode === "upload" ? "cyber-btn-primary h-10" : "cyber-btn-outline h-10"}
+									className={
+										sourceMode === "upload"
+											? "cyber-btn-primary h-10"
+											: "cyber-btn-outline h-10"
+									}
 									onClick={() => {
 										setSourceMode("upload");
 										setGeneratingDescription(false);
@@ -499,12 +777,11 @@ export default function CreateProjectAuditDialog({
 							</div>
 						</div>
 					)}
+
 					{!lockMode && (
 						<div className="space-y-2">
-							<p className="text-xs uppercase tracking-wider text-muted-foreground">
-								审计方式
-							</p>
-							<div className="grid grid-cols-2 gap-2">
+							<p className="text-xs uppercase tracking-wider text-muted-foreground">审计方式</p>
+							<div className="grid grid-cols-1 md:grid-cols-3 gap-2">
 								<Button
 									type="button"
 									variant={mode === "static" ? "default" : "outline"}
@@ -533,22 +810,33 @@ export default function CreateProjectAuditDialog({
 									<Bot className="w-4 h-4 mr-2" />
 									智能审计
 								</Button>
+								<Button
+									type="button"
+									variant={mode === "hybrid" ? "default" : "outline"}
+									className={
+										mode === "hybrid"
+											? "h-10 justify-start border border-emerald-500/40 bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30"
+											: "cyber-btn-outline h-10 justify-start"
+									}
+									onClick={() => setMode("hybrid")}
+									disabled={creating || generatingDescription}
+								>
+									<Layers className="w-4 h-4 mr-2" />
+									混合扫描
+								</Button>
 							</div>
 						</div>
 					)}
 
 					{sourceMode === "existing" ? (
 						<div className="space-y-3">
-							<div className="relative">
-								{/* <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /> */}
-								<Input
-									value={searchTerm}
-									onChange={(event) => setSearchTerm(event.target.value)}
-									placeholder="搜索项目..."
-									className="pl-12 h-9 cyber-input"
-									disabled={creating || generatingDescription}
-								/>
-							</div>
+							<Input
+								value={searchTerm}
+								onChange={(event) => setSearchTerm(event.target.value)}
+								placeholder="搜索项目..."
+								className="h-9 cyber-input"
+								disabled={creating || generatingDescription}
+							/>
 							<div className="border border-border rounded-lg max-h-[280px] overflow-y-auto p-2 space-y-2">
 								{loadingProjects ? (
 									<div className="py-10 flex items-center justify-center text-sm text-muted-foreground">
@@ -561,17 +849,16 @@ export default function CreateProjectAuditDialog({
 											key={project.id}
 											type="button"
 											onClick={() => setSelectedProjectId(project.id)}
-											className={`w-full text-left p-3 rounded border transition-colors ${project.id === selectedProjectId
+											className={`w-full text-left p-3 rounded border transition-colors ${
+												project.id === selectedProjectId
 													? "border-sky-500/50 bg-sky-500/10"
 													: "border-border hover:border-sky-500/30 bg-background"
-												}`}
+											}`}
 											disabled={creating || generatingDescription}
 										>
 											<div className="flex items-start justify-between gap-3">
 												<div className="min-w-0">
-													<p className="text-sm font-semibold text-foreground">
-														{project.name}
-													</p>
+													<p className="text-sm font-semibold text-foreground">{project.name}</p>
 													{project.description && (
 														<p className="text-xs text-muted-foreground mt-1 line-clamp-1">
 															{project.description}
@@ -624,11 +911,7 @@ export default function CreateProjectAuditDialog({
 										variant="outline"
 										className="cyber-btn-outline h-8 text-xs"
 										onClick={handleGenerateNewProjectDescription}
-										disabled={
-											creating ||
-											generatingDescription ||
-											!newProjectFile
-										}
+										disabled={creating || generatingDescription || !newProjectFile}
 									>
 										<Sparkles className="w-3 h-3 mr-1.5" />
 										{generatingDescription ? "生成中..." : "一键生成"}
@@ -665,10 +948,12 @@ export default function CreateProjectAuditDialog({
 						</div>
 					)}
 
-					{mode === "static" ? (
+					{mode === "static" || mode === "hybrid" ? (
 						<div className="border border-border rounded-lg p-4 space-y-3">
 							<div className="flex items-center justify-between">
-								<p className="text-sm font-semibold text-foreground">静态扫描引擎</p>
+								<p className="text-sm font-semibold text-foreground">
+									{mode === "hybrid" ? "混合扫描 - 静态引擎" : "静态扫描引擎"}
+								</p>
 								<p className="text-xs text-muted-foreground">
 									{loadingRules ? "规则加载中..." : `已启用规则 ${activeRules.length}`}
 								</p>
@@ -677,7 +962,9 @@ export default function CreateProjectAuditDialog({
 								<label className="border border-border rounded p-3 flex items-center gap-3 cursor-pointer hover:border-sky-500/30">
 									<Checkbox
 										checked={opengrepEnabled}
-										onCheckedChange={(checked) => setOpengrepEnabled(Boolean(checked))}
+										onCheckedChange={(checked) =>
+											setOpengrepEnabled(Boolean(checked))
+										}
 										disabled={creating || generatingDescription}
 										className="data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
 									/>
@@ -689,7 +976,9 @@ export default function CreateProjectAuditDialog({
 								<label className="border border-border rounded p-3 flex items-center gap-3 cursor-pointer hover:border-sky-500/30">
 									<Checkbox
 										checked={gitleaksEnabled}
-										onCheckedChange={(checked) => setGitleaksEnabled(Boolean(checked))}
+										onCheckedChange={(checked) =>
+											setGitleaksEnabled(Boolean(checked))
+										}
 										disabled={creating || generatingDescription}
 										className="data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
 									/>
@@ -699,110 +988,217 @@ export default function CreateProjectAuditDialog({
 									</div>
 								</label>
 							</div>
+							{mode === "hybrid" && selectedProject && !isZipProject(selectedProject) && (
+								<p className="text-xs text-rose-300">
+									混合扫描当前仅支持源码压缩包项目（静态 + 智能）。
+								</p>
+							)}
 						</div>
-						) : (
+					) : null}
+
+					{shouldShowAgentPrecheckHint && (
+						<div className="space-y-3">
 							<div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
-								<p className="text-sm text-violet-200">执行前会自动校验 LLM / RAG 配置。</p>
-								<p className="text-xs text-violet-300/80 mt-1">校验通过后开始智能审计。</p>
-							</div>
-						)}
-
-						{mode === "agent" && (
-							<div className="space-y-2 border border-border rounded-lg p-3 bg-muted/40">
-								<p className="text-xs uppercase tracking-wider text-muted-foreground">
-									验证模式
+								<p className="text-sm text-violet-200">执行前会自动校验 LLM 配置。</p>
+								<p className="text-xs text-violet-300/80 mt-1">
+									未通过时可在下方直接补配并测试连接。
 								</p>
-								<div className="rounded border border-border bg-background px-3 py-2">
-									<p className="text-sm text-foreground font-medium">
-										分析 + PoC 思路
-									</p>
-									<p className="text-[11px] text-muted-foreground mt-1">
-										固定单档模式：输出漏洞分析与可行 PoC 思路（非武器化）
-									</p>
+							</div>
+
+							{showLlmQuickFixPanel && (
+								<div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+									<div className="flex items-start justify-between gap-2">
+										<div className="space-y-1">
+											<p className="text-sm font-semibold text-amber-100">LLM 快速补配</p>
+											<p className="text-xs text-amber-200/85 leading-relaxed">
+												{lastPreflightMessage ||
+													"检测到 LLM 配置异常，请补全后重新创建。"}
+											</p>
+										</div>
+										<Badge className="cyber-badge-info uppercase">
+											{normalizeProvider(llmQuickConfig.provider)}
+										</Badge>
+									</div>
+
+									<div className="grid grid-cols-1 gap-3">
+										<div className="space-y-1">
+											<p className="text-xs uppercase tracking-wider text-muted-foreground">
+												模型
+											</p>
+											<Input
+												value={llmQuickConfig.model}
+												onChange={(event) =>
+													handleQuickFixConfigChange("model", event.target.value)
+												}
+												placeholder="例如：gpt-5"
+												className={`h-9 cyber-input ${missingFieldClass("llmModel")}`}
+												disabled={creating || quickFixSaving || quickFixTesting}
+											/>
+										</div>
+
+										<div className="space-y-1">
+											<p className="text-xs uppercase tracking-wider text-muted-foreground">
+												Base URL
+											</p>
+											<Input
+												value={llmQuickConfig.baseUrl}
+												onChange={(event) =>
+													handleQuickFixConfigChange("baseUrl", event.target.value)
+												}
+												placeholder="例如：https://api.openai.com/v1"
+												className={`h-9 cyber-input ${missingFieldClass("llmBaseUrl")}`}
+												disabled={creating || quickFixSaving || quickFixTesting}
+											/>
+										</div>
+
+										<div className="space-y-1">
+											<p className="text-xs uppercase tracking-wider text-muted-foreground">
+												Token
+											</p>
+											<Input
+												type="password"
+												value={llmQuickConfig.apiKey}
+												onChange={(event) =>
+													handleQuickFixConfigChange("apiKey", event.target.value)
+												}
+												placeholder={
+													normalizeProvider(llmQuickConfig.provider) === "ollama"
+														? "可选"
+														: "请输入 API Key"
+												}
+												className={`h-9 cyber-input ${missingFieldClass("llmApiKey")}`}
+												disabled={creating || quickFixSaving || quickFixTesting}
+											/>
+										</div>
+									</div>
+
+									{quickFixTestResult && (
+										<p
+											className={`text-xs ${
+												quickFixTestResult.success
+													? "text-emerald-300"
+													: "text-rose-300"
+											}`}
+										>
+											{quickFixTestResult.success
+												? `测试成功：${quickFixTestResult.model || llmQuickConfig.model}`
+												: `测试失败：${quickFixTestResult.message}`}
+										</p>
+									)}
+
+									<div className="flex items-center justify-end gap-2">
+										<Button
+											type="button"
+											variant="outline"
+											className="cyber-btn-outline h-9"
+											onClick={handleQuickFixTest}
+											disabled={creating || quickFixSaving || quickFixTesting}
+										>
+											{quickFixTesting ? (
+												<>
+													<Loader2 className="w-4 h-4 animate-spin mr-2" />
+													测试中...
+												</>
+											) : (
+												"测试连接"
+											)}
+										</Button>
+										<Button
+											type="button"
+											className="cyber-btn-primary h-9"
+											onClick={handleQuickFixSave}
+											disabled={creating || quickFixSaving || quickFixTesting}
+										>
+											{quickFixSaving ? (
+												<>
+													<Loader2 className="w-4 h-4 animate-spin mr-2" />
+													保存中...
+												</>
+											) : (
+												"保存配置"
+											)}
+										</Button>
+									</div>
 								</div>
-								<Textarea
-									value={targetFilesInput}
-									onChange={(event) =>
-										setTargetFilesInput(event.target.value)
-									}
-									placeholder="目标文件（可选，每行或逗号分隔）"
-									rows={3}
-									className="cyber-input text-xs font-mono"
-									disabled={creating || generatingDescription}
-								/>
-								<p className="text-[11px] text-muted-foreground">
-									当前目标文件数量: {parsedTargetFiles.length}
-								</p>
-							</div>
-						)}
+							)}
+						</div>
+					)}
 
-						{mode === "agent" &&
-							selectedProject &&
-						isRepositoryProject(selectedProject) && (
-							<div className="space-y-2">
-								<p className="text-xs uppercase tracking-wider text-muted-foreground">审计分支</p>
-								<Input
-									value={branchName}
-									onChange={(event) => setBranchName(event.target.value)}
-									placeholder="main"
-									className="h-9 cyber-input"
-									disabled={creating || generatingDescription}
-								/>
-							</div>
-						)}
+					{mode === "agent" && selectedProject && isRepositoryProject(selectedProject) && (
+						<div className="space-y-2">
+							<p className="text-xs uppercase tracking-wider text-muted-foreground">审计分支</p>
+							<Input
+								value={branchName}
+								onChange={(event) => setBranchName(event.target.value)}
+								placeholder="main"
+								className="h-9 cyber-input"
+								disabled={creating || generatingDescription}
+							/>
+						</div>
+					)}
 				</div>
 
-					<div className="px-6 py-4 border-t border-border bg-muted flex justify-end gap-2">
-						
+				<div className="px-6 py-4 border-t border-border bg-muted flex justify-end gap-2">
+					{showReturnButton && onReturn && (
 						<Button
 							type="button"
 							variant="outline"
+							className="cyber-btn-outline"
+							onClick={onReturn}
+							disabled={creating || generatingDescription}
+						>
+							返回
+						</Button>
+					)}
+					<Button
+						type="button"
+						variant="outline"
 						className="cyber-btn-outline"
 						onClick={() => onOpenChange(false)}
 						disabled={creating || generatingDescription}
 					>
 						取消
-						</Button>
-						<Button
-							type="button"
-							className="cyber-btn-primary"
-							onClick={() => handleCreate("primary")}
-							disabled={!canCreate || creating || generatingDescription}
-						>
-							{creating ? (
+					</Button>
+					<Button
+						type="button"
+						className="cyber-btn-primary"
+						onClick={() => handleCreate("primary")}
+						disabled={!canCreate || creating || generatingDescription}
+					>
+						{creating ? (
 							<>
 								<Loader2 className="w-4 h-4 animate-spin mr-2" />
 								创建中...
 							</>
+						) : (
+							<>
+								<Shield className="w-4 h-4 mr-2" />
+								{primaryCreateLabel}
+							</>
+						)}
+					</Button>
+					{createButtonVariant === "dual" && (
+						<Button
+							type="button"
+							className="cyber-btn-primary"
+							onClick={() => handleCreate("secondary")}
+							disabled={!canCreate || creating || generatingDescription}
+						>
+							{creating ? (
+								<>
+									<Loader2 className="w-4 h-4 animate-spin mr-2" />
+									创建中...
+								</>
 							) : (
 								<>
 									<Shield className="w-4 h-4 mr-2" />
-									{primaryCreateLabel}
+									{secondaryCreateLabel}
 								</>
 							)}
 						</Button>
-						{createButtonVariant === "dual" && (
-							<Button
-								type="button"
-								className="cyber-btn-primary"
-								onClick={() => handleCreate("secondary")}
-								disabled={!canCreate || creating || generatingDescription}
-							>
-								{creating ? (
-									<>
-										<Loader2 className="w-4 h-4 animate-spin mr-2" />
-										创建中...
-									</>
-								) : (
-									<>
-										<Shield className="w-4 h-4 mr-2" />
-										{secondaryCreateLabel}
-									</>
-								)}
-							</Button>
-						)}
-					</div>
-				</DialogContent>
-			</Dialog>
+					)}
+				</div>
+			</DialogContent>
+		</Dialog>
 	);
 }

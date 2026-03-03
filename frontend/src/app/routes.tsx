@@ -9,6 +9,7 @@ import TaskManagementOverview from "@/pages/TaskManagementOverview";
 import TaskManagementStatic from "@/pages/TaskManagementStatic";
 import TaskManagementIntelligent from "@/pages/TaskManagementIntelligent";
 import TaskManagementHybrid from "@/pages/TaskManagementHybrid";
+import ScanConfigOverview from "@/pages/ScanConfigOverview";
 import ScanConfigEngines from "@/pages/ScanConfigEngines";
 import ScanConfigExternalTools from "@/pages/ScanConfigExternalTools";
 import type { ReactNode } from "react";
@@ -78,7 +79,7 @@ const routes: RouteConfig[] = [
         path: "/opengrep-rules",
         element: <OpengrepRules />,
         visible: true,
-        navVisible: true,
+        navVisible: false,
         navGroup: "main",
         navOrder: 40,
     },
@@ -123,6 +124,16 @@ const routes: RouteConfig[] = [
         navOrder: 40,
     },
     {
+        name: "扫描配置总览",
+        nameKey: "route.scanConfigOverview",
+        path: "/scan-config",
+        element: <ScanConfigOverview />,
+        visible: true,
+        navVisible: true,
+        navGroup: "scanConfig",
+        navOrder: 10,
+    },
+    {
         name: "扫描引擎",
         nameKey: "route.scanEngines",
         path: "/scan-config/engines",
@@ -130,7 +141,7 @@ const routes: RouteConfig[] = [
         visible: true,
         navVisible: true,
         navGroup: "scanConfig",
-        navOrder: 10,
+        navOrder: 20,
     },
     {
         name: "外部工具",
@@ -140,7 +151,7 @@ const routes: RouteConfig[] = [
         visible: true,
         navVisible: true,
         navGroup: "scanConfig",
-        navOrder: 20,
+        navOrder: 30,
     },
     {
         name: "静态分析结果",

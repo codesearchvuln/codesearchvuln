@@ -51,18 +51,7 @@ import {
 	Database,
 	ShieldCheck,
 	ListFilter,
-	Bug,
 } from "lucide-react";
-import {
-	Bar,
-	BarChart,
-	CartesianGrid,
-	Legend,
-	ResponsiveContainer,
-	Tooltip,
-	XAxis,
-	YAxis,
-} from "recharts";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
 	getOpengrepRules,
@@ -86,19 +75,11 @@ import {
 import { setOpengrepActiveRules } from "@/shared/stores/opengrepRulesStore";
 import { useI18n } from "@/shared/i18n";
 
-type RuleLanguageChartItem = {
-	language: string;
-	total: number;
-	highCount: number;
-	mediumCount: number;
-};
+interface OpengrepRulesProps {
+	embedded?: boolean;
+}
 
-type RuleCweChartItem = {
-	cwe: string;
-	total: number;
-};
-
-export default function OpengrepRules() {
+export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) {
 	const { t, isEnglish } = useI18n();
 	const navigate = useNavigate();
 	const location = useLocation();
@@ -1028,42 +1009,6 @@ export default function OpengrepRules() {
 		(currentPage - 1) * pageSize,
 		currentPage * pageSize,
 	);
-	const rulesByLanguageData = useMemo<RuleLanguageChartItem[]>(() => {
-		const aggregate = new Map<string, RuleLanguageChartItem>();
-
-		for (const rule of filteredRules) {
-			const language = String(rule.language || "unknown").trim() || "unknown";
-			if (!aggregate.has(language)) {
-				aggregate.set(language, {
-					language,
-					total: 0,
-					highCount: 0,
-					mediumCount: 0,
-				});
-			}
-			const entry = aggregate.get(language);
-			if (!entry) continue;
-
-			const confidence = normalizeConfidence(rule.confidence);
-			if (confidence === "HIGH") {
-				entry.highCount += 1;
-			} else if (confidence === "MEDIUM") {
-				entry.mediumCount += 1;
-			}
-		}
-
-		return Array.from(aggregate.values())
-			.map((item) => ({
-				...item,
-				total: item.highCount + item.mediumCount,
-			}))
-			.filter((item) => item.total > 0)
-			.sort((a, b) => {
-				if (b.total !== a.total) return b.total - a.total;
-				return a.language.localeCompare(b.language, "zh-CN");
-			});
-	}, [filteredRules]);
-
 	function normalizeCweCode(cwe?: string) {
 		const raw = cwe?.trim();
 		if (!raw) return "";
@@ -1076,51 +1021,6 @@ export default function OpengrepRules() {
 		}
 		return `CWE-${upper}`;
 	}
-
-	const rulesByCweData = useMemo<RuleCweChartItem[]>(() => {
-		const aggregate = new Map<string, number>();
-		for (const rule of filteredRules) {
-			const cweList = Array.isArray(rule.cwe) ? rule.cwe : [];
-			const normalizedSet = new Set(
-				cweList.map((item) => normalizeCweCode(item)).filter(Boolean),
-			);
-			for (const cwe of normalizedSet) {
-				aggregate.set(cwe, (aggregate.get(cwe) || 0) + 1);
-			}
-		}
-		return Array.from(aggregate.entries())
-			.map(([cwe, total]) => ({ cwe, total }))
-			.sort((a, b) => {
-				if (b.total !== a.total) return b.total - a.total;
-				return a.cwe.localeCompare(b.cwe, "zh-CN");
-			})
-			.slice(0, 20);
-	}, [filteredRules]);
-
-	const chartMax = useMemo(() => {
-		if (rulesByLanguageData.length === 0) return 1;
-		const maxSide = Math.max(...rulesByLanguageData.map((item) => item.total));
-		return Math.max(1, maxSide);
-	}, [rulesByLanguageData]);
-
-	const cweChartMax = useMemo(() => {
-		if (rulesByCweData.length === 0) return 1;
-		const maxSide = Math.max(...rulesByCweData.map((item) => item.total));
-		return Math.max(1, maxSide);
-	}, [rulesByCweData]);
-
-	const rulesChartHeight = useMemo(() => {
-		const rowCount = Math.max(1, rulesByLanguageData.length);
-		return Math.min(520, Math.max(280, rowCount * 36));
-	}, [rulesByLanguageData.length]);
-
-	const cweChartHeight = useMemo(() => {
-		const rowCount = Math.max(1, rulesByCweData.length);
-		return Math.min(520, Math.max(280, rowCount * 36));
-	}, [rulesByCweData.length]);
-
-	const formatTick = (value: number | string) =>
-		Number(value || 0).toLocaleString();
 
 	function normalizeConfidence(confidence?: string | null) {
 		const normalized = confidence?.trim().toUpperCase();
@@ -1163,7 +1063,9 @@ export default function OpengrepRules() {
 
 	if (loading) {
 		return (
-			<div className="flex items-center justify-center min-h-screen">
+			<div
+				className={`flex items-center justify-center ${embedded ? "min-h-[360px]" : "min-h-screen"}`}
+			>
 				<div className="text-center space-y-4">
 					<div className="loading-spinner mx-auto" />
 					<p className="text-muted-foreground font-mono text-sm uppercase tracking-wider">
@@ -1175,12 +1077,14 @@ export default function OpengrepRules() {
 	}
 
 	return (
-		<div className="h-screen flex flex-col bg-background font-mono relative overflow-hidden">
+		<div
+			className={`flex flex-col bg-background font-mono relative ${embedded ? "" : "h-screen overflow-hidden"}`}
+		>
 			{/* Grid background */}
 			<div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
 
 			{/* Scrollable Content */}
-			<div className="flex-1 overflow-y-auto">
+			<div className={`flex-1 ${embedded ? "" : "overflow-y-auto"}`}>
 				<div className="space-y-6 p-6 relative z-10">
 					{returnTo && (
 						<div className="cyber-card p-3 border border-primary/40 bg-primary/5 flex items-center justify-between gap-3">
@@ -1247,160 +1151,6 @@ export default function OpengrepRules() {
 								<div className="stat-icon text-sky-400">
 									<ListFilter className="w-6 h-6" />
 								</div>
-							</div>
-						</div>
-					</div>
-
-					<div className="grid grid-cols-1 xl:grid-cols-2 gap-4 relative z-10">
-						<div className="cyber-card p-4">
-							<div className="section-header mb-3">
-								<AlertTriangle className="w-5 h-5 text-sky-400" />
-								<div className="w-full">
-									<div className="flex items-center justify-between gap-3 flex-wrap">
-										<h3 className="section-title">规则分布横向条形统计图</h3>
-										<span className="text-sm text-muted-foreground">
-											语言数：{rulesByLanguageData.length}
-										</span>
-									</div>
-									<p className="text-sm text-muted-foreground mt-1">
-										仅统计中/高置信度规则
-									</p>
-								</div>
-							</div>
-
-							<div
-								className="mt-4 border border-border/60 rounded-lg bg-muted/15 p-3"
-								style={{ height: rulesChartHeight }}
-							>
-								{rulesByLanguageData.length === 0 ? (
-									<div className="h-full flex items-center justify-center text-base text-muted-foreground">
-										暂无符合条件的规则分布数据
-									</div>
-								) : (
-									<ResponsiveContainer width="100%" height="100%">
-										<BarChart
-											data={rulesByLanguageData}
-											layout="vertical"
-											margin={{ top: 6, right: 6, left: 4, bottom: 6 }}
-											barCategoryGap={16}
-											barGap={6}
-											barSize={18}
-										>
-											<CartesianGrid
-												strokeDasharray="3 3"
-												strokeOpacity={0.2}
-											/>
-											<XAxis
-												type="number"
-												domain={[0, chartMax]}
-												tickFormatter={formatTick}
-												tick={{ fontSize: 13 }}
-											/>
-											<YAxis
-												type="category"
-												dataKey="language"
-												width={96}
-												tick={{ fontSize: 13 }}
-											/>
-											<Tooltip
-												formatter={(value: number | string, name: string) => [
-													Number(value || 0).toLocaleString(),
-													name,
-												]}
-												contentStyle={{ fontSize: 13 }}
-											/>
-											<Legend wrapperStyle={{ fontSize: 13 }} />
-											<Bar
-												dataKey="highCount"
-												stackId="confidence"
-												fill="#22c55e"
-												name="高置信度"
-												radius={[2, 2, 2, 2]}
-												minPointSize={6}
-											/>
-											<Bar
-												stackId="confidence"
-												dataKey="mediumCount"
-												fill="#facc15"
-												name="中置信度"
-												radius={[2, 2, 2, 2]}
-												minPointSize={6}
-											/>
-										</BarChart>
-									</ResponsiveContainer>
-								)}
-							</div>
-						</div>
-
-						<div className="cyber-card p-4">
-							<div className="section-header mb-3">
-								<Bug className="w-5 h-5 text-violet-400" />
-								<div className="w-full">
-									<div className="flex items-center justify-between gap-3 flex-wrap">
-										<h3 className="section-title">
-											规则漏洞类型统计图（CWE分类）
-										</h3>
-										<span className="text-sm text-muted-foreground">
-											类型数：{rulesByCweData.length}
-										</span>
-									</div>
-									<p className="text-sm text-muted-foreground mt-1">
-										统计当前筛选结果中规则关联的 CWE 类型（Top 20）
-									</p>
-								</div>
-							</div>
-
-							<div
-								className="mt-4 border border-border/60 rounded-lg bg-muted/15 p-3"
-								style={{ height: cweChartHeight }}
-							>
-								{rulesByCweData.length === 0 ? (
-									<div className="h-full flex items-center justify-center text-base text-muted-foreground">
-										暂无 CWE 分类统计数据
-									</div>
-								) : (
-									<ResponsiveContainer width="100%" height="100%">
-										<BarChart
-											data={rulesByCweData}
-											layout="vertical"
-											margin={{ top: 6, right: 6, left: 4, bottom: 6 }}
-											barCategoryGap={16}
-											barGap={6}
-											barSize={18}
-										>
-											<CartesianGrid
-												strokeDasharray="3 3"
-												strokeOpacity={0.2}
-											/>
-											<XAxis
-												type="number"
-												domain={[0, cweChartMax]}
-												tickFormatter={formatTick}
-												tick={{ fontSize: 13 }}
-											/>
-											<YAxis
-												type="category"
-												dataKey="cwe"
-												width={96}
-												tick={{ fontSize: 13 }}
-											/>
-											<Tooltip
-												formatter={(value: number | string, name: string) => [
-													Number(value || 0).toLocaleString(),
-													name,
-												]}
-												contentStyle={{ fontSize: 13 }}
-											/>
-											<Bar
-												dataKey="total"
-												fill="#a78bfa"
-												name="规则数量"
-												radius={[2, 2, 2, 2]}
-												minPointSize={6}
-											/>
-										</BarChart>
-									</ResponsiveContainer>
-								)}
 							</div>
 						</div>
 					</div>

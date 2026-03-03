@@ -44,6 +44,7 @@ const routeIcons: Record<string, React.ReactNode> = {
     "/tasks/static": <Shield className="w-[18px] h-[18px]" />,
     "/tasks/intelligent": <Bot className="w-[18px] h-[18px]" />,
     "/tasks/hybrid": <ListChecks className="w-[18px] h-[18px]" />,
+    "/scan-config": <Wrench className="w-[18px] h-[18px]" />,
     "/scan-config/engines": <Zap className="w-[18px] h-[18px]" />,
     "/scan-config/external-tools": <Wrench className="w-[18px] h-[18px]" />,
     // "/prompts": <MessageSquare className="w-[18px] h-[18px]" />,
@@ -80,6 +81,12 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
         taskRoutes[0];
     const taskChildRoutes = taskRoutes.filter(
         (route) => route.path !== taskOverviewRoute?.path,
+    );
+    const scanConfigOverviewRoute =
+        scanConfigRoutes.find((route) => route.path === "/scan-config") ||
+        scanConfigRoutes[0];
+    const scanConfigChildRoutes = scanConfigRoutes.filter(
+        (route) => route.path !== scanConfigOverviewRoute?.path,
     );
     const isTaskGroupActive = taskRoutes.some(
         (route) => location.pathname === route.path,
@@ -355,10 +362,14 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                     onMouseEnter={() => setHoveredGroup("scanConfig")}
                                     onMouseLeave={() => setHoveredGroup(null)}
                                 >
-                                    <button
-                                        type="button"
+                                    <Link
+                                        to={scanConfigOverviewRoute?.path || "/scan-config"}
                                         className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all duration-300 ${isScanConfigGroupActive ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/20 border-border/40 text-muted-foreground"}`}
-                                        onClick={() => toggleGroupExpanded("scanConfig")}
+                                        onClick={() => {
+                                            toggleGroupExpanded("scanConfig");
+                                            setMobileOpen(false);
+                                        }}
+                                        title={collapsed ? t("route.scanConfig", "扫描配置") : undefined}
                                     >
                                         <span className={`p-1.5 rounded-md ${isScanConfigGroupActive ? "bg-primary/20" : "bg-muted/50"}`}>
                                             <Wrench className="w-[18px] h-[18px]" />
@@ -368,11 +379,11 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                                                 {t("route.scanConfig", "扫描配置")}
                                             </span>
                                         )}
-                                    </button>
+                                    </Link>
 
-                                    {isScanConfigGroupExpanded && (
+                                    {isScanConfigGroupExpanded && scanConfigChildRoutes.length > 0 && (
                                         <div className="mt-1 pl-4 space-y-1">
-                                            {scanConfigRoutes.map((route) =>
+                                            {scanConfigChildRoutes.map((route) =>
                                                 renderRouteLink(route, {
                                                     compact: true,
                                                 }),
