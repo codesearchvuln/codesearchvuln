@@ -3,7 +3,7 @@
  * Premium Terminal Aesthetic with Enhanced Visual Design
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import LanguageToggle from "@/components/layout/LanguageToggle";
@@ -103,6 +103,18 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
     const toggleGroupExpanded = (group: "task" | "scanConfig") => {
         setExpandedGroup((prev) => (prev === group ? null : group));
     };
+
+    const prefetchTaskGroupAssets = useCallback(() => {
+        void import("@/features/tasks/services/taskActivitiesStore").then(
+            ({ prefetchTaskActivitiesSnapshot }) => {
+                void prefetchTaskActivitiesSnapshot();
+            },
+        );
+        void import("@/pages/TaskManagementOverview");
+        void import("@/pages/TaskManagementStatic");
+        void import("@/pages/TaskManagementIntelligent");
+        void import("@/pages/TaskManagementHybrid");
+    }, []);
 
     const renderRouteLink = (
         route: (typeof routes)[number],
@@ -322,13 +334,17 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                             {taskRoutes.length > 0 && (
                                 <div
                                     className="pt-1"
-                                    onMouseEnter={() => setHoveredGroup("task")}
+                                    onMouseEnter={() => {
+                                        setHoveredGroup("task");
+                                        prefetchTaskGroupAssets();
+                                    }}
                                     onMouseLeave={() => setHoveredGroup(null)}
                                 >
                                     <Link
                                         to={taskOverviewRoute?.path || "/tasks/overview"}
                                         className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition-all duration-300 ${isTaskGroupActive ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/20 border-border/40 text-muted-foreground"}`}
                                         onClick={() => {
+                                            prefetchTaskGroupAssets();
                                             toggleGroupExpanded("task");
                                             setMobileOpen(false);
                                         }}

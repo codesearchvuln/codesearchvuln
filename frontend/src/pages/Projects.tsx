@@ -3,14 +3,7 @@
  * Cyberpunk Terminal Aesthetic
  */
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import {
-    PieChart,
-    Pie,
-    Cell,
-    ResponsiveContainer,
-    Tooltip as ChartTooltip,
-} from "recharts";
+import { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -75,9 +68,8 @@ import {
 } from "@/shared/utils/projectUtils";
 import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import CreateProjectAuditDialog, {
-    type AuditCreateMode,
-} from "@/components/audit/CreateProjectAuditDialog";
+import DeferredSection from "@/components/performance/DeferredSection";
+import type { AuditCreateMode } from "@/components/audit/CreateProjectAuditDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 import { useI18n } from "@/shared/i18n";
 import { apiClient } from "@/shared/api/serverClient";
@@ -100,7 +92,7 @@ import {
     type ProjectCardLanguageStats,
     type ProjectCardPotentialVulnerability,
 } from "@/features/projects/services/projectCardPreview";
-const PROJECT_PAGE_SIZE = 6;
+const PROJECT_PAGE_SIZE = 1;
 const MODULE_SCROLL_DELAY_MS = 80;
 const TASK_POOL_MAX_TOTAL = 800;
 const AGENT_TASK_PAGE_LIMIT = 100;
@@ -130,6 +122,13 @@ const ARCHIVE_SUFFIXES = [
     ".7z",
     ".rar",
 ];
+
+const CreateProjectAuditDialog = lazy(
+    () => import("@/components/audit/CreateProjectAuditDialog"),
+);
+const ProjectLanguagePieChart = lazy(
+    () => import("@/features/projects/components/ProjectLanguagePieChart"),
+);
 
 const stripArchiveSuffix = (filename: string) => {
     const lower = filename.toLowerCase();
@@ -216,6 +215,7 @@ export default function Projects() {
     const languageStatsRetryCountRef = useRef<Record<string, number>>({});
     const languageStatsPollTimerRef = useRef<Record<string, number>>({});
     const potentialVulnerabilityLoadingRef = useRef<Record<string, boolean>>({});
+    const taskPoolRequestSeqRef = useRef(0);
 
     // 将小写语言名转换为显示格式
     const formatLanguageName = (lang: string): string => {
@@ -466,11 +466,53 @@ export default function Projects() {
         return taskPool.slice(0, TASK_POOL_MAX_TOTAL);
     }, []);
 
+    const loadTaskPools = useCallback(async () => {
+        const requestSeq = taskPoolRequestSeqRef.current + 1;
+        taskPoolRequestSeqRef.current = requestSeq;
+        const [auditResult, agentResult, opengrepResult, gitleaksResult] =
+            await Promise.allSettled([
+                api.getAuditTasks(),
+                fetchAgentTaskPool(),
+                fetchOpengrepTaskPool(),
+                fetchGitleaksTaskPool(),
+            ]);
+
+        if (requestSeq !== taskPoolRequestSeqRef.current) {
+            return;
+        }
+
+        setAuditTaskPool(
+            auditResult.status === "fulfilled" &&
+                Array.isArray(auditResult.value)
+                ? auditResult.value
+                : [],
+        );
+        setAgentTaskPool(
+            agentResult.status === "fulfilled" &&
+                Array.isArray(agentResult.value)
+                ? agentResult.value
+                : [],
+        );
+        setOpengrepTaskPool(
+            opengrepResult.status === "fulfilled" &&
+                Array.isArray(opengrepResult.value)
+                ? opengrepResult.value
+                : [],
+        );
+        setGitleaksTaskPool(
+            gitleaksResult.status === "fulfilled" &&
+                Array.isArray(gitleaksResult.value)
+                ? gitleaksResult.value
+                : [],
+        );
+    }, [fetchAgentTaskPool, fetchGitleaksTaskPool, fetchOpengrepTaskPool]);
+
     const loadProjects = async () => {
         try {
             setLoading(true);
             const projectData = await api.getProjects();
-            setProjects(Array.isArray(projectData) ? projectData : []);
+            const normalizedProjects = Array.isArray(projectData) ? projectData : [];
+            setProjects(normalizedProjects);
             setProjectLanguageStatsMap({});
             setProjectPotentialVulnerabilityMap({});
             for (const timer of Object.values(languageStatsPollTimerRef.current)) {
@@ -479,40 +521,16 @@ export default function Projects() {
             languageStatsPollTimerRef.current = {};
             languageStatsRetryCountRef.current = {};
             potentialVulnerabilityLoadingRef.current = {};
+            if (normalizedProjects.length === 0) {
+                taskPoolRequestSeqRef.current += 1;
+                setAuditTaskPool([]);
+                setAgentTaskPool([]);
+                setOpengrepTaskPool([]);
+                setGitleaksTaskPool([]);
+                return;
+            }
 
-            // 任务池属于增强信息，不应阻断项目浏览主列表渲染
-            const [auditResult, agentResult, opengrepResult, gitleaksResult] =
-                await Promise.allSettled([
-                    api.getAuditTasks(),
-                    fetchAgentTaskPool(),
-                    fetchOpengrepTaskPool(),
-                    fetchGitleaksTaskPool(),
-                ]);
-
-            setAuditTaskPool(
-                auditResult.status === "fulfilled" &&
-                    Array.isArray(auditResult.value)
-                    ? auditResult.value
-                    : [],
-            );
-            setAgentTaskPool(
-                agentResult.status === "fulfilled" &&
-                    Array.isArray(agentResult.value)
-                    ? agentResult.value
-                    : [],
-            );
-            setOpengrepTaskPool(
-                opengrepResult.status === "fulfilled" &&
-                    Array.isArray(opengrepResult.value)
-                    ? opengrepResult.value
-                    : [],
-            );
-            setGitleaksTaskPool(
-                gitleaksResult.status === "fulfilled" &&
-                    Array.isArray(gitleaksResult.value)
-                    ? gitleaksResult.value
-                    : [],
-            );
+            void loadTaskPools();
         } catch (error) {
             console.error("Failed to load projects:", error);
             toast.error("加载项目失败");
@@ -894,7 +912,7 @@ export default function Projects() {
 
     const projectRecentTasksMap = useMemo(() => {
         return new Map(
-            filteredProjects.map((project) => [
+            pagedProjects.map((project) => [
                 project.id,
                 getProjectCardRecentTasks({
                     projectId: project.id,
@@ -907,7 +925,7 @@ export default function Projects() {
             ]),
         );
     }, [
-        filteredProjects,
+        pagedProjects,
         auditTaskPool,
         agentTaskPool,
         opengrepTaskPool,
@@ -916,7 +934,7 @@ export default function Projects() {
 
     const projectSummaryStatsMap = useMemo(() => {
         return new Map(
-            filteredProjects.map((project) => [
+            pagedProjects.map((project) => [
                 project.id,
                 getProjectCardSummaryStats({
                     projectId: project.id,
@@ -926,11 +944,11 @@ export default function Projects() {
                 }),
             ]),
         );
-    }, [filteredProjects, auditTaskPool, agentTaskPool, opengrepTaskPool]);
+    }, [pagedProjects, auditTaskPool, agentTaskPool, opengrepTaskPool]);
 
     const projectLanguagesMap = useMemo(() => {
         return new Map(
-            filteredProjects.map((project) => {
+            pagedProjects.map((project) => {
                 try {
                     const parsed = JSON.parse(project.programming_languages || "[]");
                     return [
@@ -946,7 +964,7 @@ export default function Projects() {
                 }
             }),
         );
-    }, [filteredProjects]);
+    }, [pagedProjects]);
 
     const projectDetailFrom = `${location.pathname}${location.search}${location.hash}`;
 
@@ -1702,6 +1720,7 @@ export default function Projects() {
                                     </div>
                                 </div>
 
+                                <DeferredSection delayMs={180} minHeight={420}>
                                 <div className="mt-3 space-y-3">
                                     <div className="grid grid-cols-3 gap-2">
                                         <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
@@ -1775,40 +1794,19 @@ export default function Projects() {
                                             ) : languageStats?.status === "ready" ? (
                                                 <div className="space-y-3">
                                                     <div className="h-[170px]">
-                                                        <ResponsiveContainer width="100%" height="100%">
-                                                            <PieChart>
-                                                                <Pie
-                                                                    data={languageStats.slices}
-                                                                    dataKey="proportion"
-                                                                    nameKey="name"
-                                                                    cx="50%"
-                                                                    cy="50%"
-                                                                    outerRadius={68}
-                                                                    innerRadius={26}
-                                                                    stroke="none"
-                                                                >
-                                                                    {languageStats.slices.map((slice, index) => (
-                                                                        <Cell
-                                                                            key={`${project.id}-${slice.name}`}
-                                                                            fill={
-                                                                                PROJECT_CARD_PIE_COLORS[
-                                                                                    index % PROJECT_CARD_PIE_COLORS.length
-                                                                                ]
-                                                                            }
-                                                                        />
-                                                                    ))}
-                                                                </Pie>
-                                                                <ChartTooltip
-                                                                    formatter={(value: number, _name, payload: any) => {
-                                                                        const item = payload?.payload;
-                                                                        return [
-                                                                            `${(Number(value || 0) * 100).toFixed(2)}% · ${Number(item?.loc || 0).toLocaleString()} 行`,
-                                                                            item?.name || "未知语言",
-                                                                        ];
-                                                                    }}
-                                                                />
-                                                            </PieChart>
-                                                        </ResponsiveContainer>
+                                                        <Suspense
+                                                            fallback={
+                                                                <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
+                                                                    语言图表加载中...
+                                                                </div>
+                                                            }
+                                                        >
+                                                            <ProjectLanguagePieChart
+                                                                projectId={project.id}
+                                                                slices={languageStats.slices}
+                                                                colors={PROJECT_CARD_PIE_COLORS}
+                                                            />
+                                                        </Suspense>
                                                     </div>
                                                     <div className="space-y-1.5 pt-2 border-t border-border/60">
                                                         {languageStats.slices.slice(0, 5).map((slice, index) => (
@@ -1974,6 +1972,7 @@ export default function Projects() {
                                         </div>
                                     </div>
                                 </div>
+                                </DeferredSection>
                                         </>
                                     );
                                 })()}
@@ -2033,14 +2032,18 @@ export default function Projects() {
                 )}
             </div>
 
-            <CreateProjectAuditDialog
-                open={showCreateAuditDialog}
-                onOpenChange={handleCreateAuditDialogOpenChange}
-                onTaskCreated={handleTaskCreated}
-                preselectedProjectId={auditPreselectedProjectId}
-                initialMode={auditInitialMode}
-                navigateOnSuccess={auditNavigateOnSuccess}
-            />
+            {showCreateAuditDialog ? (
+                <Suspense fallback={null}>
+                    <CreateProjectAuditDialog
+                        open={showCreateAuditDialog}
+                        onOpenChange={handleCreateAuditDialogOpenChange}
+                        onTaskCreated={handleTaskCreated}
+                        preselectedProjectId={auditPreselectedProjectId}
+                        initialMode={auditInitialMode}
+                        navigateOnSuccess={auditNavigateOnSuccess}
+                    />
+                </Suspense>
+            ) : null}
 
             {/* Edit Dialog */}
             <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>

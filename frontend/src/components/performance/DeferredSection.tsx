@@ -1,0 +1,118 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/shared/utils/utils";
+
+interface DeferredSectionProps {
+	children: ReactNode;
+	className?: string;
+	delayMs?: number;
+	rootMargin?: string;
+	minHeight?: number;
+	fallback?: ReactNode;
+}
+
+export default function DeferredSection({
+	children,
+	className,
+	delayMs = 250,
+	rootMargin = "240px 0px",
+	minHeight = 320,
+	fallback,
+}: DeferredSectionProps) {
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const [isNearViewport, setIsNearViewport] = useState(false);
+	const [isMounted, setIsMounted] = useState(false);
+
+	useEffect(() => {
+		if (isNearViewport) return;
+		const element = containerRef.current;
+		if (!element) return;
+		if (typeof window === "undefined") {
+			setIsNearViewport(true);
+			return;
+		}
+		if (!("IntersectionObserver" in window)) {
+			setIsNearViewport(true);
+			return;
+		}
+
+		const observer = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					if (entry.isIntersecting) {
+						setIsNearViewport(true);
+						observer.disconnect();
+						break;
+					}
+				}
+			},
+			{
+				rootMargin,
+			},
+		);
+
+		observer.observe(element);
+		return () => observer.disconnect();
+	}, [isNearViewport, rootMargin]);
+
+	useEffect(() => {
+		if (!isNearViewport || isMounted) return;
+		if (typeof window === "undefined") {
+			setIsMounted(true);
+			return;
+		}
+		const idleWindow = window as Window & {
+			requestIdleCallback?: (
+				callback: IdleRequestCallback,
+				options?: IdleRequestOptions,
+			) => number;
+			cancelIdleCallback?: (handle: number) => void;
+		};
+
+		let timeoutId: number | null = null;
+		let idleId: number | null = null;
+
+		const mountSection = () => {
+			setIsMounted(true);
+		};
+
+		timeoutId = window.setTimeout(() => {
+			if (typeof idleWindow.requestIdleCallback === "function") {
+				idleId = idleWindow.requestIdleCallback(mountSection, {
+					timeout: delayMs * 4,
+				});
+				return;
+			}
+			mountSection();
+		}, delayMs);
+
+		return () => {
+			if (timeoutId !== null) {
+				window.clearTimeout(timeoutId);
+			}
+			if (
+				idleId !== null &&
+				typeof idleWindow.cancelIdleCallback === "function"
+			) {
+				idleWindow.cancelIdleCallback(idleId);
+			}
+		};
+	}, [delayMs, isMounted, isNearViewport]);
+
+	return (
+		<div ref={containerRef} className={cn("relative", className)}>
+			{isMounted
+				? children
+				: (fallback ?? (
+					<div
+						className="rounded-lg border border-border/60 bg-muted/15 p-3 space-y-3"
+						style={{ minHeight }}
+					>
+						<Skeleton className="h-4 w-28" />
+						<Skeleton className="h-20 w-full" />
+						<Skeleton className="h-20 w-full" />
+					</div>
+				))}
+		</div>
+	);
+}

@@ -438,8 +438,8 @@ export function formatCreatedAt(time: string): string {
 	});
 }
 
-export function getRelativeTime(time: string): string {
-	const now = new Date();
+export function getRelativeTime(time: string, nowMs = Date.now()): string {
+	const now = new Date(nowMs);
 	const taskDate = new Date(time);
 	const diffMs = now.getTime() - taskDate.getTime();
 	const diffMins = Math.floor(diffMs / 60000);
@@ -462,7 +462,10 @@ export function formatDurationMs(durationMs: number): string {
 	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
-export function getActivityDurationLabel(activity: TaskActivityItem): string {
+export function getActivityDurationLabel(
+	activity: TaskActivityItem,
+	nowMs = Date.now(),
+): string {
 	if (activity.kind === "rule_scan") {
 		if (
 			typeof activity.durationMs === "number" &&
@@ -482,7 +485,7 @@ export function getActivityDurationLabel(activity: TaskActivityItem): string {
 			return "用时：-";
 		}
 		if (activity.status === "running" && started) {
-			const elapsed = Date.now() - new Date(started).getTime();
+			const elapsed = nowMs - new Date(started).getTime();
 			if (Number.isFinite(elapsed) && elapsed >= 0) {
 				return `已运行：${formatDurationMs(elapsed)}`;
 			}
@@ -504,7 +507,7 @@ export function getActivityDurationLabel(activity: TaskActivityItem): string {
 	}
 
 	if (activity.status === "running" && started) {
-		const elapsed = Date.now() - new Date(started).getTime();
+		const elapsed = nowMs - new Date(started).getTime();
 		if (Number.isFinite(elapsed) && elapsed >= 0) {
 			return `已运行：${formatDurationMs(elapsed)}`;
 		}

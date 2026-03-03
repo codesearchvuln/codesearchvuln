@@ -1,19 +1,23 @@
-import Dashboard from "@/pages/Dashboard";
-import Projects from "@/pages/Projects";
-import AgentAudit from "@/pages/AgentAudit";
-import AdminDashboard from "@/pages/AdminDashboard";
-import ProjectDetail from "@/pages/ProjectDetail";
-import OpengrepRules from "@/pages/OpengrepRules";
-import StaticAnalysis from "@/pages/StaticAnalysis";
-import TaskManagementOverview from "@/pages/TaskManagementOverview";
-import TaskManagementStatic from "@/pages/TaskManagementStatic";
-import TaskManagementIntelligent from "@/pages/TaskManagementIntelligent";
-import TaskManagementHybrid from "@/pages/TaskManagementHybrid";
-import ScanConfigOverview from "@/pages/ScanConfigOverview";
-import ScanConfigEngines from "@/pages/ScanConfigEngines";
-import ScanConfigExternalTools from "@/pages/ScanConfigExternalTools";
+import { lazy } from "react";
 import type { ReactNode } from "react";
 import type { I18nKey } from "@/shared/i18n";
+
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Projects = lazy(() => import("@/pages/Projects"));
+const AgentAudit = lazy(() => import("@/pages/AgentAudit"));
+const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
+const ProjectDetail = lazy(() => import("@/pages/ProjectDetail"));
+const OpengrepRules = lazy(() => import("@/pages/OpengrepRules"));
+const StaticAnalysis = lazy(() => import("@/pages/StaticAnalysis"));
+const ScanConfigOverview = lazy(() => import("@/pages/ScanConfigOverview"));
+const ScanConfigEngines = lazy(() => import("@/pages/ScanConfigEngines"));
+const ScanConfigExternalTools = lazy(
+	() => import("@/pages/ScanConfigExternalTools"),
+);
+const TaskManagementOverview = lazy(() => import("@/pages/TaskManagementOverview"));
+const TaskManagementStatic = lazy(() => import("@/pages/TaskManagementStatic"));
+const TaskManagementIntelligent = lazy(() => import("@/pages/TaskManagementIntelligent"));
+const TaskManagementHybrid = lazy(() => import("@/pages/TaskManagementHybrid"));
 
 export interface RouteConfig {
     name: string;
