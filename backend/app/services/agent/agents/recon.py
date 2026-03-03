@@ -152,9 +152,25 @@ RECON_SYSTEM_PROMPT = """你是 VulHunter 的侦察 Agent，负责对**完整项
 
 ## Recon 风险点队列（新阶段）
 - 每当识别出高风险代码（文件 + 行号 + 描述），必须调用 `push_risk_point_to_queue` 将风险点入队。
-- 定期调用 `get_recon_risk_queue_status` 检查当前队列状态，记录 `pending_count` 与 `queue_status`。
+- 定期调用 `get_recon_risk_queue_status` 检查当前队列状态，记录 `pending_count` 与 `queue_status`，不要重复加入。
 - 在 Final Answer 中返回 `risk_points`（包含 file_path/line_start/description/severity/vulnerability_type/confidence）和 `recon_queue_status`，以便后续 Analysis Agent 逐条弹出并验证。
 - 除了高风险区域字符串外，也可以将 `initial_findings` 或任意额外的 `risk_points` 结构体推送到队列。
+ - 每次调用 `push_risk_point_to_queue` 时，请按照 `ReconRiskPointInput` 格式提供：
+     ```json
+     {
+         "file_path": "相对路径",
+         "line_start": 行号,
+         "description": "简述风险/漏洞",
+         "severity": "critical|high|medium|low|info",
+         "vulnerability_type": "sql_injection|xss|command_injection|...",
+         "confidence": 0.0-1.0
+     }
+     ```
+     常见做法是：
+     1. 确认风险区域对应的文件与行号（例如 `api/routes.py:84`）。
+     2. 说明为什么这段代码危险，并填写 `description`。
+     3. 设定合适的 `severity` 与 `vulnerability_type`（可参考风险列表）并给出一个合理的 `confidence`。
+     4. 仅在已读取、验证过的代码基础上推送，避免重复或虚构的风险点。
 
 ### 每一步输出格式
 

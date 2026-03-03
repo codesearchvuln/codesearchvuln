@@ -1,4 +1,5 @@
 """Tools for managing the Recon risk point queue."""
+
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -32,7 +33,15 @@ class GetReconRiskQueueStatusTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "获取 Recon 风险点队列的状态，包括待处理数量和统计信息。"
+        return """获取 Recon 风险点队列的状态，包括待处理数量和统计信息。
+
+                返回值格式:
+                {
+                    "queue_status": {...},  # 详细统计（如 current_size/total_processed/last_push 等）
+                    "pending_count": int    # 当前待处理数量
+                }
+
+                常见用途：在持续审计过程中周期性轮询，确认 Analysis Agent 是否处理完上轮的推送，同时作为数据收敛依据。"""
 
     async def _execute(self, **kwargs) -> ToolResult:
         try:
@@ -60,7 +69,15 @@ class PushRiskPointToQueueTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "将 Recon 发现的风险点推送到 Recon 风险队列中，供后续 Analysis 逐条处理。"
+        return """将 Recon 发现的风险点推送到 Recon 风险队列中，供后续 Analysis 逐条处理。
+
+        输入字段说明（参考 ReconRiskPointInput）：
+        - file_path / line_start / description：必须提供风险位置与描述
+        - severity：critical/high/medium/low/info，缺省为 high
+        - vulnerability_type：比如 sql_injection、xss、command_injection 等
+        - confidence：0.0-1.0，用来记录推断的置信度
+
+        调用后会返回当前队列大小，可据此判断是否需要等待消费。"""
 
     @property
     def args_schema(self):
@@ -90,16 +107,22 @@ class DequeueReconRiskPointTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "从 Recon 风险点队列中取出第一条风险点（FIFO）。"
+        return """从 Recon 风险点队列中取出第一条风险点（FIFO）。
+
+        返回字段: risk_point（已出队的风险点结构），queue_remaining（剩余数量）。
+        可用于手动或自动消费队列中的下一条记录，结合 is_recon_risk_point_in_queue 可用于保障消费一致性。"""
 
     async def _execute(self, **kwargs) -> ToolResult:
         try:
             risk_point = self.queue_service.dequeue(self.task_id)
             remaining = self.queue_service.size(self.task_id)
-            return ToolResult(success=True, data={
-                "risk_point": risk_point,
-                "queue_remaining": remaining,
-            })
+            return ToolResult(
+                success=True,
+                data={
+                    "risk_point": risk_point,
+                    "queue_remaining": remaining,
+                },
+            )
         except Exception as exc:
             logger.error(f"[ReconQueue] Dequeue failed: {exc}")
             return ToolResult(success=False, error=str(exc), data={})
@@ -120,7 +143,11 @@ class PeekReconRiskQueueTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "预览 Recon 风险点队列中的前 N 条记录。"
+        return """预览 Recon 风险点队列中的前 N 条记录。
+
+        输入: limit（最多预览的条数，最大自动限制为 20）。
+        返回: {"findings": [...], "count": 实际条数}。
+        使用场景：理解当前队列内容，避免重复推送，或排查未消费的风险点。"""
 
     @property
     def args_schema(self):
@@ -147,7 +174,10 @@ class ClearReconRiskQueueTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "清空 Recon 风险点队列。"
+        return """清空 Recon 风险点队列。
+
+        作用: 重置队列状态，通常在重新规划侦查任务或出现数据异常时使用。
+        返回: {"success": true/false} 指示是否成功清空。"""
 
     async def _execute(self, **kwargs) -> ToolResult:
         try:
@@ -175,13 +205,19 @@ class IsReconRiskPointInQueueTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "检查指定风险点是否仍在 Recon 风险队列中。"
+        return """检查指定风险点是否仍在 Recon 风险队列中。
+
+        输入字段: 文件路径、行号、可选描述（用于精确匹配）。
+        返回: {"in_queue": bool}。
+        场景: 结合 push/check/consume 流程，确认未消费的风险点避免重复推送。"""
 
     @property
     def args_schema(self):
         return self.Input
 
-    async def _execute(self, file_path: str, line_start: int, description: str = "", **kwargs) -> ToolResult:
+    async def _execute(
+        self, file_path: str, line_start: int, description: str = "", **kwargs
+    ) -> ToolResult:
         try:
             point = {
                 "file_path": file_path,
