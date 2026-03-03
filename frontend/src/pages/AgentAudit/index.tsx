@@ -193,6 +193,7 @@ type UnifiedAgentEvent = {
   tool_input?: unknown;
   tool_output?: unknown;
   tool_duration_ms?: number | null;
+  tokens_used?: number | null;
   error?: string | null;
 };
 
@@ -656,11 +657,11 @@ function AgentAuditPageContent() {
   // but we keep the plumbing in place for future toggles.
   const [bootstrapInputsSummary, setBootstrapInputsSummary] =
     useState<BootstrapInputsSummary | null>(null);
-  const [bootstrapInputFindings, setBootstrapInputFindings] = useState<
+  const [, setBootstrapInputFindings] = useState<
     OpengrepFinding[]
   >([]);
-  const [bootstrapInputsLoading, setBootstrapInputsLoading] = useState(false);
-  const [bootstrapInputsError, setBootstrapInputsError] = useState<string | null>(
+  const [, setBootstrapInputsLoading] = useState(false);
+  const [, setBootstrapInputsError] = useState<string | null>(
     null,
   );
   const [detailViewState, setDetailViewState] = useState<DetailViewState | null>(null);
@@ -717,15 +718,6 @@ function AgentAuditPageContent() {
   const [historicalEventsLoaded, setHistoricalEventsLoaded] =
     useState<boolean>(false);
   const { logoSrc, cycleLogoVariant } = useLogoVariant();
-  const effectiveFindingsCount = useMemo(
-    () =>
-      findings.filter(
-        (item) =>
-          item.status !== "false_positive" &&
-          item.authenticity !== "false_positive",
-      ).length,
-    [findings],
-  );
   const selectedLogItem = useMemo(
     () =>
       detailDialog?.type === "log"
@@ -1576,7 +1568,7 @@ function AgentAuditPageContent() {
             tool: {
               name: toolName,
               status: "running",
-              callId: toolCallId,
+              callId: toolCallId || undefined,
             },
             agentName,
             detail: baseDetail,
@@ -1795,7 +1787,7 @@ function AgentAuditPageContent() {
           event_type: eventType,
           phase: null,
           message: message || null,
-          metadata: metadata || null,
+          metadata: metadata || undefined,
           tool_name: null,
           tool_input: undefined,
           tool_output: undefined,
@@ -1803,7 +1795,10 @@ function AgentAuditPageContent() {
           finding_id:
             toSafeTrimmedString((event as Record<string, unknown>).finding_id) ||
             null,
-          tokens_used: null,
+          tokens_used:
+            typeof event.tokens_used === "number"
+              ? event.tokens_used
+              : undefined,
           timestamp: toSafeTrimmedString(event.timestamp) || "",
         };
         const mergedFindingItem = agentEventToRealtimeItem(normalizedEvent);
