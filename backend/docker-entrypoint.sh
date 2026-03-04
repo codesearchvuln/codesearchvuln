@@ -3,6 +3,17 @@ set -e
 
 echo "🚀 DeepAudit 后端启动中..."
 
+is_true() {
+    case "${1:-}" in
+        1|true|TRUE|True|yes|YES|on|ON)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # 启动前同步 MCP 源码（持久化到数据卷，供后续验证）
 if [ -x "/app/scripts/sync_mcp_sources.sh" ]; then
     /app/scripts/sync_mcp_sources.sh || true
@@ -11,6 +22,13 @@ fi
 # 启动前安装 Codex Skills（持久化到 mcp_data 卷）
 if [ -x "/app/scripts/install_codex_skills.sh" ]; then
     /app/scripts/install_codex_skills.sh
+fi
+
+# 启动前构建统一 Skill Registry（失败不阻断启动）
+if [ -f "/app/scripts/build_skill_registry.py" ] && \
+   is_true "${SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP:-true}"; then
+    .venv/bin/python /app/scripts/build_skill_registry.py --print-json || \
+        echo "[SkillRegistry] build failed, continue startup"
 fi
 
 # 等待 PostgreSQL 就绪

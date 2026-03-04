@@ -76,7 +76,15 @@ TOOL_INPUT_REPAIR_MAP: Dict[str, str] = {
     "dir": "directory",
 }
 
-RETRY_GUARD_TOOLS: Set[str] = {"read_file", "search_code", "pattern_match"}
+RETRY_GUARD_TOOLS: Set[str] = {
+    "read_file",
+    "search_code",
+    "pattern_match",
+    "get_recon_risk_queue_status",
+    "get_queue_status",
+    "dequeue_recon_risk_point",
+    "dequeue_finding",
+}
 WRITE_TOOL_GUARD_NAMES: Set[str] = {"edit_file", "write_file", "move_file", "create_directory"}
 DETERMINISTIC_ERROR_HINTS: Tuple[str, ...] = (
     "文件不存在",
@@ -87,6 +95,14 @@ DETERMINISTIC_ERROR_HINTS: Tuple[str, ...] = (
     "必须提供",
     "参数校验失败",
     "工具参数缺失",
+)
+STRICT_MCP_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
+    "timeout",
+    "timed out",
+    "temporarily unavailable",
+    "connection reset",
+    "connection refused",
+    "network",
 )
 SUPERPOWERS_MAX_RETRIES = 3
 
@@ -3490,6 +3506,34 @@ class BaseAgent(ABC):
         return any(hint in text for hint in DETERMINISTIC_ERROR_HINTS)
 
     @staticmethod
+    def _classify_mcp_strict_error(error_text: str) -> str:
+        normalized = str(error_text or "").strip()
+        lowered = normalized.lower()
+        if not normalized:
+            return "mcp_unknown_error"
+        if normalized.startswith("invalid_recon_queue_service_binding"):
+            return "invalid_recon_queue_service_binding"
+        if normalized.startswith("mcp_runtime_unavailable"):
+            return "mcp_runtime_unavailable"
+        if normalized.startswith("mcp_route_missing"):
+            return "mcp_route_missing"
+        if normalized.startswith("mcp_adapter_unavailable"):
+            return "mcp_adapter_unavailable"
+        if normalized.startswith("skill_not_ready"):
+            return "skill_not_ready"
+        if "object is not callable" in lowered:
+            return "invalid_callable_binding"
+        if normalized.startswith("mcp_unhandled_in_strict_mode"):
+            return "mcp_unhandled_in_strict_mode"
+        if any(hint in lowered for hint in STRICT_MCP_TRANSIENT_ERROR_HINTS):
+            return "mcp_transient_error"
+        return "mcp_non_transient_error"
+
+    @staticmethod
+    def _is_non_transient_mcp_error_class(error_class: str) -> bool:
+        return str(error_class or "") not in {"mcp_transient_error"}
+
+    @staticmethod
     def _get_schema_fields(args_schema: Any) -> Tuple[Set[str], Set[str]]:
         fields: Set[str] = set()
         required_fields: Set[str] = set()
@@ -4304,6 +4348,18 @@ class BaseAgent(ABC):
                 )
                 if last_error:
                     short_circuit_msg += f" 最近错误: {last_error}"
+                short_circuit_metadata: Dict[str, Any] = {
+                    **(write_scope_metadata or {}),
+                    "retry_suppressed": True,
+                    "deterministic_failure_count": deterministic_fail_count,
+                }
+                if mcp_strict_mode:
+                    short_circuit_metadata["mcp_error"] = (
+                        str(last_error or "deterministic_short_circuit")
+                    )
+                    short_circuit_metadata["mcp_error_class"] = self._classify_mcp_strict_error(
+                        str(last_error or "")
+                    )
                 await self.emit_tool_result(
                     resolved_tool_name,
                     short_circuit_msg,
@@ -4312,7 +4368,7 @@ class BaseAgent(ABC):
                     tool_status="failed",
                     alias_used=alias_used,
                     input_repaired=repaired_changes or None,
-                    extra_metadata=write_scope_metadata or None,
+                    extra_metadata=short_circuit_metadata or None,
                 )
                 return (
                     "⚠️ 工具调用已短路\n\n"
@@ -4384,8 +4440,41 @@ class BaseAgent(ABC):
                     **write_scope_metadata,
                     "mcp_strict_mode": True,
                 }
+
+                def _build_strict_failure_metadata(
+                    *,
+                    strict_error: str,
+                    base_metadata: Optional[Dict[str, Any]] = None,
+                ) -> Dict[str, Any]:
+                    error_class = self._classify_mcp_strict_error(strict_error)
+                    non_transient = self._is_non_transient_mcp_error_class(error_class)
+                    current_count = 0
+                    if retry_guard_key and non_transient:
+                        self._deterministic_failure_counts[retry_guard_key] = (
+                            self._deterministic_failure_counts.get(retry_guard_key, 0) + 1
+                        )
+                        self._deterministic_failure_last_error[retry_guard_key] = str(strict_error or "")
+                        current_count = self._deterministic_failure_counts.get(retry_guard_key, 0)
+                    retry_suppressed = bool(
+                        non_transient
+                        or (retry_guard_key and current_count >= 2)
+                    )
+                    merged_failure_meta = {
+                        **(base_metadata or {}),
+                        "mcp_error": str(strict_error or ""),
+                        "mcp_error_class": error_class,
+                        "retry_suppressed": retry_suppressed,
+                    }
+                    if retry_guard_key:
+                        merged_failure_meta["deterministic_failure_count"] = int(current_count)
+                    return merged_failure_meta
+
                 if not mcp_runtime:
                     strict_error = "mcp_runtime_unavailable_strict_mode"
+                    strict_failure_metadata = _build_strict_failure_metadata(
+                        strict_error=strict_error,
+                        base_metadata=strict_metadata,
+                    )
                     await self.emit_tool_result(
                         resolved_tool_name,
                         strict_error,
@@ -4394,7 +4483,7 @@ class BaseAgent(ABC):
                         tool_status="failed",
                         alias_used=alias_used,
                         input_repaired=repaired_changes or None,
-                        extra_metadata=strict_metadata or None,
+                        extra_metadata=strict_failure_metadata or None,
                     )
                     return (
                         "⚠️ MCP 严格模式阻断\n\n"
@@ -4405,6 +4494,10 @@ class BaseAgent(ABC):
 
                 if not mcp_can_handle:
                     strict_error = f"mcp_route_missing:{resolved_tool_name}"
+                    strict_failure_metadata = _build_strict_failure_metadata(
+                        strict_error=strict_error,
+                        base_metadata=strict_metadata,
+                    )
                     await self.emit_tool_result(
                         resolved_tool_name,
                         strict_error,
@@ -4413,7 +4506,7 @@ class BaseAgent(ABC):
                         tool_status="failed",
                         alias_used=alias_used,
                         input_repaired=repaired_changes or None,
-                        extra_metadata=strict_metadata or None,
+                        extra_metadata=strict_failure_metadata or None,
                     )
                     return (
                         "⚠️ MCP 严格模式阻断\n\n"
@@ -4447,6 +4540,9 @@ class BaseAgent(ABC):
                         input_repaired=repaired_changes or None,
                         extra_metadata=merged_meta or None,
                     )
+                    if retry_guard_key:
+                        self._deterministic_failure_counts.pop(retry_guard_key, None)
+                        self._deterministic_failure_last_error.pop(retry_guard_key, None)
                     self._record_tool_context(
                         tool_name=resolved_tool_name,
                         tool_input=repaired_input,
@@ -4460,6 +4556,10 @@ class BaseAgent(ABC):
                     return mcp_output
 
                 strict_error = mcp_result.error or "mcp_unhandled_in_strict_mode"
+                strict_failure_metadata = _build_strict_failure_metadata(
+                    strict_error=strict_error,
+                    base_metadata=merged_meta,
+                )
                 await self.emit_tool_result(
                     resolved_tool_name,
                     mcp_output or strict_error,
@@ -4468,7 +4568,7 @@ class BaseAgent(ABC):
                     tool_status="failed",
                     alias_used=alias_used,
                     input_repaired=repaired_changes or None,
-                    extra_metadata=merged_meta or None,
+                    extra_metadata=strict_failure_metadata or None,
                 )
                 failure_output = (
                     "⚠️ MCP 严格模式执行失败\n\n"
@@ -4477,6 +4577,11 @@ class BaseAgent(ABC):
                     f"**错误**: {strict_error}\n"
                     "MCP 未成功处理，已按严格策略阻断。"
                 )
+                if strict_failure_metadata.get("retry_suppressed") is True:
+                    return (
+                        f"{failure_output}\n\n"
+                        "该错误已判定为确定性/非瞬时，已抑制 superpowers 重试。"
+                    )
                 retry_output = await self._maybe_retry_with_superpowers(
                     requested_tool_name=requested_tool_name,
                     resolved_tool_name=resolved_tool_name,

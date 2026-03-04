@@ -1778,10 +1778,12 @@ def _build_bootstrap_confidence_map_from_rules(
 ) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
     for rule in rules:
-        normalized_confidence = _normalize_bootstrap_confidence(rule.confidence)
+        normalized_confidence = _normalize_bootstrap_confidence(
+            getattr(rule, "confidence", None)
+        )
         if not normalized_confidence:
             continue
-        lookup_values = [rule.id, rule.name]
+        lookup_values = [getattr(rule, "id", None), getattr(rule, "name", None)]
         for raw_value in lookup_values:
             for key in _extract_bootstrap_rule_lookup_keys(raw_value):
                 mapping[key] = normalized_confidence
@@ -2011,49 +2013,60 @@ async def _prepare_embedded_bootstrap_findings(
     opengrep_enabled: bool = True,
     gitleaks_enabled: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Optional[str], str]:
-    if event_emitter:
-        await event_emitter.emit_info(
-            "⏭️ OpenGrep 预扫描已禁用：返回空候选，继续后续流程",
-            metadata={
-                "bootstrap": True,
-                "bootstrap_task_id": None,
-                "bootstrap_source": "disabled_empty_seed",
-                "bootstrap_total_findings": 0,
-                "bootstrap_candidate_count": 0,
-            },
-        )
-    return [], None, "disabled_empty_seed"
+    opengrep_candidates: List[Dict[str, Any]] = []
+    gitleaks_candidates: List[Dict[str, Any]] = []
+    opengrep_total_findings = 0
+    gitleaks_total_findings = 0
 
-    active_rules_result = await db.execute(
-        select(OpengrepRule).where(OpengrepRule.is_active == True)
-    )
-    active_rules = active_rules_result.scalars().all()
-    if not active_rules:
-        await event_emitter.emit_error(
-            "❌ OpenGrep 预处理失败：当前没有启用规则，无法继续智能审计"
-        )
-        raise RuntimeError("OpenGrep 预处理失败：当前没有启用规则")
+    if not opengrep_enabled and not gitleaks_enabled:
+        if event_emitter:
+            await event_emitter.emit_info(
+                "⏭️ 静态预扫未启用：返回空候选，继续后续流程",
+                metadata={
+                    "bootstrap": True,
+                    "bootstrap_task_id": None,
+                    "bootstrap_source": "disabled_empty_seed",
+                    "bootstrap_total_findings": 0,
+                    "bootstrap_candidate_count": 0,
+                },
+            )
+        return [], None, "disabled_empty_seed"
 
-        await event_emitter.emit_info(
-            "🧪 OpenGrep 内嵌预扫开始",
-            metadata={
-                "bootstrap": True,
-                "bootstrap_task_id": None,
-                "bootstrap_source": "embedded_opengrep",
-                "bootstrap_total_findings": 0,
-                "bootstrap_candidate_count": 0,
-            },
+    if opengrep_enabled:
+        active_rules_result = await db.execute(
+            select(OpengrepRule).where(OpengrepRule.is_active == True)
         )
+        active_rules = active_rules_result.scalars().all()
+        if not active_rules:
+            if event_emitter:
+                await event_emitter.emit_error(
+                    "❌ OpenGrep 预处理失败：当前没有启用规则，无法继续智能审计"
+                )
+            raise RuntimeError("OpenGrep 预处理失败：当前没有启用规则")
+
+        if event_emitter:
+            await event_emitter.emit_info(
+                "🧪 OpenGrep 内嵌预扫开始",
+                metadata={
+                    "bootstrap": True,
+                    "bootstrap_task_id": None,
+                    "bootstrap_source": "embedded_opengrep",
+                    "bootstrap_total_findings": 0,
+                    "bootstrap_candidate_count": 0,
+                },
+            )
         try:
             parsed_opengrep_findings = await _run_bootstrap_opengrep_scan(
                 project_root,
                 active_rules,
             )
         except FileNotFoundError as exc:
-            await event_emitter.emit_error("❌ OpenGrep 预处理失败：未安装 opengrep")
+            if event_emitter:
+                await event_emitter.emit_error("❌ OpenGrep 预处理失败：未安装 opengrep")
             raise RuntimeError("OpenGrep 预处理失败：未安装 opengrep") from exc
         except Exception as exc:
-            await event_emitter.emit_error(f"❌ OpenGrep 预处理失败：{str(exc)[:160]}")
+            if event_emitter:
+                await event_emitter.emit_error(f"❌ OpenGrep 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"OpenGrep 预处理失败：{str(exc)[:200]}") from exc
 
         opengrep_total_findings = len(parsed_opengrep_findings)
@@ -2073,23 +2086,26 @@ async def _prepare_embedded_bootstrap_findings(
         )
 
     if gitleaks_enabled:
-        await event_emitter.emit_info(
-            "🧪 Gitleaks 内嵌预扫开始",
-            metadata={
-                "bootstrap": True,
-                "bootstrap_task_id": None,
-                "bootstrap_source": "embedded_gitleaks",
-                "bootstrap_total_findings": 0,
-                "bootstrap_candidate_count": 0,
-            },
-        )
+        if event_emitter:
+            await event_emitter.emit_info(
+                "🧪 Gitleaks 内嵌预扫开始",
+                metadata={
+                    "bootstrap": True,
+                    "bootstrap_task_id": None,
+                    "bootstrap_source": "embedded_gitleaks",
+                    "bootstrap_total_findings": 0,
+                    "bootstrap_candidate_count": 0,
+                },
+            )
         try:
             parsed_gitleaks_findings = await _run_bootstrap_gitleaks_scan(project_root)
         except FileNotFoundError as exc:
-            await event_emitter.emit_error("❌ Gitleaks 预处理失败：未安装 gitleaks")
+            if event_emitter:
+                await event_emitter.emit_error("❌ Gitleaks 预处理失败：未安装 gitleaks")
             raise RuntimeError("Gitleaks 预处理失败：未安装 gitleaks") from exc
         except Exception as exc:
-            await event_emitter.emit_error(f"❌ Gitleaks 预处理失败：{str(exc)[:160]}")
+            if event_emitter:
+                await event_emitter.emit_error(f"❌ Gitleaks 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"Gitleaks 预处理失败：{str(exc)[:200]}") from exc
 
         gitleaks_total_findings = len(parsed_gitleaks_findings)
@@ -2115,20 +2131,21 @@ async def _prepare_embedded_bootstrap_findings(
     else:
         bootstrap_source = "embedded_gitleaks"
 
-    await event_emitter.emit_info(
-        "✅ 内嵌静态预扫完成",
-        metadata={
-            "bootstrap": True,
-            "bootstrap_task_id": None,
-            "bootstrap_source": bootstrap_source,
-            "bootstrap_total_findings": total_findings,
-            "bootstrap_candidate_count": len(merged_candidates),
-            "bootstrap_opengrep_total_findings": opengrep_total_findings,
-            "bootstrap_opengrep_candidate_count": len(opengrep_candidates),
-            "bootstrap_gitleaks_total_findings": gitleaks_total_findings,
-            "bootstrap_gitleaks_candidate_count": len(gitleaks_candidates),
-        },
-    )
+    if event_emitter:
+        await event_emitter.emit_info(
+            "✅ 内嵌静态预扫完成",
+            metadata={
+                "bootstrap": True,
+                "bootstrap_task_id": None,
+                "bootstrap_source": bootstrap_source,
+                "bootstrap_total_findings": total_findings,
+                "bootstrap_candidate_count": len(merged_candidates),
+                "bootstrap_opengrep_total_findings": opengrep_total_findings,
+                "bootstrap_opengrep_candidate_count": len(opengrep_candidates),
+                "bootstrap_gitleaks_total_findings": gitleaks_total_findings,
+                "bootstrap_gitleaks_candidate_count": len(gitleaks_candidates),
+            },
+        )
     return merged_candidates, None, bootstrap_source
 
 
@@ -4345,6 +4362,7 @@ async def _initialize_tools(
         DataFlowAnalysisTool,
         ThinkTool,
         ReflectTool,
+        SkillLookupTool,
         CreateVulnerabilityReportTool,
         ControlFlowAnalysisLightTool,
         JoernReachabilityVerifyTool,
@@ -4560,6 +4578,7 @@ async def _initialize_tools(
         "search_code": FileSearchTool(project_root, exclude_patterns, target_files),
         "think": ThinkTool(),
         "reflect": ReflectTool(),
+        "skill_lookup": SkillLookupTool(),
     }
 
     user_other_config = (user_config or {}).get("otherConfig", {})
@@ -4677,8 +4696,14 @@ async def _initialize_tools(
         # "pmd_scan": PMDTool(project_root, sandbox_manager),
     }
     if recon_queue_service and task_id:
-        recon_tools["push_risk_point_to_queue"] = PushRiskPointToQueueTool(recon_queue_service, task_id)
-        recon_tools["get_recon_risk_queue_status"] = GetReconRiskQueueStatusTool(recon_queue_service, task_id)
+        recon_tools["push_risk_point_to_queue"] = PushRiskPointToQueueTool(
+            queue_service=recon_queue_service,
+            task_id=task_id,
+        )
+        recon_tools["get_recon_risk_queue_status"] = GetReconRiskQueueStatusTool(
+            queue_service=recon_queue_service,
+            task_id=task_id,
+        )
         logger.info(f"[Tools] Added Recon risk queue tools for task {task_id}")
 
     # Analysis 工具
@@ -4842,19 +4867,24 @@ async def _initialize_tools(
 
     if recon_queue_service and task_id:
         orchestrator_tools["get_recon_risk_queue_status"] = GetReconRiskQueueStatusTool(
-            recon_queue_service, task_id
+            queue_service=recon_queue_service,
+            task_id=task_id,
         )
         orchestrator_tools["dequeue_recon_risk_point"] = DequeueReconRiskPointTool(
-            recon_queue_service, task_id
+            queue_service=recon_queue_service,
+            task_id=task_id,
         )
         orchestrator_tools["peek_recon_risk_queue"] = PeekReconRiskQueueTool(
-            recon_queue_service, task_id
+            queue_service=recon_queue_service,
+            task_id=task_id,
         )
         orchestrator_tools["clear_recon_risk_queue"] = ClearReconRiskQueueTool(
-            recon_queue_service, task_id
+            queue_service=recon_queue_service,
+            task_id=task_id,
         )
         orchestrator_tools["is_recon_risk_point_in_queue"] = IsReconRiskPointInQueueTool(
-            recon_queue_service, task_id
+            queue_service=recon_queue_service,
+            task_id=task_id,
         )
         logger.info(f"[Tools] Added Recon queue tools for task {task_id}")
     

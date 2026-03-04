@@ -1,14 +1,36 @@
 """Tools for managing the Recon risk point queue."""
 
-import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
 from .base import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_recon_queue_service_binding(
+    *,
+    queue_service: Any,
+    task_id: str,
+    tool_name: str,
+    required_callables: Tuple[str, ...],
+) -> None:
+    missing = [
+        method_name
+        for method_name in required_callables
+        if not callable(getattr(queue_service, method_name, None))
+    ]
+    if not missing:
+        return
+    missing_text = ",".join(missing)
+    error_token = (
+        "invalid_recon_queue_service_binding:"
+        f"{tool_name}:missing_callable={missing_text}:task_id={task_id}"
+    )
+    logger.error("[ReconQueue] %s", error_token)
+    raise TypeError(error_token)
 
 
 class ReconRiskPointInput(BaseModel):
@@ -22,8 +44,14 @@ class ReconRiskPointInput(BaseModel):
 
 
 class GetReconRiskQueueStatusTool(AgentTool):
-    def __init__(self, queue_service, task_id: str):
+    def __init__(self, *, queue_service: Any, task_id: str):
         super().__init__()
+        _validate_recon_queue_service_binding(
+            queue_service=queue_service,
+            task_id=task_id,
+            tool_name="get_recon_risk_queue_status",
+            required_callables=("stats",),
+        )
         self.queue_service = queue_service
         self.task_id = task_id
 
@@ -58,8 +86,14 @@ class GetReconRiskQueueStatusTool(AgentTool):
 
 
 class PushRiskPointToQueueTool(AgentTool):
-    def __init__(self, queue_service, task_id: str):
+    def __init__(self, *, queue_service: Any, task_id: str):
         super().__init__()
+        _validate_recon_queue_service_binding(
+            queue_service=queue_service,
+            task_id=task_id,
+            tool_name="push_risk_point_to_queue",
+            required_callables=("enqueue", "size"),
+        )
         self.queue_service = queue_service
         self.task_id = task_id
 
@@ -96,8 +130,14 @@ class PushRiskPointToQueueTool(AgentTool):
 
 
 class DequeueReconRiskPointTool(AgentTool):
-    def __init__(self, queue_service, task_id: str):
+    def __init__(self, *, queue_service: Any, task_id: str):
         super().__init__()
+        _validate_recon_queue_service_binding(
+            queue_service=queue_service,
+            task_id=task_id,
+            tool_name="dequeue_recon_risk_point",
+            required_callables=("dequeue", "size"),
+        )
         self.queue_service = queue_service
         self.task_id = task_id
 
@@ -132,8 +172,14 @@ class PeekReconRiskQueueTool(AgentTool):
     class PeekInput(BaseModel):
         limit: int = Field(3, ge=1, description="预览条数")
 
-    def __init__(self, queue_service, task_id: str):
+    def __init__(self, *, queue_service: Any, task_id: str):
         super().__init__()
+        _validate_recon_queue_service_binding(
+            queue_service=queue_service,
+            task_id=task_id,
+            tool_name="peek_recon_risk_queue",
+            required_callables=("peek",),
+        )
         self.queue_service = queue_service
         self.task_id = task_id
 
@@ -163,8 +209,14 @@ class PeekReconRiskQueueTool(AgentTool):
 
 
 class ClearReconRiskQueueTool(AgentTool):
-    def __init__(self, queue_service, task_id: str):
+    def __init__(self, *, queue_service: Any, task_id: str):
         super().__init__()
+        _validate_recon_queue_service_binding(
+            queue_service=queue_service,
+            task_id=task_id,
+            tool_name="clear_recon_risk_queue",
+            required_callables=("clear",),
+        )
         self.queue_service = queue_service
         self.task_id = task_id
 
@@ -194,8 +246,14 @@ class IsReconRiskPointInQueueTool(AgentTool):
         line_start: int = Field(...)
         description: Optional[str] = Field("")
 
-    def __init__(self, queue_service, task_id: str):
+    def __init__(self, *, queue_service: Any, task_id: str):
         super().__init__()
+        _validate_recon_queue_service_binding(
+            queue_service=queue_service,
+            task_id=task_id,
+            tool_name="is_recon_risk_point_in_queue",
+            required_callables=("contains",),
+        )
         self.queue_service = queue_service
         self.task_id = task_id
 

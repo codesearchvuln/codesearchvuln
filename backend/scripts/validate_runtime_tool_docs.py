@@ -23,12 +23,32 @@ from scripts.generate_runtime_tool_docs import (  # noqa: E402
 )
 
 
-REQUIRED_DOC_HEADINGS = [
-    "## Goal",
-    "## Task List",
-    "## Inputs",
-    "## Outputs",
-]
+REQUIRED_DOC_HEADING_ALIASES = {
+    "## Goal": [
+        "## Goal",
+        "## 目标",
+        "## Tool Purpose",
+        "## 概述",
+    ],
+    "## Task List": [
+        "## Task List",
+        "## 推荐调用链",
+        "## 任务清单",
+        "## 工作原理",
+        "## 使用方法",
+        "## Typical Triggers",
+    ],
+    "## Inputs": [
+        "## Inputs",
+        "## 输入参数",
+        "## 输入",
+    ],
+    "## Outputs": [
+        "## Outputs",
+        "## 输出",
+        "## 返回格式",
+    ],
+}
 
 
 def validate_runtime_tool_docs() -> Dict[str, Any]:
@@ -44,7 +64,11 @@ def validate_runtime_tool_docs() -> Dict[str, Any]:
             missing_docs.append(runtime_key)
             continue
         text = doc_path.read_text(encoding="utf-8", errors="replace")
-        missing = [heading for heading in REQUIRED_DOC_HEADINGS if heading not in text]
+        missing = [
+            heading
+            for heading, aliases in REQUIRED_DOC_HEADING_ALIASES.items()
+            if not any(alias in text for alias in aliases)
+        ]
         if missing:
             missing_headings[runtime_key] = missing
 

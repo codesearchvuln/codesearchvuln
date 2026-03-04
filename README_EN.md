@@ -141,6 +141,9 @@ docker compose -f docker-compose.prod.cn.yml up -d
 - `docker-compose.prod.yml` and `docker-compose.prod.cn.yml` use the Nanjing University GHCR mirror (`ghcr.nju.edu.cn/lintsinghua/*`) for faster pulls in CN regions. Replace with your own images/registry for production deployments if needed.
 - The dev build flow defaults to `./scripts/compose-up-with-fallback.sh`: 3 retries with CN mirrors first, then 3 retries with official registries, then fail fast.
 - You can override mirror endpoints with `DOCKERHUB_LIBRARY_MIRROR` and `SANDBOX_IMAGE`.
+- Backend Node/pnpm build now supports mirror-first + official fallback; override with `BACKEND_NPM_REGISTRY_PRIMARY`, `BACKEND_NPM_REGISTRY_FALLBACK`, and `BACKEND_PNPM_VERSION`.
+- Local Compose now disables pnpm optional dependencies by default (`BACKEND_PNPM_INSTALL_OPTIONAL=0`) to avoid long `node-llama-cpp` retry loops; set it to `1` if you require full optional dependencies.
+- Local Compose now skips CJK font installation by default (`BACKEND_INSTALL_CJK_FONTS=0`) to speed up builds; set it to `1` if you need Chinese font rendering.
 - Running `docker compose up -d --build` directly does not include automatic mirror fallback logic.
 - GitHub source sync and task repo download/clone now use a two-step proxy chain by default: `https://gh-proxy.com` -> `https://v6.gh-proxy.org`.
 - Fallback to origin GitHub is disabled by default (`GIT_MIRROR_FALLBACK_TO_ORIGIN=false`); enable it only for troubleshooting.
@@ -150,6 +153,17 @@ Example:
 ```bash
 DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library \
 SANDBOX_IMAGE=ghcr.nju.edu.cn/lintsinghua/deepaudit-sandbox:latest \
+./scripts/compose-up-with-fallback.sh
+```
+
+Backend Node/pnpm mirror fallback example:
+
+```bash
+BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com \
+BACKEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org \
+BACKEND_PNPM_VERSION=9.15.4 \
+BACKEND_PNPM_INSTALL_OPTIONAL=0 \
+BACKEND_INSTALL_CJK_FONTS=0 \
 ./scripts/compose-up-with-fallback.sh
 ```
 

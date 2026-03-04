@@ -198,3 +198,5 @@ backend/data/vector_db/
 commit_message.txt
 
 skills/
+!backend/app/services/agent/skills/
+!backend/app/services/agent/skills/**

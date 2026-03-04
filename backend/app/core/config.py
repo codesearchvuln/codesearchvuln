@@ -1,7 +1,8 @@
 from __future__ import annotations
-from typing import List, Union, Optional
+from typing import Annotated, List, Union, Optional
+from pathlib import Path
 from pydantic import AnyHttpUrl, validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -43,6 +44,39 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return [str(item).strip() for item in v if str(item).strip()]
         return []
+
+    @validator("SKILL_REGISTRY_ROOT", pre=True)
+    def normalize_skill_registry_root(cls, v: Optional[str]) -> str:
+        text = str(v or "").strip() or "./data/mcp/skill-registry"
+        return str(Path(text).expanduser())
+
+    @validator("SKILL_SOURCE_ROOTS", pre=True)
+    def assemble_skill_source_roots(cls, v: Union[str, List[str], None]) -> List[str]:
+        default_roots = [
+            "./data/mcp/codex-home/skills",
+            "~/.agents/skills",
+            "~/.codex/skills",
+            "~/.codex/superpowers/skills",
+        ]
+        if v is None:
+            return [str(Path(item).expanduser()) for item in default_roots]
+        if isinstance(v, str):
+            text = v.strip()
+            if not text:
+                return [str(Path(item).expanduser()) for item in default_roots]
+            if text.startswith("[") and text.endswith("]"):
+                try:
+                    import json
+
+                    parsed = json.loads(text)
+                    if isinstance(parsed, list):
+                        return [str(Path(str(item).strip()).expanduser()) for item in parsed if str(item).strip()]
+                except Exception:
+                    pass
+            return [str(Path(item.strip()).expanduser()) for item in text.split(",") if item.strip()]
+        if isinstance(v, list):
+            return [str(Path(str(item).strip()).expanduser()) for item in v if str(item).strip()]
+        return [str(Path(item).expanduser()) for item in default_roots]
 
     # POSTGRES
     POSTGRES_SERVER: str = "db"
@@ -224,6 +258,17 @@ class Settings(BaseSettings):
     GIT_MIRROR_HOSTS: str = "github.com"
     GIT_MIRROR_ALLOW_AUTH_URL: bool = False
     GIT_MIRROR_FALLBACK_TO_ORIGIN: bool = False
+
+    # Unified Skill Registry
+    SKILL_REGISTRY_ENABLED: bool = True
+    SKILL_REGISTRY_ROOT: str = "./data/mcp/skill-registry"
+    SKILL_SOURCE_ROOTS: Annotated[List[str], NoDecode] = [
+        "./data/mcp/codex-home/skills",
+        "~/.agents/skills",
+        "~/.codex/skills",
+        "~/.codex/superpowers/skills",
+    ]
+    SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP: bool = True
 
     MCP_CODE_INDEX_DAEMON_HOST: str = "127.0.0.1"
     MCP_CODE_INDEX_DAEMON_PORT: int = 8765

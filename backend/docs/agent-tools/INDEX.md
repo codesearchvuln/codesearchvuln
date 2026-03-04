@@ -1,6 +1,6 @@
 # Agent Tool Docs Index
 
-- Runtime 工具总数: **23**
+- Runtime 工具总数: **24**
 - 共享目录: `docs/agent-tools/TOOL_SHARED_CATALOG.md`
 
 ## Tool Docs
@@ -18,6 +18,7 @@
 - `reflect` -> `docs/agent-tools/tools/reflect.md`
 - `search_code` -> `docs/agent-tools/tools/search_code.md`
 - `sequential_thinking` -> `docs/agent-tools/tools/sequential_thinking.md`
+- `skill_lookup` -> `docs/agent-tools/tools/skill_lookup.md`
 - `smart_scan` -> `docs/agent-tools/tools/smart_scan.md`
 - `test_command_injection` -> `docs/agent-tools/tools/test_command_injection.md`
 - `test_deserialization` -> `docs/agent-tools/tools/test_deserialization.md`

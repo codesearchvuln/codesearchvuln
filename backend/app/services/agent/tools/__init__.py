@@ -15,6 +15,7 @@ from .rag_tool import RAGQueryTool, SecurityCodeSearchTool, FunctionContextTool
 from .pattern_tool import PatternMatchTool
 from .code_analysis_tool import CodeAnalysisTool, DataFlowAnalysisTool, VulnerabilityValidationTool
 from .file_tool import FileReadTool, FileSearchTool, ListFilesTool
+from .skill_lookup_tool import SkillLookupTool
 from .sandbox_tool import (
     SandboxTool,
     SandboxHttpTool,
@@ -112,6 +113,7 @@ __all__ = [
     "FileReadTool",
     "FileSearchTool",
     "ListFilesTool",
+    "SkillLookupTool",
     
     # 沙箱
     "SandboxTool",

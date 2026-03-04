@@ -143,6 +143,9 @@ docker compose -f docker-compose.prod.cn.yml up -d
 - `docker-compose.prod.yml` 与 `docker-compose.prod.cn.yml` 默认使用南京大学 GHCR 镜像站（`ghcr.nju.edu.cn/lintsinghua/*`）加速拉取。如需生产镜像部署，可替换为你们自己的镜像地址/私有仓库。
 - 开发构建链路默认使用 `./scripts/compose-up-with-fallback.sh`：先走国内镜像重试 3 次，再自动切官方镜像重试 3 次，全部失败则退出。
 - 如需切换为自建代理/其他镜像站，可覆盖环境变量：`DOCKERHUB_LIBRARY_MIRROR`、`SANDBOX_IMAGE`。
+- 后端 Node/pnpm 构建支持镜像优先+官方回退，可覆盖：`BACKEND_NPM_REGISTRY_PRIMARY`、`BACKEND_NPM_REGISTRY_FALLBACK`、`BACKEND_PNPM_VERSION`。
+- 本地 Compose 默认关闭 pnpm optional 依赖安装（`BACKEND_PNPM_INSTALL_OPTIONAL=0`），可显著减少 `node-llama-cpp` 相关下载重试；如需完整 optional 依赖可设为 `1`。
+- 本地 Compose 默认跳过 CJK 字体安装（`BACKEND_INSTALL_CJK_FONTS=0`）以加快构建；如需中文字体渲染可设置为 `1`。
 - 直接执行 `docker compose up -d --build` 不包含自动切换镜像源逻辑。
 - GitHub 源码同步与任务仓库下载/克隆默认走双代理：`https://gh-proxy.com` -> `https://v6.gh-proxy.org`。
 - 默认不回源 GitHub（`GIT_MIRROR_FALLBACK_TO_ORIGIN=false`）；仅在排障时建议临时开启回源。
@@ -154,6 +157,17 @@ docker compose -f docker-compose.prod.cn.yml up -d
 ```bash
 DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library \
 SANDBOX_IMAGE=ghcr.nju.edu.cn/lintsinghua/deepaudit-sandbox:latest \
+./scripts/compose-up-with-fallback.sh
+```
+
+后端 Node/pnpm 镜像回退示例：
+
+```bash
+BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com \
+BACKEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org \
+BACKEND_PNPM_VERSION=9.15.4 \
+BACKEND_PNPM_INSTALL_OPTIONAL=0 \
+BACKEND_INSTALL_CJK_FONTS=0 \
 ./scripts/compose-up-with-fallback.sh
 ```
 

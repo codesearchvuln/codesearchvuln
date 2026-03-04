@@ -105,20 +105,32 @@
   - 反例/误用: 在无有效输入或无证据时直接下结论。
 
 ## 工具全量索引
+- `business_logic_scan`
 - `controlflow_analysis_light`
 - `create_vulnerability_report`
 - `dataflow_analysis`
 - `extract_function`
+- `go_test`
+- `java_test`
+- `javascript_test`
 - `joern_reachability_verify`
 - `list_files`
 - `logic_authz_analysis`
 - `pattern_match`
+- `php_test`
+- `python_test`
 - `quick_audit`
 - `read_file`
 - `reasoning_trace`
 - `reflect`
+- `ruby_test`
+- `run_code`
+- `sandbox_exec`
+- `sandbox_http`
 - `search_code`
 - `sequential_thinking`
+- `shell_test`
+- `skill_lookup`
 - `smart_scan`
 - `test_command_injection`
 - `test_deserialization`
@@ -127,4 +139,6 @@
 - `test_ssti`
 - `test_xss`
 - `think`
+- `universal_code_test`
 - `universal_vuln_test`
+- `verify_vulnerability`

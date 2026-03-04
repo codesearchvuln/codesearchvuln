@@ -35,6 +35,11 @@ services:
       args:
         - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
         - UV_IMAGE=${UV_IMAGE:-ghcr.nju.edu.cn/astral-sh/uv:latest}
+        - BACKEND_NPM_REGISTRY_PRIMARY=${BACKEND_NPM_REGISTRY_PRIMARY:-https://registry.npmmirror.com}
+        - BACKEND_NPM_REGISTRY_FALLBACK=${BACKEND_NPM_REGISTRY_FALLBACK:-https://registry.npmjs.org}
+        - BACKEND_PNPM_VERSION=${BACKEND_PNPM_VERSION:-9.15.4}
+        - BACKEND_PNPM_INSTALL_OPTIONAL=${BACKEND_PNPM_INSTALL_OPTIONAL:-0}
+        - BACKEND_INSTALL_CJK_FONTS=${BACKEND_INSTALL_CJK_FONTS:-0}
         - http_proxy=
         - https_proxy=
         - HTTP_PROXY=
@@ -142,6 +147,10 @@ services:
       - CODEX_HOME=/app/data/mcp/codex-home
       - CODEX_SKILLS_AUTO_INSTALL=${CODEX_SKILLS_AUTO_INSTALL:-true}
       - CODEX_SKILLS_FAIL_ON_ERROR=${CODEX_SKILLS_FAIL_ON_ERROR:-true}
+      - SKILL_REGISTRY_ENABLED=${SKILL_REGISTRY_ENABLED:-true}
+      - SKILL_REGISTRY_ROOT=${SKILL_REGISTRY_ROOT:-/app/data/mcp/skill-registry}
+      - SKILL_SOURCE_ROOTS=${SKILL_SOURCE_ROOTS:-/app/data/mcp/codex-home/skills,/app/data/mcp/agents-skills,/app/data/mcp/codex-skills,/app/data/mcp/superpowers-skills}
+      - SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP=${SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP:-true}
       # Enable Joern MCP fallback (CodeBadger). Best-effort when the profile isn't enabled.
       - JOERN_MCP_ENABLED=true
       # 禁用代理设置，防止容器内无法连接外部 API
@@ -156,7 +165,7 @@ services:
       redis:
         condition: service_healthy
     # 开发模式：启用 --reload 热重载
-    command: sh -c "if [ -x /app/scripts/sync_mcp_sources.sh ]; then /app/scripts/sync_mcp_sources.sh || true; fi && if [ -x /app/scripts/install_codex_skills.sh ]; then /app/scripts/install_codex_skills.sh; fi && .venv/bin/alembic upgrade head && if [ \"$$RESET_STATIC_SCAN_TABLES_ON_DEPLOY\" = \"true\" ] || [ \"$$RESET_STATIC_SCAN_TABLES_ON_DEPLOY\" = \"1\" ]; then .venv/bin/python scripts/reset_static_scan_tables.py; fi && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "if [ -x /app/scripts/sync_mcp_sources.sh ]; then /app/scripts/sync_mcp_sources.sh || true; fi && if [ -x /app/scripts/install_codex_skills.sh ]; then /app/scripts/install_codex_skills.sh; fi && if [ \"$$SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP\" = \"true\" ] || [ \"$$SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP\" = \"1\" ]; then .venv/bin/python scripts/build_skill_registry.py --print-json || true; fi && .venv/bin/alembic upgrade head && if [ \"$$RESET_STATIC_SCAN_TABLES_ON_DEPLOY\" = \"true\" ] || [ \"$$RESET_STATIC_SCAN_TABLES_ON_DEPLOY\" = \"1\" ]; then .venv/bin/python scripts/reset_static_scan_tables.py; fi && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     networks:
       - deepaudit-network
 
