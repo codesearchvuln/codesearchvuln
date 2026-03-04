@@ -45,6 +45,7 @@ class ControlFlowAnalysisLightTool(AgentTool):
         return (
             "轻量控制流/数据流分析：基于 tree-sitter 和 code2flow 推断从入口到漏洞位置的调用链、"
             "控制条件和可达性分值。适用于不完整代码和不可编译项目。"
+            "优先输入 file_path:line 或显式 line_start 以确保可定位。"
         )
 
     @property

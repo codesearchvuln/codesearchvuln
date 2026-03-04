@@ -301,19 +301,66 @@ class PushFindingToQueueTool(AgentTool):
     def args_schema(self):
         return PushFindingToQueueInput
 
+    @staticmethod
+    def _flatten_finding_payload(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        payload = dict(kwargs or {})
+        nested = payload.get("finding")
+        if isinstance(nested, dict):
+            for key, value in nested.items():
+                payload.setdefault(str(key), value)
+        payload.pop("finding", None)
+        return payload
+
     async def _execute(
         self,
-        file_path: str,
-        line_start: int,
-        title: str,
-        description: str,
-        vulnerability_type: str,
+        file_path: Optional[str] = None,
+        line_start: Optional[int] = None,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        vulnerability_type: Optional[str] = None,
         line_end: Optional[int] = None,
         severity: str = "medium",
         confidence: float = 0.8,
         **kwargs
     ) -> ToolResult:
         """执行工具"""
+        normalized_kwargs = self._flatten_finding_payload(kwargs)
+        if file_path in (None, ""):
+            file_path = normalized_kwargs.get("file_path")
+        if line_start in (None, ""):
+            line_start = normalized_kwargs.get("line_start")
+        if line_end in (None, ""):
+            line_end = normalized_kwargs.get("line_end")
+        if title in (None, ""):
+            title = normalized_kwargs.get("title")
+        if description in (None, ""):
+            description = normalized_kwargs.get("description")
+        if vulnerability_type in (None, ""):
+            vulnerability_type = normalized_kwargs.get("vulnerability_type")
+        if str(severity or "").strip() in {"", "medium"}:
+            severity = str(normalized_kwargs.get("severity") or severity or "medium")
+        if "confidence" in normalized_kwargs:
+            confidence = normalized_kwargs.get("confidence")
+
+        file_path = str(file_path or "").strip()
+        title = str(title or "").strip()
+        description = str(description or "").strip()
+        vulnerability_type = str(vulnerability_type or "").strip()
+        severity = str(severity or "medium").strip().lower()
+
+        try:
+            line_start = int(line_start) if line_start is not None else 0
+        except Exception:
+            line_start = 0
+        try:
+            line_end = int(line_end) if line_end is not None else None
+        except Exception:
+            line_end = None
+        try:
+            confidence = float(confidence)
+        except Exception:
+            confidence = -1.0
+
         # 简单参数校验，确保必填字段有值，并给出正确参数示例
         errors = []
         if not file_path or not file_path.strip():

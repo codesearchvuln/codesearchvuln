@@ -46,20 +46,20 @@ ANALYSIS_SYSTEM_PROMPT = """你是 VulHunter 漏洞分析 Agent，一个**自主
 ```
 Action: push_finding_to_queue
 Action Input: {
-    "finding": {
-        "file_path": "src/example.py",
-        "line_start": 42,
-        "line_end": 45,
-        "title": "src/example.py中handle_request函数SQL注入漏洞",
-        "description": "...",
-        "vulnerability_type": "sql_injection",
-        "severity": "high",
-        "confidence": 0.8,
-        "code_snippet": "...",
-        "function_name": "handle_request"
-    }
+    "file_path": "src/example.py",
+    "line_start": 42,
+    "line_end": 45,
+    "title": "src/example.py中handle_request函数SQL注入漏洞",
+    "description": "...",
+    "vulnerability_type": "sql_injection",
+    "severity": "high",
+    "confidence": 0.8,
+    "code_snippet": "...",
+    "function_name": "handle_request"
 }
 ```
+
+兼容说明：如果你拿到的是 `{"finding": {...}}` 结构，先将 `finding` 对象展开到顶层字段后再调用。
 
 ### ⚠️ 强制要求
 - **每发现一个漏洞必须立即推送到队列**，不得延迟或跳过
@@ -103,6 +103,7 @@ Action Input: {
 - `smart_scan` 综合扫描
 - `pattern_match` 模式匹配
 - ⚠️ **每发现一个漏洞必须立即调用 `push_finding_to_queue` 推送**
+- 调用 `controlflow_analysis_light` 时，优先传 `file_path:line`（如 `src/a.py:88`）或显式传 `line_start`；仅传文件路径会导致缺少定位信息。
 
 ### 第四步: 汇总汇报
 - **在输出 Final Answer 前，确认所有漏洞已推送到队列**
@@ -135,17 +136,15 @@ Action Input: [JSON 格式的参数]
 Thought: [发现了SQL注入漏洞，需要立即推送到队列]
 Action: push_finding_to_queue
 Action Input: {
-    "finding": {
-        "file_path": "app.py",
-        "line_start": 42,
-        "title": "app.py中handle_request函数SQL注入漏洞",
-        "vulnerability_type": "sql_injection",
-        "severity": "high",
-        "description": "...",
-        "code_snippet": "...",
-        "function_name": "handle_request",
-        "confidence": 0.85
-    }
+    "file_path": "app.py",
+    "line_start": 42,
+    "title": "app.py中handle_request函数SQL注入漏洞",
+    "vulnerability_type": "sql_injection",
+    "severity": "high",
+    "description": "...",
+    "code_snippet": "...",
+    "function_name": "handle_request",
+    "confidence": 0.85
 }
 ```
 
@@ -235,16 +234,14 @@ Action Input: {"scan_type": "security", "max_files": 50}
 Thought: 发现SQL注入漏洞，立即推送到队列
 Action: push_finding_to_queue
 Action Input: {
-    "finding": {
-        "file_path": "app.py",
-        "line_start": 45,
-        "title": "app.py中login函数SQL注入漏洞",
-        "vulnerability_type": "sql_injection",
-        "severity": "high",
-        "description": "用户输入未过滤直接拼接到SQL查询",
-        "function_name": "login",
-        "confidence": 0.9
-    }
+    "file_path": "app.py",
+    "line_start": 45,
+    "title": "app.py中login函数SQL注入漏洞",
+    "vulnerability_type": "sql_injection",
+    "severity": "high",
+    "description": "用户输入未过滤直接拼接到SQL查询",
+    "function_name": "login",
+    "confidence": 0.9
 }
 ```
 

@@ -624,7 +624,7 @@ export function getProjectCardPotentialVulnerabilities(params: {
         confidence,
         filePath: finding.file_path,
         line,
-        route: `/static-analysis/${finding.scan_task_id}?opengrepTaskId=${finding.scan_task_id}`,
+        route: `/static-analysis/${finding.scan_task_id}/findings/${finding.id}`,
         groupPriority: 2 as const,
         sortTime: 0,
       };

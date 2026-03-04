@@ -11,6 +11,8 @@
 | `list_files` | `code_index` | `find_files` | `directory/path` | 文件列表 |
 | `locate_enclosing_function` | `code_index` | `get_file_summary` | `file_path`, `line_start` | 所属函数与范围 |
 | `extract_function` | `code_index` | `get_symbol_body` | `file_path`, `function_name/symbol_name` | 函数代码 |
+| `push_finding_to_queue` | local queue tool | `push_finding_to_queue` | `file_path`, `line_start`, `title`, `description`, `vulnerability_type` | 入队结果与队列大小 |
+| `get_recon_risk_queue_status` | local queue tool | `get_recon_risk_queue_status` | 无 | `pending_count` 与统计快照 |
 | `qmd_query` | `qmd` | `deep_search` | `query/searches` | 语义检索结果 |
 | `qmd_get` | `qmd` | `get` | `doc_id/id` | 文档详情 |
 | `qmd_multi_get` | `qmd` | `multi_get` | `ids` | 批量文档结果 |
@@ -56,7 +58,62 @@
 - 误用：使用虚拟工具名（如 `code_search`、`rag_query`）直接执行。
   - 纠偏：改用标准工具名（`search_code`, `read_file`, `qmd_query` 等）。
 
-## 5) 可复制 Action Input 示例
+## 5) 队列工具调用模板（Analysis/Orchestrator）
+
+`push_finding_to_queue`（标准扁平契约）
+
+```json
+{
+  "action": "push_finding_to_queue",
+  "action_input": {
+    "file_path": "src/auth/login.py",
+    "line_start": 88,
+    "line_end": 96,
+    "title": "src/auth/login.py中login函数SQL注入漏洞",
+    "description": "用户输入拼接 SQL 且未参数化。",
+    "vulnerability_type": "sql_injection",
+    "severity": "high",
+    "confidence": 0.9
+  }
+}
+```
+
+兼容历史输入：
+
+```json
+{
+  "action": "push_finding_to_queue",
+  "action_input": {
+    "finding": {
+      "file_path": "src/auth/login.py",
+      "line_start": 88,
+      "title": "src/auth/login.py中login函数SQL注入漏洞",
+      "description": "用户输入拼接 SQL 且未参数化。",
+      "vulnerability_type": "sql_injection"
+    }
+  }
+}
+```
+
+`get_recon_risk_queue_status`（轮询）
+
+```json
+{
+  "action": "get_recon_risk_queue_status",
+  "action_input": {}
+}
+```
+
+## 6) 失败分流（熔断判定）
+
+- 业务输入错误（不计入 adapter 熔断）：
+  - 例：`read_file` 的 `ENOENT` / `No such file or directory` / 参数缺失。
+  - 处理：修正参数，保留 strict MCP，不触发 adapter disable。
+- 基础设施故障（计入 adapter 熔断）：
+  - 例：`server disconnected`, `RemoteProtocolError`, `connection refused`, `status_502/503/504`。
+  - 处理：增加失败计数，达到阈值后 `adapter_disabled_after_failures`。
+
+## 7) 可复制 Action Input 示例
 
 ```json
 {

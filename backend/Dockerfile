@@ -247,7 +247,7 @@ COPY . .
 
 # 创建上传目录并设置启动脚本权限
 RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/code-index /app/data/mcp/xdg-config /app/data/qmd /app/mcp-src /app/mcp-src/code-index-mcp && \
-    chmod +x /app/docker-entrypoint.sh /app/scripts/sync_mcp_sources.sh
+    chmod +x /app/docker-entrypoint.sh /app/scripts/sync_mcp_sources.sh /app/scripts/install_codex_skills.sh
 
 # 暴露端口
 EXPOSE 8000

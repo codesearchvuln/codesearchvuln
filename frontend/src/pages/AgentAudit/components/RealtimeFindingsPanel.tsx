@@ -311,45 +311,56 @@ export default function RealtimeFindingsPanel(props: {
                     key={item.id}
                     className="rounded-lg border border-border bg-background/50 hover:border-primary/30 transition-colors p-3 space-y-2.5"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold break-words line-clamp-2 min-w-0">
-                        {item.display_title || item.title || "未命名缺陷"}
-                      </span>
-                      <Badge variant="outline" className={`text-[11px] ${severityMeta.className}`}>
-                        {severityMeta.label}
-                      </Badge>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-2 text-xs">
-                      <div className="rounded-md border border-border/60 bg-card/60 px-2.5 py-1.5 text-muted-foreground">
-                        类型: <span className="text-foreground">{item.vulnerability_type || "-"}</span>
-                      </div>
-                      <div className="rounded-md border border-border/60 bg-card/60 px-2.5 py-1.5 text-muted-foreground">
-                        定位: <span className="text-foreground break-all">{formatLocation(item)}</span>
-                      </div>
+                    <div className="text-sm font-semibold break-words line-clamp-2 min-w-0">
+                      {item.display_title || item.title || "未命名缺陷"}
                     </div>
 
                     <div className="flex items-center justify-between gap-2">
-                      <Badge
-                        variant="outline"
-                        className={`text-[11px] ${
-                          verificationKey === "verified"
-                            ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10"
-                            : "border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10"
-                        }`}
-                      >
-                        {verificationKey === "verified" ? "已验证" : "待验证"}
-                      </Badge>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Badge
+                          variant="outline"
+                          className={`text-[11px] ${
+                            verificationKey === "verified"
+                              ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10"
+                              : "border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10"
+                          }`}
+                        >
+                          {verificationKey === "verified" ? "已验证" : "待验证"}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={`text-[11px] ${severityMeta.className}`}
+                        >
+                          {severityMeta.label}
+                        </Badge>
+                      </div>
 
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-7 px-2.5 text-[11px]"
+                        className="h-7 px-2.5 text-[11px] shrink-0"
                         onClick={() => setDetailItem(item)}
                       >
                         查看详情
                         <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
                       </Button>
+                    </div>
+
+                    <div className="rounded-md border border-border/60 bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-left">
+                        <span className="min-w-0">
+                          类型:{" "}
+                          <span className="text-foreground break-words">
+                            {item.vulnerability_type || "-"}
+                          </span>
+                        </span>
+                        <span className="min-w-0">
+                          定位:{" "}
+                          <span className="text-foreground break-all">
+                            {formatLocation(item)}
+                          </span>
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );

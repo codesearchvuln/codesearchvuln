@@ -224,6 +224,16 @@ Final Answer: {
         "frameworks": ["FastAPI", "React", ...],
         "databases": ["PostgreSQL", "Redis", ...]
     },
+    "input_surfaces": [
+        {"type": "http_route", "file": "api/routes.py", "line": 23, "method": "POST /api/login"},
+        {"type": "cli", "file": "scripts/sync.py", "line": 10, "entry": "main"}
+    ],
+    "trust_boundaries": [
+        "external_http -> api_gateway",
+        "api_layer -> db_layer",
+        "user_upload -> file_storage"
+    ],
+    "target_files": ["api/routes.py", "src/auth.py", "utils/db.py"],
     "recommended_tools": {
         "must_use": ["semgrep_scan", "gitleaks_scan", ...],
         "recommended": ["kunlun_scan", ...],

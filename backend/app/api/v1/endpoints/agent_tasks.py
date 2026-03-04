@@ -4228,6 +4228,9 @@ def _build_tool_skills_snapshot(*, max_chars: int) -> str:
     index_path = docs_root / "SKILLS_INDEX.md"
     skills_dir = docs_root / "skills"
     preferred_skill_order = [
+        "mcp_reliability_workflow.skill.md",
+        "push_finding_to_queue.skill.md",
+        "get_recon_risk_queue_status.skill.md",
         "read_file.skill.md",
         "search_code.skill.md",
         "list_files.skill.md",
@@ -4237,10 +4240,6 @@ def _build_tool_skills_snapshot(*, max_chars: int) -> str:
     ]
 
     fragments: List[str] = []
-    _playbook_path, playbook_content = _load_mcp_tool_playbook(max_chars=max_chars)
-    if playbook_content.strip():
-        fragments.append(playbook_content.strip())
-
     if index_path.exists():
         try:
             fragments.append(index_path.read_text(encoding="utf-8", errors="replace").strip())
@@ -4261,6 +4260,10 @@ def _build_tool_skills_snapshot(*, max_chars: int) -> str:
                 fragments.append(skill_doc.read_text(encoding="utf-8", errors="replace").strip())
             except Exception as exc:
                 logger.warning("[ToolDocSync] read skill doc failed (%s): %s", skill_doc, exc)
+
+    _playbook_path, playbook_content = _load_mcp_tool_playbook(max_chars=max_chars)
+    if playbook_content.strip():
+        fragments.append(playbook_content.strip())
 
     snapshot = "\n\n---\n\n".join(item for item in fragments if str(item or "").strip())
     if not snapshot.strip():

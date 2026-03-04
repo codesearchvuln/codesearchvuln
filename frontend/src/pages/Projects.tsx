@@ -112,6 +112,8 @@ const LANGUAGE_STATS_MAX_RETRIES = 6;
 const PROJECT_CARD_POTENTIAL_SOURCE_TASK_LIMIT = 3;
 const PROJECT_CARD_POTENTIAL_FINDINGS_FETCH_LIMIT = 200;
 const PROJECT_CARD_POTENTIAL_TOP_LIMIT = 5;
+const STATIC_FINDING_DETAIL_ROUTE_PATTERN =
+    /^\/static-analysis\/[^/]+\/findings\/[^/]+$/;
 const PROJECT_CARD_PIE_COLORS = [
     "#0ea5e9",
     "#22c55e",
@@ -124,6 +126,28 @@ const PROJECT_CARD_PIE_COLORS = [
 function getErrorStatusCode(error: unknown): number {
     const apiError = error as { response?: { status?: number } };
     return Number(apiError?.response?.status || 0);
+}
+
+function appendReturnToForStaticFindingRoute(
+    route: string,
+    returnTo: string,
+): string {
+    const normalizedRoute = String(route || "").trim();
+    if (!normalizedRoute) return normalizedRoute;
+
+    const [pathPart, queryPart = ""] = normalizedRoute.split("?");
+    if (!STATIC_FINDING_DETAIL_ROUTE_PATTERN.test(pathPart)) {
+        return normalizedRoute;
+    }
+
+    if (!returnTo.startsWith("/") || returnTo.startsWith("//")) {
+        return normalizedRoute;
+    }
+
+    const queryParams = new URLSearchParams(queryPart);
+    queryParams.set("returnTo", returnTo);
+    const query = queryParams.toString();
+    return query ? `${pathPart}?${query}` : pathPart;
 }
 const ARCHIVE_SUFFIXES = [
     ".tar.gz",
@@ -172,6 +196,7 @@ type ProjectTaskPoolState = {
 
 export default function Projects() {
     const location = useLocation();
+    const currentRoute = `${location.pathname}${location.search}`;
     const { t } = useI18n();
     const [projects, setProjects] = useState<Project[]>([]);
     const [projectPage, setProjectPage] = useState(1);
@@ -2053,7 +2078,10 @@ export default function Projects() {
                                                     {potentialVulnerabilityState.items.map((item) => (
                                                         <Link
                                                             key={`${project.id}-vuln-${item.id}`}
-                                                            to={item.route}
+                                                            to={appendReturnToForStaticFindingRoute(
+                                                                item.route,
+                                                                currentRoute,
+                                                            )}
                                                             className="block rounded border border-border bg-background/80 px-2.5 py-2 hover:border-primary/40 transition-colors text-left"
                                                         >
                                                             <div className="flex items-center justify-between gap-2">

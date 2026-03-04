@@ -1935,6 +1935,40 @@ class BaseAgent(ABC):
         return value
 
     @staticmethod
+    def _sanitize_file_path_text(raw_value: Any) -> str:
+        text = str(raw_value or "").strip()
+        if not text:
+            return ""
+
+        text = text.strip().strip("`'\"")
+        text = text.replace("\\", "/")
+
+        path_candidate_pattern = re.compile(
+            r"(?P<path>[A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+(?:[:#]\d+(?:-\d+)?)?)"
+        )
+        matched = path_candidate_pattern.search(text)
+        if matched:
+            text = str(matched.group("path") or "").strip()
+        else:
+            text = text.splitlines()[0].strip()
+            text = re.split(r"[，,;；]\s*", text, maxsplit=1)[0].strip()
+
+        text = re.sub(
+            r"[（(][^()（）]{0,120}(?:和其他|and\s+other|others?|等)[^()（）]{0,120}[)）]\s*$",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\s*(?:和其他|等)\S*\s*$",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+        return text.strip().strip("`'\"()[]{}<>，,。！？；;")
+
+    @staticmethod
     def _looks_like_line_suffix(value: str) -> bool:
         return bool(re.fullmatch(r"\d+(?:-\d+)?", str(value or "")))
 
@@ -2111,7 +2145,7 @@ class BaseAgent(ABC):
         for text in reversed(texts):
             for match in pattern.finditer(str(text or "")):
                 raw_path = str(match.group("path") or "").strip()
-                cleaned_path = raw_path.strip("`'\"()[]{}<>，,。！？；;")
+                cleaned_path = self._sanitize_file_path_text(raw_path)
                 if not cleaned_path:
                     continue
                 start_raw = match.group("start")
@@ -3551,6 +3585,9 @@ class BaseAgent(ABC):
         arguments_payload = tool_input.get("arguments")
         if isinstance(arguments_payload, dict):
             envelope_sources.append(("arguments", arguments_payload))
+        finding_payload = tool_input.get("finding")
+        if isinstance(finding_payload, dict):
+            envelope_sources.append(("finding", finding_payload))
         items_payload = tool_input.get("items")
         if isinstance(items_payload, list):
             first_item = next((item for item in items_payload if isinstance(item, dict)), None)
@@ -3621,7 +3658,28 @@ class BaseAgent(ABC):
                             line_source_label = "__raw_input.line_range" if used_raw_input_hint else "__context.line_range"
                             repaired_changes[line_source_label] = "start_line,end_line"
             else:
-                file_hint = {"file_path": file_path}
+                explicit_hint = self._extract_file_hint_from_context([file_path])
+                sanitized_path = str(explicit_hint.get("file_path") or "").strip()
+                if not sanitized_path:
+                    sanitized_path = self._sanitize_file_path_text(file_path)
+                if sanitized_path:
+                    file_hint = {
+                        "file_path": sanitized_path,
+                        "start_line": explicit_hint.get("start_line"),
+                        "end_line": explicit_hint.get("end_line"),
+                    }
+                    if sanitized_path != file_path:
+                        repaired["file_path"] = sanitized_path
+                        repaired_changes["__sanitize.file_path"] = "file_path"
+                else:
+                    file_hint = {"file_path": file_path}
+
+                if "start_line" in schema_fields and repaired.get("start_line") in (None, "") and file_hint.get("start_line") is not None:
+                    repaired["start_line"] = int(file_hint["start_line"])
+                    repaired_changes.setdefault("__sanitize.line_range", "start_line,end_line")
+                if "end_line" in schema_fields and repaired.get("end_line") in (None, "") and file_hint.get("end_line") is not None:
+                    repaired["end_line"] = int(file_hint["end_line"])
+                    repaired_changes.setdefault("__sanitize.line_range", "start_line,end_line")
 
             if "reason_paths" in schema_fields and not repaired.get("reason_paths"):
                 reason_paths = self._collect_reason_paths_for_read(file_hint)
@@ -3677,6 +3735,48 @@ class BaseAgent(ABC):
                     max_lines_value = 200
                     repaired_changes.setdefault("__read_scope.max_lines_clamped", "max_lines")
                 repaired["max_lines"] = int(max_lines_value)
+
+        if tool_name == "controlflow_analysis_light":
+            if "line_start" in schema_fields and repaired.get("line_start") in (None, ""):
+                line_value = repaired.get("line")
+                if line_value in (None, ""):
+                    line_value = repaired.get("start_line")
+                if line_value not in (None, ""):
+                    try:
+                        repaired["line_start"] = int(line_value)
+                        repaired_changes["line"] = "line_start"
+                    except Exception:
+                        pass
+
+            if "line_end" in schema_fields and repaired.get("line_end") in (None, ""):
+                line_end_value = repaired.get("end_line")
+                if line_end_value not in (None, ""):
+                    try:
+                        repaired["line_end"] = int(line_end_value)
+                        repaired_changes["end_line"] = "line_end"
+                    except Exception:
+                        pass
+
+            file_path_candidate = str(
+                repaired.get("file_path")
+                or repaired.get("path")
+                or ""
+            ).strip()
+            if file_path_candidate:
+                controlflow_hint = self._extract_file_hint_from_context([file_path_candidate])
+                normalized_file_path = str(controlflow_hint.get("file_path") or "").strip()
+                if not normalized_file_path:
+                    normalized_file_path = self._sanitize_file_path_text(file_path_candidate)
+                if normalized_file_path:
+                    if repaired.get("file_path") != normalized_file_path:
+                        repaired["file_path"] = normalized_file_path
+                        repaired_changes["__sanitize.file_path"] = "file_path"
+                if "line_start" in schema_fields and repaired.get("line_start") in (None, "") and controlflow_hint.get("start_line") is not None:
+                    repaired["line_start"] = int(controlflow_hint["start_line"])
+                    repaired_changes["__sanitize.file_path_line"] = "line_start"
+                if "line_end" in schema_fields and repaired.get("line_end") in (None, "") and controlflow_hint.get("end_line") is not None:
+                    repaired["line_end"] = int(controlflow_hint["end_line"])
+                    repaired_changes["__sanitize.file_path_line"] = "line_end"
 
         if tool_name == "search_code" and "keyword" in schema_fields:
             keyword = str(repaired.get("keyword") or "").strip()

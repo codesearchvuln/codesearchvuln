@@ -301,6 +301,7 @@ export interface OpengrepFinding {
     scan_task_id: string;
     rule: Record<string, any>;
     rule_name?: string | null;
+    cwe?: string[] | null;
     description?: string | null;
     file_path: string;
     start_line?: number | null;
@@ -399,6 +400,19 @@ export async function getOpengrepScanFindings(params: {
         ...item,
         confidence: normalizeConfidence(item?.confidence),
     }));
+}
+
+export async function getOpengrepScanFinding(params: {
+    taskId: string;
+    findingId: string;
+}): Promise<OpengrepFinding> {
+    const response = await apiClient.get(
+        `/static-tasks/tasks/${params.taskId}/findings/${params.findingId}`,
+    );
+    return {
+        ...response.data,
+        confidence: normalizeConfidence(response.data?.confidence),
+    };
 }
 
 export async function getOpengrepFindingContext(params: {

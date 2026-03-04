@@ -28,6 +28,11 @@ def test_analysis_prompt_requires_two_evidence_classes_and_structured_title():
     assert "流证据" in ANALYSIS_SYSTEM_PROMPT
     assert "dataflow_analysis/controlflow_analysis_light" in ANALYSIS_SYSTEM_PROMPT
     assert "src/time64.c中asctime64_r栈溢出漏洞" in ANALYSIS_SYSTEM_PROMPT
+    assert "\"file_path\": \"src/example.py\"" in ANALYSIS_SYSTEM_PROMPT
+    assert "兼容说明：如果你拿到的是 `{\"finding\": {...}}` 结构" in ANALYSIS_SYSTEM_PROMPT
+    assert "Action Input: {\n    \"finding\": {" not in ANALYSIS_SYSTEM_PROMPT
+    assert "file_path:line" in ANALYSIS_SYSTEM_PROMPT
+    assert "line_start" in ANALYSIS_SYSTEM_PROMPT
 
 
 def test_verification_prompt_requires_flow_fields_and_report_preconditions():

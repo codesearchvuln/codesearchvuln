@@ -9,6 +9,7 @@ const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
 const ProjectDetail = lazy(() => import("@/pages/ProjectDetail"));
 const OpengrepRules = lazy(() => import("@/pages/OpengrepRules"));
 const StaticAnalysis = lazy(() => import("@/pages/StaticAnalysis"));
+const StaticFindingDetail = lazy(() => import("@/pages/StaticFindingDetail"));
 const ScanConfigOverview = lazy(() => import("@/pages/ScanConfigOverview"));
 const ScanConfigEngines = lazy(() => import("@/pages/ScanConfigEngines"));
 const ScanConfigExternalTools = lazy(
@@ -162,6 +163,13 @@ const routes: RouteConfig[] = [
         nameKey: "route.staticAnalysis",
         path: "/static-analysis/:taskId",
         element: <StaticAnalysis />,
+        visible: false,
+        navVisible: false,
+    },
+    {
+        name: "静态漏洞详情",
+        path: "/static-analysis/:taskId/findings/:findingId",
+        element: <StaticFindingDetail />,
         visible: false,
         navVisible: false,
     },

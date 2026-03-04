@@ -980,14 +980,13 @@ class MCPRuntime:
         return None
 
     @staticmethod
-    def _is_infra_error(error_text: str) -> bool:
+    def _is_infra_error(error_text: str, *, tool_name: Optional[str] = None) -> bool:
         text = str(error_text or "").lower()
         if not text:
             return False
-        infra_tokens = (
-            "no such file or directory",
-            "command not found",
-            "enoent",
+        normalized_tool = str(tool_name or "").strip().lower()
+
+        transport_tokens = (
             "adapter unavailable",
             "missing_mcp_stdio_command",
             "command_not_found",
@@ -1009,8 +1008,36 @@ class MCPRuntime:
             "bad gateway",
             "service unavailable",
             "gateway timeout",
+            "command not found",
         )
-        return any(token in text for token in infra_tokens)
+        if any(token in text for token in transport_tokens):
+            return True
+
+        file_input_error_tokens = (
+            "no such file or directory",
+            "enoent",
+            "file not found",
+            "文件不存在",
+            "路径不存在",
+        )
+        if any(token in text for token in file_input_error_tokens):
+            input_sensitive_tools = {
+                "read_file",
+                "write_file",
+                "edit_file",
+                "find_files",
+                "search_files",
+                "search_code_advanced",
+                "get_symbol_body",
+                "get_file_summary",
+            }
+            if normalized_tool in input_sensitive_tools:
+                return False
+            if "project path not set" in text:
+                return True
+            return True
+
+        return False
 
     @staticmethod
     def _is_expected_qmd_verify_error(
@@ -1177,7 +1204,7 @@ class MCPRuntime:
             tools = await selection.adapter.list_tools()
         except Exception as exc:
             error_text = f"{exc}"
-            if self._is_infra_error(error_text):
+            if self._is_infra_error(error_text, tool_name="tools/list"):
                 self._register_adapter_failure(selection.adapter_key)
             return {
                 "success": False,
@@ -1292,7 +1319,7 @@ class MCPRuntime:
                     normalized_tool,
                     exc,
                 )
-            if self._is_infra_error(error_text):
+            if self._is_infra_error(error_text, tool_name=normalized_tool):
                 self._register_adapter_failure(selection.adapter_key)
             return MCPExecutionResult(
                 handled=True,
@@ -1333,7 +1360,7 @@ class MCPRuntime:
         }
         if not success_flag and not error_text:
             error_text = "mcp_tool_failed"
-        if not success_flag and self._is_infra_error(error_text or ""):
+        if not success_flag and self._is_infra_error(error_text or "", tool_name=normalized_tool):
             self._register_adapter_failure(selection.adapter_key)
         if success_flag:
             self._clear_adapter_failure(selection.adapter_key)
@@ -1750,7 +1777,7 @@ class MCPRuntime:
                     exc,
                 )
                 error_text = f"{exc}"
-                if self._is_infra_error(error_text):
+                if self._is_infra_error(error_text, tool_name=attempt_route.mcp_tool_name):
                     self._register_adapter_failure(selection.adapter_key)
                 if attempt_index < len(attempt_plan) - 1:
                     continue
@@ -1819,7 +1846,10 @@ class MCPRuntime:
 
             if not success_flag and not error_text:
                 error_text = "mcp_tool_failed"
-            if not success_flag and self._is_infra_error(error_text or ""):
+            if not success_flag and self._is_infra_error(
+                error_text or "",
+                tool_name=attempt_route.mcp_tool_name,
+            ):
                 self._register_adapter_failure(selection.adapter_key)
 
             if success_flag:

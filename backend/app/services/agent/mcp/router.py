@@ -100,6 +100,22 @@ class MCPToolRouter:
                     return normalized
             return None
 
+        def _sanitize_path(value: Any) -> Optional[str]:
+            normalized = _non_empty_string(value)
+            if not normalized:
+                return None
+            normalized = normalized.replace("\\", "/").strip("`'\"")
+            path_match = re.search(r"([A-Za-z0-9_./-]+\.[A-Za-z0-9_+-]+)", normalized)
+            if path_match:
+                normalized = str(path_match.group(1) or "").strip()
+            normalized = re.sub(
+                r"[（(][^()（）]{0,120}(?:和其他|and\s+other|others?|等)[^()（）]{0,120}[)）]\s*$",
+                "",
+                normalized,
+                flags=re.IGNORECASE,
+            ).strip()
+            return normalized.strip("`'\"")
+
         if tool_name == "list_files":
             directory = _non_empty_string(payload.get("directory"))
             if directory and "path" not in payload:
@@ -137,14 +153,14 @@ class MCPToolRouter:
                 payload["glob"] = file_pattern
 
         if tool_name == "read_file":
-            file_path = payload.get("file_path") or payload.get("path")
-            if isinstance(file_path, str) and file_path.strip():
-                payload["path"] = file_path.strip()
+            file_path = _sanitize_path(payload.get("file_path") or payload.get("path"))
+            if file_path:
+                payload["path"] = file_path
 
         if tool_name in {"edit_file", "write_file"}:
-            file_path = payload.get("file_path") or payload.get("path")
-            if isinstance(file_path, str) and file_path.strip():
-                payload["path"] = file_path.strip()
+            file_path = _sanitize_path(payload.get("file_path") or payload.get("path"))
+            if file_path:
+                payload["path"] = file_path
 
         if tool_name == "extract_function":
             normalized_path = (

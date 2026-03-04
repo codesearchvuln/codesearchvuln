@@ -8,6 +8,11 @@ if [ -x "/app/scripts/sync_mcp_sources.sh" ]; then
     /app/scripts/sync_mcp_sources.sh || true
 fi
 
+# 启动前安装 Codex Skills（持久化到 mcp_data 卷）
+if [ -x "/app/scripts/install_codex_skills.sh" ]; then
+    /app/scripts/install_codex_skills.sh
+fi
+
 # 等待 PostgreSQL 就绪
 echo "⏳ 等待数据库连接..."
 max_retries=30

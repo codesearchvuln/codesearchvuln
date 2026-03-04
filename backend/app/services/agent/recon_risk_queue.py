@@ -125,13 +125,13 @@ class InMemoryReconRiskQueue:
 
     def __init__(self):
         self.queues: Dict[str, List[Dict[str, Any]]] = {}
-        self.stats: Dict[str, Dict[str, Any]] = {}
+        self._stats: Dict[str, Dict[str, Any]] = {}
         self.seen: Dict[str, set[str]] = {}
 
     def _ensure_task(self, task_id: str):
         if task_id not in self.queues:
             self.queues[task_id] = []
-            self.stats[task_id] = {
+            self._stats[task_id] = {
                 "total_enqueued": 0,
                 "total_dequeued": 0,
                 "total_deduplicated": 0,
@@ -154,12 +154,12 @@ class InMemoryReconRiskQueue:
             if not fp:
                 return False
             if fp in self.seen[task_id]:
-                self.stats[task_id]["total_deduplicated"] += 1
+                self._stats[task_id]["total_deduplicated"] += 1
             else:
                 self.seen[task_id].add(fp)
             self.queues[task_id].append(risk_point)
-            self.stats[task_id]["total_enqueued"] += 1
-            self.stats[task_id]["last_enqueue_time"] = datetime.now(timezone.utc).isoformat()
+            self._stats[task_id]["total_enqueued"] += 1
+            self._stats[task_id]["last_enqueue_time"] = datetime.now(timezone.utc).isoformat()
             return True
         except Exception as exc:
             logger.error("[ReconRiskQueue] InMemory enqueue failed: %s", exc)
@@ -171,8 +171,8 @@ class InMemoryReconRiskQueue:
             if not self.queues[task_id]:
                 return None
             item = self.queues[task_id].pop(0)
-            self.stats[task_id]["total_dequeued"] += 1
-            self.stats[task_id]["last_dequeue_time"] = datetime.now(timezone.utc).isoformat()
+            self._stats[task_id]["total_dequeued"] += 1
+            self._stats[task_id]["last_dequeue_time"] = datetime.now(timezone.utc).isoformat()
             return item
         except Exception as exc:
             logger.error("[ReconRiskQueue] InMemory dequeue failed: %s", exc)
@@ -197,7 +197,7 @@ class InMemoryReconRiskQueue:
     def stats(self, task_id: str) -> Dict[str, Any]:
         try:
             self._ensure_task(task_id)
-            data = dict(self.stats[task_id])
+            data = dict(self._stats[task_id])
             data["current_size"] = len(self.queues[task_id])
             return data
         except Exception as exc:
@@ -217,7 +217,7 @@ class InMemoryReconRiskQueue:
         try:
             self._ensure_task(task_id)
             self.queues[task_id].clear()
-            self.stats[task_id] = {
+            self._stats[task_id] = {
                 "total_enqueued": 0,
                 "total_dequeued": 0,
                 "total_deduplicated": 0,

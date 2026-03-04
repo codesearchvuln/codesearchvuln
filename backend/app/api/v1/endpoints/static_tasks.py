@@ -41,7 +41,6 @@ from app.services.upload.upload_manager import UploadManager
 from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
 from app.services.llm.service import LLMService, LLMConfigError
 from app.services.opengrep_confidence import (
-    build_rule_confidence_map as shared_build_rule_confidence_map,
     count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
     extract_finding_payload_confidence as shared_extract_finding_payload_confidence,
     extract_rule_lookup_keys as shared_extract_rule_lookup_keys,
@@ -1557,10 +1556,112 @@ def _extract_finding_payload_confidence(rule_data: Any) -> Optional[str]:
     return shared_extract_finding_payload_confidence(rule_data)
 
 
-def _build_rule_confidence_maps(
-    rows: List[Any],
-) -> Dict[str, Optional[str]]:
-    return shared_build_rule_confidence_map(rows)
+async def _build_finding_rule_lookup_maps(
+    db: AsyncSession,
+    findings: List[OpengrepFinding],
+) -> tuple[
+    Dict[str, Optional[str]],
+    Dict[str, Optional[List[str]]],
+    Dict[str, str],
+]:
+    """为 finding 列表批量构建规则查找映射，避免重复查询。"""
+    rule_name_candidates: set[str] = set()
+    for finding in findings:
+        if not isinstance(finding.rule, dict):
+            continue
+        check_id = finding.rule.get("check_id") or finding.rule.get("id")
+        for key in _extract_rule_lookup_keys(check_id):
+            rule_name_candidates.add(key)
+
+    rule_confidence_map: Dict[str, Optional[str]] = {}
+    rule_cwe_map: Dict[str, Optional[List[str]]] = {}
+    rule_display_name_map: Dict[str, str] = {}
+    if not rule_name_candidates:
+        return rule_confidence_map, rule_cwe_map, rule_display_name_map
+
+    rule_result = await db.execute(
+        select(OpengrepRule.name, OpengrepRule.confidence, OpengrepRule.cwe).where(
+            OpengrepRule.name.in_(rule_name_candidates)
+        )
+    )
+    for rule_name, rule_confidence, rule_cwe in rule_result.all():
+        normalized_rule_name = str(rule_name or "").strip()
+        if not normalized_rule_name:
+            continue
+        for lookup_key in _extract_rule_lookup_keys(normalized_rule_name):
+            rule_confidence_map[lookup_key] = _normalize_confidence(rule_confidence)
+            rule_cwe_map[lookup_key] = rule_cwe
+            rule_display_name_map[lookup_key] = normalized_rule_name
+
+    return rule_confidence_map, rule_cwe_map, rule_display_name_map
+
+
+def _resolve_finding_enrichment(
+    finding: OpengrepFinding,
+    *,
+    rule_confidence_map: Dict[str, Optional[str]],
+    rule_cwe_map: Dict[str, Optional[List[str]]],
+    rule_display_name_map: Dict[str, str],
+) -> tuple[Optional[str], Optional[List[str]], Optional[str]]:
+    """统一解析 finding 的 confidence/cwe/rule_name。"""
+    resolved_confidence = _extract_finding_payload_confidence(finding.rule)
+    resolved_cwe: Optional[List[str]] = None
+    resolved_rule_name: Optional[str] = None
+
+    lookup_keys: List[str] = []
+    if isinstance(finding.rule, dict):
+        check_id = finding.rule.get("check_id") or finding.rule.get("id")
+        lookup_keys = _extract_rule_lookup_keys(check_id)
+
+    for key in lookup_keys:
+        if not resolved_confidence:
+            mapped_confidence = rule_confidence_map.get(key)
+            if mapped_confidence:
+                resolved_confidence = mapped_confidence
+
+        if resolved_cwe is None:
+            mapped_cwe = rule_cwe_map.get(key)
+            if mapped_cwe is not None:
+                resolved_cwe = mapped_cwe
+
+        if not resolved_rule_name:
+            mapped_rule_name = rule_display_name_map.get(key)
+            if mapped_rule_name:
+                resolved_rule_name = mapped_rule_name
+
+        if resolved_confidence and resolved_cwe is not None and resolved_rule_name:
+            break
+
+    return resolved_confidence, resolved_cwe, resolved_rule_name
+
+
+def _serialize_finding_response(
+    finding: OpengrepFinding,
+    *,
+    rule_confidence_map: Dict[str, Optional[str]],
+    rule_cwe_map: Dict[str, Optional[List[str]]],
+    rule_display_name_map: Dict[str, str],
+) -> Dict[str, Any]:
+    resolved_confidence, resolved_cwe, resolved_rule_name = _resolve_finding_enrichment(
+        finding,
+        rule_confidence_map=rule_confidence_map,
+        rule_cwe_map=rule_cwe_map,
+        rule_display_name_map=rule_display_name_map,
+    )
+    return {
+        "id": finding.id,
+        "scan_task_id": finding.scan_task_id,
+        "rule": finding.rule,
+        "description": finding.description,
+        "file_path": finding.file_path,
+        "start_line": finding.start_line,
+        "code_snippet": finding.code_snippet,
+        "severity": finding.severity,
+        "status": finding.status,
+        "confidence": _format_confidence_for_response(resolved_confidence),
+        "cwe": resolved_cwe,
+        "rule_name": resolved_rule_name,
+    }
 
 
 async def _count_high_confidence_findings_by_task_ids(
@@ -2003,81 +2104,65 @@ async def get_static_task_findings(
     result = await db.execute(query)
     findings = result.scalars().all()
 
-    # 批量构建规则名候选，避免 N+1 查询
-    rule_name_candidates: set[str] = set()
-    for finding in findings:
-        if isinstance(finding.rule, dict):
-            check_id = finding.rule.get("check_id") or finding.rule.get("id")
-            for key in _extract_rule_lookup_keys(check_id):
-                rule_name_candidates.add(key)
-
-    rule_confidence_map: Dict[str, Optional[str]] = {}
-    rule_cwe_map: Dict[str, Optional[List[str]]] = {}
-    rule_display_name_map: Dict[str, str] = {}
-    if rule_name_candidates:
-        rule_result = await db.execute(
-            select(OpengrepRule.name, OpengrepRule.confidence, OpengrepRule.cwe).where(
-                OpengrepRule.name.in_(rule_name_candidates)
-            )
-        )
-        for rule_name, rule_confidence, rule_cwe in rule_result.all():
-            normalized_rule_name = str(rule_name)
-            for lookup_key in _extract_rule_lookup_keys(normalized_rule_name):
-                rule_confidence_map[lookup_key] = _normalize_confidence(rule_confidence)
-                rule_cwe_map[lookup_key] = rule_cwe
-                rule_display_name_map[lookup_key] = normalized_rule_name
+    (
+        rule_confidence_map,
+        rule_cwe_map,
+        rule_display_name_map,
+    ) = await _build_finding_rule_lookup_maps(db, findings)
 
     response_findings = []
     for finding in findings:
-        resolved_confidence = _extract_finding_payload_confidence(finding.rule)
-        resolved_cwe = None
-        resolved_rule_name = None
+        finding_dict = _serialize_finding_response(
+            finding,
+            rule_confidence_map=rule_confidence_map,
+            rule_cwe_map=rule_cwe_map,
+            rule_display_name_map=rule_display_name_map,
+        )
 
-        if not resolved_confidence:
-            if isinstance(finding.rule, dict):
-                check_id = finding.rule.get("check_id") or finding.rule.get("id")
-                for key in _extract_rule_lookup_keys(check_id):
-                    if rule_confidence_map.get(key):
-                        resolved_confidence = rule_confidence_map[key]
-                        resolved_rule_name = rule_display_name_map.get(key)
-                        if not resolved_cwe and rule_cwe_map.get(key):
-                            resolved_cwe = rule_cwe_map[key]
-                        break
-        else:
-            # 即使找到了confidence，也继续查找CWE
-            if isinstance(finding.rule, dict):
-                check_id = finding.rule.get("check_id") or finding.rule.get("id")
-                for key in _extract_rule_lookup_keys(check_id):
-                    if rule_cwe_map.get(key):
-                        resolved_cwe = rule_cwe_map[key]
-                    if not resolved_rule_name and rule_display_name_map.get(key):
-                        resolved_rule_name = rule_display_name_map[key]
-                    if resolved_cwe and resolved_rule_name:
-                        break
-
-        if confidence_filter and resolved_confidence != confidence_filter:
+        if confidence_filter and finding_dict.get("confidence") != confidence_filter:
             continue
-
-        finding_dict = {
-            "id": finding.id,
-            "scan_task_id": finding.scan_task_id,
-            "rule": finding.rule,
-            "description": finding.description,
-            "file_path": finding.file_path,
-            "start_line": finding.start_line,
-            "code_snippet": finding.code_snippet,
-            "severity": finding.severity,
-            "status": finding.status,
-            "confidence": _format_confidence_for_response(resolved_confidence),
-            "cwe": resolved_cwe,
-            "rule_name": resolved_rule_name,
-        }
         response_findings.append(finding_dict)
 
     if confidence_filter is not None:
         response_findings = response_findings[skip : skip + limit]
 
     return response_findings
+
+
+@router.get("/tasks/{task_id}/findings/{finding_id}", response_model=OpengrepFindingResponse)
+async def get_static_task_finding(
+    task_id: str,
+    finding_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """获取静态代码扫描任务的单条漏洞详情。"""
+    task_result = await db.execute(select(OpengrepScanTask).where(OpengrepScanTask.id == task_id))
+    if not task_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    finding_result = await db.execute(
+        select(OpengrepFinding).where(
+            (OpengrepFinding.id == finding_id)
+            & (OpengrepFinding.scan_task_id == task_id)
+        )
+    )
+    finding = finding_result.scalar_one_or_none()
+    if not finding:
+        raise HTTPException(status_code=404, detail="漏洞不存在")
+
+    (
+        rule_confidence_map,
+        rule_cwe_map,
+        rule_display_name_map,
+    ) = await _build_finding_rule_lookup_maps(db, [finding])
+
+    return _serialize_finding_response(
+        finding,
+        rule_confidence_map=rule_confidence_map,
+        rule_cwe_map=rule_cwe_map,
+        rule_display_name_map=rule_display_name_map,
+    )
 
 
 @router.get(

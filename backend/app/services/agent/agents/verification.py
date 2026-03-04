@@ -79,6 +79,10 @@ VERIFICATION_SYSTEM_PROMPT = """你是 VulHunter 的漏洞验证 Agent，一个*
   - 用于获取目标函数，构建 Fuzzing Harness
   - 参数: file_path (str), function_name (str), include_imports (bool)
 
+- **create_vulnerability_report**: 在确认漏洞成立后生成标准化验证报告
+  - 报告必须包含标题结构化信息（路径+函数+漏洞名）
+  - 报告中必须保留验证证据与可复现步骤
+
 ### 文件操作
 - **read_file**: 读取代码文件获取上下文
   参数: file_path (str), start_line (int), end_line (int)
@@ -246,6 +250,11 @@ Action Input: [参数]
 Thought: [总结验证结果]
 Final Answer: [JSON 格式的验证报告]
 ```
+
+## 验证结果结构（强约束）
+- 输出中必须包含 `verification_result.flow` 字段，记录调用链、控制条件和可达性结论。
+- 输出中必须包含 `function_trigger_flow` 字段，用于描述触发路径与关键函数序列。
+- 标题必须执行“标题结构化”规则，例如：`src/time64.c中asctime64_r栈溢出漏洞`。
 
 ## ⚠️ 输出格式要求（严格遵守）
 

@@ -86,6 +86,36 @@ class _ReadTool:
         )
 
 
+class _PushFindingSchema(BaseModel):
+    file_path: str
+    line_start: int
+    title: str
+    description: str
+    vulnerability_type: str
+
+
+class _PushFindingTool:
+    args_schema = _PushFindingSchema
+    name = "push_finding_to_queue"
+
+    async def execute(self, **kwargs):
+        return SimpleNamespace(success=True, data=kwargs, error=None, metadata={})
+
+
+class _ControlFlowSchema(BaseModel):
+    file_path: str
+    line_start: int
+    line_end: Optional[int] = None
+
+
+class _ControlFlowTool:
+    args_schema = _ControlFlowSchema
+    name = "controlflow_analysis_light"
+
+    async def execute(self, **kwargs):
+        return SimpleNamespace(success=True, data=kwargs, error=None, metadata={})
+
+
 def _make_agent(tools=None, metadata=None):
     emitter = SimpleNamespace(emit=AsyncMock())
     config = AgentConfig(
@@ -316,6 +346,68 @@ async def test_execute_tool_repairs_search_code_from_recent_thought_context():
     repaired = metadata.get("input_repaired") or {}
     assert repaired.get("__context.keyword") == "keyword"
     assert repaired.get("__context.regex_hint") == "is_regex"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_push_finding_nested_envelope():
+    agent, emitter = _make_agent(tools={"push_finding_to_queue": _PushFindingTool()})
+
+    output = await agent.execute_tool(
+        "push_finding_to_queue",
+        {
+            "finding": {
+                "file_path": "src/auth/login.py",
+                "line_start": 88,
+                "title": "src/auth/login.py中login函数SQL注入漏洞",
+                "description": "用户输入拼接 SQL 且未参数化。",
+                "vulnerability_type": "sql_injection",
+            }
+        },
+    )
+
+    assert "src/auth/login.py" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__envelope.finding.file_path") == "file_path"
+    assert repaired.get("__envelope.finding.line_start") == "line_start"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_read_file_polluted_path_suffix():
+    agent, emitter = _make_agent(tools={"read_file": _ReadTool()})
+
+    output = await agent.execute_tool(
+        "read_file",
+        {"file_path": "src/time64.c(和其他多处)", "start_line": 780, "end_line": 820},
+    )
+
+    assert "src/time64.c" in output
+    assert "和其他多处" not in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__sanitize.file_path") == "file_path"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_controlflow_line_start_from_file_path_suffix():
+    agent, emitter = _make_agent(tools={"controlflow_analysis_light": _ControlFlowTool()})
+
+    output = await agent.execute_tool(
+        "controlflow_analysis_light",
+        {"file_path": "src/login.py:123"},
+    )
+
+    assert "src/login.py" in output
+    assert "123" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__sanitize.file_path_line") in {"line_start", "line_end"}
 
 
 @pytest.mark.asyncio

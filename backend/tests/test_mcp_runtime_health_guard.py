@@ -362,21 +362,20 @@ async def test_fastmcp_stdio_adapter_bootstrap_needs_project_root(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_runtime_marks_adapter_disabled_after_repeated_infra_failures():
+async def test_runtime_file_not_found_error_does_not_trip_circuit_breaker():
     runtime = MCPRuntime(
         enabled=True,
         adapters={"filesystem": _AlwaysFailAdapter()},
         adapter_failure_threshold=2,
     )
 
-    # Two failures trip the circuit breaker.
-    for _ in range(2):
+    for _ in range(3):
         await runtime.execute_tool(
             tool_name="read_file",
             tool_input={"file_path": "src/a.c"},
         )
 
-    assert runtime.can_handle("read_file") is False
+    assert runtime.can_handle("read_file") is True
 
 
 def test_fastmcp_http_adapter_checks_health_endpoint(monkeypatch):
