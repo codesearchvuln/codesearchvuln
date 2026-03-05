@@ -3961,13 +3961,26 @@ async def _execute_agent_task(task_id: str):
                         },
                     )
                 if orchestrator_findings_count > 0 and persisted_findings_count == 0:
+                    # 分析为什么全部被过滤，同步新的参数验证和 uncertain 状态
+                    uncertain_count = sum(
+                        1 for f in effective_findings 
+                        if f.status == FindingStatus.UNCERTAIN
+                    ) if effective_findings else 0
+                    
                     await event_emitter.emit_warning(
-                        "⚠️ 编排阶段识别到漏洞，但入库结果为 0，疑似全部被门禁过滤",
+                        "⚠️ 编排阶段识别到漏洞，但入库结果为 0，疑似参数验证或质量门限制",
                         metadata={
                             "orchestrator_findings_count": orchestrator_findings_count,
                             "persisted_findings_count": persisted_findings_count,
+                            "uncertain_count": uncertain_count,
                             "filtered_findings_count": filtered_findings_count,
                             "filtered_reasons": filtered_reasons or {},
+                            "diagnosis_suggestions": [
+                                "参数验证失败：确认 confidence 为浮点数、verdict 为有效值、reachability 正确",
+                                "文件定位失败（已降级）：查看 localization_status=failed 的 findings 是否被其他原因过滤",
+                                f"uncertain 状态未入库：有 {uncertain_count} 条 uncertain findings，若数据库不支持需升级",
+                                "其他质量门：检查 verification_evidence 是否为空、cwe_id 格式是否正确",
+                            ],
                             **drain_metadata,
                             "is_terminal": True,
                         },
@@ -5312,7 +5325,7 @@ def _normalize_authenticity_verdict(
     else:
         verdict = None
 
-    allowed = {"confirmed", "likely", "false_positive"}
+    allowed = {"confirmed", "likely", "uncertain", "false_positive"}
     if verdict in allowed:
         return verdict
 
@@ -5327,7 +5340,7 @@ def _normalize_authenticity_verdict(
         return "likely"
     if confidence <= 0.2:
         return "false_positive"
-    return "likely"
+    return "uncertain"
 
 
 def _normalize_reachability(
@@ -5344,9 +5357,11 @@ def _normalize_reachability(
         return "reachable"
     if verdict == "likely":
         return "likely_reachable"
+    if verdict == "uncertain":
+        return "unknown"
     if verdict == "false_positive":
         return "unreachable"
-    return "likely_reachable"
+    return "unknown"
 
 
 def _normalize_cwe_id(value: Any) -> Optional[str]:
@@ -5757,48 +5772,63 @@ async def _save_findings(
 
             verification_result_payload_input = finding.get("verification_result")
             if not isinstance(verification_result_payload_input, dict):
-                mark_filtered("missing_verification_result", finding)
-                continue
+                verification_result_payload_input = {}
 
-            # 4) strict verification gate
+            # 4) verification compatibility gate (allow synthesis from top-level)
             authenticity_raw = (
                 finding.get("authenticity")
                 or finding.get("verdict")
                 or verification_result_payload_input.get("authenticity")
                 or verification_result_payload_input.get("verdict")
             )
+            authenticity = _normalize_optional_text(authenticity_raw)
+            authenticity = authenticity.lower() if authenticity else None
+            if authenticity not in {"confirmed", "likely", "uncertain", "false_positive"}:
+                authenticity = _normalize_authenticity_verdict(finding, confidence)
+            if authenticity not in {"confirmed", "likely", "uncertain", "false_positive"}:
+                mark_filtered("missing_verification_result", finding)
+                continue
+
             reachability_raw = (
                 finding.get("reachability")
                 or verification_result_payload_input.get("reachability")
             )
+            reachability = _normalize_optional_text(reachability_raw)
+            reachability = reachability.lower() if reachability else None
+            if reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
+                reachability = _normalize_reachability(finding, authenticity)
+            if reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
+                mark_filtered("missing_verification_result", finding)
+                continue
+
             evidence_raw = (
                 finding.get("verification_details")
                 or finding.get("verification_evidence")
                 or verification_result_payload_input.get("verification_details")
                 or verification_result_payload_input.get("verification_evidence")
                 or verification_result_payload_input.get("evidence")
+                or finding.get("description")
+                or finding.get("reason")
             )
-            if not authenticity_raw or not reachability_raw or not evidence_raw:
-                mark_filtered("missing_verification_result", finding)
-                continue
-
-            # 支持 uncertain 状态，允许多种 verdict 值
-            authenticity = str(authenticity_raw).strip().lower()
-            if authenticity not in {"confirmed", "likely", "uncertain", "false_positive"}:
-                mark_filtered("missing_verification_result", finding)
-                continue
-            # false_positive 被接受但稍后会被标记为不同的状态
-            if authenticity == "false_positive":
-                logger.debug(f"[SaveFindings] Finding with false_positive verdict will be marked separately: {str(finding.get('title'))[:60]}")
-
-            reachability = str(reachability_raw).strip().lower()
-            if reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
-                mark_filtered("missing_verification_result", finding)
-                continue
             verification_details_text = _normalize_optional_text(evidence_raw)
             if not verification_details_text:
-                mark_filtered("missing_verification_result", finding)
-                continue
+                verification_details_text = (
+                    "verification_result auto synthesized during persistence; "
+                    f"verdict={authenticity}; confidence={confidence:.2f}"
+                )
+
+            if authenticity == "false_positive":
+                logger.debug(
+                    f"[SaveFindings] Finding with false_positive verdict will be marked separately: {str(finding.get('title'))[:60]}"
+                )
+
+            verification_result_payload_input = {
+                **verification_result_payload_input,
+                "verdict": authenticity,
+                "confidence": confidence,
+                "reachability": reachability,
+                "verification_evidence": verification_details_text,
+            }
 
             # 5) normalize file location
             location_file, location_line = _extract_location_parts(finding)

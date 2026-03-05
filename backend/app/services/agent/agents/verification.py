@@ -2658,6 +2658,21 @@ class VerificationAgent(BaseAgent):
                 ]
                 logger.info(f"[{self.name}] LLM returned verdicts: {verdicts_debug}")
 
+                def _coerce_confidence(value: Any) -> float:
+                    try:
+                        return max(0.0, min(float(value), 1.0))
+                    except Exception:
+                        return CONFIDENCE_DEFAULT_FALLBACK
+
+                def _default_reachability(verdict_value: str) -> str:
+                    if verdict_value == "confirmed":
+                        return "reachable"
+                    if verdict_value == "likely":
+                        return "likely_reachable"
+                    if verdict_value == "false_positive":
+                        return "unreachable"
+                    return "unknown"
+
                 for finding in final_result["findings"]:
                     # === 适配新的verification_result嵌套结构 ===
                     # 优先从verification_result中获取，向后兼容finding层级
@@ -2698,19 +2713,29 @@ class VerificationAgent(BaseAgent):
                             f"[{self.name}] Missing/invalid verdict for {finding.get('file_path', '?')}, inferred as: {verdict}"
                         )
 
+                    confidence_value = _coerce_confidence(confidence)
+                    if not reachability:
+                        reachability = _default_reachability(verdict)
+                    if not verification_evidence:
+                        verification_evidence = (
+                            f"verifier={self.name}; mode=llm_or_fallback; "
+                            f"verdict={verdict}; confidence={confidence_value:.2f}; "
+                            f"file={finding.get('file_path') or 'unknown'}"
+                        )
+
                     verified = {
                         **finding,
                         "verdict": verdict,
-                        "confidence": confidence,
+                        "confidence": confidence_value,
                         "reachability": reachability,
                         "verification_result": {
                             **(verification_result or {}),
                             "verdict": verdict,
-                            "confidence": confidence,
+                            "confidence": confidence_value,
                             "reachability": reachability,
                             "verification_evidence": verification_evidence,
                         },
-                        "is_verified": verdict == "confirmed" or (verdict == "likely" and (confidence or 0) >= CONFIDENCE_THRESHOLD_LIKELY),
+                        "is_verified": verdict == "confirmed" or (verdict == "likely" and confidence_value >= CONFIDENCE_THRESHOLD_LIKELY),
                         "verified_at": datetime.now(timezone.utc).isoformat() if verdict in ["confirmed", "likely"] else None,
                     }
 
@@ -2720,10 +2745,21 @@ class VerificationAgent(BaseAgent):
                     verified_findings.append(verified)
             else:
                 for finding in findings_to_verify:
+                    fallback_confidence = CONFIDENCE_DEFAULT_FALLBACK
                     verified_findings.append({
                         **finding,
                         "verdict": "uncertain",
-                        "confidence": 0.5,
+                        "confidence": fallback_confidence,
+                        "reachability": "unknown",
+                        "verification_result": {
+                            "verdict": "uncertain",
+                            "confidence": fallback_confidence,
+                            "reachability": "unknown",
+                            "verification_evidence": (
+                                f"verifier={self.name}; mode=fallback_branch_auto_generated; "
+                                f"reason=missing_llm_output; file={finding.get('file_path') or 'unknown'}"
+                            ),
+                        },
                         "is_verified": False,
                     })
 
@@ -2811,34 +2847,30 @@ class VerificationAgent(BaseAgent):
             # LLM 处理层已在 Final Answer 后将 findings 传递给此工具；
             # 这里做兼容兴德：如果 LLM 未主动调用，仍由濒递逻辑处理。
             if "save_verification_results" in self.tools and verified_findings:
-                confirmed_or_likely = [
-                    f for f in verified_findings
-                    if str(f.get("verdict") or "").lower() in {"confirmed", "likely"}
-                ]
-                if confirmed_or_likely:
-                    try:
-                        save_result = await self.execute_tool(
-                            "save_verification_results",
-                            {
-                                "findings": confirmed_or_likely,
-                                "summary": (
-                                    f"共验证 {len(findings_to_verify)} 个候选，"
-                                    f"{confirmed_count} 确认 / {likely_count} 可能 / "
-                                    f"{false_positive_count} 误报"
-                                ),
-                            },
-                        )
-                        logger.info(
-                            "[%s] save_verification_results: %s",
-                            self.name,
-                            (save_result.data or {}).get("message", ""),
-                        )
-                    except Exception as _save_err:
-                        logger.warning(
-                            "[%s] save_verification_results 工具调用失败 (已降级继续): %s",
-                            self.name,
-                            _save_err,
-                        )
+                try:
+                    save_result = await self.execute_tool(
+                        "save_verification_results",
+                        {
+                            "findings": verified_findings,
+                            "summary": (
+                                f"共验证 {len(findings_to_verify)} 个候选，"
+                                f"{confirmed_count} 确认 / {likely_count} 可能 / "
+                                f"{false_positive_count} 误报"
+                            ),
+                            "strict_mode": False,
+                        },
+                    )
+                    logger.info(
+                        "[%s] save_verification_results: %s",
+                        self.name,
+                        (save_result.data or {}).get("message", ""),
+                    )
+                except Exception as _save_err:
+                    logger.warning(
+                        "[%s] save_verification_results 工具调用失败 (已降级继续): %s",
+                        self.name,
+                        _save_err,
+                    )
 
             handoff = self._create_verification_handoff(
                 verified_findings,

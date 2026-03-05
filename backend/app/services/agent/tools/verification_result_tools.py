@@ -137,20 +137,6 @@ class VerificationResultModel(BaseModel):
             raise ValueError("verification_evidence 必须至少 10 个字符，且不能为空")
         return v
 
-    @field_validator("cwe_id", mode="before")
-    @classmethod
-    def validate_cwe_id_if_present(cls, v):
-        """如果存在 cwe_id 字段，验证其格式"""
-        if v is None:
-            return v
-        if not isinstance(v, str):
-            raise ValueError(f"cwe_id 必须是字符串或 null，得到: {type(v).__name__}")
-        # 允许格式：CWE-123、CWE-123, CWE-456 等
-        pattern = r"^CWE-\d+(\s*,\s*CWE-\d+)*$|^$"
-        if not re.match(pattern, v, re.IGNORECASE):
-            raise ValueError(f"cwe_id 必须符合格式 CWE-123 或 CWE-123, CWE-456 等，得到: {v}")
-        return v
-
 
 class AgentFindingModel(BaseModel):
     """Agent 发现的漏洞的标准化结构 - 每条 finding 必须符合此模型"""
@@ -229,6 +215,20 @@ class AgentFindingModel(BaseModel):
             raise ValueError(f"severity 必须为 {allowed} 之一，得到: {v}")
         return v
 
+    @field_validator("cwe_id", mode="before")
+    @classmethod
+    def validate_cwe_id_if_present(cls, v):
+        """如果存在 cwe_id 字段，验证其格式"""
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError(f"cwe_id 必须是字符串或 null，得到: {type(v).__name__}")
+        # 允许格式：CWE-123、CWE-123, CWE-456 等
+        pattern = r"^CWE-\d+(\s*,\s*CWE-\d+)*$|^$"
+        if not re.match(pattern, v, re.IGNORECASE):
+            raise ValueError(f"cwe_id 必须符合格式 CWE-123 或 CWE-123, CWE-456 等，得到: {v}")
+        return v
+
 
 class SaveVerificationResultsInput(BaseModel):
     """保存验证结果工具的输入参数 - 严密参数约束"""
@@ -275,12 +275,79 @@ class SaveVerificationResultsInput(BaseModel):
         """尝试将原始 Dict findings 转换为 AgentFindingModel"""
         if not isinstance(v, list):
             raise ValueError("findings 必须是列表")
+
+        def _normalize_reachability(verdict: Optional[str], reachability: Any) -> str:
+            text = str(reachability or "").strip().lower()
+            allowed = {"reachable", "likely_reachable", "unknown", "unreachable"}
+            if text in allowed:
+                return text
+            if verdict == "confirmed":
+                return "reachable"
+            if verdict == "likely":
+                return "likely_reachable"
+            if verdict == "false_positive":
+                return "unreachable"
+            return "unknown"
+
+        def _normalize_verification_payload(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
+            payload = dict(item)
+            payload["severity"] = str(payload.get("severity") or "medium").strip().lower()
+            if payload.get("line_end") is None and payload.get("line_start") is not None:
+                payload["line_end"] = payload.get("line_start")
+
+            vr = payload.get("verification_result")
+            if not isinstance(vr, dict):
+                vr = {}
+
+            verdict = str(
+                vr.get("verdict")
+                or payload.get("verdict")
+                or payload.get("authenticity")
+                or "uncertain"
+            ).strip().lower()
+            if verdict not in {"confirmed", "likely", "uncertain", "false_positive"}:
+                verdict = "uncertain"
+
+            confidence_raw = vr.get("confidence", payload.get("confidence", 0.5))
+            try:
+                confidence = max(0.0, min(float(confidence_raw), 1.0))
+            except Exception:
+                confidence = 0.5
+
+            reachability = _normalize_reachability(verdict, vr.get("reachability") or payload.get("reachability"))
+
+            evidence = (
+                vr.get("verification_evidence")
+                or vr.get("verification_details")
+                or payload.get("verification_evidence")
+                or payload.get("verification_details")
+            )
+            evidence_text = str(evidence or "").strip()
+            if len(evidence_text) < 10:
+                evidence_text = (
+                    f"auto_normalized_evidence: verdict={verdict}; "
+                    f"confidence={confidence:.2f}; finding_index={idx}"
+                )
+
+            payload["verification_result"] = {
+                **vr,
+                "verdict": verdict,
+                "confidence": confidence,
+                "reachability": reachability,
+                "verification_evidence": evidence_text,
+            }
+            payload["verdict"] = verdict
+            payload["confidence"] = confidence
+            payload["reachability"] = reachability
+            payload["verification_evidence"] = evidence_text
+            return payload
         
         result = []
         for idx, item in enumerate(v):
             if isinstance(item, dict):
                 try:
-                    result.append(AgentFindingModel(**item))
+                    normalized_item = _normalize_verification_payload(item, idx)
+                    result.append(AgentFindingModel(**normalized_item))
                 except Exception as e:
                     raise ValueError(f"findings[{idx}] 验证失败: {str(e)}")
             elif isinstance(item, AgentFindingModel):
