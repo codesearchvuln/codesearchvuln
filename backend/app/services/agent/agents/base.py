@@ -85,6 +85,18 @@ RETRY_GUARD_TOOLS: Set[str] = {
     "dequeue_recon_risk_point",
     "dequeue_finding",
 }
+NON_CACHEABLE_TOOL_NAMES: Set[str] = {
+    "push_finding_to_queue",
+    "get_queue_status",
+    "dequeue_finding",
+    "push_risk_point_to_queue",
+    "get_recon_risk_queue_status",
+    "dequeue_recon_risk_point",
+    "peek_recon_risk_queue",
+    "clear_recon_risk_queue",
+    "is_recon_risk_point_in_queue",
+    "is_finding_in_queue",
+}
 WRITE_TOOL_GUARD_NAMES: Set[str] = {"edit_file", "write_file", "move_file", "create_directory"}
 DETERMINISTIC_ERROR_HINTS: Tuple[str, ...] = (
     "文件不存在",
@@ -4518,14 +4530,17 @@ class BaseAgent(ABC):
                     )
                 )
 
+            normalized_resolved_tool_name = str(resolved_tool_name or "").strip().lower()
             cached_output = self._tool_success_cache.get(tool_call_key)
-            runtime_cache_priority = bool(
-                mcp_runtime
-                and str(resolved_tool_name or "").strip().lower()
-                in {"qmd_query", "read_file", "search_code"}
-            )
+            runtime_cache_priority = normalized_resolved_tool_name in {
+                "qmd_query",
+                "read_file",
+                "search_code",
+            }
+            cache_bypass = normalized_resolved_tool_name in NON_CACHEABLE_TOOL_NAMES
             if (
                 not is_write_tool
+                and not cache_bypass
                 and call_count >= 2
                 and cached_output is not None
                 and not runtime_cache_priority
@@ -4752,7 +4767,7 @@ class BaseAgent(ABC):
                         tool_input=repaired_input,
                         tool_metadata=mcp_result_meta,
                     )
-                    if not is_write_tool:
+                    if not is_write_tool and not cache_bypass:
                         self._tool_success_cache[tool_call_key] = mcp_output
                         if len(self._tool_success_cache) > 500:
                             oldest_key = next(iter(self._tool_success_cache))
@@ -4893,7 +4908,7 @@ class BaseAgent(ABC):
                         input_repaired=repaired_changes or None,
                         extra_metadata=proxy_metadata,
                     )
-                    if not is_write_tool:
+                    if not is_write_tool and not cache_bypass:
                         self._tool_success_cache[tool_call_key] = fallback_output
                         if len(self._tool_success_cache) > 500:
                             oldest_key = next(iter(self._tool_success_cache))
@@ -4966,7 +4981,7 @@ class BaseAgent(ABC):
                             tool_input=repaired_input,
                             tool_metadata=mcp_result_meta,
                         )
-                        if not is_write_tool:
+                        if not is_write_tool and not cache_bypass:
                             self._tool_success_cache[tool_call_key] = mcp_output
                             if len(self._tool_success_cache) > 500:
                                 oldest_key = next(iter(self._tool_success_cache))
@@ -5000,7 +5015,7 @@ class BaseAgent(ABC):
                             input_repaired=repaired_changes or None,
                             extra_metadata=merged_fallback_metadata or None,
                         )
-                        if not is_write_tool:
+                        if not is_write_tool and not cache_bypass:
                             self._tool_success_cache[tool_call_key] = fallback_output
                             if len(self._tool_success_cache) > 500:
                                 oldest_key = next(iter(self._tool_success_cache))
@@ -5266,7 +5281,7 @@ class BaseAgent(ABC):
                         output[:MAX_EVENT_PAYLOAD_CHARS]
                         + f"\n\n... [输出已截断，共 {len(str(result.data))} 字符]"
                     )
-                if not is_write_tool:
+                if not is_write_tool and not cache_bypass:
                     self._tool_success_cache[tool_call_key] = output
                     if len(self._tool_success_cache) > 500:
                         oldest_key = next(iter(self._tool_success_cache))
