@@ -328,7 +328,8 @@ class FindingStatus:
     """发现状态"""
     NEW = "new"               # 新发现
     ANALYZING = "analyzing"   # 分析中
-    VERIFIED = "verified"     # 已验证
+    VERIFIED = "verified"     # 已验证（confirmed 或 likely 状态）
+    UNCERTAIN = "uncertain"   # 不确定（信息不足，需进一步验证）
     FALSE_POSITIVE = "false_positive"  # 误报
     NEEDS_REVIEW = "needs_review"      # 需要人工审核
     FIXED = "fixed"           # 已修复
@@ -389,6 +390,12 @@ class AgentFinding(Base):
     # AI 解释
     ai_explanation = Column(Text, nullable=True)
     ai_confidence = Column(Float, nullable=True)  # AI 置信度 0-1
+    
+    # 验证 Agent 的标准化结果（与 VerificationResultModel 对应）
+    verdict = Column(String(20), nullable=True, index=True)  # confirmed|likely|uncertain|false_positive
+    confidence = Column(Float, nullable=True)  # 验证置信度 [0.0-1.0]
+    reachability = Column(String(30), nullable=True)  # reachable|likely_reachable|unknown|unreachable
+    verification_evidence = Column(Text, nullable=True)  # 验证证据
     
     # XAI (可解释AI)
     xai_what = Column(Text, nullable=True)

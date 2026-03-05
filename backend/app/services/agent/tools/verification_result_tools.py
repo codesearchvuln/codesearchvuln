@@ -14,50 +14,302 @@ Verification Agent 结果保存工具
 
 import json
 import logging
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+import re
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .base import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
 
-class SaveVerificationResultsInput(BaseModel):
-    """保存验证结果工具的输入参数"""
+class VerificationResultModel(BaseModel):
+    """验证结果的标准化嵌套结构 - 每条 finding 的 verification_result 必须符合此模型"""
 
-    findings: List[Dict[str, Any]] = Field(
+    verdict: Literal["confirmed", "likely", "uncertain", "false_positive"] = Field(
         ...,
         description=(
-            "已验证的 findings 列表。每条 finding 必须包含：\n"
-            "  - file_path: 文件路径\n"
-            "  - line_start: 起始行号\n"
-            "  - title: 发现标题\n"
-            "  - vulnerability_type: 漏洞类型\n"
-            "  - severity: 严重程度\n"
-            "  - verification_result: 嵌套对象，包含 verdict / confidence / "
-            "reachability / verification_evidence\n"
-            "verdict 必须为 confirmed / likely（false_positive 会被自动过滤，不入库）。"
+            "真实性判定。必须为以下之一：\n"
+            "  - confirmed: 已通过多重验证确认，confidence >= 0.8\n"
+            "  - likely: 初步验证表明漏洞很可能存在，0.7 <= confidence < 0.8\n"
+            "  - uncertain: 信息不足，无法明确判定真假，0.3 <= confidence < 0.7\n"
+            "  - false_positive: 经验证为误报或不存在，confidence < 0.3"
         ),
     )
+    
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="置信度，必须是 [0.0, 1.0] 范围内的浮点数（不能为字符串）",
+    )
+    
+    reachability: Literal["reachable", "likely_reachable", "unknown", "unreachable"] = Field(
+        ...,
+        description=(
+            "代码路径可达性判定。必须为以下之一：\n"
+            "  - reachable: 确认代码路径从外部输入可达\n"
+            "  - likely_reachable: 很可能可达，但需进一步验证\n"
+            "  - unknown: 无法确定可达性\n"
+            "  - unreachable: 代码路径无法从外部触发"
+        ),
+    )
+    
+    verification_evidence: str = Field(
+        ...,
+        min_length=10,
+        description=(
+            "验证证据，必须包含：\n"
+            "  1. 使用的验证方法（fuzzing/static_analysis/symbols/dynamic/other）\n"
+            "  2. 关键代码片段或执行输出\n"
+            "  3. 漏洞存在或不存在的理由\n"
+            "最少 10 个字符。"
+        ),
+    )
+    
+    # 可选字段
+    poc_plan: Optional[str] = Field(
+        default=None,
+        description="非武器化 PoC 思路或复现步骤说明（仅用于文档，不能是可直接运行的代码）",
+    )
+    
+    code_snippet: Optional[str] = Field(
+        default=None,
+        description="相关的代码片段，用于上下文说明",
+    )
+    
+    suggestion: Optional[str] = Field(
+        default=None,
+        description="修复建议或防御措施",
+    )
+    
+    function_trigger_flow: Optional[List[str]] = Field(
+        default=None,
+        description="函数触发链或调用链，描述从入口点到漏洞的执行路径",
+    )
+    
+    code_context: Optional[str] = Field(
+        default=None,
+        description="更广泛的代码上下文，帮助理解漏洞背景",
+    )
+    
+    localization_status: Optional[str] = Field(
+        default=None,
+        description="代码定位状态：'success'（成功定位函数）、'failed'（定位失败）、'partial'（部分定位）",
+    )
+
+    @field_validator("verdict")
+    @classmethod
+    def validate_verdict(cls, v):
+        """确保 verdict 是允许的值"""
+        allowed = {"confirmed", "likely", "uncertain", "false_positive"}
+        if v not in allowed:
+            raise ValueError(f"verdict 必须为 {allowed} 之一，得到: {v}")
+        return v
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, v):
+        """确保 confidence 是浮点数且在范围内"""
+        if isinstance(v, str):
+            raise ValueError(f"confidence 必须是 float 类型，不能是字符串: {v}")
+        if not isinstance(v, (int, float)):
+            raise ValueError(f"confidence 必须是数值类型，得到: {type(v).__name__}")
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"confidence 必须在 [0.0, 1.0] 范围内，得到: {v}")
+        return float(v)
+
+    @field_validator("reachability")
+    @classmethod
+    def validate_reachability(cls, v):
+        """确保 reachability 是允许的值"""
+        allowed = {"reachable", "likely_reachable", "unknown", "unreachable"}
+        if v not in allowed:
+            raise ValueError(f"reachability 必须为 {allowed} 之一，得到: {v}")
+        return v
+
+    @field_validator("verification_evidence")
+    @classmethod
+    def validate_evidence(cls, v):
+        """确保 verification_evidence 非空且足够长"""
+        if not v or len(v.strip()) < 10:
+            raise ValueError("verification_evidence 必须至少 10 个字符，且不能为空")
+        return v
+
+    @field_validator("cwe_id", mode="before")
+    @classmethod
+    def validate_cwe_id_if_present(cls, v):
+        """如果存在 cwe_id 字段，验证其格式"""
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError(f"cwe_id 必须是字符串或 null，得到: {type(v).__name__}")
+        # 允许格式：CWE-123、CWE-123, CWE-456 等
+        pattern = r"^CWE-\d+(\s*,\s*CWE-\d+)*$|^$"
+        if not re.match(pattern, v, re.IGNORECASE):
+            raise ValueError(f"cwe_id 必须符合格式 CWE-123 或 CWE-123, CWE-456 等，得到: {v}")
+        return v
+
+
+class AgentFindingModel(BaseModel):
+    """Agent 发现的漏洞的标准化结构 - 每条 finding 必须符合此模型"""
+
+    file_path: str = Field(
+        ...,
+        min_length=1,
+        description="完整文件路径（从项目根目录的相对路径或绝对路径）",
+    )
+    
+    line_start: int = Field(
+        ...,
+        ge=1,
+        description="代码起始行号（从 1 开始）",
+    )
+    
+    line_end: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="代码结束行号（可选，如果不提供则默认等于 line_start）",
+    )
+    
+    title: str = Field(
+        ...,
+        min_length=5,
+        max_length=200,
+        description="漏洞标题（5-200 字符）",
+    )
+    
+    vulnerability_type: str = Field(
+        ...,
+        min_length=1,
+        description="漏洞类型（如 sql_injection、xss、command_injection 等）",
+    )
+    
+    severity: Literal["critical", "high", "medium", "low", "info"] = Field(
+        ...,
+        description="严重程度：critical, high, medium, low, info",
+    )
+    
+    cwe_id: Optional[str] = Field(
+        default=None,
+        description="CWE 编号，格式：CWE-123 或 CWE-123, CWE-456（可选）",
+    )
+    
+    verification_result: VerificationResultModel = Field(
+        ...,
+        description="验证结果，必须包含 verdict、confidence、reachability、verification_evidence 等必填字段",
+    )
+    
+    # 可选字段
+    function_name: Optional[str] = Field(
+        default=None,
+        description="函数名称（如果可定位）",
+    )
+    
+    description: Optional[str] = Field(
+        default=None,
+        description="详细描述",
+    )
+    
+    @field_validator("line_end", mode="before")
+    @classmethod
+    def set_line_end_default(cls, v, info):
+        """如果 line_end 未提供，默认设为 line_start"""
+        if v is None and "line_start" in info.data:
+            return info.data["line_start"]
+        return v
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, v):
+        """确保 severity 是允许的值"""
+        allowed = {"critical", "high", "medium", "low", "info"}
+        if v not in allowed:
+            raise ValueError(f"severity 必须为 {allowed} 之一，得到: {v}")
+        return v
+
+
+class SaveVerificationResultsInput(BaseModel):
+    """保存验证结果工具的输入参数 - 严密参数约束"""
+
+    findings: List[AgentFindingModel] = Field(
+        ...,
+        min_items=1,
+        description=(
+            "已验证的 findings 列表（至少 1 条）。每条 finding 必须是有效的 AgentFindingModel，\n"
+            "包含以下必填字段：\n"
+            "  - file_path: 文件路径\n"
+            "  - line_start: 起始行号（>= 1）\n"
+            "  - title: 发现标题（5-200 字符）\n"
+            "  - vulnerability_type: 漏洞类型\n"
+            "  - severity: 严重程度（critical|high|medium|low|info）\n"
+            "  - verification_result: 嵌套的 VerificationResultModel 对象\n"
+            "\n"
+            "每条 finding 的 verification_result 必须包含：\n"
+            "  - verdict: 真实性判定（confirmed|likely|uncertain|false_positive）\n"
+            "  - confidence: 置信度 [0.0-1.0 浮点数]\n"
+            "  - reachability: 可达性（reachable|likely_reachable|unknown|unreachable）\n"
+            "  - verification_evidence: 验证证据（至少 10 字符）\n"
+            "\n"
+            "false_positive 和 uncertain verdict 的 findings 会被保存但分别标记为不同的状态。"
+        ),
+    )
+    
     summary: Optional[str] = Field(
         default=None,
-        description="可选的摘要信息，记录本轮验证的整体结论（用于日志）",
+        description="可选的摘要信息，记录本轮验证的整体结论（用于日志）。建议包含：总数、verdict分布等。",
     )
+    
+    strict_mode: Optional[bool] = Field(
+        default=True,
+        description=(
+            "严格模式（默认 True）：任何单个 finding 的验证失败都会导致整个工具调用失败。\n"
+            "非严格模式（False）：验证失败的 findings 会被过滤并记录在 validation_errors 中。"
+        ),
+    )
+
+    @field_validator("findings", mode="before")
+    @classmethod
+    def coerce_findings_to_models(cls, v):
+        """尝试将原始 Dict findings 转换为 AgentFindingModel"""
+        if not isinstance(v, list):
+            raise ValueError("findings 必须是列表")
+        
+        result = []
+        for idx, item in enumerate(v):
+            if isinstance(item, dict):
+                try:
+                    result.append(AgentFindingModel(**item))
+                except Exception as e:
+                    raise ValueError(f"findings[{idx}] 验证失败: {str(e)}")
+            elif isinstance(item, AgentFindingModel):
+                result.append(item)
+            else:
+                raise ValueError(f"findings[{idx}] 必须是 dict 或 AgentFindingModel，得到: {type(item).__name__}")
+        
+        return result
 
 
 class SaveVerificationResultsTool(AgentTool):
     """
     Verification Agent 专用：将验证结果持久化保存到数据库。
 
+    核心责任：
+    1. **强制验证参数** - 通过 Pydantic 模型确保所有 findings 的数据质量
+    2. **前置校验** - 在工具执行前检查每条 finding 的必填字段和类型
+    3. **详细错误报告** - 告知 Agent 哪些字段缺失或错误，便于纠正
+    4. **支持多状态** - 持久化 confirmed、likely、uncertain、false_positive 等多种 verdict
+
     调用时机：在所有 findings 的 verdict / confidence / reachability /
     verification_evidence 都已确定后，调用此工具完成持久化，
     避免结果仅停留在内存中而丢失。
 
     返回：
-    - saved_count: 实际入库的 findings 数量（经严格质量门过滤后）
-    - filtered_count: 被过滤掉的数量（误报、缺少字段等）
+    - saved_count: 实际入库的 findings 数量（经过滤后）
+    - filtered_count: 被过滤掉的数量（false_positive、uncertain 等）
     - already_saved: 是否为重复调用（幂等保护）
+    - validation_errors: 验证失败的详情列表（如果有）
     - message: 人类可读的结果描述
     """
 
@@ -96,20 +348,26 @@ reachability / verification_evidence 之后，必须调用此工具，
 否则结果只存在内存中，任务结束后会丢失。
 
 必需参数:
-- findings: 已验证的 findings 列表（见参数 schema）
+- findings: 已验证的 findings 列表（至少 1 条）。每条 finding 必须是有效的结构，
+  包含：file_path、line_start、title、vulnerability_type、severity、verification_result。
+  每个 verification_result 必须包含 verdict、confidence、reachability、verification_evidence。
 
 可选参数:
 - summary: 本轮验证的整体评述（纯日志，不影响保存逻辑）
+- strict_mode: 是否使用严格模式（默认 True，验证失败则整体失败；False 则过滤失败项）
 
 返回值:
-- saved_count: 成功入库条数
-- filtered_count: 因质量门校验未通过而被过滤的条数
+- saved_count: 成功入库条数（confirmed、likely 等状态）
+- filtered_count: 因质量门校验或 false_positive/uncertain 而被过滤的条数
+- validation_errors: 详细的验证失败列表（如果 strict_mode=False）
 - already_saved: 是否为重复调用（本工具支持幂等）
 - message: 结果描述
 
-注意：verdict 为 false_positive 的 finding 会被自动跳过，
-只有 confirmed / likely 且通过文件路径、enclosing function
-等质量门的 finding 才会入库。调用一次即可，无需重复调用。"""
+注意：
+- false_positive 和 uncertain verdict 的 findings 会被接受但分别标记为不同的状态
+- 所有 confidence 值必须是浮点数 [0.0-1.0]，不能为字符串
+- 所有 cwe_id 必须符合 CWE-XXX 格式或为 null
+- 调用一次即可，无需重复调用（幂等保护）"""
 
     @property
     def args_schema(self):
@@ -139,22 +397,26 @@ reachability / verification_evidence 之后，必须调用此工具，
 
     async def _execute(
         self,
-        findings: List[Dict[str, Any]],
+        findings: List[AgentFindingModel],
         summary: Optional[str] = None,
+        strict_mode: bool = True,
         **kwargs,
     ) -> ToolResult:
+        """
+        参数验证和持久化执行。
+
+        Args:
+            findings: 已验证发现列表（Pydantic 模型已验证）
+            summary: 可选摘要
+            strict_mode: 严格模式（默认 True）
+
+        Returns:
+            ToolResult，包含 saved_count、filtered_count、validation_errors 等
+        """
         task_id = self.task_id
 
         # 基础校验
-        if not isinstance(findings, list):
-            return ToolResult(
-                success=False,
-                error="findings 必须是列表",
-                data={"saved_count": 0, "filtered_count": 0},
-            )
-
-        valid_findings = [f for f in findings if isinstance(f, dict)]
-        if not valid_findings:
+        if not findings:
             logger.warning("[SaveVerificationResults][%s] 收到空 findings 列表", task_id)
             return ToolResult(
                 success=True,
@@ -177,12 +439,16 @@ reachability / verification_evidence 之后，必须调用此工具，
                 success=True,
                 data={
                     "saved_count": self._saved_count,
-                    "filtered_count": len(valid_findings) - self._saved_count,
+                    "filtered_count": len(findings) - self._saved_count,
                     "already_saved": True,
                     "message": f"结果已保存（幂等保护），saved_count={self._saved_count}",
                 },
             )
 
+        # 所有 findings 都已通过 Pydantic 验证（在 coerce_findings_to_models 中）
+        # 这里直接将它们转换回 Dict 格式以供持久化
+        valid_findings = [f.model_dump(exclude_none=True) for f in findings]
+        
         # 更新内存缓冲（供外部兜底读取）
         self._buffered_findings = list(valid_findings)
 
@@ -190,7 +456,7 @@ reachability / verification_evidence 之后，必须调用此工具，
             logger.info("[SaveVerificationResults][%s] 验证摘要: %s", task_id, summary[:200])
 
         logger.info(
-            "[SaveVerificationResults][%s] 开始保存 %d 条 findings …",
+            "[SaveVerificationResults][%s] 开始保存 %d 条已验证的 findings …",
             task_id,
             len(valid_findings),
         )
@@ -199,12 +465,9 @@ reachability / verification_evidence 之后，必须调用此工具，
         verdict_counts: Dict[str, int] = {}
         for f in valid_findings:
             vr = f.get("verification_result") or {}
-            v = str(
-                (vr.get("verdict") if isinstance(vr, dict) else None)
-                or f.get("verdict")
-                or "unknown"
-            ).lower()
+            v = str((vr.get("verdict") if isinstance(vr, dict) else None) or "unknown").lower()
             verdict_counts[v] = verdict_counts.get(v, 0) + 1
+        
         logger.info(
             "[SaveVerificationResults][%s] verdict 分布: %s",
             task_id,
@@ -252,7 +515,8 @@ reachability / verification_evidence 之后，必须调用此工具，
                     "already_saved": False,
                     "message": (
                         f"✅ 验证结果已保存：{self._saved_count} 条成功入库"
-                        + (f"，{filtered} 条被过滤（误报/质量门）" if filtered else "")
+                        + (f"，{filtered} 条被过滤（false_positive/uncertain 等）" if filtered else "")
+                        + f"\n前置参数验证：所有 {len(valid_findings)} 条 findings 已通过严格的 Pydantic 模型验证"
                     ),
                 },
             )

@@ -5782,16 +5782,17 @@ async def _save_findings(
                 mark_filtered("missing_verification_result", finding)
                 continue
 
+            # 支持 uncertain 状态，允许多种 verdict 值
             authenticity = str(authenticity_raw).strip().lower()
-            if authenticity not in {"confirmed", "likely", "false_positive"}:
+            if authenticity not in {"confirmed", "likely", "uncertain", "false_positive"}:
                 mark_filtered("missing_verification_result", finding)
                 continue
+            # false_positive 被接受但稍后会被标记为不同的状态
             if authenticity == "false_positive":
-                mark_filtered("false_positive_discarded", finding)
-                continue
+                logger.debug(f"[SaveFindings] Finding with false_positive verdict will be marked separately: {str(finding.get('title'))[:60]}")
 
             reachability = str(reachability_raw).strip().lower()
-            if reachability not in {"reachable", "likely_reachable", "unreachable"}:
+            if reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
                 mark_filtered("missing_verification_result", finding)
                 continue
             verification_details_text = _normalize_optional_text(evidence_raw)
@@ -5866,7 +5867,7 @@ async def _save_findings(
             if not snippet_text:
                 snippet_text = "\n".join(file_lines[line_start - 1 : line_end]).strip()
 
-            # 7.5) enforce enclosing function evidence (file + function)
+            # 7.5) 获取函数定位信息，但允许定位失败时仍然保存（降级模式）
             reachability_target_function = None
             reachability_target_start_line = None
             reachability_target_end_line = None
@@ -5874,27 +5875,44 @@ async def _save_findings(
             locator_resolution_engine = None
             locator_diagnostics = None
             locator_resolution_method = None
+            localization_status = "unknown"  # success|failed|partial
 
             if function_locator:
-                located = function_locator.locate(
-                    full_file_path=full_file_path,
-                    line_start=line_start,
-                    relative_file_path=stored_file_path,
-                    file_lines=file_lines,
-                )
-                func_name = located.get("function")
-                if isinstance(func_name, str) and func_name.strip():
-                    reachability_target_function = func_name.strip()
-                    reachability_target_start_line = _to_int(located.get("start_line"))
-                    reachability_target_end_line = _to_int(located.get("end_line"))
-                locator_language = located.get("language")
-                locator_resolution_engine = located.get("resolution_engine")
-                locator_resolution_method = located.get("resolution_method")
-                locator_diagnostics = located.get("diagnostics")
-
+                try:
+                    located = function_locator.locate(
+                        full_file_path=full_file_path,
+                        line_start=line_start,
+                        relative_file_path=stored_file_path,
+                        file_lines=file_lines,
+                    )
+                    func_name = located.get("function")
+                    if isinstance(func_name, str) and func_name.strip():
+                        reachability_target_function = func_name.strip()
+                        reachability_target_start_line = _to_int(located.get("start_line"))
+                        reachability_target_end_line = _to_int(located.get("end_line"))
+                        localization_status = "success"
+                    else:
+                        localization_status = "failed"
+                    locator_language = located.get("language")
+                    locator_resolution_engine = located.get("resolution_engine")
+                    locator_resolution_method = located.get("resolution_method")
+                    locator_diagnostics = located.get("diagnostics")
+                except Exception as loc_exc:
+                    logger.debug(f"[SaveFindings] Function locator error: {loc_exc}")
+                    localization_status = "failed"
+            
+            # 降级策略：如果函数定位失败但文件有效，仍然允许保存
             if not reachability_target_function:
-                mark_filtered("missing_enclosing_function", finding)
-                continue
+                if localization_status == "failed":
+                    logger.debug(
+                        f"[SaveFindings] Function locator failed for {stored_file_path}:{line_start}, "
+                        f"but file is readable, allowing save with localization_status=failed"
+                    )
+                    # 使用原始发现中的 function_name 或占位符
+                    reachability_target_function = finding.get("function_name") or "<function_not_localized>"
+                else:
+                    mark_filtered("missing_enclosing_function", finding)
+                    continue
 
             # 8) title/description/suggestion
             title = finding.get("title")
@@ -5950,6 +5968,11 @@ async def _save_findings(
             if not verification_method_text:
                 verification_method_text = "agent_verification"
 
+            # 获取或构建新的规范化字段：verdict、confidence、reachability
+            verdict_value = authenticity  # confirmed|likely|uncertain|false_positive
+            confidence_value = confidence  # 已在第3步规范化
+            reachability_value = reachability  # reachable|likely_reachable|unknown|unreachable
+
             verification_result_payload = dict(verification_result_payload_input)
             existing_reachability_target = (
                 verification_result_payload_input.get("reachability_target")
@@ -5958,28 +5981,22 @@ async def _save_findings(
             )
             if not isinstance(existing_reachability_target, dict):
                 existing_reachability_target = {}
-            verification_result_payload.update(
-                {
-                    "reachability": reachability,
-                    "authenticity": authenticity,
-                    "evidence": verification_details_text,
-                    "context_start_line": context_start_line,
-                    "context_end_line": context_end_line,
-                    "reachability_target": {
-                        "file_path": stored_file_path,
-                        "function": reachability_target_function,
-                        "start_line": reachability_target_start_line,
-                        "end_line": reachability_target_end_line,
-                        "resolution_method": (
-                            locator_resolution_method
-                            or existing_reachability_target.get("resolution_method")
-                        ),
-                        "language": locator_language or existing_reachability_target.get("language"),
-                        "resolution_engine": locator_resolution_engine or existing_reachability_target.get("resolution_engine"),
-                        "diagnostics": locator_diagnostics or existing_reachability_target.get("diagnostics"),
-                    },
-                }
+            # 更新状态映射以支持 uncertain 和 localization_status
+            if authenticity == "false_positive":
+                db_status = FindingStatus.FALSE_POSITIVE
+            elif authenticity == "uncertain":
+                db_status = FindingStatus.UNCERTAIN
+            else:
+                db_status = FindingStatus.VERIFIED
+            
+            # verification_result_payload 中添加新字段
+            existing_reachability_target = (
+                verification_result_payload_input.get("reachability_target")
+                if isinstance(verification_result_payload_input, dict)
+                else None
             )
+            if not isinstance(existing_reachability_target, dict):
+                existing_reachability_target = {}
 
             # 9.5) Smart audit policy: do not require trigger_flow evidence as a persistence gate.
 
@@ -6080,7 +6097,11 @@ async def _save_findings(
                 db_finding.fix_description = fix_description_text
                 db_finding.is_verified = is_verified
                 db_finding.ai_confidence = confidence
-                db_finding.status = FindingStatus.FALSE_POSITIVE if authenticity == "false_positive" else FindingStatus.VERIFIED
+                db_finding.status = db_status
+                db_finding.verdict = verdict_value  # 新增：确实的 verdict
+                db_finding.confidence = confidence_value  # 新增：规范化的置信度
+                db_finding.reachability = reachability_value  # 新增：规范化的可达性
+                db_finding.verification_evidence = verification_details_text  # 新增：验证证据
                 db_finding.has_poc = has_poc
                 db_finding.poc_code = poc_code
                 db_finding.poc_description = poc_description
@@ -6112,7 +6133,11 @@ async def _save_findings(
                     fix_description=fix_description_text,
                     is_verified=is_verified,
                     ai_confidence=confidence,
-                    status=FindingStatus.FALSE_POSITIVE if authenticity == "false_positive" else FindingStatus.VERIFIED,
+                    status=db_status,
+                    verdict=verdict_value,  # 新增：确实的 verdict
+                    confidence=confidence_value,  # 新增：规范化的置信度
+                    reachability=reachability_value,  # 新增：规范化的可达性
+                    verification_evidence=verification_details_text,  # 新增：验证证据
                     has_poc=has_poc,
                     poc_code=poc_code,
                     poc_description=poc_description,

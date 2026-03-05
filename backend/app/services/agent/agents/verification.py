@@ -86,6 +86,7 @@ VERIFICATION_SYSTEM_PROMPT = """你是 VulHunter 的漏洞验证 Agent，一个*
 - **run_code**: 执行你编写的测试代码（支持 Python/PHP/JS/Ruby/Go/Java/Bash）
   - 用于运行 Fuzzing Harness、PoC 脚本
   - 你可以完全控制测试逻辑
+  - 如果需要创建文件，请在/tmp目录下操作
   - 参数: code (str), language (str), timeout (int), description (str)
 
 - **extract_function**: 从源文件提取指定函数代码
@@ -313,7 +314,11 @@ Action Input: {"file_path": "search.php"}
 7. 输出语言必须为简体中文（title/description/suggestion/fix_description/verification_evidence/poc_plan）。
 8. 禁止 Markdown 样式的 `**Thought:**`，必须使用纯文本 `Thought:` / `Action:` / `Action Input:` / `Final Answer:`。
 9. 不允许“请选择/请确认后继续”等交互漂移语句。
-10. **输出 Final Answer 后，必须立即调用 `save_verification_results` 工具，将 confirmed/likely 的 findings 持久化入库；跳过此步骤将导致验证结果丢失。**
+10. **🔥 输出 Final Answer 前，必须立即调用 `save_verification_results` 工具进行持久化**：
+    - Final Answer 不应该包含详细的 findings 列表（如具体漏洞代码、修复建议等）
+    - 所有漏洞详情（包括 confirmed、likely、uncertain、false_positive）都由 save_verification_results 工具持久化到数据库
+    - Final Answer 仅返回高层摘要（统计数据、verdict 分布、任务完成状态等）
+    - 跳过此步骤将导致验证结果丢失
 
 ## 真实性与置信度判定
 
