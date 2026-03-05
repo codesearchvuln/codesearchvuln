@@ -4858,11 +4858,6 @@ class BaseAgent(ABC):
                 )
                 if auto_retry_used:
                     failure_output += "\n\n已执行一次自动路径修复重试，但仍失败。"
-                if strict_failure_metadata.get("retry_suppressed") is True:
-                    return (
-                        f"{failure_output}\n\n"
-                        "该错误已判定为确定性/非瞬时，已抑制 superpowers 重试。"
-                    )
                 retry_output = await self._maybe_retry_with_superpowers(
                     requested_tool_name=requested_tool_name,
                     resolved_tool_name=resolved_tool_name,
