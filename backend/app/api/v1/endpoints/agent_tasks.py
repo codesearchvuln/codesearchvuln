@@ -6893,82 +6893,38 @@ async def list_agent_events(
     return events
 
 
-@router.get("/{task_id}/findings", response_model=List[AgentFindingResponse])
-async def list_agent_findings(
-    task_id: str,
-    severity: Optional[str] = None,
-    verified_only: bool = False,
-    include_false_positive: bool = Query(False, description="是否包含 false_positive 结果"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    """
-    获取 Agent 发现列表
-    """
-    task = await db.get(AgentTask, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    
-    project = await db.get(Project, task.project_id)
-    if not project:
-        raise HTTPException(status_code=403, detail="无权访问此任务")
-    
-    query = select(AgentFinding).where(AgentFinding.task_id == task_id)
-    if not include_false_positive:
-        query = query.where(AgentFinding.status != FindingStatus.FALSE_POSITIVE)
-    
-    if severity:
-        normalized_severity = str(severity).strip().lower()
-        if normalized_severity in _VALID_SEVERITY_VALUES:
-            query = query.where(AgentFinding.severity == normalized_severity)
-    
-    if verified_only:
-        query = query.where(AgentFinding.is_verified == True)
-    
-    # 按严重程度排序
-    severity_order = {
-        VulnerabilitySeverity.CRITICAL: 0,
-        VulnerabilitySeverity.HIGH: 1,
-        VulnerabilitySeverity.MEDIUM: 2,
-        VulnerabilitySeverity.LOW: 3,
-        VulnerabilitySeverity.INFO: 4,
-    }
-    
-    query = query.order_by(
-        case(
-            (AgentFinding.severity == VulnerabilitySeverity.CRITICAL, 0),
-            (AgentFinding.severity == VulnerabilitySeverity.HIGH, 1),
-            (AgentFinding.severity == VulnerabilitySeverity.MEDIUM, 2),
-            (AgentFinding.severity == VulnerabilitySeverity.LOW, 3),
-            (AgentFinding.severity == VulnerabilitySeverity.INFO, 4),
-            else_=5,
-        ),
-        AgentFinding.created_at.desc(),
-    )
-    query = query.offset(skip).limit(limit)
-    
-    result = await db.execute(query)
-    findings = result.scalars().all()
-
+def _serialize_agent_findings(
+    findings: List[AgentFinding],
+    *,
+    include_false_positive: bool,
+) -> List[AgentFindingResponse]:
     responses: List[AgentFindingResponse] = []
     for item in findings:
-        verification_payload = item.verification_result if isinstance(item.verification_result, dict) else {}
+        verification_payload = (
+            item.verification_result
+            if isinstance(item.verification_result, dict)
+            else {}
+        )
         normalized_item_file_path = _normalize_relative_file_path(
             str(item.file_path or ""),
             None,
         )
         authenticity = verification_payload.get("authenticity")
         if not authenticity:
-            authenticity = "false_positive" if str(item.status) == FindingStatus.FALSE_POSITIVE else ("confirmed" if item.is_verified else "likely")
+            authenticity = (
+                "false_positive"
+                if str(item.status) == FindingStatus.FALSE_POSITIVE
+                else ("confirmed" if item.is_verified else "likely")
+            )
         authenticity = str(authenticity).lower()
 
         if not include_false_positive and authenticity == "false_positive":
             continue
 
         reachability = verification_payload.get("reachability")
-        verification_evidence = verification_payload.get("evidence") or verification_payload.get("details")
+        verification_evidence = (
+            verification_payload.get("evidence") or verification_payload.get("details")
+        )
         context_start_line = _to_int(verification_payload.get("context_start_line"))
         context_end_line = _to_int(verification_payload.get("context_end_line"))
         reachability_file = None
@@ -6984,25 +6940,40 @@ async def list_agent_findings(
             file_value = reachability_target.get("file_path")
             func_value = reachability_target.get("function")
             if isinstance(file_value, str) and file_value.strip():
-                reachability_file = _normalize_relative_file_path(file_value.strip(), None)
+                reachability_file = _normalize_relative_file_path(
+                    file_value.strip(),
+                    None,
+                )
             if isinstance(func_value, str) and func_value.strip():
                 reachability_function = func_value.strip()
-            reachability_function_start_line = _to_int(reachability_target.get("start_line"))
-            reachability_function_end_line = _to_int(reachability_target.get("end_line"))
+            reachability_function_start_line = _to_int(
+                reachability_target.get("start_line")
+            )
+            reachability_function_end_line = _to_int(
+                reachability_target.get("end_line")
+            )
         if not reachability_function:
             raw_function_name = getattr(item, "function_name", None)
             if isinstance(raw_function_name, str) and raw_function_name.strip():
                 reachability_function = raw_function_name.strip()
         if not reachability_file and normalized_item_file_path:
             reachability_file = normalized_item_file_path
-        flow_payload = verification_payload.get("flow") if isinstance(verification_payload, dict) else None
+        flow_payload = (
+            verification_payload.get("flow")
+            if isinstance(verification_payload, dict)
+            else None
+        )
         flow_path_score = None
         flow_call_chain = None
         function_trigger_flow = None
         flow_control_conditions = None
         if isinstance(flow_payload, dict):
             try:
-                flow_path_score = float(flow_payload.get("path_score")) if flow_payload.get("path_score") is not None else None
+                flow_path_score = (
+                    float(flow_payload.get("path_score"))
+                    if flow_payload.get("path_score") is not None
+                    else None
+                )
             except Exception:
                 flow_path_score = None
             raw_chain = flow_payload.get("call_chain")
@@ -7020,7 +6991,9 @@ async def list_agent_findings(
                     for step in raw_function_chain
                     if str(step).strip()
                 ]
-                function_trigger_flow = [step for step in function_trigger_flow if step]
+                function_trigger_flow = [
+                    step for step in function_trigger_flow if step
+                ]
             raw_controls = flow_payload.get("control_conditions")
             if isinstance(raw_controls, list):
                 flow_control_conditions = [
@@ -7028,7 +7001,9 @@ async def list_agent_findings(
                     for ctrl in raw_controls
                     if str(ctrl).strip()
                 ]
-                flow_control_conditions = [ctrl for ctrl in flow_control_conditions if ctrl]
+                flow_control_conditions = [
+                    ctrl for ctrl in flow_control_conditions if ctrl
+                ]
         if not function_trigger_flow:
             raw_function_chain = verification_payload.get("function_trigger_flow")
             if isinstance(raw_function_chain, list):
@@ -7037,7 +7012,9 @@ async def list_agent_findings(
                     for step in raw_function_chain
                     if str(step).strip()
                 ]
-                function_trigger_flow = [step for step in function_trigger_flow if step]
+                function_trigger_flow = [
+                    step for step in function_trigger_flow if step
+                ]
         if not function_trigger_flow:
             function_trigger_flow = _build_function_trigger_flow(
                 call_chain=flow_call_chain or [],
@@ -7055,12 +7032,20 @@ async def list_agent_findings(
         if function_trigger_flow:
             flow_call_chain = function_trigger_flow
 
-        logic_payload = verification_payload.get("logic_authz") if isinstance(verification_payload, dict) else None
+        logic_payload = (
+            verification_payload.get("logic_authz")
+            if isinstance(verification_payload, dict)
+            else None
+        )
         logic_authz_evidence = None
         if isinstance(logic_payload, dict):
             raw_logic_evidence = logic_payload.get("evidence")
             if isinstance(raw_logic_evidence, list):
-                logic_authz_evidence = [str(item) for item in raw_logic_evidence if str(item).strip()]
+                logic_authz_evidence = [
+                    str(raw_item)
+                    for raw_item in raw_logic_evidence
+                    if str(raw_item).strip()
+                ]
             elif isinstance(raw_logic_evidence, str) and raw_logic_evidence.strip():
                 logic_authz_evidence = [raw_logic_evidence.strip()]
 
@@ -7139,7 +7124,9 @@ async def list_agent_findings(
                     "context_start_line": context_start_line,
                     "context_end_line": context_end_line,
                     "is_verified": item.is_verified,
-                    "confidence": item.ai_confidence if item.ai_confidence is not None else 0.5,
+                    "confidence": (
+                        item.ai_confidence if item.ai_confidence is not None else 0.5
+                    ),
                     "reachability": reachability,
                     "authenticity": authenticity,
                     "verification_evidence": verification_evidence,
@@ -7170,18 +7157,125 @@ async def list_agent_findings(
                     "has_poc": bool(item.has_poc),
                     "poc_code": item.poc_code,
                     "poc_description": item.poc_description,
-                    "poc_steps": item.poc_steps if isinstance(item.poc_steps, list) else None,
-                    "poc": {
-                        "code": item.poc_code,
-                        "description": item.poc_description,
-                        "steps": item.poc_steps,
-                    } if item.has_poc else None,
+                    "poc_steps": (
+                        item.poc_steps if isinstance(item.poc_steps, list) else None
+                    ),
+                    "poc": (
+                        {
+                            "code": item.poc_code,
+                            "description": item.poc_description,
+                            "steps": item.poc_steps,
+                        }
+                        if item.has_poc
+                        else None
+                    ),
                     "created_at": item.created_at,
                 }
             )
         )
-
     return responses
+
+
+@router.get("/{task_id}/findings", response_model=List[AgentFindingResponse])
+async def list_agent_findings(
+    task_id: str,
+    severity: Optional[str] = None,
+    verified_only: bool = False,
+    include_false_positive: bool = Query(False, description="是否包含 false_positive 结果"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    获取 Agent 发现列表
+    """
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    project = await db.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(status_code=403, detail="无权访问此任务")
+    
+    query = select(AgentFinding).where(AgentFinding.task_id == task_id)
+    if not include_false_positive:
+        query = query.where(AgentFinding.status != FindingStatus.FALSE_POSITIVE)
+    
+    if severity:
+        normalized_severity = str(severity).strip().lower()
+        if normalized_severity in _VALID_SEVERITY_VALUES:
+            query = query.where(AgentFinding.severity == normalized_severity)
+    
+    if verified_only:
+        query = query.where(AgentFinding.is_verified == True)
+    
+    # 按严重程度排序
+    severity_order = {
+        VulnerabilitySeverity.CRITICAL: 0,
+        VulnerabilitySeverity.HIGH: 1,
+        VulnerabilitySeverity.MEDIUM: 2,
+        VulnerabilitySeverity.LOW: 3,
+        VulnerabilitySeverity.INFO: 4,
+    }
+    
+    query = query.order_by(
+        case(
+            (AgentFinding.severity == VulnerabilitySeverity.CRITICAL, 0),
+            (AgentFinding.severity == VulnerabilitySeverity.HIGH, 1),
+            (AgentFinding.severity == VulnerabilitySeverity.MEDIUM, 2),
+            (AgentFinding.severity == VulnerabilitySeverity.LOW, 3),
+            (AgentFinding.severity == VulnerabilitySeverity.INFO, 4),
+            else_=5,
+        ),
+        AgentFinding.created_at.desc(),
+    )
+    query = query.offset(skip).limit(limit)
+    
+    result = await db.execute(query)
+    findings = result.scalars().all()
+    return _serialize_agent_findings(
+        findings,
+        include_false_positive=include_false_positive,
+    )
+
+@router.get("/{task_id}/findings/{finding_id}", response_model=AgentFindingResponse)
+async def get_agent_finding(
+    task_id: str,
+    finding_id: str,
+    include_false_positive: bool = Query(
+        True,
+        description="是否包含 false_positive 结果",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """获取 Agent 单条发现详情。"""
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    project = await db.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(status_code=403, detail="无权访问此任务")
+
+    result = await db.execute(
+        select(AgentFinding).where(
+            (AgentFinding.task_id == task_id)
+            & (AgentFinding.id == finding_id)
+        )
+    )
+    finding = result.scalar_one_or_none()
+    if not finding:
+        raise HTTPException(status_code=404, detail="发现不存在")
+
+    serialized = _serialize_agent_findings(
+        [finding],
+        include_false_positive=include_false_positive,
+    )
+    if not serialized:
+        raise HTTPException(status_code=404, detail="发现不存在")
+    return serialized[0]
 
 
 @router.get("/{task_id}/summary", response_model=TaskSummaryResponse)

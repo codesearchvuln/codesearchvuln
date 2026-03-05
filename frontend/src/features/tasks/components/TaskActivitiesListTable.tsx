@@ -1,0 +1,186 @@
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import {
+	formatCreatedAt,
+	getActivityDurationLabel,
+	getRelativeTime,
+	getTaskKindText,
+	getTaskProgressBarClassName,
+	getTaskProgressPercent,
+	getTaskStatusBadgeClassName,
+	getTaskStatusText,
+	type TaskActivityItem,
+} from "@/features/tasks/services/taskActivities";
+
+interface TaskActivitiesListTableProps {
+	activities: TaskActivityItem[];
+	loading?: boolean;
+	nowMs: number;
+	emptyText?: string;
+	pageSize?: number;
+}
+
+function getDefectSummaryLabel(activity: TaskActivityItem): string {
+	if (!activity.staticFindingStats) {
+		return "-";
+	}
+	const { severe, hint, total } = activity.staticFindingStats;
+	return `高危 ${severe} / 提示 ${hint} / 总计 ${total}`;
+}
+
+export default function TaskActivitiesListTable({
+	activities,
+	loading = false,
+	nowMs,
+	emptyText = "暂无任务",
+	pageSize = 10,
+}: TaskActivitiesListTableProps) {
+	const [page, setPage] = useState(1);
+
+	const totalPages = Math.max(1, Math.ceil(activities.length / pageSize));
+
+	useEffect(() => {
+		if (page > totalPages) {
+			setPage(totalPages);
+		}
+	}, [page, totalPages]);
+
+	const pagedActivities = useMemo(() => {
+		const start = (page - 1) * pageSize;
+		return activities.slice(start, start + pageSize);
+	}, [activities, page, pageSize]);
+
+	return (
+		<div className="space-y-3">
+			<div className="overflow-x-auto">
+				<Table>
+					<TableHeader>
+						<TableRow>
+							<TableHead className="w-[80px] text-center">序号</TableHead>
+							<TableHead className="min-w-[160px]">扫描项目</TableHead>
+							<TableHead className="min-w-[120px]">扫描任务</TableHead>
+							<TableHead className="min-w-[180px]">创建时间</TableHead>
+							<TableHead className="w-[120px]">用时</TableHead>
+							<TableHead className="min-w-[220px]">扫描进度</TableHead>
+							<TableHead className="min-w-[140px]">扫描状态</TableHead>
+							<TableHead className="min-w-[160px]">缺陷统计</TableHead>
+							<TableHead className="w-[120px]">操作</TableHead>
+						</TableRow>
+					</TableHeader>
+					<TableBody>
+						{loading && activities.length === 0 ? (
+							<TableRow>
+								<TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+									加载中...
+								</TableCell>
+							</TableRow>
+						) : pagedActivities.length > 0 ? (
+							pagedActivities.map((activity, index) => {
+								const progress = getTaskProgressPercent(activity, nowMs);
+								const rawDuration = getActivityDurationLabel(activity, nowMs);
+								const durationText = rawDuration
+									.replace("用时：", "")
+									.replace("已运行：", "");
+								const rowNumber = (page - 1) * pageSize + index + 1;
+								return (
+									<TableRow key={activity.id}>
+										<TableCell className="text-center text-muted-foreground">
+											{rowNumber}
+										</TableCell>
+										<TableCell className="font-medium text-foreground">
+											{activity.projectName}
+										</TableCell>
+										<TableCell className="text-muted-foreground">
+											{getTaskKindText(activity)}
+										</TableCell>
+										<TableCell className="text-sm text-muted-foreground">
+											<div>{formatCreatedAt(activity.createdAt)}</div>
+											<div className="text-xs">{getRelativeTime(activity.createdAt, nowMs)}</div>
+										</TableCell>
+										<TableCell className="font-mono text-foreground">{durationText}</TableCell>
+										<TableCell>
+											<div className="space-y-1 min-w-[210px]">
+												<div className="flex items-center justify-between text-xs text-muted-foreground">
+													<span>进度</span>
+													<span className="font-medium text-foreground">{progress}%</span>
+												</div>
+												<div className="h-2 rounded bg-muted/50 overflow-hidden">
+													<div
+														className={`h-full transition-all ${getTaskProgressBarClassName(activity.status)}`}
+														style={{ width: `${progress}%` }}
+													/>
+												</div>
+											</div>
+										</TableCell>
+										<TableCell>
+											<Badge className={getTaskStatusBadgeClassName(activity.status)}>
+												{getTaskStatusText(activity.status)}
+											</Badge>
+										</TableCell>
+										<TableCell className="text-sm text-muted-foreground">
+											{getDefectSummaryLabel(activity)}
+										</TableCell>
+										<TableCell>
+											<Button
+												asChild
+												size="sm"
+												variant="outline"
+												className="cyber-btn-ghost h-8 px-3"
+											>
+												<Link to={activity.route}>详情</Link>
+											</Button>
+										</TableCell>
+									</TableRow>
+								);
+							})
+						) : (
+							<TableRow>
+								<TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+									{emptyText}
+								</TableCell>
+							</TableRow>
+						)}
+					</TableBody>
+				</Table>
+			</div>
+
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<div className="text-xs text-muted-foreground">共 {activities.length} 条</div>
+				<div className="flex items-center gap-2">
+					<Button
+						variant="outline"
+						size="sm"
+						className="cyber-btn-outline h-8 px-3"
+						disabled={page <= 1}
+						onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+					>
+						上一页
+					</Button>
+					<div className="text-xs text-muted-foreground">
+						第 {page} / {totalPages} 页
+					</div>
+					<Button
+						variant="outline"
+						size="sm"
+						className="cyber-btn-outline h-8 px-3"
+						disabled={page >= totalPages}
+						onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
+					>
+						下一页
+					</Button>
+				</div>
+			</div>
+		</div>
+	);
+}

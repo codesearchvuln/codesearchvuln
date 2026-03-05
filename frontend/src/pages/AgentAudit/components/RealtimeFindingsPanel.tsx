@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -15,6 +16,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -67,6 +76,7 @@ export type RealtimeMergedFindingItem = {
   context_start_line?: number | null;
   context_end_line?: number | null;
   verification_evidence?: string | null;
+  confidence?: number | null;
   timestamp?: string | null;
   is_verified: boolean;
 };
@@ -96,6 +106,27 @@ function formatLocation(item: RealtimeMergedFindingItem): string {
   }
   if (path) return path;
   return "-";
+}
+
+function normalizeCweLabel(raw: string | null | undefined): string {
+  const value = String(raw || "").trim();
+  if (!value) return "-";
+
+  const cweMatch = value.match(/CWE[\s:_-]*(\d{1,6})/i);
+  if (cweMatch?.[1]) {
+    return `CWE-${cweMatch[1]}`;
+  }
+
+  const definitionMatch = value.match(/definitions\/(\d{1,6})(?:\.html)?/i);
+  if (definitionMatch?.[1]) {
+    return `CWE-${definitionMatch[1]}`;
+  }
+
+  if (/^\d{1,6}$/.test(value)) {
+    return `CWE-${value}`;
+  }
+
+  return value.toUpperCase();
 }
 
 function pickRealtimeCode(item: RealtimeMergedFindingItem): {
@@ -173,6 +204,52 @@ function getSeverityMeta(severity: RealtimeDisplaySeverity): {
   };
 }
 
+function getConfidenceMeta(confidence: number | null | undefined): {
+  label: string;
+  className: string;
+} | null {
+  if (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence <= 0) {
+    return null;
+  }
+  if (confidence >= 0.8) {
+    return {
+      label: "高",
+      className:
+        "border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10",
+    };
+  }
+  if (confidence >= 0.5) {
+    return {
+      label: "中",
+      className:
+        "border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10",
+    };
+  }
+  return {
+    label: "低",
+    className:
+      "border-zinc-500/40 text-zinc-600 dark:text-zinc-300 bg-zinc-500/10",
+  };
+}
+
+function getVerificationMeta(progress: RealtimeVerificationProgress): {
+  label: string;
+  className: string;
+} {
+  if (progress === "verified") {
+    return {
+      label: "已验证",
+      className:
+        "border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10",
+    };
+  }
+  return {
+    label: "待验证",
+    className:
+      "border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10",
+  };
+}
+
 export default function RealtimeFindingsPanel(props: {
   items: RealtimeMergedFindingItem[];
   isRunning: boolean;
@@ -183,6 +260,7 @@ export default function RealtimeFindingsPanel(props: {
     "all" | RealtimeVerificationProgress
   >("all");
   const [detailItem, setDetailItem] = useState<RealtimeMergedFindingItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -216,6 +294,69 @@ export default function RealtimeFindingsPanel(props: {
       );
     });
   }, [props.items, keyword, verification]);
+
+  useEffect(() => {
+    const validIds = new Set(props.items.map((item) => item.id));
+    setSelectedIds((prev) => {
+      if (!prev.size) return prev;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (validIds.has(id)) {
+          next.add(id);
+        }
+      }
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [props.items]);
+
+  const visibleIds = useMemo(() => filtered.map((item) => item.id), [filtered]);
+
+  const selectedVisibleCount = useMemo(() => {
+    let count = 0;
+    for (const id of visibleIds) {
+      if (selectedIds.has(id)) {
+        count += 1;
+      }
+    }
+    return count;
+  }, [selectedIds, visibleIds]);
+
+  const allVisibleSelected =
+    visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const headerChecked: boolean | "indeterminate" = allVisibleSelected
+    ? true
+    : selectedVisibleCount > 0
+      ? "indeterminate"
+      : false;
+
+  const toggleSelectAll = (checked: boolean | "indeterminate") => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked === true) {
+        for (const id of visibleIds) {
+          next.add(id);
+        }
+      } else {
+        for (const id of visibleIds) {
+          next.delete(id);
+        }
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectOne = (id: string, checked: boolean | "indeterminate") => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked === true) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="h-full flex flex-col border border-border rounded-xl bg-card/70 overflow-hidden">
@@ -302,69 +443,105 @@ export default function RealtimeFindingsPanel(props: {
           </div>
         ) : (
           <ScrollArea className="h-full">
-            <div className="p-3 space-y-2">
-              {filtered.map((item) => {
-                const verificationKey = getItemVerificationProgress(item);
-                const severityMeta = getSeverityMeta(item.display_severity);
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-lg border border-border bg-background/50 hover:border-primary/30 transition-colors p-3 space-y-2.5"
-                  >
-                    <div className="text-sm font-semibold break-words line-clamp-2 min-w-0">
-                      {item.display_title || item.title || "未命名缺陷"}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Badge
-                          variant="outline"
-                          className={`text-[11px] ${
-                            verificationKey === "verified"
-                              ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10"
-                              : "border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10"
-                          }`}
-                        >
-                          {verificationKey === "verified" ? "已验证" : "待验证"}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className={`text-[11px] ${severityMeta.className}`}
-                        >
-                          {severityMeta.label}
-                        </Badge>
-                      </div>
-
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2.5 text-[11px] shrink-0"
-                        onClick={() => setDetailItem(item)}
+            <div className="p-3">
+              <Table className="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[44px]">
+                      <Checkbox
+                        checked={headerChecked}
+                        onCheckedChange={toggleSelectAll}
+                        aria-label="全选当前可见缺陷"
+                      />
+                    </TableHead>
+                    <TableHead className="w-[64px]">序号</TableHead>
+                    <TableHead className="w-[18%]">类型（CWE编号）</TableHead>
+                    <TableHead className="w-[34%]">路径</TableHead>
+                    <TableHead className="w-[12%]">危害</TableHead>
+                    <TableHead className="w-[10%]">置信度</TableHead>
+                    <TableHead className="w-[10%]">状态</TableHead>
+                    <TableHead className="w-[12%]">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((item, index) => {
+                    const verificationKey = getItemVerificationProgress(item);
+                    const severityMeta = getSeverityMeta(item.display_severity);
+                    const confidenceMeta = getConfidenceMeta(item.confidence);
+                    const verificationMeta = getVerificationMeta(verificationKey);
+                    const cweLabel = normalizeCweLabel(item.cwe_id);
+                    const rowSelected = selectedIds.has(item.id);
+                    return (
+                      <TableRow
+                        key={item.id}
+                        data-state={rowSelected ? "selected" : undefined}
+                        className={rowSelected ? "bg-primary/5" : undefined}
                       >
-                        查看详情
-                        <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
-                      </Button>
-                    </div>
-
-                    <div className="rounded-md border border-border/60 bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-left">
-                        <span className="min-w-0">
-                          类型:{" "}
-                          <span className="text-foreground break-words">
-                            {item.vulnerability_type || "-"}
-                          </span>
-                        </span>
-                        <span className="min-w-0">
-                          定位:{" "}
-                          <span className="text-foreground break-all">
-                            {formatLocation(item)}
-                          </span>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                        <TableCell>
+                          <Checkbox
+                            checked={rowSelected}
+                            onCheckedChange={(checked) =>
+                              toggleSelectOne(item.id, checked)
+                            }
+                            aria-label={`选择缺陷 ${index + 1}`}
+                          />
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {index + 1}
+                        </TableCell>
+                        <TableCell
+                          className="text-sm text-foreground break-words"
+                          title={cweLabel}
+                        >
+                          {cweLabel}
+                        </TableCell>
+                        <TableCell
+                          className="text-xs text-muted-foreground whitespace-normal break-all"
+                          title={formatLocation(item)}
+                        >
+                          {formatLocation(item)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`text-[11px] ${severityMeta.className}`}>
+                            {severityMeta.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {confidenceMeta ? (
+                            <Badge
+                              variant="outline"
+                              className={`text-[11px] ${confidenceMeta.className}`}
+                            >
+                              {confidenceMeta.label}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`text-[11px] ${verificationMeta.className}`}
+                          >
+                            {verificationMeta.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2.5 text-[11px]"
+                            onClick={() => setDetailItem(item)}
+                          >
+                            详情
+                            <ExternalLink className="w-3.5 h-3.5 ml-1.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
           </ScrollArea>
         )}

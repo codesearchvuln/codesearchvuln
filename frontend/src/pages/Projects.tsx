@@ -7,9 +7,18 @@ import { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } fro
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
     Select,
@@ -101,7 +110,8 @@ import {
     formatDurationMs,
     resolveSourceModeFromTaskMeta,
 } from "@/features/tasks/services/taskActivities";
-const PROJECT_PAGE_SIZE = 1;
+const PROJECT_PAGE_SIZE = 10;
+const PROJECT_FETCH_BATCH_SIZE = 200;
 const MODULE_SCROLL_DELAY_MS = 80;
 const TASK_POOL_MAX_TOTAL = 800;
 const AGENT_TASK_PAGE_LIMIT = 100;
@@ -112,8 +122,6 @@ const LANGUAGE_STATS_MAX_RETRIES = 6;
 const PROJECT_CARD_POTENTIAL_SOURCE_TASK_LIMIT = 3;
 const PROJECT_CARD_POTENTIAL_FINDINGS_FETCH_LIMIT = 200;
 const PROJECT_CARD_POTENTIAL_TOP_LIMIT = 5;
-const STATIC_FINDING_DETAIL_ROUTE_PATTERN =
-    /^\/static-analysis\/[^/]+\/findings\/[^/]+$/;
 const PROJECT_CARD_PIE_COLORS = [
     "#0ea5e9",
     "#22c55e",
@@ -128,27 +136,6 @@ function getErrorStatusCode(error: unknown): number {
     return Number(apiError?.response?.status || 0);
 }
 
-function appendReturnToForStaticFindingRoute(
-    route: string,
-    returnTo: string,
-): string {
-    const normalizedRoute = String(route || "").trim();
-    if (!normalizedRoute) return normalizedRoute;
-
-    const [pathPart, queryPart = ""] = normalizedRoute.split("?");
-    if (!STATIC_FINDING_DETAIL_ROUTE_PATTERN.test(pathPart)) {
-        return normalizedRoute;
-    }
-
-    if (!returnTo.startsWith("/") || returnTo.startsWith("//")) {
-        return normalizedRoute;
-    }
-
-    const queryParams = new URLSearchParams(queryPart);
-    queryParams.set("returnTo", returnTo);
-    const query = queryParams.toString();
-    return query ? `${pathPart}?${query}` : pathPart;
-}
 const ARCHIVE_SUFFIXES = [
     ".tar.gz",
     ".tar.bz2",
@@ -202,6 +189,9 @@ export default function Projects() {
     const [projectPage, setProjectPage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+    const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(
+        () => new Set(),
+    );
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [showCreateAuditDialog, setShowCreateAuditDialog] = useState(false);
     const [auditPreselectedProjectId, setAuditPreselectedProjectId] =
@@ -213,8 +203,8 @@ export default function Projects() {
     const [uploading, setUploading] = useState(false);
     const [generatingDescription, setGeneratingDescription] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-    const [projectToDelete, setProjectToDelete] = useState<Project | null>(
+    const [showDisableDialog, setShowDisableDialog] = useState(false);
+    const [projectToDisable, setProjectToDisable] = useState<Project | null>(
         null,
     );
     const [showEditDialog, setShowEditDialog] = useState(false);
@@ -478,10 +468,22 @@ export default function Projects() {
                         return result.value;
                     },
                 );
+                const agentTaskCategoryMap: Record<string, "intelligent" | "hybrid"> =
+                    {};
+                for (const task of sourceAgentTasks) {
+                    const mode = resolveSourceModeFromTaskMeta(
+                        "intelligent_audit",
+                        task.name,
+                        task.description,
+                    );
+                    agentTaskCategoryMap[task.id] =
+                        mode === "hybrid" ? "hybrid" : "intelligent";
+                }
 
                 const topVulnerabilities = getProjectCardPotentialVulnerabilities({
                     opengrepFindings: staticFindings,
                     verifiedAgentFindings,
+                    agentTaskCategoryMap,
                     limit: PROJECT_CARD_POTENTIAL_TOP_LIMIT,
                 });
 
@@ -648,8 +650,33 @@ export default function Projects() {
     const loadProjects = async () => {
         try {
             setLoading(true);
-            const projectData = await api.getProjects();
-            const normalizedProjects = Array.isArray(projectData) ? projectData : [];
+            const mergedProjects: Project[] = [];
+            let skip = 0;
+            // 后端默认 limit=100，这里主动分批拉取避免禁用项目被截断。
+            while (true) {
+                const projectBatch = await api.getProjects({
+                    includeDeleted: true,
+                    skip,
+                    limit: PROJECT_FETCH_BATCH_SIZE,
+                });
+                const normalizedBatch = Array.isArray(projectBatch)
+                    ? projectBatch
+                    : [];
+                mergedProjects.push(...normalizedBatch);
+                if (normalizedBatch.length < PROJECT_FETCH_BATCH_SIZE) {
+                    break;
+                }
+                skip += PROJECT_FETCH_BATCH_SIZE;
+            }
+
+            const normalizedProjects = mergedProjects.sort((a, b) => {
+                const aTs = new Date(a.created_at).getTime();
+                const bTs = new Date(b.created_at).getTime();
+                if (Number.isNaN(aTs) || Number.isNaN(bTs)) {
+                    return String(b.created_at).localeCompare(String(a.created_at));
+                }
+                return bTs - aTs;
+            });
             setProjects(normalizedProjects);
             setProjectTaskPoolsMap({});
             setProjectLanguageStatsMap({});
@@ -953,6 +980,20 @@ export default function Projects() {
     );
 
     useEffect(() => {
+        setSelectedProjectIds((previous) => {
+            if (previous.size === 0) return previous;
+            const validProjectIds = new Set(projects.map((project) => project.id));
+            const next = new Set<string>();
+            for (const id of previous) {
+                if (validProjectIds.has(id)) {
+                    next.add(id);
+                }
+            }
+            return next.size === previous.size ? previous : next;
+        });
+    }, [projects]);
+
+    useEffect(() => {
         setProjectPage(1);
     }, [searchTerm]);
 
@@ -966,6 +1007,26 @@ export default function Projects() {
         const start = (projectPage - 1) * PROJECT_PAGE_SIZE;
         return filteredProjects.slice(start, start + PROJECT_PAGE_SIZE);
     }, [filteredProjects, projectPage]);
+
+    const currentPageProjectIds = useMemo(
+        () => pagedProjects.map((project) => project.id),
+        [pagedProjects],
+    );
+
+    const isAllCurrentPageSelected = useMemo(() => {
+        return (
+            currentPageProjectIds.length > 0 &&
+            currentPageProjectIds.every((id) => selectedProjectIds.has(id))
+        );
+    }, [currentPageProjectIds, selectedProjectIds]);
+
+    const isSomeCurrentPageSelected = useMemo(() => {
+        if (currentPageProjectIds.length === 0) return false;
+        const selectedCount = currentPageProjectIds.filter((id) =>
+            selectedProjectIds.has(id),
+        ).length;
+        return selectedCount > 0 && selectedCount < currentPageProjectIds.length;
+    }, [currentPageProjectIds, selectedProjectIds]);
 
     useEffect(() => {
         const visibleProjectIds = pagedProjects.map((project) => project.id);
@@ -1011,40 +1072,6 @@ export default function Projects() {
     }, [pagedProjects, projectLanguageStatsMap, fetchProjectLanguageStats]);
 
     useEffect(() => {
-        const visibleProjectIds = pagedProjects.map((project) => project.id);
-        if (visibleProjectIds.length === 0) {
-            return;
-        }
-
-        const pendingFetchIds = visibleProjectIds.filter((projectId) => {
-            const current = projectPotentialVulnerabilityMap[projectId];
-            const taskPoolState = projectTaskPoolsMap[projectId];
-            return !current && taskPoolState?.status === "ready";
-        });
-
-        if (pendingFetchIds.length > 0) {
-            setProjectPotentialVulnerabilityMap((previous) => {
-                const next = { ...previous };
-                for (const projectId of pendingFetchIds) {
-                    if (!next[projectId]) {
-                        next[projectId] = { status: "loading", items: [] };
-                    }
-                }
-                return next;
-            });
-
-            for (const projectId of pendingFetchIds) {
-                void fetchProjectPotentialVulnerabilities(projectId);
-            }
-        }
-    }, [
-        projectTaskPoolsMap,
-        pagedProjects,
-        projectPotentialVulnerabilityMap,
-        fetchProjectPotentialVulnerabilities,
-    ]);
-
-    useEffect(() => {
         return () => {
             for (const timer of Object.values(languageStatsPollTimerRef.current)) {
                 window.clearTimeout(timer);
@@ -1086,6 +1113,30 @@ export default function Projects() {
                         agentTasks: projectTaskPools?.agentTasks || [],
                         opengrepTasks: projectTaskPools?.opengrepTasks || [],
                     }),
+                ];
+            }),
+        );
+    }, [pagedProjects, projectTaskPoolsMap]);
+
+    const projectExecutionStatsMap = useMemo(() => {
+        return new Map(
+            pagedProjects.map((project) => {
+                const projectTaskPools = projectTaskPoolsMap[project.id];
+                const statuses = [
+                    ...(projectTaskPools?.auditTasks || []).map((task) => task.status),
+                    ...(projectTaskPools?.agentTasks || []).map((task) => task.status),
+                    ...(projectTaskPools?.opengrepTasks || []).map((task) => task.status),
+                    ...(projectTaskPools?.gitleaksTasks || []).map((task) => task.status),
+                ].map((status) => String(status || "").trim().toLowerCase());
+
+                return [
+                    project.id,
+                    {
+                        completed: statuses.filter((status) => status === "completed")
+                            .length,
+                        running: statuses.filter((status) => status === "running")
+                            .length,
+                    },
                 ];
             }),
         );
@@ -1213,6 +1264,76 @@ export default function Projects() {
         return "未知";
     };
 
+    const getProjectSizeText = (projectId: string) => {
+        const languageStats = projectLanguageStatsMap[projectId];
+        if (!languageStats) return "-";
+        if (languageStats.status === "ready") {
+            return `${languageStats.totalFiles} 文件 / ${languageStats.total.toLocaleString()} 行`;
+        }
+        if (
+            languageStats.status === "loading" ||
+            languageStats.status === "pending"
+        ) {
+            return "统计中...";
+        }
+        return "-";
+    };
+
+    const toggleProjectSelection = (projectId: string, checked: boolean) => {
+        setSelectedProjectIds((previous) => {
+            const next = new Set(previous);
+            if (checked) {
+                next.add(projectId);
+            } else {
+                next.delete(projectId);
+            }
+            return next;
+        });
+    };
+
+    const toggleSelectCurrentPage = (checked: boolean) => {
+        setSelectedProjectIds((previous) => {
+            const next = new Set(previous);
+            if (checked) {
+                for (const projectId of currentPageProjectIds) {
+                    next.add(projectId);
+                }
+            } else {
+                for (const projectId of currentPageProjectIds) {
+                    next.delete(projectId);
+                }
+            }
+            return next;
+        });
+    };
+
+    const paginationItems = useMemo(() => {
+        if (totalProjectPages <= 7) {
+            return Array.from({ length: totalProjectPages }, (_, index) => index + 1);
+        }
+        const pages = new Set<number>([
+            1,
+            totalProjectPages,
+            projectPage - 1,
+            projectPage,
+            projectPage + 1,
+        ]);
+        const sortedPages = Array.from(pages)
+            .filter((page) => page >= 1 && page <= totalProjectPages)
+            .sort((a, b) => a - b);
+
+        const items: Array<number | "ellipsis"> = [];
+        let previousPage = 0;
+        for (const page of sortedPages) {
+            if (previousPage > 0 && page - previousPage > 1) {
+                items.push("ellipsis");
+            }
+            items.push(page);
+            previousPage = page;
+        }
+        return items;
+    }, [projectPage, totalProjectPages]);
+
     const handleCreateTask = (projectId: string) => {
         openCreateAuditDialog("agent", projectId, {
             navigateOnSuccess: true,
@@ -1263,39 +1384,68 @@ export default function Projects() {
         setEditForm({ ...editForm, programming_languages: newLanguages });
     };
 
-    const handleDeleteClick = (project: Project) => {
-        setProjectToDelete(project);
-        setShowDeleteDialog(true);
+    const handleDisableClick = (project: Project) => {
+        setProjectToDisable(project);
+        setShowDisableDialog(true);
     };
 
-    const handleConfirmDelete = async () => {
-        if (!projectToDelete) return;
+    const handleConfirmDisable = async () => {
+        if (!projectToDisable) return;
 
         try {
-            await api.deleteProject(projectToDelete.id);
+            await api.deleteProject(projectToDisable.id);
 
             import("@/shared/utils/logger").then(({ logger }) => {
-                logger.logUserAction("删除项目", {
-                    projectId: projectToDelete.id,
-                    projectName: projectToDelete.name,
+                logger.logUserAction("禁用项目", {
+                    projectId: projectToDisable.id,
+                    projectName: projectToDisable.name,
                 });
             });
 
-            toast.success(`项目 "${projectToDelete.name}" 删除成功`, {
-                description: "项目已从列表中移除",
+            toast.success(`项目 "${projectToDisable.name}" 已禁用`, {
+                description: "可通过“启用”按钮恢复该项目",
                 duration: 4000,
             });
-            setShowDeleteDialog(false);
-            setProjectToDelete(null);
+            setShowDisableDialog(false);
+            setProjectToDisable(null);
             loadProjects();
         } catch (error) {
-            console.error("Failed to delete project:", error);
+            console.error("Failed to disable project:", error);
             import("@/shared/utils/errorHandler").then(({ handleError }) => {
-                handleError(error, "删除项目失败");
+                handleError(error, "禁用项目失败");
             });
             const errorMessage =
                 error instanceof Error ? error.message : "未知错误";
-            toast.error(`删除项目失败: ${errorMessage}`);
+            toast.error(`禁用项目失败: ${errorMessage}`);
+        }
+    };
+
+    const handleEnableProject = async (project: Project) => {
+        if (project.is_active) return;
+
+        try {
+            await api.restoreProject(project.id);
+
+            import("@/shared/utils/logger").then(({ logger }) => {
+                logger.logUserAction("启用项目", {
+                    projectId: project.id,
+                    projectName: project.name,
+                });
+            });
+
+            toast.success(`项目 "${project.name}" 已启用`, {
+                description: "项目恢复为可执行状态",
+                duration: 3000,
+            });
+            loadProjects();
+        } catch (error) {
+            console.error("Failed to enable project:", error);
+            import("@/shared/utils/errorHandler").then(({ handleError }) => {
+                handleError(error, "启用项目失败");
+            });
+            const errorMessage =
+                error instanceof Error ? error.message : "未知错误";
+            toast.error(`启用项目失败: ${errorMessage}`);
         }
     };
 
@@ -1764,420 +1914,257 @@ export default function Projects() {
 
             {/* Project Browser */}
             <div id="project-browser" className="cyber-card p-4 relative z-10">
-                <div className="flex items-center justify-between gap-3">
-                    <div className="section-header">
-                        <Code className="w-5 h-5 text-primary" />
+                <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="relative w-full max-w-xl">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder={t(
+                                "projects.searchPlaceholder",
+                                "按项目名称/描述/仓库地址搜索",
+                            )}
+                            className="h-9 font-mono pl-9"
+                        />
                     </div>
                     <Button
                         size="sm"
-                        className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 px-3`}
+                        className={`${PROJECT_ACTION_BTN_SUBTLE} h-9 px-3 shrink-0`}
                         onClick={handleOpenCreateProject}
                     >
                         <Plus className="w-4 h-4 mr-2" />
                         创建项目
                     </Button>
                 </div>
-                <div className="space-y-3 mb-3 mt-3">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder={t("projects.searchPlaceholder", "按项目名称/描述/仓库地址搜索")}
-                            className="h-9 font-mono pl-9"
-                        />
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        <span>共 {filteredProjects.length} 个</span>
-                    </div>
-                </div>
-                <div className="space-y-2">
-                    {loading && projects.length === 0 ? (
-                        <div className="cyber-card p-4 space-y-3">
-                            <Skeleton className="h-5 w-40" />
-                            <Skeleton className="h-8 w-full" />
-                            <Skeleton className="h-8 w-full" />
-                            <Skeleton className="h-56 w-full" />
-                        </div>
-                    ) : pagedProjects.length > 0 ? (
-                        pagedProjects.map((project) => (
-                            <div
-                                key={project.id}
-                                className={`block p-3 rounded-lg border transition-all ${project.is_active
-                                        ? "bg-primary/5 border-primary/20 hover:border-primary/40"
-                                        : "bg-muted/20 border-border hover:border-border"
-                                    }`}
-                            >
-                                {(() => {
-                                    const languageStats = projectLanguageStatsMap[project.id];
-                                    const recentTasks = projectRecentTasksMap.get(project.id) || [];
-                                    const potentialVulnerabilityState =
-                                        projectPotentialVulnerabilityMap[project.id] ||
-                                        (projectTaskPoolsMap[project.id]?.status === "loading"
-                                            ? ({ status: "loading", items: [] } as ProjectCardPotentialVulnerabilityState)
-                                            : undefined);
-                                    const summaryStats = projectSummaryStatsMap.get(project.id) || {
-                                        totalTasks: 0,
-                                        completedTasks: 0,
-                                        totalIssues: 0,
-                                    };
 
+                {loading && projects.length === 0 ? (
+                    <div className="cyber-card p-4 space-y-3">
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-48 w-full" />
+                    </div>
+                ) : pagedProjects.length > 0 ? (
+                    <>
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead className="w-[52px]">
+                                        <Checkbox
+                                            checked={
+                                                isAllCurrentPageSelected
+                                                    ? true
+                                                    : isSomeCurrentPageSelected
+                                                        ? "indeterminate"
+                                                        : false
+                                            }
+                                            onCheckedChange={(checked) =>
+                                                toggleSelectCurrentPage(Boolean(checked))
+                                            }
+                                            aria-label="全选当前页"
+                                        />
+                                    </TableHead>
+                                    <TableHead className="w-[80px] text-center">序号</TableHead>
+                                    <TableHead className="min-w-[180px]">项目名称</TableHead>
+                                    <TableHead className="min-w-[150px]">项目大小</TableHead>
+                                    <TableHead className="w-[120px]">状态</TableHead>
+                                    <TableHead className="w-[220px]">
+                                        执行任务
+                                    </TableHead>
+                                    <TableHead className="w-[120px]">发现漏洞</TableHead>
+                                    <TableHead className="min-w-[360px]">操作</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {pagedProjects.map((project, rowIndex) => {
+                                    const summaryStats =
+                                        projectSummaryStatsMap.get(project.id) || {
+                                            totalTasks: 0,
+                                            completedTasks: 0,
+                                            totalIssues: 0,
+                                        };
+                                    const executionStats =
+                                        projectExecutionStatsMap.get(project.id) || {
+                                            completed: 0,
+                                            running: 0,
+                                        };
+                                    const isDisabledRow = !project.is_active;
+                                    const rowNumber =
+                                        (projectPage - 1) * PROJECT_PAGE_SIZE + rowIndex + 1;
                                     return (
-                                        <>
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                                    <span className="inline-flex items-center gap-1 text-muted-foreground">
-                                        {getRepositoryIcon(project.repository_type)}
-                                    </span>
-                                    <Link
-                                        to={`/projects/${project.id}`}
-                                        state={{ from: projectDetailFrom }}
-                                        className="text-base font-medium text-foreground hover:text-primary transition-colors"
-                                    >
-                                        {project.name}
-                                    </Link>
-                                    <Badge
-                                        className={
-                                            project.is_active
-                                                ? "cyber-badge-success"
-                                                : "cyber-badge-muted"
-                                        }
-                                    >
-                                        {project.is_active ? "活跃" : "暂停"}
-                                    </Badge>
-                                    <Badge
-                                        className={
-                                            project.source_type === "zip"
-                                                ? "cyber-badge-warning"
-                                                : "cyber-badge-info"
-                                        }
-                                    >
-                                        {getSourceTypeBadge(project.source_type)}
-                                    </Badge>
-                                    <span className="text-xs text-muted-foreground">
-                                        创建时间：{formatCreatedAt(project.created_at)}
-                                    </span>
-                                    <div className="ml-auto flex items-center gap-2">
-                                        <Button
-                                            size="sm"
-                                            className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 text-xs`}
-                                            onClick={() => handleCreateTask(project.id)}
+                                        <TableRow
+                                            key={project.id}
+                                            className={isDisabledRow ? "opacity-80" : undefined}
                                         >
-                                            <Shield className="w-3 h-3 mr-2" />
-                                            审计
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="cyber-btn-ghost h-8 px-2 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
-                                            onClick={() => handleDeleteClick(project)}
-                                        >
-                                            <Trash2 className="w-3 h-3" />
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                <DeferredSection minHeight={420} priority>
-                                <div className="mt-3 space-y-3">
-                                    <div className="grid grid-cols-3 gap-2">
-                                        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
-                                            <p className="text-[11px] text-muted-foreground">
-                                                {t("projects.card.totalIssues")}
-                                            </p>
-                                            <p className="text-sm font-semibold text-amber-300">
-                                                {summaryStats.totalIssues}
-                                            </p>
-                                        </div>
-                                        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
-                                            <p className="text-[11px] text-muted-foreground">
-                                                {t("projects.card.totalTasks")}
-                                            </p>
-                                            <p className="text-sm font-semibold text-foreground">
-                                                {summaryStats.totalTasks}
-                                            </p>
-                                        </div>
-                                        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
-                                            <p className="text-[11px] text-muted-foreground">
-                                                {t("projects.card.completedTasks")}
-                                            </p>
-                                            <p className="text-sm font-semibold text-emerald-400">
-                                                {summaryStats.completedTasks}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <p className="text-sm text-muted-foreground line-clamp-2">
-                                        {project.description?.trim() || "暂无项目描述"}
-                                    </p>
-
-                                    <div className="grid grid-cols-1 xl:grid-cols-10 gap-3">
-                                        <div className="rounded-lg border border-border bg-muted/40 p-3 xl:col-span-2">
-                                            <div className="flex items-center justify-between gap-2 mb-2">
-                                                <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                                                    语言统计
-                                                </p>
-                                                {languageStats?.status === "ready" && (
-                                                    <span className="text-[11px] text-muted-foreground">
-                                                        {languageStats.total.toLocaleString()} 行
-                                                    </span>
-                                                )}
-                                            </div>
-
-                                            {languageStats?.status === "loading" ||
-                                            languageStats?.status === "pending" ? (
-                                                <p className="text-xs text-muted-foreground">
-                                                    语言统计生成中...
-                                                </p>
-                                            ) : languageStats?.status === "unsupported" ? (
-                                                <p className="text-xs text-muted-foreground">
-                                                    {t("projects.language.unsupported")}
-                                                </p>
-                                            ) : languageStats?.status === "failed" ? (
-                                                <p className="text-xs text-rose-400">
-                                                    语言统计加载失败
-                                                </p>
-                                            ) : languageStats?.status === "ready" ? (
-                                                <div className="space-y-3">
-                                                    <div className="h-[170px]">
-                                                        <Suspense
-                                                            fallback={
-                                                                <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
-                                                                    语言图表加载中...
-                                                                </div>
-                                                            }
-                                                        >
-                                                            <ProjectLanguagePieChart
-                                                                projectId={project.id}
-                                                                slices={languageStats.slices}
-                                                                colors={PROJECT_CARD_PIE_COLORS}
-                                                            />
-                                                        </Suspense>
-                                                    </div>
-                                                    <div className="space-y-1.5 pt-2 border-t border-border/60">
-                                                        {languageStats.slices.slice(0, 5).map((slice, index) => (
-                                                            <div
-                                                                key={`${project.id}-lang-item-${slice.name}`}
-                                                                className="flex items-center justify-between text-[11px] gap-2"
-                                                            >
-                                                                <span className="inline-flex items-center gap-1.5 min-w-0">
-                                                                    <span
-                                                                        className="w-2 h-2 rounded-full shrink-0"
-                                                                        style={{
-                                                                            backgroundColor:
-                                                                                PROJECT_CARD_PIE_COLORS[
-                                                                                    index % PROJECT_CARD_PIE_COLORS.length
-                                                                                ],
-                                                                        }}
-                                                                    />
-                                                                    <span className="truncate text-foreground font-semibold">
-                                                                        {slice.name}
-                                                                    </span>
-                                                                </span>
-                                                                <span className="inline-flex items-center gap-2 shrink-0">
-                                                                    <span className="text-muted-foreground">
-                                                                        {(slice.proportion * 100).toFixed(1)}%
-                                                                    </span>
-                                                                    <span className="text-foreground/80">
-                                                                        {slice.loc.toLocaleString()} 行
-                                                                    </span>
-                                                                </span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <p className="text-xs text-muted-foreground">
-                                                    暂无语言统计
-                                                </p>
-                                            )}
-                                        </div>
-
-                                        <div className="rounded-lg border border-border bg-muted/40 p-3 xl:col-span-4">
-                                            <div className="flex items-center justify-between gap-2 mb-2">
-                                                <p className="text-sm uppercase tracking-wider text-muted-foreground">
-                                                    最近任务
-                                                </p>
-                                                <span className="text-sm text-muted-foreground">
-                                                    最近 3 条
-                                                </span>
-                                            </div>
-                                            {recentTasks.length > 0 ? (
-                                                <div className="space-y-2">
-                                                    {recentTasks.map((task) => (
+                                            <TableCell>
+                                                <Checkbox
+                                                    checked={selectedProjectIds.has(project.id)}
+                                                    onCheckedChange={(checked) =>
+                                                        toggleProjectSelection(
+                                                            project.id,
+                                                            Boolean(checked),
+                                                        )
+                                                    }
+                                                    aria-label={`选择项目 ${project.name}`}
+                                                />
+                                            </TableCell>
+                                            <TableCell className="text-muted-foreground text-center">
+                                                {rowNumber}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Link
+                                                    to={`/projects/${project.id}`}
+                                                    state={{ from: projectDetailFrom }}
+                                                    title={project.name}
+                                                    className="block max-w-[180px] truncate text-foreground hover:text-primary transition-colors font-semibold"
+                                                >
+                                                    {project.name}
+                                                </Link>
+                                            </TableCell>
+                                            <TableCell className="text-sm text-muted-foreground">
+                                                {getProjectSizeText(project.id)}
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge
+                                                    className={
+                                                        project.is_active
+                                                            ? "cyber-badge-success"
+                                                            : "cyber-badge-warning"
+                                                    }
+                                                >
+                                                    {project.is_active ? "启用" : "禁用"}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-emerald-300 font-semibold">
+                                                {executionStats.completed}/{executionStats.running}
+                                            </TableCell>
+                                            <TableCell className="text-amber-300 font-semibold">
+                                                {summaryStats.totalIssues ?? 0}
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex items-center gap-2 whitespace-nowrap">
+                                                    <Button
+                                                        asChild
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="cyber-btn-ghost h-8 px-3"
+                                                    >
                                                         <Link
-                                                            key={`${project.id}-${task.kind}-${task.id}`}
-                                                            to={task.route}
-                                                            className="block rounded border border-border bg-background/80 px-2.5 py-2 hover:border-primary/40 transition-colors text-left"
+                                                            to={`/projects/${project.id}`}
+                                                            state={{ from: projectDetailFrom }}
                                                         >
-                                                            <div className="flex items-center gap-2">
-                                                                <p className="min-w-0 flex-1 text-base text-foreground font-semibold truncate">
-                                                                    {task.label}
-                                                                </p>
-                                                                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                                                    {formatCreatedAt(task.createdAt)}
-                                                                </span>
-                                                                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                                                    {formatTaskDuration(task.durationMs)}
-                                                                </span>
-                                                                <span className="inline-flex items-center gap-1 text-sm text-primary/85 shrink-0">
-                                                                    查看详情
-                                                                    <ChevronRight className="w-4 h-4" />
-                                                                </span>
-                                                            </div>
-                                                            <div className="mt-2 space-y-1.5">
-                                                                <div className="flex flex-wrap items-center gap-1.5">
-                                                                    <Badge
-                                                                        className={`${getTaskStatusBadgeClassName(task.status)} text-xs`}
-                                                                    >
-                                                                        {getTaskStatusText(task.status)}
-                                                                    </Badge>
-                                                                    <Badge className="cyber-badge-success text-xs">
-                                                                        发现漏洞 {formatRecentTaskMetricValue(task.vulnerabilities)}
-                                                                    </Badge>
-                                                                </div>
-                                                            </div>
-                                                            <div className="mt-2 space-y-1">
-                                                                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                                                    <span>进度</span>
-                                                                    <span>{Math.round(task.progressPercent)}%</span>
-                                                                </div>
-                                                                <Progress
-                                                                    value={task.progressPercent}
-                                                                    className={`h-1.5 bg-muted/45 ${getTaskProgressBarClassName(task.status)}`}
-                                                                />
-                                                            </div>
+                                                            查看详情
                                                         </Link>
-                                                    ))}
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 px-3`}
+                                                        onClick={() => handleCreateTask(project.id)}
+                                                        disabled={!project.is_active}
+                                                    >
+                                                        创建审计
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="cyber-btn-ghost h-8 px-3 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
+                                                        onClick={() => handleDisableClick(project)}
+                                                        disabled={!project.is_active}
+                                                    >
+                                                        禁用
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="cyber-btn-ghost h-8 px-3 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/30"
+                                                        onClick={() => void handleEnableProject(project)}
+                                                        disabled={project.is_active}
+                                                    >
+                                                        启用
+                                                    </Button>
                                                 </div>
-                                            ) : (
-                                                <p className="text-xs text-muted-foreground">
-                                                    暂无任务记录
-                                                </p>
-                                            )}
-                                        </div>
-
-                                        <div className="rounded-lg border border-border bg-muted/40 p-3 xl:col-span-4">
-                                            <div className="flex items-center justify-between gap-2 mb-2">
-                                                <p className="text-sm uppercase tracking-wider text-muted-foreground">
-                                                    潜在漏洞
-                                                </p>
-                                                <span className="text-sm text-muted-foreground">
-                                                    Top 5
-                                                </span>
-                                            </div>
-                                            {potentialVulnerabilityState?.status === "loading" ? (
-                                                <p className="text-xs text-muted-foreground">
-                                                    潜在漏洞分析中...
-                                                </p>
-                                            ) : potentialVulnerabilityState?.status === "failed" ? (
-                                                <p className="text-xs text-rose-400">
-                                                    潜在漏洞加载失败
-                                                </p>
-                                            ) : potentialVulnerabilityState?.status === "ready" &&
-                                              potentialVulnerabilityState.items.length > 0 ? (
-                                                <div className="space-y-2">
-                                                    {potentialVulnerabilityState.items.map((item) => (
-                                                        <Link
-                                                            key={`${project.id}-vuln-${item.id}`}
-                                                            to={appendReturnToForStaticFindingRoute(
-                                                                item.route,
-                                                                currentRoute,
-                                                            )}
-                                                            className="block rounded border border-border bg-background/80 px-2.5 py-2 hover:border-primary/40 transition-colors text-left"
-                                                        >
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <p className="text-base text-foreground font-semibold truncate">
-                                                                    {item.title}
-                                                                </p>
-                                                                <div className="inline-flex items-center gap-2 shrink-0">
-                                                                    <Badge
-                                                                        className={`${getVulnerabilitySeverityBadgeClassName(
-                                                                            item.severity,
-                                                                        )} text-xs`}
-                                                                    >
-                                                                        {getVulnerabilitySeverityText(item.severity)}
-                                                                    </Badge>
-                                                                    <span className="inline-flex items-center gap-1 text-sm text-primary/85">
-                                                                        查看详情
-                                                                        <ChevronRight className="w-4 h-4" />
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                            <div className="mt-1 flex items-center justify-between gap-2 text-sm">
-                                                                <p className="text-muted-foreground truncate">
-                                                                    {item.filePath}
-                                                                    {item.line ? `:${item.line}` : ""}
-                                                                </p>
-                                                                <span className="text-foreground/80 shrink-0">
-                                                                    置信度 {getVulnerabilityConfidenceText(item.confidence)}
-                                                                </span>
-                                                            </div>
-                                                        </Link>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <p className="text-xs text-muted-foreground">
-                                                    暂无潜在漏洞
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                </DeferredSection>
-                                        </>
+                                            </TableCell>
+                                        </TableRow>
                                     );
-                                })()}
+                                })}
+                            </TableBody>
+                        </Table>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                            <div className="text-xs text-muted-foreground">
+                                共 {filteredProjects.length} 条
                             </div>
-                        ))
-                    ) : (
-                        <div className="empty-state py-10">
-                            <Code className="w-12 h-12 text-muted-foreground mb-3" />
-                            <p className="text-base text-muted-foreground">
-                                {searchTerm ? "未匹配到项目" : "暂无项目"}
-                            </p>
-                            {!searchTerm && (
+                            <div className="flex items-center gap-1.5">
                                 <Button
-                                    onClick={handleOpenCreateProject}
-                                    className={`${PROJECT_ACTION_BTN} mt-4`}
+                                    variant="outline"
+                                    size="sm"
+                                    className="cyber-btn-outline h-8 px-3"
+                                    disabled={projectPage <= 1}
+                                    onClick={() =>
+                                        setProjectPage((prev) => Math.max(prev - 1, 1))
+                                    }
                                 >
-                                    <Plus className="w-4 h-4 mr-2" />
-                                    初始化项目
+                                    上一页
                                 </Button>
-                            )}
+                                {paginationItems.map((item, index) => {
+                                    if (item === "ellipsis") {
+                                        return (
+                                            <span
+                                                key={`ellipsis-${index}`}
+                                                className="px-2 text-muted-foreground"
+                                            >
+                                                ...
+                                            </span>
+                                        );
+                                    }
+                                    const page = item;
+                                    return (
+                                        <Button
+                                            key={`page-${page}`}
+                                            size="sm"
+                                            variant={
+                                                page === projectPage ? "default" : "outline"
+                                            }
+                                            className={`h-8 min-w-8 px-2 ${
+                                                page === projectPage
+                                                    ? "cyber-btn-primary"
+                                                    : "cyber-btn-ghost"
+                                            }`}
+                                            onClick={() => setProjectPage(page)}
+                                        >
+                                            {page}
+                                        </Button>
+                                    );
+                                })}
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="cyber-btn-outline h-8 px-3"
+                                    disabled={projectPage >= totalProjectPages}
+                                    onClick={() =>
+                                        setProjectPage((prev) =>
+                                            Math.min(prev + 1, totalProjectPages),
+                                        )
+                                    }
+                                >
+                                    下一页
+                                </Button>
+                            </div>
                         </div>
-                    )}
-                </div>
-                {filteredProjects.length > 0 && (
-                    <div className="mt-4 flex items-center justify-between">
-                        <div className="text-xs text-muted-foreground">
-                            第 {projectPage} / {totalProjectPages} 页（每页{" "}
-                            {PROJECT_PAGE_SIZE} 条）
-                        </div>
-                        <div className="flex items-center gap-2">
+                    </>
+                ) : (
+                    <div className="empty-state py-10">
+                        <Code className="w-12 h-12 text-muted-foreground mb-3" />
+                        <p className="text-base text-muted-foreground">
+                            {searchTerm ? "未匹配到项目" : "暂无项目"}
+                        </p>
+                        {!searchTerm && (
                             <Button
-                                variant="outline"
-                                size="sm"
-                                className="cyber-btn-outline h-8 px-3"
-                                disabled={projectPage <= 1}
-                                onClick={() =>
-                                    setProjectPage((prev) => Math.max(prev - 1, 1))
-                                }
+                                onClick={handleOpenCreateProject}
+                                className={`${PROJECT_ACTION_BTN} mt-4`}
                             >
-                                上一页
+                                <Plus className="w-4 h-4 mr-2" />
+                                创建项目
                             </Button>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="cyber-btn-outline h-8 px-3"
-                                disabled={projectPage >= totalProjectPages}
-                                onClick={() =>
-                                    setProjectPage((prev) =>
-                                        Math.min(prev + 1, totalProjectPages),
-                                    )
-                                }
-                            >
-                                下一页
-                            </Button>
-                        </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -2580,21 +2567,21 @@ export default function Projects() {
                 </DialogContent>
             </Dialog>
 
-            {/* Delete Dialog */}
+            {/* Disable Dialog */}
             <AlertDialog
-                open={showDeleteDialog}
-                onOpenChange={setShowDeleteDialog}
+                open={showDisableDialog}
+                onOpenChange={setShowDisableDialog}
             >
                 <AlertDialogContent className="cyber-card border-border cyber-dialog p-0 !fixed">
                     <AlertDialogHeader className="p-6">
                         <AlertDialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
                             <Trash2 className="w-5 h-5 text-rose-400" />
-                            确认删除
+                            确认禁用
                         </AlertDialogTitle>
                         <AlertDialogDescription className="text-muted-foreground font-mono">
-                            您确定要删除{" "}
+                            您确定要禁用{" "}
                             <span className="font-bold text-rose-400">
-                                "{projectToDelete?.name}"
+                                "{projectToDisable?.name}"
                             </span>{" "}
                             吗？
                         </AlertDialogDescription>
@@ -2608,7 +2595,7 @@ export default function Projects() {
                             <ul className="list-none text-sky-400/80 space-y-1 text-xs font-mono">
                                 <li className="flex items-center gap-2">
                                     <span className="text-sky-400">&gt;</span>{" "}
-                                    项目将被删除
+                                    项目将被禁用
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <span className="text-sky-400">&gt;</span>{" "}
@@ -2616,7 +2603,7 @@ export default function Projects() {
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <span className="text-sky-400">&gt;</span>{" "}
-                                    此操作将立即生效
+                                    可通过“启用”按钮恢复
                                 </li>
                             </ul>
                         </div>
@@ -2627,10 +2614,10 @@ export default function Projects() {
                             取消
                         </AlertDialogCancel>
                         <AlertDialogAction
-                            onClick={handleConfirmDelete}
+                            onClick={handleConfirmDisable}
                             className="cyber-btn bg-rose-500/90 border-rose-500/50 text-foreground hover:bg-rose-500"
                         >
-                            确认删除
+                            确认禁用
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

@@ -17,6 +17,20 @@ docker compose up -d --build
 
 Frontend is exposed at `http://localhost:3000`, backend at `http://localhost:8000`.
 
+### Default seed projects (persistent)
+
+On first startup (`docker compose up --build`), backend initializes built-in ZIP projects for the demo user:
+
+- `libplist`
+- `DVWA`
+- `DSVW`
+- `WebGoat`
+- `JavaSecLab`
+- `govwa`
+- `fastjson`
+
+Project ZIPs are imported once and persisted in Docker volumes (`postgres_data` + `backend_uploads`), so subsequent restarts/rebuilds reuse them directly.
+
 ## Local Development
 
 ### 1) Environment

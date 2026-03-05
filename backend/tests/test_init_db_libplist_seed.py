@@ -207,3 +207,57 @@ async def test_seed_asset_missing(monkeypatch, tmp_path: Path, caplog):
 
     save_mock.assert_not_awaited()
     assert any("本地资源缺失" in record.message for record in caplog.records)
+
+
+def test_build_default_test_resource_seed_projects(monkeypatch, tmp_path: Path):
+    known_zip = tmp_path / "DVWA-master.zip"
+    unknown_zip = tmp_path / "custom-sample.zip"
+    known_zip.write_bytes(b"dvwa")
+    unknown_zip.write_bytes(b"custom")
+
+    monkeypatch.setattr(init_db_module, "DEFAULT_TEST_RESOURCE_ARCHIVE_DIR", tmp_path)
+
+    seeds = init_db_module._build_default_test_resource_seed_projects()
+    seed_by_archive = {seed.archive_name: seed for seed in seeds}
+
+    assert set(seed_by_archive) == {"DVWA-master.zip", "custom-sample.zip"}
+    assert seed_by_archive["DVWA-master.zip"].name == "DVWA"
+    assert "经典的 Web 安全靶场项目" in seed_by_archive["DVWA-master.zip"].description
+    assert seed_by_archive["custom-sample.zip"].name == "custom-sample"
+    assert "离线安全样本项目" in seed_by_archive["custom-sample.zip"].description
+
+
+@pytest.mark.asyncio
+async def test_ensure_default_test_resource_projects(monkeypatch):
+    db = AsyncMock()
+    user = SimpleNamespace(id="user-1")
+    seeds = [
+        init_db_module.DefaultZipSeedProject(
+            name="seed-a",
+            description="A",
+            archive_name="a.zip",
+            local_zip_path="/tmp/a.zip",
+            fallback_languages=["Python"],
+        ),
+        init_db_module.DefaultZipSeedProject(
+            name="seed-b",
+            description="B",
+            archive_name="b.zip",
+            local_zip_path="/tmp/b.zip",
+            fallback_languages=["Go"],
+        ),
+    ]
+
+    monkeypatch.setattr(
+        init_db_module,
+        "_build_default_test_resource_seed_projects",
+        lambda: seeds,
+    )
+    ensure_mock = AsyncMock()
+    monkeypatch.setattr(init_db_module, "_ensure_default_zip_seed_project", ensure_mock)
+
+    await init_db_module.ensure_default_test_resource_projects(db=db, user=user)
+
+    assert ensure_mock.await_count == 2
+    called_names = [call.kwargs["seed"].name for call in ensure_mock.await_args_list]
+    assert called_names == ["seed-a", "seed-b"]

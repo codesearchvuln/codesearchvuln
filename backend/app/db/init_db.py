@@ -11,6 +11,7 @@ import yaml
 import subprocess
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from typing import Optional, List, Any
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -75,6 +76,68 @@ DEFAULT_LIBPLIST_ARCHIVE_NAME = "libplist-2.7.0.zip"
 DEFAULT_LIBPLIST_LOCAL_ZIP_PATH = str(
     Path(__file__).resolve().parent / "seed_assets" / DEFAULT_LIBPLIST_ARCHIVE_NAME
 )
+DEFAULT_TEST_RESOURCE_ARCHIVE_DIR = Path(__file__).resolve().parents[2] / "tests" / "resources"
+DEFAULT_TEST_RESOURCE_PROJECT_METADATA: dict[str, dict[str, Any]] = {
+    "DVWA-master.zip": {
+        "name": "DVWA",
+        "description": (
+            "DVWA（Damn Vulnerable Web Application）是经典的 Web 安全靶场项目，"
+            "覆盖 SQL 注入、XSS、文件包含、CSRF 等常见漏洞场景，适合用于漏洞验证与规则调试。"
+        ),
+        "fallback_languages": ["PHP", "JavaScript"],
+    },
+    "DSVW-master.zip": {
+        "name": "DSVW",
+        "description": (
+            "DSVW（Damn Small Vulnerable Web）是轻量级 Web 漏洞练习项目，"
+            "聚焦常见输入验证与访问控制缺陷，便于快速复现与教学演示。"
+        ),
+        "fallback_languages": ["PHP", "JavaScript"],
+    },
+    "WebGoat-main.zip": {
+        "name": "WebGoat",
+        "description": (
+            "WebGoat 是 OWASP 提供的交互式安全训练平台，"
+            "包含身份认证、注入、逻辑缺陷等多类教学关卡，适合后端与应用安全演练。"
+        ),
+        "fallback_languages": ["Java", "JavaScript"],
+    },
+    "JavaSecLab-1.4.zip": {
+        "name": "JavaSecLab",
+        "description": (
+            "JavaSecLab 是面向 Java 生态的漏洞练习项目，"
+            "覆盖反序列化、表达式注入、模板注入等典型风险，适合 Java 安全测试场景。"
+        ),
+        "fallback_languages": ["Java"],
+    },
+    "govwa-master.zip": {
+        "name": "govwa",
+        "description": (
+            "govwa 是 Go 语言 Web 漏洞练习项目，"
+            "用于演示输入校验、权限控制和请求处理中的安全缺陷，适合 Go 应用审计训练。"
+        ),
+        "fallback_languages": ["Go", "HTML"],
+    },
+    "fastjson.zip": {
+        "name": "fastjson",
+        "description": (
+            "fastjson 安全样本项目用于演示 Java 反序列化链与历史漏洞利用面，"
+            "可用于规则回归测试与序列化安全能力验证。"
+        ),
+        "fallback_languages": ["Java"],
+    },
+}
+
+
+@dataclass(frozen=True)
+class DefaultZipSeedProject:
+    name: str
+    description: str
+    archive_name: str
+    local_zip_path: str
+    fallback_languages: list[str]
+    legacy_description: str | None = None
+    legacy_repository_url: str | None = None
 
 LEGACY_DEFAULT_PROJECT_NAMES = {
     "电商平台后端",
@@ -127,16 +190,48 @@ async def cleanup_legacy_default_projects(db: AsyncSession, user_id: str) -> Non
     logger.info("✓ 已清理旧默认项目: %s 个", len(legacy_projects))
 
 
-async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
-    """
-    首次初始化仅引入 libplist 默认项目，并从本地 seed 资源导入 zip 到项目存储。
-    """
-    await cleanup_legacy_default_projects(db, user.id)
+def _build_default_test_resource_seed_projects() -> list[DefaultZipSeedProject]:
+    seeds: list[DefaultZipSeedProject] = []
+    for zip_path in sorted(DEFAULT_TEST_RESOURCE_ARCHIVE_DIR.glob("*.zip")):
+        metadata = DEFAULT_TEST_RESOURCE_PROJECT_METADATA.get(zip_path.name, {})
+        default_name = zip_path.stem
+        for suffix in ("-master", "-main"):
+            if default_name.endswith(suffix):
+                default_name = default_name[: -len(suffix)]
+                break
+        project_name = metadata.get("name", default_name)
+        description = metadata.get(
+            "description",
+            (
+                f"{project_name} 是系统内置的离线安全样本项目，来源于本地归档 {zip_path.name}，"
+                "用于首次启动时自动初始化项目数据并支持后续重复使用。"
+            ),
+        )
+        fallback_languages = metadata.get("fallback_languages", ["Unknown"])
+        seeds.append(
+            DefaultZipSeedProject(
+                name=project_name,
+                description=description,
+                archive_name=zip_path.name,
+                local_zip_path=str(zip_path),
+                fallback_languages=fallback_languages,
+            )
+        )
+    return seeds
 
+
+async def _ensure_default_zip_seed_project(
+    db: AsyncSession,
+    user: User,
+    seed: DefaultZipSeedProject,
+) -> None:
+    """
+    确保默认 ZIP 种子项目存在，并从本地 seed 资源导入 zip 到项目存储。
+    """
     result = await db.execute(
         select(Project).where(
             Project.owner_id == user.id,
-            Project.name == DEFAULT_LIBPLIST_NAME,
+            Project.name == seed.name,
         )
     )
     project = result.scalars().first()
@@ -144,8 +239,8 @@ async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
     if not project:
         project = Project(
             owner_id=user.id,
-            name=DEFAULT_LIBPLIST_NAME,
-            description=DEFAULT_LIBPLIST_DESCRIPTION,
+            name=seed.name,
+            description=seed.description,
             source_type="zip",
             repository_url=None,
             repository_type="other",
@@ -156,20 +251,19 @@ async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
         db.add(project)
         await db.commit()
         await db.refresh(project)
-        logger.info("✓ 已创建默认项目: %s", DEFAULT_LIBPLIST_NAME)
+        logger.info("✓ 已创建默认项目: %s", seed.name)
     else:
         should_update_project = False
         if not project.is_active:
             project.is_active = True
             should_update_project = True
-            logger.info("✓ 已恢复默认项目: %s", DEFAULT_LIBPLIST_NAME)
+            logger.info("✓ 已恢复默认项目: %s", seed.name)
 
         current_description = (project.description or "").strip()
-        if (
-            not current_description
-            or current_description == DEFAULT_LIBPLIST_LEGACY_DESCRIPTION
+        if not current_description or (
+            seed.legacy_description and current_description == seed.legacy_description
         ):
-            project.description = DEFAULT_LIBPLIST_DESCRIPTION
+            project.description = seed.description
             should_update_project = True
 
         if project.source_type != "zip":
@@ -177,7 +271,7 @@ async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
             should_update_project = True
 
         # 旧版本默认项目会写入远程 URL，迁移到离线模式后统一清空
-        if project.repository_url == DEFAULT_LIBPLIST_LEGACY_ZIP_URL:
+        if seed.legacy_repository_url and project.repository_url == seed.legacy_repository_url:
             project.repository_url = None
             should_update_project = True
 
@@ -188,25 +282,26 @@ async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
     if await has_project_zip(project.id):
         return
 
-    if not os.path.exists(DEFAULT_LIBPLIST_LOCAL_ZIP_PATH):
+    if not os.path.exists(seed.local_zip_path):
         logger.warning(
-            "默认 libplist ZIP 本地资源缺失，仅保留项目记录: %s",
-            DEFAULT_LIBPLIST_LOCAL_ZIP_PATH,
+            "默认项目 ZIP 本地资源缺失（%s），仅保留项目记录: %s",
+            seed.name,
+            seed.local_zip_path,
         )
         return
 
     try:
-        zip_hash = _sha256_file(DEFAULT_LIBPLIST_LOCAL_ZIP_PATH)
+        zip_hash = _sha256_file(seed.local_zip_path)
         await save_project_zip(
             project.id,
-            DEFAULT_LIBPLIST_LOCAL_ZIP_PATH,
-            DEFAULT_LIBPLIST_ARCHIVE_NAME,
+            seed.local_zip_path,
+            seed.archive_name,
         )
 
-        zip_paths = _collect_zip_paths(DEFAULT_LIBPLIST_LOCAL_ZIP_PATH)
+        zip_paths = _collect_zip_paths(seed.local_zip_path)
         detected_languages = detect_languages_from_paths(zip_paths)
         project.programming_languages = json.dumps(
-            detected_languages or ["C"],
+            detected_languages or seed.fallback_languages,
             ensure_ascii=False,
         )
         project.zip_file_hash = zip_hash
@@ -217,10 +312,43 @@ async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
             await db.rollback()
             project.zip_file_hash = None
             await db.commit()
-            logger.warning("默认项目 libplist ZIP 哈希重复，已跳过去重哈希写入")
-        logger.info("✓ 默认项目 libplist ZIP 本地导入完成")
+            logger.warning("默认项目 %s ZIP 哈希重复，已跳过去重哈希写入", seed.name)
+        logger.info("✓ 默认项目 %s ZIP 本地导入完成", seed.name)
     except Exception as e:
-        logger.warning("默认 libplist ZIP 本地导入失败，仅保留项目记录: %s", e)
+        logger.warning("默认项目 %s ZIP 本地导入失败，仅保留项目记录: %s", seed.name, e)
+
+
+async def ensure_default_libplist_project(db: AsyncSession, user: User) -> None:
+    """
+    首次初始化仅引入 libplist 默认项目，并从本地 seed 资源导入 zip 到项目存储。
+    """
+    await cleanup_legacy_default_projects(db, user.id)
+    await _ensure_default_zip_seed_project(
+        db=db,
+        user=user,
+        seed=DefaultZipSeedProject(
+            name=DEFAULT_LIBPLIST_NAME,
+            description=DEFAULT_LIBPLIST_DESCRIPTION,
+            archive_name=DEFAULT_LIBPLIST_ARCHIVE_NAME,
+            local_zip_path=DEFAULT_LIBPLIST_LOCAL_ZIP_PATH,
+            fallback_languages=["C"],
+            legacy_description=DEFAULT_LIBPLIST_LEGACY_DESCRIPTION,
+            legacy_repository_url=DEFAULT_LIBPLIST_LEGACY_ZIP_URL,
+        ),
+    )
+
+
+async def ensure_default_test_resource_projects(db: AsyncSession, user: User) -> None:
+    """
+    导入 backend/tests/resources 下的离线 ZIP，作为默认演练项目。
+    """
+    seeds = _build_default_test_resource_seed_projects()
+    if not seeds:
+        logger.info("默认测试资源目录下未发现 ZIP：%s", DEFAULT_TEST_RESOURCE_ARCHIVE_DIR)
+        return
+
+    for seed in seeds:
+        await _ensure_default_zip_seed_project(db=db, user=user, seed=seed)
 
 
 async def create_demo_user(db: AsyncSession) -> User | None:
@@ -856,6 +984,7 @@ async def init_db(db: AsyncSession) -> None:
     # 不再创建历史演示项目，统一切换为默认 libplist 项目
     if demo_user:
         await ensure_default_libplist_project(db, demo_user)
+        await ensure_default_test_resource_projects(db, demo_user)
     
     await db.commit()
     

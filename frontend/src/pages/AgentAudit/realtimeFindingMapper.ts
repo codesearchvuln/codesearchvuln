@@ -39,6 +39,13 @@ function toOptionalNumber(value: unknown): number | null {
   return null;
 }
 
+function toOptionalConfidence(value: unknown): number | null {
+  const numeric = toOptionalNumber(value);
+  if (numeric === null) return null;
+  if (numeric < 0 || numeric > 1) return null;
+  return numeric;
+}
+
 function toNormalizedToken(value: unknown): string {
   return toSafeTrimmedString(value).toLowerCase().replace(/[-\s]+/g, "_");
 }
@@ -227,6 +234,7 @@ export function fromAgentFinding(
     reachability_function_end_line: finding.reachability_function_end_line ?? null,
     context_start_line: finding.context_start_line ?? null,
     context_end_line: finding.context_end_line ?? null,
+    confidence: toOptionalConfidence(finding.ai_confidence ?? finding.confidence),
     timestamp: finding.created_at ?? null,
     is_verified: verificationProgress === "verified",
   };
@@ -271,6 +279,9 @@ export function fromAgentEvent(event: AgentEvent): RealtimeMergedFindingItem | n
     toSafeTrimmedString(metadata.vulnerability_type) || "unknown";
   const filePath = normalizeFindingPath(metadata.file_path);
   const lineStart = toOptionalNumber(metadata.line_start);
+  const confidence = toOptionalConfidence(
+    metadata.confidence ?? metadata.ai_confidence,
+  );
   const timestamp =
     toOptionalString(event.timestamp) || toOptionalString(metadata.timestamp);
   const fingerprint = buildFindingFingerprint({
@@ -323,6 +334,7 @@ export function fromAgentEvent(event: AgentEvent): RealtimeMergedFindingItem | n
     ),
     context_start_line: toOptionalNumber(metadata.context_start_line),
     context_end_line: toOptionalNumber(metadata.context_end_line),
+    confidence,
     timestamp,
     is_verified: verificationProgress === "verified",
   };

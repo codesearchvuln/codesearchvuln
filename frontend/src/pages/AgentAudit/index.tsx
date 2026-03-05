@@ -591,6 +591,9 @@ function mergeRealtimeFindingsBatch(
       context_end_line: preferIncoming
         ? (item.context_end_line ?? existing.context_end_line)
         : (existing.context_end_line ?? item.context_end_line),
+      confidence: preferIncoming
+        ? (item.confidence ?? existing.confidence ?? null)
+        : (existing.confidence ?? item.confidence ?? null),
       timestamp: pickNewerIsoTimestamp(existing.timestamp, item.timestamp),
       is_verified: verificationProgress === "verified",
     };

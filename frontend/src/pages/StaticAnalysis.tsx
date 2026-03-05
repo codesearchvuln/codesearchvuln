@@ -3,12 +3,6 @@ import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
-import {
     AlertDialog,
     AlertDialogAction,
     AlertDialogCancel,
@@ -66,6 +60,10 @@ import {
     Loader2,
 } from "lucide-react";
 import { useI18n } from "@/shared/i18n";
+import {
+    appendReturnTo,
+    buildFindingDetailPath,
+} from "@/shared/utils/findingRoute";
 
 const STATUS_LABELS: Record<string, string> = {
     pending: "等待中",
@@ -306,9 +304,6 @@ export default function StaticAnalysis() {
     );
     const [updatingGitleaksFindingId, setUpdatingGitleaksFindingId] =
         useState<string | null>(null);
-    const [showDetail, setShowDetail] = useState(false);
-    const [selectedFinding, setSelectedFinding] =
-        useState<OpengrepFinding | null>(null);
     const [showInterruptConfirm, setShowInterruptConfirm] = useState(false);
     const [interruptingTask, setInterruptingTask] = useState(false);
     const lastOpengrepNotifiedStatusRef = useRef<string | null>(null);
@@ -882,21 +877,15 @@ export default function StaticAnalysis() {
         isInterruptibleStatus(opengrepTask?.status) ||
         isInterruptibleStatus(gitleaksTask?.status);
 
-    const openDetail = (finding: OpengrepFinding) => {
-        setSelectedFinding(finding);
-        setShowDetail(true);
-    };
+    const currentRoute = `${location.pathname}${location.search}`;
 
-    const handleJumpToRule = (checkId: string, ruleName?: string | null) => {
-        const currentRoute = `${location.pathname}${location.search}`;
-        const fallbackKeyword =
-            getCheckIdSuffix(checkId) || stripRuntimeRulePrefix(checkId);
-        const highlightKeyword =
-            stripRuntimeRulePrefix(ruleName) || fallbackKeyword;
-        const query = new URLSearchParams();
-        query.set("highlightRule", highlightKeyword);
-        query.set("returnTo", currentRoute);
-        navigate(`/opengrep-rules?${query.toString()}`);
+    const handleOpenUnifiedFindingDetail = (finding: OpengrepFinding) => {
+        const detailPath = buildFindingDetailPath({
+            source: "static",
+            taskId: String(opengrepTaskId || finding.scan_task_id || "").trim(),
+            findingId: String(finding.id || "").trim(),
+        });
+        navigate(appendReturnTo(detailPath, currentRoute));
     };
 
     const handleBack = () => {
@@ -1338,7 +1327,7 @@ export default function StaticAnalysis() {
                                                             variant="outline"
                                                             className="cyber-btn-ghost h-7 text-xs"
                                                             onClick={() =>
-                                                                openDetail(
+                                                                handleOpenUnifiedFindingDetail(
                                                                     finding,
                                                                 )
                                                             }
@@ -1803,186 +1792,6 @@ export default function StaticAnalysis() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-
-            <Dialog
-                open={showDetail}
-                onOpenChange={(open) => {
-                    setShowDetail(open);
-                    if (!open) {
-                        setSelectedFinding(null);
-                    }
-                }}
-            >
-                <DialogContent className="!w-[min(90vw,980px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
-                    <DialogHeader className="px-6 pt-4 flex-shrink-0">
-                        <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
-                            结果详情
-                        </DialogTitle>
-                    </DialogHeader>
-
-                    {selectedFinding &&
-                        (() => {
-                            const meta = getRuleMeta(selectedFinding);
-                            const isVerified =
-                                selectedFinding.status === "verified";
-                            const isFalsePositive =
-                                selectedFinding.status === "false_positive";
-                            const ruleDisplayId =
-                                getCheckIdSuffix(meta.checkId) || meta.checkId;
-                            const matchedRuleName = stripRuntimeRulePrefix(
-                                selectedFinding.rule_name,
-                            );
-                            return (
-                                <div className="flex-1 overflow-y-auto p-6">
-                                    <div className="space-y-6">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <Badge
-                                                className={`cyber-badge ${FINDING_STATUS_CLASSES[selectedFinding.status] || "bg-muted"}`}
-                                            >
-                                                {getStatusLabel(selectedFinding.status)}
-                                            </Badge>
-                                            <Badge
-                                                className={`cyber-badge ${isVerified ? VERIFICATION_BADGE_CLASSES.active : VERIFICATION_BADGE_CLASSES.inactive}`}
-                                            >
-                                                {isVerified
-                                                    ? "已验证"
-                                                    : "未验证"}
-                                            </Badge>
-                                            <Badge
-                                                className={`cyber-badge ${isFalsePositive ? FALSE_POSITIVE_BADGE_CLASSES.active : FALSE_POSITIVE_BADGE_CLASSES.inactive}`}
-                                            >
-                                                {isFalsePositive
-                                                    ? "误报"
-                                                    : "非误报"}
-                                            </Badge>
-                                            {parseConfidenceLevel(
-                                                selectedFinding.confidence,
-                                            ) && (
-                                                <Badge className="cyber-badge-muted">
-                                                    {isEnglish
-                                                        ? `CONF: ${getConfidenceLabel(selectedFinding.confidence || "")}`
-                                                        : `置信度: ${getConfidenceLabel(selectedFinding.confidence || "")}`}
-                                                </Badge>
-                                            )}
-                                            <span className="text-sm text-foreground font-bold">
-                                                {matchedRuleName || ruleDisplayId}
-                                            </span>
-                                            {matchedRuleName &&
-                                                matchedRuleName !== ruleDisplayId && (
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {ruleDisplayId}
-                                                    </span>
-                                                )}
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                基本信息
-                                            </h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono text-muted-foreground">
-                                                <div>
-                                                    <div className="uppercase text-[10px] text-muted-foreground mb-1">
-                                                        文件路径
-                                                    </div>
-                                                    <div className="text-foreground break-all">
-                                                        {normalizePath(
-                                                            meta.path,
-                                                        )}
-                                                        {meta.line
-                                                            ? `:${meta.line}`
-                                                            : ""}
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="uppercase text-[10px] text-muted-foreground mb-1">
-                                                        命中规则
-                                                    </div>
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        <span className="text-foreground break-all">
-                                                            {matchedRuleName || ruleDisplayId}
-                                                        </span>
-                                                        {matchedRuleName &&
-                                                            matchedRuleName !==
-                                                                ruleDisplayId && (
-                                                                <span className="text-[10px] text-muted-foreground">
-                                                                    ({ruleDisplayId})
-                                                                </span>
-                                                            )}
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            variant="outline"
-                                                            className="h-6 px-2 text-[10px] cyber-btn-outline"
-                                                            onClick={() =>
-                                                                handleJumpToRule(
-                                                                    meta.checkId,
-                                                                    selectedFinding.rule_name,
-                                                                )
-                                                            }
-                                                        >
-                                                            查看规则
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <div className="uppercase text-[10px] text-muted-foreground mb-1">
-                                                        验证状态
-                                                    </div>
-                                                    <div className="text-foreground">
-                                                        {meta.validationState ||
-                                                            "-"}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {meta.message && (
-                                            <div className="space-y-3">
-                                                <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                    规则描述
-                                                </h3>
-                                                <div className="text-sm text-foreground">
-                                                    {meta.message}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {(meta.lines || selectedFinding.code_snippet) && (
-                                            <div className="space-y-3">
-                                                <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                    命中代码
-                                                </h3>
-                                                <pre className="text-xs font-mono text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
-                                                    {meta.lines || selectedFinding.code_snippet}
-                                                </pre>
-                                            </div>
-                                        )}
-
-                                        {meta.references.length > 0 && (
-                                            <div className="space-y-3">
-                                                <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
-                                                    参考链接
-                                                </h3>
-                                                <ul className="text-xs text-muted-foreground font-mono list-disc list-inside space-y-1">
-                                                    {meta.references.map(
-                                                        (ref: string) => (
-                                                            <li
-                                                                key={ref}
-                                                                className="break-all"
-                                                            >
-                                                                {ref}
-                                                            </li>
-                                                        ),
-                                                    )}
-                                                </ul>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                </DialogContent>
-            </Dialog>
         </div>
     );
 }

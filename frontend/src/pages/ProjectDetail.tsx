@@ -3,379 +3,840 @@
  * Cyberpunk Terminal Aesthetic
  */
 
-import { useMemo, useState, useEffect } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
 import {
-    ArrowLeft,
-    Shield,
-    Activity,
-    AlertTriangle,
-    CheckCircle,
-    Clock,
-    XCircle,
+	Activity,
+	AlertTriangle,
+	ArrowLeft,
+	Bug,
+	Search,
+	Shield,
 } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { api } from "@/shared/config/database";
-import type { Project, AuditTask, UnifiedTask } from "@/shared/types";
-import type { AgentTask } from "@/shared/api/agentTasks";
-import { getAgentTasks } from "@/shared/api/agentTasks";
-import {
-    getOpengrepScanTasks,
-    type OpengrepScanTask,
-} from "@/shared/api/opengrep";
-import {
-    getGitleaksScanTasks,
-    type GitleaksScanTask,
-} from "@/shared/api/gitleaks";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
-import { ProjectTasksTab } from "@/pages/project-detail/components/ProjectTasksTab";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import {
+	getProjectCardPotentialVulnerabilities,
+	getProjectCardRecentTasks,
+	type ProjectCardPotentialVulnerability,
+} from "@/features/projects/services/projectCardPreview";
+import { resolveSourceModeFromTaskMeta } from "@/features/tasks/services/taskActivities";
+import {
+	type AgentFinding,
+	type AgentTask,
+	getAgentFindings,
+	getAgentTasks,
+} from "@/shared/api/agentTasks";
+import {
+	type GitleaksScanTask,
+	getGitleaksScanTasks,
+} from "@/shared/api/gitleaks";
+import {
+	getOpengrepScanFindings,
+	getOpengrepScanTasks,
+	type OpengrepFinding,
+	type OpengrepScanTask,
+} from "@/shared/api/opengrep";
+import { api } from "@/shared/config/database";
+import type { AuditTask, Project } from "@/shared/types";
+import { appendReturnTo } from "@/shared/utils/findingRoute";
+
+const DETAIL_RECENT_TASK_LIMIT = 10;
+const DETAIL_POTENTIAL_TOP_LIMIT = 10;
+const DETAIL_POTENTIAL_SOURCE_TASK_LIMIT = 10;
+const DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT = 200;
+
+type PotentialStatus = "loading" | "ready" | "empty" | "failed";
 
 export default function ProjectDetail() {
-    const { id } = useParams<{ id: string }>();
-    const location = useLocation();
-    const navigate = useNavigate();
-    const [project, setProject] = useState<Project | null>(null);
-    const [auditTasks, setAuditTasks] = useState<AuditTask[]>([]);
-    const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
-    const [staticTasks, setStaticTasks] = useState<OpengrepScanTask[]>([]);
-    const [gitleaksTasks, setGitleaksTasks] = useState<GitleaksScanTask[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false);
+	const { id } = useParams<{ id: string }>();
+	const location = useLocation();
+	const navigate = useNavigate();
+	const [project, setProject] = useState<Project | null>(null);
+	const [auditTasks, setAuditTasks] = useState<AuditTask[]>([]);
+	const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
+	const [staticTasks, setStaticTasks] = useState<OpengrepScanTask[]>([]);
+	const [gitleaksTasks, setGitleaksTasks] = useState<GitleaksScanTask[]>([]);
+	const [potentialVulnerabilities, setPotentialVulnerabilities] = useState<
+		ProjectCardPotentialVulnerability[]
+	>([]);
+	const [potentialStatus, setPotentialStatus] =
+		useState<PotentialStatus>("loading");
+	const [recentTaskTimeKeyword, setRecentTaskTimeKeyword] = useState("");
+	const [loading, setLoading] = useState(true);
+	const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false);
 
-    const fallbackBackPath = "/projects#project-browser";
-    const sourceFromState =
-        typeof (location.state as { from?: unknown } | null)?.from === "string"
-            ? ((location.state as { from?: string }).from ?? "")
-            : "";
-    const normalizedSourceFrom =
-        sourceFromState.startsWith("/") ? sourceFromState : "";
-    const backTarget =
-        normalizedSourceFrom && normalizedSourceFrom !== location.pathname
-            ? normalizedSourceFrom
-            : fallbackBackPath;
+	const fallbackBackPath = "/projects#project-browser";
+	const sourceFromState =
+		typeof (location.state as { from?: unknown } | null)?.from === "string"
+			? ((location.state as { from?: string }).from ?? "")
+			: "";
+	const normalizedSourceFrom = sourceFromState.startsWith("/")
+		? sourceFromState
+		: "";
+	const backTarget =
+		normalizedSourceFrom && normalizedSourceFrom !== location.pathname
+			? normalizedSourceFrom
+			: fallbackBackPath;
+	const currentRoute = `${location.pathname}${location.search}`;
 
-    const handleBack = () => {
-        navigate(backTarget);
-    };
+	const handleBack = () => {
+		navigate(backTarget);
+	};
 
-    useEffect(() => {
-        if (!id) return;
-        void loadProjectData();
-    }, [id]);
+	const fetchProjectPotentialVulnerabilities = useCallback(
+		async (
+			projectId: string,
+			sourceAgentTaskPool: AgentTask[],
+			sourceOpengrepTaskPool: OpengrepScanTask[],
+		) => {
+			setPotentialStatus("loading");
+			setPotentialVulnerabilities([]);
 
-    const loadProjectData = async () => {
-        if (!id) return;
+			try {
+				const sourceOpengrepTasks = sourceOpengrepTaskPool
+					.filter((task) => task.project_id === projectId)
+					.sort(
+						(a, b) =>
+							new Date(b.created_at).getTime() -
+							new Date(a.created_at).getTime(),
+					)
+					.slice(0, DETAIL_POTENTIAL_SOURCE_TASK_LIMIT);
 
-        try {
-            setLoading(true);
-            const [
-                projectRes,
-                auditTasksRes,
-                agentTasksRes,
-                staticTasksRes,
-                gitleaksTasksRes,
-            ] = await Promise.allSettled([
-                api.getProjectById(id),
-                api.getAuditTasks(id),
-                getAgentTasks({ project_id: id }),
-                getOpengrepScanTasks({ projectId: id }),
-                getGitleaksScanTasks({ projectId: id }),
-            ]);
+				const sourceAgentTasks = sourceAgentTaskPool
+					.filter((task) => {
+						if (task.project_id !== projectId) return false;
+						const verifiedCount = Math.max(Number(task.verified_count ?? 0), 0);
+						if (verifiedCount <= 0) return false;
+						const sourceMode = resolveSourceModeFromTaskMeta(
+							"intelligent_audit",
+							task.name,
+							task.description,
+						);
+						return sourceMode === "intelligent" || sourceMode === "hybrid";
+					})
+					.sort(
+						(a, b) =>
+							new Date(b.created_at).getTime() -
+							new Date(a.created_at).getTime(),
+					)
+					.slice(0, DETAIL_POTENTIAL_SOURCE_TASK_LIMIT);
 
-            if (projectRes.status === "fulfilled") {
-                setProject(projectRes.value);
-            } else {
-                console.error("Failed to load project:", projectRes.reason);
-                setProject(null);
-            }
+				if (sourceOpengrepTasks.length === 0 && sourceAgentTasks.length === 0) {
+					setPotentialStatus("empty");
+					return;
+				}
 
-            if (auditTasksRes.status === "fulfilled") {
-                setAuditTasks(
-                    Array.isArray(auditTasksRes.value) ? auditTasksRes.value : [],
-                );
-            } else {
-                console.error("Failed to load audit tasks:", auditTasksRes.reason);
-                setAuditTasks([]);
-            }
+				const staticFindingsResult = await Promise.allSettled(
+					sourceOpengrepTasks.map((task) =>
+						getOpengrepScanFindings({
+							taskId: task.id,
+							limit: DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT,
+							confidence: "HIGH",
+						}),
+					),
+				);
 
-            if (agentTasksRes.status === "fulfilled") {
-                setAgentTasks(
-                    Array.isArray(agentTasksRes.value) ? agentTasksRes.value : [],
-                );
-            } else {
-                console.warn("Failed to load agent tasks:", agentTasksRes.reason);
-                setAgentTasks([]);
-            }
+				const staticFindings: OpengrepFinding[] = staticFindingsResult.flatMap(
+					(result, index) => {
+						if (result.status !== "fulfilled" || !Array.isArray(result.value)) {
+							return [];
+						}
+						const fallbackTaskId = sourceOpengrepTasks[index]?.id || "";
+						return result.value.map((finding) => ({
+							...finding,
+							scan_task_id: finding.scan_task_id || fallbackTaskId,
+						}));
+					},
+				);
 
-            if (staticTasksRes.status === "fulfilled") {
-                setStaticTasks(
-                    Array.isArray(staticTasksRes.value) ? staticTasksRes.value : [],
-                );
-            } else {
-                console.warn("Failed to load static tasks:", staticTasksRes.reason);
-                setStaticTasks([]);
-            }
+				const agentFindingsResult = await Promise.allSettled(
+					sourceAgentTasks.map((task) =>
+						getAgentFindings(task.id, {
+							is_verified: true,
+							include_false_positive: false,
+						}),
+					),
+				);
 
-            if (gitleaksTasksRes.status === "fulfilled") {
-                setGitleaksTasks(
-                    Array.isArray(gitleaksTasksRes.value) ? gitleaksTasksRes.value : [],
-                );
-            } else {
-                console.warn(
-                    "Failed to load gitleaks tasks:",
-                    gitleaksTasksRes.reason,
-                );
-                setGitleaksTasks([]);
-            }
-        } catch (error) {
-            console.error("Failed to load project data:", error);
-            toast.error("加载项目数据失败");
-        } finally {
-            setLoading(false);
-        }
-    };
+					const verifiedAgentFindings: AgentFinding[] =
+						agentFindingsResult.flatMap((result) => {
+							if (result.status !== "fulfilled" || !Array.isArray(result.value)) {
+								return [];
+							}
+							return result.value;
+						});
+					const agentTaskCategoryMap: Record<
+						string,
+						"intelligent" | "hybrid"
+					> = {};
+					for (const task of sourceAgentTasks) {
+						const mode = resolveSourceModeFromTaskMeta(
+							"intelligent_audit",
+							task.name,
+							task.description,
+						);
+						agentTaskCategoryMap[task.id] =
+							mode === "hybrid" ? "hybrid" : "intelligent";
+					}
 
-    const unifiedTasks: UnifiedTask[] = useMemo(() => {
-        const merged: UnifiedTask[] = [
-            ...auditTasks.map((task) => ({ kind: "audit" as const, task })),
-            ...agentTasks.map((task) => ({ kind: "agent" as const, task })),
-            ...staticTasks.map((task) => ({ kind: "static" as const, task })),
-        ];
+					const topVulnerabilities = getProjectCardPotentialVulnerabilities({
+						opengrepFindings: staticFindings,
+						verifiedAgentFindings,
+						agentTaskCategoryMap,
+						limit: DETAIL_POTENTIAL_TOP_LIMIT,
+					});
 
-        merged.sort(
-            (a, b) =>
-                new Date((b.task as any).created_at).getTime() -
-                new Date((a.task as any).created_at).getTime(),
-        );
-        return merged;
-    }, [auditTasks, agentTasks, staticTasks]);
+				setPotentialVulnerabilities(topVulnerabilities);
+				setPotentialStatus(topVulnerabilities.length > 0 ? "ready" : "empty");
+			} catch {
+				setPotentialStatus("failed");
+			}
+		},
+		[],
+	);
 
-    const staticTaskRouteMap = useMemo(() => {
-        const map = new Map<string, string>();
-        const gitleaksByProject = new Map<string, GitleaksScanTask[]>();
+	const loadProjectData = useCallback(async () => {
+		if (!id) return;
 
-        for (const task of gitleaksTasks) {
-            const list = gitleaksByProject.get(task.project_id) || [];
-            list.push(task);
-            gitleaksByProject.set(task.project_id, list);
-        }
+		try {
+			setLoading(true);
+			setPotentialStatus("loading");
+			setPotentialVulnerabilities([]);
 
-        for (const [projectId, list] of gitleaksByProject.entries()) {
-            list.sort(
-                (a, b) =>
-                    new Date(a.created_at).getTime() -
-                    new Date(b.created_at).getTime(),
-            );
-            gitleaksByProject.set(projectId, list);
-        }
+			const [
+				projectRes,
+				auditTasksRes,
+				agentTasksRes,
+				staticTasksRes,
+				gitleaksTasksRes,
+			] = await Promise.allSettled([
+				api.getProjectById(id),
+				api.getAuditTasks(id),
+				getAgentTasks({ project_id: id }),
+				getOpengrepScanTasks({ projectId: id }),
+				getGitleaksScanTasks({ projectId: id }),
+			]);
 
-        const usedGitleaksTaskIds = new Set<string>();
-        const pairingWindowMs = 60 * 1000;
+			const nextAuditTasks =
+				auditTasksRes.status === "fulfilled" &&
+				Array.isArray(auditTasksRes.value)
+					? auditTasksRes.value
+					: [];
+			const nextAgentTasks =
+				agentTasksRes.status === "fulfilled" &&
+				Array.isArray(agentTasksRes.value)
+					? agentTasksRes.value
+					: [];
+			const nextStaticTasks =
+				staticTasksRes.status === "fulfilled" &&
+				Array.isArray(staticTasksRes.value)
+					? staticTasksRes.value
+					: [];
+			const nextGitleaksTasks =
+				gitleaksTasksRes.status === "fulfilled" &&
+				Array.isArray(gitleaksTasksRes.value)
+					? gitleaksTasksRes.value
+					: [];
 
-        const pickPairedGitleaksTask = (opengrepTask: OpengrepScanTask) => {
-            const candidates =
-                gitleaksByProject.get(opengrepTask.project_id) || [];
-            if (candidates.length === 0) return null;
+			if (projectRes.status === "fulfilled") {
+				setProject(projectRes.value);
+			} else {
+				console.error("Failed to load project:", projectRes.reason);
+				setProject(null);
+			}
 
-            const opengrepTime = new Date(opengrepTask.created_at).getTime();
-            let bestTask: GitleaksScanTask | null = null;
-            let bestDiff = Number.POSITIVE_INFINITY;
+			if (auditTasksRes.status !== "fulfilled") {
+				console.error("Failed to load audit tasks:", auditTasksRes.reason);
+			}
+			if (agentTasksRes.status !== "fulfilled") {
+				console.warn("Failed to load agent tasks:", agentTasksRes.reason);
+			}
+			if (staticTasksRes.status !== "fulfilled") {
+				console.warn("Failed to load static tasks:", staticTasksRes.reason);
+			}
+			if (gitleaksTasksRes.status !== "fulfilled") {
+				console.warn("Failed to load gitleaks tasks:", gitleaksTasksRes.reason);
+			}
 
-            for (const candidate of candidates) {
-                if (usedGitleaksTaskIds.has(candidate.id)) continue;
-                const diff = Math.abs(
-                    new Date(candidate.created_at).getTime() - opengrepTime,
-                );
-                if (diff <= pairingWindowMs && diff < bestDiff) {
-                    bestTask = candidate;
-                    bestDiff = diff;
-                }
-            }
+			setAuditTasks(nextAuditTasks);
+			setAgentTasks(nextAgentTasks);
+			setStaticTasks(nextStaticTasks);
+			setGitleaksTasks(nextGitleaksTasks);
 
-            if (bestTask) {
-                usedGitleaksTaskIds.add(bestTask.id);
-            }
+			void fetchProjectPotentialVulnerabilities(
+				id,
+				nextAgentTasks,
+				nextStaticTasks,
+			);
+		} catch (error) {
+			console.error("Failed to load project data:", error);
+			toast.error("加载项目数据失败");
+			setPotentialStatus("failed");
+			setPotentialVulnerabilities([]);
+		} finally {
+			setLoading(false);
+		}
+	}, [fetchProjectPotentialVulnerabilities, id]);
 
-            return bestTask;
-        };
+	useEffect(() => {
+		if (!id) return;
+		void loadProjectData();
+	}, [id, loadProjectData]);
 
-        for (const task of staticTasks) {
-            const params = new URLSearchParams();
-            params.set("opengrepTaskId", task.id);
-            const pairedGitleaksTask = pickPairedGitleaksTask(task);
-            if (pairedGitleaksTask) {
-                params.set("gitleaksTaskId", pairedGitleaksTask.id);
-            }
-            map.set(task.id, `/static-analysis/${task.id}?${params.toString()}`);
-        }
+	const recentTasks = useMemo(() => {
+		if (!id) return [];
+		return getProjectCardRecentTasks({
+			projectId: id,
+			auditTasks,
+			agentTasks,
+			opengrepTasks: staticTasks,
+			gitleaksTasks,
+			limit: DETAIL_RECENT_TASK_LIMIT,
+		});
+	}, [id, auditTasks, agentTasks, staticTasks, gitleaksTasks]);
 
-        return map;
-    }, [staticTasks, gitleaksTasks]);
+	const handleRunAudit = () => {
+		setShowCreateTaskDialog(true);
+	};
 
-    const getTaskDetailRoute = (wrappedTask: UnifiedTask) => {
-        const task: any = wrappedTask.task as any;
-        if (wrappedTask.kind === "static") {
-            return (
-                staticTaskRouteMap.get(task.id) || `/static-analysis/${task.id}`
-            );
-        }
-        if (wrappedTask.kind === "audit") {
-            return `/tasks/${task.id}`;
-        }
-        return `/agent-audit/${task.id}`;
-    };
+	const handleTaskCreated = () => {
+		toast.success("审计任务已创建", {
+			description:
+				"因为网络和代码文件大小等因素，审计时长通常至少需要1分钟，请耐心等待...",
+			duration: 5000,
+		});
+		void loadProjectData();
+	};
 
-    const handleRunAudit = () => {
-        setShowCreateTaskDialog(true);
-    };
+	const getStatusBadge = (status: string) => {
+		switch (status) {
+			case "completed":
+				return <Badge className="cyber-badge-success">完成</Badge>;
+			case "running":
+				return <Badge className="cyber-badge-info">运行中</Badge>;
+			case "failed":
+				return <Badge className="cyber-badge-danger">失败</Badge>;
+			case "interrupted":
+				return (
+					<Badge className="bg-orange-500/20 text-orange-300 border-orange-500/30">
+						中断
+					</Badge>
+				);
+			case "cancelled":
+				return <Badge className="cyber-badge-muted">已取消</Badge>;
+			default:
+				return <Badge className="cyber-badge-muted">等待中</Badge>;
+		}
+	};
 
-    const handleCreateTask = () => {
-        setShowCreateTaskDialog(true);
-    };
+	const getTaskProgressBarClassName = (status: string) => {
+		const normalized = String(status || "")
+			.trim()
+			.toLowerCase();
+		if (normalized === "running") return "[&>div]:bg-sky-500";
+		if (normalized === "completed") return "[&>div]:bg-emerald-500";
+		return "[&>div]:bg-slate-400";
+	};
 
-    const handleTaskCreated = () => {
-        toast.success("审计任务已创建", {
-            description:
-                "因为网络和代码文件大小等因素，审计时长通常至少需要1分钟，请耐心等待...",
-            duration: 5000,
-        });
-        void loadProjectData();
-    };
+	const getVulnerabilitySeverityBadgeClassName = (
+		severity: ProjectCardPotentialVulnerability["severity"],
+	) => {
+		if (severity === "CRITICAL") return "cyber-badge-danger";
+		if (severity === "HIGH") return "cyber-badge-warning";
+		if (severity === "MEDIUM") return "cyber-badge-info";
+		if (severity === "LOW") return "cyber-badge-muted";
+		return "cyber-badge-muted";
+	};
 
-    const getStatusBadge = (status: string) => {
-        switch (status) {
-            case "completed":
-                return <Badge className="cyber-badge-success">完成</Badge>;
-            case "running":
-                return <Badge className="cyber-badge-info">运行中</Badge>;
-            case "failed":
-                return <Badge className="cyber-badge-danger">失败</Badge>;
-            case "interrupted":
-                return (
-                    <Badge className="bg-orange-500/20 text-orange-300 border-orange-500/30">
-                        中断
-                    </Badge>
-                );
-            case "cancelled":
-                return <Badge className="cyber-badge-muted">已取消</Badge>;
-            default:
-                return <Badge className="cyber-badge-muted">等待中</Badge>;
-        }
-    };
+	const getVulnerabilitySeverityText = (
+		severity: ProjectCardPotentialVulnerability["severity"],
+	) => {
+		if (severity === "CRITICAL") return "严重";
+		if (severity === "HIGH") return "高危";
+		if (severity === "MEDIUM") return "中危";
+		if (severity === "LOW") return "低危";
+		return "未知";
+	};
 
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case "completed":
-                return <CheckCircle className="w-4 h-4 text-emerald-400" />;
-            case "running":
-                return <Activity className="w-4 h-4 text-sky-400" />;
-            case "failed":
-                return <AlertTriangle className="w-4 h-4 text-rose-400" />;
-            case "interrupted":
-                return <AlertTriangle className="w-4 h-4 text-orange-400" />;
-            case "cancelled":
-                return <XCircle className="w-4 h-4 text-muted-foreground" />;
-            default:
-                return <Clock className="w-4 h-4 text-muted-foreground" />;
-        }
-    };
+	const getVulnerabilityConfidenceText = (
+		confidence: ProjectCardPotentialVulnerability["confidence"],
+	) => {
+		if (confidence === "HIGH") return "高";
+		if (confidence === "MEDIUM") return "中";
+		if (confidence === "LOW") return "低";
+		return "-";
+	};
 
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString("zh-CN", {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-        });
-    };
+	const getVulnerabilityConfidenceBadgeClassName = (
+		confidence: ProjectCardPotentialVulnerability["confidence"],
+	) => {
+		if (confidence === "HIGH") {
+			return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+		}
+		if (confidence === "MEDIUM") {
+			return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+		}
+		if (confidence === "LOW") {
+			return "bg-sky-500/20 text-sky-300 border-sky-500/30";
+		}
+		return "cyber-badge-muted";
+	};
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="text-center space-y-4">
-                    <div className="loading-spinner mx-auto" />
-                    <p className="text-muted-foreground font-mono text-sm uppercase tracking-wider">
-                        加载项目数据...
-                    </p>
-                </div>
-            </div>
-        );
-    }
+	const getTaskCategoryBadgeClassName = (
+		category: ProjectCardPotentialVulnerability["taskCategory"],
+	) => {
+		if (category === "static") return "bg-sky-500/20 text-sky-300 border-sky-500/30";
+		if (category === "intelligent") {
+			return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+		}
+		return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+	};
 
-    if (!project) {
-        return (
-            <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="cyber-card p-8 text-center">
-                    <AlertTriangle className="w-16 h-16 text-rose-400 mx-auto mb-4" />
-                    <h2 className="text-2xl font-bold text-foreground mb-2 uppercase">
-                        项目未找到
-                    </h2>
-                    <p className="text-muted-foreground mb-4 font-mono">
-                        请检查项目ID是否正确
-                    </p>
-                    <Button className="cyber-btn-primary" onClick={handleBack}>
-                        <ArrowLeft className="w-4 h-4 mr-2" />
-                        返回
-                    </Button>
-                </div>
-            </div>
-        );
-    }
+	const getTaskCategoryText = (
+		category: ProjectCardPotentialVulnerability["taskCategory"],
+	) => {
+		if (category === "static") return "静态扫描";
+		if (category === "intelligent") return "智能扫描";
+		return "混合扫描";
+	};
 
-    return (
-        <div className="space-y-6 p-6 cyber-bg-elevated min-h-screen font-mono relative">
-            <div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
+	const toProjectRelativePath = useCallback(
+		(filePath: string) => {
+			const normalizedPath = String(filePath || "")
+				.trim()
+				.replace(/\\/g, "/");
+			if (!normalizedPath) return "-";
 
-            <div className="relative z-10 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
-                        {project.name}
-                    </h1>
-                    <Badge
-                        className={`${project.is_active ? "cyber-badge-success" : "cyber-badge-muted"}`}
-                    >
-                        {project.is_active ? "活跃" : "暂停"}
-                    </Badge>
-                </div>
+			const trimmed = normalizedPath.replace(/^\/+/, "");
+			const projectName = String(project?.name || "")
+				.trim()
+				.replace(/\\/g, "/");
+			if (!projectName) return trimmed || "-";
 
-                <div className="flex items-center space-x-3">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="cyber-btn-ghost h-10 px-3 flex items-center justify-center gap-2"
-                        onClick={handleBack}
-                    >
-                        <ArrowLeft className="w-5 h-5" />
-                        返回
-                    </Button>
-                    <Button onClick={handleRunAudit} className="cyber-btn-primary">
-                        <Shield className="w-4 h-4 mr-2" />
-                        启动审计
-                    </Button>
-                </div>
-            </div>
+			const pathLower = normalizedPath.toLowerCase();
+			const projectLower = projectName.toLowerCase();
+			const marker = `/${projectLower}/`;
+			const markerIndex = pathLower.lastIndexOf(marker);
+			if (markerIndex >= 0) {
+				const relative = normalizedPath.slice(markerIndex + marker.length);
+				return relative || "-";
+			}
 
-            <div className="flex flex-col gap-6 mt-6 relative z-10">
-                <ProjectTasksTab
-                    unifiedTasks={unifiedTasks}
-                    onCreateTask={handleCreateTask}
-                    formatDate={formatDate}
-                    renderStatusBadge={getStatusBadge}
-                    renderStatusIcon={getStatusIcon}
-                    getTaskRoute={getTaskDetailRoute}
-                />
-            </div>
+			if (pathLower.startsWith(`${projectLower}/`)) {
+				return normalizedPath.slice(projectName.length + 1) || "-";
+			}
 
-            <CreateTaskDialog
-                open={showCreateTaskDialog}
-                onOpenChange={setShowCreateTaskDialog}
-                onTaskCreated={handleTaskCreated}
-                preselectedProjectId={id}
-            />
-        </div>
-    );
+			if (pathLower === projectLower) return "-";
+
+			return trimmed || "-";
+		},
+		[project?.name],
+	);
+
+	const toStaticRelativePath = useCallback(
+		(filePath: string) => {
+			const normalizedPath = String(filePath || "")
+				.trim()
+				.replace(/\\/g, "/");
+			if (!normalizedPath) return "-";
+
+			const trimmed = normalizedPath.replace(/^\/+/, "");
+			if (!trimmed) return "-";
+
+			const segments = trimmed.split("/").filter(Boolean);
+			if (segments.length === 0) return "-";
+
+			const normalizedProjectName = String(project?.name || "")
+				.trim()
+				.replace(/\\/g, "/")
+				.toLowerCase();
+
+			if (normalizedProjectName) {
+				const projectRootIndex = segments.findIndex((segment) => {
+					const normalizedSegment = segment.toLowerCase();
+					return (
+						normalizedSegment === normalizedProjectName ||
+						normalizedSegment.startsWith(`${normalizedProjectName}-`) ||
+						normalizedSegment.startsWith(`${normalizedProjectName}_`) ||
+						normalizedSegment.startsWith(`${normalizedProjectName}.`)
+					);
+				});
+
+				if (projectRootIndex >= 0) {
+					if (projectRootIndex >= segments.length - 1) return "-";
+					return segments.slice(projectRootIndex + 1).join("/");
+				}
+			}
+
+			const sourceRootSegments = new Set([
+				"src",
+				"include",
+				"lib",
+				"app",
+				"apps",
+				"test",
+				"tests",
+			]);
+			const sourceRootIndex = segments.findIndex((segment) =>
+				sourceRootSegments.has(segment.toLowerCase()),
+			);
+			if (sourceRootIndex >= 0) {
+				return segments.slice(sourceRootIndex).join("/");
+			}
+
+			return trimmed || "-";
+		},
+		[project?.name],
+	);
+
+	const formatPotentialLocation = useCallback(
+		(
+			filePath: string,
+			line: number | null,
+			source: ProjectCardPotentialVulnerability["source"],
+		) => {
+			const relativePath =
+				source === "static"
+					? toStaticRelativePath(filePath)
+					: toProjectRelativePath(filePath);
+			if (typeof line === "number" && Number.isFinite(line) && line > 0) {
+				return `${relativePath}:${line}`;
+			}
+			return relativePath;
+		},
+		[toProjectRelativePath, toStaticRelativePath],
+	);
+
+	const formatDate = useCallback((dateString: string) => {
+		return new Date(dateString).toLocaleDateString("zh-CN", {
+			year: "numeric",
+			month: "short",
+			day: "numeric",
+			hour: "2-digit",
+			minute: "2-digit",
+		});
+	}, []);
+
+	const formatRecentTaskMetricValue = (value: number | null) => {
+		if (value === null || !Number.isFinite(value)) return "--";
+		return value.toLocaleString();
+	};
+
+	const filteredRecentTasks = useMemo(() => {
+		const keyword = recentTaskTimeKeyword.trim().toLowerCase();
+		if (!keyword) return recentTasks;
+
+		const normalizeForFuzzyMatch = (value: string) =>
+			value.toLowerCase().replace(/[\s/:\-._年月日时分秒]+/g, "");
+
+		const normalizedKeyword = normalizeForFuzzyMatch(keyword);
+
+		return recentTasks.filter((task) => {
+			const raw = String(task.createdAt || "");
+			const formatted = formatDate(task.createdAt);
+			const searchable = `${raw} ${formatted}`.toLowerCase();
+			const normalizedSearchable = normalizeForFuzzyMatch(searchable);
+			return (
+				searchable.includes(keyword) ||
+				(!!normalizedKeyword &&
+					normalizedSearchable.includes(normalizedKeyword))
+			);
+		});
+	}, [formatDate, recentTaskTimeKeyword, recentTasks]);
+
+	const potentialStatusMessage = useMemo(() => {
+		if (potentialStatus === "loading") return "加载中...";
+		if (potentialStatus === "failed") return "加载失败";
+		if (potentialStatus === "empty") return "暂无潜在缺陷";
+		return null;
+	}, [potentialStatus]);
+
+	if (loading) {
+		return (
+			<div className="flex items-center justify-center min-h-[60vh]">
+				<div className="text-center space-y-4">
+					<div className="loading-spinner mx-auto" />
+					<p className="text-muted-foreground font-mono text-sm uppercase tracking-wider">
+						加载项目数据...
+					</p>
+				</div>
+			</div>
+		);
+	}
+
+	if (!project) {
+		return (
+			<div className="flex items-center justify-center min-h-[60vh]">
+				<div className="cyber-card p-8 text-center">
+					<AlertTriangle className="w-16 h-16 text-rose-400 mx-auto mb-4" />
+					<h2 className="text-2xl font-bold text-foreground mb-2 uppercase">
+						项目未找到
+					</h2>
+					<p className="text-muted-foreground mb-4 font-mono">
+						请检查项目ID是否正确
+					</p>
+					<Button className="cyber-btn-primary" onClick={handleBack}>
+						<ArrowLeft className="w-4 h-4 mr-2" />
+						返回
+					</Button>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="space-y-6 p-6 cyber-bg-elevated min-h-screen font-mono relative">
+			<div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
+
+			<div className="relative z-10 flex items-center justify-between">
+				<div className="flex items-center gap-3">
+					<h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
+						{project.name}
+					</h1>
+					<Badge
+						className={`${project.is_active ? "cyber-badge-success" : "cyber-badge-muted"}`}
+					>
+						{project.is_active ? "活跃" : "暂停"}
+					</Badge>
+				</div>
+
+				<div className="flex items-center space-x-3">
+					<Button
+						variant="outline"
+						size="sm"
+						className="cyber-btn-ghost h-10 px-3 flex items-center justify-center gap-2"
+						onClick={handleBack}
+					>
+						<ArrowLeft className="w-5 h-5" />
+						返回
+					</Button>
+					<Button onClick={handleRunAudit} className="cyber-btn-primary">
+						<Shield className="w-4 h-4 mr-2" />
+						启动审计
+					</Button>
+				</div>
+			</div>
+
+			<div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+				<div className="cyber-card p-5">
+					<div className="flex items-center gap-2 mb-3">
+						<Bug className="w-4 h-4 text-amber-400" />
+						<h3 className="text-sm font-semibold uppercase tracking-wider">
+							潜在缺陷（Top {DETAIL_POTENTIAL_TOP_LIMIT}）
+						</h3>
+					</div>
+
+						<Table className="table-fixed">
+							<TableHeader>
+								<TableRow>
+									<TableHead className="w-[18%] text-left whitespace-nowrap">
+										类型
+									</TableHead>
+									<TableHead className="w-[30%] text-left whitespace-nowrap">
+										位置
+									</TableHead>
+									<TableHead className="w-[18%] px-3 text-center whitespace-nowrap">
+										所属任务
+									</TableHead>
+									<TableHead className="w-[10%] px-3 text-center whitespace-nowrap">
+										危害
+									</TableHead>
+									<TableHead className="w-[12%] px-3 text-center whitespace-nowrap">
+										置信度
+									</TableHead>
+									<TableHead className="w-[12%] text-center whitespace-nowrap">
+										操作
+									</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{potentialStatusMessage ? (
+									<TableRow>
+										<TableCell
+											colSpan={6}
+											className="py-10 text-center text-sm text-muted-foreground"
+										>
+											{potentialStatusMessage}
+										</TableCell>
+									</TableRow>
+								) : (
+									potentialVulnerabilities.map((item) => (
+										<TableRow key={`${item.taskId}:${item.id}`}>
+											<TableCell
+												className="text-left text-sm text-foreground whitespace-nowrap overflow-hidden text-ellipsis"
+												title={`${item.cweLabel} ${item.title}`}
+											>
+												{item.cweLabel}
+											</TableCell>
+											<TableCell
+												className="text-left text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis"
+												title={formatPotentialLocation(
+													item.filePath,
+													item.line,
+													item.source,
+												)}
+											>
+												{formatPotentialLocation(
+													item.filePath,
+													item.line,
+													item.source,
+												)}
+											</TableCell>
+											<TableCell className="px-3 text-center whitespace-nowrap">
+												<Badge
+													className={getTaskCategoryBadgeClassName(
+														item.taskCategory,
+													)}
+												>
+													{getTaskCategoryText(item.taskCategory)}
+												</Badge>
+											</TableCell>
+											<TableCell className="px-3 text-center whitespace-nowrap">
+												<Badge
+													className={getVulnerabilitySeverityBadgeClassName(
+														item.severity,
+													)}
+												>
+													{getVulnerabilitySeverityText(item.severity)}
+												</Badge>
+											</TableCell>
+											<TableCell className="px-3 text-center whitespace-nowrap">
+												<Badge
+													className={getVulnerabilityConfidenceBadgeClassName(
+														item.confidence,
+													)}
+												>
+													{getVulnerabilityConfidenceText(item.confidence)}
+												</Badge>
+											</TableCell>
+											<TableCell className="text-center whitespace-nowrap">
+												<Button
+													asChild
+													size="sm"
+													variant="outline"
+													className="cyber-btn-ghost h-7 px-3"
+												>
+													<Link to={appendReturnTo(item.route, currentRoute)}>
+														详情
+													</Link>
+												</Button>
+											</TableCell>
+										</TableRow>
+									))
+								)}
+							</TableBody>
+						</Table>
+					</div>
+
+				<div className="cyber-card p-5">
+					<div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+						<div className="flex items-center gap-2">
+							<Activity className="w-4 h-4 text-sky-400" />
+							<h3 className="text-sm font-semibold uppercase tracking-wider">
+								最近任务（Top {DETAIL_RECENT_TASK_LIMIT}）
+							</h3>
+						</div>
+						<div className="relative w-full sm:w-[320px]">
+							<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+							<Input
+								value={recentTaskTimeKeyword}
+								onChange={(event) =>
+									setRecentTaskTimeKeyword(event.target.value)
+								}
+								placeholder="按时间搜索，如 2026/03-05 14:"
+								className="h-8 pl-8 text-xs"
+							/>
+						</div>
+					</div>
+
+					<Table className="table-fixed">
+						<TableHeader>
+							<TableRow>
+								<TableHead className="w-[18%]">类型</TableHead>
+								<TableHead className="w-[24%]">创建时间</TableHead>
+								<TableHead className="w-[20%]">进度</TableHead>
+								<TableHead className="w-[16%]">状态</TableHead>
+								<TableHead className="w-[10%]">漏洞</TableHead>
+								<TableHead className="w-[12%]">操作</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{filteredRecentTasks.length > 0 ? (
+								filteredRecentTasks.map((task) => {
+									const progressPercent = Math.max(
+										0,
+										Math.min(100, Math.round(task.progressPercent)),
+									);
+									return (
+										<TableRow key={`${task.kind}:${task.id}`}>
+											<TableCell className="text-sm text-foreground">
+												{task.scanTypeLabel}
+											</TableCell>
+											<TableCell className="text-sm text-muted-foreground">
+												{formatDate(task.createdAt)}
+											</TableCell>
+											<TableCell>
+												<div className="space-y-1.5">
+													<div className="text-xs text-muted-foreground">
+														{progressPercent}%
+													</div>
+													<Progress
+														value={progressPercent}
+														className={`h-1.5 bg-muted ${getTaskProgressBarClassName(task.status)}`}
+													/>
+												</div>
+											</TableCell>
+											<TableCell>{getStatusBadge(task.status)}</TableCell>
+											<TableCell className="text-sm text-muted-foreground">
+												{formatRecentTaskMetricValue(task.vulnerabilities)}
+											</TableCell>
+											<TableCell>
+												<Button
+													asChild
+													size="sm"
+													variant="outline"
+													className="cyber-btn-ghost h-7 px-2"
+												>
+													<Link to={task.route}>详情</Link>
+												</Button>
+											</TableCell>
+										</TableRow>
+									);
+								})
+							) : (
+								<TableRow>
+									<TableCell
+										colSpan={6}
+										className="py-10 text-center text-sm text-muted-foreground"
+									>
+										{recentTaskTimeKeyword.trim() ? "未匹配到任务" : "暂无任务"}
+									</TableCell>
+								</TableRow>
+							)}
+						</TableBody>
+					</Table>
+				</div>
+			</div>
+
+			<CreateTaskDialog
+				open={showCreateTaskDialog}
+				onOpenChange={setShowCreateTaskDialog}
+				onTaskCreated={handleTaskCreated}
+				preselectedProjectId={id}
+			/>
+		</div>
+	);
 }

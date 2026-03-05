@@ -4,6 +4,7 @@ import type { GitleaksScanTask } from "@/shared/api/gitleaks";
 import type { OpengrepFinding, OpengrepScanTask } from "@/shared/api/opengrep";
 import type { AuditTask } from "@/shared/types";
 import { resolveSourceModeFromTaskMeta } from "@/features/tasks/services/taskActivities";
+import { buildFindingDetailPath } from "@/shared/utils/findingRoute";
 
 const STATIC_GITLEAKS_PAIRING_WINDOW_MS = 60 * 1000;
 
@@ -70,7 +71,10 @@ export type ProjectCardVulnerabilityConfidence =
 export interface ProjectCardPotentialVulnerability {
   id: string;
   taskId: string;
+  source: "static" | "agent";
+  taskCategory: "static" | "intelligent" | "hybrid";
   title: string;
+  cweLabel: string;
   severity: ProjectCardVulnerabilitySeverity;
   confidence: ProjectCardVulnerabilityConfidence;
   filePath: string;
@@ -538,9 +542,47 @@ function confidenceRank(confidence: ProjectCardVulnerabilityConfidence): number 
   return 0;
 }
 
+function normalizeCwe(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+
+  const cweMatch = value.match(/CWE[\s:_-]*(\d{1,6})/i);
+  if (cweMatch?.[1]) {
+    const id = Number.parseInt(cweMatch[1], 10);
+    return Number.isFinite(id) && id > 0 ? `CWE-${id}` : null;
+  }
+
+  const definitionMatch = value.match(/definitions\/(\d{1,6})(?:\.html)?/i);
+  if (definitionMatch?.[1]) {
+    const id = Number.parseInt(definitionMatch[1], 10);
+    return Number.isFinite(id) && id > 0 ? `CWE-${id}` : null;
+  }
+
+  if (/^\d{1,6}$/.test(value)) {
+    const id = Number.parseInt(value, 10);
+    return Number.isFinite(id) && id > 0 ? `CWE-${id}` : null;
+  }
+
+  return null;
+}
+
+function resolveFirstCweLabel(raw: unknown): string {
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const normalized = normalizeCwe(item);
+      if (normalized) return normalized;
+    }
+    return "-";
+  }
+
+  const normalized = normalizeCwe(raw);
+  return normalized || "-";
+}
+
 export function getProjectCardPotentialVulnerabilities(params: {
   opengrepFindings?: OpengrepFinding[];
   verifiedAgentFindings?: AgentFinding[];
+  agentTaskCategoryMap?: Record<string, "intelligent" | "hybrid">;
   limit?: number;
 }): ProjectCardPotentialVulnerability[] {
   const limit = params.limit ?? 5;
@@ -570,7 +612,9 @@ export function getProjectCardPotentialVulnerabilities(params: {
   const agentCandidates = (params.verifiedAgentFindings || [])
     .map((finding) => {
       const severity = normalizeVulnerabilitySeverity(finding.severity);
-      const confidence = toAgentConfidence(finding.ai_confidence);
+      const confidence = toAgentConfidence(
+        finding.ai_confidence ?? finding.confidence ?? null,
+      );
       const line =
         typeof finding.line_start === "number" && Number.isFinite(finding.line_start)
           ? finding.line_start
@@ -582,15 +626,27 @@ export function getProjectCardPotentialVulnerabilities(params: {
         String(finding.description || "").trim() ||
         "潜在漏洞";
       const filePath = String(finding.file_path || "").trim() || "-";
+      const cweLabel = resolveFirstCweLabel(finding.cwe_id);
+      const taskCategory: ProjectCardPotentialVulnerability["taskCategory"] =
+        params.agentTaskCategoryMap?.[finding.task_id] === "hybrid"
+          ? "hybrid"
+          : "intelligent";
       return {
         id: finding.id,
         taskId: finding.task_id,
+        source: "agent" as const,
+        taskCategory,
         title,
+        cweLabel,
         severity,
         confidence,
         filePath,
         line,
-        route: `/agent-audit/${finding.task_id}?detailType=finding&detailId=${finding.id}`,
+        route: buildFindingDetailPath({
+          source: "agent",
+          taskId: finding.task_id,
+          findingId: finding.id,
+        }),
         groupPriority: 1 as const,
         sortTime: toNormalizedTimestamp(finding.created_at),
       };
@@ -616,15 +672,23 @@ export function getProjectCardPotentialVulnerabilities(params: {
         String(finding.rule_name || "").trim() ||
         String(finding.description || "").trim() ||
         "潜在漏洞";
+      const cweLabel = resolveFirstCweLabel(finding.cwe);
       return {
         id: finding.id,
         taskId: finding.scan_task_id,
+        source: "static" as const,
+        taskCategory: "static" as const,
         title,
+        cweLabel,
         severity,
         confidence,
         filePath: finding.file_path,
         line,
-        route: `/static-analysis/${finding.scan_task_id}/findings/${finding.id}`,
+        route: buildFindingDetailPath({
+          source: "static",
+          taskId: finding.scan_task_id,
+          findingId: finding.id,
+        }),
         groupPriority: 2 as const,
         sortTime: 0,
       };
@@ -640,6 +704,9 @@ export function getProjectCardPotentialVulnerabilities(params: {
     const dedupeKey = [
       item.groupPriority,
       item.taskId,
+      item.source,
+      item.taskCategory,
+      item.cweLabel,
       item.filePath,
       item.line ?? "",
       item.title,
@@ -655,7 +722,10 @@ export function getProjectCardPotentialVulnerabilities(params: {
   return rankedCandidates.map((item) => ({
     id: item.id,
     taskId: item.taskId,
+    source: item.source,
+    taskCategory: item.taskCategory,
     title: item.title,
+    cweLabel: item.cweLabel,
     severity: item.severity,
     confidence: item.confidence,
     filePath: item.filePath,

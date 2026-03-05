@@ -155,6 +155,7 @@ export interface AgentFinding {
   fix_code: string | null;
   ai_explanation: string | null;
   ai_confidence: number | null;
+  confidence?: number | null;
 
   created_at: string;
 }
@@ -309,8 +310,16 @@ export async function getAgentFindings(
 /**
  * 获取单个发现详情
  */
-export async function getAgentFinding(taskId: string, findingId: string): Promise<AgentFinding> {
-  const response = await apiClient.get(`/agent-tasks/${taskId}/findings/${findingId}`);
+export async function getAgentFinding(
+  taskId: string,
+  findingId: string,
+  params?: {
+    include_false_positive?: boolean;
+  },
+): Promise<AgentFinding> {
+  const response = await apiClient.get(`/agent-tasks/${taskId}/findings/${findingId}`, {
+    params,
+  });
   return response.data;
 }
 

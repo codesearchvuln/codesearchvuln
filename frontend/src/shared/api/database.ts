@@ -69,8 +69,22 @@ export const api = {
 
   // ==================== Project 相关方法 ====================
 
-  async getProjects(): Promise<Project[]> {
-    const res = await apiClient.get('/projects/');
+  async getProjects(options?: {
+    includeDeleted?: boolean;
+    skip?: number;
+    limit?: number;
+  }): Promise<Project[]> {
+    const params: Record<string, unknown> = {};
+    if (typeof options?.includeDeleted === "boolean") {
+      params.include_deleted = options.includeDeleted;
+    }
+    if (typeof options?.skip === "number") {
+      params.skip = options.skip;
+    }
+    if (typeof options?.limit === "number") {
+      params.limit = options.limit;
+    }
+    const res = await apiClient.get('/projects/', { params });
     return res.data;
   },
 
