@@ -4,7 +4,8 @@ venv/
 # Uploaded files
 uploads/zip_files/*.zip
 uploads/zip_files/*.meta
-uploads/agent_memory/
+uploads/agent_memory/*
+
 
 app/services/llm_rule/cache/
 app/services/llm_rule/patches/

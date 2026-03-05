@@ -18,6 +18,7 @@ import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord
+from .memory_monitor import MemoryMonitor
 
 if TYPE_CHECKING:
     from ..agents.orchestrator import OrchestratorAgent
@@ -60,6 +61,10 @@ class AuditWorkflowEngine:
         self.vuln_queue = vuln_queue_service
         self.task_id = task_id
         self.orchestrator = orchestrator
+        
+        # 🔥 内存监控
+        self.memory_monitor = MemoryMonitor()
+        self.enable_memory_monitoring = True  # 可配置的监控开关
 
     # ─────────────────────────────────────────────────────────────────────────
     # 公开入口
@@ -80,12 +85,20 @@ class AuditWorkflowEngine:
         """
         state = WorkflowState()
         orc = self.orchestrator
+        
+        # 🔥 记录起始内存
+        if self.enable_memory_monitoring:
+            self.memory_monitor.take_snapshot(phase="init", agent_name="orchestrator")
 
         try:
             # ── 阶段 1: RECON ──────────────────────────────────────────────
             state.phase = WorkflowPhase.RECON
             await orc.emit_event("info", "🔎 [Workflow] 开始 Recon 阶段")
             await self._run_recon_phase(state)
+            
+            # 🔥 记录 Recon 完成后的内存
+            if self.enable_memory_monitoring:
+                self.memory_monitor.take_snapshot(phase="recon_done", agent_name="recon")
 
             if orc.is_cancelled:
                 state.phase = WorkflowPhase.CANCELLED
@@ -100,6 +113,10 @@ class AuditWorkflowEngine:
                 f"🔍 [Workflow] 开始 Analysis 阶段，Recon 队列共 {recon_queue_size} 条风险点",
             )
             await self._run_analysis_phase(state, task_id)
+            
+            # 🔥 记录 Analysis 完成后的内存
+            if self.enable_memory_monitoring:
+                self.memory_monitor.take_snapshot(phase="analysis_done", agent_name="analysis")
 
             if orc.is_cancelled:
                 state.phase = WorkflowPhase.CANCELLED
@@ -114,6 +131,10 @@ class AuditWorkflowEngine:
                 f"🛡️ [Workflow] 开始 Verification 阶段，漏洞队列共 {vuln_queue_size} 条",
             )
             await self._run_verification_phase(state, task_id)
+            
+            # 🔥 记录 Verification 完成后的内存
+            if self.enable_memory_monitoring:
+                self.memory_monitor.take_snapshot(phase="verification_done", agent_name="verification")
 
             if orc.is_cancelled:
                 state.phase = WorkflowPhase.CANCELLED
@@ -126,6 +147,12 @@ class AuditWorkflowEngine:
                 "info",
                 f"✅ [Workflow] 所有阶段完成，共收集 {len(state.all_findings)} 个发现",
             )
+            
+            # 🔥 记录最终内存
+            if self.enable_memory_monitoring:
+                self.memory_monitor.take_snapshot(phase="complete", agent_name="orchestrator")
+                self.memory_monitor.log_summary()
+
 
         except asyncio.CancelledError:
             state.phase = WorkflowPhase.CANCELLED
@@ -181,6 +208,12 @@ class AuditWorkflowEngine:
             recon_success,
             len(orc._all_findings),
         )
+        
+        # 🔥 清理 Recon Agent 的会话内存
+        recon_agent = orc.sub_agents.get("recon")
+        if recon_agent:
+            recon_agent.reset_session_memory()
+            logger.debug("[WorkflowEngine] Recon Agent session memory reset after phase completed")
 
     async def _run_analysis_phase(self, state: WorkflowState, task_id: str) -> None:
         """
@@ -212,6 +245,10 @@ class AuditWorkflowEngine:
                 "info",
                 f"🔍 [Workflow] Analysis 第 {iteration} 轮：风险点 {fp_repr}",
             )
+            
+            # 🔥 记录 Analysis 迭代前的内存
+            if self.enable_memory_monitoring:
+                self.memory_monitor.take_snapshot(phase="analysis", iteration=iteration, agent_name="analysis")
 
             step_start = time.time()
             params = {
@@ -257,6 +294,15 @@ class AuditWorkflowEngine:
                 analysis_success,
                 len(orc._all_findings),
             )
+            
+            # 🔥 清理 Analysis Agent 的会话内存，实现任务级隔离
+            analysis_agent = orc.sub_agents.get("analysis")
+            if analysis_agent:
+                analysis_agent.reset_session_memory()
+                logger.debug(
+                    "[WorkflowEngine] Analysis Agent session memory reset after iteration %s",
+                    iteration,
+                )
 
         logger.info(
             "[WorkflowEngine] Analysis phase done: %s risk point(s) processed, cumulative findings=%s",
@@ -312,6 +358,10 @@ class AuditWorkflowEngine:
                 "info",
                 f"🛡️ [Workflow] Verification 第 {iteration} 轮：{title_repr}",
             )
+            
+            # 🔥 记录 Verification 迭代前的内存
+            if self.enable_memory_monitoring:
+                self.memory_monitor.take_snapshot(phase="verification", iteration=iteration, agent_name="verification")
 
             step_start = time.time()
             params = {
@@ -358,6 +408,15 @@ class AuditWorkflowEngine:
                 verification_success,
                 len(orc._all_findings),
             )
+            
+            # 🔥 清理 Verification Agent 的会话内存，实现任务级隔离
+            verification_agent = orc.sub_agents.get("verification")
+            if verification_agent:
+                verification_agent.reset_session_memory()
+                logger.debug(
+                    "[WorkflowEngine] Verification Agent session memory reset after iteration %s",
+                    iteration,
+                )
 
         logger.info(
             "[WorkflowEngine] Verification phase done: %s finding(s) processed, final findings=%s",

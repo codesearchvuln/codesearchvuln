@@ -902,6 +902,29 @@ class BaseAgent(ABC):
 请基于以上来自前序 Agent 的信息，结合你的专业能力开展工作。
 """
     
+    def reset_session_memory(self) -> None:
+        """
+        重置会话级内存（任务级隔离）
+        
+        在 Workflow 中每个任务/轮次完成后调用，确保：
+        - _insights 和 _work_completed 被清除
+        - _incoming_handoff 被重置
+        
+        这样可以完全隔离任务，防止跨任务的内存污染。
+        
+        使用场景：
+        - Analysis 处理完一个风险点，清理内存
+        - Verification 验证完一个漏洞，清理内存
+        - 在 Workflow 引擎每个循环后调用
+        """
+        self._insights.clear()
+        self._work_completed.clear()
+        self._incoming_handoff = None
+        
+        logger.debug(
+            f"[{self.name}] Session memory reset: insights cleared, work_completed cleared, handoff cleared"
+        )
+    
     # ============ 核心事件发射方法 ============
     
     async def emit_event(
