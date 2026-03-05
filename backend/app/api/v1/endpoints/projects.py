@@ -300,6 +300,180 @@ def _calculate_zip_file_hash(zip_path: str) -> str:
         return ""
 
 
+# 文件树相关Schema（需要在helper函数之前定义）
+class FileTreeNode(BaseModel):
+    """文件树节点"""
+    name: str
+    path: str
+    type: Literal["file", "directory"]
+    size: Optional[int] = None
+    children: Optional[List["FileTreeNode"]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FileTreeResponse(BaseModel):
+    """文件树响应"""
+    root: FileTreeNode
+
+
+def _build_file_tree_from_zip(zip_path: str) -> FileTreeNode:
+    """
+    从ZIP文件构建文件树结构
+    
+    Args:
+        zip_path: ZIP文件路径
+    
+    Returns:
+        FileTreeNode: 根节点树结构
+    """
+    # 使用字典构建树：path -> {info}
+    tree_dict: Dict[str, Dict[str, Any]] = {}
+    
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for info in zf.infolist():
+            path = info.filename.rstrip("/")
+            
+            # 跳过空路径和被排除的文件
+            if not path or should_exclude_file(path):
+                continue
+            
+            # 标准化路径
+            parts = path.split("/")
+            
+            # 确保父目录存在于tree_dict
+            for i in range(len(parts)):
+                current_path = "/".join(parts[:i+1])
+                if current_path not in tree_dict:
+                    is_dir = i < len(parts) - 1 or info.is_dir()
+                    tree_dict[current_path] = {
+                        "name": parts[i],
+                        "path": current_path,
+                        "type": "directory" if is_dir else "file",
+                        "size": None if is_dir else info.file_size,
+                        "children": {}
+                    }
+    
+    # 构建树结构
+    def build_tree(path_prefix: str = "") -> FileTreeNode:
+        node = FileTreeNode(
+            name="root" if not path_prefix else path_prefix.split("/")[-1],
+            path=path_prefix or "/",
+            type="directory",
+            children=[]
+        )
+        
+        # 找到所有直接子节点
+        for full_path, node_info in tree_dict.items():
+            parent_path = "/".join(full_path.split("/")[:-1])
+            
+            if parent_path == path_prefix:
+                # 如果是目录，递归构建
+                if node_info["type"] == "directory":
+                    child = build_tree(full_path)
+                else:
+                    # 文件节点
+                    child = FileTreeNode(
+                        name=node_info["name"],
+                        path=full_path,
+                        type="file",
+                        size=node_info["size"]
+                    )
+                
+                if node.children is None:
+                    node.children = []
+                node.children.append(child)
+        
+        # 按名称排序（目录优先）
+        if node.children:
+            node.children.sort(
+                key=lambda x: (x.type == "file", x.name.lower())
+            )
+        
+        return node
+    
+    return build_tree()
+
+
+def _build_file_tree_from_repo_files(files: List[Dict[str, Any]]) -> FileTreeNode:
+    """
+    从文件列表构建树结构（用于仓库项目）
+    
+    Args:
+        files: 文件列表，每个元素为 {"path": "...", "size": ...}
+    
+    Returns:
+        FileTreeNode: 根节点树结构
+    """
+    # 构建树字典
+    tree_dict: Dict[str, Dict[str, Any]] = {}
+    
+    for file_info in files:
+        path = file_info.get("path", "").strip().lstrip("/")
+        if not path:
+            continue
+        
+        parts = path.split("/")
+        
+        # 创建所有路径节点
+        for i in range(len(parts)):
+            current_path = "/".join(parts[:i+1])
+            if current_path not in tree_dict:
+                is_dir = i < len(parts) - 1
+                size = None if is_dir else file_info.get("size", 0)
+                tree_dict[current_path] = {
+                    "name": parts[i],
+                    "path": current_path,
+                    "type": "directory" if is_dir else "file",
+                    "size": size,
+                }
+    
+    # 构建树结构
+    def build_tree(path_prefix: str = "") -> FileTreeNode:
+        node = FileTreeNode(
+            name="root" if not path_prefix else path_prefix.split("/")[-1],
+            path=path_prefix or "/",
+            type="directory",
+            children=[]
+        )
+        
+        # 找到直接子节点
+        child_paths = set()
+        for full_path in tree_dict.keys():
+            parent_path = "/".join(full_path.split("/")[:-1]) if "/" in full_path else ""
+            
+            if parent_path == path_prefix:
+                child_paths.add(full_path)
+        
+        # 构建子节点
+        for child_path in sorted(child_paths):
+            node_info = tree_dict[child_path]
+            
+            if node_info["type"] == "directory":
+                child = build_tree(child_path)
+            else:
+                child = FileTreeNode(
+                    name=node_info["name"],
+                    path=child_path,
+                    type="file",
+                    size=node_info["size"]
+                )
+            
+            if node.children is None:
+                node.children = []
+            node.children.append(child)
+        
+        # 按名称排序（目录优先）
+        if node.children:
+            node.children.sort(
+                key=lambda x: (x.type == "file", x.name.lower())
+            )
+        
+        return node
+    
+    return build_tree()
+
+
 async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional[dict]:
     """获取用户配置（与 static_tasks 一致）"""
     if not user_id:
@@ -1630,6 +1804,152 @@ async def get_project_files(
             raise HTTPException(status_code=500, detail=f"无法获取仓库文件: {str(e)}")
 
     return files
+
+
+@router.get("/{id}/files-tree", response_model=FileTreeResponse)
+async def get_project_files_tree(
+    id: str,
+    branch: Optional[str] = None,
+    exclude_patterns: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    获取项目文件树结构（嵌套目录树）
+    
+    支持功能：
+    - 完整的嵌套树结构显示
+    - 按类型排序（目录优先）
+    - 支持排除模式过滤
+    - ZIP和仓库项目都支持
+    
+    参数:
+    - id: 项目ID
+    - branch: 指定仓库分支（仅对仓库类型项目有效）
+    - exclude_patterns: JSON 格式的排除模式数组
+    
+    返回:
+    - root: 文件树根节点，包含嵌套的children
+    
+    树节点字段:
+    - name: 文件/目录名称
+    - path: 相对路径
+    - type: "file" 或 "directory"
+    - size: 文件大小（仅文件有值）
+    - children: 子节点列表（仅目录有值）
+    """
+    project = await db.get(Project, id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    # Check permissions
+
+    # 解析排除模式
+    parsed_exclude_patterns = []
+    if exclude_patterns:
+        try:
+            parsed_exclude_patterns = json.loads(exclude_patterns)
+        except json.JSONDecodeError:
+            pass
+
+    if project.source_type == "zip":
+        # 处理ZIP项目 - 直接从ZIP构建树
+        zip_path = await load_project_zip(id)
+        if not zip_path or not os.path.exists(zip_path):
+            raise HTTPException(status_code=404, detail="项目文件不存在")
+
+        try:
+            loop = asyncio.get_event_loop()
+            root_node = await loop.run_in_executor(
+                None,
+                _build_file_tree_from_zip,
+                zip_path
+            )
+            return FileTreeResponse(root=root_node)
+        except Exception as e:
+            logger.error(f"构建ZIP文件树失败: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"无法构建文件树: {str(e)}")
+
+    elif project.source_type == "repository":
+        # 处理仓库项目 - 先获取文件列表再构建树
+        if not project.repository_url:
+            raise HTTPException(status_code=400, detail="仓库URL未配置")
+
+        from sqlalchemy.future import select
+        from app.core.encryption import decrypt_sensitive_data
+        from app.core.config import settings
+        from app.services.git_ssh_service import GitSSHOperations
+
+        SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken", "sshPrivateKey"]
+
+        result = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
+        config = result.scalar_one_or_none()
+
+        github_token = settings.GITHUB_TOKEN
+        gitlab_token = settings.GITLAB_TOKEN
+        ssh_private_key = None
+
+        if config and config.other_config:
+            other_config = json.loads(config.other_config)
+            for field in SENSITIVE_OTHER_FIELDS:
+                if field in other_config and other_config[field]:
+                    decrypted_val = decrypt_sensitive_data(other_config[field])
+                    if field == "githubToken":
+                        github_token = decrypted_val
+                    elif field == "gitlabToken":
+                        gitlab_token = decrypted_val
+                    elif field == "sshPrivateKey":
+                        ssh_private_key = decrypted_val
+
+        is_ssh_url = GitSSHOperations.is_ssh_url(project.repository_url)
+        target_branch = branch or project.default_branch or "main"
+
+        try:
+            files = []
+            
+            if is_ssh_url:
+                if not ssh_private_key:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="仓库使用SSH URL，但未配置SSH密钥。请先在设置中生成SSH密钥。",
+                    )
+
+                logger.info(f"通过SSH获取文件树: {project.repository_url}")
+                files_with_content = GitSSHOperations.get_repo_files_via_ssh(
+                    project.repository_url, ssh_private_key, target_branch, parsed_exclude_patterns
+                )
+                files = [
+                    {"path": f["path"], "size": len(f.get("content", ""))}
+                    for f in files_with_content
+                ]
+            else:
+                repo_type = project.repository_type or "other"
+
+                if repo_type == "github":
+                    repo_files = await get_github_files(
+                        project.repository_url, target_branch, github_token, parsed_exclude_patterns
+                    )
+                    files = [{"path": f["path"], "size": 0} for f in repo_files]
+                elif repo_type == "gitlab":
+                    repo_files = await get_gitlab_files(
+                        project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns
+                    )
+                    files = [{"path": f["path"], "size": 0} for f in repo_files]
+                else:
+                    raise HTTPException(status_code=400, detail="不支持的仓库类型")
+
+            # 构建文件树
+            root_node = _build_file_tree_from_repo_files(files)
+            return FileTreeResponse(root=root_node)
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"构建仓库文件树失败: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"无法构建文件树: {str(e)}")
+
+    else:
+        raise HTTPException(status_code=400, detail="不支持的项目类型")
 
 
 @router.get("/{id}/files/{file_path:path}", response_model=Optional[FileContentResponse])
