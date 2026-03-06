@@ -129,11 +129,9 @@ type HomeScanCard = {
   key: "static" | "agent" | "hybrid";
   title: string;
   intro: string;
-  strengths: string;
-  limitations: string;
-  quickStartHint: string;
   icon: typeof Zap;
   accentClassName: string;
+  route: "static" | "intelligent" | "hybrid";
 };
 
 type AutoScrollByProjectState = Record<string, boolean>;
@@ -758,43 +756,37 @@ function AgentAuditPageContent() {
     setShowHomeMixedDialog(mode === "hybrid");
   }, []);
   const homeScanCards: HomeScanCard[] = useMemo(
-    () => [
-      {
-        key: "static",
-        title: "静态扫描",
-        intro: "简介：严重规则快速定位缺陷",
-        strengths: "优势：速度快、结果稳定",
-        limitations: "劣势：复杂语义覆盖有限",
-        quickStartHint: "点击卡片，快速开始静态审计",
-        icon: Zap,
-        accentClassName:
-          "from-sky-500/25 via-cyan-500/10 to-transparent border-sky-400/40",
-      },
-      {
-        key: "agent",
-        title: "智能扫描",
-        intro: "简介：智能体上下文推理审计",
-        strengths: "优势：可发现规则外风险",
-        limitations: "劣势：耗时更长、资源更高",
-        quickStartHint: "点击卡片，快速开始智能扫描",
-        icon: Bot,
-        accentClassName:
-          "from-violet-500/25 via-indigo-500/10 to-transparent border-violet-400/40",
-      },
-      {
-        key: "hybrid",
-        title: "混合扫描",
-        intro: "简介：静态 + 智能完整双阶段链路",
-        strengths: "优势：覆盖更全面",
-        limitations: "劣势：执行耗时更长",
-        quickStartHint: "点击卡片，快速开始混合扫描",
-        icon: Layers,
-        accentClassName:
-          "from-emerald-500/25 via-cyan-500/10 to-transparent border-emerald-400/40",
-      },
-    ],
-    [],
-  );
+  () => [
+    {
+      key: "static",
+      title: "静态扫描",
+      intro: "通过严重规则快速、准确定位缺陷",
+      icon: Zap,
+      accentClassName:
+        "from-sky-500/25 via-cyan-500/10 to-transparent border-sky-400/40",
+      route: "static",
+    },
+    {
+      key: "agent",
+      title: "智能扫描",
+      intro: "智能体上下文推理审计",
+      icon: Bot,
+      accentClassName:
+        "from-violet-500/25 via-indigo-500/10 to-transparent border-violet-400/40",
+      route: "intelligent",
+    },
+    {
+      key: "hybrid",
+      title: "混合扫描",
+      intro: "静态 + 智能双阶段链路",
+      icon: Layers,
+      accentClassName:
+        "from-emerald-500/25 via-cyan-500/10 to-transparent border-emerald-400/40",
+      route: "hybrid",
+    },
+  ],
+  [],
+);
   const currentProjectId = useMemo(() => {
     const value = typeof task?.project_id === "string" ? task.project_id.trim() : "";
     return value || null;
@@ -2871,71 +2863,103 @@ function AgentAuditPageContent() {
 
   if (showSplash && !taskId) {
     return (
-      <div className="min-h-[100dvh] bg-background flex items-start justify-center relative overflow-y-auto overflow-x-hidden pt-6 md:pt-10">
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center relative overflow-y-auto overflow-x-hidden">
         <div className="absolute inset-0 cyber-grid opacity-20" />
         <div className="absolute inset-0 vignette pointer-events-none" />
 
-        <div className="relative z-10 w-full max-w-[1800px] mx-auto px-6 text-center">
-          <button
-            type="button"
-            onClick={cycleLogoVariant}
-            className="mx-auto mb-6 w-48 h-48 rounded-[2.5rem] border border-primary/40 bg-primary/10 flex items-center justify-center shadow-[0_0_48px_rgba(59,130,246,0.4)] cursor-pointer transition-transform duration-200 hover:scale-[1.02]"
-            title="点击切换 Logo"
-          >
-            <img
-              src={logoSrc}
-              alt="VulHunter"
-              className="w-32 h-32 object-contain"
-            />
-          </button>
+        <div className="relative z-10 w-full max-w-[1800px] mx-auto px-6 text-center py-[5vh]">
+          {/* Logo + Title + Description */}
+          <div className="mb-[6vh]">
+            <button
+              type="button"
+              onClick={cycleLogoVariant}
+              className="mx-auto mb-[3vh] w-48 h-48 rounded-[2.5rem] border border-primary/40 bg-primary/10 flex items-center justify-center shadow-[0_0_48px_rgba(59,130,246,0.4)] cursor-pointer transition-transform duration-200 hover:scale-[1.02]"
+              title="点击切换 Logo"
+            >
+              <img
+                src={logoSrc}
+                alt="VulHunter"
+                className="w-32 h-32 object-contain"
+              />
+            </button>
 
-          <h1 className="text-6xl md:text-7xl font-mono font-bold tracking-wider text-foreground">
-            VulHunter
-          </h1>
-          <p className="mt-4 text-xl md:text-2xl text-muted-foreground leading-relaxed">
-            VulHunter 让你以静态、智能或混合方式快速发起代码安全审计。
-          </p>
+            <h1 className="text-6xl md:text-7xl font-mono font-bold tracking-wider text-foreground">
+              VulHunter
+            </h1>
+            
+            <p className="mt-[2vh] text-lg md:text-xl text-muted-foreground leading-relaxed">
+              VulHunter 让你以静态、智能或混合方式快速发起代码安全审计。
+            </p>
+          </div>
 
-          <div className="mt-8 mx-auto w-full md:w-[80%] grid grid-cols-1 md:grid-cols-[repeat(3,30%)] md:justify-between gap-5 text-left">
+          {/* 快速审计按钮 - 在卡片上方 */}
+          <div className="mb-[6vh]">
+            <button
+              onClick={() => openHomeModeDialog('static')}
+              className="group relative px-10 md:px-14 py-4 md:py-5 text-lg md:text-xl font-bold text-white bg-gradient-to-r from-primary via-primary to-primary/90 rounded-2xl transition-all duration-300 hover:shadow-2xl hover:shadow-primary/60 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 overflow-hidden"
+            >
+              {/* 背景动画效果 */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+              <span className="relative flex items-center justify-center gap-2">
+                一键开始审计
+                <svg className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </span>
+            </button>
+          </div>
+
+          {/* 三种审计方式卡片 */}
+          <div className="mx-auto w-full md:w-[85%] grid grid-cols-1 md:grid-cols-[repeat(3,1fr)] gap-5">
             {homeScanCards.map((card) => {
               const Icon = card.icon;
               return (
                 <button
                   key={card.key}
                   type="button"
-                  onClick={() => openHomeModeDialog(card.key)}
+                  onClick={() => window.location.href = `/tasks/${card.route}`}
                   aria-label={`${card.title}，点击快速开启审计`}
                   className="group relative flex h-full min-h-[280px] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/70 p-6 md:p-7 transition-all duration-300 hover:-translate-y-1 hover:border-primary/50 hover:shadow-[0_22px_48px_-28px_rgba(56,189,248,0.65)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
                 >
                   <div
                     className={`pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100 ${card.accentClassName}`}
                   />
-                  <div className="relative z-10 flex h-full flex-col items-start text-left">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-center gap-3">
-                        <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-primary/35 bg-primary/10 text-primary">
-                          <Icon className="w-5 h-5" />
-                        </span>
-                        <h3 className="text-lg md:text-xl font-semibold text-foreground">
-                          {card.title}
-                        </h3>
-                      </div>
-                      <p className="w-full text-sm md:text-base text-muted-foreground leading-relaxed text-left break-words">
+
+                  {/* 内容容器 */}
+                  <div className="relative z-10 flex h-full flex-col pr-16">
+                    {/* 头部：Icon + Title */}
+                    <div className="flex-shrink-0 flex items-center gap-3 mb-6">
+                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-primary/35 bg-primary/10 text-primary flex-shrink-0">
+                        <Icon className="w-5 h-5" />
+                      </span>
+                      <h3 className="text-lg md:text-xl font-semibold text-foreground">
+                        {card.title}
+                      </h3>
+                    </div>
+
+                    {/* Intro 文本 - 偏中间位置 */}
+                    <div className="flex-1 flex flex-col justify-center">
+                      <p className="text-base md:text-lg text-foreground/80 leading-relaxed break-words font-medium">
                         {card.intro}
                       </p>
-                      <p className="w-full text-sm md:text-base text-foreground/90 leading-relaxed text-left break-words">
-                        {card.strengths}
-                      </p>
-                      <p className="w-full text-sm md:text-base text-muted-foreground leading-relaxed text-left break-words">
-                        {card.limitations}
-                      </p>
                     </div>
-                    <div className="mt-4 flex items-center justify-between gap-2 border-t border-primary/20 pt-3 text-sm font-medium text-muted-foreground transition-colors duration-200 group-hover:text-primary group-focus-visible:text-primary">
-                      <span className="text-left break-words">
-                        {card.quickStartHint}
-                      </span>
-                      <ArrowRight className="h-4 w-4 flex-shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5" />
-                    </div>
+                  </div>
+
+                  {/* 右侧竖直大箭头 */}
+                  <div className="absolute right-0 top-0 bottom-0 w-1/3 flex items-center justify-center pointer-events-none">
+                    <svg
+                      className="w-24 h-24 md:w-32 md:h-32 text-primary/60 transition-all duration-300 opacity-0 group-hover:opacity-100 group-hover:text-primary/90 group-hover:translate-x-2"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={0.8}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
                   </div>
                 </button>
               );
