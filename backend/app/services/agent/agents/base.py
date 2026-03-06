@@ -116,7 +116,6 @@ STRICT_MCP_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
     "connection refused",
     "network",
 )
-SUPERPOWERS_MAX_RETRIES = 3
 
 if TYPE_CHECKING:
     from ..mcp.runtime import MCPRuntime
@@ -3261,228 +3260,6 @@ class BaseAgent(ABC):
             normalized[str(key)] = value
         return normalized
 
-    def _build_superpowers_solutions(
-        self,
-        *,
-        requested_tool_name: str,
-        resolved_tool_name: str,
-        tool_input: Dict[str, Any],
-        error_text: str,
-    ) -> List[Dict[str, Any]]:
-        normalized_tool = str(resolved_tool_name or requested_tool_name).strip().lower()
-        compact_input = self._compact_retry_input(tool_input)
-        solutions: List[Dict[str, Any]] = []
-
-        if normalized_tool == "read_file":
-            line_anchor = compact_input.get("line_start") or compact_input.get("start_line")
-            variant_1 = dict(compact_input)
-            if line_anchor is not None:
-                try:
-                    start_line = max(1, int(line_anchor))
-                except Exception:
-                    start_line = 1
-                variant_1["start_line"] = start_line
-                variant_1["end_line"] = start_line + 119
-                variant_1["max_lines"] = 120
-            variant_2 = dict(compact_input)
-            if "start_line" in variant_2:
-                try:
-                    start_line = max(1, int(variant_2["start_line"]))
-                except Exception:
-                    start_line = 1
-                variant_2["start_line"] = start_line
-                variant_2["end_line"] = start_line + 79
-                variant_2["max_lines"] = 80
-            variant_3 = {
-                key: value
-                for key, value in compact_input.items()
-                if key in {"file_path", "path", "start_line", "end_line", "max_lines", "line_start", "line_end"}
-            }
-            if not variant_3:
-                variant_3 = dict(compact_input)
-            solutions.extend(
-                [
-                    {
-                        "title": "缩小读取窗口并保留定位锚点",
-                        "detail": "将读取范围限制到 120 行以内，降低超时和无效全文读取概率。",
-                        "retry_input": variant_1,
-                    },
-                    {
-                        "title": "简化参数并重试最小必要字段",
-                        "detail": "仅保留路径和行号相关字段，避免冗余参数触发校验冲突。",
-                        "retry_input": variant_2,
-                    },
-                    {
-                        "title": "保留核心参数并切换保守读取策略",
-                        "detail": "如果仍失败，继续使用最保守参数形态重试。",
-                        "retry_input": variant_3,
-                    },
-                ]
-            )
-
-        elif normalized_tool == "search_code":
-            keyword = str(
-                compact_input.get("keyword")
-                or compact_input.get("query")
-                or compact_input.get("pattern")
-                or ""
-            ).strip()
-            variant_1 = dict(compact_input)
-            if keyword:
-                variant_1["keyword"] = keyword
-            variant_1.setdefault("max_results", 20)
-            variant_2 = dict(variant_1)
-            variant_2.setdefault("directory", ".")
-            if "file_pattern" not in variant_2:
-                variant_2["file_pattern"] = "*"
-            variant_3 = {
-                key: value
-                for key, value in variant_2.items()
-                if key in {"keyword", "query", "pattern", "directory", "file_pattern", "max_results", "case_sensitive"}
-            }
-            if not variant_3:
-                variant_3 = dict(variant_2)
-            solutions.extend(
-                [
-                    {
-                        "title": "归一化关键词并限制返回数量",
-                        "detail": "统一 keyword/query/pattern 字段，减少模糊请求导致的执行失败。",
-                        "retry_input": variant_1,
-                    },
-                    {
-                        "title": "补齐目录与文件模式边界",
-                        "detail": "增加 directory/file_pattern，缩小搜索范围提升稳定性。",
-                        "retry_input": variant_2,
-                    },
-                    {
-                        "title": "使用最小查询参数重试",
-                        "detail": "保留最小必要字段，避免多参数冲突。",
-                        "retry_input": variant_3,
-                    },
-                ]
-            )
-        else:
-            variant_1 = dict(compact_input)
-            variant_2 = {
-                key: value
-                for key, value in compact_input.items()
-                if key not in {"reason", "notes", "comment", "description"}
-            }
-            if not variant_2:
-                variant_2 = dict(compact_input)
-            variant_3 = dict(compact_input)
-            solutions.extend(
-                [
-                    {
-                        "title": "使用清洗后的参数原样重试",
-                        "detail": "剔除空值参数，优先验证是否为瞬时故障。",
-                        "retry_input": variant_1,
-                    },
-                    {
-                        "title": "移除非关键说明字段后重试",
-                        "detail": "减少非关键输入，避免 schema/路由歧义。",
-                        "retry_input": variant_2,
-                    },
-                    {
-                        "title": "保守重试并保持当前工具链",
-                        "detail": "在不改变工具类型前提下进行最后一次重试。",
-                        "retry_input": variant_3,
-                    },
-                ]
-            )
-
-        if len(solutions) < 3:
-            fallback_solution = {
-                "title": "检查 MCP 路由与工具入参后重试",
-                "detail": "核对 mcp/tool 路由、必填参数与路径范围。",
-                "retry_input": dict(compact_input),
-            }
-            while len(solutions) < 3:
-                solutions.append(dict(fallback_solution))
-
-        # error_text 参与上下文，避免未使用告警并帮助后续诊断。
-        if error_text and isinstance(solutions[0], dict):
-            solutions[0].setdefault("reason", str(error_text)[:240])
-        return solutions[:3]
-
-    @staticmethod
-    def _format_superpowers_solutions(solutions: List[Dict[str, Any]]) -> str:
-        lines = ["", "### superpowers skill 建议（Top 3）"]
-        for index, item in enumerate(solutions[:3], start=1):
-            title = str(item.get("title") or "").strip() or "调整参数后重试"
-            detail = str(item.get("detail") or "").strip() or "保持工具不变并缩小输入范围。"
-            lines.append(f"{index}. {title}：{detail}")
-        return "\n".join(lines)
-
-    async def _maybe_retry_with_superpowers(
-        self,
-        *,
-        requested_tool_name: str,
-        resolved_tool_name: str,
-        tool_input: Dict[str, Any],
-        failure_text: str,
-        fallback_depth: int,
-        superpowers_retry: int,
-    ) -> Optional[str]:
-        if superpowers_retry >= SUPERPOWERS_MAX_RETRIES:
-            return None
-        if self.is_cancelled:
-            return None
-
-        solutions = self._build_superpowers_solutions(
-            requested_tool_name=requested_tool_name,
-            resolved_tool_name=resolved_tool_name,
-            tool_input=tool_input,
-            error_text=failure_text,
-        )
-        if not solutions:
-            return None
-
-        if superpowers_retry == 0:
-            await self.emit_event(
-                "info",
-                f"[{self.name}] superpowers skill 已启动：为 {resolved_tool_name} 生成 3 个可行方案",
-                metadata={
-                    "skill": "superpowers",
-                    "tool_name": resolved_tool_name,
-                    "requested_tool_name": requested_tool_name,
-                    "solutions": [
-                        {
-                            "rank": idx + 1,
-                            "title": str(item.get("title") or ""),
-                            "detail": str(item.get("detail") or ""),
-                        }
-                        for idx, item in enumerate(solutions[:3])
-                    ],
-                },
-            )
-
-        selected = solutions[min(superpowers_retry, len(solutions) - 1)]
-        retry_input = dict(selected.get("retry_input") or tool_input or {})
-        retry_step = superpowers_retry + 1
-        await self.emit_event(
-            "info",
-            (
-                f"[{self.name}] superpowers 重试 {retry_step}/{SUPERPOWERS_MAX_RETRIES}: "
-                f"{selected.get('title') or '调整参数重试'}"
-            ),
-            metadata={
-                "skill": "superpowers",
-                "tool_name": resolved_tool_name,
-                "requested_tool_name": requested_tool_name,
-                "retry_step": retry_step,
-                "max_retries": SUPERPOWERS_MAX_RETRIES,
-                "retry_input": retry_input,
-                "failure_excerpt": str(failure_text or "")[:500],
-            },
-        )
-        return await self.execute_tool(
-            requested_tool_name,
-            retry_input,
-            _fallback_depth=fallback_depth,
-            _superpowers_retry=superpowers_retry + 1,
-        )
-
     def _build_retry_guard_key(self, tool_name: str, tool_input: Dict[str, Any]) -> Optional[str]:
         if tool_name not in RETRY_GUARD_TOOLS:
             return None
@@ -4335,7 +4112,6 @@ class BaseAgent(ABC):
         tool_name: str,
         tool_input: Dict,
         _fallback_depth: int = 0,
-        _superpowers_retry: int = 0,
     ) -> str:
         """
         统一的工具执行方法 - 支持取消和超时
@@ -4544,14 +4320,7 @@ class BaseAgent(ABC):
                     f"**原因**: {write_scope_error}\n"
                     "请改用证据绑定的文件并缩小写入范围。"
                 )
-                return failure_output + self._format_superpowers_solutions(
-                    self._build_superpowers_solutions(
-                        requested_tool_name=requested_tool_name,
-                        resolved_tool_name=resolved_tool_name,
-                        tool_input=repaired_input,
-                        error_text=str(write_scope_error),
-                    )
-                )
+                return failure_output
 
             normalized_resolved_tool_name = str(resolved_tool_name or "").strip().lower()
             cached_output = self._tool_success_cache.get(tool_call_key)
@@ -4651,14 +4420,7 @@ class BaseAgent(ABC):
                         f"**错误**: {validation_error}\n"
                         "请先通过 search_code 获取定位锚点后再重试 read_file。"
                     )
-                    return failure_output + self._format_superpowers_solutions(
-                        self._build_superpowers_solutions(
-                            requested_tool_name=requested_tool_name,
-                            resolved_tool_name=resolved_tool_name,
-                            tool_input=repaired_input,
-                            error_text=str(validation_error),
-                        )
-                    )
+                    return failure_output
                 example_fields = ", ".join(f'"{name}": "..."' for name in missing_required)
                 failure_output = (
                     "⚠️ 工具参数校验失败\n\n"
@@ -4668,14 +4430,7 @@ class BaseAgent(ABC):
                     f"**建议示例**: {{{example_fields}}}\n"
                     "请补齐参数后重试。"
                 )
-                return failure_output + self._format_superpowers_solutions(
-                    self._build_superpowers_solutions(
-                        requested_tool_name=requested_tool_name,
-                        resolved_tool_name=resolved_tool_name,
-                        tool_input=repaired_input,
-                        error_text=str(validation_error),
-                    )
-                )
+                return failure_output
 
             if mcp_strict_mode:
                 strict_metadata = {
@@ -4830,7 +4585,6 @@ class BaseAgent(ABC):
                             "search_code",
                             search_payload,
                             _fallback_depth=_fallback_depth + 1,
-                            _superpowers_retry=_superpowers_retry,
                         )
                         if not self._looks_like_tool_failure_output(search_output):
                             repaired_path, repaired_line = self._extract_location_from_search_output(search_output)
@@ -4853,7 +4607,6 @@ class BaseAgent(ABC):
                                     requested_tool_name,
                                     retry_input,
                                     _fallback_depth=_fallback_depth + 1,
-                                    _superpowers_retry=_superpowers_retry,
                                 )
                                 auto_retry_used = True
                                 if not self._looks_like_tool_failure_output(retry_output):
@@ -4881,24 +4634,7 @@ class BaseAgent(ABC):
                 )
                 if auto_retry_used:
                     failure_output += "\n\n已执行一次自动路径修复重试，但仍失败。"
-                retry_output = await self._maybe_retry_with_superpowers(
-                    requested_tool_name=requested_tool_name,
-                    resolved_tool_name=resolved_tool_name,
-                    tool_input=repaired_input,
-                    failure_text=failure_output,
-                    fallback_depth=_fallback_depth,
-                    superpowers_retry=_superpowers_retry,
-                )
-                if retry_output is not None:
-                    return retry_output
-                return failure_output + self._format_superpowers_solutions(
-                    self._build_superpowers_solutions(
-                        requested_tool_name=requested_tool_name,
-                        resolved_tool_name=resolved_tool_name,
-                        tool_input=repaired_input,
-                        error_text=str(strict_error),
-                    )
-                )
+                return failure_output
 
             is_mcp_proxy_tool = bool(local_tool_available and getattr(tool, "mcp_proxy_only", False))
             if is_mcp_proxy_tool and not mcp_can_handle:
@@ -5066,24 +4802,7 @@ class BaseAgent(ABC):
                             f"**错误**: {mcp_result.error or 'unknown'}\n"
                             "请调整参数后重试。"
                         )
-                        retry_output = await self._maybe_retry_with_superpowers(
-                            requested_tool_name=requested_tool_name,
-                            resolved_tool_name=resolved_tool_name,
-                            tool_input=repaired_input,
-                            failure_text=failure_output,
-                            fallback_depth=_fallback_depth,
-                            superpowers_retry=_superpowers_retry,
-                        )
-                        if retry_output is not None:
-                            return retry_output
-                        return failure_output + self._format_superpowers_solutions(
-                            self._build_superpowers_solutions(
-                                requested_tool_name=requested_tool_name,
-                                resolved_tool_name=resolved_tool_name,
-                                tool_input=repaired_input,
-                                error_text=str(mcp_result.error or "unknown"),
-                            )
-                        )
+                        return failure_output
 
                     elif not local_tool_available:
                         await self.emit_tool_result(
@@ -5102,24 +4821,7 @@ class BaseAgent(ABC):
                             f"**实际工具**: {resolved_tool_name}\n"
                             f"**错误**: {mcp_result.error or 'unknown'}"
                         )
-                        retry_output = await self._maybe_retry_with_superpowers(
-                            requested_tool_name=requested_tool_name,
-                            resolved_tool_name=resolved_tool_name,
-                            tool_input=repaired_input,
-                            failure_text=failure_output,
-                            fallback_depth=_fallback_depth,
-                            superpowers_retry=_superpowers_retry,
-                        )
-                        if retry_output is not None:
-                            return retry_output
-                        return failure_output + self._format_superpowers_solutions(
-                            self._build_superpowers_solutions(
-                                requested_tool_name=requested_tool_name,
-                                resolved_tool_name=resolved_tool_name,
-                                tool_input=repaired_input,
-                                error_text=str(mcp_result.error or "unknown"),
-                            )
-                        )
+                        return failure_output
 
             if not local_tool_available:
                 return (
@@ -5209,24 +4911,7 @@ class BaseAgent(ABC):
                     f"⚠️ 工具 '{resolved_tool_name}' 执行超时 ({timeout}秒)，"
                     "请尝试其他方法或减小操作范围。"
                 )
-                retry_output = await self._maybe_retry_with_superpowers(
-                    requested_tool_name=requested_tool_name,
-                    resolved_tool_name=resolved_tool_name,
-                    tool_input=repaired_input,
-                    failure_text=failure_output,
-                    fallback_depth=_fallback_depth,
-                    superpowers_retry=_superpowers_retry,
-                )
-                if retry_output is not None:
-                    return retry_output
-                return failure_output + self._format_superpowers_solutions(
-                    self._build_superpowers_solutions(
-                        requested_tool_name=requested_tool_name,
-                        resolved_tool_name=resolved_tool_name,
-                        tool_input=repaired_input,
-                        error_text=f"timeout:{timeout}",
-                    )
-                )
+                return failure_output
             except asyncio.CancelledError:
                 duration_ms = int((time.time() - start) * 1000)
                 await self.emit_tool_result(
@@ -5321,24 +5006,7 @@ class BaseAgent(ABC):
 **错误**: {result.error}
 
 请根据错误信息调整参数或尝试其他方法。{guard_hint}"""
-                retry_output = await self._maybe_retry_with_superpowers(
-                    requested_tool_name=requested_tool_name,
-                    resolved_tool_name=resolved_tool_name,
-                    tool_input=repaired_input,
-                    failure_text=error_msg,
-                    fallback_depth=_fallback_depth,
-                    superpowers_retry=_superpowers_retry,
-                )
-                if retry_output is not None:
-                    return retry_output
-                return error_msg + self._format_superpowers_solutions(
-                    self._build_superpowers_solutions(
-                        requested_tool_name=requested_tool_name,
-                        resolved_tool_name=resolved_tool_name,
-                        tool_input=repaired_input,
-                        error_text=str(result.error or ""),
-                    )
-                )
+                return error_msg
 
         except asyncio.CancelledError:
             logger.info(f"[{self.name}] Tool '{resolved_tool_name}' execution cancelled")
@@ -5379,24 +5047,7 @@ class BaseAgent(ABC):
 1. 检查参数格式是否正确
 2. 尝试使用其他工具
 3. 如果是权限或资源问题，跳过该操作"""
-            retry_output = await self._maybe_retry_with_superpowers(
-                requested_tool_name=requested_tool_name,
-                resolved_tool_name=resolved_tool_name,
-                tool_input=repaired_input if isinstance(repaired_input, dict) else {},
-                failure_text=error_msg,
-                fallback_depth=_fallback_depth,
-                superpowers_retry=_superpowers_retry,
-            )
-            if retry_output is not None:
-                return retry_output
-            return error_msg + self._format_superpowers_solutions(
-                self._build_superpowers_solutions(
-                    requested_tool_name=requested_tool_name,
-                    resolved_tool_name=resolved_tool_name,
-                    tool_input=repaired_input if isinstance(repaired_input, dict) else {},
-                    error_text=str(e),
-                )
-            )
+            return error_msg
     
     def get_tools_description(self) -> str:
         """生成工具描述文本（用于 prompt）"""
