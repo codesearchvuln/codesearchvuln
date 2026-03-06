@@ -6,6 +6,7 @@ ARG UV_IMAGE=ghcr.nju.edu.cn/astral-sh/uv:latest
 ARG BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com
 ARG BACKEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org
 ARG BACKEND_PNPM_VERSION=9.15.4
+ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS=420
 ARG BACKEND_PNPM_INSTALL_OPTIONAL=0
 ARG BACKEND_INSTALL_CJK_FONTS=1
 FROM ${UV_IMAGE} AS uvbin
@@ -13,6 +14,7 @@ FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS nodebase
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS builder
 
 WORKDIR /app
+ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -51,7 +53,6 @@ RUN --mount=type=cache,id=deepaudit-backend-builder-apt-lists,target=/var/lib/ap
         gcc \
         libpq-dev \
         libffi-dev \
-        wget \
         gitleaks
 
 # 下载并安装 Gitleaks 预编译二进制文件
@@ -74,12 +75,40 @@ ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
 COPY pyproject.toml uv.lock README.md ./
 
 # 安装 Python 依赖到虚拟环境
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,id=deepaudit-backend-uv-cache,target=/root/.cache/uv \
+    set -eux; \
+    cmd_timeout="${BACKEND_PNPM_CMD_TIMEOUT_SECONDS:-420}"; \
+    case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
+    uv_step_timeout=90; \
+    if [ "${cmd_timeout}" -lt "${uv_step_timeout}" ]; then uv_step_timeout="${cmd_timeout}"; fi; \
+    uv_http_timeout=45; \
+    sync_with_index() { \
+      index_url="$1"; \
+      attempt=1; \
+      while [ "${attempt}" -le 2 ]; do \
+        echo "uv sync via ${index_url} (attempt ${attempt}/2, timeout ${uv_step_timeout}s)"; \
+        if timeout "${uv_step_timeout}" env UV_HTTP_TIMEOUT="${uv_http_timeout}" UV_INDEX_URL="${index_url}" PIP_INDEX_URL="${index_url}" uv sync --frozen --no-dev; then \
+          return 0; \
+        else \
+          status="$?"; \
+        fi; \
+        if [ "${status}" -eq 124 ]; then \
+          echo "uv sync timed out via ${index_url} after ${uv_step_timeout}s (attempt ${attempt}/2)." >&2; \
+        else \
+          echo "uv sync failed via ${index_url} (attempt ${attempt}/2, exit ${status})." >&2; \
+        fi; \
+        sleep $((attempt + 1)); \
+        attempt=$((attempt + 1)); \
+      done; \
+      return 1; \
+    }; \
+    sync_with_index "https://mirrors.aliyun.com/pypi/simple/" || sync_with_index "https://pypi.org/simple"; \
+    printf 'ready\n' > /tmp/builder-network-ready
 
 # ============================================
-# 多阶段构建 - 运行阶段
+# 多阶段构建 - 运行时基础阶段
 # ============================================
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS runtime
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS runtime-base
 
 WORKDIR /app
 
@@ -127,6 +156,7 @@ RUN --mount=type=cache,id=deepaudit-backend-runtime-apt-lists,target=/var/lib/ap
         curl \
         git \
         unzip \
+        openjdk-21-jre-headless \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
         libpangocairo-1.0-0 \
@@ -147,7 +177,6 @@ RUN --mount=type=cache,id=deepaudit-backend-runtime-apt-lists,target=/var/lib/ap
 ARG BACKEND_NPM_REGISTRY_PRIMARY
 ARG BACKEND_NPM_REGISTRY_FALLBACK
 ARG BACKEND_PNPM_VERSION
-ARG BACKEND_PNPM_INSTALL_OPTIONAL
 COPY --from=nodebase /usr/local/bin/node /usr/local/bin/node
 COPY --from=nodebase /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN --mount=type=cache,id=deepaudit-backend-npm,target=/root/.npm \
@@ -164,8 +193,7 @@ RUN --mount=type=cache,id=deepaudit-backend-npm,target=/root/.npm \
       reg="$1"; \
       attempt=1; \
       if ! curl -fsS --max-time 5 "${reg}/-/ping" >/dev/null 2>&1; then \
-        echo "npm registry ${reg} is unreachable, skip directly." >&2; \
-        return 1; \
+        echo "npm registry probe failed for ${reg}, continue with direct install attempt." >&2; \
       fi; \
       npm config set registry "${reg}"; \
       while [ "${attempt}" -le 2 ]; do \
@@ -183,36 +211,27 @@ RUN --mount=type=cache,id=deepaudit-backend-npm,target=/root/.npm \
     node --version; \
     npm --version
 
-# 安装 Opengrep CLI（仅使用官方安装脚本）
-ARG OPENGREP_VERSION=v1.15.1
+# ============================================
+# 多阶段构建 - MCP 运行时构建阶段
+# ============================================
+FROM runtime-base AS mcp-builder
 
-RUN set -eux; \
-    unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; \
-    ARCH="$(uname -m)"; \
-    case "$ARCH" in \
-      x86_64|amd64) OG_DIST="opengrep_manylinux_x86" ;; \
-      aarch64|arm64) OG_DIST="opengrep_manylinux_aarch64" ;; \
-      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
-    esac; \
-    curl -fL "https://gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-      -o /usr/local/bin/opengrep.real; \
-    chmod +x /usr/local/bin/opengrep.real; \
-    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY="*"\nexport no_proxy="*"\nexec /usr/local/bin/opengrep.real "$@"\n' \
-      > /usr/local/bin/opengrep; \
-    chmod +x /usr/local/bin/opengrep; \
-    opengrep --version
-    
-# 安装 PMD
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.0.0/pmd-dist-7.0.0-bin.zip -o /tmp/pmd.zip && \
-    unzip -q /tmp/pmd.zip -d /opt && \
-    ln -s /opt/pmd-bin-7.0.0/bin/pmd /usr/local/bin/pmd && \
-    rm /tmp/pmd.zip
+ARG BACKEND_NPM_REGISTRY_PRIMARY
+ARG BACKEND_NPM_REGISTRY_FALLBACK
+ARG BACKEND_PNPM_INSTALL_OPTIONAL
+ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS
+COPY --from=builder /tmp/builder-network-ready /tmp/builder-network-ready
 
 # 安装 MCP 相关运行时（pnpm + qmd CLI），镜像优先并支持官方回退
 # 使用 --ignore-scripts 避免 node-llama-cpp 等可选构建脚本拖慢构建
 RUN --mount=type=cache,id=deepaudit-backend-pnpm-store,target=/pnpm/store \
     set -eux; \
+    cmd_timeout="${BACKEND_PNPM_CMD_TIMEOUT_SECONDS:-420}"; \
+    case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
+    pnpm_step_timeout=90; \
+    if [ "${cmd_timeout}" -lt "${pnpm_step_timeout}" ]; then pnpm_step_timeout="${cmd_timeout}"; fi; \
+    qmd_step_timeout=120; \
+    if [ "${cmd_timeout}" -lt "${qmd_step_timeout}" ]; then qmd_step_timeout="${cmd_timeout}"; fi; \
     mkdir -p /pnpm /pnpm/global /pnpm/store; \
     pnpm config set store-dir /pnpm/store; \
     pnpm config set global-bin-dir /pnpm; \
@@ -221,53 +240,194 @@ RUN --mount=type=cache,id=deepaudit-backend-pnpm-store,target=/pnpm/store \
     pnpm config set fetch-retry-factor 2; \
     pnpm config set fetch-retry-mintimeout 2000; \
     pnpm config set fetch-retry-maxtimeout 8000; \
-    pnpm config set network-concurrency 8; \
+    pnpm config set network-concurrency 4; \
     pnpm config set prefer-offline true; \
-    pnpm config set @node-llama-cpp:registry "${BACKEND_NPM_REGISTRY_FALLBACK}"; \
-    pnpm config set @huggingface:registry "${BACKEND_NPM_REGISTRY_FALLBACK}"; \
-    install_mcp_packages() { \
+    install_flags="--ignore-scripts --prefer-offline"; \
+    if [ "${BACKEND_PNPM_INSTALL_OPTIONAL}" != "1" ]; then \
+      install_flags="${install_flags} --no-optional"; \
+    fi; \
+    install_mcp_packages_once() { \
       reg="$1"; \
+      label="$2"; \
+      step_timeout="$3"; \
+      shift 3; \
       attempt=1; \
-      install_flags="--ignore-scripts --prefer-offline"; \
-      if [ "${BACKEND_PNPM_INSTALL_OPTIONAL}" != "1" ]; then \
-        install_flags="${install_flags} --no-optional"; \
-      fi; \
       if ! curl -fsS --max-time 5 "${reg}/-/ping" >/dev/null 2>&1; then \
-        echo "pnpm registry ${reg} is unreachable, skip directly." >&2; \
-        return 1; \
+        echo "pnpm registry probe failed for ${reg}, continue with direct add attempt." >&2; \
       fi; \
       pnpm config set registry "${reg}"; \
+      pnpm config set @node-llama-cpp:registry "${reg}"; \
+      pnpm config set @huggingface:registry "${reg}"; \
       while [ "${attempt}" -le 2 ]; do \
-        if pnpm add -g ${install_flags} \
-          @modelcontextprotocol/server-filesystem \
-          @modelcontextprotocol/server-memory \
-          @modelcontextprotocol/server-sequential-thinking \
-          @tobilu/qmd; then \
+        echo "pnpm add ${label} via ${reg} (attempt ${attempt}/2, timeout ${step_timeout}s)"; \
+        if timeout "${step_timeout}" pnpm add -g ${install_flags} "$@"; then \
           return 0; \
+        else \
+          status="$?"; \
         fi; \
-        echo "pnpm add global MCP packages failed via ${reg} (attempt ${attempt}/2), retrying..." >&2; \
-        sleep $((attempt * 2)); \
+        if [ "${status}" -eq 124 ]; then \
+          echo "pnpm add ${label} timed out via ${reg} after ${step_timeout}s (attempt ${attempt}/2)." >&2; \
+        else \
+          echo "pnpm add ${label} failed via ${reg} (attempt ${attempt}/2, exit ${status})." >&2; \
+        fi; \
+        sleep $((attempt + 1)); \
         attempt=$((attempt + 1)); \
       done; \
       return 1; \
     }; \
-    install_mcp_packages "${BACKEND_NPM_REGISTRY_PRIMARY}" || install_mcp_packages "${BACKEND_NPM_REGISTRY_FALLBACK}"; \
+    install_mcp_packages() { \
+      label="$1"; \
+      step_timeout="$2"; \
+      shift 2; \
+      install_mcp_packages_once "${BACKEND_NPM_REGISTRY_PRIMARY}" "${label}" "${step_timeout}" "$@" || install_mcp_packages_once "${BACKEND_NPM_REGISTRY_FALLBACK}" "${label}" "${step_timeout}" "$@"; \
+    }; \
+    install_mcp_packages "mcp-core" \
+      "${pnpm_step_timeout}" \
+      "@modelcontextprotocol/server-filesystem" \
+      "@modelcontextprotocol/server-memory" \
+      "@modelcontextprotocol/server-sequential-thinking"; \
+    install_mcp_packages "qmd-cli" "${qmd_step_timeout}" "@tobilu/qmd"; \
     pnpm bin -g; \
-    command -v qmd; \
+    command -v qmd
+
+# 定向补齐 better-sqlite3 原生模块，避免 --ignore-scripts 导致运行期缺失 binding。
+# 构建期硬性校验：确保 better-sqlite3 可实际创建连接。
+RUN --mount=type=cache,id=deepaudit-backend-pnpm-store,target=/pnpm/store \
+    set -eux; \
+    cmd_timeout="${BACKEND_PNPM_CMD_TIMEOUT_SECONDS:-420}"; \
+    case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
+    rebuild_timeout=120; \
+    if [ "${cmd_timeout}" -lt "${rebuild_timeout}" ]; then rebuild_timeout="${cmd_timeout}"; fi; \
     PNPM_GLOBAL_ROOT="$(pnpm root -g)"; \
     PNPM_GLOBAL_DIR="$(dirname "${PNPM_GLOBAL_ROOT}")"; \
     export PNPM_GLOBAL_ROOT; \
-    # 定向补齐 better-sqlite3 原生模块，避免 --ignore-scripts 导致运行期缺失 binding。
-    pnpm --dir "${PNPM_GLOBAL_DIR}" --config.virtual-store-dir=.pnpm rebuild better-sqlite3; \
-    # 构建期硬性校验：确保 better-sqlite3 可实际创建连接。
+    attempt=1; \
+    while [ "${attempt}" -le 2 ]; do \
+      echo "pnpm rebuild better-sqlite3 (attempt ${attempt}/2, timeout ${rebuild_timeout}s)"; \
+      if timeout "${rebuild_timeout}" pnpm --dir "${PNPM_GLOBAL_DIR}" --config.virtual-store-dir=.pnpm rebuild better-sqlite3; then \
+        break; \
+      fi; \
+      rebuild_status="$?"; \
+      if [ "${rebuild_status}" -eq 124 ]; then \
+        echo "pnpm rebuild better-sqlite3 timed out after ${rebuild_timeout}s (attempt ${attempt}/2)." >&2; \
+      else \
+        echo "pnpm rebuild better-sqlite3 failed with exit ${rebuild_status} (attempt ${attempt}/2)." >&2; \
+      fi; \
+      if [ "${attempt}" -eq 2 ]; then \
+        exit "${rebuild_status}"; \
+      fi; \
+      sleep $((attempt + 1)); \
+      attempt=$((attempt + 1)); \
+    done; \
     PNPM_BETTER_SQLITE_DIR="$(find "${PNPM_GLOBAL_DIR}/.pnpm" -maxdepth 1 -type d -name 'better-sqlite3@*' | head -n 1)"; \
     [ -n "${PNPM_BETTER_SQLITE_DIR}" ]; \
     export PNPM_BETTER_SQLITE_DIR; \
-    node -e 'const path=require("node:path");const pkg=process.env.PNPM_BETTER_SQLITE_DIR;if(!pkg){throw new Error("PNPM_BETTER_SQLITE_DIR is not set");}const Database=require(path.join(pkg,"node_modules","better-sqlite3"));const db=new Database(":memory:");db.prepare("SELECT 1 AS ok").get();db.close();console.log("better-sqlite3 smoke check passed");'; \
+    node -e 'const path=require("node:path");const pkg=process.env.PNPM_BETTER_SQLITE_DIR;if(!pkg){throw new Error("PNPM_BETTER_SQLITE_DIR is not set");}const Database=require(path.join(pkg,"node_modules","better-sqlite3"));const db=new Database(":memory:");db.prepare("SELECT 1 AS ok").get();db.close();console.log("better-sqlite3 smoke check passed");'
+
+# 软链接 MCP 源码目录，避免重复打包同一份 Node 依赖
+RUN set -eux; \
+    PNPM_GLOBAL_ROOT="$(pnpm root -g)"; \
     mkdir -p /app/mcp-src; \
-    cp -R -L "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-filesystem" /app/mcp-src/filesystem; \
-    cp -R -L "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-sequential-thinking" /app/mcp-src/sequential-thinking; \
-    cp -R -L "${PNPM_GLOBAL_ROOT}/@tobilu/qmd" /app/mcp-src/qmd
+    rm -rf /app/mcp-src/filesystem /app/mcp-src/sequential-thinking /app/mcp-src/qmd; \
+    ln -s "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-filesystem" /app/mcp-src/filesystem; \
+    ln -s "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-sequential-thinking" /app/mcp-src/sequential-thinking; \
+    ln -s "${PNPM_GLOBAL_ROOT}/@tobilu/qmd" /app/mcp-src/qmd
+
+# ============================================
+# 多阶段构建 - 运行阶段
+# ============================================
+FROM runtime-base AS runtime
+
+# 提前复制 builder 产物，避免 runtime 与 builder 并行下载导致网络争抢
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
+
+# 从 mcp-builder 复制 MCP 运行时与源码目录（前置以减少网络并发抢占）
+COPY --from=mcp-builder /pnpm /pnpm
+COPY --from=mcp-builder /app/mcp-src /app/mcp-src
+
+# 安装 Opengrep CLI 和 PMD
+ARG OPENGREP_VERSION=v1.15.1
+ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS
+
+RUN --mount=type=cache,id=deepaudit-backend-tool-archive,target=/var/cache/deepaudit-tools \
+    set -eux; \
+    unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; \
+    cmd_timeout="${BACKEND_PNPM_CMD_TIMEOUT_SECONDS:-420}"; \
+    case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
+    download_step_timeout=90; \
+    if [ "${cmd_timeout}" -lt "${download_step_timeout}" ]; then download_step_timeout="${cmd_timeout}"; fi; \
+    mkdir -p /var/cache/deepaudit-tools; \
+    ARCH="$(uname -m)"; \
+    case "$ARCH" in \
+      x86_64|amd64) OG_DIST="opengrep_manylinux_x86" ;; \
+      aarch64|arm64) OG_DIST="opengrep_manylinux_aarch64" ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac; \
+    download_with_fallback() { \
+      output="$1"; \
+      shift; \
+      for url in "$@"; do \
+        if ! curl -fsSI --connect-timeout 5 --max-time 12 "${url}" >/dev/null 2>&1 && \
+           ! curl -fsS --connect-timeout 5 --max-time 12 --range 0-0 "${url}" -o /dev/null >/dev/null 2>&1; then \
+          echo "download source probe failed for ${url}, continue with direct download attempts." >&2; \
+        fi; \
+        attempt=1; \
+        while [ "${attempt}" -le 2 ]; do \
+          echo "download ${output} via ${url} (attempt ${attempt}/2, timeout ${download_step_timeout}s)"; \
+          if timeout "${download_step_timeout}" curl -fL \
+            --connect-timeout 8 \
+            --max-time 60 \
+            --speed-time 15 \
+            --speed-limit 2048 \
+            "${url}" \
+            -o "${output}.tmp"; then \
+            mv "${output}.tmp" "${output}"; \
+            return 0; \
+          else \
+            status="$?"; \
+          fi; \
+          if [ "${status}" -eq 124 ]; then \
+            echo "download timed out: ${url} (attempt ${attempt}/2)." >&2; \
+          else \
+            echo "download failed: ${url} (attempt ${attempt}/2, exit ${status})." >&2; \
+          fi; \
+          rm -f "${output}.tmp"; \
+          sleep $((attempt + 1)); \
+          attempt=$((attempt + 1)); \
+        done; \
+      done; \
+      return 1; \
+    }; \
+    OG_CACHE="/var/cache/deepaudit-tools/opengrep-${OPENGREP_VERSION}-${OG_DIST}"; \
+    if [ ! -s "${OG_CACHE}" ]; then \
+      download_with_fallback \
+        "${OG_CACHE}" \
+        "https://gh-proxy.com/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
+        "https://v6.gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
+        "https://gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
+        "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}"; \
+    fi; \
+    cp "${OG_CACHE}" /usr/local/bin/opengrep.real; \
+    chmod +x /usr/local/bin/opengrep.real; \
+    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY="*"\nexport no_proxy="*"\nexec /usr/local/bin/opengrep.real "$@"\n' \
+      > /usr/local/bin/opengrep; \
+    chmod +x /usr/local/bin/opengrep; \
+    opengrep --version; \
+    PMD_CACHE="/var/cache/deepaudit-tools/pmd-dist-7.0.0-bin.zip"; \
+    if [ ! -s "${PMD_CACHE}" ]; then \
+      download_with_fallback \
+        "${PMD_CACHE}" \
+        "https://gh-proxy.com/https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.0.0/pmd-dist-7.0.0-bin.zip" \
+        "https://v6.gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.0.0/pmd-dist-7.0.0-bin.zip" \
+        "https://gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.0.0/pmd-dist-7.0.0-bin.zip" \
+        "https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.0.0/pmd-dist-7.0.0-bin.zip"; \
+    fi; \
+    cp "${PMD_CACHE}" /tmp/pmd.zip; \
+    unzip -q /tmp/pmd.zip -d /opt; \
+    ln -s /opt/pmd-bin-7.0.0/bin/pmd /usr/local/bin/pmd; \
+    rm /tmp/pmd.zip
 
 # MCP / QMD 持久化目录
 ENV XDG_DATA_HOME=/app/data/mcp/xdg-data
@@ -277,12 +437,6 @@ ENV QMD_DATA_DIR=/app/data/qmd
 ENV CODE_INDEX_INDEXER_PATH=/app/data/mcp/code-index
 
 
-
-# 从构建阶段复制虚拟环境、uv 和 gitleaks
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-# COPY --from=builder /usr/local/bin/gitleaks /usr/local/bin/gitleaks
-COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
 
 # code-index-mcp 是 Python 包（非 npm 包），安装到系统 PATH（镜像失败时回退官方源）
 RUN --mount=type=cache,id=deepaudit-backend-pip-cache,target=/root/.cache/pip \
@@ -309,12 +463,19 @@ if spec and spec.submodule_search_locations:
     marker.write_text(f"{package_root}\n", encoding="utf-8")
 PY
 
-# 复制应用代码
-COPY . .
+# 仅复制运行时所需代码与脚本，避免把测试/文档打进运行镜像
+COPY app /app/app
+COPY static /app/static
+COPY alembic /app/alembic
+COPY alembic.ini /app/alembic.ini
+COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY --chmod=755 scripts/sync_mcp_sources.sh /app/scripts/sync_mcp_sources.sh
+COPY --chmod=755 scripts/install_codex_skills.sh /app/scripts/install_codex_skills.sh
+COPY scripts/build_skill_registry.py /app/scripts/build_skill_registry.py
+COPY scripts/reset_static_scan_tables.py /app/scripts/reset_static_scan_tables.py
 
-# 创建上传目录并设置启动脚本权限
-RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/code-index /app/data/mcp/xdg-config /app/data/qmd /app/mcp-src /app/mcp-src/code-index-mcp && \
-    chmod +x /app/docker-entrypoint.sh /app/scripts/sync_mcp_sources.sh /app/scripts/install_codex_skills.sh
+# 创建运行时持久化目录
+RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/code-index /app/data/mcp/xdg-config /app/data/qmd /app/mcp-src /app/mcp-src/code-index-mcp
 
 # 暴露端口
 EXPOSE 8000
