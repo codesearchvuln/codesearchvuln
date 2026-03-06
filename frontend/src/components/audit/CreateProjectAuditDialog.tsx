@@ -1,5 +1,5 @@
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
 	Dialog,
@@ -45,6 +45,7 @@ import {
 	INTELLIGENT_TASK_NAME_MARKER,
 } from "@/features/tasks/services/taskActivities";
 import { useI18n } from "@/shared/i18n";
+import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 export type AuditCreateMode = "static" | "agent" | "hybrid";
 
@@ -173,6 +174,8 @@ export default function CreateProjectAuditDialog({
 	onReturn,
 }: CreateProjectAuditDialogProps) {
 	const navigate = useNavigate();
+	const location = useLocation();
+	const currentRoute = `${location.pathname}${location.search}`;
 	const { t } = useI18n();
 	const [projects, setProjects] = useState<Project[]>([]);
 	const [loadingProjects, setLoadingProjects] = useState(false);
@@ -705,7 +708,7 @@ export default function CreateProjectAuditDialog({
 						if (action === "secondary") {
 							onSecondaryCreateSuccess?.();
 						} else if (navigateOnSuccess) {
-							navigate(buildStaticTaskRoute(result));
+							navigate(appendReturnTo(buildStaticTaskRoute(result), currentRoute));
 						}
 						return;
 					}
@@ -762,7 +765,7 @@ export default function CreateProjectAuditDialog({
 				if (action === "secondary") {
 					onSecondaryCreateSuccess?.();
 				} else if (navigateOnSuccess) {
-					navigate(buildStaticTaskRoute(result));
+					navigate(appendReturnTo(buildStaticTaskRoute(result), currentRoute));
 				}
 				return;
 			}

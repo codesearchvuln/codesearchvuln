@@ -1,10 +1,11 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { FileText, Play, Activity } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { AuditTask } from "@/shared/types";
 import type { UnifiedTask } from "@/shared/types";
+import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 export function ProjectTasksTab(props: {
   unifiedTasks: UnifiedTask[];
@@ -14,6 +15,7 @@ export function ProjectTasksTab(props: {
   renderStatusIcon: (status: string) => React.ReactNode;
   getTaskRoute?: (task: UnifiedTask) => string;
 }) {
+  const location = useLocation();
   const {
     unifiedTasks,
     onCreateTask,
@@ -22,6 +24,7 @@ export function ProjectTasksTab(props: {
     renderStatusIcon,
     getTaskRoute,
   } = props;
+  const currentRoute = `${location.pathname}${location.search}`;
 
   return (
     <>
@@ -56,6 +59,8 @@ export function ProjectTasksTab(props: {
                 ? `/tasks/${task.id}`
                 : `/agent-audit/${task.id}`;
             const detailRoute = getTaskRoute ? getTaskRoute(wrappedTask) : defaultRoute;
+            const resolvedDetailRoute =
+              isStaticTask ? appendReturnTo(detailRoute, currentRoute) : detailRoute;
 
             return (
               <div key={`${wrappedTask.kind}:${task.id}`} className="cyber-card p-6">
@@ -120,7 +125,7 @@ export function ProjectTasksTab(props: {
                 </div>
 
                 <div className="flex justify-end space-x-2 pt-4 border-t border-border">
-                  <Link to={detailRoute}>
+                  <Link to={resolvedDetailRoute}>
                     <Button variant="outline" size="sm" className="cyber-btn-outline">
                       <FileText className="w-4 h-4 mr-2" />
                       查看详情

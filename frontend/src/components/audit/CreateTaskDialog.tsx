@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
 	Dialog,
 	DialogContent,
@@ -68,6 +68,7 @@ import { uploadZipFile } from "@/shared/utils/zipStorage";
 import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
 import type { Project } from "@/shared/types";
 import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
+import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 interface CreateTaskDialogProps {
 	open: boolean;
@@ -142,6 +143,8 @@ export default function CreateTaskDialog({
 	allowUploadProject = false,
 }: CreateTaskDialogProps) {
 	const navigate = useNavigate();
+	const location = useLocation();
+	const currentRoute = `${location.pathname}${location.search}`;
 	const [sourceMode, setSourceMode] = useState<"existing" | "upload">(
 		"existing",
 	);
@@ -531,8 +534,11 @@ export default function CreateTaskDialog({
 					toast.success("静态分析任务已创建");
 					if (navigateOnSuccess) {
 						navigate(
-							`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
-							}`,
+							appendReturnTo(
+								`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
+								}`,
+								currentRoute,
+							),
 						);
 					}
 					loadProjects();
@@ -612,8 +618,11 @@ export default function CreateTaskDialog({
 			toast.success("静态分析任务已创建");
 			if (navigateOnSuccess) {
 				navigate(
-					`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
-					}`,
+					appendReturnTo(
+						`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
+						}`,
+						currentRoute,
+					),
 				);
 			}
 		} catch (error) {

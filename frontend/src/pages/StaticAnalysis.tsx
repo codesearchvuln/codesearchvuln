@@ -1,1794 +1,1102 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Progress } from "@/components/ui/progress";
-import {
-    Tabs,
-    TabsContent,
-} from "@/components/ui/tabs";
+	AlertCircle,
+	ArrowLeft,
+	Ban,
+	Loader2,
+	RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
-    interruptOpengrepScanTask,
-    getOpengrepScanFindings,
-    getOpengrepScanProgress,
-    getOpengrepScanTask,
-    updateOpengrepFindingStatus,
-    type OpengrepFinding,
-    type OpengrepScanProgress,
-    type OpengrepScanTask,
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import {
+	getGitleaksFindings,
+	getGitleaksScanTask,
+	interruptGitleaksScanTask,
+	updateGitleaksFindingStatus,
+	type GitleaksFinding,
+	type GitleaksScanTask,
+} from "@/shared/api/gitleaks";
+import {
+	getOpengrepScanFindings,
+	getOpengrepScanTask,
+	interruptOpengrepScanTask,
+	updateOpengrepFindingStatus,
+	type OpengrepFinding,
+	type OpengrepScanTask,
 } from "@/shared/api/opengrep";
 import {
-    interruptGitleaksScanTask,
-    getGitleaksFindings,
-    getGitleaksScanTask,
-    updateGitleaksFindingStatus,
-    type GitleaksFinding,
-    type GitleaksScanTask,
-} from "@/shared/api/gitleaks";
-import { showToastQueue } from "@/shared/utils/toastQueue";
-import {
-    runWithRefreshMode,
-    type RefreshOptions,
-} from "@/shared/utils/refreshMode";
-import {
-    AlertCircle,
-    ArrowLeft,
-    Ban,
-    ChevronDown,
-    ChevronUp,
-    RefreshCw,
-    Shield,
-    Loader2,
-} from "lucide-react";
-import { useI18n } from "@/shared/i18n";
-import {
-    appendReturnTo,
-    buildFindingDetailPath,
+	appendReturnTo,
+	buildFindingDetailPath,
 } from "@/shared/utils/findingRoute";
 
-const STATUS_LABELS: Record<string, string> = {
-    pending: "等待中",
-    running: "运行中",
-    completed: "已完成",
-    failed: "失败",
-    interrupted: "已中断",
+type Engine = "opengrep" | "gitleaks";
+type EngineFilter = "all" | Engine;
+type FindingStatus = "open" | "verified" | "false_positive" | "fixed";
+type StatusFilter = "all" | FindingStatus;
+type ConfidenceFilter = "all" | "HIGH" | "MEDIUM" | "LOW";
+type NormalizedSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+type NormalizedConfidence = "HIGH" | "MEDIUM" | "LOW";
+
+type UnifiedFindingRow = {
+	key: string;
+	id: string;
+	taskId: string;
+	engine: Engine;
+	rule: string;
+	filePath: string;
+	line: number | null;
+	severity: NormalizedSeverity;
+	severityScore: number;
+	confidence: NormalizedConfidence;
+	confidenceScore: number;
+	status: string;
 };
 
-const STATUS_CLASSES: Record<string, string> = {
-    pending: "bg-amber-500/20 text-amber-300 border-amber-500/30",
-    running: "bg-sky-500/20 text-sky-300 border-sky-500/30",
-    completed: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-    failed: "bg-rose-500/20 text-rose-300 border-rose-500/30",
-    interrupted: "bg-orange-500/20 text-orange-300 border-orange-500/30",
+const PAGE_SIZE = 10;
+const FINDING_BATCH_SIZE = 200;
+const MAX_FINDING_BATCH_PAGES = 500;
+
+const YES_BADGE_CLASS = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+const NO_BADGE_CLASS = "bg-muted text-muted-foreground border-border";
+
+const SEVERITY_SCORE: Record<NormalizedSeverity, number> = {
+	CRITICAL: 4,
+	HIGH: 3,
+	MEDIUM: 2,
+	LOW: 1,
 };
 
-const FINDING_STATUS_CLASSES: Record<string, string> = {
-    open: "bg-sky-500/20 text-sky-300 border-sky-500/30",
-    verified: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-    false_positive: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+const CONFIDENCE_SCORE: Record<NormalizedConfidence, number> = {
+	HIGH: 3,
+	MEDIUM: 2,
+	LOW: 1,
 };
 
-const GITLEAKS_STATUS_CLASSES: Record<string, string> = {
-    open: "bg-sky-500/20 text-sky-300 border-sky-500/30",
-    verified: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-    false_positive: "bg-amber-500/20 text-amber-300 border-amber-500/30",
-    fixed: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-};
+function decodePathParam(raw: string | undefined): string {
+	try {
+		return decodeURIComponent(String(raw || "")).trim();
+	} catch {
+		return String(raw || "").trim();
+	}
+}
 
-const VERIFICATION_BADGE_CLASSES = {
-    active: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-    inactive: "bg-muted text-muted-foreground border-border",
-};
+function normalizePath(path?: string | null): string {
+	const raw = String(path || "").trim();
+	if (!raw) return "-";
+	const unified = raw.replace(/\\/g, "/");
+	const tmpIndex = unified.indexOf("/tmp/");
+	if (tmpIndex >= 0) {
+		const trimmed = unified.slice(tmpIndex + 5);
+		const parts = trimmed.split("/").filter(Boolean);
+		if (parts.length > 1) {
+			return parts.slice(1).join("/");
+		}
+	}
+	return unified.replace(/^\/+/, "") || "-";
+}
 
-const FALSE_POSITIVE_BADGE_CLASSES = {
-    active: "bg-amber-500/20 text-amber-300 border-amber-500/30",
-    inactive: "bg-muted text-muted-foreground border-border",
-};
-const PAGE_SIZE_OPTIONS = [10, 30, 50, 100] as const;
-const FINDINGS_COUNT_BATCH_SIZE = 200;
-const FINDINGS_COUNT_MAX_PAGES = 500;
+function normalizeSeverity(severity?: string | null): NormalizedSeverity {
+	const normalized = String(severity || "").trim().toUpperCase();
+	if (normalized === "CRITICAL") return "CRITICAL";
+	if (normalized === "HIGH") return "HIGH";
+	if (normalized === "ERROR" || normalized === "WARNING" || normalized === "MEDIUM") {
+		return "MEDIUM";
+	}
+	return "LOW";
+}
 
-const normalizePath = (path?: string | null) => {
-    if (!path) return "";
-    const tmpIndex = path.indexOf("/tmp/");
-    if (tmpIndex >= 0) {
-        const trimmed = path.slice(tmpIndex + 5);
-        const parts = trimmed.split("/");
-        if (parts.length > 1) {
-            return parts.slice(1).join("/");
-        }
-    }
-    return path;
-};
+function getSeverityLabel(severity: NormalizedSeverity): string {
+	if (severity === "CRITICAL") return "严重";
+	if (severity === "HIGH") return "高危";
+	if (severity === "MEDIUM") return "中危";
+	return "低危";
+}
 
-const stripRuntimeRulePrefix = (value?: string | null) =>
-    String(value || "")
-        .trim()
-        .replace(/^(?:tmp[-_]+|tem[-_]+)/i, "");
+function getSeverityBadgeClass(severity: NormalizedSeverity): string {
+	if (severity === "CRITICAL") {
+		return "bg-rose-500/20 text-rose-300 border-rose-500/30";
+	}
+	if (severity === "HIGH") {
+		return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+	}
+	if (severity === "MEDIUM") {
+		return "bg-sky-500/20 text-sky-300 border-sky-500/30";
+	}
+	return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+}
 
-const getCheckIdSuffix = (checkId?: string | null) => {
-    const value = String(checkId || "").trim();
-    if (!value) return "";
-    const parts = value.split(".");
-    const suffix = parts[parts.length - 1] || value;
-    return stripRuntimeRulePrefix(suffix);
-};
+function normalizeConfidence(confidence?: string | null): NormalizedConfidence {
+	const normalized = String(confidence || "").trim().toUpperCase();
+	if (normalized === "HIGH") return "HIGH";
+	if (normalized === "LOW") return "LOW";
+	return "MEDIUM";
+}
 
-const parseConfidenceLevel = (
-    confidence?: string | null,
-): "HIGH" | "MEDIUM" | "LOW" | null => {
-    const normalized = String(confidence || "").trim().toUpperCase();
-    if (normalized === "HIGH") return "HIGH";
-    if (normalized === "MEDIUM") return "MEDIUM";
-    if (normalized === "LOW") return "LOW";
-    return null;
-};
+function getConfidenceLabel(confidence: NormalizedConfidence): string {
+	if (confidence === "HIGH") return "高";
+	if (confidence === "LOW") return "低";
+	return "中";
+}
 
-const getRuleMeta = (finding: OpengrepFinding) => {
-    const rule = (finding.rule || {}) as Record<string, any>;
-    const extra = (rule.extra || {}) as Record<string, any>;
-    const metadata = (extra.metadata || {}) as Record<string, any>;
-    return {
-        checkId: rule.check_id || rule.id || "unknown-rule",
-        message: extra.message || finding.description || "",
-        references: Array.isArray(metadata.references)
-            ? metadata.references
-            : [],
-        path: rule.path || finding.file_path,
-        line: rule.start?.line || finding.start_line,
-        lines: extra.lines || finding.code_snippet || "",
-        validationState: extra.validation_state,
-        start: rule.start,
-        end: rule.end,
-        metadata,
-        extra,
-        rule,
-    };
-};
+function getConfidenceBadgeClass(confidence: NormalizedConfidence): string {
+	if (confidence === "HIGH") {
+		return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+	}
+	if (confidence === "LOW") {
+		return "bg-sky-500/20 text-sky-300 border-sky-500/30";
+	}
+	return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+}
 
-const isSameOpengrepTask = (
-    prev: OpengrepScanTask | null,
-    next: OpengrepScanTask,
-) => {
-    if (!prev) return false;
-    return (
-        prev.id === next.id &&
-        prev.status === next.status &&
-        prev.total_findings === next.total_findings &&
-        prev.error_count === next.error_count &&
-        prev.warning_count === next.warning_count &&
-        prev.files_scanned === next.files_scanned &&
-        prev.lines_scanned === next.lines_scanned &&
-        prev.updated_at === next.updated_at
-    );
-};
+function getSeverityScore(severity: NormalizedSeverity): number {
+	return SEVERITY_SCORE[severity];
+}
 
-const isSameGitleaksTask = (
-    prev: GitleaksScanTask | null,
-    next: GitleaksScanTask,
-) => {
-    if (!prev) return false;
-    return (
-        prev.id === next.id &&
-        prev.status === next.status &&
-        prev.total_findings === next.total_findings &&
-        prev.files_scanned === next.files_scanned &&
-        prev.error_message === next.error_message &&
-        prev.updated_at === next.updated_at
-    );
-};
+function getConfidenceScore(confidence: NormalizedConfidence): number {
+	return CONFIDENCE_SCORE[confidence];
+}
 
-const isSameOpengrepFindings = (
-    prev: OpengrepFinding[],
-    next: OpengrepFinding[],
-) => {
-    if (prev.length !== next.length) return false;
-    for (let i = 0; i < prev.length; i += 1) {
-        const a = prev[i];
-        const b = next[i];
-        if (
-            a.id !== b.id ||
-            a.status !== b.status ||
-            a.severity !== b.severity ||
-            a.confidence !== b.confidence ||
-            a.rule_name !== b.rule_name
-        ) {
-            return false;
-        }
-    }
-    return true;
-};
+function formatDuration(ms: number): string {
+	if (!Number.isFinite(ms) || ms <= 0) return "0 ms";
+	if (ms < 1000) return `${Math.round(ms)} ms`;
+	const seconds = ms / 1000;
+	if (seconds < 60) return `${seconds.toFixed(2)} s`;
+	const minutes = Math.floor(seconds / 60);
+	const remainSeconds = Math.round(seconds % 60);
+	return `${minutes}m ${remainSeconds}s`;
+}
 
-const isSameGitleaksFindings = (
-    prev: GitleaksFinding[],
-    next: GitleaksFinding[],
-) => {
-    if (prev.length !== next.length) return false;
-    for (let i = 0; i < prev.length; i += 1) {
-        const a = prev[i];
-        const b = next[i];
-        if (a.id !== b.id || a.status !== b.status) {
-            return false;
-        }
-    }
-    return true;
-};
+function toPositiveLine(value: unknown): number | null {
+	const parsed = Number(value);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
-const isSameOpengrepProgress = (
-    prev: OpengrepScanProgress | null,
-    next: OpengrepScanProgress,
-) => {
-    if (!prev) return false;
-    return (
-        prev.status === next.status &&
-        prev.progress === next.progress &&
-        prev.current_stage === next.current_stage &&
-        prev.message === next.message &&
-        prev.logs.length === next.logs.length &&
-        prev.updated_at === next.updated_at
-    );
-};
+function isPollableStatus(status?: string | null): boolean {
+	const normalized = String(status || "").trim().toLowerCase();
+	return normalized === "pending" || normalized === "running";
+}
+
+function isInterruptibleStatus(status?: string | null): boolean {
+	return isPollableStatus(status);
+}
+
+function isCompletedStatus(status?: string | null): boolean {
+	return String(status || "").trim().toLowerCase() === "completed";
+}
+
+function toSafeMetric(value: unknown): number {
+	const parsed = Number(value);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getOpengrepRuleName(finding: OpengrepFinding): string {
+	const rule = (finding.rule || {}) as Record<string, unknown>;
+	const byField = String(finding.rule_name || "").trim();
+	if (byField) return byField;
+	const byCheckId = String(rule.check_id || rule.id || "").trim();
+	if (byCheckId) return byCheckId;
+	return "-";
+}
+
+async function fetchAllOpengrepFindings(taskId: string): Promise<OpengrepFinding[]> {
+	const allFindings: OpengrepFinding[] = [];
+	for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
+		const batch = await getOpengrepScanFindings({
+			taskId,
+			skip: page * FINDING_BATCH_SIZE,
+			limit: FINDING_BATCH_SIZE,
+		});
+		allFindings.push(...batch);
+		if (batch.length < FINDING_BATCH_SIZE) break;
+	}
+	return allFindings;
+}
+
+async function fetchAllGitleaksFindings(taskId: string): Promise<GitleaksFinding[]> {
+	const allFindings: GitleaksFinding[] = [];
+	for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
+		const batch = await getGitleaksFindings({
+			taskId,
+			skip: page * FINDING_BATCH_SIZE,
+			limit: FINDING_BATCH_SIZE,
+		});
+		allFindings.push(...batch);
+		if (batch.length < FINDING_BATCH_SIZE) break;
+	}
+	return allFindings;
+}
 
 export default function StaticAnalysis() {
-    const { isEnglish } = useI18n();
-    const { taskId } = useParams<{ taskId: string }>();
-    const location = useLocation();
-    const navigate = useNavigate();
-
-    const [activeTab, setActiveTab] = useState<"opengrep" | "gitleaks">(
-        "opengrep",
-    );
-
-    const [opengrepTask, setOpengrepTask] =
-        useState<OpengrepScanTask | null>(null);
-    const [opengrepFindings, setOpengrepFindings] = useState<
-        OpengrepFinding[]
-    >([]);
-    const [loadingOpengrepTask, setLoadingOpengrepTask] = useState(false);
-    const [loadingOpengrepFindings, setLoadingOpengrepFindings] =
-        useState(false);
-    const [opengrepProgress, setOpengrepProgress] =
-        useState<OpengrepScanProgress | null>(null);
-    const [showProgressLogs, setShowProgressLogs] = useState(false);
-    const [opengrepPage, setOpengrepPage] = useState(1);
-    const [opengrepPageSize, setOpengrepPageSize] = useState<number>(10);
-    const [opengrepHasMore, setOpengrepHasMore] = useState(false);
-    const [opengrepFilteredCount, setOpengrepFilteredCount] = useState<
-        number | null
-    >(null);
-    const [countingOpengrepFilteredCount, setCountingOpengrepFilteredCount] =
-        useState(false);
-
-    const [gitleaksTask, setGitleaksTask] =
-        useState<GitleaksScanTask | null>(null);
-    const [gitleaksFindings, setGitleaksFindings] = useState<
-        GitleaksFinding[]
-    >([]);
-    const [loadingGitleaksTask, setLoadingGitleaksTask] = useState(false);
-    const [loadingGitleaksFindings, setLoadingGitleaksFindings] =
-        useState(false);
-    const [gitleaksPage, setGitleaksPage] = useState(1);
-    const [gitleaksPageSize, setGitleaksPageSize] = useState<number>(10);
-    const [gitleaksHasMore, setGitleaksHasMore] = useState(false);
-    const [gitleaksFilteredCount, setGitleaksFilteredCount] = useState<
-        number | null
-    >(null);
-    const [countingGitleaksFilteredCount, setCountingGitleaksFilteredCount] =
-        useState(false);
-
-    const [confidenceFilter, setConfidenceFilter] = useState<string>("");
-    const [statusFilter, setStatusFilter] = useState<string>("open");
-    const [gitleaksStatusFilter, setGitleaksStatusFilter] =
-        useState<string>("open");
-    const [updatingFindingId, setUpdatingFindingId] = useState<string | null>(
-        null,
-    );
-    const [updatingGitleaksFindingId, setUpdatingGitleaksFindingId] =
-        useState<string | null>(null);
-    const [showInterruptConfirm, setShowInterruptConfirm] = useState(false);
-    const [interruptingTask, setInterruptingTask] = useState(false);
-    const lastOpengrepNotifiedStatusRef = useRef<string | null>(null);
-    const lastGitleaksNotifiedStatusRef = useRef<string | null>(null);
-    const opengrepSilentRefreshRef = useRef(false);
-    const gitleaksSilentRefreshRef = useRef(false);
-    const opengrepCountRequestRef = useRef(0);
-    const gitleaksCountRequestRef = useRef(0);
-
-    const searchParams = useMemo(
-        () => new URLSearchParams(location.search),
-        [location.search],
-    );
-    const returnToParam = searchParams.get("returnTo") || "";
-    const returnTo =
-        returnToParam.startsWith("/") && !returnToParam.startsWith("//")
-            ? returnToParam
-            : "";
-
-    const toolParam = searchParams.get("tool");
-    const muteToast = searchParams.get("muteToast") === "1";
-    const opengrepTaskId =
-        searchParams.get("opengrepTaskId") ||
-        (toolParam === "gitleaks" ? null : taskId || null);
-    const gitleaksTaskId =
-        searchParams.get("gitleaksTaskId") ||
-        (toolParam === "gitleaks" ? taskId || null : null);
-    const showOpengrepTab = Boolean(opengrepTaskId);
-    const showGitleaksTab = Boolean(gitleaksTaskId);
-    const enabledToolsLabel = useMemo(() => {
-        const tools: string[] = [];
-        if (showOpengrepTab) tools.push("Opengrep");
-        if (showGitleaksTab) tools.push("Gitleaks");
-        return tools.join(" / ");
-    }, [showOpengrepTab, showGitleaksTab]);
-
-    const taskStatusLabel = useMemo(
-        () =>
-            opengrepTask?.status
-                ? STATUS_LABELS[opengrepTask.status] || opengrepTask.status
-                : "未知",
-        [opengrepTask?.status],
-    );
-
-    const gitleaksStatusLabel = useMemo(
-        () =>
-            gitleaksTask?.status
-                ? STATUS_LABELS[gitleaksTask.status] || gitleaksTask.status
-                : "未知",
-        [gitleaksTask?.status],
-    );
-
-    const getStatusLabel = (status: string) => {
-        const normalized = String(status || "").toLowerCase();
-        if (isEnglish) return normalized;
-        if (normalized === "open") return "未处理";
-        if (normalized === "verified") return "已验证";
-        if (normalized === "false_positive") return "误报";
-        if (normalized === "fixed") return "已修复";
-        return status;
-    };
-
-    const getConfidenceLabel = (confidence: string) => {
-        const normalized = parseConfidenceLevel(confidence);
-        if (isEnglish) {
-            if (normalized === "HIGH") return "High";
-            if (normalized === "MEDIUM") return "Medium";
-            if (normalized === "LOW") return "Low";
-            return String(confidence || "");
-        }
-        if (normalized === "HIGH") return "高";
-        if (normalized === "MEDIUM") return "中";
-        if (normalized === "LOW") return "低";
-        return String(confidence || "");
-    };
-
-    const loadOpengrepTask = async (options?: RefreshOptions) => {
-        if (!opengrepTaskId) return;
-        try {
-            const data = await runWithRefreshMode(
-                () => getOpengrepScanTask(opengrepTaskId),
-                { ...options, setLoading: setLoadingOpengrepTask },
-            );
-            setOpengrepTask((prev) => (isSameOpengrepTask(prev, data) ? prev : data));
-        } catch (error) {
-            if (!options?.silent) {
-                toast.error("加载 Opengrep 任务失败");
-            }
-        }
-    };
-
-    const loadOpengrepFindings = async (options?: RefreshOptions) => {
-        if (!opengrepTaskId) return;
-        try {
-            const data = await runWithRefreshMode(
-                async () => {
-                    const skip = (opengrepPage - 1) * opengrepPageSize;
-                    const pageFindings = await getOpengrepScanFindings({
-                        taskId: opengrepTaskId,
-                        confidence: confidenceFilter || undefined,
-                        status: statusFilter || undefined,
-                        skip,
-                        limit: opengrepPageSize + 1,
-                    });
-                    const hasMore = pageFindings.length > opengrepPageSize;
-                    setOpengrepHasMore(hasMore);
-                    return hasMore
-                        ? pageFindings.slice(0, opengrepPageSize)
-                        : pageFindings;
-                },
-                { ...options, setLoading: setLoadingOpengrepFindings },
-            );
-            setOpengrepFindings((prev) =>
-                isSameOpengrepFindings(prev, data) ? prev : data,
-            );
-        } catch (error) {
-            if (!options?.silent) {
-                toast.error("加载 Opengrep 结果失败");
-            }
-        }
-    };
-
-    const loadOpengrepProgress = async (withLogs: boolean = showProgressLogs) => {
-        if (!opengrepTaskId) return;
-        try {
-            const data = await getOpengrepScanProgress(opengrepTaskId, withLogs);
-            setOpengrepProgress((prev) =>
-                isSameOpengrepProgress(prev, data) ? prev : data,
-            );
-        } catch (error) {
-            // 不阻塞主流程，静默失败
-        }
-    };
-
-    const loadGitleaksTask = async (options?: RefreshOptions) => {
-        if (!gitleaksTaskId) return;
-        try {
-            const data = await runWithRefreshMode(
-                () => getGitleaksScanTask(gitleaksTaskId),
-                { ...options, setLoading: setLoadingGitleaksTask },
-            );
-            setGitleaksTask((prev) => (isSameGitleaksTask(prev, data) ? prev : data));
-        } catch (error) {
-            if (!options?.silent) {
-                toast.error("加载 Gitleaks 任务失败");
-            }
-        }
-    };
-
-    const loadGitleaksFindings = async (options?: RefreshOptions) => {
-        if (!gitleaksTaskId) return;
-        try {
-            const data = await runWithRefreshMode(
-                async () => {
-                    const skip = (gitleaksPage - 1) * gitleaksPageSize;
-                    const pageFindings = await getGitleaksFindings({
-                        taskId: gitleaksTaskId,
-                        status: gitleaksStatusFilter || undefined,
-                        skip,
-                        limit: gitleaksPageSize + 1,
-                    });
-                    const hasMore = pageFindings.length > gitleaksPageSize;
-                    setGitleaksHasMore(hasMore);
-                    return hasMore
-                        ? pageFindings.slice(0, gitleaksPageSize)
-                        : pageFindings;
-                },
-                { ...options, setLoading: setLoadingGitleaksFindings },
-            );
-            setGitleaksFindings((prev) =>
-                isSameGitleaksFindings(prev, data) ? prev : data,
-            );
-        } catch (error) {
-            if (!options?.silent) {
-                toast.error("加载 Gitleaks 结果失败");
-            }
-        }
-    };
-
-    const loadOpengrepFilteredCount = async () => {
-        if (!opengrepTaskId) {
-            setOpengrepFilteredCount(null);
-            return;
-        }
-        const requestId = ++opengrepCountRequestRef.current;
-        setCountingOpengrepFilteredCount(true);
-        try {
-            let total = 0;
-            for (let page = 0; page < FINDINGS_COUNT_MAX_PAGES; page += 1) {
-                const findings = await getOpengrepScanFindings({
-                    taskId: opengrepTaskId,
-                    confidence: confidenceFilter || undefined,
-                    status: statusFilter || undefined,
-                    skip: page * FINDINGS_COUNT_BATCH_SIZE,
-                    limit: FINDINGS_COUNT_BATCH_SIZE,
-                });
-                total += findings.length;
-                if (findings.length < FINDINGS_COUNT_BATCH_SIZE) break;
-            }
-            if (requestId === opengrepCountRequestRef.current) {
-                setOpengrepFilteredCount(total);
-            }
-        } catch (error) {
-            if (requestId === opengrepCountRequestRef.current) {
-                setOpengrepFilteredCount(null);
-            }
-        } finally {
-            if (requestId === opengrepCountRequestRef.current) {
-                setCountingOpengrepFilteredCount(false);
-            }
-        }
-    };
-
-    const loadGitleaksFilteredCount = async () => {
-        if (!gitleaksTaskId) {
-            setGitleaksFilteredCount(null);
-            return;
-        }
-        const requestId = ++gitleaksCountRequestRef.current;
-        setCountingGitleaksFilteredCount(true);
-        try {
-            let total = 0;
-            for (let page = 0; page < FINDINGS_COUNT_MAX_PAGES; page += 1) {
-                const findings = await getGitleaksFindings({
-                    taskId: gitleaksTaskId,
-                    status: gitleaksStatusFilter || undefined,
-                    skip: page * FINDINGS_COUNT_BATCH_SIZE,
-                    limit: FINDINGS_COUNT_BATCH_SIZE,
-                });
-                total += findings.length;
-                if (findings.length < FINDINGS_COUNT_BATCH_SIZE) break;
-            }
-            if (requestId === gitleaksCountRequestRef.current) {
-                setGitleaksFilteredCount(total);
-            }
-        } catch (error) {
-            if (requestId === gitleaksCountRequestRef.current) {
-                setGitleaksFilteredCount(null);
-            }
-        } finally {
-            if (requestId === gitleaksCountRequestRef.current) {
-                setCountingGitleaksFilteredCount(false);
-            }
-        }
-    };
-
-    const refreshOpengrepSilently = async () => {
-        if (opengrepSilentRefreshRef.current) return;
-        opengrepSilentRefreshRef.current = true;
-        try {
-            await Promise.all([
-                loadOpengrepTask({ silent: true }),
-                loadOpengrepFindings({ silent: true }),
-                loadOpengrepProgress(showProgressLogs),
-            ]);
-        } finally {
-            opengrepSilentRefreshRef.current = false;
-        }
-    };
-
-    const refreshGitleaksSilently = async () => {
-        if (gitleaksSilentRefreshRef.current) return;
-        gitleaksSilentRefreshRef.current = true;
-        try {
-            await Promise.all([
-                loadGitleaksTask({ silent: true }),
-                loadGitleaksFindings({ silent: true }),
-            ]);
-        } finally {
-            gitleaksSilentRefreshRef.current = false;
-        }
-    };
-
-    useEffect(() => {
-        if (toolParam === "gitleaks" && showGitleaksTab) {
-            setActiveTab("gitleaks");
-            return;
-        }
-        if (showOpengrepTab) {
-            setActiveTab("opengrep");
-            return;
-        }
-        if (showGitleaksTab) {
-            setActiveTab("gitleaks");
-        }
-    }, [toolParam, showOpengrepTab, showGitleaksTab]);
-
-    useEffect(() => {
-        loadOpengrepTask();
-        loadOpengrepProgress(false);
-    }, [opengrepTaskId]);
-
-    useEffect(() => {
-        setOpengrepPage(1);
-        setOpengrepHasMore(false);
-    }, [opengrepTaskId]);
-
-    useEffect(() => {
-        loadOpengrepFindings();
-    }, [opengrepTaskId, confidenceFilter, statusFilter, opengrepPage, opengrepPageSize]);
-
-    useEffect(() => {
-        setOpengrepFilteredCount(null);
-        loadOpengrepFilteredCount();
-    }, [
-        opengrepTaskId,
-        confidenceFilter,
-        statusFilter,
-        opengrepTask?.total_findings,
-    ]);
-
-    useEffect(() => {
-        loadGitleaksTask();
-    }, [gitleaksTaskId]);
-
-    useEffect(() => {
-        setGitleaksPage(1);
-        setGitleaksHasMore(false);
-    }, [gitleaksTaskId]);
-
-    useEffect(() => {
-        loadGitleaksFindings();
-    }, [gitleaksTaskId, gitleaksStatusFilter, gitleaksPage, gitleaksPageSize]);
-
-    useEffect(() => {
-        setGitleaksFilteredCount(null);
-        loadGitleaksFilteredCount();
-    }, [gitleaksTaskId, gitleaksStatusFilter, gitleaksTask?.total_findings]);
-
-    useEffect(() => {
-        if (!opengrepTaskId) return;
-        if (!opengrepTask || !["pending", "running"].includes(opengrepTask.status)) {
-            return;
-        }
-        const timer = setInterval(() => {
-            refreshOpengrepSilently();
-        }, 5000);
-        return () => clearInterval(timer);
-    }, [opengrepTaskId, opengrepTask?.status, showProgressLogs]);
-
-    useEffect(() => {
-        if (!opengrepTaskId || !showProgressLogs) return;
-        loadOpengrepProgress(true);
-    }, [opengrepTaskId, showProgressLogs]);
-
-    useEffect(() => {
-        if (!gitleaksTaskId) return;
-        if (!gitleaksTask || !["pending", "running"].includes(gitleaksTask.status)) {
-            return;
-        }
-        const timer = setInterval(() => {
-            refreshGitleaksSilently();
-        }, 5000);
-        return () => clearInterval(timer);
-    }, [gitleaksTaskId, gitleaksTask?.status]);
-
-    useEffect(() => {
-        if (muteToast) return;
-        if (!opengrepTask?.status) return;
-        if (lastOpengrepNotifiedStatusRef.current === null) {
-            lastOpengrepNotifiedStatusRef.current = opengrepTask.status;
-            return;
-        }
-        if (lastOpengrepNotifiedStatusRef.current === opengrepTask.status) return;
-        lastOpengrepNotifiedStatusRef.current = opengrepTask.status;
-
-        if (opengrepTask.status === "pending") {
-            void showToastQueue(
-                [{ level: "info", message: "Opengrep 任务已创建，等待执行..." }],
-                { durationMs: 2200 },
-            );
-            return;
-        }
-
-        if (opengrepTask.status === "running") {
-            void showToastQueue(
-                [{ level: "info", message: "Opengrep 扫描进行中，请稍候..." }],
-                { durationMs: 2200 },
-            );
-            return;
-        }
-
-        if (opengrepTask.status === "completed") {
-            const hasFindings = (opengrepTask.total_findings || 0) > 0;
-            void showToastQueue(
-                hasFindings
-                    ? [
-                        {
-                            level: "success",
-                            message: `Opengrep 完成，共发现 ${opengrepTask.total_findings} 条结果`,
-                        },
-                    ]
-                    : [
-                        {
-                            level: "success",
-                            message:
-                                "Opengrep 扫描完成，未发现规则命中（结果为 0 也视为成功）",
-                        },
-                    ],
-                { durationMs: 2600 },
-            );
-            return;
-        }
-
-        if (opengrepTask.status === "failed") {
-            void showToastQueue(
-                [
-                    {
-                        level: "error",
-                        message: "Opengrep 扫描失败：规则执行异常或规则配置错误",
-                    },
-                ],
-                { durationMs: 2600 },
-            );
-            return;
-        }
-
-        if (opengrepTask.status === "interrupted") {
-            void showToastQueue(
-                [
-                    {
-                        level: "warning",
-                        message: "Opengrep 扫描已中断：服务中止或沙箱停止",
-                    },
-                ],
-                { durationMs: 2600 },
-            );
-        }
-    }, [muteToast, opengrepTask?.status, opengrepTask?.total_findings]);
-
-    useEffect(() => {
-        if (muteToast) return;
-        if (!gitleaksTask?.status) return;
-        if (lastGitleaksNotifiedStatusRef.current === null) {
-            lastGitleaksNotifiedStatusRef.current = gitleaksTask.status;
-            return;
-        }
-        if (lastGitleaksNotifiedStatusRef.current === gitleaksTask.status) return;
-        lastGitleaksNotifiedStatusRef.current = gitleaksTask.status;
-
-        if (gitleaksTask.status === "pending") {
-            void showToastQueue(
-                [{ level: "info", message: "Gitleaks 任务已创建，等待执行..." }],
-                { durationMs: 2200 },
-            );
-            return;
-        }
-
-        if (gitleaksTask.status === "running") {
-            void showToastQueue(
-                [{ level: "info", message: "Gitleaks 扫描进行中，请稍候..." }],
-                { durationMs: 2200 },
-            );
-            return;
-        }
-
-        if (gitleaksTask.status === "completed") {
-            const hasFindings = (gitleaksTask.total_findings || 0) > 0;
-            void showToastQueue(
-                hasFindings
-                    ? [
-                        {
-                            level: "success",
-                            message: `Gitleaks 完成，共发现 ${gitleaksTask.total_findings} 条结果`,
-                        },
-                    ]
-                    : [
-                        {
-                            level: "success",
-                            message:
-                                "Gitleaks 扫描完成，未发现密钥泄露（结果为 0 也视为成功）",
-                        },
-                    ],
-                { durationMs: 2600 },
-            );
-            return;
-        }
-
-        if (gitleaksTask.status === "failed") {
-            void showToastQueue(
-                [
-                    {
-                        level: "error",
-                        message: "Gitleaks 扫描失败：执行异常或配置错误",
-                    },
-                ],
-                { durationMs: 2600 },
-            );
-            return;
-        }
-
-        if (gitleaksTask.status === "interrupted") {
-            void showToastQueue(
-                [
-                    {
-                        level: "warning",
-                        message: "Gitleaks 扫描已中断：服务中止或沙箱停止",
-                    },
-                ],
-                { durationMs: 2600 },
-            );
-        }
-    }, [muteToast, gitleaksTask?.status, gitleaksTask?.total_findings]);
-
-    const handleUpdateStatus = async (
-        findingId: string,
-        status: "open" | "verified" | "false_positive",
-    ) => {
-        setUpdatingFindingId(findingId);
-        try {
-            await updateOpengrepFindingStatus({ findingId, status });
-            setOpengrepFindings((prev) => {
-                if (statusFilter && statusFilter !== status) {
-                    return prev.filter((item) => item.id !== findingId);
-                }
-                return prev.map((item) =>
-                    item.id === findingId ? { ...item, status } : item,
-                );
-            });
-            loadOpengrepFilteredCount();
-            toast.success("状态已更新");
-        } catch (error) {
-            toast.error("更新状态失败");
-        } finally {
-            setUpdatingFindingId(null);
-        }
-    };
-
-    const handleUpdateGitleaksStatus = async (
-        findingId: string,
-        status: "open" | "verified" | "false_positive" | "fixed",
-    ) => {
-        setUpdatingGitleaksFindingId(findingId);
-        try {
-            await updateGitleaksFindingStatus({ findingId, status });
-            setGitleaksFindings((prev) => {
-                if (gitleaksStatusFilter && gitleaksStatusFilter !== status) {
-                    return prev.filter((item) => item.id !== findingId);
-                }
-                return prev.map((item) =>
-                    item.id === findingId ? { ...item, status } : item,
-                );
-            });
-            loadGitleaksFilteredCount();
-            toast.success("状态已更新");
-        } catch (error) {
-            toast.error("更新状态失败");
-        } finally {
-            setUpdatingGitleaksFindingId(null);
-        }
-    };
-
-    const resolveNextStatus = (
-        currentStatus: string,
-        targetStatus: "verified" | "false_positive",
-    ) => {
-        return currentStatus === targetStatus ? "open" : targetStatus;
-    };
-
-    const resolveNextGitleaksStatus = (
-        currentStatus: string,
-        targetStatus: "verified" | "false_positive" | "fixed",
-    ) => {
-        return currentStatus === targetStatus ? "open" : targetStatus;
-    };
-
-    const isInterruptibleStatus = (status?: string | null) =>
-        status === "pending" || status === "running";
-
-    const hasInterruptibleTask =
-        isInterruptibleStatus(opengrepTask?.status) ||
-        isInterruptibleStatus(gitleaksTask?.status);
-
-    const currentRoute = `${location.pathname}${location.search}`;
-
-    const handleOpenUnifiedFindingDetail = (finding: OpengrepFinding) => {
-        const detailPath = buildFindingDetailPath({
-            source: "static",
-            taskId: String(opengrepTaskId || finding.scan_task_id || "").trim(),
-            findingId: String(finding.id || "").trim(),
-        });
-        navigate(appendReturnTo(detailPath, currentRoute));
-    };
-
-    const handleBack = () => {
-        if (returnTo) {
-            navigate(returnTo);
-            return;
-        }
-        navigate(-1);
-    };
-
-    const handleInterruptTasks = async () => {
-        setInterruptingTask(true);
-        try {
-            const actions: Promise<unknown>[] = [];
-
-            if (opengrepTaskId && isInterruptibleStatus(opengrepTask?.status)) {
-                actions.push(interruptOpengrepScanTask(opengrepTaskId));
-            }
-            if (gitleaksTaskId && isInterruptibleStatus(gitleaksTask?.status)) {
-                actions.push(interruptGitleaksScanTask(gitleaksTaskId));
-            }
-
-            if (actions.length === 0) {
-                toast.info("当前没有可中止的运行中任务");
-                setShowInterruptConfirm(false);
-                return;
-            }
-
-            const results = await Promise.allSettled(actions);
-            const successCount = results.filter((item) => item.status === "fulfilled").length;
-            const failedCount = results.length - successCount;
-
-            if (successCount > 0) {
-                toast.success("已发送中止请求，任务状态正在更新");
-            }
-            if (failedCount > 0) {
-                toast.error("部分任务中止失败，请稍后重试");
-            }
-
-            setShowInterruptConfirm(false);
-            await Promise.all([
-                loadOpengrepTask({ silent: true }),
-                loadOpengrepFindings({ silent: true }),
-                loadOpengrepProgress(showProgressLogs),
-                loadGitleaksTask({ silent: true }),
-                loadGitleaksFindings({ silent: true }),
-            ]);
-        } finally {
-            setInterruptingTask(false);
-        }
-    };
-
-    const activeTask = activeTab === "opengrep" ? opengrepTask : gitleaksTask;
-    const activeTaskStatusLabel =
-        activeTab === "opengrep" ? taskStatusLabel : gitleaksStatusLabel;
-    const activeLoadingTask =
-        activeTab === "opengrep" ? loadingOpengrepTask : loadingGitleaksTask;
-    const activeLoadingFindings =
-        activeTab === "opengrep"
-            ? loadingOpengrepFindings
-            : loadingGitleaksFindings;
-    const opengrepProgressPercent = useMemo(() => {
-        const rawProgress = opengrepProgress?.progress;
-        if (typeof rawProgress === "number") {
-            return Math.max(0, Math.min(100, rawProgress));
-        }
-        if (opengrepTask?.status === "completed") return 100;
-        if (opengrepTask?.status === "failed") return 100;
-        if (opengrepTask?.status === "interrupted") return 100;
-        if (opengrepTask?.status === "running") return 10;
-        return 0;
-    }, [opengrepProgress?.progress, opengrepTask?.status]);
-    const showOpengrepLoadingSkeleton =
-        loadingOpengrepFindings && opengrepFindings.length === 0;
-    const showGitleaksLoadingSkeleton =
-        loadingGitleaksFindings && gitleaksFindings.length === 0;
-
-    return (
-        <div className="space-y-6 p-6 bg-background min-h-screen font-mono relative">
-            <div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
-
-            <div className="relative z-10">
-                <div className="flex items-center justify-between mb-4">
-                    <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                            <h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
-                                静态分析结果
-                            </h1>
-                            {enabledToolsLabel && (
-                                <Badge className="cyber-badge-info">
-                                    本次启用工具：{enabledToolsLabel}
-                                </Badge>
-                            )}
-                        </div>
-                        {activeTask && (
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Badge
-                                    className={`cyber-badge ${STATUS_CLASSES[activeTask.status] || "bg-muted"}`}
-                                >
-                                    {activeTaskStatusLabel}
-                                </Badge>
-                                <span>任务：{activeTask.name}</span>
-                                <span>·</span>
-                                <span>文件：{activeTask.files_scanned}</span>
-                                <span>·</span>
-                                <span>发现：{activeTask.total_findings}</span>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        {hasInterruptibleTask && (
-                            <Button
-                                variant="outline"
-                                className="cyber-btn-outline border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
-                                onClick={() => setShowInterruptConfirm(true)}
-                                disabled={interruptingTask}
-                            >
-                                <Ban className="w-4 h-4 mr-2" />
-                                中止
-                            </Button>
-                        )}
-                        <Button
-                            variant="outline"
-                            className="cyber-btn-outline"
-                            onClick={handleBack}
-                        >
-                            <ArrowLeft className="w-4 h-4 mr-2" />
-                            返回
-                        </Button>
-                        <Button
-                            variant="outline"
-                            className="cyber-btn-ghost"
-                            onClick={() => {
-                                if (activeTab === "opengrep") {
-                                    refreshOpengrepSilently();
-                                } else {
-                                    refreshGitleaksSilently();
-                                }
-                            }}
-                            disabled={activeLoadingTask || activeLoadingFindings}
-                        >
-                            <RefreshCw className="w-4 h-4 mr-2" />
-                            刷新
-                        </Button>
-                    </div>
-                </div>
-            </div>
-
-            <Tabs
-                value={activeTab}
-                onValueChange={(val) => setActiveTab(val as "opengrep" | "gitleaks")}
-                className="relative z-10"
-            >
-                <TabsContent value="opengrep">
-                    {opengrepTask && (
-                        <div className="cyber-card p-4 space-y-3 mb-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="text-sm font-mono text-foreground">
-                                    扫描进度
-                                </div>
-                                <div className="text-xs font-mono text-muted-foreground">
-                                    {Math.round(opengrepProgressPercent)}%
-                                </div>
-                            </div>
-                            <Progress value={opengrepProgressPercent} className="h-2" />
-                            <div className="flex items-center justify-between gap-2 text-xs font-mono text-muted-foreground">
-                                <span>
-                                    {opengrepProgress?.message ||
-                                        (opengrepTask.status === "running"
-                                            ? "扫描进行中..."
-                                            : `任务状态：${opengrepTask.status}`)}
-                                </span>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 px-2"
-                                    onClick={() => setShowProgressLogs((prev) => !prev)}
-                                >
-                                    {showProgressLogs ? "隐藏后端进度" : "查看后端进度"}
-                                    {showProgressLogs ? (
-                                        <ChevronUp className="w-3 h-3 ml-1" />
-                                    ) : (
-                                        <ChevronDown className="w-3 h-3 ml-1" />
-                                    )}
-                                </Button>
-                            </div>
-                            {showProgressLogs && (
-                                <div className="bg-muted/40 border border-border rounded-md">
-                                    <ScrollArea className="h-36">
-                                        <div className="p-3 space-y-1 text-xs font-mono">
-                                            {(opengrepProgress?.logs || []).length === 0 ? (
-                                                <div className="text-muted-foreground">
-                                                    暂无后端进度日志
-                                                </div>
-                                            ) : (
-                                                (opengrepProgress?.logs || []).map((log, index) => (
-                                                    <div key={`${log.timestamp}-${index}`} className="text-muted-foreground">
-                                                        [{log.stage}] {log.message}
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    </ScrollArea>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    <div className="cyber-card p-4 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                            <div>
-                                <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
-                                    扫描引擎
-                                </label>
-                                <Select
-                                    value={activeTab}
-                                    onValueChange={(val) =>
-                                        setActiveTab(val as "opengrep" | "gitleaks")
-                                    }
-                                    disabled={!showOpengrepTab || !showGitleaksTab}
-                                >
-                                    <SelectTrigger className="cyber-input">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent className="cyber-dialog border-border">
-                                        {showOpengrepTab && (
-                                            <SelectItem value="opengrep">
-                                                Opengrep
-                                            </SelectItem>
-                                        )}
-                                        {showGitleaksTab && (
-                                            <SelectItem value="gitleaks">
-                                                Gitleaks
-                                            </SelectItem>
-                                        )}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
-                                    置信度
-                                </label>
-                                <Select
-                                    value={confidenceFilter || "all"}
-                                    onValueChange={(val) => {
-                                        setOpengrepPage(1);
-                                        setConfidenceFilter(
-                                            val === "all" ? "" : val,
-                                        );
-                                    }
-                                    }
-                                    disabled={!opengrepTaskId}
-                                >
-                                    <SelectTrigger className="cyber-input">
-                                        <SelectValue placeholder="全部" />
-                                    </SelectTrigger>
-                                    <SelectContent className="cyber-dialog border-border">
-                                        <SelectItem value="all">全部</SelectItem>
-                                        <SelectItem value="HIGH">
-                                            {getConfidenceLabel("HIGH")}
-                                        </SelectItem>
-                                        <SelectItem value="MEDIUM">
-                                            {getConfidenceLabel("MEDIUM")}
-                                        </SelectItem>
-                                        <SelectItem value="LOW">
-                                            {getConfidenceLabel("LOW")}
-                                        </SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
-                                    状态
-                                </label>
-                                <Select
-                                    value={statusFilter || "all"}
-                                    onValueChange={(val) => {
-                                        setOpengrepPage(1);
-                                        setStatusFilter(
-                                            val === "all" ? "" : val,
-                                        );
-                                    }
-                                    }
-                                    disabled={!opengrepTaskId}
-                                >
-                                    <SelectTrigger className="cyber-input">
-                                        <SelectValue placeholder="全部" />
-                                    </SelectTrigger>
-                                    <SelectContent className="cyber-dialog border-border">
-                                        <SelectItem value="all">全部</SelectItem>
-                                        <SelectItem value="open">
-                                            {getStatusLabel("open")}
-                                        </SelectItem>
-                                        <SelectItem value="verified">
-                                            {getStatusLabel("verified")}
-                                        </SelectItem>
-                                        <SelectItem value="false_positive">
-                                            {getStatusLabel("false_positive")}
-                                        </SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
-                                    每页条数
-                                </label>
-                                <Select
-                                    value={String(opengrepPageSize)}
-                                    onValueChange={(val) => {
-                                        setOpengrepPage(1);
-                                        setOpengrepPageSize(Number(val));
-                                    }}
-                                    disabled={!opengrepTaskId}
-                                >
-                                    <SelectTrigger className="cyber-input">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent className="cyber-dialog border-border">
-                                        {PAGE_SIZE_OPTIONS.map((size) => (
-                                            <SelectItem key={size} value={String(size)}>
-                                                {size}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="flex items-end">
-                                <div className="w-full text-xs text-muted-foreground font-mono flex items-center justify-between gap-3">
-                                    <span>
-                                        {showOpengrepLoadingSkeleton
-                                            ? "加载中..."
-                                            : `第 ${opengrepPage} 页 · 当前 ${opengrepFindings.length} 条`}
-                                        {loadingOpengrepFindings &&
-                                            opengrepFindings.length > 0 &&
-                                            " · 后台更新中"}
-                                    </span>
-                                    {!showOpengrepLoadingSkeleton && (
-                                        <span className="whitespace-nowrap">
-                                            {countingOpengrepFilteredCount
-                                                ? "符合筛选统计中..."
-                                                : `符合筛选 ${opengrepFilteredCount ?? 0} 条`}
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="cyber-card relative z-10 overflow-hidden mt-4">
-                        {showOpengrepLoadingSkeleton ? (
-                            <div className="p-16 text-center">
-                                <div className="loading-spinner mx-auto mb-4" />
-                                <p className="text-muted-foreground font-mono text-sm">
-                                    加载 Opengrep 结果...
-                                </p>
-                            </div>
-                        ) : opengrepFindings.length === 0 ? (
-                            <div className="p-16 text-center">
-                                <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                                <h3 className="text-lg font-bold text-foreground mb-2">
-                                    暂无发现
-                                </h3>
-                                <p className="text-muted-foreground font-mono text-sm">
-                                    {opengrepTask?.status === "running"
-                                        ? "扫描进行中，请稍后刷新"
-                                        : opengrepTask?.status === "completed"
-                                            ? "扫描完成，未扫描到缺陷"
-                                            : opengrepTask?.status ===
-                                                "interrupted"
-                                                ? "扫描已中断，请重新发起任务"
-                                                : "暂无扫描结果"}
-                                </p>
-                            </div>
-                        ) : (
-                            <ScrollArea className="h-[600px]">
-                                <div className="divide-y divide-border">
-                                    {opengrepFindings.map((finding) => {
-                                        const meta = getRuleMeta(finding);
-                                        const ruleDisplayId =
-                                            getCheckIdSuffix(meta.checkId) || meta.checkId;
-                                        const matchedRuleName = stripRuntimeRulePrefix(
-                                            finding.rule_name,
-                                        );
-                                        const isVerified =
-                                            finding.status === "verified";
-                                        const isFalsePositive =
-                                            finding.status === "false_positive";
-                                        return (
-                                            <div
-                                                key={finding.id}
-                                                className="p-4 space-y-3"
-                                            >
-                                                <div className="flex items-center justify-between gap-4 flex-wrap">
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        <Badge
-                                                            className={`cyber-badge ${FINDING_STATUS_CLASSES[finding.status] || "bg-muted"}`}
-                                                        >
-                                                            {getStatusLabel(finding.status)}
-                                                        </Badge>
-                                                        <Badge
-                                                            className={`cyber-badge ${isVerified ? VERIFICATION_BADGE_CLASSES.active : VERIFICATION_BADGE_CLASSES.inactive}`}
-                                                        >
-                                                            {isVerified
-                                                                ? "已验证"
-                                                                : "未验证"}
-                                                        </Badge>
-                                                        <Badge
-                                                            className={`cyber-badge ${isFalsePositive ? FALSE_POSITIVE_BADGE_CLASSES.active : FALSE_POSITIVE_BADGE_CLASSES.inactive}`}
-                                                        >
-                                                            {isFalsePositive
-                                                                ? "误报"
-                                                                : "非误报"}
-                                                        </Badge>
-                                                        {parseConfidenceLevel(
-                                                            finding.confidence,
-                                                        ) && (
-                                                                <Badge className="cyber-badge-muted">
-                                                                    {isEnglish
-                                                                        ? `CONF: ${getConfidenceLabel(finding.confidence || "")}`
-                                                                        : `置信度: ${getConfidenceLabel(finding.confidence || "")}`}
-                                                                </Badge>
-                                                            )}
-                                                        <span className="text-sm text-foreground font-bold">
-                                                            {matchedRuleName || ruleDisplayId}
-                                                        </span>
-                                                        {matchedRuleName &&
-                                                            matchedRuleName !== ruleDisplayId && (
-                                                                <span className="text-xs text-muted-foreground">
-                                                                    {ruleDisplayId}
-                                                                </span>
-                                                            )}
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            className="cyber-btn-ghost h-7 text-xs"
-                                                            onClick={() =>
-                                                                handleOpenUnifiedFindingDetail(
-                                                                    finding,
-                                                                )
-                                                            }
-                                                        >
-                                                            详情
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            className="cyber-btn-outline h-7 text-xs border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
-                                                            disabled={
-                                                                updatingFindingId ===
-                                                                finding.id
-                                                            }
-                                                            onClick={() =>
-                                                                handleUpdateStatus(
-                                                                    finding.id,
-                                                                    resolveNextStatus(
-                                                                        finding.status,
-                                                                        "verified",
-                                                                    ),
-                                                                )
-                                                            }
-                                                        >
-                                                            {finding.status ===
-                                                                "verified"
-                                                                ? "取消已验证"
-                                                                : "标记已验证"}
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            className="cyber-btn-outline h-7 text-xs border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
-                                                            disabled={
-                                                                updatingFindingId ===
-                                                                finding.id
-                                                            }
-                                                            onClick={() =>
-                                                                handleUpdateStatus(
-                                                                    finding.id,
-                                                                    resolveNextStatus(
-                                                                        finding.status,
-                                                                        "false_positive",
-                                                                    ),
-                                                                )
-                                                            }
-                                                        >
-                                                            {finding.status ===
-                                                                "false_positive"
-                                                                ? "取消误报"
-                                                                : "标记误报"}
-                                                        </Button>
-                                                        {updatingFindingId ===
-                                                            finding.id && (
-                                                                <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                                                            )}
-                                                    </div>
-                                                </div>
-
-                                                <div className="text-xs text-muted-foreground font-mono">
-                                                    {normalizePath(meta.path)}
-                                                    {meta.line
-                                                        ? `:${meta.line}`
-                                                        : ""}
-                                                </div>
-
-                                                {meta.message && (
-                                                    <div className="text-sm text-foreground">
-                                                        {meta.message}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </ScrollArea>
-                        )}
-                        {!showOpengrepLoadingSkeleton && opengrepFindings.length > 0 && (
-                            <div className="border-t border-border p-3 flex items-center justify-between">
-                                <div className="text-xs text-muted-foreground font-mono">
-                                    第 {opengrepPage} 页
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="cyber-btn-outline h-8"
-                                        onClick={() =>
-                                            setOpengrepPage((prev) => Math.max(1, prev - 1))
-                                        }
-                                        disabled={opengrepPage <= 1 || loadingOpengrepFindings}
-                                    >
-                                        上一页
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="cyber-btn-outline h-8"
-                                        onClick={() => setOpengrepPage((prev) => prev + 1)}
-                                        disabled={!opengrepHasMore || loadingOpengrepFindings}
-                                    >
-                                        下一页
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </TabsContent>
-
-                {showGitleaksTab && (
-                    <TabsContent value="gitleaks">
-                        <div className="cyber-card p-4 space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <div>
-                                    <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
-                                        扫描引擎
-                                    </label>
-                                    <Select
-                                        value={activeTab}
-                                        onValueChange={(val) =>
-                                            setActiveTab(val as "opengrep" | "gitleaks")
-                                        }
-                                        disabled={!showOpengrepTab || !showGitleaksTab}
-                                    >
-                                        <SelectTrigger className="cyber-input">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="cyber-dialog border-border">
-                                            {showOpengrepTab && (
-                                                <SelectItem value="opengrep">
-                                                    Opengrep
-                                                </SelectItem>
-                                            )}
-                                            {showGitleaksTab && (
-                                                <SelectItem value="gitleaks">
-                                                    Gitleaks
-                                                </SelectItem>
-                                            )}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
-                                        状态
-                                    </label>
-                                    <Select
-                                        value={gitleaksStatusFilter || "all"}
-                                        onValueChange={(val) => {
-                                            setGitleaksPage(1);
-                                            setGitleaksStatusFilter(
-                                                val === "all" ? "" : val,
-                                            );
-                                        }
-                                        }
-                                        disabled={!gitleaksTaskId}
-                                    >
-                                        <SelectTrigger className="cyber-input">
-                                            <SelectValue placeholder="全部" />
-                                        </SelectTrigger>
-                                        <SelectContent className="cyber-dialog border-border">
-                                            <SelectItem value="all">全部</SelectItem>
-                                            <SelectItem value="open">
-                                                {getStatusLabel("open")}
-                                            </SelectItem>
-                                            <SelectItem value="verified">
-                                                {getStatusLabel("verified")}
-                                            </SelectItem>
-                                            <SelectItem value="false_positive">
-                                                {getStatusLabel("false_positive")}
-                                            </SelectItem>
-                                            <SelectItem value="fixed">
-                                                {getStatusLabel("fixed")}
-                                            </SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-mono font-bold text-muted-foreground mb-1 uppercase">
-                                        每页条数
-                                    </label>
-                                    <Select
-                                        value={String(gitleaksPageSize)}
-                                        onValueChange={(val) => {
-                                            setGitleaksPage(1);
-                                            setGitleaksPageSize(Number(val));
-                                        }}
-                                        disabled={!gitleaksTaskId}
-                                    >
-                                        <SelectTrigger className="cyber-input">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="cyber-dialog border-border">
-                                            {PAGE_SIZE_OPTIONS.map((size) => (
-                                                <SelectItem key={size} value={String(size)}>
-                                                    {size}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="flex items-end">
-                                    <div className="w-full text-xs text-muted-foreground font-mono flex items-center justify-between gap-3">
-                                        <span>
-                                            {showGitleaksLoadingSkeleton
-                                                ? "加载中..."
-                                                : `第 ${gitleaksPage} 页 · 当前 ${gitleaksFindings.length} 条`}
-                                            {loadingGitleaksFindings &&
-                                                gitleaksFindings.length > 0 &&
-                                                " · 后台更新中"}
-                                        </span>
-                                        {!showGitleaksLoadingSkeleton && (
-                                            <span className="whitespace-nowrap">
-                                                {countingGitleaksFilteredCount
-                                                    ? "符合筛选统计中..."
-                                                    : `符合筛选 ${gitleaksFilteredCount ?? 0} 条`}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="cyber-card relative z-10 overflow-hidden mt-4">
-                            {showGitleaksLoadingSkeleton ? (
-                                <div className="p-16 text-center">
-                                    <div className="loading-spinner mx-auto mb-4" />
-                                    <p className="text-muted-foreground font-mono text-sm">
-                                        加载 Gitleaks 结果...
-                                    </p>
-                                </div>
-                            ) : gitleaksFindings.length === 0 ? (
-                                <div className="p-16 text-center">
-                                    <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                                    <h3 className="text-lg font-bold text-foreground mb-2">
-                                        暂无发现
-                                    </h3>
-                                    <p className="text-muted-foreground font-mono text-sm">
-                                        {gitleaksTask?.status === "running"
-                                            ? "扫描进行中，请稍后刷新"
-                                            : gitleaksTask?.status === "completed"
-                                                ? "扫描完成，未扫描到缺陷"
-                                                : gitleaksTask?.status ===
-                                                    "interrupted"
-                                                    ? "扫描已中断，请重新发起任务"
-                                                    : "暂无扫描结果"}
-                                    </p>
-                                </div>
-                            ) : (
-                                <ScrollArea className="h-[600px]">
-                                    <div className="divide-y divide-border">
-                                        {gitleaksFindings.map((finding) => {
-                                            const isVerified =
-                                                finding.status === "verified";
-                                            const isFalsePositive =
-                                                finding.status === "false_positive";
-                                            const isFixed =
-                                                finding.status === "fixed";
-                                            return (
-                                                <div
-                                                    key={finding.id}
-                                                    className="p-4 space-y-3"
-                                                >
-                                                    <div className="flex items-center justify-between gap-4 flex-wrap">
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            <Badge className="cyber-badge">
-                                                                {finding.rule_id}
-                                                            </Badge>
-                                                            <Badge
-                                                                className={`cyber-badge ${GITLEAKS_STATUS_CLASSES[finding.status] || "bg-muted"}`}
-                                                            >
-                                                                {getStatusLabel(finding.status)}
-                                                            </Badge>
-                                                            <Badge
-                                                                className={`cyber-badge ${isVerified ? VERIFICATION_BADGE_CLASSES.active : VERIFICATION_BADGE_CLASSES.inactive}`}
-                                                            >
-                                                                {isVerified
-                                                                    ? "已验证"
-                                                                    : "未验证"}
-                                                            </Badge>
-                                                            <Badge
-                                                                className={`cyber-badge ${isFalsePositive ? FALSE_POSITIVE_BADGE_CLASSES.active : FALSE_POSITIVE_BADGE_CLASSES.inactive}`}
-                                                            >
-                                                                {isFalsePositive
-                                                                    ? "误报"
-                                                                    : "非误报"}
-                                                            </Badge>
-                                                            <Badge
-                                                                className={`cyber-badge ${isFixed ? VERIFICATION_BADGE_CLASSES.active : VERIFICATION_BADGE_CLASSES.inactive}`}
-                                                            >
-                                                                {isFixed
-                                                                    ? "已修复"
-                                                                    : "未修复"}
-                                                            </Badge>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <Button
-                                                                size="sm"
-                                                                variant="outline"
-                                                                className="cyber-btn-outline h-7 text-xs border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
-                                                                disabled={
-                                                                    updatingGitleaksFindingId ===
-                                                                    finding.id
-                                                                }
-                                                                onClick={() =>
-                                                                    handleUpdateGitleaksStatus(
-                                                                        finding.id,
-                                                                        resolveNextGitleaksStatus(
-                                                                            finding.status,
-                                                                            "verified",
-                                                                        ),
-                                                                    )
-                                                                }
-                                                            >
-                                                                {finding.status ===
-                                                                    "verified"
-                                                                    ? "取消已验证"
-                                                                    : "标记已验证"}
-                                                            </Button>
-                                                            <Button
-                                                                size="sm"
-                                                                variant="outline"
-                                                                className="cyber-btn-outline h-7 text-xs border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
-                                                                disabled={
-                                                                    updatingGitleaksFindingId ===
-                                                                    finding.id
-                                                                }
-                                                                onClick={() =>
-                                                                    handleUpdateGitleaksStatus(
-                                                                        finding.id,
-                                                                        resolveNextGitleaksStatus(
-                                                                            finding.status,
-                                                                            "false_positive",
-                                                                        ),
-                                                                    )
-                                                                }
-                                                            >
-                                                                {finding.status ===
-                                                                    "false_positive"
-                                                                    ? "取消误报"
-                                                                    : "标记误报"}
-                                                            </Button>
-                                                            <Button
-                                                                size="sm"
-                                                                variant="outline"
-                                                                className="cyber-btn-outline h-7 text-xs border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
-                                                                disabled={
-                                                                    updatingGitleaksFindingId ===
-                                                                    finding.id
-                                                                }
-                                                                onClick={() =>
-                                                                    handleUpdateGitleaksStatus(
-                                                                        finding.id,
-                                                                        resolveNextGitleaksStatus(
-                                                                            finding.status,
-                                                                            "fixed",
-                                                                        ),
-                                                                    )
-                                                                }
-                                                            >
-                                                                {finding.status ===
-                                                                    "fixed"
-                                                                    ? "取消已修复"
-                                                                    : "标记已修复"}
-                                                            </Button>
-                                                            {updatingGitleaksFindingId ===
-                                                                finding.id && (
-                                                                    <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                                                                )}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="text-xs text-muted-foreground font-mono">
-                                                        {normalizePath(
-                                                            finding.file_path,
-                                                        )}
-                                                        {finding.start_line
-                                                            ? `:${finding.start_line}`
-                                                            : ""}
-                                                    </div>
-
-                                                    {finding.description && (
-                                                        <div className="text-sm text-foreground">
-                                                            {finding.description}
-                                                        </div>
-                                                    )}
-
-                                                    {finding.secret && (
-                                                        <pre className="text-xs font-mono text-foreground bg-muted border border-border rounded p-3 whitespace-pre-wrap break-words">
-                                                            {finding.secret}
-                                                        </pre>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </ScrollArea>
-                            )}
-                            {!showGitleaksLoadingSkeleton && gitleaksFindings.length > 0 && (
-                                <div className="border-t border-border p-3 flex items-center justify-between">
-                                    <div className="text-xs text-muted-foreground font-mono">
-                                        第 {gitleaksPage} 页
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="cyber-btn-outline h-8"
-                                            onClick={() =>
-                                                setGitleaksPage((prev) => Math.max(1, prev - 1))
-                                            }
-                                            disabled={gitleaksPage <= 1 || loadingGitleaksFindings}
-                                        >
-                                            上一页
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="cyber-btn-outline h-8"
-                                            onClick={() => setGitleaksPage((prev) => prev + 1)}
-                                            disabled={!gitleaksHasMore || loadingGitleaksFindings}
-                                        >
-                                            下一页
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </TabsContent>
-                )}
-            </Tabs>
-
-            <AlertDialog
-                open={showInterruptConfirm}
-                onOpenChange={(open) => {
-                    if (!interruptingTask) {
-                        setShowInterruptConfirm(open);
-                    }
-                }}
-            >
-                <AlertDialogContent className="cyber-dialog border-border">
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>确认中止扫描任务？</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            中止后当前运行中的静态分析任务会被标记为“已中断”，已产生的结果会保留。
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel disabled={interruptingTask}>
-                            取消
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                            onClick={(e) => {
-                                e.preventDefault();
-                                void handleInterruptTasks();
-                            }}
-                            disabled={interruptingTask}
-                            className="bg-rose-600 hover:bg-rose-700 text-white"
-                        >
-                            {interruptingTask ? "中止中..." : "确认中止"}
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
-        </div>
-    );
+	const { taskId: rawTaskId } = useParams<{ taskId: string }>();
+	const location = useLocation();
+	const navigate = useNavigate();
+
+	const searchParams = useMemo(
+		() => new URLSearchParams(location.search),
+		[location.search],
+	);
+
+	const taskId = useMemo(() => decodePathParam(rawTaskId), [rawTaskId]);
+	const toolParam = searchParams.get("tool");
+	const returnToParam = searchParams.get("returnTo") || "";
+	const returnTo =
+		returnToParam.startsWith("/") && !returnToParam.startsWith("//")
+			? returnToParam
+			: "";
+	const currentRoute = `${location.pathname}${location.search}`;
+
+	const opengrepTaskId = useMemo(() => {
+		const explicit = searchParams.get("opengrepTaskId");
+		if (explicit) return explicit;
+		if (toolParam === "gitleaks") return "";
+		return taskId;
+	}, [searchParams, taskId, toolParam]);
+
+	const gitleaksTaskId = useMemo(() => {
+		const explicit = searchParams.get("gitleaksTaskId");
+		if (explicit) return explicit;
+		if (toolParam === "gitleaks") return taskId;
+		return "";
+	}, [searchParams, taskId, toolParam]);
+
+	const hasEnabledEngine = Boolean(opengrepTaskId || gitleaksTaskId);
+
+	const [opengrepTask, setOpengrepTask] = useState<OpengrepScanTask | null>(null);
+	const [gitleaksTask, setGitleaksTask] = useState<GitleaksScanTask | null>(null);
+	const [opengrepFindings, setOpengrepFindings] = useState<OpengrepFinding[]>([]);
+	const [gitleaksFindings, setGitleaksFindings] = useState<GitleaksFinding[]>([]);
+
+	const [loadingInitial, setLoadingInitial] = useState(true);
+	const [loadingTask, setLoadingTask] = useState(false);
+	const [loadingFindings, setLoadingFindings] = useState(false);
+	const [updatingKey, setUpdatingKey] = useState<string | null>(null);
+	const [interruptTarget, setInterruptTarget] = useState<Engine | null>(null);
+	const [interrupting, setInterrupting] = useState(false);
+
+	const [engineFilter, setEngineFilter] = useState<EngineFilter>("all");
+	const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+	const [confidenceFilter, setConfidenceFilter] =
+		useState<ConfidenceFilter>("all");
+	const [page, setPage] = useState(1);
+
+	const opengrepSilentRefreshRef = useRef(false);
+	const gitleaksSilentRefreshRef = useRef(false);
+
+	const loadOpengrepTask = useCallback(
+		async (silent: boolean = false) => {
+			if (!opengrepTaskId) {
+				setOpengrepTask(null);
+				return;
+			}
+			try {
+				if (!silent) setLoadingTask(true);
+				const task = await getOpengrepScanTask(opengrepTaskId);
+				setOpengrepTask(task);
+			} catch (error) {
+				setOpengrepTask(null);
+				if (!silent) {
+					toast.error("加载 Opengrep 任务失败");
+				}
+			} finally {
+				if (!silent) setLoadingTask(false);
+			}
+		},
+		[opengrepTaskId],
+	);
+
+	const loadGitleaksTask = useCallback(
+		async (silent: boolean = false) => {
+			if (!gitleaksTaskId) {
+				setGitleaksTask(null);
+				return;
+			}
+			try {
+				if (!silent) setLoadingTask(true);
+				const task = await getGitleaksScanTask(gitleaksTaskId);
+				setGitleaksTask(task);
+			} catch (error) {
+				setGitleaksTask(null);
+				if (!silent) {
+					toast.error("加载 Gitleaks 任务失败");
+				}
+			} finally {
+				if (!silent) setLoadingTask(false);
+			}
+		},
+		[gitleaksTaskId],
+	);
+
+	const loadOpengrepFindings = useCallback(
+		async (silent: boolean = false) => {
+			if (!opengrepTaskId) {
+				setOpengrepFindings([]);
+				return;
+			}
+			try {
+				if (!silent) setLoadingFindings(true);
+				const findings = await fetchAllOpengrepFindings(opengrepTaskId);
+				setOpengrepFindings(findings);
+			} catch (error) {
+				setOpengrepFindings([]);
+				if (!silent) {
+					toast.error("加载 Opengrep 漏洞失败");
+				}
+			} finally {
+				if (!silent) setLoadingFindings(false);
+			}
+		},
+		[opengrepTaskId],
+	);
+
+	const loadGitleaksFindings = useCallback(
+		async (silent: boolean = false) => {
+			if (!gitleaksTaskId) {
+				setGitleaksFindings([]);
+				return;
+			}
+			try {
+				if (!silent) setLoadingFindings(true);
+				const findings = await fetchAllGitleaksFindings(gitleaksTaskId);
+				setGitleaksFindings(findings);
+			} catch (error) {
+				setGitleaksFindings([]);
+				if (!silent) {
+					toast.error("加载 Gitleaks 漏洞失败");
+				}
+			} finally {
+				if (!silent) setLoadingFindings(false);
+			}
+		},
+		[gitleaksTaskId],
+	);
+
+	const refreshAll = useCallback(
+		async (silent: boolean = false) => {
+			if (!hasEnabledEngine) {
+				setLoadingInitial(false);
+				return;
+			}
+			if (!silent) setLoadingInitial(true);
+			try {
+				await Promise.all([
+					loadOpengrepTask(silent),
+					loadGitleaksTask(silent),
+					loadOpengrepFindings(silent),
+					loadGitleaksFindings(silent),
+				]);
+			} finally {
+				if (!silent) setLoadingInitial(false);
+			}
+		},
+		[
+			hasEnabledEngine,
+			loadGitleaksFindings,
+			loadGitleaksTask,
+			loadOpengrepFindings,
+			loadOpengrepTask,
+		],
+	);
+
+	const refreshOpengrepSilently = useCallback(async () => {
+		if (!opengrepTaskId || opengrepSilentRefreshRef.current) return;
+		opengrepSilentRefreshRef.current = true;
+		try {
+			await loadOpengrepTask(true);
+			await loadOpengrepFindings(true);
+		} finally {
+			opengrepSilentRefreshRef.current = false;
+		}
+	}, [loadOpengrepFindings, loadOpengrepTask, opengrepTaskId]);
+
+	const refreshGitleaksSilently = useCallback(async () => {
+		if (!gitleaksTaskId || gitleaksSilentRefreshRef.current) return;
+		gitleaksSilentRefreshRef.current = true;
+		try {
+			await loadGitleaksTask(true);
+			await loadGitleaksFindings(true);
+		} finally {
+			gitleaksSilentRefreshRef.current = false;
+		}
+	}, [gitleaksTaskId, loadGitleaksFindings, loadGitleaksTask]);
+
+	const unifiedRows = useMemo<UnifiedFindingRow[]>(() => {
+		const opengrepRows = opengrepFindings.map((finding) => {
+			const severity = normalizeSeverity(finding.severity);
+			const confidence = normalizeConfidence(finding.confidence);
+			return {
+				key: `opengrep:${finding.id}`,
+				id: finding.id,
+				taskId: finding.scan_task_id || opengrepTaskId,
+				engine: "opengrep" as const,
+				rule: getOpengrepRuleName(finding),
+				filePath: normalizePath(finding.file_path),
+				line: toPositiveLine(finding.start_line),
+				severity,
+				severityScore: getSeverityScore(severity),
+				confidence,
+				confidenceScore: getConfidenceScore(confidence),
+				status: String(finding.status || "open").trim().toLowerCase(),
+			};
+		});
+
+		const gitleaksRows = gitleaksFindings.map((finding) => ({
+			key: `gitleaks:${finding.id}`,
+			id: finding.id,
+			taskId: finding.scan_task_id || gitleaksTaskId,
+			engine: "gitleaks" as const,
+			rule: String(finding.rule_id || "").trim() || "-",
+			filePath: normalizePath(finding.file_path),
+			line: toPositiveLine(finding.start_line),
+			severity: "LOW" as const,
+			severityScore: getSeverityScore("LOW"),
+			confidence: "MEDIUM" as const,
+			confidenceScore: getConfidenceScore("MEDIUM"),
+			status: String(finding.status || "open").trim().toLowerCase(),
+		}));
+
+		return [...opengrepRows, ...gitleaksRows];
+	}, [gitleaksFindings, gitleaksTaskId, opengrepFindings, opengrepTaskId]);
+
+	const filteredRows = useMemo(() => {
+		const nextRows = unifiedRows
+			.filter((row) => {
+				if (engineFilter === "all") return true;
+				return row.engine === engineFilter;
+			})
+			.filter((row) => {
+				if (statusFilter === "all") return true;
+				return row.status === statusFilter;
+			})
+			.filter((row) => {
+				if (confidenceFilter === "all") return true;
+				if (row.engine !== "opengrep") return true;
+				return row.confidence === confidenceFilter;
+			})
+			.sort((a, b) => {
+				if (a.severityScore !== b.severityScore) {
+					return b.severityScore - a.severityScore;
+				}
+				if (a.confidenceScore !== b.confidenceScore) {
+					return b.confidenceScore - a.confidenceScore;
+				}
+				const pathCompare = a.filePath.localeCompare(b.filePath);
+				if (pathCompare !== 0) return pathCompare;
+				const lineA = a.line ?? Number.MAX_SAFE_INTEGER;
+				const lineB = b.line ?? Number.MAX_SAFE_INTEGER;
+				if (lineA !== lineB) return lineA - lineB;
+				return a.key.localeCompare(b.key);
+			});
+		return nextRows;
+	}, [confidenceFilter, engineFilter, statusFilter, unifiedRows]);
+
+	const totalRows = filteredRows.length;
+	const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+	const clampedPage = Math.min(page, totalPages);
+	const pageStart = (clampedPage - 1) * PAGE_SIZE;
+	const pagedRows = filteredRows.slice(pageStart, pageStart + PAGE_SIZE);
+
+	const enabledEngines = useMemo(() => {
+		const engines: Engine[] = [];
+		if (opengrepTaskId) engines.push("opengrep");
+		if (gitleaksTaskId) engines.push("gitleaks");
+		return engines;
+	}, [gitleaksTaskId, opengrepTaskId]);
+
+	const enabledEngineCount = enabledEngines.length;
+	const completedEngineCount = useMemo(() => {
+		let count = 0;
+		if (opengrepTaskId && isCompletedStatus(opengrepTask?.status)) count += 1;
+		if (gitleaksTaskId && isCompletedStatus(gitleaksTask?.status)) count += 1;
+		return count;
+	}, [gitleaksTask?.status, gitleaksTaskId, opengrepTask?.status, opengrepTaskId]);
+
+	const progressPercent = Math.max(
+		0,
+		Math.min(
+			100,
+			enabledEngineCount > 0
+				? Math.round((completedEngineCount / enabledEngineCount) * 100)
+				: 0,
+		),
+	);
+
+	const totalScanDurationMs =
+		toSafeMetric(opengrepTask?.scan_duration_ms) +
+		toSafeMetric(gitleaksTask?.scan_duration_ms);
+	const totalFindings =
+		toSafeMetric(opengrepTask?.total_findings) +
+		toSafeMetric(gitleaksTask?.total_findings);
+	const totalFilesScanned =
+		toSafeMetric(opengrepTask?.files_scanned) +
+		toSafeMetric(gitleaksTask?.files_scanned);
+
+	const canInterruptOpengrep = Boolean(
+		opengrepTaskId && isInterruptibleStatus(opengrepTask?.status),
+	);
+	const canInterruptGitleaks = Boolean(
+		gitleaksTaskId && isInterruptibleStatus(gitleaksTask?.status),
+	);
+
+	const handleBack = () => {
+		if (returnTo) {
+			navigate(returnTo);
+			return;
+		}
+		navigate(-1);
+	};
+
+	const handleRefresh = async () => {
+		await refreshAll(false);
+	};
+
+	const handleInterrupt = async () => {
+		if (!interruptTarget) return;
+		setInterrupting(true);
+		try {
+			if (interruptTarget === "opengrep" && opengrepTaskId) {
+				await interruptOpengrepScanTask(opengrepTaskId);
+				toast.success("Opengrep 任务已中止");
+			}
+			if (interruptTarget === "gitleaks" && gitleaksTaskId) {
+				await interruptGitleaksScanTask(gitleaksTaskId);
+				toast.success("Gitleaks 任务已中止");
+			}
+			await refreshAll(true);
+		} catch (error) {
+			toast.error("中止任务失败");
+		} finally {
+			setInterrupting(false);
+			setInterruptTarget(null);
+		}
+	};
+
+	const handleToggleStatus = async (
+		row: UnifiedFindingRow,
+		target: FindingStatus,
+	) => {
+		if (row.engine === "opengrep" && target === "fixed") return;
+		const currentStatus = String(row.status || "open").toLowerCase();
+		const nextStatus: FindingStatus =
+			currentStatus === target ? "open" : target;
+		const updateKey = `${row.engine}:${row.id}:${target}`;
+		setUpdatingKey(updateKey);
+		try {
+			if (row.engine === "opengrep") {
+				await updateOpengrepFindingStatus({
+					findingId: row.id,
+					status: nextStatus === "fixed" ? "open" : nextStatus,
+				});
+				setOpengrepFindings((prev) =>
+					prev.map((finding) =>
+						finding.id === row.id ? { ...finding, status: nextStatus } : finding,
+					),
+				);
+			} else {
+				await updateGitleaksFindingStatus({
+					findingId: row.id,
+					status: nextStatus,
+				});
+				setGitleaksFindings((prev) =>
+					prev.map((finding) =>
+						finding.id === row.id ? { ...finding, status: nextStatus } : finding,
+					),
+				);
+			}
+		} catch (error) {
+			toast.error("更新状态失败");
+		} finally {
+			setUpdatingKey(null);
+		}
+	};
+
+	useEffect(() => {
+		void refreshAll(false);
+	}, [refreshAll]);
+
+	useEffect(() => {
+		setPage(1);
+	}, [engineFilter, statusFilter, confidenceFilter]);
+
+	useEffect(() => {
+		if (page !== clampedPage) {
+			setPage(clampedPage);
+		}
+	}, [clampedPage, page]);
+
+	useEffect(() => {
+		if (!opengrepTaskId || !isPollableStatus(opengrepTask?.status)) return;
+		const timer = setInterval(() => {
+			void refreshOpengrepSilently();
+		}, 5000);
+		return () => clearInterval(timer);
+	}, [opengrepTask?.status, opengrepTaskId, refreshOpengrepSilently]);
+
+	useEffect(() => {
+		if (!gitleaksTaskId || !isPollableStatus(gitleaksTask?.status)) return;
+		const timer = setInterval(() => {
+			void refreshGitleaksSilently();
+		}, 5000);
+		return () => clearInterval(timer);
+	}, [gitleaksTask?.status, gitleaksTaskId, refreshGitleaksSilently]);
+
+	if (!hasEnabledEngine) {
+		return (
+			<div className="min-h-screen bg-background p-6">
+				<div className="cyber-card p-8 text-center space-y-4">
+					<AlertCircle className="w-12 h-12 text-rose-400 mx-auto" />
+					<p className="text-sm text-muted-foreground">
+						静态分析任务参数无效，无法加载详情。
+					</p>
+					<Button variant="outline" className="cyber-btn-outline" onClick={handleBack}>
+						<ArrowLeft className="w-4 h-4 mr-2" />
+						返回
+					</Button>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="space-y-5 p-6 bg-background min-h-screen">
+			<div className="flex items-center justify-between gap-3 flex-wrap">
+				<div>
+					<h1 className="text-2xl font-bold tracking-wider uppercase text-foreground">
+						静态分析详情
+					</h1>
+				</div>
+				<div className="flex items-center gap-2">
+					{canInterruptOpengrep ? (
+						<Button
+							variant="outline"
+							className="cyber-btn-outline h-8"
+							onClick={() => setInterruptTarget("opengrep")}
+						>
+							<Ban className="w-3.5 h-3.5 mr-1.5" />
+							中止 Opengrep
+						</Button>
+					) : null}
+					{canInterruptGitleaks ? (
+						<Button
+							variant="outline"
+							className="cyber-btn-outline h-8"
+							onClick={() => setInterruptTarget("gitleaks")}
+						>
+							<Ban className="w-3.5 h-3.5 mr-1.5" />
+							中止 Gitleaks
+						</Button>
+					) : null}
+					<Button
+						variant="outline"
+						className="cyber-btn-outline h-8"
+						onClick={handleRefresh}
+						disabled={loadingInitial || loadingTask || loadingFindings}
+					>
+						<RefreshCw
+							className={`w-3.5 h-3.5 mr-1.5 ${loadingInitial ? "animate-spin" : ""}`}
+						/>
+						刷新
+					</Button>
+					<Button variant="outline" className="cyber-btn-outline h-8" onClick={handleBack}>
+						<ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
+						返回
+					</Button>
+				</div>
+			</div>
+
+			<div className="grid grid-cols-1 gap-3 md:grid-cols-5">
+				<div className="cyber-card p-4 space-y-2">
+					<p className="text-xs font-semibold uppercase text-muted-foreground">
+						进度比例
+					</p>
+					<p className="text-xl font-bold text-foreground">
+						{progressPercent}%
+					</p>
+					<Progress
+						value={progressPercent}
+						className="h-1.5 bg-muted [&>div]:bg-emerald-500"
+					/>
+					<p className="text-xs text-muted-foreground">
+						已完成 {completedEngineCount} / {enabledEngineCount}
+					</p>
+				</div>
+				<div className="cyber-card p-4 space-y-1">
+					<p className="text-xs font-semibold uppercase text-muted-foreground">
+						扫描时间
+					</p>
+					<p className="text-xl font-bold text-foreground">
+						{formatDuration(totalScanDurationMs)}
+					</p>
+					<p className="text-xs text-muted-foreground">
+						合计 {totalScanDurationMs.toLocaleString()} ms
+					</p>
+				</div>
+				<div className="cyber-card p-4 space-y-1">
+					<p className="text-xs font-semibold uppercase text-muted-foreground">
+						扫描漏洞数量
+					</p>
+					<p className="text-xl font-bold text-foreground">
+						{totalFindings.toLocaleString()}
+					</p>
+					<p className="text-xs text-muted-foreground">多引擎总计</p>
+				</div>
+				<div className="cyber-card p-4 space-y-1">
+					<p className="text-xs font-semibold uppercase text-muted-foreground">
+						使用引擎数量
+					</p>
+					<p className="text-xl font-bold text-foreground">
+						{enabledEngineCount.toLocaleString()}
+					</p>
+					<p className="text-xs text-muted-foreground">
+						{enabledEngines
+							.map((engine) => (engine === "opengrep" ? "Opengrep" : "Gitleaks"))
+							.join(" / ") || "-"}
+					</p>
+				</div>
+				<div className="cyber-card p-4 space-y-1">
+					<p className="text-xs font-semibold uppercase text-muted-foreground">
+						涉及文件
+					</p>
+					<p className="text-xl font-bold text-foreground">
+						{totalFilesScanned.toLocaleString()}
+					</p>
+					<p className="text-xs text-muted-foreground">多引擎总计</p>
+				</div>
+			</div>
+
+			<div className="cyber-card p-4 space-y-3">
+				<div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+					<div>
+						<label className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
+							引擎筛选
+						</label>
+						<Select
+							value={engineFilter}
+							onValueChange={(value) => setEngineFilter(value as EngineFilter)}
+						>
+							<SelectTrigger className="cyber-input">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent className="cyber-dialog border-border">
+								<SelectItem value="all">全部</SelectItem>
+								<SelectItem value="opengrep">Opengrep</SelectItem>
+								<SelectItem value="gitleaks">Gitleaks</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div>
+						<label className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
+							状态筛选
+						</label>
+						<Select
+							value={statusFilter}
+							onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+						>
+							<SelectTrigger className="cyber-input">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent className="cyber-dialog border-border">
+								<SelectItem value="all">全部</SelectItem>
+								<SelectItem value="open">未处理</SelectItem>
+								<SelectItem value="verified">已验证</SelectItem>
+								<SelectItem value="false_positive">误报</SelectItem>
+								<SelectItem value="fixed">已修复</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+					<div>
+						<label className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
+							置信度筛选（仅 Opengrep）
+						</label>
+						<Select
+							value={confidenceFilter}
+							onValueChange={(value) =>
+								setConfidenceFilter(value as ConfidenceFilter)
+							}
+						>
+							<SelectTrigger className="cyber-input">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent className="cyber-dialog border-border">
+								<SelectItem value="all">全部</SelectItem>
+								<SelectItem value="HIGH">高</SelectItem>
+								<SelectItem value="MEDIUM">中</SelectItem>
+								<SelectItem value="LOW">低</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+				</div>
+
+				<div className="text-xs text-muted-foreground flex items-center justify-between gap-2 flex-wrap">
+					<span>
+						符合筛选 {totalRows.toLocaleString()} 条，当前第 {clampedPage} /{" "}
+						{totalPages.toLocaleString()} 页
+					</span>
+					<span>排序规则：危害降序；同危害按置信度降序；其后按路径+行号升序</span>
+				</div>
+
+				<div className="border border-border rounded-md overflow-x-auto">
+					<Table className="min-w-[1400px]">
+						<TableHeader>
+							<TableRow>
+								<TableHead className="w-[72px]">序号</TableHead>
+								<TableHead className="w-[110px]">所属引擎</TableHead>
+								<TableHead className="min-w-[220px]">命中规则</TableHead>
+								<TableHead className="min-w-[240px]">命中位置</TableHead>
+								<TableHead className="w-[120px]">漏洞危害</TableHead>
+								<TableHead className="w-[110px]">置信度</TableHead>
+								<TableHead className="w-[220px]">处理状态</TableHead>
+								<TableHead className="min-w-[280px]">操作</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{loadingInitial ? (
+								<TableRow>
+									<TableCell colSpan={8} className="py-12 text-center">
+										<div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+											<Loader2 className="w-4 h-4 animate-spin" />
+											加载扫描数据中...
+										</div>
+									</TableCell>
+								</TableRow>
+							) : pagedRows.length === 0 ? (
+								<TableRow>
+									<TableCell colSpan={8} className="py-12 text-center">
+										<div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+											<AlertCircle className="w-4 h-4" />
+											暂无符合条件的漏洞
+										</div>
+									</TableCell>
+								</TableRow>
+							) : (
+								pagedRows.map((row, index) => {
+									const rowStatus = String(row.status || "open").toLowerCase();
+									const processed = rowStatus !== "open";
+									const verified = rowStatus === "verified";
+									const falsePositive = rowStatus === "false_positive";
+									const isOpengrep = row.engine === "opengrep";
+									const verifyUpdating = updatingKey === `${row.engine}:${row.id}:verified`;
+									const falsePositiveUpdating =
+										updatingKey === `${row.engine}:${row.id}:false_positive`;
+									const fixedUpdating = updatingKey === `${row.engine}:${row.id}:fixed`;
+
+									const detailRoute = appendReturnTo(
+										buildFindingDetailPath({
+											source: "static",
+											taskId: row.taskId,
+											findingId: row.id,
+											engine: row.engine,
+										}),
+										currentRoute,
+									);
+
+									return (
+										<TableRow key={row.key}>
+											<TableCell className="font-mono text-xs">
+												{(pageStart + index + 1).toLocaleString()}
+											</TableCell>
+											<TableCell>
+												<Badge
+													className={
+														row.engine === "opengrep"
+															? "bg-sky-500/20 text-sky-300 border-sky-500/30"
+															: "bg-amber-500/20 text-amber-300 border-amber-500/30"
+													}
+												>
+													{row.engine === "opengrep" ? "Opengrep" : "Gitleaks"}
+												</Badge>
+											</TableCell>
+											<TableCell className="text-sm break-all">
+												{row.rule || "-"}
+											</TableCell>
+											<TableCell className="font-mono text-xs break-all">
+												{row.filePath}
+												{row.line ? `:${row.line}` : ""}
+											</TableCell>
+											<TableCell>
+												<Badge className={getSeverityBadgeClass(row.severity)}>
+													{getSeverityLabel(row.severity)}
+												</Badge>
+											</TableCell>
+											<TableCell>
+												<Badge className={getConfidenceBadgeClass(row.confidence)}>
+													{getConfidenceLabel(row.confidence)}
+												</Badge>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
+													<Badge className={processed ? YES_BADGE_CLASS : NO_BADGE_CLASS}>
+														处理：{processed ? "是" : "否"}
+													</Badge>
+													<Badge className={verified ? YES_BADGE_CLASS : NO_BADGE_CLASS}>
+														验证：{verified ? "是" : "否"}
+													</Badge>
+													<Badge
+														className={falsePositive ? YES_BADGE_CLASS : NO_BADGE_CLASS}
+													>
+														误报：{falsePositive ? "是" : "否"}
+													</Badge>
+												</div>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-1.5 flex-wrap">
+													<Button
+														asChild
+														size="sm"
+														variant="outline"
+														className="cyber-btn-outline h-7 px-2.5"
+													>
+														<Link to={detailRoute}>详情</Link>
+													</Button>
+													<Button
+														size="sm"
+														variant="outline"
+														className="cyber-btn-outline h-7 px-2.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
+														disabled={Boolean(updatingKey)}
+														onClick={() => handleToggleStatus(row, "verified")}
+													>
+														{verifyUpdating ? (
+															<Loader2 className="w-3 h-3 animate-spin" />
+														) : rowStatus === "verified" ? (
+															"取消验证"
+														) : (
+															"验证"
+														)}
+													</Button>
+													<Button
+														size="sm"
+														variant="outline"
+														className="cyber-btn-outline h-7 px-2.5 border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
+														disabled={Boolean(updatingKey)}
+														onClick={() => handleToggleStatus(row, "false_positive")}
+													>
+														{falsePositiveUpdating ? (
+															<Loader2 className="w-3 h-3 animate-spin" />
+														) : rowStatus === "false_positive" ? (
+															"取消误报"
+														) : (
+															"误报"
+														)}
+													</Button>
+													{isOpengrep ? null : (
+														<Button
+															size="sm"
+															variant="outline"
+															className="cyber-btn-outline h-7 px-2.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
+															disabled={Boolean(updatingKey)}
+															onClick={() => handleToggleStatus(row, "fixed")}
+														>
+															{fixedUpdating ? (
+																<Loader2 className="w-3 h-3 animate-spin" />
+															) : rowStatus === "fixed" ? (
+																"取消修复"
+															) : (
+																"修复"
+															)}
+														</Button>
+													)}
+												</div>
+											</TableCell>
+										</TableRow>
+									);
+								})
+							)}
+						</TableBody>
+					</Table>
+				</div>
+
+				<div className="flex items-center justify-between gap-2 flex-wrap">
+					<div className="text-xs text-muted-foreground">
+						共 {totalRows.toLocaleString()} 条，当前显示{" "}
+						{pagedRows.length.toLocaleString()} 条
+					</div>
+					<div className="flex items-center gap-2">
+						<Button
+							size="sm"
+							variant="outline"
+							className="cyber-btn-outline h-8"
+							onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+							disabled={clampedPage <= 1}
+						>
+							上一页
+						</Button>
+						<Button
+							size="sm"
+							variant="outline"
+							className="cyber-btn-outline h-8"
+							onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+							disabled={clampedPage >= totalPages}
+						>
+							下一页
+						</Button>
+					</div>
+				</div>
+			</div>
+
+			<AlertDialog
+				open={Boolean(interruptTarget)}
+				onOpenChange={(open) => {
+					if (!open) setInterruptTarget(null);
+				}}
+			>
+				<AlertDialogContent className="cyber-dialog border-border">
+					<AlertDialogHeader>
+						<AlertDialogTitle>确认中止任务？</AlertDialogTitle>
+						<AlertDialogDescription>
+							即将中止
+							{interruptTarget === "opengrep" ? " Opengrep " : " Gitleaks "}
+							扫描任务。中止后任务状态将更新为已中断。
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={interrupting}>取消</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={interrupting}
+							onClick={(event) => {
+								event.preventDefault();
+								void handleInterrupt();
+							}}
+							className="bg-rose-600 hover:bg-rose-500"
+						>
+							{interrupting ? (
+								<span className="inline-flex items-center gap-1.5">
+									<Loader2 className="w-3.5 h-3.5 animate-spin" />
+									处理中...
+								</span>
+							) : (
+								"确认中止"
+							)}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		</div>
+	);
 }

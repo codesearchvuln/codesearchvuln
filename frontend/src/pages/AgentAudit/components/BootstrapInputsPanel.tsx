@@ -1,8 +1,9 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ExternalLink, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { OpengrepFinding } from "@/shared/api/opengrep";
+import { appendReturnTo } from "@/shared/utils/findingRoute";
 import type { BootstrapInputsSummary } from "../types";
 
 interface BootstrapInputsPanelProps {
@@ -30,12 +31,19 @@ function formatConfidence(confidence?: string | null): string {
 }
 
 export function BootstrapInputsPanel({
-  summary,
-  findings,
-  loading,
-  error,
-  onRetry,
+ summary,
+ findings,
+ loading,
+ error,
+ onRetry,
 }: BootstrapInputsPanelProps) {
+  const location = useLocation();
+  const currentRoute = `${location.pathname}${location.search}`;
+  const staticAnalysisRoute = appendReturnTo(
+    `/static-analysis/${summary.taskId}?opengrepTaskId=${summary.taskId}`,
+    currentRoute,
+  );
+
   return (
     <details className="mx-4 mt-4 rounded-lg border border-border bg-card/70" open={false}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
@@ -57,7 +65,7 @@ export function BootstrapInputsPanel({
             该智能审计任务的预扫描输入（来源: {summary.source}）
           </p>
           <Link
-            to={`/static-analysis/${summary.taskId}?opengrepTaskId=${summary.taskId}`}
+            to={staticAnalysisRoute}
             className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
           >
             查看原始静态扫描详情

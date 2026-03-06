@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
 	getTaskStatusText,
 	type TaskActivityItem,
 } from "@/features/tasks/services/taskActivities";
+import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 interface TaskActivitiesListTableProps {
 	activities: TaskActivityItem[];
@@ -46,7 +47,9 @@ export default function TaskActivitiesListTable({
 	emptyText = "暂无任务",
 	pageSize = 10,
 }: TaskActivitiesListTableProps) {
+	const location = useLocation();
 	const [page, setPage] = useState(1);
+	const currentRoute = `${location.pathname}${location.search}`;
 
 	const totalPages = Math.max(1, Math.ceil(activities.length / pageSize));
 
@@ -60,6 +63,11 @@ export default function TaskActivitiesListTable({
 		const start = (page - 1) * pageSize;
 		return activities.slice(start, start + pageSize);
 	}, [activities, page, pageSize]);
+
+	const getDetailRoute = (activity: TaskActivityItem): string => {
+		if (activity.kind !== "rule_scan") return activity.route;
+		return appendReturnTo(activity.route, currentRoute);
+	};
 
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-3">
@@ -138,7 +146,7 @@ export default function TaskActivitiesListTable({
 												variant="outline"
 												className="cyber-btn-ghost h-8 px-3"
 											>
-												<Link to={activity.route}>详情</Link>
+												<Link to={getDetailRoute(activity)}>详情</Link>
 											</Button>
 										</TableCell>
 									</TableRow>

@@ -91,6 +91,13 @@ export default function ProjectDetail() {
 			? normalizedSourceFrom
 			: fallbackBackPath;
 	const currentRoute = `${location.pathname}${location.search}`;
+	const withStaticReturnTo = useCallback(
+		(route: string, taskKind: string) => {
+			if (taskKind !== "static") return route;
+			return appendReturnTo(route, currentRoute);
+		},
+		[currentRoute],
+	);
 
 	const handleBack = () => {
 		navigate(backTarget);
@@ -810,7 +817,9 @@ export default function ProjectDetail() {
 													variant="outline"
 													className="cyber-btn-ghost h-7 px-2"
 												>
-													<Link to={task.route}>详情</Link>
+													<Link to={withStaticReturnTo(task.route, task.kind)}>
+														详情
+													</Link>
 												</Button>
 											</TableCell>
 										</TableRow>
