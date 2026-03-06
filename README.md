@@ -141,8 +141,10 @@ docker compose -f docker-compose.prod.cn.yml up -d
 - 后端需要访问 Docker，用于沙箱验证，因此默认会挂载 `/var/run/docker.sock`。生产环境请评估权限边界与隔离策略。
 - 默认开发流程使用 `docker-compose.yml` 本地构建业务镜像；`docker-compose.prod.yml` / `docker-compose.prod.cn.yml` 用于预构建镜像部署。
 - `docker-compose.prod.yml` 与 `docker-compose.prod.cn.yml` 默认使用南京大学 GHCR 镜像站（`ghcr.nju.edu.cn/lintsinghua/*`）加速拉取。如需生产镜像部署，可替换为你们自己的镜像地址/私有仓库。
-- 开发构建链路默认使用 `./scripts/compose-up-with-fallback.sh`：先走国内镜像重试 3 次，再自动切官方镜像重试 3 次，全部失败则退出。
+- 开发构建链路默认使用 `./scripts/compose-up-with-fallback.sh`：先对候选镜像源测速并按延迟排序，再按排序分阶段重试构建（不再固定“国内→官方”两段式）。
+- 脚本默认启用 BuildKit（`DOCKER_BUILDKIT=1`、`COMPOSE_DOCKER_CLI_BUILD=1`），可按需覆盖。
 - 如需切换为自建代理/其他镜像站，可覆盖环境变量：`DOCKERHUB_LIBRARY_MIRROR`、`SANDBOX_IMAGE`。
+- 可通过 `*_CANDIDATES`（逗号分隔）扩展测速候选源；也可直接显式指定 `*_PRIMARY` / `*_FALLBACK` 跳过该类源测速。
 - 后端 Node/pnpm 构建支持镜像优先+官方回退，可覆盖：`BACKEND_NPM_REGISTRY_PRIMARY`、`BACKEND_NPM_REGISTRY_FALLBACK`、`BACKEND_PNPM_VERSION`。
 - 本地 Compose 默认关闭 pnpm optional 依赖安装（`BACKEND_PNPM_INSTALL_OPTIONAL=0`），可显著减少 `node-llama-cpp` 相关下载重试；如需完整 optional 依赖可设为 `1`。
 - 本地 Compose 默认跳过 CJK 字体安装（`BACKEND_INSTALL_CJK_FONTS=0`）以加快构建；如需中文字体渲染可设置为 `1`。

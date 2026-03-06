@@ -2,17 +2,36 @@
 # 安全沙箱环境用于漏洞验证和 PoC 执行
 # 集成各类安全扫描工具 (Opengrep, Bandit, Gitleaks, etc.)
 
-ARG SANDBOX_BASE_IMAGE=docker.m.daocloud.io/python:3.11-bullseye
+ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+ARG SANDBOX_BASE_IMAGE=docker.m.daocloud.io/python:3.12-slim
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS nodebase
 FROM ${SANDBOX_BASE_IMAGE}
+
 ARG SANDBOX_APT_MIRROR_PRIMARY=mirrors.aliyun.com
 ARG SANDBOX_APT_SECURITY_PRIMARY=mirrors.aliyun.com
 ARG SANDBOX_APT_MIRROR_FALLBACK=deb.debian.org
 ARG SANDBOX_APT_SECURITY_FALLBACK=security.debian.org
+ARG SANDBOX_PYPI_INDEX_PRIMARY=https://mirrors.aliyun.com/pypi/simple/
+ARG SANDBOX_PYPI_INDEX_FALLBACK=https://pypi.org/simple
+ARG SANDBOX_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com
+ARG SANDBOX_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org
+ARG SANDBOX_PNPM_VERSION=9.15.4
+ARG SANDBOX_PNPM_CMD_TIMEOUT_SECONDS=420
+ARG GO_VERSION=1.21.6
+ARG OPENGREP_VERSION=v1.15.1
+ARG GITLEAKS_VERSION=8.18.2
+ARG OSV_SCANNER_VERSION=1.6.2
+ARG PMD_VERSION=7.0.0
 
 LABEL maintainer="XCodeReviewer Team"
 LABEL description="Secure sandbox environment for vulnerability verification and security scanning"
 
-# 安装基本工具（主镜像源失败后自动回退到官方源）
+ENV UV_INDEX_URL=${SANDBOX_PYPI_INDEX_PRIMARY}
+ENV PIP_INDEX_URL=${SANDBOX_PYPI_INDEX_PRIMARY}
+ENV PNPM_HOME=/pnpm
+ENV PATH=/pnpm:${PATH}
+
+# 安装基础运行时与构建工具（主镜像源失败后回退）
 RUN set -eux; \
     unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; \
     rm -f /etc/apt/apt.conf.d/proxy.conf 2>/dev/null || true; \
@@ -25,8 +44,7 @@ RUN set -eux; \
       echo 'Acquire::ForceIPv4 "true";'; \
     } > /etc/apt/apt.conf.d/99-deepaudit-network; \
     . /etc/os-release; \
-    CODENAME="${VERSION_CODENAME:-bullseye}"; \
-    APT_INSTALL_RETRIES=3; \
+    CODENAME="${VERSION_CODENAME:-bookworm}"; \
     write_sources() { \
       main_host="$1"; \
       security_host="$2"; \
@@ -35,183 +53,213 @@ RUN set -eux; \
       printf 'deb https://%s/debian %s-updates main\n' "${main_host}" "${CODENAME}" >> /etc/apt/sources.list; \
       printf 'deb https://%s/debian-security %s-security main\n' "${security_host}" "${CODENAME}" >> /etc/apt/sources.list; \
     }; \
-    install_core_packages_with_retry() { \
-      max_attempts="$1"; \
+    install_core_packages() { \
+      apt-get update && apt-get install -y --no-install-recommends --fix-missing \
+        curl \
+        wget \
+        netcat-openbsd \
+        dnsutils \
+        iputils-ping \
+        ca-certificates \
+        git \
+        unzip \
+        jq \
+        php-cli \
+        openjdk-21-jdk-headless \
+        ruby-full \
+        build-essential \
+        cmake \
+        clang \
+        llvm \
+        xz-utils; \
+    }; \
+    write_sources "${SANDBOX_APT_MIRROR_PRIMARY}" "${SANDBOX_APT_SECURITY_PRIMARY}"; \
+    if ! install_core_packages; then \
+      rm -rf /var/lib/apt/lists/*; \
+      write_sources "${SANDBOX_APT_MIRROR_FALLBACK}" "${SANDBOX_APT_SECURITY_FALLBACK}"; \
+      install_core_packages; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
+
+# 引入 Node.js 22 运行时并用 corepack 安装 pnpm（主源失败后回退）
+COPY --from=nodebase /usr/local/bin/node /usr/local/bin/node
+COPY --from=nodebase /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN --mount=type=cache,id=deepaudit-sandbox-npm,target=/root/.npm \
+    set -eux; \
+    ln -sf /usr/local/bin/node /usr/local/bin/nodejs; \
+    ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
+    ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack; \
+    corepack enable; \
+    prepare_pnpm() { \
+      reg="$1"; \
       attempt=1; \
-      while [ "${attempt}" -le "${max_attempts}" ]; do \
-        if apt-get update && apt-get install -y --no-install-recommends --fix-missing \
-          curl \
-          wget \
-          netcat-openbsd \
-          dnsutils \
-          iputils-ping \
-          ca-certificates \
-          git \
-          unzip \
-          jq \
-          php-cli \
-          openjdk-11-jdk-headless \
-          ruby-full \
-          build-essential \
-          cmake \
-          clang \
-          llvm \
-          xz-utils; then \
+      npm config set registry "${reg}"; \
+      export COREPACK_NPM_REGISTRY="${reg}"; \
+      while [ "${attempt}" -le 2 ]; do \
+        if corepack prepare "pnpm@${SANDBOX_PNPM_VERSION}" --activate; then \
           return 0; \
         fi; \
-        echo "APT install failed (attempt ${attempt}/${max_attempts}), retrying..." >&2; \
-        rm -rf /var/lib/apt/lists/*; \
-        sleep $((attempt * attempt)); \
+        sleep $((attempt + 1)); \
         attempt=$((attempt + 1)); \
       done; \
       return 1; \
     }; \
-    write_sources "${SANDBOX_APT_MIRROR_PRIMARY}" "${SANDBOX_APT_SECURITY_PRIMARY}"; \
-    if ! install_core_packages_with_retry "${APT_INSTALL_RETRIES}"; then \
-      echo "Primary apt mirrors failed, switching to fallback mirrors..." >&2; \
-      write_sources "${SANDBOX_APT_MIRROR_FALLBACK}" "${SANDBOX_APT_SECURITY_FALLBACK}"; \
-      install_core_packages_with_retry "${APT_INSTALL_RETRIES}"; \
-    fi; \
-    rm -rf /var/lib/apt/lists/*
-
-# 统一 Python 包镜像源（uv/pip）
-ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
-ENV PNPM_HOME=/pnpm
-ENV PATH=/pnpm:${PATH}
-
-# 安装 Node.js 22+ 与 pnpm（用于 JavaScript/TypeScript 代码执行、npm audit、qmd）
-# 使用 npmmirror 节点二进制下载，避免额外 apt 源
-RUN set -eux; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "$ARCH" in \
-      amd64) NODE_ARCH="x64" ;; \
-      arm64) NODE_ARCH="arm64" ;; \
-      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
-    esac; \
-    NODE_BASE_URL_PRIMARY="https://npmmirror.com/mirrors/node/latest-v22.x"; \
-    NODE_BASE_URL_FALLBACK="https://nodejs.org/dist/latest-v22.x"; \
-    NODE_BASE_URL="${NODE_BASE_URL_PRIMARY}"; \
-    NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" 2>/dev/null | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
-    if [ -z "${NODE_TARBALL}" ]; then \
-      NODE_BASE_URL="${NODE_BASE_URL_FALLBACK}"; \
-      NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
-    fi; \
-    test -n "${NODE_TARBALL}"; \
-    if ! curl -fL "${NODE_BASE_URL}/${NODE_TARBALL}" -o /tmp/node.tar.xz; then \
-      NODE_BASE_URL="${NODE_BASE_URL_FALLBACK}"; \
-      NODE_TARBALL="$(curl -fsSL "${NODE_BASE_URL}/SHASUMS256.txt" | tr -d '\r' | awk '$2 ~ /linux-'"${NODE_ARCH}"'[.]tar[.]xz$/ {print $2; exit}')"; \
-      test -n "${NODE_TARBALL}"; \
-      curl -fL "${NODE_BASE_URL}/${NODE_TARBALL}" -o /tmp/node.tar.xz; \
-    fi; \
-    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
-    rm -f /tmp/node.tar.xz; \
-    export COREPACK_NPM_REGISTRY="https://registry.npmmirror.com"; \
-    corepack enable; \
-    corepack prepare pnpm@9.15.4 --activate; \
-    pnpm config set registry https://registry.npmmirror.com; \
+    prepare_pnpm "${SANDBOX_NPM_REGISTRY_PRIMARY}" || prepare_pnpm "${SANDBOX_NPM_REGISTRY_FALLBACK}"; \
+    pnpm config set registry "${SANDBOX_NPM_REGISTRY_PRIMARY}"; \
     node --version; npm --version; pnpm --version
 
-# bullseye 自带 cmake 版本过低（arm64 下 qmd 依赖 node-llama-cpp 需要 >=3.19）
-RUN python3 -m pip install --no-cache-dir "cmake>=3.27,<4" && \
-    cmake --version
-
 # 安装 MCP 与 qmd CLI（供沙盒域运行时调用）
-RUN mkdir -p /pnpm /pnpm/global && \
-    pnpm config set global-bin-dir /pnpm && \
-    pnpm config set global-dir /pnpm/global && \
-    pnpm add -g \
-    @modelcontextprotocol/server-filesystem \
-    @modelcontextprotocol/server-memory \
-    @modelcontextprotocol/server-sequential-thinking \
-    @tobilu/qmd
+RUN --mount=type=cache,id=deepaudit-sandbox-pnpm-store,target=/pnpm/store \
+    set -eux; \
+    mkdir -p /pnpm /pnpm/global /pnpm/store; \
+    cmd_timeout="${SANDBOX_PNPM_CMD_TIMEOUT_SECONDS:-420}"; \
+    case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
+    pnpm_step_timeout=120; \
+    if [ "${cmd_timeout}" -lt "${pnpm_step_timeout}" ]; then pnpm_step_timeout="${cmd_timeout}"; fi; \
+    pnpm config set store-dir /pnpm/store; \
+    pnpm config set global-bin-dir /pnpm; \
+    pnpm config set global-dir /pnpm/global; \
+    pnpm config set fetch-retries 1; \
+    pnpm config set fetch-retry-factor 2; \
+    pnpm config set fetch-retry-mintimeout 2000; \
+    pnpm config set fetch-retry-maxtimeout 8000; \
+    pnpm config set network-concurrency 4; \
+    install_mcp_packages() { \
+      reg="$1"; \
+      attempt=1; \
+      if ! curl -fsS --max-time 5 "${reg}/-/ping" >/dev/null 2>&1; then \
+        echo "pnpm registry probe failed for ${reg}, continue with direct add attempt." >&2; \
+      fi; \
+      pnpm config set registry "${reg}"; \
+      while [ "${attempt}" -le 2 ]; do \
+        if timeout "${pnpm_step_timeout}" pnpm add -g \
+          @modelcontextprotocol/server-filesystem \
+          @modelcontextprotocol/server-memory \
+          @modelcontextprotocol/server-sequential-thinking \
+          @tobilu/qmd; then \
+          return 0; \
+        fi; \
+        status="$?"; \
+        if [ "${status}" -eq 124 ]; then \
+          echo "pnpm add timed out via ${reg} after ${pnpm_step_timeout}s (attempt ${attempt}/2)." >&2; \
+        else \
+          echo "pnpm add failed via ${reg} (attempt ${attempt}/2, exit ${status})." >&2; \
+        fi; \
+        sleep $((attempt + 1)); \
+        attempt=$((attempt + 1)); \
+      done; \
+      return 1; \
+    }; \
+    install_mcp_packages "${SANDBOX_NPM_REGISTRY_PRIMARY}" || install_mcp_packages "${SANDBOX_NPM_REGISTRY_FALLBACK}"; \
+    command -v qmd
 
-# 安装 Go (使用阿里云镜像)
+# 安装 Python 安全工具与 code-index-mcp（主源失败后回退）
+RUN --mount=type=cache,id=deepaudit-sandbox-pip,target=/root/.cache/pip \
+    set -eux; \
+    pip_install_with_index() { \
+      idx="$1"; \
+      PIP_INDEX_URL="${idx}" pip install --no-cache-dir \
+        requests \
+        httpx \
+        aiohttp \
+        beautifulsoup4 \
+        lxml \
+        pycryptodome \
+        paramiko \
+        pyjwt \
+        python-jose \
+        sqlparse \
+        bandit \
+        safety \
+        code-index-mcp; \
+    }; \
+    pip_install_with_index "${SANDBOX_PYPI_INDEX_PRIMARY}" || pip_install_with_index "${SANDBOX_PYPI_INDEX_FALLBACK}"
+
+# 安装 Go/Rust 与安全扫描工具（统一下载函数 + 架构对齐）
 ENV PATH=$PATH:/usr/local/go/bin
 ENV GOPROXY=https://goproxy.cn,direct
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://mirrors.aliyun.com/golang/go1.21.6.linux-amd64.tar.gz -o go.tar.gz && \
-    tar -C /usr/local -xzf go.tar.gz && \
-    rm go.tar.gz
-
-# 安装 Rust (使用 rsproxy 镜像)
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
     RUSTUP_DIST_SERVER=https://rsproxy.cn \
     RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable --profile minimal && \
-    chmod -R a+w /usr/local/cargo
-
-# 安装 Python 安全工具
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    pip install --no-cache-dir \
-    requests \
-    httpx \
-    aiohttp \
-    beautifulsoup4 \
-    lxml \
-    pycryptodome \
-    paramiko \
-    pyjwt \
-    python-jose \
-    sqlparse \
-    bandit \
-    safety
-
-# code-index-mcp 是 Python 包（非 npm 包）
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    pip install --no-cache-dir code-index-mcp
-
-# 安装 Opengrep CLI（仅使用官方安装脚本）
-ARG OPENGREP_VERSION=v1.15.1
-
 RUN set -eux; \
     unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; \
-    ARCH="$(uname -m)"; \
-    case "$ARCH" in \
-      x86_64|amd64) OG_DIST="opengrep_manylinux_x86" ;; \
-      aarch64|arm64) OG_DIST="opengrep_manylinux_aarch64" ;; \
-      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    ARCH_RAW="$(dpkg --print-architecture)"; \
+    case "${ARCH_RAW}" in \
+      amd64) GO_ARCH="amd64"; GITLEAKS_ARCH="x64"; OSV_ARCH="amd64"; OG_DIST="opengrep_manylinux_x86" ;; \
+      arm64) GO_ARCH="arm64"; GITLEAKS_ARCH="arm64"; OSV_ARCH="arm64"; OG_DIST="opengrep_manylinux_aarch64" ;; \
+      *) echo "unsupported arch: ${ARCH_RAW}" >&2; exit 1 ;; \
     esac; \
-    curl -fL "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-      -o /usr/local/bin/opengrep.real; \
+    download_with_fallback() { \
+      output="$1"; \
+      shift; \
+      for url in "$@"; do \
+        attempt=1; \
+        while [ "${attempt}" -le 2 ]; do \
+          if curl -fL --connect-timeout 8 --max-time 120 "${url}" -o "${output}.tmp"; then \
+            mv "${output}.tmp" "${output}"; \
+            return 0; \
+          fi; \
+          rm -f "${output}.tmp"; \
+          sleep $((attempt + 1)); \
+          attempt=$((attempt + 1)); \
+        done; \
+      done; \
+      return 1; \
+    }; \
+    GO_TARBALL="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"; \
+    download_with_fallback \
+      /tmp/go.tar.gz \
+      "https://mirrors.aliyun.com/golang/${GO_TARBALL}" \
+      "https://go.dev/dl/${GO_TARBALL}"; \
+    tar -C /usr/local -xzf /tmp/go.tar.gz; \
+    rm -f /tmp/go.tar.gz; \
+    curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable --profile minimal; \
+    chmod -R a+w /usr/local/cargo; \
+    download_with_fallback \
+      /usr/local/bin/opengrep.real \
+      "https://gh-proxy.com/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
+      "https://v6.gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
+      "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}"; \
     chmod +x /usr/local/bin/opengrep.real; \
-    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY="*"\nexport no_proxy="*"\nexec /usr/local/bin/opengrep.real "$@"\n' \
-      > /usr/local/bin/opengrep; \
+    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY="*"\nexport no_proxy="*"\nexec /usr/local/bin/opengrep.real "$@"\n' > /usr/local/bin/opengrep; \
     chmod +x /usr/local/bin/opengrep; \
-    opengrep --version
-
-
-# 安装 Gitleaks
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz -o gitleaks.tar.gz && \
-    tar -xzf gitleaks.tar.gz && \
-    mv gitleaks /usr/local/bin/ && \
-    rm gitleaks.tar.gz
-
-# 安装 TruffleHog
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
-
-# 安装 OSV-Scanner
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://github.com/google/osv-scanner/releases/download/v1.6.2/osv-scanner_1.6.2_linux_amd64 -o /usr/local/bin/osv-scanner && \
-    chmod +x /usr/local/bin/osv-scanner
-
-# 安装 PMD
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.0.0/pmd-dist-7.0.0-bin.zip -o /tmp/pmd.zip && \
-    unzip -q /tmp/pmd.zip -d /opt && \
-    ln -s /opt/pmd-bin-7.0.0/bin/pmd /usr/local/bin/pmd && \
-    rm /tmp/pmd.zip
-
-# 安装 PHPStan (PHP 静态分析工具) - 使用官方 PHAR 直装版（最稳定）
-RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
-    curl -L https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar -o /usr/local/bin/phpstan && \
-    chmod +x /usr/local/bin/phpstan
+    GITLEAKS_TARBALL="gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz"; \
+    download_with_fallback \
+      /tmp/gitleaks.tar.gz \
+      "https://gh-proxy.com/https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_TARBALL}" \
+      "https://v6.gh-proxy.org/https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_TARBALL}" \
+      "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_TARBALL}"; \
+    tar -xzf /tmp/gitleaks.tar.gz -C /tmp; \
+    mv /tmp/gitleaks /usr/local/bin/gitleaks; \
+    rm -f /tmp/gitleaks.tar.gz; \
+    download_with_fallback \
+      /usr/local/bin/osv-scanner \
+      "https://gh-proxy.com/https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_${OSV_SCANNER_VERSION}_linux_${OSV_ARCH}" \
+      "https://v6.gh-proxy.org/https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_${OSV_SCANNER_VERSION}_linux_${OSV_ARCH}" \
+      "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_${OSV_SCANNER_VERSION}_linux_${OSV_ARCH}"; \
+    chmod +x /usr/local/bin/osv-scanner; \
+    download_with_fallback \
+      /tmp/pmd.zip \
+      "https://gh-proxy.com/https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
+      "https://v6.gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
+      "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip"; \
+    unzip -q /tmp/pmd.zip -d /opt; \
+    ln -sf "/opt/pmd-bin-${PMD_VERSION}/bin/pmd" /usr/local/bin/pmd; \
+    rm -f /tmp/pmd.zip; \
+    curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin; \
+    download_with_fallback \
+      /usr/local/bin/phpstan \
+      "https://gh-proxy.com/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
+      "https://v6.gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
+      "https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"; \
+    chmod +x /usr/local/bin/phpstan; \
+    opengrep --version; \
+    gitleaks version; \
+    osv-scanner --version; \
+    pmd --version || true
 
 # 创建非 root 用户
 RUN groupadd -g 1000 sandbox && \

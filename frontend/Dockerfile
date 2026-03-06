@@ -3,7 +3,7 @@
 # =============================================
 
 ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:20-slim AS builder
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS builder
 
 WORKDIR /app
 
@@ -18,6 +18,7 @@ ENV no_proxy="*"
 ENV NO_PROXY="*"
 
 ARG FRONTEND_NPM_REGISTRY=https://registry.npmmirror.com
+ARG FRONTEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org
 ARG PNPM_VERSION=9.15.4
 ARG BUILD_WEAK_NETWORK=false
 ARG BUILD_ARCH=
@@ -25,11 +26,28 @@ ARG BUILD_ARCH=
 ENV PNPM_HOME=/pnpm
 ENV PATH=/pnpm:${PATH}
 
-# 使用 corepack 管理 pnpm，避免全局 npm install 带来的层抖动
-RUN corepack enable && \
-    corepack prepare pnpm@${PNPM_VERSION} --activate && \
-    npm config set registry ${FRONTEND_NPM_REGISTRY} && \
-    pnpm config set registry ${FRONTEND_NPM_REGISTRY} && \
+# 使用 corepack 管理 pnpm，镜像优先且支持官方回退
+RUN --mount=type=cache,id=deepaudit-frontend-npm,target=/root/.npm \
+    --mount=type=cache,id=deepaudit-frontend-corepack,target=/root/.cache/node/corepack \
+    set -eux; \
+    corepack enable; \
+    prepare_pnpm() { \
+      reg="$1"; \
+      attempt=1; \
+      npm config set registry "${reg}"; \
+      export COREPACK_NPM_REGISTRY="${reg}"; \
+      while [ "${attempt}" -le 2 ]; do \
+        if corepack prepare "pnpm@${PNPM_VERSION}" --activate; then \
+          return 0; \
+        fi; \
+        sleep $((attempt + 1)); \
+        attempt=$((attempt + 1)); \
+      done; \
+      return 1; \
+    }; \
+    prepare_pnpm "${FRONTEND_NPM_REGISTRY}" || prepare_pnpm "${FRONTEND_NPM_REGISTRY_FALLBACK}"; \
+    npm config set registry "${FRONTEND_NPM_REGISTRY}" && \
+    pnpm config set registry "${FRONTEND_NPM_REGISTRY}" && \
     pnpm config set store-dir /pnpm/store
 
 # 复制依赖文件
@@ -37,8 +55,9 @@ COPY package.json pnpm-lock.yaml ./
 
 # 利用 BuildKit 缓存 mount 复用 pnpm store，减少重复下载
 RUN --mount=type=cache,id=deepaudit-frontend-pnpm,target=/pnpm/store \
+    --mount=type=cache,id=deepaudit-frontend-npm,target=/root/.npm \
     set -eux; \
-    FALLBACK_REGISTRY="https://registry.npmjs.org"; \
+    FALLBACK_REGISTRY="${FRONTEND_NPM_REGISTRY_FALLBACK}"; \
     step_timeout=90; \
     pnpm config set network-timeout 120000; \
     pnpm config set fetch-retries 1; \

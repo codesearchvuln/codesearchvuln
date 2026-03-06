@@ -139,8 +139,10 @@ docker compose -f docker-compose.prod.cn.yml up -d
 - The backend mounts `/var/run/docker.sock` for sandbox execution. Review security boundaries before using in production.
 - The default dev flow uses local image builds from `docker-compose.yml`; `docker-compose.prod.yml` / `docker-compose.prod.cn.yml` are for prebuilt-image deployment.
 - `docker-compose.prod.yml` and `docker-compose.prod.cn.yml` use the Nanjing University GHCR mirror (`ghcr.nju.edu.cn/lintsinghua/*`) for faster pulls in CN regions. Replace with your own images/registry for production deployments if needed.
-- The dev build flow defaults to `./scripts/compose-up-with-fallback.sh`: 3 retries with CN mirrors first, then 3 retries with official registries, then fail fast.
+- The dev build flow defaults to `./scripts/compose-up-with-fallback.sh`: it probes candidate mirrors first, ranks by latency, then retries build phases in ranked order (instead of fixed CN->official phases).
+- The script enables BuildKit by default (`DOCKER_BUILDKIT=1`, `COMPOSE_DOCKER_CLI_BUILD=1`), and you can override both.
 - You can override mirror endpoints with `DOCKERHUB_LIBRARY_MIRROR` and `SANDBOX_IMAGE`.
+- You can extend probe pools via comma-separated `*_CANDIDATES`, or explicitly set `*_PRIMARY` / `*_FALLBACK` to skip probing for that category.
 - Backend Node/pnpm build now supports mirror-first + official fallback; override with `BACKEND_NPM_REGISTRY_PRIMARY`, `BACKEND_NPM_REGISTRY_FALLBACK`, and `BACKEND_PNPM_VERSION`.
 - Local Compose now disables pnpm optional dependencies by default (`BACKEND_PNPM_INSTALL_OPTIONAL=0`) to avoid long `node-llama-cpp` retry loops; set it to `1` if you require full optional dependencies.
 - Local Compose now skips CJK font installation by default (`BACKEND_INSTALL_CJK_FONTS=0`) to speed up builds; set it to `1` if you need Chinese font rendering.
