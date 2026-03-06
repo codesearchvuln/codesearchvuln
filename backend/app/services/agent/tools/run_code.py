@@ -214,11 +214,13 @@ for payload in payloads:
             return s.replace("'", "'\"'\"'")
 
         if language == "python":
+            # 在 /tmp 执行，避免工作目录权限问题（__pycache__ 写入等）
             escaped = escape_for_shell(code)
-            return f"python3 -c '{escaped}'"
+            return f"cd /tmp && python3 -c '{escaped}'"
 
         elif language == "php":
             # PHP: php -r 不需要 <?php 标签
+            # 在 /tmp 执行，避免工作目录权限问题（session、临时文件等）
             clean_code = code.strip()
             if clean_code.startswith("<?php"):
                 clean_code = clean_code[5:].strip()
@@ -227,33 +229,38 @@ for payload in payloads:
             if clean_code.endswith("?>"):
                 clean_code = clean_code[:-2].strip()
             escaped = escape_for_shell(clean_code)
-            return f"php -r '{escaped}'"
+            return f"cd /tmp && php -r '{escaped}'"
 
         elif language in ["javascript", "js", "node"]:
+            # 在 /tmp 执行，避免工作目录权限问题（模块缓存等）
             escaped = escape_for_shell(code)
-            return f"node -e '{escaped}'"
+            return f"cd /tmp && node -e '{escaped}'"
 
         elif language == "ruby":
+            # 在 /tmp 执行，避免工作目录权限问题（字节码缓存等）
             escaped = escape_for_shell(code)
-            return f"ruby -e '{escaped}'"
+            return f"cd /tmp && ruby -e '{escaped}'"
 
         elif language == "bash":
+            # 在 /tmp 执行，避免工作目录权限问题（用户代码可能创建文件）
             escaped = escape_for_shell(code)
-            return f"bash -c '{escaped}'"
+            return f"cd /tmp && bash -c '{escaped}'"
 
         elif language == "go":
             # Go 需要完整的 package main
+            # 切换到 /tmp 目录执行，避免工作目录权限问题
             escaped = escape_for_shell(code).replace("\\", "\\\\")
-            return f"echo '{escaped}' > /tmp/main.go && go run /tmp/main.go"
+            return f"cd /tmp && echo '{escaped}' > main.go && go run main.go"
 
         elif language == "java":
             # Java 需要完整的 class
+            # 切换到 /tmp 目录执行，避免工作目录权限问题
             escaped = escape_for_shell(code).replace("\\", "\\\\")
             # 提取类名
             import re
             class_match = re.search(r'public\s+class\s+(\w+)', code)
             class_name = class_match.group(1) if class_match else "Test"
-            return f"echo '{escaped}' > /tmp/{class_name}.java && javac /tmp/{class_name}.java && java -cp /tmp {class_name}"
+            return f"cd /tmp && echo '{escaped}' > {class_name}.java && javac {class_name}.java && java {class_name}"
 
         return None
 
