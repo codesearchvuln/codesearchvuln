@@ -120,6 +120,33 @@ class AgentTool(ABC):
         
         try:
             logger.debug(f"Tool '{self.name}' executing with args: {filtered_kwargs}")
+            
+            # 🔥 修复：如果定义了 args_schema，先通过 Pydantic 验证输入
+            # 这样可以触发 field_validator，将字典转换为 Pydantic 模型对象
+            if self.args_schema:
+                try:
+                    validated_input = self.args_schema(**filtered_kwargs)
+                    # 从验证后的模型提取字段值，保持 Pydantic 对象不变
+                    # 这样嵌套的模型对象（如 AgentFindingModel）不会被转换回字典
+                    filtered_kwargs = {
+                        field_name: getattr(validated_input, field_name)
+                        for field_name in validated_input.model_fields.keys()
+                    }
+                except ValidationError as ve:
+                    logger.warning(f"Tool '{self.name}' input validation failed: {ve}")
+                    expected = self._build_expected_args()
+                    result = ToolResult(
+                        success=False,
+                        error="参数校验失败",
+                        data={
+                            "message": str(ve),
+                            "expected_args": expected,
+                        },
+                    )
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    result.duration_ms = duration_ms
+                    return result
+            
             result = await self._execute(**filtered_kwargs)
             
         except ValidationError as e:
