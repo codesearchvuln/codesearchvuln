@@ -38,6 +38,38 @@ interface DashboardChartsPanelsProps {
 const formatTick = (value: number | string) =>
 	Number(value || 0).toLocaleString();
 
+const CHART_MARGIN = { top: 8, right: 14, left: 10, bottom: 8 };
+const AXIS_TICK_STYLE = {
+	fontSize: 14,
+	fill: "hsl(var(--muted-foreground))",
+	fontWeight: 500,
+};
+const AXIS_LINE_STYLE = { stroke: "hsl(var(--border) / 0.65)" };
+const AXIS_TICK_LINE_STYLE = { stroke: "hsl(var(--border) / 0.55)" };
+const GRID_STROKE = "hsl(var(--border) / 0.35)";
+const LEGEND_STYLE = {
+	fontSize: 14,
+	color: "hsl(var(--muted-foreground))",
+};
+const TOOLTIP_STYLE = {
+	fontSize: 13,
+	color: "hsl(var(--foreground))",
+	borderColor: "hsl(var(--border) / 0.7)",
+	backgroundColor: "hsl(var(--background) / 0.96)",
+};
+const CHART_COLORS = {
+	staticRuns: "#38bdf8",
+	intelligentRuns: "#34d399",
+	hybridRuns: "#a78bfa",
+	totalVulns: "#fbbf24",
+	highConfidence: "#fbbf24",
+	mediumConfidence: "#38bdf8",
+	cweTotal: "#a78bfa",
+	tooltipStatic: "#7dd3fc",
+	tooltipIntelligent: "#6ee7b7",
+	tooltipHybrid: "#c4b5fd",
+};
+
 export default function DashboardChartsPanels({
 	rulesByLanguageData,
 	rulesByCweData,
@@ -104,27 +136,27 @@ export default function DashboardChartsPanels({
 		if (!row) return null;
 
 		return (
-			<div className="rounded border border-border bg-background/95 px-3 py-2 text-xs shadow-xl">
-				<p className="font-semibold text-foreground">{row.projectName}</p>
-				<p className="text-muted-foreground mt-1">
-					{translate("dashboard.totalVulns")}：
-					{formatTick(row.totalVulns)}
-				</p>
-				<div className="mt-1 space-y-0.5">
-					<p className="text-sky-300">
-						{translate("dashboard.staticScan")}：
-						{formatTick(row.staticVulns)}
+				<div className="rounded border border-border bg-background/95 px-3 py-2 text-xs shadow-xl">
+					<p className="font-semibold text-foreground">{row.projectName}</p>
+					<p className="text-muted-foreground mt-1">
+						{translate("dashboard.totalVulns")}：
+						{formatTick(row.totalVulns)}
 					</p>
-					<p className="text-emerald-300">
-						{translate("dashboard.intelligentScan")}：
-						{formatTick(row.intelligentVulns)}
-					</p>
-					<p className="text-violet-300">
-						{translate("dashboard.hybridScan")}：
-						{formatTick(row.hybridVulns)}
-					</p>
+					<div className="mt-1 space-y-0.5">
+						<p style={{ color: CHART_COLORS.tooltipStatic }}>
+							{translate("dashboard.staticScan")}：
+							{formatTick(row.staticVulns)}
+						</p>
+						<p style={{ color: CHART_COLORS.tooltipIntelligent }}>
+							{translate("dashboard.intelligentScan")}：
+							{formatTick(row.intelligentVulns)}
+						</p>
+						<p style={{ color: CHART_COLORS.tooltipHybrid }}>
+							{translate("dashboard.hybridScan")}：
+							{formatTick(row.hybridVulns)}
+						</p>
+					</div>
 				</div>
-			</div>
 		);
 	};
 
@@ -162,36 +194,41 @@ export default function DashboardChartsPanels({
 								<BarChart
 									data={projectScanRunsData}
 									layout="vertical"
-									margin={{ top: 6, right: 6, left: 4, bottom: 6 }}
+									margin={CHART_MARGIN}
 									barCategoryGap={16}
 									barGap={6}
 									barSize={18}
 								>
-									<CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+									<CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
 									<XAxis
 										type="number"
 										domain={[0, projectScanRunsChartMax]}
+										allowDecimals={false}
 										tickFormatter={formatTick}
-										tick={{ fontSize: 13 }}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<YAxis
 										type="category"
 										dataKey="projectName"
-										width={108}
-										tick={{ fontSize: 13 }}
+										width={120}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<Tooltip
 										formatter={(value: number | string, name: string) => [
 											Number(value || 0).toLocaleString(),
 											name,
 										]}
-										contentStyle={{ fontSize: 13 }}
+										contentStyle={TOOLTIP_STYLE}
 									/>
-									<Legend wrapperStyle={{ fontSize: 13 }} />
+									<Legend wrapperStyle={LEGEND_STYLE} />
 									<Bar
 										dataKey="staticRuns"
 										stackId="runs"
-										fill="#38bdf8"
+										fill={CHART_COLORS.staticRuns}
 										name={translate("dashboard.staticScan")}
 										radius={[2, 2, 2, 2]}
 										minPointSize={6}
@@ -199,7 +236,7 @@ export default function DashboardChartsPanels({
 									<Bar
 										dataKey="intelligentRuns"
 										stackId="runs"
-										fill="#34d399"
+										fill={CHART_COLORS.intelligentRuns}
 										name={translate("dashboard.intelligentScan")}
 										radius={[2, 2, 2, 2]}
 										minPointSize={6}
@@ -207,7 +244,7 @@ export default function DashboardChartsPanels({
 									<Bar
 										dataKey="hybridRuns"
 										stackId="runs"
-										fill="#a78bfa"
+										fill={CHART_COLORS.hybridRuns}
 										name={translate("dashboard.hybridScan")}
 										radius={[2, 2, 2, 2]}
 										minPointSize={6}
@@ -249,28 +286,33 @@ export default function DashboardChartsPanels({
 								<BarChart
 									data={projectVulnsData}
 									layout="vertical"
-									margin={{ top: 6, right: 6, left: 4, bottom: 6 }}
+									margin={CHART_MARGIN}
 									barCategoryGap={16}
 									barGap={6}
 									barSize={18}
 								>
-									<CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+									<CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
 									<XAxis
 										type="number"
 										domain={[0, projectVulnsChartMax]}
+										allowDecimals={false}
 										tickFormatter={formatTick}
-										tick={{ fontSize: 13 }}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<YAxis
 										type="category"
 										dataKey="projectName"
-										width={108}
-										tick={{ fontSize: 13 }}
+										width={120}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<Tooltip content={renderProjectVulnsTooltip} />
 									<Bar
 										dataKey="totalVulns"
-										fill="#f59e0b"
+										fill={CHART_COLORS.totalVulns}
 										name={translate("dashboard.totalVulns")}
 										radius={[2, 2, 2, 2]}
 										minPointSize={6}
@@ -312,36 +354,40 @@ export default function DashboardChartsPanels({
 								<BarChart
 									data={rulesByLanguageData}
 									layout="vertical"
-									margin={{ top: 6, right: 6, left: 4, bottom: 6 }}
+									margin={CHART_MARGIN}
 									barCategoryGap={16}
 									barGap={6}
 									barSize={18}
 								>
-									<CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+									<CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
 									<XAxis
 										type="number"
 										domain={[0, chartMax]}
 										tickFormatter={formatTick}
-										tick={{ fontSize: 13 }}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<YAxis
 										type="category"
 										dataKey="language"
-										width={96}
-										tick={{ fontSize: 13 }}
+										width={104}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<Tooltip
 										formatter={(value: number | string, name: string) => [
 											Number(value || 0).toLocaleString(),
 											name,
 										]}
-										contentStyle={{ fontSize: 13 }}
+										contentStyle={TOOLTIP_STYLE}
 									/>
-									<Legend wrapperStyle={{ fontSize: 13 }} />
+									<Legend wrapperStyle={LEGEND_STYLE} />
 									<Bar
 										dataKey="highCount"
 										stackId="confidence"
-										fill="#22c55e"
+										fill={CHART_COLORS.highConfidence}
 										name="高置信度"
 										radius={[2, 2, 2, 2]}
 										minPointSize={6}
@@ -349,7 +395,7 @@ export default function DashboardChartsPanels({
 									<Bar
 										stackId="confidence"
 										dataKey="mediumCount"
-										fill="#facc15"
+										fill={CHART_COLORS.mediumConfidence}
 										name="中置信度"
 										radius={[2, 2, 2, 2]}
 										minPointSize={6}
@@ -389,34 +435,38 @@ export default function DashboardChartsPanels({
 								<BarChart
 									data={rulesByCweData}
 									layout="vertical"
-									margin={{ top: 6, right: 6, left: 4, bottom: 6 }}
+									margin={CHART_MARGIN}
 									barCategoryGap={16}
 									barGap={6}
 									barSize={18}
 								>
-									<CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+									<CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
 									<XAxis
 										type="number"
 										domain={[0, cweChartMax]}
 										tickFormatter={formatTick}
-										tick={{ fontSize: 13 }}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<YAxis
 										type="category"
 										dataKey="cwe"
-										width={96}
-										tick={{ fontSize: 13 }}
+										width={104}
+										tick={AXIS_TICK_STYLE}
+										axisLine={AXIS_LINE_STYLE}
+										tickLine={AXIS_TICK_LINE_STYLE}
 									/>
 									<Tooltip
 										formatter={(value: number | string, name: string) => [
 											Number(value || 0).toLocaleString(),
 											name,
 										]}
-										contentStyle={{ fontSize: 13 }}
+										contentStyle={TOOLTIP_STYLE}
 									/>
 									<Bar
 										dataKey="total"
-										fill="#a78bfa"
+										fill={CHART_COLORS.cweTotal}
 										name="规则数量"
 										radius={[2, 2, 2, 2]}
 										minPointSize={6}
