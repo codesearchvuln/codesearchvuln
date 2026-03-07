@@ -6,7 +6,7 @@
 用于构建 Fuzzing Harness 时获取目标函数代码。
 
 输入：
-- file_path: 源文件路径
+- file_path: 源文件路径 (相对于项目根目录)
 - function_name: 要提取的函数名
 - include_imports: 是否包含文件开头的 import 语句（默认 true）
 

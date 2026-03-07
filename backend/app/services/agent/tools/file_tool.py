@@ -750,7 +750,7 @@ class FileSearchTool(AgentTool):
 输入:
 - keyword: 搜索关键字或正则表达式
 - file_pattern: 可选，文件名模式（如 *.py）
-- directory: 可选，搜索目录 (使用相对路径)
+- directory: 可选，搜索目录 (相对于项目根目录)
 - case_sensitive: 是否区分大小写
 - is_regex: 是否使用正则表达式
 
@@ -921,7 +921,7 @@ class ListFilesTool(AgentTool):
 - 浏览目录内容
 
 输入:
-- directory: 目录路径
+- directory: 目录路径 (相对于项目根目录)
 - pattern: 可选，文件名模式
 - recursive: 是否递归
 - max_files: 最大文件数"""

@@ -9,7 +9,7 @@
 - 浏览目录内容
 
 输入:
-- directory: 目录路径
+- directory: 目录路径 (相对于项目根目录)
 - pattern: 可选，文件名模式
 - recursive: 是否递归
 - max_files: 最大文件数
