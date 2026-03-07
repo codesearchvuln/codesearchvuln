@@ -15,13 +15,16 @@ import {
 	formatCreatedAt,
 	getActivityDurationLabel,
 	getRelativeTime,
-	getTaskKindText,
 	getTaskProgressBarClassName,
 	getTaskProgressPercent,
 	getTaskStatusBadgeClassName,
 	getTaskStatusText,
 	type TaskActivityItem,
 } from "@/features/tasks/services/taskActivities";
+import {
+	TASK_ACTIVITIES_TABLE_COLSPAN,
+	TASK_ACTIVITIES_TABLE_HEADERS,
+} from "@/features/tasks/components/taskActivitiesTableConfig";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 interface TaskActivitiesListTableProps {
@@ -72,27 +75,26 @@ export default function TaskActivitiesListTable({
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-3">
 			<div className="min-h-0 flex-1 [&_[data-slot=table-container]]:h-full">
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead className="w-[80px] text-center">序号</TableHead>
-							<TableHead className="min-w-[160px]">扫描项目</TableHead>
-							<TableHead className="min-w-[120px]">扫描任务</TableHead>
-							<TableHead className="min-w-[180px]">创建时间</TableHead>
-							<TableHead className="w-[120px]">用时</TableHead>
-							<TableHead className="min-w-[220px]">扫描进度</TableHead>
-							<TableHead className="min-w-[140px]">扫描状态</TableHead>
-							<TableHead className="min-w-[160px]">缺陷统计</TableHead>
-							<TableHead className="w-[120px]">操作</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{loading && activities.length === 0 ? (
+					<Table>
+						<TableHeader>
 							<TableRow>
-								<TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-									加载中...
-								</TableCell>
+								<TableHead className="w-[80px] text-center">{TASK_ACTIVITIES_TABLE_HEADERS[0]}</TableHead>
+								<TableHead className="min-w-[160px]">{TASK_ACTIVITIES_TABLE_HEADERS[1]}</TableHead>
+								<TableHead className="min-w-[180px]">{TASK_ACTIVITIES_TABLE_HEADERS[2]}</TableHead>
+								<TableHead className="w-[120px]">{TASK_ACTIVITIES_TABLE_HEADERS[3]}</TableHead>
+								<TableHead className="min-w-[220px]">{TASK_ACTIVITIES_TABLE_HEADERS[4]}</TableHead>
+								<TableHead className="min-w-[140px]">{TASK_ACTIVITIES_TABLE_HEADERS[5]}</TableHead>
+								<TableHead className="min-w-[160px]">{TASK_ACTIVITIES_TABLE_HEADERS[6]}</TableHead>
+								<TableHead className="w-[120px]">{TASK_ACTIVITIES_TABLE_HEADERS[7]}</TableHead>
 							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{loading && activities.length === 0 ? (
+								<TableRow>
+									<TableCell colSpan={TASK_ACTIVITIES_TABLE_COLSPAN} className="text-center text-muted-foreground py-8">
+										加载中...
+									</TableCell>
+								</TableRow>
 						) : pagedActivities.length > 0 ? (
 							pagedActivities.map((activity, index) => {
 								const progress = getTaskProgressPercent(activity, nowMs);
@@ -108,9 +110,6 @@ export default function TaskActivitiesListTable({
 										</TableCell>
 										<TableCell className="font-medium text-foreground">
 											{activity.projectName}
-										</TableCell>
-										<TableCell className="text-muted-foreground">
-											{getTaskKindText(activity)}
 										</TableCell>
 										<TableCell className="text-sm text-muted-foreground">
 											<div>{formatCreatedAt(activity.createdAt)}</div>
@@ -154,7 +153,7 @@ export default function TaskActivitiesListTable({
 							})
 						) : (
 							<TableRow>
-								<TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+								<TableCell colSpan={TASK_ACTIVITIES_TABLE_COLSPAN} className="text-center text-muted-foreground py-8">
 									{emptyText}
 								</TableCell>
 							</TableRow>
