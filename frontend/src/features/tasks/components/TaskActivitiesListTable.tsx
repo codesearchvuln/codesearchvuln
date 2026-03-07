@@ -75,45 +75,26 @@ export default function TaskActivitiesListTable({
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-3">
 			<div className="min-h-0 flex-1 [&_[data-slot=table-container]]:h-full">
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead className="w-[80px] text-center">
-								{TASK_ACTIVITIES_TABLE_HEADERS[0]}
-							</TableHead>
-							<TableHead className="min-w-[160px]">
-								{TASK_ACTIVITIES_TABLE_HEADERS[1]}
-							</TableHead>
-							<TableHead className="min-w-[180px]">
-								{TASK_ACTIVITIES_TABLE_HEADERS[2]}
-							</TableHead>
-							<TableHead className="w-[120px]">
-								{TASK_ACTIVITIES_TABLE_HEADERS[3]}
-							</TableHead>
-							<TableHead className="min-w-[220px]">
-								{TASK_ACTIVITIES_TABLE_HEADERS[4]}
-							</TableHead>
-							<TableHead className="min-w-[140px]">
-								{TASK_ACTIVITIES_TABLE_HEADERS[5]}
-							</TableHead>
-							<TableHead className="min-w-[160px]">
-								{TASK_ACTIVITIES_TABLE_HEADERS[6]}
-							</TableHead>
-							<TableHead className="w-[120px]">
-								{TASK_ACTIVITIES_TABLE_HEADERS[7]}
-							</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{loading && activities.length === 0 ? (
+					<Table>
+						<TableHeader>
 							<TableRow>
-								<TableCell
-									colSpan={TASK_ACTIVITIES_TABLE_COLSPAN}
-									className="text-center text-muted-foreground py-8"
-								>
-									加载中...
-								</TableCell>
+								<TableHead className="w-[80px] text-center">{TASK_ACTIVITIES_TABLE_HEADERS[0]}</TableHead>
+								<TableHead className="min-w-[160px]">{TASK_ACTIVITIES_TABLE_HEADERS[1]}</TableHead>
+								<TableHead className="min-w-[180px]">{TASK_ACTIVITIES_TABLE_HEADERS[2]}</TableHead>
+								<TableHead className="w-[120px]">{TASK_ACTIVITIES_TABLE_HEADERS[3]}</TableHead>
+								<TableHead className="min-w-[220px]">{TASK_ACTIVITIES_TABLE_HEADERS[4]}</TableHead>
+								<TableHead className="min-w-[140px]">{TASK_ACTIVITIES_TABLE_HEADERS[5]}</TableHead>
+								<TableHead className="min-w-[160px]">{TASK_ACTIVITIES_TABLE_HEADERS[6]}</TableHead>
+								<TableHead className="w-[120px]">{TASK_ACTIVITIES_TABLE_HEADERS[7]}</TableHead>
 							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{loading && activities.length === 0 ? (
+								<TableRow>
+									<TableCell colSpan={TASK_ACTIVITIES_TABLE_COLSPAN} className="text-center text-muted-foreground py-8">
+										加载中...
+									</TableCell>
+								</TableRow>
 						) : pagedActivities.length > 0 ? (
 							pagedActivities.map((activity, index) => {
 								const progress = getTaskProgressPercent(activity, nowMs);
@@ -132,20 +113,14 @@ export default function TaskActivitiesListTable({
 										</TableCell>
 										<TableCell className="text-sm text-muted-foreground">
 											<div>{formatCreatedAt(activity.createdAt)}</div>
-											<div className="text-xs">
-												{getRelativeTime(activity.createdAt, nowMs)}
-											</div>
+											<div className="text-xs">{getRelativeTime(activity.createdAt, nowMs)}</div>
 										</TableCell>
-										<TableCell className="font-mono text-foreground">
-											{durationText}
-										</TableCell>
+										<TableCell className="font-mono text-foreground">{durationText}</TableCell>
 										<TableCell>
 											<div className="space-y-1 min-w-[210px]">
 												<div className="flex items-center justify-between text-xs text-muted-foreground">
 													<span>进度</span>
-													<span className="font-medium text-foreground">
-														{progress}%
-													</span>
+													<span className="font-medium text-foreground">{progress}%</span>
 												</div>
 												<div className="h-2 rounded bg-muted/50 overflow-hidden">
 													<div
@@ -156,9 +131,7 @@ export default function TaskActivitiesListTable({
 											</div>
 										</TableCell>
 										<TableCell>
-											<Badge
-												className={getTaskStatusBadgeClassName(activity.status)}
-											>
+											<Badge className={getTaskStatusBadgeClassName(activity.status)}>
 												{getTaskStatusText(activity.status)}
 											</Badge>
 										</TableCell>
@@ -180,10 +153,7 @@ export default function TaskActivitiesListTable({
 							})
 						) : (
 							<TableRow>
-								<TableCell
-									colSpan={TASK_ACTIVITIES_TABLE_COLSPAN}
-									className="text-center text-muted-foreground py-8"
-								>
+								<TableCell colSpan={TASK_ACTIVITIES_TABLE_COLSPAN} className="text-center text-muted-foreground py-8">
 									{emptyText}
 								</TableCell>
 							</TableRow>
@@ -193,9 +163,7 @@ export default function TaskActivitiesListTable({
 			</div>
 
 			<div className="mt-auto flex flex-wrap items-center justify-between gap-3">
-				<div className="text-xs text-muted-foreground">
-					共 {activities.length} 条
-				</div>
+				<div className="text-xs text-muted-foreground">共 {activities.length} 条</div>
 				<div className="flex items-center gap-2">
 					<Button
 						variant="outline"
