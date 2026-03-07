@@ -8961,7 +8961,7 @@ async def get_vulnerability_queue_status(
     
     # 检查权限
     project = await db.get(Project, task.project_id)
-    if not project or project.user_id != current_user.id:
+    if not project or project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     
     # 复用运行中的队列服务，避免新实例导致状态丢失
@@ -9000,7 +9000,7 @@ async def peek_vulnerability_queue(
     
     # 检查权限
     project = await db.get(Project, task.project_id)
-    if not project or project.user_id != current_user.id:
+    if not project or project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     
     # 复用运行中的队列服务，避免新实例导致状态丢失
@@ -9039,7 +9039,7 @@ async def clear_vulnerability_queue(
     
     # 检查权限
     project = await db.get(Project, task.project_id)
-    if not project or project.user_id != current_user.id:
+    if not project or project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     
     # 复用运行中的队列服务，避免新实例导致状态丢失
@@ -9070,7 +9070,7 @@ async def get_recon_risk_queue_status(
         raise HTTPException(status_code=404, detail="Task not found")
 
     project = await db.get(Project, task.project_id)
-    if not project or project.user_id != current_user.id:
+    if not project or project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     queue_service = _running_recon_queue_services.get(task_id)
@@ -9100,7 +9100,7 @@ async def peek_recon_risk_queue(
         raise HTTPException(status_code=404, detail="Task not found")
 
     project = await db.get(Project, task.project_id)
-    if not project or project.user_id != current_user.id:
+    if not project or project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     queue_service = _running_recon_queue_services.get(task_id)
@@ -9130,7 +9130,7 @@ async def clear_recon_risk_queue(
         raise HTTPException(status_code=404, detail="Task not found")
 
     project = await db.get(Project, task.project_id)
-    if not project or project.user_id != current_user.id:
+    if not project or project.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     queue_service = _running_recon_queue_services.get(task_id)
@@ -9143,4 +9143,111 @@ async def clear_recon_risk_queue(
         "success": success,
         "task_id": task_id,
         "message": "Recon 队列已清空" if success else "清空 Recon 队列失败",
+    }
+
+
+# ==================== 🔥 综合进度接口 ====================
+
+@router.get("/{task_id}/progress", response_model=Dict[str, Any])
+async def get_task_progress(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """
+    获取任务综合进度信息（整合三类信息）
+    
+    返回：
+    - task: 任务基本信息和状态
+    - recon_queue: Recon 队列统计
+    - analysis_queue: Analysis 候选漏洞队列统计
+    - verification: 验证后漏洞统计和分布
+    """
+    from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
+    from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
+
+    # 获取任务信息
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    project = await db.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # 权限检查（仅检查项目存在，与其他接口保持一致）
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 1. Recon 队列状态
+    recon_queue_service = _running_recon_queue_services.get(task_id)
+    if recon_queue_service is None:
+        recon_queue_service = InMemoryReconRiskQueue()
+    recon_stats = recon_queue_service.stats(task_id)
+
+    # 2. Analysis 队列状态
+    vuln_queue_service = _running_queue_services.get(task_id)
+    if vuln_queue_service is None:
+        vuln_queue_service = InMemoryVulnerabilityQueue()
+    analysis_stats = vuln_queue_service.get_queue_stats(task_id)
+
+    # 3. Verification 统计（从数据库）
+    findings_query = select(AgentFinding).where(AgentFinding.task_id == task_id)
+    findings_result = await db.execute(findings_query)
+    all_findings = findings_result.scalars().all()
+
+    verified_findings = [f for f in all_findings if f.is_verified]
+    false_positives = [f for f in all_findings if f.status == FindingStatus.FALSE_POSITIVE]
+    
+    # 按严重程度分布
+    severity_distribution = {
+        "critical": sum(1 for f in all_findings if f.severity == VulnerabilitySeverity.CRITICAL),
+        "high": sum(1 for f in all_findings if f.severity == VulnerabilitySeverity.HIGH),
+        "medium": sum(1 for f in all_findings if f.severity == VulnerabilitySeverity.MEDIUM),
+        "low": sum(1 for f in all_findings if f.severity == VulnerabilitySeverity.LOW),
+        "info": sum(1 for f in all_findings if f.severity == VulnerabilitySeverity.INFO),
+    }
+
+    # 按漏洞类型分布
+    vulnerability_types: Dict[str, int] = {}
+    for finding in all_findings:
+        vuln_type = finding.vulnerability_type or "unknown"
+        vulnerability_types[vuln_type] = vulnerability_types.get(vuln_type, 0) + 1
+
+    # 4. 任务整体进度
+    task_info = {
+        "task_id": task.id,
+        "project_id": task.project_id,
+        "status": task.status,
+        "current_phase": task.current_phase,
+        "current_step": task.current_step,
+        "progress_percentage": task.progress_percentage,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "error_message": task.error_message,
+    }
+
+    return {
+        "success": True,
+        "task": task_info,
+        "recon_queue": {
+            "current_size": recon_stats.get("current_size", 0),
+            "total_enqueued": recon_stats.get("total_enqueued", 0),
+            "total_dequeued": recon_stats.get("total_dequeued", 0),
+            "total_deduplicated": recon_stats.get("total_deduplicated", 0),
+        },
+        "analysis_queue": {
+            "current_size": analysis_stats.get("current_size", 0),
+            "total_enqueued": analysis_stats.get("total_enqueued", 0),
+            "total_dequeued": analysis_stats.get("total_dequeued", 0),
+            "total_deduplicated": analysis_stats.get("total_deduplicated", 0),
+        },
+        "verification": {
+            "total_findings": len(all_findings),
+            "verified_count": len(verified_findings),
+            "false_positive_count": len(false_positives),
+            "severity_distribution": severity_distribution,
+            "vulnerability_types": vulnerability_types,
+        },
     }
