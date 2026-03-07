@@ -5742,6 +5742,36 @@ async def _save_findings(
                 f"title={str(payload.get('title', 'N/A'))[:80]}"
             )
 
+    def _infer_function_name_for_save(payload: Dict[str, Any], normalized_line_start: Optional[int]) -> str:
+        direct_name = str(payload.get("function_name") or "").strip()
+        if direct_name:
+            return direct_name
+
+        title_text = str(payload.get("title") or "").strip()
+        if title_text:
+            patterns = [
+                r"中([A-Za-z_][A-Za-z0-9_]*)函数",
+                r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+            ]
+            for pattern in patterns:
+                matched = re.search(pattern, title_text)
+                if matched:
+                    candidate = str(matched.group(1) or "").strip()
+                    if candidate:
+                        return candidate
+
+        verification_payload = payload.get("verification_result")
+        if isinstance(verification_payload, dict):
+            target_payload = verification_payload.get("reachability_target")
+            if isinstance(target_payload, dict):
+                candidate = str(target_payload.get("function") or "").strip()
+                if candidate:
+                    return candidate
+
+        if normalized_line_start is not None:
+            return f"<function_at_line_{normalized_line_start}>"
+        return "<function_not_localized>"
+
     for finding in findings:
         if not isinstance(finding, dict):
             logger.debug(f"[SaveFindings] Skipping non-dict finding: {type(finding)}")
@@ -5942,7 +5972,7 @@ async def _save_findings(
                 snippet_text = "\n".join(file_lines[line_start - 1 : line_end]).strip()
 
             # 7.5) 获取函数定位信息，但允许定位失败时仍然保存（降级模式）
-            reachability_target_function = None
+            reachability_target_function = _infer_function_name_for_save(finding, line_start)
             reachability_target_start_line = None
             reachability_target_end_line = None
             locator_language = None
@@ -5975,18 +6005,13 @@ async def _save_findings(
                     logger.debug(f"[SaveFindings] Function locator error: {loc_exc}")
                     localization_status = "failed"
             
-            # 降级策略：如果函数定位失败但文件有效，仍然允许保存
+            # 降级策略：函数定位失败时仍允许保存，且确保 function_name 始终非空
             if not reachability_target_function:
-                if localization_status == "failed":
-                    logger.debug(
-                        f"[SaveFindings] Function locator failed for {stored_file_path}:{line_start}, "
-                        f"but file is readable, allowing save with localization_status=failed"
-                    )
-                    # 使用原始发现中的 function_name 或占位符
-                    reachability_target_function = finding.get("function_name") or "<function_not_localized>"
-                else:
-                    mark_filtered("missing_enclosing_function", finding)
-                    continue
+                reachability_target_function = _infer_function_name_for_save(finding, line_start)
+                logger.debug(
+                    f"[SaveFindings] Fallback function_name for {stored_file_path}:{line_start} -> "
+                    f"{reachability_target_function} (localization_status={localization_status})"
+                )
 
             # 8) title/description/suggestion
             title = finding.get("title")

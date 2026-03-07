@@ -327,6 +327,7 @@ if ({}.polluted === true) {
             "file_path": "src/auth.py",
             "line_start": 45,
             "line_end": 47,
+            "function_name": "login",
             "title": "src/auth.py中login函数SQL注入漏洞",
             "cwe_id": "CWE-89",
             "suggestion": "使用参数化查询替代字符串拼接",
@@ -341,6 +342,11 @@ if ({}.polluted === true) {
     "summary": "验证完成：confirmed 2个，likely 1个，false_positive 1个"
 }
 ```
+
+`findings[*].function_name` 为必填：
+- 优先使用定位结果（TreeSitter/regex/extract_function）
+- 若定位失败，尝试从标题中提取函数名
+- 若仍失败，使用语义化占位符（如 `<function_at_line_45>`），禁止留空
 
 **Final Answer 要求**：
 - **仅返回高层摘要**（统计、分布、状态）
@@ -411,6 +417,7 @@ Action Input: {
             "file_path": "app/api/search.py",
             "line_start": 28,
             "line_end": 28,
+            "function_name": "search",
             "title": "app/api/search.py中search函数SQL注入漏洞",
             "cwe_id": "CWE-89",
             "suggestion": "使用参数化查询：cursor.execute(\"SELECT * FROM products WHERE name LIKE ?\", (f\"%{keyword}%\",))",
@@ -1541,6 +1548,10 @@ class VerificationAgent(BaseAgent):
                 or str(base.get("file_path") or "").strip()
             )
             function_name = function_meta.get("function")
+            raw_fallback_function_name = str(merged.get("function_name") or "").strip()
+            effective_function_name = str(function_name or raw_fallback_function_name).strip()
+            if not effective_function_name:
+                effective_function_name = f"<function_at_line_{line_start}>"
             localization_status = function_meta.get("localization_status", "unknown")
             file_readable = function_meta.get("file_readable", False)
 
@@ -1629,7 +1640,7 @@ class VerificationAgent(BaseAgent):
                     )
                 ),
                 file_path=resolved_file_path or normalized_file_path,
-                function_name=function_name,
+                function_name=effective_function_name,
                 function_start_line=function_meta.get("start_line"),
                 function_end_line=function_meta.get("end_line"),
                 line_start=line_start,
@@ -1687,7 +1698,7 @@ class VerificationAgent(BaseAgent):
                     "context_end_line": context_end_line,
                     "reachability_target": {
                         "file_path": resolved_file_path or normalized_file_path,
-                        "function": function_name,
+                        "function": effective_function_name,
                         "start_line": function_meta.get("start_line"),
                         "end_line": function_meta.get("end_line"),
                         "resolution_method": function_meta.get("resolution_method"),
@@ -1719,7 +1730,7 @@ class VerificationAgent(BaseAgent):
                     **merged,
                     "file_path": resolved_file_path or normalized_file_path,
                     # 改进：不再无条件使用"未知函数"，而是基于定位状态
-                    "function_name": function_name or (
+                    "function_name": effective_function_name or (
                         f"[{localization_status}]" if localization_status != "unknown" else "未知函数"
                     ),
                 }
@@ -1734,7 +1745,7 @@ class VerificationAgent(BaseAgent):
                     "file_path": resolved_file_path or normalized_file_path,
                     "line_start": line_start,
                     "line_end": line_end,
-                    "function_name": function_name,
+                    "function_name": effective_function_name,
                     "verdict": verdict,
                     "authenticity": verdict,
                     "reachability": reachability,

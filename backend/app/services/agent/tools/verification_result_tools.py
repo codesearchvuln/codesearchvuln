@@ -188,10 +188,10 @@ class AgentFindingModel(BaseModel):
         description="验证结果，必须包含 verdict、confidence、reachability、verification_evidence 等必填字段",
     )
     
-    # 可选字段
-    function_name: Optional[str] = Field(
-        default=None,
-        description="函数名称（如果可定位）",
+    function_name: str = Field(
+        ...,
+        min_length=1,
+        description="函数名称（必填）。无法精确定位时可使用语义化占位符（如 <function_at_line_120>）",
     )
     
     description: Optional[str] = Field(
@@ -215,6 +215,17 @@ class AgentFindingModel(BaseModel):
         if v not in allowed:
             raise ValueError(f"severity 必须为 {allowed} 之一，得到: {v}")
         return v
+
+    @field_validator("function_name", mode="before")
+    @classmethod
+    def validate_function_name(cls, v):
+        """确保 function_name 非空字符串"""
+        if v is None:
+            raise ValueError("function_name 为必填字段，不能为空")
+        text = str(v).strip()
+        if not text:
+            raise ValueError("function_name 不能为空字符串")
+        return text
 
     @field_validator("cwe_id", mode="before")
     @classmethod
@@ -242,6 +253,7 @@ class SaveVerificationResultsInput(BaseModel):
             "包含以下必填字段：\n"
             "  - file_path: 文件路径\n"
             "  - line_start: 起始行号（>= 1）\n"
+            "  - function_name: 函数名称（必填，无法精确定位时使用语义化占位符）\n"
             "  - title: 发现标题（5-200 字符）\n"
             "  - vulnerability_type: 漏洞类型\n"
             "  - severity: 严重程度（critical|high|medium|low|info）\n"
@@ -341,6 +353,21 @@ class SaveVerificationResultsInput(BaseModel):
             payload["confidence"] = confidence
             payload["reachability"] = reachability
             payload["verification_evidence"] = evidence_text
+
+            function_name = str(payload.get("function_name") or "").strip()
+            if not function_name:
+                title_text = str(payload.get("title") or "")
+                title_match = re.search(r"中([A-Za-z_][A-Za-z0-9_]*)函数", title_text)
+                if title_match:
+                    function_name = title_match.group(1).strip()
+            if not function_name:
+                reachability_target = vr.get("reachability_target") if isinstance(vr, dict) else None
+                if isinstance(reachability_target, dict):
+                    function_name = str(reachability_target.get("function") or "").strip()
+            if not function_name:
+                line_value = payload.get("line_start")
+                function_name = f"<function_at_line_{line_value}>" if line_value else "<function_not_localized>"
+            payload["function_name"] = function_name
             return payload
         
         result = []
@@ -418,7 +445,7 @@ reachability / verification_evidence 之后，必须调用此工具，
 
 必需参数:
 - findings: 已验证的 findings 列表（至少 1 条）。每条 finding 必须是有效的结构，
-  包含：file_path、line_start、title、vulnerability_type、severity、verification_result。
+    包含：file_path、line_start、function_name、title、vulnerability_type、severity、verification_result。
   每个 verification_result 必须包含 verdict、confidence、reachability、verification_evidence。
 
 可选参数:
