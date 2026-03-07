@@ -253,7 +253,7 @@ Observation: 推送成功，队列状态更新。
 
 Thought: 原始风险点已确认并推送。现在扩展分析：检查uploads目录是否有执行限制，以及寻找其他相关业务逻辑入口（如用户头像上传、订单附件上传）。
 Action: search_code
-Action Input: { "query": "uploads|file.save|request.files", "file_pattern": "*.py" }
+Action Input: { "keyword": "uploads|file.save|request.files", "file_pattern": "*.py", "is_regex": true }
 
 Observation: 发现其他文件上传点：
 - app/api/user.py:42: 用户头像上传

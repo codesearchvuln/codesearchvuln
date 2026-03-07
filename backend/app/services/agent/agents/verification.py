@@ -405,7 +405,7 @@ Observation:
 
 Thought: Fuzzing 成功触发 SQL 注入，payload 中的单引号破坏了查询结构。检查调用链确认可达性。
 Action: search_code
-Action Input: {"query": "def search|@app.route.*search", "file_pattern": "*.py"}
+Action Input: {"keyword": "def search|@app.route.*search", "file_pattern": "*.py", "is_regex": true}
 
 Observation: 发现 @app.route('/api/search') 装饰器，函数可通过 HTTP POST 访问。
 

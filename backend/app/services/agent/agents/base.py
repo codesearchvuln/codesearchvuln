@@ -41,19 +41,13 @@ MAX_EVENT_PAYLOAD_CHARS = 120000
 TOOL_ALIAS_CANDIDATES: Dict[str, List[str]] = {
     "smart_scan": ["smart_scan", "quick_audit", "opengrep_scan", "pattern_match", "search_code", "read_file"],
     "quick_audit": ["quick_audit", "smart_scan", "opengrep_scan", "pattern_match", "search_code", "read_file"],
-    "rag_query": ["qmd_query", "search_code", "read_file"],
-    "security_search": ["qmd_query", "search_code", "read_file"],
     "query_security_knowledge": ["qmd_query", "search_code"],
     "get_vulnerability_knowledge": ["qmd_get", "qmd_query", "search_code"],
-    "function_context": ["locate_enclosing_function", "extract_function", "read_file"],
 }
 VIRTUAL_TOOL_NAMES: Set[str] = {
     "code_search",
-    "rag_query",
-    "security_search",
     "query_security_knowledge",
     "get_vulnerability_knowledge",
-    "function_context",
 }
 
 DOWNLINED_TOOL_MESSAGES: Dict[str, str] = {
@@ -1851,15 +1845,8 @@ class BaseAgent(ABC):
                 "qmd_get": ["read_file", "search_code"],
                 "qmd_multi_get": ["search_code", "read_file"],
                 "qmd_status": ["search_code"],
-                "rag_query": ["search_code", "read_file"],
-                "security_search": ["search_code", "read_file"],
                 "query_security_knowledge": ["search_code"],
                 "get_vulnerability_knowledge": ["search_code", "read_file"],
-                "function_context": [
-                    "locate_enclosing_function",
-                    "extract_function",
-                    "read_file",
-                ],
             }
             fallback_names.extend(fallback_map.get(normalized_tool, []))
 
