@@ -14,7 +14,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import CreateTaskDialog from "@/components/audit/CreateTaskDialog";
+import CreateScanTaskDialog from "@/components/scan/CreateScanTaskDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import ProjectTaskFindingsDialog from "@/pages/project-detail/components/ProjectTaskFindingsDialog";
 import {
 	getProjectCardPotentialVulnerabilities,
 	getProjectCardRecentTasks,
@@ -76,7 +77,12 @@ export default function ProjectDetail() {
 		useState<PotentialStatus>("loading");
 	const [recentTaskTimeKeyword, setRecentTaskTimeKeyword] = useState("");
 	const [loading, setLoading] = useState(true);
-	const [showCreateTaskDialog, setShowCreateTaskDialog] = useState(false);
+	const [showCreateScanTaskDialog, setShowCreateScanTaskDialog] = useState(false);
+	const [selectedTaskFindings, setSelectedTaskFindings] = useState<{
+		taskId: string;
+		taskCategory: ProjectCardPotentialVulnerability["taskCategory"];
+		taskLabel: string;
+	} | null>(null);
 
 	const fallbackBackPath = "/projects#project-browser";
 	const sourceFromState =
@@ -178,33 +184,31 @@ export default function ProjectDetail() {
 					),
 				);
 
-					const verifiedAgentFindings: AgentFinding[] =
-						agentFindingsResult.flatMap((result) => {
-							if (result.status !== "fulfilled" || !Array.isArray(result.value)) {
-								return [];
-							}
-							return result.value;
-						});
-					const agentTaskCategoryMap: Record<
-						string,
-						"intelligent" | "hybrid"
-					> = {};
-					for (const task of sourceAgentTasks) {
-						const mode = resolveSourceModeFromTaskMeta(
-							"intelligent_audit",
-							task.name,
-							task.description,
-						);
-						agentTaskCategoryMap[task.id] =
-							mode === "hybrid" ? "hybrid" : "intelligent";
-					}
-
-					const topVulnerabilities = getProjectCardPotentialVulnerabilities({
-						opengrepFindings: staticFindings,
-						verifiedAgentFindings,
-						agentTaskCategoryMap,
-						limit: DETAIL_POTENTIAL_TOP_LIMIT,
+				const verifiedAgentFindings: AgentFinding[] =
+					agentFindingsResult.flatMap((result) => {
+						if (result.status !== "fulfilled" || !Array.isArray(result.value)) {
+							return [];
+						}
+						return result.value;
 					});
+				const agentTaskCategoryMap: Record<string, "intelligent" | "hybrid"> =
+					{};
+				for (const task of sourceAgentTasks) {
+					const mode = resolveSourceModeFromTaskMeta(
+						"intelligent_audit",
+						task.name,
+						task.description,
+					);
+					agentTaskCategoryMap[task.id] =
+						mode === "hybrid" ? "hybrid" : "intelligent";
+				}
+
+				const topVulnerabilities = getProjectCardPotentialVulnerabilities({
+					opengrepFindings: staticFindings,
+					verifiedAgentFindings,
+					agentTaskCategoryMap,
+					limit: DETAIL_POTENTIAL_TOP_LIMIT,
+				});
 
 				setPotentialVulnerabilities(topVulnerabilities);
 				setPotentialStatus(topVulnerabilities.length > 0 ? "ready" : "empty");
@@ -266,7 +270,7 @@ export default function ProjectDetail() {
 			}
 
 			if (auditTasksRes.status !== "fulfilled") {
-				console.error("Failed to load audit tasks:", auditTasksRes.reason);
+				console.error("Failed to load scan tasks:", auditTasksRes.reason);
 			}
 			if (agentTasksRes.status !== "fulfilled") {
 				console.warn("Failed to load agent tasks:", agentTasksRes.reason);
@@ -315,14 +319,14 @@ export default function ProjectDetail() {
 		});
 	}, [id, auditTasks, agentTasks, staticTasks, gitleaksTasks]);
 
-	const handleRunAudit = () => {
-		setShowCreateTaskDialog(true);
+	const handleRunScan = () => {
+		setShowCreateScanTaskDialog(true);
 	};
 
 	const handleTaskCreated = () => {
-		toast.success("审计任务已创建", {
+		toast.success("扫描任务已创建", {
 			description:
-				"因为网络和代码文件大小等因素，审计时长通常至少需要1分钟，请耐心等待...",
+				"因为网络和代码文件大小等因素，扫描时长通常至少需要1分钟，请耐心等待...",
 			duration: 5000,
 		});
 		void loadProjectData();
@@ -405,7 +409,8 @@ export default function ProjectDetail() {
 	const getTaskCategoryBadgeClassName = (
 		category: ProjectCardPotentialVulnerability["taskCategory"],
 	) => {
-		if (category === "static") return "bg-sky-500/20 text-sky-300 border-sky-500/30";
+		if (category === "static")
+			return "bg-sky-500/20 text-sky-300 border-sky-500/30";
 		if (category === "intelligent") {
 			return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
 		}
@@ -419,6 +424,21 @@ export default function ProjectDetail() {
 		if (category === "intelligent") return "智能扫描";
 		return "混合扫描";
 	};
+
+	const openTaskFindingsDialog = useCallback(
+		(
+			taskId: string,
+			taskCategory: ProjectCardPotentialVulnerability["taskCategory"],
+			taskLabel: string,
+		) => {
+			setSelectedTaskFindings({
+				taskId,
+				taskCategory,
+				taskLabel,
+			});
+		},
+		[],
+	);
 
 	const toProjectRelativePath = useCallback(
 		(filePath: string) => {
@@ -630,124 +650,14 @@ export default function ProjectDetail() {
 						<ArrowLeft className="w-5 h-5" />
 						返回
 					</Button>
-					<Button onClick={handleRunAudit} className="cyber-btn-primary">
+					<Button onClick={handleRunScan} className="cyber-btn-primary">
 						<Shield className="w-4 h-4 mr-2" />
-						启动审计
+						启动扫描
 					</Button>
 				</div>
 			</div>
 
-			<div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
-				<div className="cyber-card p-5">
-					<div className="flex items-center gap-2 mb-3">
-						<Bug className="w-4 h-4 text-amber-400" />
-						<h3 className="text-sm font-semibold uppercase tracking-wider">
-							潜在缺陷（Top {DETAIL_POTENTIAL_TOP_LIMIT}）
-						</h3>
-					</div>
-
-						<Table className="table-fixed">
-							<TableHeader>
-								<TableRow>
-									<TableHead className="w-[18%] text-left whitespace-nowrap">
-										类型
-									</TableHead>
-									<TableHead className="w-[30%] text-left whitespace-nowrap">
-										位置
-									</TableHead>
-									<TableHead className="w-[18%] px-3 text-center whitespace-nowrap">
-										所属任务
-									</TableHead>
-									<TableHead className="w-[10%] px-3 text-center whitespace-nowrap">
-										危害
-									</TableHead>
-									<TableHead className="w-[12%] px-3 text-center whitespace-nowrap">
-										置信度
-									</TableHead>
-									<TableHead className="w-[12%] text-center whitespace-nowrap">
-										操作
-									</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{potentialStatusMessage ? (
-									<TableRow>
-										<TableCell
-											colSpan={6}
-											className="py-10 text-center text-sm text-muted-foreground"
-										>
-											{potentialStatusMessage}
-										</TableCell>
-									</TableRow>
-								) : (
-									potentialVulnerabilities.map((item) => (
-										<TableRow key={`${item.taskId}:${item.id}`}>
-											<TableCell
-												className="text-left text-sm text-foreground whitespace-nowrap overflow-hidden text-ellipsis"
-												title={`${item.cweLabel} ${item.title}`}
-											>
-												{item.cweLabel}
-											</TableCell>
-											<TableCell
-												className="text-left text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis"
-												title={formatPotentialLocation(
-													item.filePath,
-													item.line,
-													item.source,
-												)}
-											>
-												{formatPotentialLocation(
-													item.filePath,
-													item.line,
-													item.source,
-												)}
-											</TableCell>
-											<TableCell className="px-3 text-center whitespace-nowrap">
-												<Badge
-													className={getTaskCategoryBadgeClassName(
-														item.taskCategory,
-													)}
-												>
-													{getTaskCategoryText(item.taskCategory)}
-												</Badge>
-											</TableCell>
-											<TableCell className="px-3 text-center whitespace-nowrap">
-												<Badge
-													className={getVulnerabilitySeverityBadgeClassName(
-														item.severity,
-													)}
-												>
-													{getVulnerabilitySeverityText(item.severity)}
-												</Badge>
-											</TableCell>
-											<TableCell className="px-3 text-center whitespace-nowrap">
-												<Badge
-													className={getVulnerabilityConfidenceBadgeClassName(
-														item.confidence,
-													)}
-												>
-													{getVulnerabilityConfidenceText(item.confidence)}
-												</Badge>
-											</TableCell>
-											<TableCell className="text-center whitespace-nowrap">
-												<Button
-													asChild
-													size="sm"
-													variant="outline"
-													className="cyber-btn-ghost h-7 px-3"
-												>
-													<Link to={appendReturnTo(item.route, currentRoute)}>
-														详情
-													</Link>
-												</Button>
-											</TableCell>
-										</TableRow>
-									))
-								)}
-							</TableBody>
-						</Table>
-					</div>
-
+			<div className="relative z-10 space-y-4 mt-6">
 				<div className="cyber-card p-5">
 					<div className="flex flex-wrap items-center justify-between gap-3 mb-3">
 						<div className="flex items-center gap-2">
@@ -777,7 +687,7 @@ export default function ProjectDetail() {
 								<TableHead className="w-[20%]">进度</TableHead>
 								<TableHead className="w-[16%]">状态</TableHead>
 								<TableHead className="w-[10%]">漏洞</TableHead>
-								<TableHead className="w-[12%]">操作</TableHead>
+								<TableHead className="w-[20%]">操作</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
@@ -811,17 +721,48 @@ export default function ProjectDetail() {
 												{formatRecentTaskMetricValue(task.vulnerabilities)}
 											</TableCell>
 											<TableCell>
-												<Button
-													asChild
-													size="sm"
-													variant="outline"
-													className="cyber-btn-ghost h-7 px-2"
-												>
-													<Link to={withStaticReturnTo(task.route, task.kind)}>
-														详情
-													</Link>
-												</Button>
-											</TableCell>
+													<div className="flex items-center gap-2 whitespace-nowrap">
+														<Button
+															asChild
+															size="sm"
+															variant="outline"
+															className="cyber-btn-ghost h-7 px-3"
+														>
+															<Link to={withStaticReturnTo(task.route, task.kind)}>
+																任务详情
+															</Link>
+														</Button>
+														{task.supportsFindingsDetail && task.taskCategory ? (
+															<Button
+																type="button"
+																size="sm"
+																variant="outline"
+																className="cyber-btn-ghost h-7 px-3"
+																onClick={() =>
+																	openTaskFindingsDialog(
+																		task.id,
+																		task.taskCategory,
+																		getTaskCategoryText(task.taskCategory),
+																	)
+																}
+															>
+																缺陷详情
+															</Button>
+														) : (
+															<span title={task.findingsButtonDisabledReason || undefined}>
+																<Button
+																	type="button"
+																	size="sm"
+																	variant="outline"
+																	className="cyber-btn-ghost h-7 px-3"
+																	disabled
+																>
+																	缺陷详情
+																</Button>
+															</span>
+														)}
+													</div>
+												</TableCell>
 										</TableRow>
 									);
 								})
@@ -838,13 +779,138 @@ export default function ProjectDetail() {
 						</TableBody>
 					</Table>
 				</div>
+
+				<div className="cyber-card p-5">
+					<div className="flex items-center gap-2 mb-3">
+						<Bug className="w-4 h-4 text-amber-400" />
+						<h3 className="text-sm font-semibold uppercase tracking-wider">
+							潜在缺陷（Top {DETAIL_POTENTIAL_TOP_LIMIT}）
+						</h3>
+					</div>
+
+					<Table className="table-fixed">
+						<TableHeader>
+							<TableRow>
+								<TableHead className="w-[16%] text-left whitespace-nowrap">
+									类型
+								</TableHead>
+								<TableHead className="w-[28%] text-left whitespace-nowrap">
+									位置
+								</TableHead>
+								<TableHead className="w-[16%] px-3 text-center whitespace-nowrap">
+									所属任务
+								</TableHead>
+								<TableHead className="w-[10%] px-3 text-center whitespace-nowrap">
+									危害
+								</TableHead>
+								<TableHead className="w-[10%] px-3 text-center whitespace-nowrap">
+									置信度
+								</TableHead>
+								<TableHead className="w-[12%] text-center whitespace-nowrap">
+									操作
+								</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{potentialStatusMessage ? (
+								<TableRow>
+									<TableCell
+										colSpan={6}
+										className="py-10 text-center text-sm text-muted-foreground"
+									>
+										{potentialStatusMessage}
+									</TableCell>
+								</TableRow>
+							) : (
+								potentialVulnerabilities.map((item) => (
+									<TableRow key={`${item.taskId}:${item.id}`}>
+										<TableCell
+											className="text-left text-sm text-foreground whitespace-nowrap overflow-hidden text-ellipsis"
+											title={`${item.cweLabel} ${item.title}`}
+										>
+											{item.cweLabel}
+										</TableCell>
+										<TableCell
+											className="text-left text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis"
+											title={formatPotentialLocation(
+												item.filePath,
+												item.line,
+												item.source,
+											)}
+										>
+											{formatPotentialLocation(
+												item.filePath,
+												item.line,
+												item.source,
+											)}
+										</TableCell>
+										<TableCell className="px-3 text-center whitespace-nowrap">
+											<Badge
+												className={getTaskCategoryBadgeClassName(
+													item.taskCategory,
+												)}
+											>
+												{getTaskCategoryText(item.taskCategory)}
+											</Badge>
+										</TableCell>
+										<TableCell className="px-3 text-center whitespace-nowrap">
+											<Badge
+												className={getVulnerabilitySeverityBadgeClassName(
+													item.severity,
+												)}
+											>
+												{getVulnerabilitySeverityText(item.severity)}
+											</Badge>
+										</TableCell>
+										<TableCell className="px-3 text-center whitespace-nowrap">
+											<Badge
+												className={getVulnerabilityConfidenceBadgeClassName(
+													item.confidence,
+												)}
+											>
+												{getVulnerabilityConfidenceText(item.confidence)}
+											</Badge>
+										</TableCell>
+										<TableCell className="whitespace-nowrap">
+											<div className="flex items-center justify-center">
+												<Button
+													asChild
+													size="sm"
+													variant="outline"
+													className="cyber-btn-ghost h-7 px-3"
+												>
+													<Link to={appendReturnTo(item.route, currentRoute)}>
+														详情
+													</Link>
+												</Button>
+											</div>
+										</TableCell>
+									</TableRow>
+								))
+							)}
+						</TableBody>
+					</Table>
+				</div>
 			</div>
 
-			<CreateTaskDialog
-				open={showCreateTaskDialog}
-				onOpenChange={setShowCreateTaskDialog}
+			<CreateScanTaskDialog
+				open={showCreateScanTaskDialog}
+				onOpenChange={setShowCreateScanTaskDialog}
 				onTaskCreated={handleTaskCreated}
 				preselectedProjectId={id}
+			/>
+			<ProjectTaskFindingsDialog
+				open={selectedTaskFindings !== null}
+				onOpenChange={(nextOpen) => {
+					if (!nextOpen) {
+						setSelectedTaskFindings(null);
+					}
+				}}
+				taskId={selectedTaskFindings?.taskId || ""}
+				taskCategory={selectedTaskFindings?.taskCategory || "static"}
+				projectName={project.name}
+				returnTo={currentRoute}
+				taskLabel={selectedTaskFindings?.taskLabel || "任务"}
 			/>
 		</div>
 	);

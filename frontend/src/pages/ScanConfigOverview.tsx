@@ -29,7 +29,7 @@ const ENGINE_CARDS: EngineCard[] = [
   {
     id: "smart-engine",
     name: "智能引擎",
-    description: "智能分析引擎，支撑智能审计、总结归纳与上下文推理。",
+    description: "智能分析引擎，支撑智能扫描、总结归纳与上下文推理。",
     icon: <Bot className="w-5 h-5 text-sky-100" />,
     to: "/scan-config/intelligent-engine",
   },

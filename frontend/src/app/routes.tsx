@@ -32,6 +32,7 @@ export interface RouteConfig {
     navVisible?: boolean;
     navGroup?: "main" | "task" | "scanConfig";
     navOrder?: number;
+    navParentPath?: string;
 }
 
 const routes: RouteConfig[] = [
@@ -80,10 +81,11 @@ const routes: RouteConfig[] = [
         element: <ProjectDetail />,
         visible: false,
         navVisible: false,
+        navParentPath: "/projects",
     },
     {
-        name: "审计规则",
-        nameKey: "route.auditRules",
+        name: "扫描规则",
+        nameKey: "route.scanRules",
         path: "/opengrep-rules",
         element: <OpengrepRules />,
         visible: true,

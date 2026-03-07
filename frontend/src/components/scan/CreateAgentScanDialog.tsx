@@ -1,7 +1,7 @@
-import CreateProjectAuditDialog from "./CreateProjectAuditDialog";
+import CreateProjectScanDialog from "./CreateProjectScanDialog";
 import { useNavigate } from "react-router-dom";
 
-interface CreateAgentAuditDialogProps {
+interface CreateAgentScanDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onTaskCreated?: () => void;
@@ -11,10 +11,10 @@ interface CreateAgentAuditDialogProps {
 	onReturn?: () => void;
 }
 
-export default function CreateAgentAuditDialog(props: CreateAgentAuditDialogProps) {
+export default function CreateAgentScanDialog(props: CreateAgentScanDialogProps) {
 	const navigate = useNavigate();
 	return (
-		<CreateProjectAuditDialog
+		<CreateProjectScanDialog
 			{...props}
 			initialMode="agent"
 			lockMode

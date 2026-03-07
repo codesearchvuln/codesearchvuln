@@ -1,7 +1,7 @@
 /**
  * Agent 流式事件 React Hook
  * 
- * 用于在 React 组件中消费 Agent 审计的实时事件流
+ * 用于在 React 组件中消费 Agent 扫描的实时事件流
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';

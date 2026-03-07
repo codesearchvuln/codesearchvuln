@@ -45,6 +45,7 @@ pytest                             # Run all tests (testpaths=tests, asyncio_mod
 pytest tests/test_specific.py      # Run single test file
 pytest -k "test_name"              # Run test by name pattern
 pytest -m "not integration"        # Skip integration tests
+pytest --cov=app --cov-report=html # Run tests with coverage report
 ```
 
 ### Docker Compose (full stack)
@@ -52,6 +53,14 @@ pytest -m "not integration"        # Skip integration tests
 ./scripts/compose-up-with-fallback.sh   # Build & start all services (with mirror fallback)
 docker compose up -d --build            # Direct start without mirror fallback
 docker compose logs -f backend          # View backend logs
+docker compose down                     # Stop all services
+docker volume rm audittool_postgres_data  # Remove PostgreSQL data (WARNING: deletes all data)
+```
+
+**Production deployment options:**
+```bash
+docker compose -f docker-compose.prod.yml up -d      # Use pre-built images
+docker compose -f docker-compose.prod.cn.yml up -d   # Use pre-built images (China mirrors)
 ```
 
 ### Environment Setup
@@ -93,13 +102,20 @@ backend/app/
 │   ├── llm/             # LLM adapters, factory, cache (via LiteLLM)
 │   ├── rag/             # Vector retrieval and indexing (ChromaDB)
 │   ├── upload/          # File processing, language detection
-│   └── llm_rule/        # Rule-based LLM scanning
+│   ├── llm_rule/        # Rule-based LLM scanning
+│   └── scanner.py       # Traditional audit scanning
 ├── models/              # SQLAlchemy ORM models
 ├── schemas/             # Pydantic request/response schemas
 ├── core/                # Config, security, encryption
 ├── db/                  # Database session, init
 └── utils/
 ```
+
+**Key service responsibilities:**
+- `services/agent/`: Multi-agent orchestration with LangGraph, SSE streaming, MCP tool integration
+- `services/llm/`: LLM provider abstraction (supports OpenAI, Anthropic, Azure, etc. via LiteLLM)
+- `services/rag/`: Code vectorization and semantic search using ChromaDB
+- `services/upload/`: Repository ingestion, language detection, file parsing
 
 ### Frontend Layers
 
@@ -135,6 +151,8 @@ frontend/src/
 - **Naming history**: Code may reference `deepaudit` / `AuditTool` — these are legacy names, the product is VulHunter
 - **Backend line length**: 100 chars (both ruff and black)
 - **Frontend lint**: Biome for correctness, ast-grep for custom rules (see `sgconfig.yml` + `rules/`)
+- **MCP Integration**: Backend uses FastMCP for tool integration (CodeBadger for code analysis)
+- **Docker socket**: Backend requires `/var/run/docker.sock` access for sandbox PoC verification
 
 ### Adding New CRUD Features
 
@@ -150,3 +168,54 @@ Frontend: API functions in `shared/api/<domain>.ts` → Page/component → Route
 | Backend    | 8000  | FastAPI with OpenAPI at /docs   |
 | PostgreSQL | 5432  | User/pass: postgres/postgres    |
 | Redis      | 6379  | Agent task queue                |
+| ChromaDB   | 8001  | Vector database (embedded in backend) |
+
+## Troubleshooting
+
+### Common Issues
+
+**Alembic migration error: `Can't locate revision identified by 'xxx'`**
+
+This occurs when the database volume has a different migration history than the current codebase (e.g., switching between pre-built images and local builds).
+
+Solution:
+```bash
+# 1. Try rebuilding with local source first
+./scripts/compose-up-with-fallback.sh
+
+# 2. If still failing and you can discard test data:
+docker compose down
+docker volume rm audittool_postgres_data
+./scripts/compose-up-with-fallback.sh
+```
+
+**Docker image pull failures**
+
+The project uses automatic mirror fallback for China regions. If builds fail:
+```bash
+# Check which mirrors are being tested
+./scripts/compose-up-with-fallback.sh
+
+# Override with specific mirrors
+DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library \
+SANDBOX_IMAGE=ghcr.nju.edu.cn/lintsinghua/deepaudit-sandbox:latest \
+./scripts/compose-up-with-fallback.sh
+```
+
+**Backend fails to start with MCP errors**
+
+MCP (Model Context Protocol) sources are cached by default. To force refresh:
+```bash
+MCP_SOURCE_UPDATE_ON_STARTUP=true ./scripts/compose-up-with-fallback.sh
+```
+
+**Frontend dev server proxy errors**
+
+The dev server proxies `/api` to `localhost:8000`. Ensure backend is running first:
+```bash
+# Terminal 1: Start backend
+cd backend && source .venv/bin/activate && uvicorn app.main:app --reload
+
+# Terminal 2: Start frontend
+cd frontend && pnpm dev
+```

@@ -1,6 +1,6 @@
 import { api } from "@/shared/config/database";
 
-export async function runRepositoryAudit(params: {
+export async function runRepositoryScan(params: {
   projectId: string;
   repoUrl: string;
   branch?: string;

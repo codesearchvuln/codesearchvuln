@@ -1,6 +1,6 @@
 /**
- * Agent Audit Utilities
- * Helper functions for the Agent Audit page
+ * Agent Scan Utilities
+ * Helper functions for the Agent Scan page
  */
 
 import type { AgentTreeNode, LogItem } from "./types";
@@ -9,7 +9,7 @@ const AUDIT_EMOJI_REGEX = /[\p{Extended_Pictographic}\uFE0F\u200D]/gu;
 const AUDIT_DECORATION_REGEX = /[◆◇■□●○★☆▶▷◀◁►◄•▪▫◉◎◌⏭⏮⏯⏹⏺⏸⏵⏴⏩⏪]/g;
 
 /**
- * Remove emoji/decorative symbols from audit logs while preserving readable text.
+ * Remove emoji/decorative symbols from scan logs while preserving readable text.
  */
 export function sanitizeAuditText(value: string): string {
   if (!value) return "";

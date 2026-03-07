@@ -1,6 +1,6 @@
 /**
  * 任务控制服务
- * 用于管理审计任务的状态和控制
+ * 用于管理扫描任务的状态和控制
  */
 
 import { api } from '@/shared/api/database';

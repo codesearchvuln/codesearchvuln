@@ -807,7 +807,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>安全审计报告 - ${taskName}</title>
+  <title>安全扫描报告 - ${taskName}</title>
   <style>
     :root {
       --bg-body: #06060a;
@@ -1374,7 +1374,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   <footer class="report-footer">
     <div class="container">
       <div class="footer-content">
-        <span>安全审计报告</span>
+        <span>安全扫描报告</span>
         <span>·</span>
         <span>${generateDate}</span>
       </div>
@@ -1533,7 +1533,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
                 </div>
                 <div>
                   <DialogTitle className="text-xl font-bold text-foreground flex items-center gap-2">
-                    导出审计报告
+                    导出扫描报告
                     <Sparkles className="w-4 h-4 text-primary/60" />
                   </DialogTitle>
                   <p className="text-xs text-muted-foreground mt-1 font-mono flex items-center gap-2">

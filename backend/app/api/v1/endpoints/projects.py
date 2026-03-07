@@ -506,6 +506,58 @@ async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional
     return None
 
 
+async def _resolve_project_description_bundle(
+    *,
+    extracted_dir: str,
+    extracted_files: Optional[List[str]],
+    project_name: Optional[str],
+    db: AsyncSession,
+    user_id: Optional[str],
+) -> tuple[str, str, Literal["llm", "static"]]:
+    language_info = await get_cloc_stats_from_extracted_dir(
+        extracted_dir,
+        extracted_files=extracted_files,
+    )
+    description = build_static_project_description(
+        language_info,
+        (project_name or "").strip() or None,
+    )
+    source: Literal["llm", "static"] = "static"
+
+    user_config = await _get_user_config(db, user_id)
+    if user_config:
+        try:
+            llm_result = await generate_project_description_from_extracted_dir(
+                extracted_dir,
+                user_config=user_config,
+                project_name=(project_name or "").strip() or None,
+            )
+            llm_description = ""
+            if isinstance(llm_result, dict):
+                llm_description = str(llm_result.get("project_description") or "").strip()
+            if llm_description:
+                description = llm_description
+                source = "llm"
+        except Exception as e:
+            logger.warning(f"生成项目描述时 LLM 失败，已回退静态描述: {e}")
+
+    return description, language_info, source
+
+
+async def _get_or_create_project_info(db: AsyncSession, project_id: str) -> ProjectInfo:
+    result = await db.execute(select(ProjectInfo).where(ProjectInfo.project_id == project_id))
+    project_info = result.scalars().first()
+    if project_info:
+        return project_info
+
+    project_info = ProjectInfo(
+        project_id=project_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(project_info)
+    return project_info
+
+
 async def find_duplicate_zip_project(
     db: AsyncSession, zip_hash: str, current_project_id: str
 ) -> Optional[Project]:
@@ -1408,34 +1460,13 @@ async def generate_project_description_preview(
             if not success:
                 raise HTTPException(status_code=400, detail=f"解压失败: {error}")
 
-            language_info = await get_cloc_stats_from_extracted_dir(
-                temp_extract_dir,
+            description, language_info, source = await _resolve_project_description_bundle(
+                extracted_dir=temp_extract_dir,
                 extracted_files=extracted_files,
+                project_name=project_name,
+                db=db,
+                user_id=current_user.id,
             )
-            static_description = build_static_project_description(
-                language_info,
-                (project_name or "").strip() or None,
-            )
-
-            source: Literal["llm", "static"] = "static"
-            description = static_description
-            user_config = await _get_user_config(db, current_user.id)
-            if user_config:
-                try:
-                    llm_result = await generate_project_description_from_extracted_dir(
-                        temp_extract_dir,
-                        user_config=user_config,
-                    )
-                    llm_description = ""
-                    if isinstance(llm_result, dict):
-                        llm_description = (
-                            llm_result.get("project_description") or ""
-                        ).strip()
-                    if llm_description:
-                        description = llm_description
-                        source = "llm"
-                except Exception as e:
-                    logger.warning(f"生成项目描述时 LLM 失败，已回退静态描述: {e}")
 
             return ProjectDescriptionGenerateResponse(
                 description=description,
@@ -2421,6 +2452,21 @@ async def upload_project_zip(
             detected_languages = detect_languages_from_paths(filtered_paths)
             project.programming_languages = json.dumps(detected_languages, ensure_ascii=False)
             project.zip_file_hash = zip_hash
+            description, language_info, _source = await _resolve_project_description_bundle(
+                extracted_dir=temp_extract_dir,
+                extracted_files=extracted_files,
+                project_name=project.name,
+                db=db,
+                user_id=current_user.id,
+            )
+            project.description = description
+
+            project_info = await _get_or_create_project_info(db, id)
+            project_info.language_info = language_info
+            project_info.description = description
+            project_info.status = "completed"
+            db.add(project)
+            db.add(project_info)
             try:
                 await db.commit()
                 await db.refresh(project)

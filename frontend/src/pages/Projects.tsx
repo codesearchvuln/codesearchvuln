@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     Table,
@@ -19,7 +20,6 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import {
     Select,
     SelectContent,
@@ -62,7 +62,6 @@ import {
     Github,
     Folder,
     Key,
-    Sparkles,
     ChevronRight,
 } from "lucide-react";
 import { api } from "@/shared/config/database";
@@ -78,7 +77,7 @@ import {
 import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import DeferredSection from "@/components/performance/DeferredSection";
-import type { AuditCreateMode } from "@/components/audit/CreateProjectAuditDialog";
+import type { ScanCreateMode } from "@/components/scan/CreateProjectScanDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 import { useI18n } from "@/shared/i18n";
 import { apiClient } from "@/shared/api/serverClient";
@@ -107,7 +106,9 @@ import {
     type ProjectCardPotentialVulnerability,
 } from "@/features/projects/services/projectCardPreview";
 import {
+    buildStaticScanGroups,
     formatDurationMs,
+    resolveStaticScanGroupStatus,
     resolveSourceModeFromTaskMeta,
 } from "@/features/tasks/services/taskActivities";
 const PROJECT_PAGE_SIZE = 10;
@@ -148,8 +149,8 @@ const ARCHIVE_SUFFIXES = [
     ".rar",
 ];
 
-const CreateProjectAuditDialog = lazy(
-    () => import("@/components/audit/CreateProjectAuditDialog"),
+const CreateProjectScanDialog = lazy(
+    () => import("@/components/scan/CreateProjectScanDialog"),
 );
 const ProjectLanguagePieChart = lazy(
     () => import("@/features/projects/components/ProjectLanguagePieChart"),
@@ -193,15 +194,14 @@ export default function Projects() {
         () => new Set(),
     );
     const [showCreateDialog, setShowCreateDialog] = useState(false);
-    const [showCreateAuditDialog, setShowCreateAuditDialog] = useState(false);
-    const [auditPreselectedProjectId, setAuditPreselectedProjectId] =
+    const [showCreateScanDialog, setShowCreateScanDialog] = useState(false);
+    const [scanPreselectedProjectId, setScanPreselectedProjectId] =
         useState<string>("");
-    const [auditInitialMode, setAuditInitialMode] =
-        useState<AuditCreateMode>("static");
-    const [auditNavigateOnSuccess, setAuditNavigateOnSuccess] = useState(true);
+    const [scanInitialMode, setScanInitialMode] =
+        useState<ScanCreateMode>("static");
+    const [scanNavigateOnSuccess, setScanNavigateOnSuccess] = useState(true);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [uploading, setUploading] = useState(false);
-    const [generatingDescription, setGeneratingDescription] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [showDisableDialog, setShowDisableDialog] = useState(false);
     const [projectToDisable, setProjectToDisable] = useState<Project | null>(
@@ -735,14 +735,14 @@ export default function Projects() {
         closeCreateProjectDialog();
     };
 
-    const handleCreateAuditDialogOpenChange = (open: boolean) => {
-        setShowCreateAuditDialog(open);
+    const handleCreateScanDialogOpenChange = (open: boolean) => {
+        setShowCreateScanDialog(open);
         if (!open) {
-            setAuditPreselectedProjectId("");
+            setScanPreselectedProjectId("");
             pinToProjectBrowserHash();
             scrollToProjectBrowser();
-            setAuditNavigateOnSuccess(true);
-            setAuditInitialMode("static");
+            setScanNavigateOnSuccess(true);
+            setScanInitialMode("static");
         }
     };
 
@@ -751,17 +751,17 @@ export default function Projects() {
         setShowCreateDialog(true);
     };
 
-    const openCreateAuditDialog = (
-        mode: AuditCreateMode = "static",
+    const openCreateScanDialog = (
+        mode: ScanCreateMode = "static",
         projectId = "",
         options?: { navigateOnSuccess?: boolean },
     ) => {
         const navigateOnSuccess = options?.navigateOnSuccess ?? true;
         pinToProjectBrowserHash();
-        setAuditInitialMode(mode);
-        setAuditPreselectedProjectId(projectId);
-        setAuditNavigateOnSuccess(navigateOnSuccess);
-        setShowCreateAuditDialog(true);
+        setScanInitialMode(mode);
+        setScanPreselectedProjectId(projectId);
+        setScanNavigateOnSuccess(navigateOnSuccess);
+        setShowCreateScanDialog(true);
     };
 
     const handleCreateProject = async () => {
@@ -809,7 +809,6 @@ export default function Projects() {
             programming_languages: [],
         });
         setSelectedFile(null);
-        setGeneratingDescription(false);
         if (fileInputRef.current) {
             fileInputRef.current.value = "";
         }
@@ -899,7 +898,7 @@ export default function Projects() {
                 description:
                     detectedLanguages.length > 0
                         ? `已自动识别语言: ${detectedLanguages.join(" / ")}`
-                        : "项目压缩包已保存，您可以启动代码审计",
+                        : "项目压缩包已保存，您可以启动代码扫描",
                 duration: 4000,
             });
         } catch (error: unknown) {
@@ -927,38 +926,6 @@ export default function Projects() {
             if (progressInterval) clearInterval(progressInterval);
             setUploading(false);
             setUploadProgress(0);
-        }
-    };
-
-    const handleGenerateProjectDescription = async () => {
-        if (!selectedFile) {
-            toast.error("请先选择压缩包文件");
-            return;
-        }
-
-        try {
-            setGeneratingDescription(true);
-            const result = await api.generateProjectDescription({
-                file: selectedFile,
-                project_name: createForm.name,
-            });
-            setCreateForm((prev) => ({
-                ...prev,
-                description: result.description || "",
-            }));
-            if (result.source === "llm") {
-                toast.success("已生成项目描述");
-            } else {
-                toast.success("LLM不可用，已回退静态描述");
-            }
-        } catch (error) {
-            console.error("Failed to generate project description:", error);
-            import("@/shared/utils/errorHandler").then(({ handleError }) => {
-                handleError(error, "生成项目描述失败");
-            });
-            toast.error("生成项目描述失败");
-        } finally {
-            setGeneratingDescription(false);
         }
     };
 
@@ -1122,22 +1089,39 @@ export default function Projects() {
         return new Map(
             pagedProjects.map((project) => {
                 const projectTaskPools = projectTaskPoolsMap[project.id];
-                const statuses = [
+                const nonStaticStatuses = [
                     ...(projectTaskPools?.auditTasks || []).map((task) => task.status),
                     ...(projectTaskPools?.agentTasks || []).map((task) => task.status),
-                    ...(projectTaskPools?.opengrepTasks || []).map((task) => task.status),
-                    ...(projectTaskPools?.gitleaksTasks || []).map((task) => task.status),
                 ].map((status) => String(status || "").trim().toLowerCase());
+
+                const staticGroups = buildStaticScanGroups({
+                    opengrepTasks: projectTaskPools?.opengrepTasks || [],
+                    gitleaksTasks: projectTaskPools?.gitleaksTasks || [],
+                });
+                const staticStats = staticGroups.reduce(
+                    (acc, group) => {
+                        const status = resolveStaticScanGroupStatus(group);
+                        if (status === "completed") {
+                            acc.completed += 1;
+                        } else if (status === "running") {
+                            acc.running += 1;
+                        }
+                        return acc;
+                    },
+                    { completed: 0, running: 0 },
+                );
 
                 return [
                     project.id,
                     {
-                        completed: statuses.filter((status) => status === "completed")
-                            .length,
-                        running: statuses.filter(
-                            (status) =>
-                                status === "running" || status === "pending",
-                        ).length,
+                        completed:
+                            nonStaticStatuses.filter((status) => status === "completed")
+                                .length + staticStats.completed,
+                        running:
+                            nonStaticStatuses.filter(
+                                (status) =>
+                                    status === "running" || status === "pending",
+                            ).length + staticStats.running,
                     },
                 ];
             }),
@@ -1337,7 +1321,7 @@ export default function Projects() {
     }, [projectPage, totalProjectPages]);
 
     const handleCreateTask = (projectId: string) => {
-        openCreateAuditDialog("agent", projectId, {
+        openCreateScanDialog("agent", projectId, {
             navigateOnSuccess: true,
         });
     };
@@ -1452,9 +1436,9 @@ export default function Projects() {
     };
 
     const handleTaskCreated = () => {
-        toast.success("审计任务已创建", {
+        toast.success("扫描任务已创建", {
             description:
-                "因为网络和代码文件大小等因素，审计时长通常至少需要1分钟，请耐心等待...",
+                "因为网络和代码文件大小等因素，扫描时长通常至少需要1分钟，请耐心等待...",
             duration: 5000,
         });
         loadProjects();
@@ -1556,26 +1540,13 @@ export default function Projects() {
                                     </div>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <Label
-                                        htmlFor="description"
-                                        className="font-mono font-bold uppercase text-base text-muted-foreground"
-                                    >
-                                        描述
-                                    </Label>
-                                    <Textarea
-                                        id="description"
-                                        value={createForm.description}
-                                        onChange={(e) =>
-                                            setCreateForm({
-                                                ...createForm,
-                                                description: e.target.value,
-                                            })
-                                        }
-                                        placeholder="// 项目描述..."
-                                        rows={3}
-                                        className="cyber-input min-h-[80px]"
-                                    />
+                                <div className="rounded-lg border border-border bg-muted/35 p-4">
+                                    <p className="text-xs font-mono font-bold uppercase text-muted-foreground mb-1">
+                                        项目简介
+                                    </p>
+                                    <p className="text-sm text-muted-foreground leading-6">
+                                        创建时无需手动填写描述。ZIP 项目会在上传后自动生成 1-2 句简介；仓库项目可在后续编辑页补充说明。
+                                    </p>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-5">
@@ -1736,45 +1707,13 @@ export default function Projects() {
                                     />
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <Label
-                                            htmlFor="upload-description"
-                                            className="font-mono font-bold uppercase text-base text-muted-foreground"
-                                        >
-                                            描述
-                                        </Label>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            onClick={handleGenerateProjectDescription}
-                                            disabled={
-                                                !selectedFile ||
-                                                uploading ||
-                                                generatingDescription
-                                            }
-                                            className="cyber-btn-outline h-8 text-xs"
-                                        >
-                                            <Sparkles className="w-3 h-3 mr-1.5" />
-                                            {generatingDescription
-                                                ? "生成中..."
-                                                : "一键生成"}
-                                        </Button>
-                                    </div>
-                                    <Textarea
-                                        id="upload-description"
-                                        value={createForm.description}
-                                        onChange={(e) =>
-                                            setCreateForm({
-                                                ...createForm,
-                                                description: e.target.value,
-                                            })
-                                        }
-                                        placeholder="// 项目描述..."
-                                        rows={3}
-                                        className="cyber-input min-h-[80px]"
-                                        disabled={uploading}
-                                    />
+                                <div className="rounded-lg border border-dashed border-sky-500/30 bg-sky-500/8 p-4">
+                                    <p className="text-xs font-mono font-bold uppercase text-sky-100 mb-1">
+                                        自动生成简介
+                                    </p>
+                                    <p className="text-sm text-sky-50/85 leading-6">
+                                        系统会在压缩包上传完成后，基于项目结构自动生成 1-2 句项目使用场景简介，无需手动填写。
+                                    </p>
                                 </div>
 
                                 <div className="space-y-4">
@@ -1839,12 +1778,11 @@ export default function Projects() {
                                                     </p>
                                                 </div>
                                             </div>
-                                            <Button
+                                                    <Button
                                                 variant="ghost"
                                                 size="icon"
                                                 onClick={() => {
                                                     setSelectedFile(null);
-                                                    setGeneratingDescription(false);
                                                     setCreateForm((prev) => ({
                                                         ...prev,
                                                         programming_languages:
@@ -1891,7 +1829,7 @@ export default function Projects() {
                                     <Button
                                         variant="outline"
                                         onClick={() => closeCreateProjectDialog()}
-                                        disabled={uploading || generatingDescription}
+                                        disabled={uploading}
                                         className="cyber-btn-outline"
                                     >
                                         取消
@@ -1901,8 +1839,7 @@ export default function Projects() {
                                         className={PROJECT_ACTION_BTN_SUBTLE}
                                         disabled={
                                             !selectedFile ||
-                                            uploading ||
-                                            generatingDescription
+                                            uploading
                                         }
                                     >
                                         {uploading ? "上传中..." : "执行创建"}
@@ -2083,7 +2020,7 @@ export default function Projects() {
                                                         onClick={() => handleCreateTask(project.id)}
                                                         disabled={!project.is_active}
                                                     >
-                                                        创建审计
+                                                        创建扫描
                                                     </Button>
                                                     <Button
                                                         size="sm"
@@ -2192,15 +2129,15 @@ export default function Projects() {
                 )}
             </div>
 
-            {showCreateAuditDialog ? (
+            {showCreateScanDialog ? (
                 <Suspense fallback={null}>
-                    <CreateProjectAuditDialog
-                        open={showCreateAuditDialog}
-                        onOpenChange={handleCreateAuditDialogOpenChange}
+                    <CreateProjectScanDialog
+                        open={showCreateScanDialog}
+                        onOpenChange={handleCreateScanDialogOpenChange}
                         onTaskCreated={handleTaskCreated}
-                        preselectedProjectId={auditPreselectedProjectId}
-                        initialMode={auditInitialMode}
-                        navigateOnSuccess={auditNavigateOnSuccess}
+                        preselectedProjectId={scanPreselectedProjectId}
+                        initialMode={scanInitialMode}
+                        navigateOnSuccess={scanNavigateOnSuccess}
                     />
                 </Suspense>
             ) : null}
@@ -2444,7 +2381,7 @@ export default function Projects() {
                                                     暂无ZIP文件
                                                 </p>
                                                 <p className="text-amber-400/80 text-xs">
-                                                    此项目还没有上传ZIP文件，请上传文件以便进行代码审计。
+                                                    此项目还没有上传ZIP文件，请上传文件以便进行代码扫描。
                                                 </p>
                                             </div>
                                         </div>
@@ -2622,7 +2559,7 @@ export default function Projects() {
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <span className="text-sky-400">&gt;</span>{" "}
-                                    审计数据保留
+                                    扫描数据保留
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <span className="text-sky-400">&gt;</span>{" "}

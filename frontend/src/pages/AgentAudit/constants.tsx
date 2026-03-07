@@ -1,6 +1,6 @@
 /**
- * Agent Audit Constants
- * Shared constants for the Agent Audit page
+ * Agent Scan Constants
+ * Shared constants for the Agent Scan page
  * Cassette Futurism / Terminal Retro aesthetic
  * Enhanced color palette for better visibility
  */
@@ -51,7 +51,7 @@ export const ACTION_VERBS = [
 	"探测中",
 	"排查中",
 	"检查中",
-	"审计中",
+	"扫描中",
 	"测试中",
 	"探索中",
 	"处理中",

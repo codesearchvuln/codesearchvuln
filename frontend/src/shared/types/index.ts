@@ -55,7 +55,7 @@ export interface ProjectMember {
   project?: Project;
 }
 
-// 审计相关类型
+// 扫描相关类型
 export interface AuditTask {
   id: string;
   project_id: string;

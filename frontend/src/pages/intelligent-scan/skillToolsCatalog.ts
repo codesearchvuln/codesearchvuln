@@ -179,7 +179,7 @@ const SKILL_TOOLS_CATALOG_RAW: SkillToolCatalogItem[] = [
     id: "create_vulnerability_report",
     category: "报告与协作编排",
     summary: `创建正式的漏洞报告。这是记录已确认漏洞的唯一方式。`,
-    goal: "在 verification 阶段支撑审计编排和结果产出。",
+    goal: "在 verification 阶段支撑扫描编排和结果产出。",
     taskList: [
       "协助 Agent 制定下一步行动。",
       "沉淀中间结论与可追溯信息。",
@@ -492,7 +492,7 @@ const SKILL_TOOLS_CATALOG_RAW: SkillToolCatalogItem[] = [
   {
     id: "quick_audit",
     category: "候选发现与模式扫描",
-    summary: `快速文件审计工具 - 对单个文件进行全面安全分析`,
+    summary: `快速文件扫描工具 - 对单个文件进行全面安全分析`,
     goal: "快速发现候选漏洞与高风险模式。",
     taskList: [
       "批量扫描候选风险点。",
@@ -500,7 +500,7 @@ const SKILL_TOOLS_CATALOG_RAW: SkillToolCatalogItem[] = [
       "为后续验证阶段提供优先级线索。",
     ],
     inputChecklist: [
-      "`file_path` (string, required): 要审计的文件路径",
+      "`file_path` (string, required): 要扫描的文件路径",
       "`deep_analysis` (boolean, optional): 是否进行深度分析（包括上下文和数据流分析）",
     ],
     exampleInput: `\`\`\`json
@@ -587,7 +587,7 @@ const SKILL_TOOLS_CATALOG_RAW: SkillToolCatalogItem[] = [
 2. 评估当前分析的覆盖度
 3. 识别可能遗漏的方向
 4. 决定是否需要调整策略`,
-    goal: "在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。",
+    goal: "在 analysis/orchestrator/recon/verification 阶段支撑扫描编排和结果产出。",
     taskList: [
       "协助 Agent 制定下一步行动。",
       "沉淀中间结论与可追溯信息。",
@@ -877,7 +877,7 @@ const SKILL_TOOLS_CATALOG_RAW: SkillToolCatalogItem[] = [
 2. 规划下一步的分析策略
 3. 评估发现的漏洞是否真实存在
 4. 决定是否需要深入调查某个方向`,
-    goal: "在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。",
+    goal: "在 analysis/orchestrator/recon/verification 阶段支撑扫描编排和结果产出。",
     taskList: [
       "协助 Agent 制定下一步行动。",
       "沉淀中间结论与可追溯信息。",
@@ -953,8 +953,8 @@ export function buildSkillToolPrompt(tool: SkillToolCatalogItem): string {
   const taskLines = tool.taskList.map((item) => `- ${item}`).join("\n");
   const inputLines = tool.inputChecklist.map((item) => `- ${item}`).join("\n");
   return [
-    `你是智能审计 Agent，请调用工具 \`${tool.id}\` 完成分析。`,
-    `审计目标：${tool.goal}`,
+    `你是智能扫描 Agent，请调用工具 \`${tool.id}\` 完成分析。`,
+    `扫描目标：${tool.goal}`,
     "适用任务：",
     taskLines,
     "调用前准备参数：",

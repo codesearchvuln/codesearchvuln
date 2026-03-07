@@ -1,5 +1,5 @@
 import { Wrench } from "lucide-react";
-import SkillToolsPanel from "@/pages/intelligent-audit/SkillToolsPanel";
+import SkillToolsPanel from "@/pages/intelligent-scan/SkillToolsPanel";
 
 export default function ScanConfigExternalTools() {
   return (

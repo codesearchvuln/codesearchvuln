@@ -1,5 +1,5 @@
 /**
- * Agent 审计任务创建对话框
+ * Agent 扫描任务创建对话框
  * Cyberpunk Terminal Aesthetic
  */
 
@@ -42,7 +42,7 @@ import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
 import { getZipFileInfo, type ZipFileMeta } from "@/shared/utils/zipStorage";
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import type { Project } from "@/shared/types";
-import FileSelectionDialog from "@/components/audit/FileSelectionDialog";
+import FileSelectionDialog from "@/components/scan/FileSelectionDialog";
 import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
 
 interface CreateAgentTaskDialogProps {
@@ -210,7 +210,7 @@ export default function CreateAgentTaskDialog({
 		setCreating(true);
 		try {
 			const preflightToast = toast.loading(
-				"正在检查智能审计配置（LLM）...",
+				"正在检查智能扫描配置（LLM）...",
 			);
 			const preflight = await runAgentPreflightCheck();
 			toast.dismiss(preflightToast);
@@ -221,7 +221,7 @@ export default function CreateAgentTaskDialog({
 
 			const agentTask = await createAgentTask({
 				project_id: selectedProject.id,
-				name: `智能审计-${selectedProject.name}`,
+				name: `智能扫描-${selectedProject.name}`,
 				description: `${INTELLIGENT_TASK_NAME_MARKER}智能扫描任务`,
 				audit_scope: {
 					static_bootstrap: {
@@ -237,7 +237,7 @@ export default function CreateAgentTaskDialog({
 			});
 
 			onOpenChange(false);
-			toast.success("智能审计任务已创建");
+			toast.success("智能扫描任务已创建");
 			navigate(`/agent-audit/${agentTask.id}`);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : "创建失败";
@@ -273,7 +273,7 @@ export default function CreateAgentTaskDialog({
 						</div>
 						<div>
 							<span className="text-base font-bold uppercase tracking-wider">
-								新建智能审计
+								新建智能扫描
 							</span>
 							<p className="text-xs text-muted-foreground font-normal mt-0.5">
 								AI 驱动的安全分析
@@ -559,7 +559,7 @@ export default function CreateAgentTaskDialog({
 						) : (
 							<>
 								<Play className="w-4 h-4 mr-2" />
-								启动智能审计
+								启动智能扫描
 							</>
 						)}
 					</Button>

@@ -1,6 +1,6 @@
 /**
  * Agent Tasks API
- * Agent 审计任务相关的 API 调用
+ * Agent 扫描任务相关的 API 调用
  */
 
 import { apiClient } from "./serverClient";
@@ -232,7 +232,7 @@ export interface AgentTaskSummary {
 // ============ API Functions ============
 
 /**
- * 创建 Agent 审计任务
+ * 创建 Agent 扫描任务
  */
 export async function createAgentTask(data: CreateAgentTaskRequest): Promise<AgentTask> {
   const response = await apiClient.post("/agent-tasks/", data);

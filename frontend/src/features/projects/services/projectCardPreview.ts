@@ -9,6 +9,7 @@ import { buildFindingDetailPath } from "@/shared/utils/findingRoute";
 const STATIC_GITLEAKS_PAIRING_WINDOW_MS = 60 * 1000;
 
 export type ProjectCardTaskKind = "static" | "intelligent" | "audit";
+export type ProjectCardTaskFindingCategory = "static" | "intelligent" | "hybrid";
 
 export interface ProjectCardRecentTask {
   id: string;
@@ -26,6 +27,9 @@ export interface ProjectCardRecentTask {
   scannedFiles: number | null;
   scannedLines: number | null;
   vulnerabilities: number | null;
+  taskCategory: ProjectCardTaskFindingCategory | null;
+  supportsFindingsDetail: boolean;
+  findingsButtonDisabledReason: string | null;
 }
 
 export interface ProjectCardLanguageSlice {
@@ -73,7 +77,7 @@ export interface ProjectCardPotentialVulnerability {
   id: string;
   taskId: string;
   source: "static" | "agent";
-  taskCategory: "static" | "intelligent" | "hybrid";
+  taskCategory: ProjectCardTaskFindingCategory;
   title: string;
   cweLabel: string;
   severity: ProjectCardVulnerabilitySeverity;
@@ -443,6 +447,9 @@ export function getProjectCardRecentTasks(params: {
         scannedFiles: toNullableNonNegativeNumber(task.files_scanned),
         scannedLines: toNullableNonNegativeNumber(task.lines_scanned),
         vulnerabilities: toNullableNonNegativeNumber(task.high_confidence_count ?? 0),
+        taskCategory: "static",
+        supportsFindingsDetail: true,
+        findingsButtonDisabledReason: null,
       };
     });
 
@@ -487,6 +494,9 @@ export function getProjectCardRecentTasks(params: {
           dynamicTask.lines_scanned ?? dynamicTask.total_lines,
         ),
         vulnerabilities: toNullableNonNegativeNumber(task.verified_count),
+        taskCategory: sourceMode === "hybrid" ? "hybrid" : "intelligent",
+        supportsFindingsDetail: true,
+        findingsButtonDisabledReason: null,
       };
     });
 
@@ -503,11 +513,14 @@ export function getProjectCardRecentTasks(params: {
       completedAt: task.completed_at ?? null,
       durationMs: computeDurationMs(task.started_at, task.completed_at),
       route: `/tasks/${task.id}`,
-      label: task.task_type === "instant" ? "即时分析" : "审计任务",
-      scanTypeLabel: "审计任务",
+      label: task.task_type === "instant" ? "即时分析" : "扫描任务",
+      scanTypeLabel: "扫描任务",
       scannedFiles: toNullableNonNegativeNumber(task.scanned_files ?? task.total_files),
       scannedLines: toNullableNonNegativeNumber(task.total_lines),
       vulnerabilities: toNullableNonNegativeNumber(task.issues_count),
+      taskCategory: null,
+      supportsFindingsDetail: false,
+      findingsButtonDisabledReason: "当前任务类型暂不支持缺陷详情",
     }));
 
   return [...staticItems, ...intelligentItems, ...auditItems]

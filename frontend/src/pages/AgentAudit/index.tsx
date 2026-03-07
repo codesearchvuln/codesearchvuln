@@ -1,6 +1,6 @@
 /**
- * Agent Audit Page - Modular Implementation
- * Main entry point for the Agent Audit feature
+ * Agent Scan Page - Modular Implementation
+ * Main entry point for the Agent Scan feature
  * Cassette Futurism / Terminal Retro aesthetic
  */
 
@@ -760,7 +760,7 @@ function AgentAuditPageContent() {
     {
       key: "agent",
       title: "智能扫描",
-      intro: "智能体上下文推理审计",
+      intro: "智能体上下文推理扫描",
       icon: Bot,
       accentClassName:
         "from-violet-500/25 via-indigo-500/10 to-transparent border-violet-400/40",
@@ -1077,7 +1077,7 @@ function AgentAuditPageContent() {
         setFindings(data);
       } catch (err) {
         console.error(err);
-        const message = err instanceof Error ? err.message : "加载审计结果失败";
+        const message = err instanceof Error ? err.message : "加载扫描结果失败";
         setFindingsError(message);
       } finally {
         if (!silent) {
@@ -2570,7 +2570,7 @@ function AgentAuditPageContent() {
     const nowTime = buildNowRelativeLogTime();
     dispatch({
       type: "ADD_LOG",
-      payload: { ...nowTime, type: "info", title: "已连接审计事件流" },
+      payload: { ...nowTime, type: "info", title: "已连接扫描事件流" },
     });
 
     return () => {
@@ -2796,7 +2796,7 @@ function AgentAuditPageContent() {
       }
 
       const lines: string[] = [];
-      lines.push(`# 智能审计活动日志`);
+      lines.push(`# 智能扫描活动日志`);
       lines.push(`- task_id: ${task.id}`);
       lines.push(`- task_name: ${task.name || "-"}`);
       lines.push(`- project_id: ${task.project_id}`);
@@ -2879,11 +2879,11 @@ function AgentAuditPageContent() {
             </h1>
             
             <p className="mt-[2vh] text-lg md:text-xl text-muted-foreground leading-relaxed">
-              VulHunter 让你以静态、智能或混合方式快速发起代码安全审计。
+              VulHunter 让你以静态、智能或混合方式快速发起代码安全扫描。
             </p>
           </div>
 
-          {/* 快速审计按钮 - 在卡片上方 */}
+          {/* 快速扫描按钮 - 在卡片上方 */}
           <div className="mb-[6vh]">
             <button
               onClick={() =>
@@ -2894,7 +2894,7 @@ function AgentAuditPageContent() {
               {/* 背景动画效果 */}
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
               <span className="relative flex items-center justify-center gap-2">
-                一键开始审计
+                一键开始扫描
                 <svg className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
@@ -2902,7 +2902,7 @@ function AgentAuditPageContent() {
             </button>
           </div>
 
-          {/* 三种审计方式卡片 */}
+          {/* 三种扫描方式卡片 */}
           <div className="mx-auto w-full md:w-[85%] grid grid-cols-1 md:grid-cols-[repeat(3,1fr)] gap-5">
             {homeScanCards.map((card) => {
               const Icon = card.icon;
@@ -2911,7 +2911,7 @@ function AgentAuditPageContent() {
                   key={card.key}
                   type="button"
                   onClick={() => navigate(card.targetRoute)}
-                  aria-label={`${card.title}，点击快速开启审计`}
+                  aria-label={`${card.title}，点击快速开启扫描`}
                   className="group relative flex h-full min-h-[280px] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/70 p-6 md:p-7 transition-all duration-300 hover:-translate-y-1 hover:border-primary/50 hover:shadow-[0_22px_48px_-28px_rgba(56,189,248,0.65)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
                 >
                   <div
@@ -2974,7 +2974,7 @@ function AgentAuditPageContent() {
         <div className="flex items-center gap-3 text-muted-foreground relative z-10">
           <Loader2 className="w-5 h-5 animate-spin text-primary" />
           <span className="font-mono text-sm tracking-wide">
-            正在加载审计任务...
+            正在加载扫描任务...
           </span>
         </div>
       </div>
@@ -3002,7 +3002,7 @@ function AgentAuditPageContent() {
           {failedReason && (
             <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3">
               <div className="text-sm font-semibold text-rose-600 dark:text-rose-300">
-                智能审计失败{failedStep ? `（${failedStep}）` : ""}
+                智能扫描失败{failedStep ? `（${failedStep}）` : ""}
               </div>
               <div className="mt-1 text-xs font-mono text-rose-700 dark:text-rose-200 whitespace-pre-wrap break-words">
                 {failedReason}

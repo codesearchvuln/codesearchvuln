@@ -1,6 +1,6 @@
 /**
- * Agent Audit Types
- * Type definitions for the Agent Audit page
+ * Agent Scan Types
+ * Type definitions for the Agent Scan page
  */
 
 import type { AgentTask, AgentFinding, AgentTreeNode } from "@/shared/api/agentTasks";

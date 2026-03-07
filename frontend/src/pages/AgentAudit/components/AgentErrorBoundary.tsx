@@ -1,6 +1,6 @@
 /**
  * Agent Error Boundary Component
- * Specialized error boundary for Agent Audit pages with retry and recovery
+ * Specialized error boundary for Agent Scan pages with retry and recovery
  */
 
 import { Component, ReactNode } from 'react';

@@ -11,8 +11,8 @@ import { useTaskActivitiesSnapshot } from "@/features/tasks/hooks/useTaskActivit
 import { useTaskClock } from "@/features/tasks/hooks/useTaskClock";
 import { filterHybridActivities } from "@/features/tasks/services/taskActivities";
 
-const CreateProjectAuditDialog = lazy(
-	() => import("@/components/audit/CreateProjectAuditDialog"),
+const CreateProjectScanDialog = lazy(
+	() => import("@/components/scan/CreateProjectScanDialog"),
 );
 
 export default function TaskManagementHybrid() {
@@ -151,7 +151,7 @@ export default function TaskManagementHybrid() {
 
 			{showCreateHybridDialog ? (
 				<Suspense fallback={null}>
-					<CreateProjectAuditDialog
+					<CreateProjectScanDialog
 						open={showCreateHybridDialog}
 						onOpenChange={setShowCreateHybridDialog}
 						onTaskCreated={() => {

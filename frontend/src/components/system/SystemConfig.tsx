@@ -3,7 +3,15 @@
  * Cyberpunk Terminal Aesthetic
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	type Dispatch,
+	type SetStateAction,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/shared/utils/utils";
 import { Input } from "@/components/ui/input";
@@ -251,6 +259,24 @@ interface SystemConfigData {
 
 type ConfigSection = "llm" | "embedding" | "analysis" | "mcp";
 
+export interface SystemConfigSharedDraftState {
+	config: SystemConfigData | null;
+	setConfig: Dispatch<SetStateAction<SystemConfigData | null>>;
+	loading: boolean;
+	setLoading: Dispatch<SetStateAction<boolean>>;
+	hasChanges: boolean;
+	setHasChanges: Dispatch<SetStateAction<boolean>>;
+	llmProvidersFromBackend: LLMProviderItem[];
+	setLlmProvidersFromBackend: Dispatch<SetStateAction<LLMProviderItem[]>>;
+	fetchedModelsByProvider: Record<string, string[]>;
+	setFetchedModelsByProvider: Dispatch<SetStateAction<Record<string, string[]>>>;
+	fetchedModelMetadataByProvider: Record<string, Record<string, LLMModelMetadata>>;
+	setFetchedModelMetadataByProvider: Dispatch<
+		SetStateAction<Record<string, Record<string, LLMModelMetadata>>>
+	>;
+	reloadConfig: () => Promise<void>;
+}
+
 interface SystemConfigProps {
 	visibleSections?: ConfigSection[];
 	defaultSection?: ConfigSection;
@@ -259,6 +285,15 @@ interface SystemConfigProps {
 	llmSummaryOnly?: boolean;
 	showFloatingSaveButton?: boolean;
 	compactLayout?: boolean;
+	sharedDraftState?: SystemConfigSharedDraftState;
+	onLlmSummaryChange?: (summary: {
+		providerId: string;
+		providerLabel: string;
+		currentModelName: string;
+		availableModelCount: number;
+		availableModelMetadataCount: number;
+		supportsModelFetch: boolean;
+	}) => void;
 }
 
 type AdvancedConfigItemId =
@@ -338,6 +373,140 @@ function normalizeMcpConfig(
 					: DEFAULT_CONFIG.mcpConfig.writePolicy.require_evidence_binding,
 			forbid_project_wide_writes: true,
 		},
+	};
+}
+
+function buildSystemConfigDataFromBackendConfig(
+	backendConfig:
+		| {
+				llmConfig?: Record<string, unknown>;
+				otherConfig?: Record<string, unknown>;
+			}
+		| null
+		| undefined,
+): SystemConfigData {
+	const llmConfig = (backendConfig?.llmConfig ?? {}) as Record<string, unknown>;
+	const otherConfig = (backendConfig?.otherConfig ?? {}) as Record<string, unknown>;
+	const normalizedProvider = normalizeLlmProviderId(
+		typeof llmConfig.llmProvider === "string" ? llmConfig.llmProvider : "",
+	);
+
+	return {
+		llmProvider: normalizedProvider || DEFAULT_CONFIG.llmProvider,
+		llmApiKey: typeof llmConfig.llmApiKey === "string" ? llmConfig.llmApiKey : "",
+		llmModel: typeof llmConfig.llmModel === "string" ? llmConfig.llmModel : "",
+		llmBaseUrl:
+			typeof llmConfig.llmBaseUrl === "string" ? llmConfig.llmBaseUrl : "",
+		llmTimeout:
+			typeof llmConfig.llmTimeout === "number"
+				? llmConfig.llmTimeout
+				: DEFAULT_CONFIG.llmTimeout,
+		llmTemperature:
+			typeof llmConfig.llmTemperature === "number"
+				? llmConfig.llmTemperature
+				: DEFAULT_CONFIG.llmTemperature,
+		llmMaxTokens:
+			typeof llmConfig.llmMaxTokens === "number"
+				? llmConfig.llmMaxTokens
+				: DEFAULT_CONFIG.llmMaxTokens,
+		llmFirstTokenTimeout:
+			typeof llmConfig.llmFirstTokenTimeout === "number"
+				? llmConfig.llmFirstTokenTimeout
+				: DEFAULT_CONFIG.llmFirstTokenTimeout,
+		llmStreamTimeout:
+			typeof llmConfig.llmStreamTimeout === "number"
+				? llmConfig.llmStreamTimeout
+				: DEFAULT_CONFIG.llmStreamTimeout,
+		agentTimeout:
+			typeof llmConfig.agentTimeout === "number"
+				? llmConfig.agentTimeout
+				: DEFAULT_CONFIG.agentTimeout,
+		subAgentTimeout:
+			typeof llmConfig.subAgentTimeout === "number"
+				? llmConfig.subAgentTimeout
+				: DEFAULT_CONFIG.subAgentTimeout,
+		toolTimeout:
+			typeof llmConfig.toolTimeout === "number"
+				? llmConfig.toolTimeout
+				: DEFAULT_CONFIG.toolTimeout,
+		maxAnalyzeFiles:
+			typeof otherConfig.maxAnalyzeFiles === "number"
+				? otherConfig.maxAnalyzeFiles
+				: DEFAULT_CONFIG.maxAnalyzeFiles,
+		llmConcurrency:
+			typeof otherConfig.llmConcurrency === "number"
+				? otherConfig.llmConcurrency
+				: DEFAULT_CONFIG.llmConcurrency,
+		llmGapMs:
+			typeof otherConfig.llmGapMs === "number"
+				? otherConfig.llmGapMs
+				: DEFAULT_CONFIG.llmGapMs,
+		outputLanguage:
+			typeof otherConfig.outputLanguage === "string"
+				? otherConfig.outputLanguage
+				: DEFAULT_CONFIG.outputLanguage,
+		mcpConfig: normalizeMcpConfig(otherConfig),
+	};
+}
+
+export function useSystemConfigDraftState(
+	options?: { enabled?: boolean },
+): SystemConfigSharedDraftState {
+	const enabled = options?.enabled ?? true;
+	const [config, setConfig] = useState<SystemConfigData | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [hasChanges, setHasChanges] = useState(false);
+	const [llmProvidersFromBackend, setLlmProvidersFromBackend] = useState<
+		LLMProviderItem[]
+	>([]);
+	const [fetchedModelsByProvider, setFetchedModelsByProvider] = useState<
+		Record<string, string[]>
+	>({});
+	const [fetchedModelMetadataByProvider, setFetchedModelMetadataByProvider] =
+		useState<Record<string, Record<string, LLMModelMetadata>>>({});
+
+	const reloadConfig = useCallback(async () => {
+		if (!enabled) return;
+		try {
+			setLoading(true);
+			const backendConfig = await api.getUserConfig();
+			setConfig(
+				backendConfig
+					? buildSystemConfigDataFromBackendConfig(backendConfig)
+					: { ...DEFAULT_CONFIG },
+			);
+			setHasChanges(false);
+		} catch (error) {
+			console.error("Failed to load config:", error);
+			setConfig({ ...DEFAULT_CONFIG });
+		} finally {
+			setLoading(false);
+		}
+	}, [enabled]);
+
+	useEffect(() => {
+		if (!enabled) return;
+		void reloadConfig();
+		api
+			.getLLMProviders()
+			.then((res) => setLlmProvidersFromBackend(res.providers || []))
+			.catch(() => setLlmProvidersFromBackend([]));
+	}, [enabled, reloadConfig]);
+
+	return {
+		config,
+		setConfig,
+		loading,
+		setLoading,
+		hasChanges,
+		setHasChanges,
+		llmProvidersFromBackend,
+		setLlmProvidersFromBackend,
+		fetchedModelsByProvider,
+		setFetchedModelsByProvider,
+		fetchedModelMetadataByProvider,
+		setFetchedModelMetadataByProvider,
+		reloadConfig,
 	};
 }
 
@@ -427,7 +596,7 @@ function AdvancedConfigDialog(props: {
 			},
 			agentTimeout: {
 				label: "Agent 总超时 (秒)",
-				desc: "智能审计任务整体超时阈值。",
+				desc: "智能扫描任务整体超时阈值。",
 				input: (
 					<Input
 						type="number"
@@ -499,7 +668,7 @@ function AdvancedConfigDialog(props: {
 			},
 			outputLanguage: {
 				label: "输出语言",
-				desc: "智能审计输出语言。",
+				desc: "智能扫描输出语言。",
 				input: (
 					<Select
 						value={cfg.outputLanguage}
@@ -656,29 +825,36 @@ export function SystemConfig({
 	llmSummaryOnly = false,
 	showFloatingSaveButton = true,
 	compactLayout = false,
+	sharedDraftState,
+	onLlmSummaryChange,
 }: SystemConfigProps = {}) {
 	const sections = visibleSections.length > 0 ? visibleSections : ["llm"];
-	const [config, setConfig] = useState<SystemConfigData | null>(null);
-	const [loading, setLoading] = useState(true);
+	const internalDraftState = useSystemConfigDraftState({
+		enabled: sharedDraftState == null,
+	});
+	const {
+		config,
+		setConfig,
+		loading,
+		hasChanges,
+		setHasChanges,
+		llmProvidersFromBackend,
+		fetchedModelsByProvider,
+		setFetchedModelsByProvider,
+		fetchedModelMetadataByProvider,
+		setFetchedModelMetadataByProvider,
+		reloadConfig,
+	} = sharedDraftState ?? internalDraftState;
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [llmModelSelectValue, setLlmModelSelectValue] =
 		useState<string>("__default__");
 	const [llmModelPopoverOpen, setLlmModelPopoverOpen] = useState(false);
 	const [customModelQuery, setCustomModelQuery] = useState("");
 	const [customSuggestionOpen, setCustomSuggestionOpen] = useState(false);
-	const [hasChanges, setHasChanges] = useState(false);
 	const [testingLLM, setTestingLLM] = useState(false);
 	const [advancedOpen, setAdvancedOpen] = useState(false);
 	const [selectedAdvancedItemId, setSelectedAdvancedItemId] =
 		useState<AdvancedConfigItemId>("llmTimeout");
-	const [llmProvidersFromBackend, setLlmProvidersFromBackend] = useState<
-		LLMProviderItem[]
-	>([]);
-	const [fetchedModelsByProvider, setFetchedModelsByProvider] = useState<
-		Record<string, string[]>
-	>({});
-	const [fetchedModelMetadataByProvider, setFetchedModelMetadataByProvider] =
-		useState<Record<string, Record<string, LLMModelMetadata>>>({});
 	const [fetchingModels, setFetchingModels] = useState(false);
 	const [llmTestResult, setLlmTestResult] = useState<{
 		success: boolean;
@@ -690,14 +866,11 @@ export function SystemConfig({
 	const llmBaseUrlTouchedRef = useRef(false);
 	const llmMaxTokensTouchedRef = useRef(false);
 	const autoFetchSignatureRef = useRef<string>("");
+	const latestConfigRef = useRef<SystemConfigData | null>(config);
 
 	useEffect(() => {
-		loadConfig();
-		api
-			.getLLMProviders()
-			.then((res) => setLlmProvidersFromBackend(res.providers || []))
-			.catch(() => setLlmProvidersFromBackend([]));
-	}, []);
+		latestConfigRef.current = config;
+	}, [config]);
 
 	const tabsGridClass = useMemo(() => {
 		if (sections.length <= 1) return "grid-cols-1";
@@ -733,63 +906,7 @@ export function SystemConfig({
 		];
 	}, [llmProvidersFromBackend, config?.llmProvider]);
 
-	const loadConfig = async () => {
-		try {
-			setLoading(true);
-			const backendConfig = await api.getUserConfig();
-			if (!backendConfig) {
-				setConfig({ ...DEFAULT_CONFIG });
-				return;
-			}
-
-			const llmConfig = backendConfig.llmConfig || {};
-			const otherConfig = backendConfig.otherConfig || {};
-			const normalizedProvider = normalizeLlmProviderId(llmConfig.llmProvider);
-
-			const nextConfig: SystemConfigData = {
-				llmProvider: normalizedProvider || DEFAULT_CONFIG.llmProvider,
-				llmApiKey: llmConfig.llmApiKey || "",
-				llmModel: llmConfig.llmModel || "",
-				llmBaseUrl: llmConfig.llmBaseUrl || "",
-				llmTimeout: llmConfig.llmTimeout || DEFAULT_CONFIG.llmTimeout,
-				llmTemperature:
-					llmConfig.llmTemperature ?? DEFAULT_CONFIG.llmTemperature,
-				llmMaxTokens: llmConfig.llmMaxTokens || DEFAULT_CONFIG.llmMaxTokens,
-				llmFirstTokenTimeout:
-					llmConfig.llmFirstTokenTimeout || DEFAULT_CONFIG.llmFirstTokenTimeout,
-				llmStreamTimeout:
-					llmConfig.llmStreamTimeout || DEFAULT_CONFIG.llmStreamTimeout,
-				agentTimeout: llmConfig.agentTimeout || DEFAULT_CONFIG.agentTimeout,
-				subAgentTimeout:
-					llmConfig.subAgentTimeout || DEFAULT_CONFIG.subAgentTimeout,
-				toolTimeout: llmConfig.toolTimeout || DEFAULT_CONFIG.toolTimeout,
-				maxAnalyzeFiles:
-					otherConfig.maxAnalyzeFiles ?? DEFAULT_CONFIG.maxAnalyzeFiles,
-				llmConcurrency:
-					otherConfig.llmConcurrency || DEFAULT_CONFIG.llmConcurrency,
-				llmGapMs: otherConfig.llmGapMs || DEFAULT_CONFIG.llmGapMs,
-				outputLanguage:
-					otherConfig.outputLanguage || DEFAULT_CONFIG.outputLanguage,
-				mcpConfig: normalizeMcpConfig(otherConfig as Record<string, unknown>),
-			};
-
-			setConfig(nextConfig);
-			llmModelSelectTouchedRef.current = false;
-			llmBaseUrlTouchedRef.current = false;
-			llmMaxTokensTouchedRef.current = false;
-			setLlmModelSelectValue(
-				computeLlmModelSelectValue(
-					nextConfig.llmModel,
-					getModelsForProvider(nextConfig.llmProvider),
-				),
-			);
-		} catch (error) {
-			console.error("Failed to load config:", error);
-			setConfig({ ...DEFAULT_CONFIG });
-		} finally {
-			setLoading(false);
-		}
-	};
+	const loadConfig = reloadConfig;
 
 	const updateConfig = (
 		key: keyof SystemConfigData,
@@ -848,6 +965,19 @@ export function SystemConfig({
 		const current = (model || "").trim();
 		if (!current) return "__default__";
 		return models.includes(current) ? current : "__custom__";
+	};
+
+	const resolveDisplayedLlmModelSelectValue = (
+		model: string,
+		models: string[],
+		uiValue: string,
+	): string => {
+		const current = String(model || "").trim();
+		if (!current) return "__default__";
+		if (!models.includes(current)) return "__custom__";
+		if (uiValue === "__custom__") return "__custom__";
+		if (uiValue === "__default__") return current;
+		return models.includes(uiValue) ? uiValue : current;
 	};
 
 	const getProviderInfo = (providerId: string): LLMProviderItem | undefined => {
@@ -1014,7 +1144,11 @@ export function SystemConfig({
 	};
 
 	const handleProviderChange = (newProvider: string) => {
+		const previousConfig = latestConfigRef.current;
 		const defaultModel = getDefaultModelForProvider(newProvider);
+		const currentModel = String(previousConfig?.llmModel || "").trim();
+		const preserveCustomModel =
+			llmModelSelectValue === "__custom__" && currentModel.length > 0;
 		setConfig((prev) => {
 			if (!prev) return prev;
 			const defaultBaseUrl = getDefaultBaseUrlForProvider(newProvider);
@@ -1023,16 +1157,21 @@ export function SystemConfig({
 			return {
 				...prev,
 				llmProvider: newProvider,
-				llmModel: defaultModel || prev.llmModel,
+				llmModel:
+					preserveCustomModel ? currentModel : defaultModel || prev.llmModel,
 				llmBaseUrl: shouldUpdateBaseUrl ? defaultBaseUrl : prev.llmBaseUrl,
 			};
 		});
 		llmModelSelectTouchedRef.current = true;
-		setLlmModelSelectValue("__default__");
-		applyRecommendedMaxTokens(newProvider, defaultModel, {
-			force: false,
-			markChanges: true,
-		});
+		setLlmModelSelectValue(preserveCustomModel ? "__custom__" : "__default__");
+		if (preserveCustomModel) {
+			setCustomModelQuery(currentModel);
+		} else {
+			applyRecommendedMaxTokens(newProvider, defaultModel, {
+				force: false,
+				markChanges: true,
+			});
+		}
 		setHasChanges(true);
 		setLlmTestResult(null);
 	};
@@ -1041,12 +1180,14 @@ export function SystemConfig({
 		trigger?: "manual" | "auto";
 		silent?: boolean;
 	}) => {
-		if (!config) return;
+		const configSnapshot = latestConfigRef.current;
+		if (!configSnapshot) return;
 		const trigger = options?.trigger || "manual";
 		const silent = Boolean(options?.silent);
-		const providerId = normalizeLlmProviderId(config.llmProvider);
-		const baseUrl = String(config.llmBaseUrl || "").trim();
-		const apiKey = String(config.llmApiKey || "").trim();
+		const providerId = normalizeLlmProviderId(configSnapshot.llmProvider);
+		const baseUrl = String(configSnapshot.llmBaseUrl || "").trim();
+		const apiKey = String(configSnapshot.llmApiKey || "").trim();
+		const currentModelBeforeFetch = String(configSnapshot.llmModel || "").trim();
 		const requiresApiKey = shouldRequireApiKey(providerId);
 		const signature = `${providerId}|${baseUrl}|${requiresApiKey ? apiKey : ""}`;
 
@@ -1069,6 +1210,14 @@ export function SystemConfig({
 				apiKey,
 				baseUrl,
 			});
+			const latestConfig = latestConfigRef.current;
+			if (!latestConfig) return;
+			const latestProviderId = normalizeLlmProviderId(latestConfig.llmProvider);
+			const latestBaseUrl = String(latestConfig.llmBaseUrl || "").trim();
+			const latestApiKey = String(latestConfig.llmApiKey || "").trim();
+			const latestSignature = `${latestProviderId}|${latestBaseUrl}|${shouldRequireApiKey(latestProviderId) ? latestApiKey : ""}`;
+			if (latestSignature !== signature) return;
+
 			const normalizedModels = Array.isArray(result.models)
 				? [
 						...new Set(
@@ -1106,18 +1255,23 @@ export function SystemConfig({
 				...prev,
 				[providerId]: normalizedMetadata,
 			}));
+			const latestModel = String(latestConfig.llmModel || "").trim();
+			const wasCustomInput =
+				llmModelSelectValue === "__custom__" && currentModelBeforeFetch.length > 0;
 			llmModelSelectTouchedRef.current = false;
 			setLlmModelSelectValue(
-				computeLlmModelSelectValue(config.llmModel, normalizedModels),
+				computeLlmModelSelectValue(latestModel, normalizedModels),
 			);
-			const effectiveModel =
-				resolveCurrentModelName(providerId, config.llmModel) ||
-				result.defaultModel ||
-				getDefaultModelForProvider(providerId);
-			applyRecommendedMaxTokens(providerId, effectiveModel, {
-				force: false,
-				markChanges: true,
-			});
+			if (!wasCustomInput) {
+				const effectiveModel =
+					resolveCurrentModelName(providerId, latestModel) ||
+					result.defaultModel ||
+					getDefaultModelForProvider(providerId);
+				applyRecommendedMaxTokens(providerId, effectiveModel, {
+					force: false,
+					markChanges: true,
+				});
+			}
 			if (!silent) {
 				if (result.success) {
 					toast.success(result.message || "模型列表已更新");
@@ -1160,17 +1314,29 @@ export function SystemConfig({
 	useEffect(() => {
 		if (!config) return;
 		const models = getModelsForProvider(config.llmProvider);
-		if (!models.length) return;
-		if (llmModelSelectTouchedRef.current) return;
-		setLlmModelSelectValue(computeLlmModelSelectValue(config.llmModel, models));
-	}, [config, llmProvidersFromBackend, fetchedModelsByProvider]);
-
-	useEffect(() => {
-		if (!config) return;
-		if (llmModelSelectValue === "__custom__") {
-			setCustomModelQuery(String(config.llmModel || ""));
+		const currentModel = String(config.llmModel || "").trim();
+		if (!llmModelSelectTouchedRef.current) {
+			setLlmModelSelectValue(
+				resolveDisplayedLlmModelSelectValue(
+					currentModel,
+					models,
+					llmModelSelectValue,
+				),
+			);
 		}
-	}, [llmModelSelectValue, config?.llmModel]);
+		if (
+			llmModelSelectValue === "__custom__" ||
+			(currentModel.length > 0 && !models.includes(currentModel))
+		) {
+			setCustomModelQuery(currentModel);
+		}
+	}, [
+		config?.llmModel,
+		config?.llmProvider,
+		llmProvidersFromBackend,
+		fetchedModelsByProvider,
+		llmModelSelectValue,
+	]);
 
 	const handleLlmModelSelect = (value: string) => {
 		if (!config) return;
@@ -1244,40 +1410,11 @@ export function SystemConfig({
 			});
 
 			if (savedConfig) {
-				const llmConfig = savedConfig.llmConfig || {};
-				const otherConfig = savedConfig.otherConfig || {};
-				const normalizedProvider = normalizeLlmProviderId(
-					llmConfig.llmProvider,
-				);
-				const nextConfig: SystemConfigData = {
-					llmProvider: normalizedProvider || DEFAULT_CONFIG.llmProvider,
-					llmApiKey: llmConfig.llmApiKey || "",
-					llmModel: llmConfig.llmModel || "",
-					llmBaseUrl: llmConfig.llmBaseUrl || "",
-					llmTimeout: llmConfig.llmTimeout || DEFAULT_CONFIG.llmTimeout,
-					llmTemperature:
-						llmConfig.llmTemperature ?? DEFAULT_CONFIG.llmTemperature,
-					llmMaxTokens: llmConfig.llmMaxTokens || DEFAULT_CONFIG.llmMaxTokens,
-					llmFirstTokenTimeout:
-						llmConfig.llmFirstTokenTimeout ||
-						DEFAULT_CONFIG.llmFirstTokenTimeout,
-					llmStreamTimeout:
-						llmConfig.llmStreamTimeout || DEFAULT_CONFIG.llmStreamTimeout,
-					agentTimeout: llmConfig.agentTimeout || DEFAULT_CONFIG.agentTimeout,
-					subAgentTimeout:
-						llmConfig.subAgentTimeout || DEFAULT_CONFIG.subAgentTimeout,
-					toolTimeout: llmConfig.toolTimeout || DEFAULT_CONFIG.toolTimeout,
-					maxAnalyzeFiles:
-						otherConfig.maxAnalyzeFiles ?? DEFAULT_CONFIG.maxAnalyzeFiles,
-					llmConcurrency:
-						otherConfig.llmConcurrency || DEFAULT_CONFIG.llmConcurrency,
-					llmGapMs: otherConfig.llmGapMs || DEFAULT_CONFIG.llmGapMs,
-					outputLanguage:
-						otherConfig.outputLanguage || DEFAULT_CONFIG.outputLanguage,
-					mcpConfig: normalizeMcpConfig(otherConfig as Record<string, unknown>),
-				};
+				const nextConfig = buildSystemConfigDataFromBackendConfig(savedConfig);
 				setConfig(nextConfig);
 				llmModelSelectTouchedRef.current = false;
+				llmBaseUrlTouchedRef.current = false;
+				llmMaxTokensTouchedRef.current = false;
 				setLlmModelSelectValue(
 					computeLlmModelSelectValue(
 						nextConfig.llmModel,
@@ -1285,7 +1422,6 @@ export function SystemConfig({
 					),
 				);
 				setCustomModelQuery(nextConfig.llmModel || "");
-				llmBaseUrlTouchedRef.current = false;
 			}
 
 			setHasChanges(false);
@@ -1302,6 +1438,9 @@ export function SystemConfig({
 		try {
 			await api.deleteUserConfig();
 			await loadConfig();
+			llmModelSelectTouchedRef.current = false;
+			llmBaseUrlTouchedRef.current = false;
+			llmMaxTokensTouchedRef.current = false;
 			setHasChanges(false);
 			toast.success("已重置为默认配置");
 		} catch (error) {
@@ -1340,6 +1479,38 @@ export function SystemConfig({
 		}
 	};
 
+	const normalizedProviderId = normalizeLlmProviderId(config?.llmProvider || "");
+	const selectedProviderInfo = getProviderInfo(normalizedProviderId);
+	const currentModelName = config
+		? resolveCurrentModelName(normalizedProviderId, config.llmModel)
+		: "";
+	const availableModelCount = config
+		? getModelsForProvider(normalizedProviderId).length
+		: 0;
+	const availableModelMetadataCount = config
+		? Object.keys(getModelMetadataForProvider(normalizedProviderId)).length
+		: 0;
+
+	useEffect(() => {
+		if (!onLlmSummaryChange) return;
+		onLlmSummaryChange({
+			providerId: normalizedProviderId,
+			providerLabel: selectedProviderInfo?.name || normalizedProviderId || "--",
+			currentModelName: currentModelName || "--",
+			availableModelCount,
+			availableModelMetadataCount,
+			supportsModelFetch: Boolean(selectedProviderInfo?.supportsModelFetch),
+		});
+	}, [
+		onLlmSummaryChange,
+		normalizedProviderId,
+		selectedProviderInfo?.name,
+		selectedProviderInfo?.supportsModelFetch,
+		currentModelName,
+		availableModelCount,
+		availableModelMetadataCount,
+	]);
+
 	if (loading || !config) {
 		return (
 			<div className="flex items-center justify-center min-h-[400px]">
@@ -1353,19 +1524,10 @@ export function SystemConfig({
 		);
 	}
 
-	const normalizedProviderId = normalizeLlmProviderId(config.llmProvider);
-	const selectedProviderInfo = getProviderInfo(normalizedProviderId);
-	const currentModelName = resolveCurrentModelName(
-		normalizedProviderId,
-		config.llmModel,
-	);
-	const availableModelCount = getModelsForProvider(normalizedProviderId).length;
-	const availableModelMetadataCount = Object.keys(
-		getModelMetadataForProvider(normalizedProviderId),
-	).length;
 	const hasModelConfigured = String(config.llmModel || "").trim().length > 0;
 	const hasBaseUrlConfigured =
 		String(config.llmBaseUrl || "").trim().length > 0;
+
 	const isConfigured =
 		(!shouldRequireApiKey(config.llmProvider) ||
 			config.llmApiKey.trim() !== "") &&
@@ -1608,16 +1770,19 @@ export function SystemConfig({
 													const defaultModel =
 														getDefaultModelForProvider(providerId) || "auto";
 													const fallbackSelectValue = computeLlmModelSelectValue(
-														config.llmModel,
-														models,
-													);
-													const selectValue =
-														llmModelSelectValue === "__default__" ||
-														llmModelSelectValue === "__custom__" ||
-														models.includes(llmModelSelectValue)
-															? llmModelSelectValue
-															: fallbackSelectValue;
-													const displayLabel =
+												config.llmModel,
+												models,
+											);
+											const selectValue = resolveDisplayedLlmModelSelectValue(
+												config.llmModel,
+												models,
+												llmModelSelectValue === "__default__" ||
+												llmModelSelectValue === "__custom__" ||
+												models.includes(llmModelSelectValue)
+													? llmModelSelectValue
+													: fallbackSelectValue,
+											);
+											const displayLabel =
 														selectValue === "__default__"
 															? `默认（${defaultModel}）`
 															: selectValue === "__custom__"

@@ -1,7 +1,7 @@
 /**
  * 嵌入模型配置组件
  * Cyberpunk Terminal Aesthetic
- * 独立于 LLM 配置，专门用于 Agent 审计的 RAG 系统
+ * 独立于 LLM 配置，专门用于 Agent 扫描的 RAG 系统
  */
 
 import { useEffect, useRef, useState } from "react";

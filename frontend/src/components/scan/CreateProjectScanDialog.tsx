@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -18,7 +17,6 @@ import {
 	Layers,
 	Loader2,
 	Shield,
-	Sparkles,
 	TerminalSquare,
 	Upload,
 	Zap,
@@ -47,14 +45,14 @@ import {
 import { useI18n } from "@/shared/i18n";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 
-export type AuditCreateMode = "static" | "agent" | "hybrid";
+export type ScanCreateMode = "static" | "agent" | "hybrid";
 
-interface CreateProjectAuditDialogProps {
+interface CreateProjectScanDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onTaskCreated?: () => void;
 	preselectedProjectId?: string;
-	initialMode?: AuditCreateMode;
+	initialMode?: ScanCreateMode;
 	lockMode?: boolean;
 	allowUploadProject?: boolean;
 	navigateOnSuccess?: boolean;
@@ -157,7 +155,7 @@ const isLlmPreflightUiHandledError = (
 			(error as { code?: string }).code === LLM_PREFLIGHT_UI_HANDLED_CODE,
 	);
 
-export default function CreateProjectAuditDialog({
+export default function CreateProjectScanDialog({
 	open,
 	onOpenChange,
 	onTaskCreated,
@@ -167,12 +165,12 @@ export default function CreateProjectAuditDialog({
 	allowUploadProject = false,
 	navigateOnSuccess = true,
 	createButtonVariant = "single",
-	primaryCreateLabel = "创建审计任务",
+	primaryCreateLabel = "创建扫描任务",
 	secondaryCreateLabel = "创建并返回",
 	onSecondaryCreateSuccess,
 	showReturnButton = false,
 	onReturn,
-}: CreateProjectAuditDialogProps) {
+}: CreateProjectScanDialogProps) {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const currentRoute = `${location.pathname}${location.search}`;
@@ -184,10 +182,8 @@ export default function CreateProjectAuditDialog({
 	const [sourceMode, setSourceMode] = useState<"existing" | "upload">("existing");
 	const [selectedProjectId, setSelectedProjectId] = useState("");
 	const [newProjectName, setNewProjectName] = useState("");
-	const [newProjectDescription, setNewProjectDescription] = useState("");
 	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
-	const [generatingDescription, setGeneratingDescription] = useState(false);
-	const [mode, setMode] = useState<AuditCreateMode>("static");
+	const [mode, setMode] = useState<ScanCreateMode>("static");
 	const [targetFilesInput, setTargetFilesInput] = useState("");
 	const [branchName, setBranchName] = useState("main");
 	const [opengrepEnabled, setOpengrepEnabled] = useState(true);
@@ -244,10 +240,10 @@ export default function CreateProjectAuditDialog({
 	);
 
 	const dialogTitle = useMemo(() => {
-		if (!lockMode) return "创建审计";
-		if (initialMode === "agent") return "创建智能审计";
+		if (!lockMode) return "创建扫描";
+		if (initialMode === "agent") return "创建智能扫描";
 		if (initialMode === "hybrid") return "创建混合扫描";
-		return "创建静态审计";
+		return "创建静态扫描";
 	}, [initialMode, lockMode]);
 
 	useEffect(() => {
@@ -256,9 +252,7 @@ export default function CreateProjectAuditDialog({
 		setSourceMode("existing");
 		setSelectedProjectId(preselectedProjectId || "");
 		setNewProjectName("");
-		setNewProjectDescription("");
 		setNewProjectFile(null);
-		setGeneratingDescription(false);
 		setMode(initialMode || "static");
 		setTargetFilesInput("");
 		setBranchName("main");
@@ -371,7 +365,7 @@ export default function CreateProjectAuditDialog({
 
 		const primaryTaskId = opengrepTask?.id || gitleaksTask?.id;
 		if (!primaryTaskId) {
-			throw new Error("静态审计任务创建失败");
+			throw new Error("静态扫描任务创建失败");
 		}
 
 		const params = new URLSearchParams();
@@ -391,8 +385,8 @@ export default function CreateProjectAuditDialog({
 		project_id: project.id,
 		name:
 			source === "hybrid"
-				? `混合扫描-智能审计-${project.name}`
-				: `智能审计-${project.name}`,
+				? `混合扫描-智能扫描-${project.name}`
+				: `智能扫描-${project.name}`,
 		description:
 			source === "hybrid"
 				? `${HYBRID_TASK_NAME_MARKER}混合扫描智能阶段任务`
@@ -467,7 +461,7 @@ export default function CreateProjectAuditDialog({
 	};
 
 	const ensureLlmPreflightPassed = async () => {
-		const checkToast = toast.loading("正在检查智能审计配置（LLM）...");
+		const checkToast = toast.loading("正在检查智能扫描配置（LLM）...");
 		let preflight: AgentPreflightResult;
 		try {
 			preflight = await runAgentPreflightCheck();
@@ -476,7 +470,7 @@ export default function CreateProjectAuditDialog({
 		}
 
 		if (!preflight.ok) {
-			const message = preflight.message || "智能审计配置检查未通过";
+			const message = preflight.message || "智能扫描配置检查未通过";
 			toast.error(message);
 			await openLlmQuickFixPanel(preflight);
 			throw createLlmPreflightUiHandledError(message);
@@ -607,7 +601,7 @@ export default function CreateProjectAuditDialog({
 		);
 		onOpenChange(false);
 		onTaskCreated?.();
-		toast.success("混合扫描任务已创建（内嵌静态预扫 + 智能审计）");
+		toast.success("混合扫描任务已创建（内嵌静态预扫 + 智能扫描）");
 		if (action === "secondary") {
 			onSecondaryCreateSuccess?.();
 		} else if (navigateOnSuccess) {
@@ -643,35 +637,9 @@ export default function CreateProjectAuditDialog({
 			return;
 		}
 		setNewProjectFile(file);
-		setGeneratingDescription(false);
 		const inferredName = stripArchiveSuffix(file.name).trim();
 		if (inferredName) setNewProjectName(inferredName);
 		event.target.value = "";
-	};
-
-	const handleGenerateNewProjectDescription = async () => {
-		if (!newProjectFile) {
-			toast.error("请先选择项目压缩包");
-			return;
-		}
-
-		try {
-			setGeneratingDescription(true);
-			const result = await api.generateProjectDescription({
-				file: newProjectFile,
-				project_name: newProjectName,
-			});
-			setNewProjectDescription(result.description || "");
-			if (result.source === "llm") {
-				toast.success("已生成项目描述");
-			} else {
-				toast.success("LLM不可用，已回退静态描述");
-			}
-		} catch (error) {
-			toast.error(`生成失败: ${extractApiErrorMessage(error)}`);
-		} finally {
-			setGeneratingDescription(false);
-		}
 	};
 
 	const handleCreate = async (action: "primary" | "secondary" = "primary") => {
@@ -687,7 +655,6 @@ export default function CreateProjectAuditDialog({
 				try {
 					createdProject = await api.createProject({
 						name: newProjectName.trim(),
-						description: newProjectDescription.trim() || undefined,
 						source_type: "zip",
 						repository_type: "other",
 						repository_url: undefined,
@@ -704,7 +671,7 @@ export default function CreateProjectAuditDialog({
 						const result = await createStaticTasksForProject(createdProject);
 						onOpenChange(false);
 						onTaskCreated?.();
-						toast.success("静态审计任务已创建");
+						toast.success("静态扫描任务已创建");
 						if (action === "secondary") {
 							onSecondaryCreateSuccess?.();
 						} else if (navigateOnSuccess) {
@@ -742,7 +709,7 @@ export default function CreateProjectAuditDialog({
 					toast.error(
 						mode === "hybrid"
 							? "混合扫描当前仅支持源码压缩包项目"
-							: "静态审计仅支持源码压缩包项目",
+							: "静态扫描仅支持源码压缩包项目",
 					);
 					return;
 				}
@@ -761,7 +728,7 @@ export default function CreateProjectAuditDialog({
 				const result = await createStaticTasksForProject(selectedProject);
 				onOpenChange(false);
 				onTaskCreated?.();
-				toast.success("静态审计任务已创建");
+				toast.success("静态扫描任务已创建");
 				if (action === "secondary") {
 					onSecondaryCreateSuccess?.();
 				} else if (navigateOnSuccess) {
@@ -835,9 +802,8 @@ export default function CreateProjectAuditDialog({
 									}
 									onClick={() => {
 										setSourceMode("existing");
-										setGeneratingDescription(false);
 									}}
-									disabled={creating || generatingDescription}
+									disabled={creating}
 								>
 									选择已有项目
 								</Button>
@@ -851,9 +817,8 @@ export default function CreateProjectAuditDialog({
 									}
 									onClick={() => {
 										setSourceMode("upload");
-										setGeneratingDescription(false);
 									}}
-									disabled={creating || generatingDescription}
+									disabled={creating}
 								>
 									上传新项目
 								</Button>
@@ -863,7 +828,7 @@ export default function CreateProjectAuditDialog({
 
 					{!lockMode && (
 						<div className="space-y-2">
-							<p className="text-xs uppercase tracking-wider text-muted-foreground">审计方式</p>
+							<p className="text-xs uppercase tracking-wider text-muted-foreground">扫描方式</p>
 							<div className="grid grid-cols-1 md:grid-cols-3 gap-2">
 								<Button
 									type="button"
@@ -874,10 +839,10 @@ export default function CreateProjectAuditDialog({
 											: "cyber-btn-outline h-10 justify-start"
 									}
 									onClick={() => setMode("static")}
-									disabled={creating || generatingDescription}
+									disabled={creating}
 								>
 									<Zap className="w-4 h-4 mr-2" />
-									静态审计
+									静态扫描
 								</Button>
 								<Button
 									type="button"
@@ -888,10 +853,10 @@ export default function CreateProjectAuditDialog({
 											: "cyber-btn-outline h-10 justify-start"
 									}
 									onClick={() => setMode("agent")}
-									disabled={creating || generatingDescription}
+									disabled={creating}
 								>
 									<Bot className="w-4 h-4 mr-2" />
-									智能审计
+									智能扫描
 								</Button>
 								<Button
 									type="button"
@@ -902,7 +867,7 @@ export default function CreateProjectAuditDialog({
 											: "cyber-btn-outline h-10 justify-start"
 									}
 									onClick={() => setMode("hybrid")}
-									disabled={creating || generatingDescription}
+									disabled={creating}
 								>
 									<Layers className="w-4 h-4 mr-2" />
 									混合扫描
@@ -918,7 +883,7 @@ export default function CreateProjectAuditDialog({
 								onChange={(event) => setSearchTerm(event.target.value)}
 								placeholder="搜索项目..."
 								className="h-9 cyber-input"
-								disabled={creating || generatingDescription}
+								disabled={creating}
 							/>
 							<div className="border border-border rounded-lg max-h-[280px] overflow-y-auto p-2 space-y-2">
 								{loadingProjects ? (
@@ -937,7 +902,7 @@ export default function CreateProjectAuditDialog({
 													? "border-sky-500/50 bg-sky-500/10"
 													: "border-border hover:border-sky-500/30 bg-background"
 											}`}
-											disabled={creating || generatingDescription}
+											disabled={creating}
 										>
 											<div className="flex items-start justify-between gap-3">
 												<div className="min-w-0">
@@ -981,34 +946,17 @@ export default function CreateProjectAuditDialog({
 									onChange={(event) => setNewProjectName(event.target.value)}
 									placeholder="请输入项目名称"
 									className="h-9 cyber-input"
-									disabled={creating || generatingDescription}
+									disabled={creating}
 								/>
 							</div>
-							<div>
-								<div className="mb-1 flex items-center justify-between gap-2">
-									<p className="text-xs uppercase tracking-wider text-muted-foreground">
-										项目描述（可选）
-									</p>
-									<Button
-										type="button"
-										variant="outline"
-										className="cyber-btn-outline h-8 text-xs"
-										onClick={handleGenerateNewProjectDescription}
-										disabled={creating || generatingDescription || !newProjectFile}
-									>
-										<Sparkles className="w-3 h-3 mr-1.5" />
-										{generatingDescription ? "生成中..." : "一键生成"}
-									</Button>
-								</div>
-								<Textarea
-									value={newProjectDescription}
-									onChange={(event) => setNewProjectDescription(event.target.value)}
-									placeholder="请输入项目描述"
-									rows={2}
-									className="cyber-input min-h-[72px]"
-									disabled={creating || generatingDescription}
-								/>
-							</div>
+						<div className="rounded-lg border border-dashed border-sky-500/30 bg-sky-500/8 p-3">
+							<p className="text-xs uppercase tracking-wider font-semibold text-sky-100 mb-1">
+								自动生成简介
+							</p>
+							<p className="text-xs leading-5 text-sky-50/85">
+								项目上传完成后，系统会自动生成 1-2 句使用场景简介，并同步展示到项目列表与详情页。
+							</p>
+						</div>
 							<div>
 								<p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">源码压缩包</p>
 								<label className="inline-flex">
@@ -1017,7 +965,7 @@ export default function CreateProjectAuditDialog({
 										accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
 										className="hidden"
 										onChange={handleNewProjectFileSelect}
-										disabled={creating || generatingDescription}
+										disabled={creating}
 									/>
 									<span className="cyber-btn-outline h-9 px-3 inline-flex items-center cursor-pointer">
 										<Upload className="w-4 h-4 mr-2" />
@@ -1048,7 +996,7 @@ export default function CreateProjectAuditDialog({
 										onCheckedChange={(checked) =>
 											setOpengrepEnabled(Boolean(checked))
 										}
-										disabled={creating || generatingDescription}
+										disabled={creating}
 										className="data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
 									/>
 									<div>
@@ -1062,7 +1010,7 @@ export default function CreateProjectAuditDialog({
 										onCheckedChange={(checked) =>
 											setGitleaksEnabled(Boolean(checked))
 										}
-										disabled={creating || generatingDescription}
+										disabled={creating}
 										className="data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
 									/>
 									<div>
@@ -1097,17 +1045,16 @@ export default function CreateProjectAuditDialog({
 											)}
 										</p>
 									</div>
-									<Button
-										type="button"
-										variant="outline"
-										className="cyber-btn-outline h-8 shrink-0"
-										onClick={openLlmQuickFixPanelManual}
-										disabled={
-											creating ||
-											generatingDescription ||
-											quickFixSaving ||
-											quickFixTesting ||
-											quickFixPanelOpening
+					<Button
+						type="button"
+						variant="outline"
+						className="cyber-btn-outline h-8 shrink-0"
+						onClick={openLlmQuickFixPanelManual}
+						disabled={
+							creating ||
+							quickFixSaving ||
+							quickFixTesting ||
+							quickFixPanelOpening
 										}
 									>
 										{quickFixPanelOpening ? (
@@ -1250,13 +1197,13 @@ export default function CreateProjectAuditDialog({
 
 					{mode === "agent" && selectedProject && isRepositoryProject(selectedProject) && (
 						<div className="space-y-2">
-							<p className="text-xs uppercase tracking-wider text-muted-foreground">审计分支</p>
+							<p className="text-xs uppercase tracking-wider text-muted-foreground">扫描分支</p>
 							<Input
 								value={branchName}
 								onChange={(event) => setBranchName(event.target.value)}
 								placeholder="main"
 								className="h-9 cyber-input"
-								disabled={creating || generatingDescription}
+								disabled={creating}
 							/>
 						</div>
 					)}
@@ -1269,7 +1216,7 @@ export default function CreateProjectAuditDialog({
 							variant="outline"
 							className="cyber-btn-outline"
 							onClick={onReturn}
-							disabled={creating || generatingDescription}
+							disabled={creating}
 						>
 							返回
 						</Button>
@@ -1279,7 +1226,7 @@ export default function CreateProjectAuditDialog({
 						variant="outline"
 						className="cyber-btn-outline"
 						onClick={() => onOpenChange(false)}
-						disabled={creating || generatingDescription}
+						disabled={creating}
 					>
 						取消
 					</Button>
@@ -1287,7 +1234,7 @@ export default function CreateProjectAuditDialog({
 						type="button"
 						className="cyber-btn-primary"
 						onClick={() => handleCreate("primary")}
-						disabled={!canCreate || creating || generatingDescription}
+						disabled={!canCreate || creating}
 					>
 						{creating ? (
 							<>
@@ -1306,7 +1253,7 @@ export default function CreateProjectAuditDialog({
 							type="button"
 							className="cyber-btn-primary"
 							onClick={() => handleCreate("secondary")}
-							disabled={!canCreate || creating || generatingDescription}
+							disabled={!canCreate || creating}
 						>
 							{creating ? (
 								<>

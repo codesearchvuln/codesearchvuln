@@ -471,7 +471,7 @@ export default function FileSelectionDialog({
                     <div className="flex items-center gap-3">
                         <FolderOpen className="w-5 h-5 text-primary" />
                         <DialogTitle className="text-lg font-bold uppercase tracking-wider text-foreground">
-                            选择要审计的文件
+                            选择要扫描的文件
                         </DialogTitle>
                     </div>
                     {excludePatterns && excludePatterns.length > 0 && (

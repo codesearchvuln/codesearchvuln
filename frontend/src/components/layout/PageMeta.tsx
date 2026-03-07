@@ -24,7 +24,7 @@ export function AppWrapper({ children }: AppWrapperProps) {
 export default function PageMeta({
   title = "VulHunter",
   description = "基于AI的现代化代码质量分析和审查服务，提供全面的代码安全检测、性能分析和最佳实践建议。",
-  keywords = "代码审计,代码质量,AI分析,安全检测,性能优化,代码规范",
+  keywords = "代码扫描,代码质量,AI分析,安全检测,性能优化,代码规范",
   image = "/images/logo.png",
   url = window.location.href
 }: PageMetaProps) {

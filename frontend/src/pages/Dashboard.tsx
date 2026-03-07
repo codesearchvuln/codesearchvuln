@@ -388,7 +388,7 @@ export default function Dashboard() {
 				<div className="cyber-card p-4">
 					<div className="flex items-center justify-between">
 						<div>
-							<p className="stat-label">审计任务</p>
+							<p className="stat-label">扫描任务</p>
 							<p className="stat-value">{stats.total_tasks || 0}</p>
 							<p className="text-sm mt-1 flex items-center gap-3">
 								<span className="text-emerald-400 inline-flex items-center gap-1">
@@ -410,7 +410,7 @@ export default function Dashboard() {
 				<div className="cyber-card p-4">
 					<div className="flex items-center justify-between">
 						<div>
-							<p className="stat-label">审计规则</p>
+							<p className="stat-label">扫描规则</p>
 							<p className="stat-value">{ruleStats.total}</p>
 							<p className="text-sm text-sky-400 mt-1 flex items-center gap-1">
 								<span className="w-2 h-2 rounded-full bg-sky-400" />

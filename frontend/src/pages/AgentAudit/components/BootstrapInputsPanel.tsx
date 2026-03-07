@@ -62,7 +62,7 @@ export function BootstrapInputsPanel({
       <div className="border-t border-border px-4 py-3 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            该智能审计任务的预扫描输入（来源: {summary.source}）
+            该智能扫描任务的预扫描输入（来源: {summary.source}）
           </p>
           <Link
             to={staticAnalysisRoute}

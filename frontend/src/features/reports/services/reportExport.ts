@@ -56,7 +56,7 @@ export async function exportToJSON(task: AuditTask, issues: AuditIssue[]) {
     downloadBlob(blob, `audit-report-${task.id.slice(0, 8)}-${Date.now()}.json`);
 }
 
-// 导出任务审计报告 PDF（后端生成）
+// 导出任务扫描报告 PDF（后端生成）
 export async function exportToPDF(task: AuditTask, _issues: AuditIssue[]) {
     try {
         const blob = await api.exportTaskReportPDF(task.id);

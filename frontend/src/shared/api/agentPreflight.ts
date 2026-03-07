@@ -70,7 +70,7 @@ export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 			stage: "llm_config",
 			reasonCode: "missing_fields",
 			missingFields,
-			message: `智能审计初始化失败：LLM 缺少必填配置 ${message}，请先补全并测试。`,
+			message: `智能扫描初始化失败：LLM 缺少必填配置 ${message}，请先补全并测试。`,
 		};
 	}
 
@@ -87,7 +87,7 @@ export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 				ok: false,
 				stage: "llm_test",
 				reasonCode: "llm_test_failed",
-				message: `智能审计初始化失败：LLM 测试未通过（${llmResult.message || "未知错误"}）。`,
+				message: `智能扫描初始化失败：LLM 测试未通过（${llmResult.message || "未知错误"}）。`,
 			};
 		}
 	} catch (error) {
@@ -96,7 +96,7 @@ export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 			ok: false,
 			stage: "llm_test",
 			reasonCode: "llm_test_exception",
-			message: `智能审计初始化失败：LLM 测试异常（${message}）。`,
+			message: `智能扫描初始化失败：LLM 测试异常（${message}）。`,
 		};
 	}
 

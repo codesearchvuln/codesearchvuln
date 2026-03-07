@@ -1,21 +1,84 @@
-import { KeyRound, Zap } from "lucide-react";
-import { SystemConfig } from "@/components/system/SystemConfig";
+import { useState } from "react";
+import { Brain, KeyRound, Settings, Zap } from "lucide-react";
+import { SystemConfig, useSystemConfigDraftState } from "@/components/system/SystemConfig";
 import EmbeddingConfig from "@/components/agent/EmbeddingConfig";
 
+type LlmSummaryState = {
+	providerLabel: string;
+	currentModelName: string;
+	availableModelCount: number;
+	availableModelMetadataCount: number;
+	supportsModelFetch: boolean;
+};
+
 export default function ScanConfigIntelligentEngine() {
+	const sharedDraftState = useSystemConfigDraftState();
+	const summaryConfig = sharedDraftState.config;
+	const [summaryState, setSummaryState] = useState<LlmSummaryState | null>(null);
+	const summary: LlmSummaryState = {
+		providerLabel: summaryState?.providerLabel || summaryConfig?.llmProvider || "--",
+		currentModelName:
+			summaryState?.currentModelName || summaryConfig?.llmModel || "--",
+		availableModelCount: summaryState?.availableModelCount || 0,
+		availableModelMetadataCount:
+			summaryState?.availableModelMetadataCount || 0,
+		supportsModelFetch: summaryState?.supportsModelFetch || false,
+	};
+
 	return (
 		<div className="space-y-6 p-6 bg-background min-h-screen relative">
 			<div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
 
 			<div className="relative z-10 space-y-4">
-				<SystemConfig
-					visibleSections={["llm"]}
-					defaultSection="llm"
-					mergedView={false}
-					llmSummaryOnly
-					showFloatingSaveButton={false}
-					compactLayout
-				/>
+				<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+					<div className="cyber-card p-4">
+						<div className="flex items-center justify-between">
+							<div>
+								<p className="stat-label">模型提供商</p>
+								<p className="stat-value text-2xl break-all">
+									{summary.providerLabel}
+								</p>
+								<p className="text-sm text-muted-foreground mt-1">
+									{summary.supportsModelFetch ? "支持在线拉取" : "静态模型列表"}
+								</p>
+							</div>
+							<div className="stat-icon text-primary">
+								<Settings className="w-6 h-6" />
+							</div>
+						</div>
+					</div>
+
+					<div className="cyber-card p-4">
+						<div className="flex items-center justify-between">
+							<div>
+								<p className="stat-label">当前采用模型</p>
+								<p className="stat-value text-2xl break-all">
+									{summary.currentModelName || "--"}
+								</p>
+							</div>
+							<div className="stat-icon text-sky-400">
+								<Brain className="w-6 h-6" />
+							</div>
+						</div>
+					</div>
+
+					<div className="cyber-card p-4">
+						<div className="flex items-center justify-between">
+							<div>
+								<p className="stat-label">模型统计</p>
+								<p className="stat-value">
+									{summary.availableModelCount} 个模型
+								</p>
+								<p className="text-sm text-muted-foreground mt-1">
+									元数据 {summary.availableModelMetadataCount} ·{summary.supportsModelFetch ? " 支持在线拉取" : " 使用静态列表"}
+								</p>
+							</div>
+							<div className="stat-icon text-emerald-400">
+								<Zap className="w-6 h-6" />
+							</div>
+						</div>
+					</div>
+				</div>
 
 				<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 					<div className="cyber-card p-4 space-y-2">
@@ -35,6 +98,8 @@ export default function ScanConfigIntelligentEngine() {
 							showLlmSummaryCards={false}
 							showFloatingSaveButton={false}
 							compactLayout
+							sharedDraftState={sharedDraftState}
+							onLlmSummaryChange={setSummaryState}
 						/>
 					</div>
 

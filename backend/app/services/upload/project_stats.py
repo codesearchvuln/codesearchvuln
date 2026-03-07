@@ -358,18 +358,25 @@ async def generate_project_description(
 
 
 async def generate_project_description_from_extracted_dir(
-    extracted_dir: str, user_config: Optional[dict] = None
+    extracted_dir: str,
+    user_config: Optional[dict] = None,
+    project_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     analyzer = ProjectDescriptionAnalyzer(user_config=user_config)
     try:
-        return await analyzer.analyze_project(extracted_dir)
+        return await analyzer.analyze_project(
+            extracted_dir,
+            project_name=project_name,
+        )
     except Exception as e:
         logger.error(f"生成项目描述失败: {e}", exc_info=True)
         return {"error": str(e)}
 
 
 async def generate_project_description_from_archive(
-    archive_path: str, user_config: Optional[dict] = None
+    archive_path: str,
+    user_config: Optional[dict] = None,
+    project_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     if not os.path.exists(archive_path):
         logger.error(f"项目ZIP文件不存在: {archive_path}")
@@ -385,6 +392,7 @@ async def generate_project_description_from_archive(
             return await generate_project_description_from_extracted_dir(
                 temp_dir,
                 user_config=user_config,
+                project_name=project_name,
             )
     except Exception as e:
         logger.error(f"生成项目描述失败: {e}", exc_info=True)
@@ -491,68 +499,241 @@ class ProjectDescriptionAnalyzer:
 
         return False
 
-    async def analyze_project(self, project_dir: str, max_files: int = 30) -> Dict[str, Any]:
-        """遍历项目目录，提取函数及注释，调用LLM进行逐文件分析并汇总结果（MVP）。"""
-        summaries: Dict[str, Any] = {}
-
-        # 先收集待处理文件（根据 max_files 限制），避免在并发阶段进行文件系统遍历
-        file_entries: List[Tuple[str, str]] = []
-        for root, dirs, files in os.walk(project_dir):
-            dirs[:] = [d for d in dirs if not self._should_skip_dir(d)]
-            for fname in files:
-                if len(file_entries) >= max_files:
-                    break
-                fpath = os.path.join(root, fname)
-                rel_path = os.path.relpath(fpath, project_dir)
-                if self._should_skip_file(fpath):
-                    continue
-                file_entries.append((fpath, rel_path))
-            if len(file_entries) >= max_files:
-                break
-
-        # 并发处理文件，限制并发数以避免同时打爆 LLM 或本地 IO
-        concurrency = min(6, max(1, (os.cpu_count() / 4 or 4)))
-        semaphore = asyncio.Semaphore(concurrency)
-
-        async def worker(fpath: str, rel_path: str):
-            async with semaphore:
-                return await self._process_file(fpath, rel_path)
-
-        tasks = [asyncio.create_task(worker(f, r)) for f, r in file_entries]
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-        else:
-            results = []
-
-        files_processed = 0
-        for idx, res in enumerate(results):
-            fpath, rel_path = file_entries[idx]
-            if isinstance(res, Exception):
-                logger.warning(f"处理文件失败 {fpath}: {res}")
-                summaries[rel_path] = {"error": str(res)}
-            else:
-                summaries[rel_path] = res
-                files_processed += 1
-
-        # 汇总：用LLM对文件分析结果生成项目级描述
+    async def analyze_project(
+        self,
+        project_dir: str,
+        max_files: int = 60,
+        project_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """构建项目静态画像后只调用一次 LLM 生成 1-2 句用途描述。"""
+        profile = self._build_project_profile(
+            project_dir,
+            max_files=max_files,
+            project_name=project_name,
+        )
+        project_description = ""
         try:
-            summary_prompt = self._build_project_summary_prompt(summaries)
+            summary_prompt = self._build_usage_summary_prompt(profile)
             project_summary_resp = await self.llm_service.chat_completion(
-                [{"role": "user", "content": summary_prompt}], temperature=0.1, max_tokens=1000
+                [{"role": "user", "content": summary_prompt}],
+                temperature=0.1,
+                max_tokens=220,
             )
             logger.warning(f"项目汇总LLM响应: {project_summary_resp}")
-            project_description = (
+            raw_description = (
                 project_summary_resp.get("content")
                 if isinstance(project_summary_resp, dict)
                 else ""
             )
+            project_description = self._normalize_usage_description(raw_description)
         except Exception as e:
-            logger.warning(f"生成项目汇总描述时LLM失败: {e}")
-            project_description = ""
+            logger.warning(f"生成项目用途描述时 LLM 失败: {e}")
+
         return {
             "project_description": project_description,
-            "file_summaries": summaries,
+            "project_profile": profile,
+            "file_summaries": {},
         }
+
+    def _build_project_profile(
+        self,
+        project_dir: str,
+        max_files: int = 60,
+        project_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        top_level_dirs: List[str] = []
+        manifest_files: List[str] = []
+        entry_files: List[str] = []
+        representative_files: List[str] = []
+        framework_hints: List[str] = []
+        language_counts: Dict[str, int] = defaultdict(int)
+        source_file_count = 0
+
+        seen_frameworks: set[str] = set()
+        seen_entries: set[str] = set()
+        seen_manifests: set[str] = set()
+
+        for root, dirs, files in os.walk(project_dir):
+            dirs[:] = [d for d in dirs if not self._should_skip_dir(d)]
+            rel_root = os.path.relpath(root, project_dir)
+            if rel_root == ".":
+                top_level_dirs.extend(sorted(d for d in dirs if d not in top_level_dirs)[:8])
+
+            for fname in sorted(files):
+                fpath = os.path.join(root, fname)
+                rel_path = os.path.relpath(fpath, project_dir)
+                if self._should_skip_file(fpath):
+                    continue
+
+                suffix = Path(fpath).suffix.lower()
+                language = EXTENSION_LANGUAGE_MAP.get(suffix)
+                if language:
+                    language_counts[language] += 1
+                    source_file_count += 1
+                    if len(representative_files) < max_files:
+                        representative_files.append(rel_path)
+
+                if self._is_manifest_file(fname) and rel_path not in seen_manifests:
+                    manifest_files.append(rel_path)
+                    seen_manifests.add(rel_path)
+                    for hint in self._extract_framework_hints(fname, fpath):
+                        if hint not in seen_frameworks:
+                            framework_hints.append(hint)
+                            seen_frameworks.add(hint)
+
+                if self._is_entry_file(rel_path) and rel_path not in seen_entries:
+                    entry_files.append(rel_path)
+                    seen_entries.add(rel_path)
+
+        primary_languages = [
+            language
+            for language, _count in sorted(
+                language_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        ]
+
+        return {
+            "project_name": (project_name or "").strip() or Path(project_dir).resolve().name,
+            "primary_languages": primary_languages,
+            "framework_hints": framework_hints[:6],
+            "top_level_dirs": top_level_dirs[:8],
+            "manifest_files": manifest_files[:8],
+            "entry_files": entry_files[:8],
+            "source_file_count": source_file_count,
+            "representative_files": representative_files[:10],
+        }
+
+    def _is_manifest_file(self, filename: str) -> bool:
+        return filename in {
+            "package.json",
+            "requirements.txt",
+            "pyproject.toml",
+            "Pipfile",
+            "poetry.lock",
+            "pom.xml",
+            "build.gradle",
+            "go.mod",
+            "Cargo.toml",
+            "composer.json",
+            "Gemfile",
+            "pubspec.yaml",
+        }
+
+    def _is_entry_file(self, rel_path: str) -> bool:
+        normalized = rel_path.replace("\\", "/").lower()
+        entry_candidates = (
+            "src/main.",
+            "src/index.",
+            "main.",
+            "index.",
+            "app.",
+            "cmd/main.",
+            "pages/index.",
+            "src/app.",
+            "src/App.",
+            "manage.py",
+        )
+        return any(candidate in normalized for candidate in entry_candidates)
+
+    def _extract_framework_hints(self, filename: str, fpath: str) -> List[str]:
+        text = self._read_file_text(fpath) or ""
+        normalized = text.lower()
+        hints: List[str] = []
+
+        framework_patterns = {
+            "package.json": {
+                '"react"': "React",
+                '"next"': "Next.js",
+                '"vue"': "Vue",
+                '"nuxt"': "Nuxt",
+                '"vite"': "Vite",
+                '"express"': "Express",
+                '"nestjs"': "NestJS",
+                '"electron"': "Electron",
+            },
+            "requirements.txt": {
+                "django": "Django",
+                "fastapi": "FastAPI",
+                "flask": "Flask",
+                "streamlit": "Streamlit",
+            },
+            "pyproject.toml": {
+                "django": "Django",
+                "fastapi": "FastAPI",
+                "flask": "Flask",
+                "poetry": "Poetry",
+            },
+            "pom.xml": {
+                "spring-boot": "Spring Boot",
+                "mybatis": "MyBatis",
+            },
+            "go.mod": {
+                "github.com/gin-gonic/gin": "Gin",
+                "github.com/labstack/echo": "Echo",
+                "github.com/gofiber/fiber": "Fiber",
+            },
+            "cargo.toml": {
+                "axum": "Axum",
+                "actix-web": "Actix Web",
+                "tauri": "Tauri",
+            },
+            "composer.json": {
+                "laravel": "Laravel",
+                "symfony": "Symfony",
+            },
+            "gemfile": {
+                "rails": "Ruby on Rails",
+                "sinatra": "Sinatra",
+            },
+        }
+
+        for pattern, label in framework_patterns.get(filename.lower(), {}).items():
+            if pattern in normalized:
+                hints.append(label)
+
+        return hints
+
+    def _build_usage_summary_prompt(self, profile: Dict[str, Any]) -> str:
+        project_name = profile.get("project_name") or "未命名项目"
+        languages = "、".join(profile.get("primary_languages") or []) or "未知"
+        frameworks = "、".join(profile.get("framework_hints") or []) or "暂无明显框架线索"
+        manifests = "、".join(profile.get("manifest_files") or []) or "无"
+        entry_files = "、".join(profile.get("entry_files") or []) or "无"
+        top_dirs = "、".join(profile.get("top_level_dirs") or []) or "无"
+        representative_files = "、".join(profile.get("representative_files") or []) or "无"
+        source_file_count = int(profile.get("source_file_count") or 0)
+
+        return (
+            "你是 project-usage-summarizer。请根据下面的项目画像，用简体中文输出 1-2 句话，"
+            "只说明这个项目主要是做什么的、适用于什么场景。"
+            "不要使用列表，不要输出实现细节，不要编造仓库中没有体现的信息。\n\n"
+            f"项目名：{project_name}\n"
+            f"主要语言：{languages}\n"
+            f"框架/生态线索：{frameworks}\n"
+            f"关键清单文件：{manifests}\n"
+            f"代表性入口文件：{entry_files}\n"
+            f"顶层目录：{top_dirs}\n"
+            f"源码文件数量：{source_file_count}\n"
+            f"代表文件：{representative_files}\n\n"
+            "请仅返回最终简介文本。"
+        )
+
+    def _normalize_usage_description(self, text: Any) -> str:
+        cleaned = str(text or "").replace("\r", "\n").strip()
+        if not cleaned:
+            return ""
+
+        cleaned = cleaned.replace("项目简介：", "").replace("项目描述：", "").strip()
+        cleaned = re.sub(r"^[\-•\d\s.、)）:：]+", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        sentences = [segment.strip() for segment in re.split(r"(?<=[。！？!?])\s*", cleaned) if segment.strip()]
+        if len(sentences) > 2:
+            cleaned = "".join(sentences[:2])
+        elif sentences:
+            cleaned = "".join(sentences)
+
+        return cleaned[:120].strip()
 
     def _get_source_segment(self, text: str, node: ast.AST, context_lines: int = 2) -> str:
         try:

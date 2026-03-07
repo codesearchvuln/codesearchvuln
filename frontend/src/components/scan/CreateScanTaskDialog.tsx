@@ -14,7 +14,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,7 +36,6 @@ import {
 	Loader2,
 	Zap,
 	Bot,
-	Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/shared/config/database";
@@ -59,7 +57,7 @@ import { useProjects } from "./hooks/useTaskForm";
 import { useZipFile, formatFileSize } from "./hooks/useZipFile";
 import FileSelectionDialog from "./FileSelectionDialog";
 import AgentModeSelector, {
-	type AuditMode,
+	type ScanMode,
 	type StaticToolSelection,
 } from "@/components/agent/AgentModeSelector";
 
@@ -70,12 +68,12 @@ import type { Project } from "@/shared/types";
 import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 
-interface CreateTaskDialogProps {
+interface CreateScanTaskDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onTaskCreated: () => void;
 	preselectedProjectId?: string;
-	initialAuditMode?: AuditMode;
+	initialScanMode?: ScanMode;
 	navigateOnSuccess?: boolean;
 	showReturnButton?: boolean;
 	onReturn?: () => void;
@@ -131,17 +129,17 @@ const extractApiErrorMessage = (error: unknown): string => {
 const isSevereRule = (rule: OpengrepRule) =>
 	String(rule.severity || "").toUpperCase() === "ERROR";
 
-export default function CreateTaskDialog({
+export default function CreateScanTaskDialog({
 	open,
 	onOpenChange,
 	onTaskCreated,
 	preselectedProjectId,
-	initialAuditMode,
+	initialScanMode,
 	navigateOnSuccess = true,
 	showReturnButton = false,
 	onReturn,
 	allowUploadProject = false,
-}: CreateTaskDialogProps) {
+}: CreateScanTaskDialogProps) {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const currentRoute = `${location.pathname}${location.search}`;
@@ -160,12 +158,10 @@ export default function CreateTaskDialog({
 	const [creating, setCreating] = useState(false);
 	const [uploading, setUploading] = useState(false);
 	const [newProjectName, setNewProjectName] = useState("");
-	const [newProjectDescription, setNewProjectDescription] = useState("");
 	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
-	const [generatingDescription, setGeneratingDescription] = useState(false);
 	const newProjectFileInputRef = useRef<HTMLInputElement>(null);
 
-	const [auditMode, setAuditMode] = useState<AuditMode>("agent");
+	const [scanMode, setScanMode] = useState<ScanMode>("agent");
 	const [staticTools, setStaticTools] = useState<StaticToolSelection>({
 		opengrep: true,
 		gitleaks: false,
@@ -235,12 +231,14 @@ export default function CreateTaskDialog({
 		const unsubscribe = subscribeOpengrepActiveRules((rules) => {
 			setStaticRules(rules.filter(isSevereRule));
 		});
-		return unsubscribe;
+		return () => {
+			unsubscribe();
+		};
 	}, []);
 
 	useEffect(() => {
 		const loadStaticRules = async () => {
-			if (!open || auditMode !== "static" || !staticTools.opengrep) return;
+			if (!open || scanMode !== "static" || !staticTools.opengrep) return;
 			setLoadingStaticRules(true);
 			try {
 				const rules = (await getOpengrepRules({ is_active: true })).filter(
@@ -260,7 +258,7 @@ export default function CreateTaskDialog({
 			}
 		};
 		loadStaticRules();
-	}, [open, auditMode, staticTools.opengrep]);
+	}, [open, scanMode, staticTools.opengrep]);
 
 	useEffect(() => {
 		if (open) {
@@ -269,16 +267,14 @@ export default function CreateTaskDialog({
 			setSearchTerm("");
 			setShowAdvanced(false);
 			setSelectedRuleIds([]);
-			setAuditMode(initialAuditMode || "agent");
+			setScanMode(initialScanMode || "agent");
 			setStaticTools({ opengrep: true, gitleaks: false });
 			setSourceMode("existing");
 			setNewProjectName("");
-				setNewProjectDescription("");
-				setNewProjectFile(null);
-				setGeneratingDescription(false);
-				zipState.reset();
+			setNewProjectFile(null);
+			zipState.reset();
 			}
-		}, [open, preselectedProjectId, initialAuditMode, loadProjects]);
+		}, [open, preselectedProjectId, initialScanMode, loadProjects]);
 
 	useEffect(() => {
 		if (!open || sourceMode !== "existing") return;
@@ -313,14 +309,12 @@ export default function CreateTaskDialog({
 			setNewProjectName(inferredName);
 		}
 		setNewProjectFile(file);
-		setGeneratingDescription(false);
 		event.target.value = "";
 	};
 
 	const handleSourceModeChange = (mode: "existing" | "upload") => {
 		setSourceMode(mode);
 		setSelectedFiles(undefined);
-		setGeneratingDescription(false);
 		if (mode === "upload") {
 			setSelectedProjectId("");
 			setBranch("main");
@@ -339,32 +333,6 @@ export default function CreateTaskDialog({
 		}
 		return [];
 	}, [selectedFiles]);
-
-	const handleGenerateNewProjectDescription = async () => {
-		if (!newProjectFile) {
-			toast.error("请先选择项目压缩包");
-			return;
-		}
-
-		try {
-			setGeneratingDescription(true);
-			const result = await api.generateProjectDescription({
-				file: newProjectFile,
-				project_name: newProjectName,
-			});
-			setNewProjectDescription(result.description || "");
-			if (result.source === "llm") {
-				toast.success("已生成项目描述");
-			} else {
-				toast.success("LLM不可用，已回退静态描述");
-			}
-		} catch (error) {
-			const msg = extractApiErrorMessage(error);
-			toast.error(`生成失败: ${msg}`);
-		} finally {
-			setGeneratingDescription(false);
-		}
-	};
 
 	const createStaticScanTasksForProject = async (
 		projectId: string,
@@ -470,7 +438,6 @@ export default function CreateTaskDialog({
 				try {
 					createdProject = await api.createProject({
 						name: newProjectName.trim(),
-						description: newProjectDescription.trim() || undefined,
 						source_type: "zip",
 						repository_type: "other",
 						repository_url: undefined,
@@ -486,9 +453,9 @@ export default function CreateTaskDialog({
 						throw new Error(uploadResult.message || "压缩包上传失败");
 					}
 
-					if (auditMode === "agent") {
+					if (scanMode === "agent") {
 						const preflightToast = toast.loading(
-							"正在检查智能审计配置（LLM）...",
+							"正在检查智能扫描配置（LLM）...",
 						);
 						const preflight = await runAgentPreflightCheck();
 						toast.dismiss(preflightToast);
@@ -499,7 +466,7 @@ export default function CreateTaskDialog({
 
 						const agentTask = await createAgentTask({
 							project_id: createdProject.id,
-							name: `智能审计-${createdProject.name}`,
+							name: `智能扫描-${createdProject.name}`,
 							description: `${INTELLIGENT_TASK_NAME_MARKER}智能扫描任务`,
 							audit_scope: {
 								static_bootstrap: {
@@ -517,7 +484,7 @@ export default function CreateTaskDialog({
 
 						onOpenChange(false);
 						onTaskCreated();
-						toast.success("智能审计任务已创建");
+						toast.success("智能扫描任务已创建");
 						if (navigateOnSuccess) {
 							navigate(`/agent-audit/${agentTask.id}`);
 						}
@@ -560,9 +527,9 @@ export default function CreateTaskDialog({
 				return;
 			}
 
-			if (auditMode === "agent") {
+			if (scanMode === "agent") {
 				const preflightToast = toast.loading(
-					"正在检查智能审计配置（LLM）...",
+					"正在检查智能扫描配置（LLM）...",
 				);
 				const preflight = await runAgentPreflightCheck();
 				toast.dismiss(preflightToast);
@@ -573,7 +540,7 @@ export default function CreateTaskDialog({
 
 				const agentTask = await createAgentTask({
 					project_id: selectedProject.id,
-					name: `智能审计-${selectedProject.name}`,
+					name: `智能扫描-${selectedProject.name}`,
 					description: `${INTELLIGENT_TASK_NAME_MARKER}智能扫描任务`,
 					audit_scope: {
 						static_bootstrap: {
@@ -593,7 +560,7 @@ export default function CreateTaskDialog({
 
 				onOpenChange(false);
 				onTaskCreated();
-				toast.success("智能审计任务已创建");
+				toast.success("智能扫描任务已创建");
 				if (navigateOnSuccess) {
 					navigate(`/agent-audit/${agentTask.id}`);
 				}
@@ -638,13 +605,13 @@ export default function CreateTaskDialog({
 		const canStart = useMemo(() => {
 			if (sourceMode === "upload") {
 				if (!newProjectName.trim() || !newProjectFile) return false;
-				if (auditMode === "static") {
+				if (scanMode === "static") {
 					return staticTools.opengrep || staticTools.gitleaks;
 				}
 				return true;
 			}
 			if (!selectedProject) return false;
-			if (auditMode === "static") {
+			if (scanMode === "static") {
 				return (
 					isZipProject(selectedProject) &&
 				!!zipState.storedZipInfo?.has_file &&
@@ -667,7 +634,7 @@ export default function CreateTaskDialog({
 			selectedProject,
 			zipState,
 			branch,
-			auditMode,
+			scanMode,
 			effectiveTargetFiles,
 			staticTools.opengrep,
 			staticTools.gitleaks,
@@ -685,7 +652,7 @@ export default function CreateTaskDialog({
 							</div>
 							<div>
 								<span className="text-base font-bold uppercase tracking-wider">
-									开始代码审计
+									开始代码扫描
 								</span>
 								<p className="text-xs text-muted-foreground font-normal mt-0.5">
 									Code Security Analysis
@@ -706,25 +673,25 @@ export default function CreateTaskDialog({
 										className={
 											sourceMode === "existing"
 												? "cyber-btn-primary"
-												: "cyber-btn-outline"
-										}
-										onClick={() => handleSourceModeChange("existing")}
-										disabled={creating || generatingDescription}
-									>
-										选择已有项目
-									</Button>
+							: "cyber-btn-outline"
+						}
+						onClick={() => handleSourceModeChange("existing")}
+						disabled={creating}
+					>
+						选择已有项目
+					</Button>
 									<Button
 										variant={sourceMode === "upload" ? "default" : "outline"}
 										className={
 											sourceMode === "upload"
 												? "cyber-btn-primary"
-												: "cyber-btn-outline"
-										}
-										onClick={() => handleSourceModeChange("upload")}
-										disabled={creating || generatingDescription}
-									>
-										上传新项目
-									</Button>
+							: "cyber-btn-outline"
+						}
+						onClick={() => handleSourceModeChange("upload")}
+						disabled={creating}
+					>
+						上传新项目
+					</Button>
 								</div>
 							</div>
 						)}
@@ -782,63 +749,40 @@ export default function CreateTaskDialog({
 									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
 										项目名称
 									</Label>
-									<Input
-										value={newProjectName}
-										onChange={(e) => setNewProjectName(e.target.value)}
-										placeholder="输入项目名称"
-										className="h-10 cyber-input"
-										disabled={creating || generatingDescription}
-									/>
-								</div>
-								<div className="space-y-1.5">
-									<div className="flex items-center justify-between gap-2">
-										<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-											描述
-										</Label>
-										<Button
-											type="button"
-											variant="outline"
-											className="cyber-btn-outline h-8 text-xs"
-											onClick={handleGenerateNewProjectDescription}
-											disabled={
-												creating ||
-												generatingDescription ||
-												!newProjectFile
-											}
-										>
-											<Sparkles className="w-3 h-3 mr-1.5" />
-											{generatingDescription ? "生成中..." : "一键生成"}
-										</Button>
-									</div>
-									<Textarea
-										value={newProjectDescription}
-										onChange={(e) =>
-											setNewProjectDescription(e.target.value)
-										}
-										placeholder="// 项目描述..."
-										rows={2}
-										className="cyber-input min-h-[70px]"
-										disabled={creating || generatingDescription}
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-										源码压缩包
+					<Input
+						value={newProjectName}
+						onChange={(e) => setNewProjectName(e.target.value)}
+						placeholder="输入项目名称"
+						className="h-10 cyber-input"
+						disabled={creating}
+					/>
+				</div>
+				<div className="rounded-lg border border-dashed border-sky-500/30 bg-sky-500/8 p-3">
+					<p className="text-xs font-mono font-bold uppercase text-sky-100 mb-1">
+						自动生成简介
+					</p>
+					<p className="text-xs leading-5 text-sky-50/85">
+						上传完成后，系统会基于项目结构自动生成 1-2 句项目使用场景简介。
+					</p>
+				</div>
+				<div className="space-y-2">
+					<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+						源码压缩包
 									</Label>
 									<input
 										ref={newProjectFileInputRef}
 										type="file"
-										accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
-										onChange={handleNewProjectFileSelect}
-										className="hidden"
-										disabled={creating || generatingDescription}
-									/>
-									<Button
-										variant="outline"
-										className="cyber-btn-outline h-9"
-										onClick={() => newProjectFileInputRef.current?.click()}
-										disabled={creating || generatingDescription}
-									>
+						accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
+						onChange={handleNewProjectFileSelect}
+						className="hidden"
+						disabled={creating}
+					/>
+					<Button
+						variant="outline"
+						className="cyber-btn-outline h-9"
+						onClick={() => newProjectFileInputRef.current?.click()}
+						disabled={creating}
+					>
 										<Upload className="w-4 h-4 mr-2" />
 										选择压缩包
 									</Button>
@@ -851,12 +795,12 @@ export default function CreateTaskDialog({
 							</div>
 						)}
 
-						{/* 审计模式选择 */}
+						{/* 扫描模式选择 */}
 							{(sourceMode === "upload" || selectedProject) && (
 								<AgentModeSelector
-									value={auditMode}
-									onChange={setAuditMode}
-								disabled={creating || generatingDescription}
+									value={scanMode}
+									onChange={setScanMode}
+								disabled={creating}
 								staticTools={staticTools}
 								onStaticToolsChange={setStaticTools}
 								/>
@@ -918,7 +862,7 @@ export default function CreateTaskDialog({
 									/>
 								)}
 
-								{auditMode === "static" && null}
+								{scanMode === "static" && null}
 
 								{/* 高级选项 */}
 								<Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
@@ -1070,37 +1014,37 @@ export default function CreateTaskDialog({
 							<Button
 								variant="outline"
 								onClick={() => {
-									onOpenChange(false);
-									onReturn?.();
-								}}
-								disabled={creating || generatingDescription}
-								className="px-4 h-10 cyber-btn-outline font-mono"
-							>
+								onOpenChange(false);
+								onReturn?.();
+							}}
+							disabled={creating}
+							className="px-4 h-10 cyber-btn-outline font-mono"
+						>
 								返回
 							</Button>
 						)}
-						<Button
-							variant="ghost"
-							onClick={() => onOpenChange(false)}
-							disabled={creating || generatingDescription}
-							className="px-4 h-10 font-mono text-muted-foreground hover:text-foreground hover:bg-muted"
-						>
+					<Button
+						variant="ghost"
+						onClick={() => onOpenChange(false)}
+						disabled={creating}
+						className="px-4 h-10 font-mono text-muted-foreground hover:text-foreground hover:bg-muted"
+					>
 							取消
 						</Button>
-						<Button
-							onClick={handleStartScan}
-							disabled={!canStart || creating || generatingDescription}
-							className="px-5 h-10 cyber-btn-primary font-mono font-bold uppercase"
-						>
+					<Button
+						onClick={handleStartScan}
+						disabled={!canStart || creating}
+						className="px-5 h-10 cyber-btn-primary font-mono font-bold uppercase"
+					>
 							{creating ? (
 								<>
 									<Loader2 className="w-4 h-4 animate-spin mr-2" />
 									启动中...
 								</>
-							) : auditMode === "agent" ? (
+							) : scanMode === "agent" ? (
 								<>
 									<Bot className="w-4 h-4 mr-2" />
-									启动智能审计
+									启动智能扫描
 								</>
 							) : (
 								<>

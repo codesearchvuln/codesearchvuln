@@ -16,7 +16,7 @@ export const paths = {
   // 功能模块
   analysisFeature: '@/features/analysis',
   projectsFeature: '@/features/projects',
-  auditFeature: '@/features/audit',
+  scanFeature: '@/features/audit',
   
   // 共享资源
   shared: '@/shared',

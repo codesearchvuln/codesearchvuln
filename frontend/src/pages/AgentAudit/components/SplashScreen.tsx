@@ -22,20 +22,20 @@ const BOOT_SEQUENCE = [
 
 // Available commands
 const COMMANDS: Record<string, { action: string; output?: string }> = {
-  audit: { action: "start", output: "Initializing audit configuration..." },
-  start: { action: "start", output: "Initializing audit configuration..." },
-  scan: { action: "start", output: "Initializing audit configuration..." },
+  audit: { action: "start", output: "Initializing scan configuration..." },
+  start: { action: "start", output: "Initializing scan configuration..." },
+  scan: { action: "start", output: "Initializing scan configuration..." },
   help: { action: "help" },
   clear: { action: "clear" },
 };
 
 const HELP_TEXT = `
 Available commands:
-  audit, start, scan  - Start a new security audit
+  scan, start  - Start a new security scan
   help                - Show this help message
   clear               - Clear terminal
 
-Type 'audit' to begin a new security audit.
+Type 'scan' to begin a new security scan.
 `;
 
 export function SplashScreen({ onComplete }: SplashScreenProps) {
@@ -337,7 +337,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
                     <span className="font-semibold text-cyan-600 dark:text-cyan-400">// SYSTEM READY</span>
                   </div>
                   <div className="text-gray-600 dark:text-gray-400 text-sm pl-6">
-                    Execute <span className="text-emerald-600 dark:text-emerald-400 font-bold px-2 py-0.5 bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/30 rounded">'audit'</span> to initialize security scan protocol
+                    Execute <span className="text-emerald-600 dark:text-emerald-400 font-bold px-2 py-0.5 bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/30 rounded">'scan'</span> to initialize security scan protocol
                   </div>
                   <div className="text-gray-400 dark:text-gray-600 text-xs pl-6 mt-1">
                     [ Type 'help' for available commands ]

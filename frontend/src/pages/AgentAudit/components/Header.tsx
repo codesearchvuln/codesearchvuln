@@ -123,7 +123,7 @@ export function Header({
 					className="h-9 px-4 text-xs font-mono uppercase tracking-wider text-primary hover:text-primary/90 bg-primary/10 hover:bg-primary/20 border border-primary/30 hover:border-primary/50 transition-all duration-300 rounded-md shadow-[0_0_15px_rgba(255,107,44,0.15)] hover:shadow-[0_0_25px_rgba(255,107,44,0.25)]"
 				>
 					<Sparkles className="w-3.5 h-3.5 mr-2" />
-					<span>新建审计</span>
+					<span>新建扫描</span>
 				</Button>
 			</div>
 

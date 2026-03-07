@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, matchPath, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import LanguageToggle from "@/components/layout/LanguageToggle";
 // import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -81,12 +81,28 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
     const taskChildRoutes = taskRoutes;
     const scanConfigEntryRoute = scanConfigRoutes[0];
     const scanConfigChildRoutes = scanConfigRoutes;
-    const isTaskGroupActive = taskRoutes.some(
-        (route) => location.pathname === route.path,
+    const matchesRoute = useCallback(
+        (path: string) =>
+            Boolean(
+                matchPath(
+                    {
+                        path,
+                        end: true,
+                    },
+                    location.pathname,
+                ),
+            ),
+        [location.pathname],
     );
-    const isScanConfigGroupActive = scanConfigRoutes.some(
-        (route) => location.pathname === route.path,
+    const matchedRoute = routes.find((route) => matchesRoute(route.path));
+    const activeNavPath = matchedRoute?.navParentPath || matchedRoute?.path || "";
+    const isRouteActive = useCallback(
+        (route: (typeof routes)[number]) =>
+            matchesRoute(route.path) || activeNavPath === route.path,
+        [activeNavPath, matchesRoute],
     );
+    const isTaskGroupActive = taskRoutes.some(isRouteActive);
+    const isScanConfigGroupActive = scanConfigRoutes.some(isRouteActive);
     const isTaskGroupExpanded =
         !collapsed && (isTaskGroupActive || expandedGroup === "task");
     const isScanConfigGroupExpanded =
@@ -134,7 +150,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
         route: (typeof routes)[number],
         options?: { compact?: boolean },
     ) => {
-        const isActive = location.pathname === route.path;
+        const isActive = isRouteActive(route);
         const routeLabel = route.nameKey
             ? t(route.nameKey, route.name)
             : route.name;

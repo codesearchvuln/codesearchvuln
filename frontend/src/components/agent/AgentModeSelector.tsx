@@ -1,5 +1,5 @@
 /**
- * Agent 审计模式选择器
+ * Agent 扫描模式选择器
  * Cyberpunk Terminal Aesthetic
  */
 
@@ -7,7 +7,7 @@ import { Bot, Zap, CheckCircle2, Clock, Shield, Code } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/shared/utils/utils";
 
-export type AuditMode = "static" | "agent";
+export type ScanMode = "static" | "agent";
 
 export type StaticTool = "opengrep" | "gitleaks";
 
@@ -17,8 +17,8 @@ export interface StaticToolSelection {
 }
 
 interface AgentModeSelectorProps {
-  value: AuditMode;
-  onChange: (mode: AuditMode) => void;
+  value: ScanMode;
+  onChange: (mode: ScanMode) => void;
   disabled?: boolean;
   staticTools?: StaticToolSelection;
   onStaticToolsChange?: (next: StaticToolSelection) => void;
@@ -51,7 +51,7 @@ export default function AgentModeSelector({
       <div className="flex items-center gap-2 mb-2">
         <Shield className="w-4 h-4 text-sky-600 dark:text-sky-400" />
         <span className="font-mono text-xs font-bold text-muted-foreground uppercase tracking-wider">
-          审计模式
+          扫描模式
         </span>
       </div>
 
@@ -68,7 +68,7 @@ export default function AgentModeSelector({
         >
           <input
             type="radio"
-            name="auditMode"
+            name="scanMode"
             value="static"
             checked={value === "static"}
             onChange={() => onChange("static")}
@@ -166,7 +166,7 @@ export default function AgentModeSelector({
           </div>
         </label>
 
-        {/* Agent 审计模式 */}
+        {/* Agent 扫描模式 */}
         <label
           className={cn(
             "relative flex flex-col p-4 border cursor-pointer transition-all rounded",
@@ -178,7 +178,7 @@ export default function AgentModeSelector({
         >
           <input
             type="radio"
-            name="auditMode"
+            name="scanMode"
             value="agent"
             checked={value === "agent"}
             onChange={() => onChange("agent")}
@@ -202,7 +202,7 @@ export default function AgentModeSelector({
               "font-bold text-sm font-mono uppercase",
               isAgentSelected ? "text-violet-700 dark:text-violet-300" : "text-foreground/70"
             )}>
-              智能审计
+              智能扫描
             </span>
             {isAgentSelected && (
               <CheckCircle2 className="w-4 h-4 text-violet-600 dark:text-violet-400 ml-auto" />
@@ -239,7 +239,7 @@ export default function AgentModeSelector({
                 isAgentSelected ? "text-violet-700 dark:text-violet-300" : "text-foreground/70",
               )}
             >
-              适合: 发版前审计、深度安全评估
+              适合: 发版前扫描、深度安全评估
             </span>
           </div>
         </label>
@@ -248,13 +248,13 @@ export default function AgentModeSelector({
       {/* 模式说明 */}
       {value === "agent" ? (
         <div className="p-3 bg-violet-50 dark:bg-violet-950/30 border border-violet-500/30 text-xs text-violet-700 dark:text-violet-300 rounded font-mono">
-          <p className="font-bold mb-1 uppercase text-violet-700 dark:text-violet-400">智能审计模式说明：</p>
+          <p className="font-bold mb-1 uppercase text-violet-700 dark:text-violet-400">智能扫描模式说明：</p>
           <ul className="list-disc list-inside space-y-0.5 text-violet-600 dark:text-violet-300/80">
-            <li>AI Agent 会自主规划审计策略</li>
+            <li>AI Agent 会自主规划扫描策略</li>
             <li>使用 RAG 技术进行代码语义检索</li>
             <li>在 Docker 沙箱中验证发现的漏洞</li>
             <li>可生成可复现的 PoC（概念验证）代码</li>
-            <li>审计时间较长，但结果更全面准确</li>
+            <li>扫描时间较长，但结果更全面准确</li>
           </ul>
         </div>
       ) : (

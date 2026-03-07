@@ -31,7 +31,7 @@ export function ProjectTasksTab(props: {
       <div className="flex items-center justify-between">
         <div className="section-header mb-0 pb-0 border-0">
           <FileText className="w-5 h-5 text-primary" />
-          <h3 className="section-title">审计任务</h3>
+          <h3 className="section-title">扫描任务</h3>
         </div>
         <Button onClick={onCreateTask} className="cyber-btn-primary">
           <Play className="w-4 h-4 mr-2" />
@@ -85,8 +85,8 @@ export function ProjectTasksTab(props: {
                         {isStaticTask
                           ? "静态分析任务"
                           : isAuditTask
-                            ? ((task as AuditTask).task_type === "repository" ? "审计任务" : "即时分析任务")
-                            : "Agent 审计任务"}
+                            ? ((task as AuditTask).task_type === "repository" ? "扫描任务" : "即时分析任务")
+                            : "Agent 扫描任务"}
                       </h4>
                       <p className="text-sm text-muted-foreground font-mono">创建于 {formatDate(task.created_at)}</p>
                     </div>
@@ -139,7 +139,7 @@ export function ProjectTasksTab(props: {
       ) : (
         <div className="cyber-card p-12 text-center">
           <Activity className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-bold text-foreground mb-2 uppercase">暂无审计任务</h3>
+          <h3 className="text-lg font-bold text-foreground mb-2 uppercase">暂无扫描任务</h3>
           <p className="text-sm text-muted-foreground font-mono">
             点击右上角「新建任务」开始代码安全分析
           </p>

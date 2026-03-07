@@ -1,5 +1,5 @@
 /**
- * Agent Audit State Hook
+ * Agent Scan State Hook
  * Centralized state management using useReducer
  */
 

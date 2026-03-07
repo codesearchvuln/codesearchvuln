@@ -9,6 +9,13 @@ import {
 } from "@/shared/api/opengrep";
 import type { Project } from "@/shared/types";
 
+export {
+	buildStaticScanGroups,
+	resolveStaticScanGroupStatus,
+	type StaticScanGroup,
+	type StaticScanGroupStatus,
+} from "./staticScanGrouping";
+
 export type TaskActivityKind = "rule_scan" | "intelligent_audit";
 export type TaskActivitySourceMode =
 	| "static"

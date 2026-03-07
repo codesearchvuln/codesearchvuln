@@ -26,9 +26,9 @@ import {
 const CATEGORY_DESC: Partial<Record<SkillToolCategory, string>> = {
   "模型基础增强类": "用于提供模型基础能力增强模板，包括 MCP/Skill 设计、文件规划与策略协作。",
   "代码读取与定位": "用于读取代码、检索关键位置、提取函数上下文，形成后续分析证据链起点。",
-  "候选发现与模式扫描": "用于快速拉取候选风险点，缩小审计范围并为验证阶段提供高优先级线索。",
+  "候选发现与模式扫描": "用于快速拉取候选风险点，缩小扫描范围并为验证阶段提供高优先级线索。",
   "可达性与逻辑分析": "用于验证漏洞链路是否真实可达，识别控制条件、授权边界与业务约束。",
-  "报告与协作编排": "用于审计过程编排、结论沉淀与最终报告输出，保障任务可交付性。",
+  "报告与协作编排": "用于扫描过程编排、结论沉淀与最终报告输出，保障任务可交付性。",
   "漏洞验证与 PoC 规划": "用于非武器化漏洞验证，收集可复现实验信号与证明链。",
 };
 
@@ -250,7 +250,7 @@ export default function SkillToolsPanel({
         category,
         count: groupedTools.get(category)?.length ?? 0,
         description:
-          CATEGORY_DESC[category] || "该分类用于智能审计流程中的关键步骤。",
+          CATEGORY_DESC[category] || "该分类用于智能扫描流程中的关键步骤。",
       })),
     [groupedTools],
   );
@@ -550,7 +550,7 @@ export default function SkillToolsPanel({
       {showMcpCatalog ? (
         <Card className="cyber-card p-5 gap-3">
           <CardHeader className="border-b border-border pb-3">
-            <CardTitle className="text-base">智能审计 MCP 目录（摘要）</CardTitle>
+            <CardTitle className="text-base">智能扫描 MCP 目录（摘要）</CardTitle>
           </CardHeader>
           <CardContent className="pt-3 space-y-4">
             <p className="text-sm text-muted-foreground leading-relaxed">
@@ -928,7 +928,7 @@ export default function SkillToolsPanel({
         <>
           <Card className="cyber-card p-5 gap-3">
             <CardHeader className="border-b border-border pb-3">
-              <CardTitle className="text-base">智能审计 SKILL 目录（摘要）</CardTitle>
+              <CardTitle className="text-base">智能扫描 SKILL 目录（摘要）</CardTitle>
             </CardHeader>
             <CardContent className="pt-3 space-y-3">
               <p className="text-sm text-muted-foreground leading-relaxed">

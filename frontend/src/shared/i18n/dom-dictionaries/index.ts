@@ -3,7 +3,6 @@ export type DomDictionary = Record<string, string>;
 export const commonDictionary: DomDictionary = {
   "VulHunter": "VulHunter",
   "VULHUNTER": "VULHUNTER",
-  "智能审计": "Intelligent Audit",
   "智能扫描": "Intelligent Scan",
   "关闭": "Close",
   "规则「": "Rule \"",
@@ -12,15 +11,14 @@ export const commonDictionary: DomDictionary = {
 
 export const agentAuditDictionary: DomDictionary = {
   "首页": "Home",
-  "Agent审计任务": "Agent Audit Task",
   "Agent扫描任务": "Agent Scan Task",
-  "面向代码安全与合规审计的智能分析平台。": "An intelligent platform for code security and compliance audits.",
+  "面向代码安全与合规扫描的智能分析平台。": "An intelligent platform for code security and compliance scans.",
   "聚焦仓库级项目，": "Focused on repository-level projects,",
-  "提供任务编排、自动化审计与结果追踪，帮助团队更快定位风险与改进点。": "it provides task orchestration, automated auditing, and result tracking to help teams identify risks and improvements faster.",
-  "VulHunter 让你以静态、智能或混合方式快速发起代码安全审计。":
-    "VulHunter helps you quickly launch code security audits in static, intelligent, or hybrid mode.",
-  "简介：智能体上下文推理审计":
-    "Overview: Intelligent-agent contextual reasoning audit",
+  "提供任务编排、自动化扫描与结果追踪，帮助团队更快定位风险与改进点。": "it provides task orchestration, automated scanning, and result tracking to help teams identify risks and improvements faster.",
+  "VulHunter 让你以静态、智能或混合方式快速发起代码安全扫描。":
+    "VulHunter helps you quickly launch code security scans in static, intelligent, or hybrid mode.",
+  "简介：智能体上下文推理扫描":
+    "Overview: Intelligent-agent contextual reasoning scan",
   "优势：可发现规则外风险":
     "Strength: Can discover risks beyond predefined rules",
   "劣势：耗时更长、资源更高":
@@ -40,7 +38,7 @@ export const agentAuditDictionary: DomDictionary = {
 export const dashboardDictionary: DomDictionary = {
   "仪表盘": "Dashboard",
   "总项目数": "Total Projects",
-  "审计任务": "Audit Tasks",
+  "扫描任务": "Scan Tasks",
   "发现问题": "Issues Found",
   "问题类型分布": "Issue Type Distribution",
   "暂无问题分布数据": "No issue distribution data",
@@ -56,11 +54,11 @@ export const dashboardDictionary: DomDictionary = {
   "最新活动": "Latest Activity",
   "暂无活动记录": "No recent activity",
   "快速操作": "Quick Actions",
-  "Agent 智能审计": "Agent Smart Audit",
+  "Agent 智能扫描": "Agent Intelligent Scan",
   "创建项目": "Create Project",
   "前往扫描引擎": "Go to Scan Engines",
   "漏洞扫描状态": "Vulnerability Scan Status",
-  "扫描": " Scan",
+  "扫描": "Scan",
   "已启用": "Enabled",
   "未启用": "Disabled",
   "中止:": "Aborted:",
@@ -130,8 +128,8 @@ export const projectsDictionary: DomDictionary = {
     "Code-rule scanning engine for semantic rule matching and vulnerability pattern detection.",
   "仓库密钥与敏感信息检测引擎，聚焦凭证泄露风险识别。":
     "Repository secret and sensitive data scanning engine focused on credential leak detection.",
-  "智能分析引擎，支撑智能审计、总结归纳与上下文推理。":
-    "Intelligent analysis engine for smart auditing, summarization, and context reasoning.",
+  "智能分析引擎，支撑智能扫描、总结归纳与上下文推理。":
+    "Intelligent analysis engine for intelligent scanning, summarization, and context reasoning.",
   "引擎配置": "Engine Config",
   "智能引擎（LLM）": "Smart Engine (LLM)",
   "项目详情": "Project Detail",
@@ -165,7 +163,7 @@ export const projectsDictionary: DomDictionary = {
 };
 
 export const opengrepRulesDictionary: DomDictionary = {
-  "审计规则": "Audit Rules",
+  "扫描规则": "Scan Rules",
   "静态分析结果": "Static Analysis Results",
   "通用型规则": "Generic Rule",
   "事件型规则": "Patch Rule",
@@ -384,13 +382,13 @@ export const systemConfigDictionary: DomDictionary = {
   "加载配置中...": "Loading configuration...",
 };
 
-export const intelligentAuditDictionary: DomDictionary = {
-  "审计能力": "Audit Capability",
-  "审计工具": "Audit Tools",
-  "智能审计 Skill 工具目录": "Intelligent Audit Skill Tools Catalog",
-  "本页展示智能审计运行时可调用的全量工具（26 个），每个工具包含简介、使用目标、详细 prompt 用法、示例输入和误用提示。":
-    "This page lists all 26 runtime tools used by intelligent auditing, including summary, goal, detailed prompt usage, sample input, and pitfalls.",
-  "智能审计 MCP 目录": "Intelligent Audit MCP Catalog",
+export const intelligentScanDictionary: DomDictionary = {
+  "扫描能力": "Scan Capability",
+  "扫描工具": "Scan Tools",
+  "智能扫描 Skill 工具目录": "Intelligent Scan Skill Tools Catalog",
+  "本页展示智能扫描运行时可调用的全量工具（26 个），每个工具包含简介、使用目标、详细 prompt 用法、示例输入和误用提示。":
+    "This page lists all 26 runtime tools used by intelligent scaning, including summary, goal, detailed prompt usage, sample input, and pitfalls.",
+  "智能扫描 MCP 目录": "Intelligent Scan MCP Catalog",
   "展示当前集成 MCP Server 的启用状态、实时可用 Tool 列表与验证结果。":
     "Display MCP server status, real-time available tools, and verification results.",
   "目录加载中": "Catalog Loading",
@@ -534,16 +532,16 @@ export const manualDomTranslations: DomDictionary = {
   ...projectsDictionary,
   ...opengrepRulesDictionary,
   ...systemConfigDictionary,
-  ...intelligentAuditDictionary,
+  ...intelligentScanDictionary,
   ...adminDashboardDictionary,
 };
 
 const fragmentTranslationDictionary: DomDictionary = {
-  "面向代码安全与合规审计的智能分析平台。":
-    "An intelligent platform for code security and compliance audits.",
+  "面向代码安全与合规扫描的智能分析平台。":
+    "An intelligent platform for code security and compliance scans.",
   "聚焦仓库级项目，": "Focused on repository-level projects,",
-  "提供任务编排、自动化审计与结果追踪，帮助团队更快定位风险与改进点。":
-    "it provides task orchestration, automated auditing, and result tracking to help teams identify risks and improvements faster.",
+  "提供任务编排、自动化扫描与结果追踪，帮助团队更快定位风险与改进点。":
+    "it provides task orchestration, automated scanning, and result tracking to help teams identify risks and improvements faster.",
   "活跃:": "Active:",
   "已完成:": "Completed:",
   "中止:": "Aborted:",
@@ -559,7 +557,7 @@ const fragmentTranslationDictionary: DomDictionary = {
   "LLM 已配置": "LLM configured",
   "规则": "Rule",
   "项目": "Project",
-  "审计": "Audit",
+  "扫描": "Scan",
   "禁用": "Disable",
   "保存": "Save",
   "删除": "Delete",
