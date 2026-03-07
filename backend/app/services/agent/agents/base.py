@@ -4426,13 +4426,102 @@ class BaseAgent(ABC):
                         "请先通过 search_code 获取定位锚点后再重试 read_file。"
                     )
                     return failure_output
-                example_fields = ", ".join(f'"{name}": "..."' for name in missing_required)
+                
+                # 🔥 为缺失字段生成更详细的示例
+                example_dict: Dict[str, Any] = {}
+                
+                # 特殊处理 save_verification_results 工具
+                if str(resolved_tool_name or "").strip().lower() == "save_verification_results" and "findings" in missing_required:
+                    example_dict = {
+                        "findings": [
+                            {
+                                "file_path": "<相对路径，如 src/main.py>",
+                                "line_start": "<起始行号，如 10>",
+                                "line_end": "<结束行号，如 20>",
+                                "title": "<漏洞标题，5-200字符>",
+                                "vulnerability_type": "<漏洞类型，如 sql_injection>",
+                                "severity": "<critical|high|medium|low|info>",
+                                "cwe_id": "<CWE编号，如 CWE-89>",
+                                "function_name": "<函数名，必填>",
+                                "verification_result": {
+                                    "verdict": "<confirmed|likely|uncertain|false_positive>",
+                                    "confidence": "<0.0-1.0 浮点数>",
+                                    "reachability": "<reachable|likely_reachable|unknown|unreachable>",
+                                    "verification_evidence": "<验证证据，至少10字符>"
+                                }
+                            }
+                        ],
+                        "summary": "<可选：验证结果摘要>"
+                    }
+                elif local_tool_available and tool:
+                    # 尝试从工具的 args_schema 获取字段类型和描述
+                    args_schema = getattr(tool, "args_schema", None)
+                    model_fields = getattr(args_schema, "model_fields", None)
+                    
+                    if isinstance(model_fields, dict):
+                        # Pydantic v2
+                        for field_name in missing_required:
+                            field_info = model_fields.get(field_name)
+                            if field_info:
+                                annotation = getattr(field_info, "annotation", None)
+                                description = getattr(field_info, "description", "")
+                                
+                                # 生成类型提示的示例值
+                                type_name = getattr(annotation, "__name__", None) or str(annotation)
+                                if "List" in str(annotation) or "list" in type_name.lower():
+                                    example_val = "[]"
+                                elif "Dict" in str(annotation) or "dict" in type_name.lower():
+                                    example_val = "{}"
+                                elif "int" in type_name.lower():
+                                    example_val = "1"
+                                elif "float" in type_name.lower():
+                                    example_val = "0.5"
+                                elif "bool" in type_name.lower():
+                                    example_val = "true"
+                                else:
+                                    example_val = f"<{type_name}>"
+                                
+                                # 如果有描述，添加注释
+                                if description and len(description) < 80:
+                                    example_dict[field_name] = f'{example_val}  # {description[:80]}'
+                                else:
+                                    example_dict[field_name] = example_val
+                            else:
+                                example_dict[field_name] = "<value>"
+                    else:
+                        # Pydantic v1 回退或无 schema
+                        legacy_fields = getattr(args_schema, "__fields__", None)
+                        if isinstance(legacy_fields, dict):
+                            for field_name in missing_required:
+                                field_info = legacy_fields.get(field_name)
+                                if field_info:
+                                    type_name = getattr(field_info.outer_type_, "__name__", "value")
+                                    example_dict[field_name] = f"<{type_name}>"
+                                else:
+                                    example_dict[field_name] = "<value>"
+                        else:
+                            # 没有 schema，使用简单占位符
+                            for field_name in missing_required:
+                                example_dict[field_name] = "<value>"
+                else:
+                    # 无工具对象，使用简单占位符
+                    for field_name in missing_required:
+                        example_dict[field_name] = "<value>"
+                
+                # 格式化示例
+                if example_dict:
+                    example_json = json.dumps(example_dict, ensure_ascii=False, indent=2)
+                    example_str = f"\n```json\n{example_json}\n```"
+                else:
+                    example_fields = ", ".join(f'"{name}": "..."' for name in missing_required)
+                    example_str = f"{{{example_fields}}}"
+                
                 failure_output = (
                     "⚠️ 工具参数校验失败\n\n"
                     f"**请求工具**: {requested_tool_name}\n"
                     f"**实际执行工具**: {resolved_tool_name}\n"
                     f"**缺失必填字段**: {', '.join(missing_required)}\n"
-                    f"**建议示例**: {{{example_fields}}}\n"
+                    f"**建议示例**: {example_str}\n"
                     "请补齐参数后重试。"
                 )
                 return failure_output

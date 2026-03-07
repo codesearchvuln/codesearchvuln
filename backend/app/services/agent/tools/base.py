@@ -185,21 +185,78 @@ class AgentTool(ABC):
         return result
 
     def _build_expected_args(self) -> Optional[Dict[str, Any]]:
+        """构建预期参数字典，兼容 Pydantic v1 和 v2"""
         schema = self.args_schema
         if not schema:
             return None
         expected: Dict[str, Any] = {}
-        for name, field in schema.__fields__.items():
-            if field.required and field.default is None and field.default_factory is None:
-                type_name = getattr(field.outer_type_, "__name__", "value")
-                expected[name] = f"<{type_name}>"
-            elif field.default_factory is not None:
-                try:
-                    expected[name] = field.default_factory()
-                except Exception:
-                    expected[name] = None
-            else:
-                expected[name] = field.default
+        
+        # 尝试 Pydantic v2 的 model_fields
+        model_fields = getattr(schema, "model_fields", None)
+        if isinstance(model_fields, dict):
+            # 导入 PydanticUndefined 来检查字段是否有默认值
+            try:
+                from pydantic_core import PydanticUndefined
+            except ImportError:
+                PydanticUndefined = None
+            
+            for name, field_info in model_fields.items():
+                # 检查是否为必填字段（Pydantic v2）
+                is_required = False
+                checker = getattr(field_info, "is_required", None)
+                if callable(checker):
+                    try:
+                        is_required = bool(checker())
+                    except Exception:
+                        is_required = False
+                elif isinstance(checker, bool):
+                    is_required = checker
+                
+                # 获取默认值
+                default_val = getattr(field_info, "default", None)
+                default_factory = getattr(field_info, "default_factory", None)
+                
+                # 检查 default_val 是否为 PydanticUndefined
+                has_default = True
+                if PydanticUndefined is not None and default_val is PydanticUndefined:
+                    has_default = False
+                    default_val = None
+                elif default_val is None and default_factory is None:
+                    has_default = False
+                
+                if is_required and not has_default:
+                    # 必填字段且无默认值
+                    annotation = getattr(field_info, "annotation", None)
+                    type_name = getattr(annotation, "__name__", None) or str(annotation)
+                    expected[name] = f"<{type_name}>"
+                elif default_factory is not None:
+                    try:
+                        expected[name] = default_factory()
+                    except Exception:
+                        expected[name] = None
+                else:
+                    expected[name] = default_val
+            return expected
+        
+        # 回退到 Pydantic v1 的 __fields__
+        legacy_fields = getattr(schema, "__fields__", None)
+        if isinstance(legacy_fields, dict):
+            for name, field in legacy_fields.items():
+                is_required = bool(getattr(field, "required", False))
+                default_val = getattr(field, "default", None)
+                default_factory = getattr(field, "default_factory", None)
+                
+                if is_required and default_val is None and default_factory is None:
+                    type_name = getattr(field.outer_type_, "__name__", "value")
+                    expected[name] = f"<{type_name}>"
+                elif default_factory is not None:
+                    try:
+                        expected[name] = default_factory()
+                    except Exception:
+                        expected[name] = None
+                else:
+                    expected[name] = default_val
+        
         return expected
     
     def get_langchain_tool(self):
