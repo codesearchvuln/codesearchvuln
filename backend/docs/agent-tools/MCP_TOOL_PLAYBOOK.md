@@ -6,7 +6,7 @@
 
 | 标准工具名 | MCP Server | MCP Tool | 必填参数 | 典型输出 |
 | --- | --- | --- | --- | --- |
-| `search_code` | `code_index` (fallback `filesystem`) | `search_code_advanced` (`search_files`) | `keyword/pattern` | 命中位置（含 file_path 与 line） |
+| `search_code` | `code_index` (fallback `filesystem`) | `search_code_advanced` (`search_files`) | 公开输入 `keyword`；MCP 稳定形态推荐 `keyword + is_regex=true` | 命中位置（含 file_path 与 line） |
 | `read_file` | `filesystem` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |
 | `list_files` | `code_index` | `find_files` | `directory/path` | 文件列表 |
 | `locate_enclosing_function` | `code_index` | `get_file_summary` | `file_path`, `line_start` | 所属函数与范围 |
@@ -24,6 +24,14 @@
 1. 先 `search_code` 定位：拿到 `file_path:line`。
 2. 再 `read_file` 窗口读取：优先 `line-60 ~ line+99`（最多 200 行）。
 3. 需要函数级证据时：调用 `locate_enclosing_function`，再按需 `extract_function`。
+
+### `search_code` 的 MCP 精确调用规则
+
+- 公共 `action_input` 仍然写 `keyword`，不要直接伪造 `pattern`。
+- 2026-03-08 日志表明：当 `search_code` 路由到 `code_index/search_code_advanced` 时，普通关键字模式可能触发 `pattern Field required`。
+- 当前稳定调用方式：`keyword` 写成简单正则，并显式设置 `is_regex: true`，让 router 自动补齐 MCP 所需的 `pattern`。
+- 始终附带 `directory` 与 `file_pattern` 缩小搜索域。
+- 若出现 `Potentially unsafe regex pattern`，立即简化模式或拆成多次更小搜索，不要重放原样输入。
 
 ## 3) QMD / SequentialThinking 最小调用模板
 
@@ -55,6 +63,10 @@
   - 纠偏：先 `search_code`；若仍无法定位且已给定 `file_path`，仅允许读取 `1..120` 文件头窗口。
 - 误用：`search_code` 用泛化关键词（如 `function`, `user`）。
   - 纠偏：优先用符号名/常量名，并补 `directory` 与 `file_pattern` 缩小范围。
+- 误用：`search_code` 在 `code_index` 路由下仍使用 keyword-only 调用。
+  - 纠偏：显式设置 `is_regex: true`，保持 `keyword` 为简单 regex，让 router 自动生成 `pattern`。
+- 误用：`search_code` 使用复杂正则，随后命中 `Potentially unsafe regex pattern`。
+  - 纠偏：改成简单 alternation / 简单字面量，必要时拆成多次搜索。
 - 误用：使用虚拟工具名（如 `code_search`、`rag_query`）直接执行。
   - 纠偏：改用标准工具名（`search_code`, `read_file`, `qmd_query` 等）。
 
@@ -122,7 +134,21 @@
     "keyword": "TM64_ASCTIME_FORMAT",
     "directory": "src",
     "file_pattern": "time64*",
+    "is_regex": true,
     "max_results": 8
+  }
+}
+```
+
+```json
+{
+  "action": "search_code",
+  "action_input": {
+    "keyword": "pickle|fromstring\\(|subprocess",
+    "directory": ".",
+    "file_pattern": "dsvw.py",
+    "is_regex": true,
+    "max_results": 12
   }
 }
 ```

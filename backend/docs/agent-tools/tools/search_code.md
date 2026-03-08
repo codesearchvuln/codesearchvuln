@@ -17,6 +17,12 @@
 
 这是一个快速搜索工具，结果包含匹配行和上下文。
 
+## MCP Precision Mode
+- 当 `search_code` 路由到 `code_index/search_code_advanced` 时，推荐显式设置 `is_regex=true`。
+- 原因：2026-03-08 的任务日志显示，keyword-only 调用会触发 `pattern Field required`；regex 模式则会由 router 补齐 `pattern`。
+- `keyword` 应尽量写成简单、可执行的 regex，并总是配合 `directory` + `file_pattern` 缩小范围。
+- 若命中 `Potentially unsafe regex pattern`，改用更简单的 alternation/literal token，或退回 `list_files` + `read_file`。
+
 ## Goal
 定位目标代码、函数上下文与证据位置。
 
@@ -33,6 +39,17 @@
 - `case_sensitive` (boolean, optional): 是否区分大小写
 - `max_results` (integer, optional): 最大结果数
 - `is_regex` (boolean, optional): 是否使用正则表达式
+
+### MCP-Stable Input Shape
+```json
+{
+  "keyword": "pickle|fromstring\\(|subprocess",
+  "file_pattern": "dsvw.py",
+  "directory": ".",
+  "is_regex": true,
+  "max_results": 12
+}
+```
 
 
 ### Example Input
@@ -61,3 +78,5 @@
 - 不要在输入缺失关键参数时盲目调用。
 - 不要将该工具输出直接当作最终结论，必须结合上下文复核。
 - 不要在权限不足或路径不合法时重复重试同一输入。
+- 不要在 MCP 路由下默认省略 `is_regex`。
+- 不要重复提交已被拒绝的 unsafe regex。
