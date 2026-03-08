@@ -4294,10 +4294,10 @@ async def _initialize_tools(
             queue_service=recon_queue_service,
             task_id=task_id,
         )
-        recon_tools["get_recon_risk_queue_status"] = GetReconRiskQueueStatusTool(
-            queue_service=recon_queue_service,
-            task_id=task_id,
-        )
+        # recon_tools["get_recon_risk_queue_status"] = GetReconRiskQueueStatusTool(
+        #     queue_service=recon_queue_service,
+        #     task_id=task_id,
+        # )
         logger.info(f"[Tools] Added Recon risk queue tools for task {task_id}")
 
     analysis_tools = {
