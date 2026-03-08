@@ -4,7 +4,7 @@ from pydantic import AnyHttpUrl, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "DeepAudit"
+    PROJECT_NAME: str = "VulHunter"
     API_V1_STR: str = "/api/v1"
     
     # SECURITY
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     POSTGRES_SERVER: str = "db"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "deepaudit"
+    POSTGRES_DB: str = "vulhunter"
     DATABASE_URL: str | None = None
 
     @validator("DATABASE_URL", pre=True)
