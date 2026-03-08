@@ -39,26 +39,12 @@ logger = logging.getLogger(__name__)
 MAX_EVENT_PAYLOAD_CHARS = 120000
 
 TOOL_ALIAS_CANDIDATES: Dict[str, List[str]] = {
-    "smart_scan": ["smart_scan", "quick_audit", "opengrep_scan", "pattern_match", "search_code", "read_file"],
-    "quick_audit": ["quick_audit", "smart_scan", "opengrep_scan", "pattern_match", "search_code", "read_file"],
-    "query_security_knowledge": ["qmd_query", "search_code"],
-    "get_vulnerability_knowledge": ["qmd_get", "qmd_query", "search_code"],
+    "smart_scan": ["smart_scan", "quick_audit", "pattern_match", "search_code", "read_file"],
+    "quick_audit": ["quick_audit", "smart_scan", "pattern_match", "search_code", "read_file"],
 }
-VIRTUAL_TOOL_NAMES: Set[str] = {
-    "code_search",
-    "query_security_knowledge",
-    "get_vulnerability_knowledge",
-}
+VIRTUAL_TOOL_NAMES: Set[str] = set()
 
-DOWNLINED_TOOL_MESSAGES: Dict[str, str] = {
-    "test_command_injection": "该 skill 已下线，请改用 verify_reachability + flow 证据链。",
-    "test_sql_injection": "该 skill 已下线，请改用 verify_reachability + flow 证据链。",
-    "test_xss": "该 skill 已下线，请改用 verify_reachability + flow 证据链。",
-    "test_path_traversal": "该 skill 已下线，请改用 verify_reachability + flow 证据链。",
-    "test_ssti": "该 skill 已下线，请改用 verify_reachability + flow 证据链。",
-    "test_deserialization": "该 skill 已下线，请改用 verify_reachability + flow 证据链。",
-    "universal_vuln_test": "该 skill 已下线，请改用 verify_reachability + flow 证据链。",
-}
+DOWNLINED_TOOL_MESSAGES: Dict[str, str] = {}
 
 TOOL_INPUT_REPAIR_MAP: Dict[str, str] = {
     "query": "keyword",

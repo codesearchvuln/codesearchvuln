@@ -8,11 +8,38 @@ from app.services.agent.agents.verification import VERIFICATION_SYSTEM_PROMPT
 from app.services.agent.prompts.system_prompts import TOOL_USAGE_GUIDE
 
 
+REMOVED_PROMPT_TOKENS = [
+    "qmd_query",
+    "qmd_get",
+    "sequential_thinking",
+    "reasoning_trace",
+    "skill_lookup",
+    "joern_reachability_verify",
+    "sandbox_http",
+    "php_test",
+    "python_test",
+    "javascript_test",
+    "java_test",
+    "go_test",
+    "ruby_test",
+    "shell_test",
+    "universal_code_test",
+    "test_command_injection",
+    "test_sql_injection",
+    "test_xss",
+    "test_path_traversal",
+    "test_ssti",
+    "test_deserialization",
+    "universal_vuln_test",
+]
+
+
 def test_orchestrator_prompt_requires_flow_evidence_gate():
     assert "高危候选" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "flow 证据" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "dataflow_analysis" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "controlflow_analysis_light" in ORCHESTRATOR_SYSTEM_PROMPT
+
 
 
 def test_recon_prompt_requires_input_surfaces_and_trust_boundaries():
@@ -22,17 +49,19 @@ def test_recon_prompt_requires_input_surfaces_and_trust_boundaries():
     assert "高风险区域" in RECON_SYSTEM_PROMPT
 
 
+
 def test_analysis_prompt_requires_two_evidence_classes_and_structured_title():
     assert "2 类证据" in ANALYSIS_SYSTEM_PROMPT
     assert "代码证据" in ANALYSIS_SYSTEM_PROMPT
     assert "流证据" in ANALYSIS_SYSTEM_PROMPT
     assert "dataflow_analysis/controlflow_analysis_light" in ANALYSIS_SYSTEM_PROMPT
     assert "src/time64.c中asctime64_r栈溢出漏洞" in ANALYSIS_SYSTEM_PROMPT
-    assert "\"file_path\": \"src/example.py\"" in ANALYSIS_SYSTEM_PROMPT
+    assert '"file_path": "src/example.py"' in ANALYSIS_SYSTEM_PROMPT
     assert "兼容说明：如果你拿到的是 `{\"finding\": {...}}` 结构" in ANALYSIS_SYSTEM_PROMPT
     assert "Action Input: {\n    \"finding\": {" not in ANALYSIS_SYSTEM_PROMPT
     assert "file_path:line" in ANALYSIS_SYSTEM_PROMPT
     assert "line_start" in ANALYSIS_SYSTEM_PROMPT
+
 
 
 def test_verification_prompt_requires_flow_fields_and_report_preconditions():
@@ -41,11 +70,21 @@ def test_verification_prompt_requires_flow_fields_and_report_preconditions():
     assert "create_vulnerability_report" in VERIFICATION_SYSTEM_PROMPT
     assert "标题结构化" in VERIFICATION_SYSTEM_PROMPT
     assert "src/time64.c中asctime64_r栈溢出漏洞" in VERIFICATION_SYSTEM_PROMPT
+    assert "run_code" in VERIFICATION_SYSTEM_PROMPT
+    assert "sandbox_exec" in VERIFICATION_SYSTEM_PROMPT
+    assert "verify_vulnerability" in VERIFICATION_SYSTEM_PROMPT
 
 
-def test_shared_tool_usage_prompt_includes_flow_tools_and_strict_read_rule():
+
+def test_shared_tool_usage_prompt_only_mentions_core_scan_tools():
     assert "dataflow_analysis" in TOOL_USAGE_GUIDE
     assert "controlflow_analysis_light" in TOOL_USAGE_GUIDE
     assert "logic_authz_analysis" in TOOL_USAGE_GUIDE
-    assert "code_search" not in TOOL_USAGE_GUIDE
+    assert "smart_scan" in TOOL_USAGE_GUIDE
+    assert "quick_audit" in TOOL_USAGE_GUIDE
+    assert "run_code" in TOOL_USAGE_GUIDE
+    assert "verify_vulnerability" in TOOL_USAGE_GUIDE
     assert "先用 `search_code` 定位到 `file_path:line`" in TOOL_USAGE_GUIDE
+    assert "code_search" not in TOOL_USAGE_GUIDE
+    for token in REMOVED_PROMPT_TOKENS:
+        assert token not in TOOL_USAGE_GUIDE

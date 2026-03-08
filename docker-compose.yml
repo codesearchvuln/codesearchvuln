@@ -41,8 +41,10 @@ services:
         - BACKEND_APT_SECURITY_FALLBACK=${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
         - BACKEND_PYPI_INDEX_PRIMARY=${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}
         - BACKEND_PYPI_INDEX_FALLBACK=${BACKEND_PYPI_INDEX_FALLBACK:-https://pypi.org/simple}
+        - BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}
         - BACKEND_NPM_REGISTRY_PRIMARY=${BACKEND_NPM_REGISTRY_PRIMARY:-https://registry.npmmirror.com}
         - BACKEND_NPM_REGISTRY_FALLBACK=${BACKEND_NPM_REGISTRY_FALLBACK:-https://registry.npmjs.org}
+        - BACKEND_NPM_REGISTRY_CANDIDATES=${BACKEND_NPM_REGISTRY_CANDIDATES:-https://registry.npmmirror.com,https://mirrors.cloud.tencent.com/npm,https://registry.npmjs.org}
         - BACKEND_PNPM_VERSION=${BACKEND_PNPM_VERSION:-9.15.4}
         - BACKEND_PNPM_CMD_TIMEOUT_SECONDS=${BACKEND_PNPM_CMD_TIMEOUT_SECONDS:-420}
         - BACKEND_PNPM_INSTALL_OPTIONAL=${BACKEND_PNPM_INSTALL_OPTIONAL:-0}
@@ -77,88 +79,18 @@ services:
       - SANDBOX_IMAGE=${SANDBOX_IMAGE:-${GHCR_REGISTRY:-ghcr.nju.edu.cn}/lintsinghua/vulhunter-sandbox:latest}
       - MCP_ENABLED=true
       - MCP_REQUIRE_ALL_READY_ON_STARTUP=true
-      - MCP_REQUIRED_RUNTIME_DOMAIN=all
-      - MCP_DAEMON_AUTOSTART=true
-      - MCP_DAEMON_LOG_DIR=/tmp/vulhunter/mcp-daemons
-      - MCP_SOURCE_SYNC_ENABLED=true
-      - MCP_SOURCE_ROOT=/app/data/mcp/sources
-      - MCP_SOURCE_SYNC_DEPTH=1
-      - MCP_SOURCE_SYNC_STRICT=false
-      - MCP_SOURCE_UPDATE_ON_STARTUP=false
-      - MCP_SOURCE_FORCE_REFRESH=false
-      - MCP_FILESYSTEM_ENABLED=false
-      - MCP_FILESYSTEM_SANDBOX_ENABLED=true
-      - MCP_FILESYSTEM_RUNTIME_MODE=sandbox_only
+      - MCP_REQUIRED_RUNTIME_DOMAIN=stdio
+      - MCP_FILESYSTEM_ENABLED=true
+      - MCP_FILESYSTEM_RUNTIME_MODE=stdio_only
       - MCP_FILESYSTEM_FORCE_STDIO=${MCP_FILESYSTEM_FORCE_STDIO:-true}
-      - MCP_FILESYSTEM_BACKEND_URL=${MCP_FILESYSTEM_BACKEND_URL:-http://127.0.0.1:8770/mcp}
-      - MCP_FILESYSTEM_SANDBOX_URL=${MCP_FILESYSTEM_SANDBOX_URL:-http://127.0.0.1:8770/mcp}
-      - MCP_FILESYSTEM_DAEMON_HOST=${MCP_FILESYSTEM_DAEMON_HOST:-127.0.0.1}
-      - MCP_FILESYSTEM_DAEMON_PORT=${MCP_FILESYSTEM_DAEMON_PORT:-8770}
-      - MCP_FILESYSTEM_DAEMON_COMMAND=${MCP_FILESYSTEM_DAEMON_COMMAND:-fastmcp}
-      - MCP_FILESYSTEM_DAEMON_ARGS=${MCP_FILESYSTEM_DAEMON_ARGS:-}
-      - MCP_FILESYSTEM_DAEMON_ALLOWED_DIRS=${MCP_FILESYSTEM_DAEMON_ALLOWED_DIRS:-/tmp,/app}
-      - MCP_FILESYSTEM_DAEMON_SOURCE_DIR=${MCP_FILESYSTEM_DAEMON_SOURCE_DIR:-/app/mcp-src/filesystem}
-      - MCP_FILESYSTEM_DAEMON_STARTUP_TIMEOUT_SECONDS=${MCP_FILESYSTEM_DAEMON_STARTUP_TIMEOUT_SECONDS:-45}
       - MCP_CODE_INDEX_ENABLED=true
-      - MCP_CODE_INDEX_SANDBOX_ENABLED=true
-      - MCP_CODE_INDEX_BACKEND_URL=http://127.0.0.1:8765/mcp
-      - MCP_CODE_INDEX_SANDBOX_URL=http://127.0.0.1:8765/mcp
-      - MCP_CODE_INDEX_DAEMON_HOST=127.0.0.1
-      - MCP_CODE_INDEX_DAEMON_PORT=8765
-      - MCP_CODE_INDEX_DAEMON_COMMAND=code-index-mcp
-      - MCP_CODE_INDEX_DAEMON_ARGS=--transport streamable-http --port 8765 --indexer-path /app/data/mcp/code-index
-      - MCP_CODE_INDEX_DAEMON_INDEXER_PATH=/app/data/mcp/code-index
-      - MCP_CODE_INDEX_DAEMON_SOURCE_DIR=${MCP_CODE_INDEX_DAEMON_SOURCE_DIR:-/app/mcp-src/code-index-mcp}
-      - MCP_CODE_INDEX_DAEMON_STARTUP_TIMEOUT_SECONDS=45
-      - MCP_SEQUENTIAL_THINKING_ENABLED=true
-      - MCP_SEQUENTIAL_THINKING_SANDBOX_ENABLED=true
-      - MCP_SEQUENTIAL_THINKING_FORCE_STDIO=${MCP_SEQUENTIAL_THINKING_FORCE_STDIO:-true}
-      - MCP_SEQUENTIAL_THINKING_COMMAND=${MCP_SEQUENTIAL_THINKING_COMMAND:-mcp-server-sequential-thinking}
-      - MCP_SEQUENTIAL_THINKING_ARGS=${MCP_SEQUENTIAL_THINKING_ARGS:-}
-      - MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND=${MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND:-mcp-server-sequential-thinking}
-      - MCP_SEQUENTIAL_THINKING_SANDBOX_ARGS=${MCP_SEQUENTIAL_THINKING_SANDBOX_ARGS:-}
-      - MCP_SEQUENTIAL_THINKING_BACKEND_URL=${MCP_SEQUENTIAL_THINKING_BACKEND_URL:-http://127.0.0.1:8771/mcp}
-      - MCP_SEQUENTIAL_THINKING_SANDBOX_URL=${MCP_SEQUENTIAL_THINKING_SANDBOX_URL:-http://127.0.0.1:8771/mcp}
-      - MCP_SEQUENTIAL_THINKING_DAEMON_HOST=${MCP_SEQUENTIAL_THINKING_DAEMON_HOST:-127.0.0.1}
-      - MCP_SEQUENTIAL_THINKING_DAEMON_PORT=${MCP_SEQUENTIAL_THINKING_DAEMON_PORT:-8771}
-      - MCP_SEQUENTIAL_THINKING_DAEMON_COMMAND=${MCP_SEQUENTIAL_THINKING_DAEMON_COMMAND:-node}
-      - MCP_SEQUENTIAL_THINKING_DAEMON_ARGS=${MCP_SEQUENTIAL_THINKING_DAEMON_ARGS:-dist/index.js --transport streamable-http --port 8771}
-      - MCP_SEQUENTIAL_THINKING_DAEMON_SOURCE_DIR=${MCP_SEQUENTIAL_THINKING_DAEMON_SOURCE_DIR:-/app/mcp-src/sequential-thinking}
-      - MCP_SEQUENTIAL_THINKING_DAEMON_STARTUP_TIMEOUT_SECONDS=${MCP_SEQUENTIAL_THINKING_DAEMON_STARTUP_TIMEOUT_SECONDS:-45}
-      - MCP_QMD_ENABLED=false
-      - MCP_QMD_SANDBOX_ENABLED=false
-      - MCP_QMD_RUNTIME_MODE=sandbox_only
-      - MCP_QMD_BACKEND_URL=http://localhost:8181/mcp
-      - MCP_QMD_SANDBOX_URL=http://localhost:8181/mcp
-      - MCP_QMD_DAEMON_HOST=localhost
-      - MCP_QMD_DAEMON_PORT=8181
-      - MCP_QMD_DAEMON_COMMAND=node
-      - MCP_QMD_DAEMON_ARGS=dist/index.js mcp --transport streamable-http --port 8181
-      - MCP_QMD_DAEMON_SOURCE_DIR=${MCP_QMD_DAEMON_SOURCE_DIR:-/app/mcp-src/qmd}
-      - MCP_QMD_DAEMON_STARTUP_TIMEOUT_SECONDS=60
       - GIT_MIRROR_ENABLED=${GIT_MIRROR_ENABLED:-true}
       - GIT_MIRROR_PREFIX=${GIT_MIRROR_PREFIX:-https://gh-proxy.org}
       - GIT_MIRROR_PREFIXES=${GIT_MIRROR_PREFIXES:-https://gh-proxy.org,https://v6.gh-proxy.org}
       - GIT_MIRROR_HOSTS=${GIT_MIRROR_HOSTS:-github.com}
       - GIT_MIRROR_ALLOW_AUTH_URL=${GIT_MIRROR_ALLOW_AUTH_URL:-false}
       - GIT_MIRROR_FALLBACK_TO_ORIGIN=${GIT_MIRROR_FALLBACK_TO_ORIGIN:-false}
-      - QMD_DATA_DIR=/app/data/qmd
-      - QMD_CLI_COMMAND=qmd
-      - QMD_CLI_TIMEOUT_SECONDS=120
-      - QMD_TASK_KB_ENABLED=true
-      - QMD_TASK_ROOT_REL=.vulhunter/qmd
-      - QMD_TASK_COLLECTION_PREFIX=task
-      - QMD_TASK_DOC_GLOB=**/*.{md,txt,json,yml,yaml}
-      - QMD_TASK_AUTO_EMBED=false
-      - QMD_TASK_QUERY_CACHE=true
       - XDG_CONFIG_HOME=/app/data/mcp/xdg-config
-      - CODEX_HOME=/app/data/mcp/codex-home
-      - CODEX_SKILLS_AUTO_INSTALL=${CODEX_SKILLS_AUTO_INSTALL:-true}
-      - CODEX_SKILLS_FAIL_ON_ERROR=${CODEX_SKILLS_FAIL_ON_ERROR:-true}
-      - SKILL_REGISTRY_ENABLED=${SKILL_REGISTRY_ENABLED:-true}
-      - SKILL_REGISTRY_ROOT=${SKILL_REGISTRY_ROOT:-/app/data/mcp/skill-registry}
-      - SKILL_SOURCE_ROOTS=${SKILL_SOURCE_ROOTS:-/app/data/mcp/codex-home/skills,/app/data/mcp/agents-skills,/app/data/mcp/codex-skills,/app/data/mcp/superpowers-skills}
-      - SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP=${SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP:-true}
       # Enable Joern MCP fallback (CodeBadger). Best-effort when the profile isn't enabled.
       - JOERN_MCP_ENABLED=true
       # 禁用代理设置，防止容器内无法连接外部 API
@@ -173,7 +105,6 @@ services:
       redis:
         condition: service_healthy
     # 开发模式：启用 --reload 热重载
-    command: sh -c "if [ -x /app/scripts/sync_mcp_sources.sh ]; then /app/scripts/sync_mcp_sources.sh || true; fi && if [ -x /app/scripts/install_codex_skills.sh ]; then /app/scripts/install_codex_skills.sh; fi && if [ \"$$SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP\" = \"true\" ] || [ \"$$SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP\" = \"1\" ]; then .venv/bin/python scripts/build_skill_registry.py --print-json || true; fi && .venv/bin/alembic upgrade head && if [ \"$$RESET_STATIC_SCAN_TABLES_ON_DEPLOY\" = \"true\" ] || [ \"$$RESET_STATIC_SCAN_TABLES_ON_DEPLOY\" = \"1\" ]; then .venv/bin/python scripts/reset_static_scan_tables.py; fi && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     networks:
       - vulhunter-network
 

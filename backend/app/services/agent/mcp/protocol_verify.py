@@ -283,11 +283,11 @@ def _known_tool_args(
         if normalized_tool in {"list_directory", "list_files"}:
             return {"path": root_path, "directory": root_path}
         if normalized_tool in {"read_file", "read_text_file"}:
-            return {"path": probe_file_abs}
+            return {"path": filesystem_probe_file}
         if normalized_tool == "read_media_file":
-            return {"path": probe_media_abs}
+            return {"path": filesystem_media_probe_file}
         if normalized_tool == "read_multiple_files":
-            return {"paths": [probe_file_abs]}
+            return {"paths": [filesystem_probe_file]}
         if normalized_tool == "write_file":
             return {
                 "path": probe_file_abs,
@@ -311,9 +311,9 @@ def _known_tool_args(
         if normalized_tool == "move_file":
             return {"source": probe_file_abs, "destination": moved_probe_file}
         if normalized_tool == "search_files":
-            return {"path": probe_parent_dir, "pattern": "*.txt"}
+            return {"path": "tmp", "pattern": "*.txt"}
         if normalized_tool == "get_file_info":
-            return {"path": probe_media_abs}
+            return {"path": filesystem_probe_file}
         if normalized_tool == "list_allowed_directories":
             return {}
 

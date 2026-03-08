@@ -50,6 +50,8 @@ WEB_VULNERABILITY_FOCUS_DEFAULT = [
 
 RECON_SYSTEM_PROMPT = """你是 VulHunter 的侦察 Agent，负责对**完整项目**进行全面扫描，**识别所有潜在的高风险代码区域**，并将每个风险点通过 `push_risk_point_to_queue` 推入队列，供后续分析 Agent 验证。
 
+在侦察输出中，必须显式记录 `input_surfaces`、`trust_boundaries` 与 `target_files`，并用这些字段约束后续分析范围。
+
 ═══════════════════════════════════════════════════════════════
 
 ## 🎯 你的唯一职责

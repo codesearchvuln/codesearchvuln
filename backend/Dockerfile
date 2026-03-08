@@ -9,8 +9,10 @@ ARG BACKEND_APT_MIRROR_FALLBACK=deb.debian.org
 ARG BACKEND_APT_SECURITY_FALLBACK=security.debian.org
 ARG BACKEND_PYPI_INDEX_PRIMARY=https://mirrors.aliyun.com/pypi/simple/
 ARG BACKEND_PYPI_INDEX_FALLBACK=https://pypi.org/simple
+ARG BACKEND_PYPI_INDEX_CANDIDATES=https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple
 ARG BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com
 ARG BACKEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org
+ARG BACKEND_NPM_REGISTRY_CANDIDATES=https://registry.npmmirror.com,https://mirrors.cloud.tencent.com/npm,https://registry.npmjs.org
 ARG BACKEND_PNPM_VERSION=9.15.4
 ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS=420
 ARG BACKEND_PNPM_INSTALL_OPTIONAL=0
@@ -27,6 +29,7 @@ ARG BACKEND_APT_MIRROR_FALLBACK
 ARG BACKEND_APT_SECURITY_FALLBACK
 ARG BACKEND_PYPI_INDEX_PRIMARY
 ARG BACKEND_PYPI_INDEX_FALLBACK
+ARG BACKEND_PYPI_INDEX_CANDIDATES
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -138,6 +141,8 @@ ARG BACKEND_APT_MIRROR_FALLBACK
 ARG BACKEND_APT_SECURITY_FALLBACK
 ARG BACKEND_PYPI_INDEX_PRIMARY
 ARG BACKEND_PYPI_INDEX_FALLBACK
+ARG BACKEND_PYPI_INDEX_CANDIDATES
+ARG BACKEND_NPM_REGISTRY_CANDIDATES
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -155,6 +160,8 @@ ENV UV_INDEX_URL=${BACKEND_PYPI_INDEX_PRIMARY}
 ENV PIP_INDEX_URL=${BACKEND_PYPI_INDEX_PRIMARY}
 ENV PNPM_HOME=/pnpm
 ENV PATH=/pnpm:${PATH}
+ENV PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES}
+ENV NPM_REGISTRY_CANDIDATES=${BACKEND_NPM_REGISTRY_CANDIDATES}
 
 # 只安装运行时依赖（不需要 gcc）；CJK 字体可通过 BACKEND_INSTALL_CJK_FONTS 控制
 ARG BACKEND_INSTALL_CJK_FONTS
@@ -209,6 +216,8 @@ RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/ap
     fi; \
     rm -rf /var/lib/apt/lists/*
 
+COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
+
 # 引入 Node.js 22 运行时并安装 pnpm（镜像优先，失败回退官方源）
 ARG BACKEND_NPM_REGISTRY_PRIMARY
 ARG BACKEND_NPM_REGISTRY_FALLBACK
@@ -256,6 +265,7 @@ FROM runtime-base AS mcp-builder
 
 ARG BACKEND_NPM_REGISTRY_PRIMARY
 ARG BACKEND_NPM_REGISTRY_FALLBACK
+ARG BACKEND_NPM_REGISTRY_CANDIDATES
 ARG BACKEND_PNPM_INSTALL_OPTIONAL
 ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS
 COPY --from=builder /tmp/builder-network-ready /tmp/builder-network-ready
@@ -266,6 +276,7 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
     set -eux; \
     cmd_timeout="${BACKEND_PNPM_CMD_TIMEOUT_SECONDS:-420}"; \
     case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
+    npm_registry_candidates="${BACKEND_NPM_REGISTRY_CANDIDATES:-${BACKEND_NPM_REGISTRY_PRIMARY},https://mirrors.cloud.tencent.com/npm,${BACKEND_NPM_REGISTRY_FALLBACK}}"; \
     pnpm_step_timeout=90; \
     if [ "${cmd_timeout}" -lt "${pnpm_step_timeout}" ]; then pnpm_step_timeout="${cmd_timeout}"; fi; \
     qmd_step_timeout=120; \
@@ -284,11 +295,15 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
     if [ "${BACKEND_PNPM_INSTALL_OPTIONAL}" != "1" ]; then \
       install_flags="${install_flags} --no-optional"; \
     fi; \
-    install_mcp_packages_once() { \
+    order_registries() { \
+      raw_candidates="$1"; \
+      python3 /usr/local/bin/package_source_selector.py --candidates "${raw_candidates}" --kind npm --timeout-seconds 2 || printf '%s\n' "${raw_candidates}" | tr ',' '\n'; \
+    }; \
+    install_mcp_package_once() { \
       reg="$1"; \
       label="$2"; \
       step_timeout="$3"; \
-      shift 3; \
+      package_name="$4"; \
       attempt=1; \
       if ! curl -fsS --max-time 5 "${reg}/-/ping" >/dev/null 2>&1; then \
         echo "pnpm registry probe failed for ${reg}, continue with direct add attempt." >&2; \
@@ -298,7 +313,7 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
       pnpm config set @huggingface:registry "${reg}"; \
       while [ "${attempt}" -le 2 ]; do \
         echo "pnpm add ${label} via ${reg} (attempt ${attempt}/2, timeout ${step_timeout}s)"; \
-        if timeout "${step_timeout}" pnpm add -g ${install_flags} "$@"; then \
+        if timeout "${step_timeout}" pnpm add -g ${install_flags} "${package_name}"; then \
           return 0; \
         else \
           status="$?"; \
@@ -313,20 +328,38 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
       done; \
       return 1; \
     }; \
-    install_mcp_packages() { \
+    install_mcp_package() { \
       label="$1"; \
       step_timeout="$2"; \
-      shift 2; \
-      install_mcp_packages_once "${BACKEND_NPM_REGISTRY_PRIMARY}" "${label}" "${step_timeout}" "$@" || install_mcp_packages_once "${BACKEND_NPM_REGISTRY_FALLBACK}" "${label}" "${step_timeout}" "$@"; \
+      package_name="$3"; \
+      ordered_registries="$(order_registries "${npm_registry_candidates}")"; \
+      order_file="$(mktemp)"; \
+      printf '%s\n' "${ordered_registries}" > "${order_file}"; \
+      while IFS= read -r reg; do \
+        [ -n "${reg}" ] || continue; \
+        if install_mcp_package_once "${reg}" "${label}" "${step_timeout}" "${package_name}"; then \
+          rm -f "${order_file}"; \
+          return 0; \
+        fi; \
+      done < "${order_file}"; \
+      rm -f "${order_file}"; \
+      return 1; \
     }; \
-    install_mcp_packages "mcp-core" \
-      "${pnpm_step_timeout}" \
-      "@modelcontextprotocol/server-filesystem" \
-      "@modelcontextprotocol/server-memory" \
-      "@modelcontextprotocol/server-sequential-thinking"; \
-    install_mcp_packages "qmd-cli" "${qmd_step_timeout}" "@tobilu/qmd"; \
-    pnpm bin -g; \
-    command -v qmd
+    install_or_mark_npx_fallback() { \
+      label="$1"; \
+      step_timeout="$2"; \
+      package_name="$3"; \
+      binary_name="$4"; \
+      if install_mcp_package "${label}" "${step_timeout}" "${package_name}"; then \
+        return 0; \
+      fi; \
+      echo "pnpm add ${label} failed on all candidates; runtime will fallback to npx for ${package_name} (${binary_name})." >&2; \
+      return 0; \
+    }; \
+    install_or_mark_npx_fallback "filesystem" "${pnpm_step_timeout}" "@modelcontextprotocol/server-filesystem" "mcp-server-filesystem"; \
+    install_or_mark_npx_fallback "sequential-thinking" "${pnpm_step_timeout}" "@modelcontextprotocol/server-sequential-thinking" "mcp-server-sequential-thinking"; \
+    install_or_mark_npx_fallback "qmd-cli" "${qmd_step_timeout}" "@tobilu/qmd" "qmd"; \
+    pnpm bin -g || true
 
 # 定向补齐 better-sqlite3 原生模块，避免 --ignore-scripts 导致运行期缺失 binding。
 # 构建期硬性校验：确保 better-sqlite3 可实际创建连接。
@@ -338,6 +371,11 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
     if [ "${cmd_timeout}" -lt "${rebuild_timeout}" ]; then rebuild_timeout="${cmd_timeout}"; fi; \
     PNPM_GLOBAL_ROOT="$(pnpm root -g)"; \
     PNPM_GLOBAL_DIR="$(dirname "${PNPM_GLOBAL_ROOT}")"; \
+    PNPM_BETTER_SQLITE_DIR="$(find "${PNPM_GLOBAL_DIR}/.pnpm" -maxdepth 1 -type d -name 'better-sqlite3@*' | head -n 1)"; \
+    if [ -z "${PNPM_BETTER_SQLITE_DIR}" ]; then \
+      echo "better-sqlite3 not present in pnpm global store; skip rebuild and smoke check."; \
+      exit 0; \
+    fi; \
     export PNPM_GLOBAL_ROOT; \
     attempt=1; \
     while [ "${attempt}" -le 2 ]; do \
@@ -357,19 +395,8 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
       sleep $((attempt + 1)); \
       attempt=$((attempt + 1)); \
     done; \
-    PNPM_BETTER_SQLITE_DIR="$(find "${PNPM_GLOBAL_DIR}/.pnpm" -maxdepth 1 -type d -name 'better-sqlite3@*' | head -n 1)"; \
-    [ -n "${PNPM_BETTER_SQLITE_DIR}" ]; \
     export PNPM_BETTER_SQLITE_DIR; \
     node -e 'const path=require("node:path");const pkg=process.env.PNPM_BETTER_SQLITE_DIR;if(!pkg){throw new Error("PNPM_BETTER_SQLITE_DIR is not set");}const Database=require(path.join(pkg,"node_modules","better-sqlite3"));const db=new Database(":memory:");db.prepare("SELECT 1 AS ok").get();db.close();console.log("better-sqlite3 smoke check passed");'
-
-# 软链接 MCP 源码目录，避免重复打包同一份 Node 依赖
-RUN set -eux; \
-    PNPM_GLOBAL_ROOT="$(pnpm root -g)"; \
-    mkdir -p /app/mcp-src; \
-    rm -rf /app/mcp-src/filesystem /app/mcp-src/sequential-thinking /app/mcp-src/qmd; \
-    ln -s "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-filesystem" /app/mcp-src/filesystem; \
-    ln -s "${PNPM_GLOBAL_ROOT}/@modelcontextprotocol/server-sequential-thinking" /app/mcp-src/sequential-thinking; \
-    ln -s "${PNPM_GLOBAL_ROOT}/@tobilu/qmd" /app/mcp-src/qmd
 
 # ============================================
 # 多阶段构建 - 运行阶段
@@ -381,9 +408,8 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
 
-# 从 mcp-builder 复制 MCP 运行时与源码目录（前置以减少网络并发抢占）
+# 从 mcp-builder 复制 MCP 运行时（前置以减少网络并发抢占）
 COPY --from=mcp-builder /pnpm /pnpm
-COPY --from=mcp-builder /app/mcp-src /app/mcp-src
 
 # 安装 Opengrep CLI 和 PMD
 ARG OPENGREP_VERSION=v1.15.1
@@ -481,29 +507,28 @@ ENV CODE_INDEX_INDEXER_PATH=/app/data/mcp/code-index
 # code-index-mcp 是 Python 包（非 npm 包），安装到系统 PATH（镜像失败时回退官方源）
 RUN --mount=type=cache,id=vulhunter-backend-pip-cache,target=/root/.cache/pip \
     set -eux; \
+    pypi_index_candidates="${PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"; \
+    order_indexes() { \
+      raw_candidates="$1"; \
+      python3 /usr/local/bin/package_source_selector.py --candidates "${raw_candidates}" --kind pypi --timeout-seconds 2 || printf '%s\n' "${raw_candidates}" | tr ',' '\n'; \
+    }; \
     install_code_index() { \
       idx="$1"; \
       PIP_INDEX_URL="${idx}" pip install --retries 5 --timeout 60 --disable-pip-version-check code-index-mcp; \
     }; \
-    install_code_index "${BACKEND_PYPI_INDEX_PRIMARY}" || install_code_index "${BACKEND_PYPI_INDEX_FALLBACK}"; \
-    python - <<'PY'
-from pathlib import Path
-import importlib.util
-import shutil
-
-target = Path("/app/mcp-src/code-index-mcp")
-target.mkdir(parents=True, exist_ok=True)
-spec = importlib.util.find_spec("code_index_mcp")
-if spec and spec.submodule_search_locations:
-    source_root = Path(list(spec.submodule_search_locations)[0]).resolve()
-    package_root = source_root.parent
-    dst = target / "code_index_mcp"
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(source_root, dst)
-    marker = target / ".source_snapshot"
-    marker.write_text(f"{package_root}\n", encoding="utf-8")
-PY
+    installed=0; \
+    ordered_indexes="$(order_indexes "${pypi_index_candidates}")"; \
+    order_file="$(mktemp)"; \
+    printf '%s\n' "${ordered_indexes}" > "${order_file}"; \
+    while IFS= read -r idx; do \
+      [ -n "${idx}" ] || continue; \
+      if install_code_index "${idx}"; then \
+        installed=1; \
+        break; \
+      fi; \
+    done < "${order_file}"; \
+    rm -f "${order_file}"; \
+    [ "${installed}" -eq 1 ]
 
 # 仅复制运行时所需代码与脚本，避免把测试/文档打进运行镜像
 COPY app /app/app
@@ -511,13 +536,27 @@ COPY static /app/static
 COPY alembic /app/alembic
 COPY alembic.ini /app/alembic.ini
 COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
-COPY --chmod=755 scripts/sync_mcp_sources.sh /app/scripts/sync_mcp_sources.sh
 COPY --chmod=755 scripts/install_codex_skills.sh /app/scripts/install_codex_skills.sh
 COPY scripts/build_skill_registry.py /app/scripts/build_skill_registry.py
 COPY scripts/reset_static_scan_tables.py /app/scripts/reset_static_scan_tables.py
+COPY --chmod=755 scripts/run_npx_from_candidates.sh /usr/local/bin/run_npx_from_candidates.sh
+
+RUN set -eux; \
+    ensure_npx_wrapper() { \
+      binary_name="$1"; \
+      package_name="$2"; \
+      if command -v "${binary_name}" >/dev/null 2>&1; then \
+        return 0; \
+      fi; \
+      printf '%s\n' '#!/bin/sh' "exec /usr/local/bin/run_npx_from_candidates.sh '${package_name}' \"\\$@\"" > "/usr/local/bin/${binary_name}"; \
+      chmod +x "/usr/local/bin/${binary_name}"; \
+    }; \
+    ensure_npx_wrapper "mcp-server-filesystem" "@modelcontextprotocol/server-filesystem"; \
+    ensure_npx_wrapper "mcp-server-sequential-thinking" "@modelcontextprotocol/server-sequential-thinking"; \
+    ensure_npx_wrapper "qmd" "@tobilu/qmd"
 
 # 创建运行时持久化目录
-RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/code-index /app/data/mcp/xdg-config /app/data/qmd /app/mcp-src /app/mcp-src/code-index-mcp
+RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/code-index /app/data/mcp/xdg-config /app/data/qmd
 
 # 暴露端口
 EXPOSE 8000

@@ -34,21 +34,17 @@ export const DEFAULT_MCP_CATALOG: McpCatalogItem[] = [
     enabled: true,
     description: "任务解压目录挂载（只读），支持项目文件读取与目录访问。",
     executionFunctions: ["read_file", "list_directory", "search_files", "get_file_info"],
-    inputInterface: [
-      "path/file_path",
-      "directory",
-      "pattern",
-    ],
+    inputInterface: ["path/file_path", "directory", "pattern"],
     outputInterface: ["content", "metadata.file_path", "entries"],
-    includedSkills: ["read_file", "search_code"],
-    verificationTools: ["read_file", "search_code"],
+    includedSkills: ["read_file"],
+    verificationTools: ["read_file"],
     source: "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
-    runtime_mode: "sandbox_only",
+    runtime_mode: "stdio_only",
     required: true,
     startup_ready: true,
     startup_error: null,
-    backend: { enabled: false, startup_ready: false, startup_error: "disabled" },
-    sandbox: { enabled: true, startup_ready: true, startup_error: null },
+    backend: undefined,
+    sandbox: undefined,
   },
   {
     id: "code_index",
@@ -56,53 +52,18 @@ export const DEFAULT_MCP_CATALOG: McpCatalogItem[] = [
     type: "mcp-server",
     enabled: true,
     description: "代码索引、符号级检索与函数定位。",
-    executionFunctions: [
-      "find_files",
-      "search_code_advanced",
-      "get_symbol_body",
-      "get_file_summary",
-    ],
-    inputInterface: [
-      "query/keyword",
-      "path/file_path",
-      "glob/file_pattern",
-      "line_start/function_name",
-    ],
+    executionFunctions: ["find_files", "search_code_advanced", "get_symbol_body", "get_file_summary"],
+    inputInterface: ["query/keyword", "path/file_path", "glob/file_pattern", "line_start/function_name"],
     outputInterface: ["symbols", "matches", "file_summary", "metadata.engine"],
-    includedSkills: [
-      "extract_function",
-      "list_files",
-      "locate_enclosing_function",
-      "function_context",
-    ],
-    verificationTools: ["extract_function", "list_files", "locate_enclosing_function"],
+    includedSkills: ["list_files", "search_code", "extract_function"],
+    verificationTools: ["list_files", "search_code", "extract_function"],
     source: "https://github.com/johnhuang316/code-index-mcp",
-    runtime_mode: "backend_then_sandbox",
+    runtime_mode: "stdio_only",
     required: true,
     startup_ready: true,
     startup_error: null,
-    backend: { enabled: true, startup_ready: true, startup_error: null },
-    sandbox: { enabled: false, startup_ready: false, startup_error: "disabled" },
-  },
-  {
-    id: "sequentialthinking",
-    name: "Sequential Thinking MCP",
-    type: "mcp-server",
-    enabled: true,
-    description: "序列化思考链路与步骤化推理辅助。",
-    executionFunctions: ["sequential_thinking", "reasoning_trace"],
-    inputInterface: ["goal", "constraints", "steps"],
-    outputInterface: ["reasoning_steps", "next_action", "stop_signal"],
-    includedSkills: ["sequential_thinking", "reasoning_trace", "brainstorming", "step_reasoning"],
-    verificationTools: ["sequential_thinking", "reasoning_trace"],
-    source:
-      "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
-    runtime_mode: "backend_then_sandbox",
-    required: false,
-    startup_ready: true,
-    startup_error: null,
-    backend: { enabled: true, startup_ready: true, startup_error: null },
-    sandbox: { enabled: true, startup_ready: true, startup_error: null },
+    backend: undefined,
+    sandbox: undefined,
   },
 ];
 
@@ -162,11 +123,9 @@ export function normalizeMcpCatalog(rawCatalog: unknown): McpCatalogItem[] {
             ? item.runtime_mode
             : typeof item.runtimeMode === "string"
               ? item.runtimeMode
-              : undefined,
+              : "stdio_only",
         required:
-          typeof item.required === "boolean"
-            ? item.required
-            : undefined,
+          typeof item.required === "boolean" ? item.required : true,
         startup_ready:
           typeof item.startup_ready === "boolean"
             ? item.startup_ready
@@ -177,10 +136,13 @@ export function normalizeMcpCatalog(rawCatalog: unknown): McpCatalogItem[] {
         sandbox: toDomainStatus(item.sandbox),
       } satisfies McpCatalogItem;
     })
-    
+    .filter((item): item is McpCatalogItem => item !== null);
 
-  if (!normalized.length) {
+  if (normalized.length === 0) {
     return DEFAULT_MCP_CATALOG;
   }
-  return normalized;
+
+  const visibleIds = new Set(DEFAULT_MCP_CATALOG.map((item) => item.id));
+  const filtered = normalized.filter((item) => visibleIds.has(item.id));
+  return filtered.length > 0 ? filtered : DEFAULT_MCP_CATALOG;
 }

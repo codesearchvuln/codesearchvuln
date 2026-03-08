@@ -16,7 +16,6 @@ from urllib.parse import urlparse, urlunparse
 from app.core.config import settings
 
 from .health_probe import probe_mcp_endpoint_readiness
-from .local_proxy import LocalMCPProxyAdapter
 from .router import MCPToolRoute, MCPToolRouter
 from .write_scope import TaskWriteScopeGuard, WriteScopeDecision
 
@@ -772,6 +771,7 @@ class MCPRuntime:
         "prefer_sandbox",
         "backend_then_sandbox",
         "sandbox_then_backend",
+        "stdio_only",
     }
     _FILESYSTEM_ANCHORED_TOOLS = {
         "list_directory",
@@ -972,8 +972,8 @@ class MCPRuntime:
 
     @staticmethod
     def _fallback_allowed_for_adapter(adapter_name: str) -> bool:
-        normalized = str(adapter_name or "").strip().lower()
-        return normalized != "local_proxy"
+        _ = adapter_name
+        return True
 
     @staticmethod
     def _failure_mode_for_adapter(adapter_name: str) -> Optional[str]:
@@ -1380,24 +1380,16 @@ class MCPRuntime:
     def can_handle(self, tool_name: str) -> bool:
         if not self.enabled:
             return False
-        normalized_tool = str(tool_name or "").strip().lower()
         route = self.router.route(tool_name, {})
         if not route:
             return False
-        prepared_route = self._prepare_route(route)
-        selection, _ = self._resolve_adapter(prepared_route)
-        if selection is not None:
-            return True
-
-        fallback_route = self._build_search_code_route_fallback(
-            tool_name=normalized_tool,
-            route=prepared_route,
-        )
-        if fallback_route is None:
+        normalized_adapter = str(route.adapter_name or "").strip()
+        if not normalized_adapter:
             return False
-        fallback_route = self._prepare_route(fallback_route)
-        fallback_selection, _ = self._resolve_adapter(fallback_route)
-        return fallback_selection is not None
+        if normalized_adapter in self.adapters:
+            return True
+        domain_map = self.domain_adapters.get(normalized_adapter)
+        return bool(isinstance(domain_map, dict) and domain_map)
 
     def should_prefer_mcp(self) -> bool:
         return bool(self.enabled and self.prefer_mcp)
@@ -1414,37 +1406,6 @@ class MCPRuntime:
         if not self.write_scope_guard:
             return 0
         return self.write_scope_guard.register_evidence_paths(file_paths)
-
-    def _ensure_local_proxy_adapter(self) -> LocalMCPProxyAdapter:
-        existing = self.adapters.get("local_proxy")
-        if isinstance(existing, LocalMCPProxyAdapter):
-            return existing
-
-        adapter = LocalMCPProxyAdapter(runtime_domain="backend")
-        self.adapters["local_proxy"] = adapter
-        return adapter
-
-    def register_local_tool(self, tool_name: str, tool_obj: Any) -> bool:
-        normalized = str(tool_name or "").strip()
-        if not normalized:
-            return False
-        if tool_obj is None or not hasattr(tool_obj, "execute"):
-            return False
-        adapter = self._ensure_local_proxy_adapter()
-        adapter.register_tool(normalized, tool_obj)
-        if hasattr(self.router, "register_local_proxy_tool"):
-            try:
-                self.router.register_local_proxy_tool(normalized)
-            except Exception:
-                logger.debug("Failed to register local proxy route for %s", normalized)
-        return True
-
-    def register_local_tools(self, tools: Dict[str, Any]) -> int:
-        count = 0
-        for tool_name, tool_obj in (tools or {}).items():
-            if self.register_local_tool(str(tool_name), tool_obj):
-                count += 1
-        return count
 
     @staticmethod
     def _normalize_fingerprint_value(value: Any) -> Any:
@@ -1537,47 +1498,9 @@ class MCPRuntime:
         tool_name: str,
         route: MCPToolRoute,
     ) -> Optional[MCPToolRoute]:
-        normalized_tool = str(tool_name or "").strip().lower()
-        normalized_adapter = str(route.adapter_name or "").strip().lower()
-        normalized_mcp_tool = str(route.mcp_tool_name or "").strip().lower()
-        if normalized_tool != "search_code":
-            return None
-        if normalized_adapter != "code_index" or normalized_mcp_tool != "search_code_advanced":
-            return None
-
-        args = dict(route.arguments or {})
-        pattern = str(
-            args.get("pattern")
-            or args.get("keyword")
-            or args.get("query")
-            or ""
-        ).strip()
-        fallback_args: Dict[str, Any] = {}
-        if pattern:
-            fallback_args["pattern"] = pattern
-            fallback_args["query"] = pattern
-            fallback_args["keyword"] = pattern
-
-        path = str(args.get("path") or args.get("directory") or "").strip()
-        if path:
-            fallback_args["path"] = path
-            fallback_args["directory"] = path
-
-        glob = str(args.get("glob") or args.get("file_pattern") or "").strip()
-        if glob:
-            fallback_args["glob"] = glob
-            fallback_args["file_pattern"] = glob
-
-        for key in ("max_results", "case_sensitive", "is_regex"):
-            if key in args:
-                fallback_args[key] = args.get(key)
-
-        return MCPToolRoute(
-            adapter_name="filesystem",
-            mcp_tool_name="search_files",
-            arguments=fallback_args,
-            is_write=False,
-        )
+        _ = tool_name
+        _ = route
+        return None
 
     @staticmethod
     def _build_qmd_query_route_fallback(

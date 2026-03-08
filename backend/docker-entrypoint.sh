@@ -14,11 +14,6 @@ is_true() {
     esac
 }
 
-# 启动前同步 MCP 源码（持久化到数据卷，供后续验证）
-if [ -x "/app/scripts/sync_mcp_sources.sh" ]; then
-    /app/scripts/sync_mcp_sources.sh || true
-fi
-
 # 启动前安装 Codex Skills（持久化到 mcp_data 卷）
 if [ -x "/app/scripts/install_codex_skills.sh" ]; then
     /app/scripts/install_codex_skills.sh

@@ -1,10 +1,10 @@
 export type SkillToolCategory =
-  "模型基础增强类" |
-  "代码读取与定位" |
-  "候选发现与模式扫描" |
-  "可达性与逻辑分析" |
-  "漏洞验证与 PoC 规划" |
-  "报告与协作编排";
+  | "模型基础增强类"
+  | "代码读取与定位"
+  | "候选发现与模式扫描"
+  | "可达性与逻辑分析"
+  | "漏洞验证与 PoC 规划"
+  | "报告与协作编排";
 
 export interface SkillToolCatalogItem {
   id: string;
@@ -22,932 +22,172 @@ export const SKILL_TOOL_CATEGORY_ORDER: SkillToolCategory[] = [
   "代码读取与定位",
   "候选发现与模式扫描",
   "可达性与逻辑分析",
+  "漏洞验证与 PoC 规划",
   "报告与协作编排",
 ];
 
-const SKILL_TOOLS_CATALOG_RAW: SkillToolCatalogItem[] = [
+export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] = [
   {
-    id: "mcp-builder",
+    id: "smart_scan",
     category: "模型基础增强类",
-    summary: `MCP 设计模板技能：用于定义服务能力边界、输入输出契约与安全约束。`,
-    goal: "为新 MCP 能力设计提供结构化模板，减少接口遗漏与集成返工。",
-    taskList: [
-      "梳理 MCP server 的目标能力与执行函数清单。",
-      "定义输入输出接口、失败模式与降级策略。",
-      "输出可执行的接入检查项与联调计划。",
-    ],
-    inputChecklist: [
-      "`server_goal` (string, required): MCP 服务目标",
-      "`io_schema` (any, optional): 输入输出契约草案",
-      "`security_constraints` (any, optional): 安全边界与限制条件",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "server_goal": "为代码检索提供统一 MCP 接口",
-  "io_schema": null,
-  "security_constraints": ["只读调用", "参数白名单"]
-}
-\`\`\``,
-    pitfalls: [
-      "不要跳过输入输出契约定义直接开始实现。",
-      "不要忽略失败场景与降级路径设计。",
-      "不要产出无法映射到现有路由/配置体系的方案。",
-    ],
-  },
-  {
-    id: "skill-creator",
-    category: "模型基础增强类",
-    summary: `Skill 设计模板技能：用于规范化创建/维护 skill 的提示词、约束和示例。`,
-    goal: "沉淀可复用的 skill 规范，提升模型工具调用一致性与可维护性。",
-    taskList: [
-      "明确 skill 的触发场景与职责边界。",
-      "生成结构化提示词与误用防护规则。",
-      "提供最小可运行示例与验收标准。",
-    ],
-    inputChecklist: [
-      "`skill_goal` (string, required): skill 目标",
-      "`tool_bindings` (any, optional): 关联工具或能力",
-      "`safety_rules` (any, optional): 安全与误用限制",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "skill_goal": "规范化漏洞验证阶段的工具调用",
-  "tool_bindings": ["read_file", "search_code"],
-  "safety_rules": ["禁止无证据结论"]
-}
-\`\`\``,
-    pitfalls: [
-      "不要将 schedule/环境信息混入 skill 任务描述。",
-      "不要只写高层描述而缺少可执行输入输出约束。",
-      "不要忽略误用提示与失败回退策略。",
-    ],
-  },
-  {
-    id: "planning-with-files",
-    category: "模型基础增强类",
-    summary: `文件规划模板技能：围绕文件清单拆解任务步骤，生成可执行计划。`,
-    goal: "将多文件分析任务转化为清晰的执行顺序与文件级动作。",
-    taskList: [
-      "根据目标文件集合生成阶段化执行计划。",
-      "为每个文件指定读取/分析/验证动作。",
-      "输出可追踪的进度规则与完成标准。",
-    ],
-    inputChecklist: [
-      "`file_targets` (array, required): 目标文件清单",
-      "`goal` (string, required): 任务目标",
-      "`constraints` (any, optional): 执行约束与优先级",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "file_targets": ["src/auth.py", "src/user.py"],
-  "goal": "定位认证绕过风险点",
-  "constraints": ["先读后验", "单次最多2个文件"]
-}
-\`\`\``,
-    pitfalls: [
-      "不要输出无法映射到具体文件动作的抽象计划。",
-      "不要忽略文件间依赖导致执行顺序错误。",
-      "不要在计划中混入与当前目标无关的文件。",
-    ],
-  },
-  {
-    id: "superpowers",
-    category: "模型基础增强类",
-    summary: `高阶协作模板技能：支持头脑风暴、策略对比与决策收敛。`,
-    goal: "在复杂问题下快速生成多方案并输出可解释决策。",
-    taskList: [
-      "围绕问题生成多个可行策略选项。",
-      "比较 tradeoff 并给出推荐路径。",
-      "形成带依据的决策结论与后续动作。",
-    ],
-    inputChecklist: [
-      "`problem_statement` (string, required): 问题描述",
-      "`tradeoffs` (any, optional): 关键取舍条件",
-      "`evidence` (any, optional): 现有证据与约束",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "problem_statement": "MCP 与 Skill 目录需要重新归类",
-  "tradeoffs": ["兼容历史调用", "保持界面清晰"],
-  "evidence": ["当前目录混入 skill-pack"]
-}
-\`\`\``,
-    pitfalls: [
-      "不要只给单一路径而缺少备选方案。",
-      "不要给出与现有证据矛盾的决策结论。",
-      "不要省略推荐方案的原因与风险说明。",
-    ],
-  },
-  {
-    id: "controlflow_analysis_light",
-    category: "可达性与逻辑分析",
-    summary: `轻量控制流/可达性分析：基于 tree-sitter + code2flow 推断调用链、控制条件和路径分值，支持 file_path:line 简写与函数定位补偿。`,
-    goal: "为高危候选提供可解释的 reachability 证据，支撑验证结论。",
-    taskList: [
-      "根据 file_path:line 或 function_name 定位目标函数。",
-      "计算 path_found/path_score/call_chain/control_conditions。",
-      "输出可操作 blocked_reasons，指导下一步改参或换策略。",
-    ],
-    inputChecklist: [
-      "`file_path` (string, required): 目标文件路径，支持 file_path:line",
-      "`line_start` (integer, optional): 目标起始行",
-      "`line_end` (any, optional): 目标结束行",
-      "`function_name` (any, optional): 缺少 line_start 时用于定位函数",
-      "`severity` (any, optional): 漏洞严重度",
-      "`confidence` (any, optional): 漏洞置信度 0-1",
-      "`entry_points` (any, optional): 候选入口函数",
-      "`entry_points_hint` (any, optional): 入口提示",
-      "`call_chain_hint` (any, optional): 调用链提示",
-      "`control_conditions_hint` (any, optional): 控制条件提示",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "file_path": "src/time64.c:168",
-  "function_name": "asctime64_r",
-  "severity": "high",
-  "confidence": 0.88,
-  "entry_points_hint": ["main"]
-}
-\`\`\``,
-    pitfalls: [
-      "缺少 line_start 且 function_name 无法定位时会失败。",
-      "path_found=false 不等于漏洞不存在，需结合代码证据复核。",
-      "同一失败输入连续重试会被执行层抑制，应改参数。",
-    ],
-  },
-  {
-    id: "create_vulnerability_report",
-    category: "报告与协作编排",
-    summary: `创建正式的漏洞报告。这是记录已确认漏洞的唯一方式。`,
-    goal: "在 verification 阶段支撑扫描编排和结果产出。",
-    taskList: [
-      "协助 Agent 制定下一步行动。",
-      "沉淀中间结论与可追溯信息。",
-      "保障任务收敛与结果可交付性。",
-    ],
-    inputChecklist: [
-      "`title` (string, required): 漏洞标题",
-      "`vulnerability_type` (string, required): 漏洞类型: sql_injection, xss, ssrf, command_injection, path_traversal, idor, auth_bypass, etc.",
-      "`severity` (string, required): 严重程度: critical, high, medium, low, info",
-      "`description` (string, required): 漏洞详细描述",
-      "`file_path` (string, required): 漏洞所在文件路径",
-      "`line_start` (any, optional): 起始行号",
-      "`line_end` (any, optional): 结束行号",
-      "`code_snippet` (any, optional): 相关代码片段",
-      "`source` (any, optional): 污点来源（用户输入点）",
-      "`sink` (any, optional): 危险函数（漏洞触发点）",
-      "`poc` (any, optional): 概念验证/利用方法",
-      "`impact` (any, optional): 影响分析",
-      "`recommendation` (any, optional): 修复建议",
-      "`confidence` (number, optional): 置信度 0.0-1.0",
-      "`cwe_id` (any, optional): CWE编号",
-      "`cvss_score` (any, optional): CVSS评分",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "title": "<text>",
-  "vulnerability_type": "<text>",
-  "severity": "<text>",
-  "description": "<text>",
-  "file_path": "<text>"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "dataflow_analysis",
-    category: "可达性与逻辑分析",
-    summary: `分析 Source -> Sink 传播链路，输出结构化流证据（source_nodes/sink_nodes/sanitizers/taint_steps/risk_level）。支持 source_code 或 file_path 自动读取。`,
-    goal: "沉淀可复用的数据流证据，支撑 verification 对真实性与可达性的判断。",
-    taskList: [
-      "识别 Source 节点、Sink 节点与净化节点。",
-      "生成 taint_steps/evidence_lines/confidence。",
-      "对 C/C++ 内存类风险（strcpy/sprintf/memcpy）给出明确提示。",
-    ],
-    inputChecklist: [
-      "`source_code` (string, optional): 包含数据源的代码",
-      "`sink_code` (any, optional): 包含数据汇的代码（如危险函数）",
-      "`variable_name` (string, optional): 要追踪的变量名，默认 user_input",
-      "`file_path` (string, optional): 文件路径",
-      "`start_line` (any, optional): 起始行（file_path 模式）",
-      "`end_line` (any, optional): 结束行（file_path 模式）",
-      "`source_hints` (any, optional): Source 提示",
-      "`sink_hints` (any, optional): Sink 提示",
-      "`language` (any, optional): 语言提示",
-      "`max_hops` (integer, optional): 污点传播步数上限",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "file_path": "src/time64.c",
-  "start_line": 120,
-  "end_line": 220,
-  "variable_name": "result",
-  "sink_hints": ["sprintf", "strcpy"],
-  "max_hops": 6
-}
-\`\`\``,
-    pitfalls: [
-      "source_code 为空时，file_path 不可读会直接失败。",
-      "仅凭该工具输出不能直接落库，需结合 read_file 和验证证据。",
-      "遇到同一输入重复失败，应改参数或切换 controlflow_analysis_light。",
-    ],
-  },
-  {
-    id: "extract_function",
-    category: "代码读取与定位",
-    summary: `从源文件中提取指定函数的代码`,
-    goal: "定位目标代码、函数上下文与证据位置。",
-    taskList: [
-      "读取代码文件并定位行号上下文。",
-      "快速检索关键词并筛选有效命中。",
-      "提取函数级上下文供后续验证链路使用。",
-    ],
-    inputChecklist: [
-      "`code` (string, required): 目标函数代码片段（用于推断符号名）",
-      "`file_name` (string, required): 所在文件名",
-      "`file_path` (string, required): 所在文件路径",
-      "`line` (integer, optional): 函数附近行号",
-      "`include_imports` (boolean, optional): 是否包含 import 语句",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "code": "def process_command(cmd):\\n    return cmd",
-  "file_name": "api.py",
-  "file_path": "app/api.py",
-  "line": 12,
-  "include_imports": true
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-      "旧参数 function_name 仅兼容保留，优先使用 code+file_name+file_path。",
-    ],
-  },
-  {
-    id: "function_context",
-    category: "代码读取与定位",
-    summary: `查找函数的上下文信息，包括定义、调用者和被调用的函数。
-用于追踪数据流和理解函数的使用方式。`,
-    goal: "定位目标代码、函数上下文与证据位置。",
-    taskList: [
-      "读取代码文件并定位行号上下文。",
-      "快速检索关键词并筛选有效命中。",
-      "提取函数级上下文供后续验证链路使用。",
-    ],
-    inputChecklist: [
-      "`function_name` (string, required): 函数名称",
-      "`file_path` (any, optional): 文件路径",
-      "`include_callers` (boolean, optional): 是否包含调用者",
-      "`include_callees` (boolean, optional): 是否包含被调用的函数",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "function_name": "<text>",
-  "file_path": null,
-  "include_callers": true
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "get_vulnerability_knowledge",
-    category: "候选发现与模式扫描",
-    summary: `获取特定漏洞类型的完整专业知识。`,
-    goal: "快速发现候选漏洞与高风险模式。",
-    taskList: [
-      "批量扫描候选风险点。",
-      "按漏洞类型或语义检索相关代码。",
-      "为后续验证阶段提供优先级线索。",
-    ],
-    inputChecklist: [
-      "`vulnerability_type` (string, required): 漏洞类型，如: sql_injection, xss, command_injection, path_traversal, ssrf, deserialization, hardcoded_secrets, auth_bypass",
-      "`project_language` (any, optional): 目标项目的主要编程语言（如 python, php, javascript, rust, go），用于过滤相关示例",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "vulnerability_type": "<text>",
-  "project_language": null
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "joern_reachability_verify",
-    category: "可达性与逻辑分析",
-    summary: `使用 Joern 对高危候选执行深度可达性复核，输出控制流/数据流证据。`,
-    goal: "判断漏洞是否可达、是否受逻辑/授权路径约束。",
-    taskList: [
-      "分析源到汇的数据流链路。",
-      "计算控制流可达路径与关键条件。",
-      "验证授权边界和业务逻辑约束。",
-    ],
-    inputChecklist: [
-      "`file_path` (string, required): 目标文件路径",
-      "`line_start` (integer, required): 目标起始行",
-      "`call_chain` (any, optional): 已有调用链",
-      "`control_conditions` (any, optional): 已有控制条件",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "file_path": "<text>",
-  "line_start": 1,
-  "call_chain": null
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "list_files",
-    category: "代码读取与定位",
-    summary: `列出目录中的文件。`,
-    goal: "定位目标代码、函数上下文与证据位置。",
-    taskList: [
-      "读取代码文件并定位行号上下文。",
-      "快速检索关键词并筛选有效命中。",
-      "提取函数级上下文供后续验证链路使用。",
-    ],
-    inputChecklist: [
-      "`directory` (string, optional): 目录路径（相对于项目根目录）",
-      "`pattern` (any, optional): 文件名模式，如 *.py",
-      "`recursive` (boolean, optional): 是否递归列出子目录",
-      "`max_files` (integer, optional): 最大文件数",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "directory": ".",
-  "pattern": null,
-  "recursive": false
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "logic_authz_analysis",
-    category: "可达性与逻辑分析",
-    summary: `逻辑漏洞图规则分析：检查 route/handler 到资源访问路径上的认证、授权、对象级权限(IDOR)与作用域一致性。`,
-    goal: "判断漏洞是否可达、是否受逻辑/授权路径约束。",
-    taskList: [
-      "分析源到汇的数据流链路。",
-      "计算控制流可达路径与关键条件。",
-      "验证授权边界和业务逻辑约束。",
-    ],
-    inputChecklist: [
-      "`file_path` (any, optional): 目标文件路径",
-      "`line_start` (any, optional): 目标行号",
-      "`vulnerability_type` (any, optional): 漏洞类型",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "file_path": null,
-  "line_start": null,
-  "vulnerability_type": null
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "pattern_match",
-    category: "候选发现与模式扫描",
-    summary: `🔍 快速扫描代码中的危险模式和常见漏洞。`,
-    goal: "快速发现候选漏洞与高风险模式。",
-    taskList: [
-      "批量扫描候选风险点。",
-      "按漏洞类型或语义检索相关代码。",
-      "为后续验证阶段提供优先级线索。",
-    ],
-    inputChecklist: [
-      "`code` (any, optional): 要扫描的代码内容（与 scan_file 二选一）",
-      "`scan_file` (any, optional): 要扫描的文件路径（相对于项目根目录，与 code 二选一）",
-      "`file_path` (string, optional): 文件路径（用于上下文）",
-      "`pattern_types` (any, optional): 要检测的漏洞类型列表，如 ['sql_injection', 'xss']。为空则检测所有类型",
-      "`language` (any, optional): 编程语言，用于选择特定模式",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "code": null,
-  "scan_file": null,
-  "file_path": "unknown"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "query_security_knowledge",
-    category: "候选发现与模式扫描",
-    summary: `查询安全知识库，获取漏洞类型、检测方法、修复建议等专业知识。`,
-    goal: "快速发现候选漏洞与高风险模式。",
-    taskList: [
-      "批量扫描候选风险点。",
-      "按漏洞类型或语义检索相关代码。",
-      "为后续验证阶段提供优先级线索。",
-    ],
-    inputChecklist: [
-      "`query` (string, required): 搜索查询，如漏洞类型、技术名称、安全概念等",
-      "`category` (any, optional): 知识类别过滤: vulnerability, best_practice, remediation, code_pattern, compliance",
-      "`top_k` (integer, optional): 返回结果数量",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "query": "<text>",
-  "category": null,
-  "top_k": 3
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "智能扫描入口，快速定位高风险代码区域。",
+    goal: "建立高价值候选集合，缩小后续分析范围。",
+    taskList: ["执行整体扫描", "输出高风险区域", "给出下一步建议"],
+    inputChecklist: ["`target_path` (string, required): 扫描根路径"],
+    exampleInput: "```json\n{\n  \"target_path\": \".\"\n}\n```",
+    pitfalls: ["不要把 smart_scan 结果直接当成最终漏洞结论。"],
   },
   {
     id: "quick_audit",
-    category: "候选发现与模式扫描",
-    summary: `快速文件扫描工具 - 对单个文件进行全面安全分析`,
-    goal: "快速发现候选漏洞与高风险模式。",
-    taskList: [
-      "批量扫描候选风险点。",
-      "按漏洞类型或语义检索相关代码。",
-      "为后续验证阶段提供优先级线索。",
-    ],
-    inputChecklist: [
-      "`file_path` (string, required): 要扫描的文件路径",
-      "`deep_analysis` (boolean, optional): 是否进行深度分析（包括上下文和数据流分析）",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "file_path": "<text>",
-  "deep_analysis": true
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "rag_query",
-    category: "候选发现与模式扫描",
-    summary: `在代码库中进行语义搜索。
-使用场景:
-- 查找特定功能的实现代码
-- 查找调用某个函数的代码
-- 查找处理用户输入的代码
-- 查找数据库操作相关代码
-- 查找认证/授权相关代码`,
-    goal: "快速发现候选漏洞与高风险模式。",
-    taskList: [
-      "批量扫描候选风险点。",
-      "按漏洞类型或语义检索相关代码。",
-      "为后续验证阶段提供优先级线索。",
-    ],
-    inputChecklist: [
-      "`query` (string, required): 搜索查询，描述你要找的代码功能或特征",
-      "`top_k` (integer, optional): 返回结果数量",
-      "`file_path` (any, optional): 限定搜索的文件路径",
-      "`language` (any, optional): 限定编程语言",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "query": "<text>",
-  "top_k": 10,
-  "file_path": null
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    category: "模型基础增强类",
+    summary: "轻量快速审计，优先输出高信号检查点。",
+    goal: "在较短时间内建立初步风险画像。",
+    taskList: ["执行快速审计", "输出关键候选", "标记优先级"],
+    inputChecklist: ["`target_path` (string, optional): 目标路径"],
+    exampleInput: "```json\n{\n  \"target_path\": \".\"\n}\n```",
+    pitfalls: ["不要在需要完整证据链时只停留在 quick_audit。"],
   },
   {
     id: "read_file",
     category: "代码读取与定位",
-    summary: `读取项目中的文件内容。`,
-    goal: "定位目标代码、函数上下文与证据位置。",
-    taskList: [
-      "读取代码文件并定位行号上下文。",
-      "快速检索关键词并筛选有效命中。",
-      "提取函数级上下文供后续验证链路使用。",
-    ],
-    inputChecklist: [
-      "`file_path` (string, required): 文件路径（相对于项目根目录）",
-      "`start_line` (any, optional): 起始行号（从1开始）",
-      "`end_line` (any, optional): 结束行号",
-      "`max_lines` (integer, optional): 最大返回行数",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "file_path": "<text>",
-  "start_line": null,
-  "end_line": null
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "读取目标文件窗口上下文。",
+    goal: "获取真实代码证据与附近逻辑。",
+    taskList: ["读取目标片段", "提取证据行", "补齐上下文"],
+    inputChecklist: ["`file_path` (string, required): 目标文件路径"],
+    exampleInput: "```json\n{\n  \"file_path\": \"src/app.py\"\n}\n```",
+    pitfalls: ["不要无锚点大段读取整个项目。"],
   },
   {
-    id: "reflect",
-    category: "报告与协作编排",
-    summary: `反思工具。用于回顾当前的分析进展：
-1. 总结已经发现的问题
-2. 评估当前分析的覆盖度
-3. 识别可能遗漏的方向
-4. 决定是否需要调整策略`,
-    goal: "在 analysis/orchestrator/recon/verification 阶段支撑扫描编排和结果产出。",
-    taskList: [
-      "协助 Agent 制定下一步行动。",
-      "沉淀中间结论与可追溯信息。",
-      "保障任务收敛与结果可交付性。",
-    ],
-    inputChecklist: [
-      "无显式参数（工具内部处理）。",
-    ],
-    exampleInput: `\`\`\`json
-{}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    id: "list_files",
+    category: "代码读取与定位",
+    summary: "列出候选目录和文件。",
+    goal: "缩小扫描范围并定位相关代码。",
+    taskList: ["列出目录", "筛选候选文件", "返回相对路径"],
+    inputChecklist: ["`directory` (string, optional): 目录", "`pattern` (string, optional): 匹配模式"],
+    exampleInput: "```json\n{\n  \"directory\": \"src\",\n  \"pattern\": \"*.py\"\n}\n```",
+    pitfalls: ["不要把 list_files 当作全文代码搜索。"],
   },
   {
     id: "search_code",
     category: "代码读取与定位",
-    summary: `在项目代码中搜索关键字或模式。`,
-    goal: "定位目标代码、函数上下文与证据位置。",
-    taskList: [
-      "读取代码文件并定位行号上下文。",
-      "快速检索关键词并筛选有效命中。",
-      "提取函数级上下文供后续验证链路使用。",
-    ],
-    inputChecklist: [
-      "`keyword` (string, required): 搜索关键字或正则表达式",
-      "`file_pattern` (any, optional): 文件名模式，如 *.py, *.js",
-      "`directory` (any, optional): 搜索目录（相对路径）",
-      "`case_sensitive` (boolean, optional): 是否区分大小写",
-      "`max_results` (integer, optional): 最大结果数",
-      "`is_regex` (boolean, optional): 是否使用正则表达式",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "keyword": "<text>",
-  "file_pattern": null,
-  "directory": null
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "检索关键调用、常量与危险模式。",
+    goal: "快速定位证据点与调用链入口。",
+    taskList: ["检索关键字", "输出 file_path:line", "返回命中摘要"],
+    inputChecklist: ["`query` (string, required): 搜索内容"],
+    exampleInput: "```json\n{\n  \"query\": \"dangerous_call\"\n}\n```",
+    pitfalls: ["不要只凭搜索命中就下结论。"],
   },
   {
-    id: "security_search",
+    id: "extract_function",
+    category: "代码读取与定位",
+    summary: "提取函数/符号主体。",
+    goal: "围绕目标函数建立完整分析上下文。",
+    taskList: ["定位函数", "提取函数体", "返回函数级证据"],
+    inputChecklist: ["`file_path` (string, required): 文件路径", "`function_name` (string, optional): 函数名"],
+    exampleInput: "```json\n{\n  \"file_path\": \"src/time64.c\",\n  \"function_name\": \"asctime64_r\"\n}\n```",
+    pitfalls: ["缺少函数定位信息时，优先先用 search_code/read_file 补证。"],
+  },
+  {
+    id: "pattern_match",
     category: "候选发现与模式扫描",
-    summary: `搜索可能存在安全漏洞的代码。
-专门针对特定漏洞类型进行搜索。`,
-    goal: "快速发现候选漏洞与高风险模式。",
-    taskList: [
-      "批量扫描候选风险点。",
-      "按漏洞类型或语义检索相关代码。",
-      "为后续验证阶段提供优先级线索。",
-    ],
-    inputChecklist: [
-      "`vulnerability_type` (string, required): 漏洞类型: sql_injection, xss, command_injection, path_traversal, ssrf, deserialization, auth_bypass, hardcoded_secret",
-      "`top_k` (integer, optional): 返回结果数量",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "vulnerability_type": "<text>",
-  "top_k": 20
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "基于规则/模式快速筛查危险代码。",
+    goal: "补充发现高风险候选与交叉验证。",
+    taskList: ["匹配危险模式", "输出命中位置", "给出风险说明"],
+    inputChecklist: ["`pattern` (string, required): 模式或规则"],
+    exampleInput: "```json\n{\n  \"pattern\": \"eval\\(\"\n}\n```",
+    pitfalls: ["不要让模式匹配替代可达性或动态验证。"],
   },
   {
-    id: "smart_scan",
-    category: "候选发现与模式扫描",
-    summary: `🚀 智能批量安全扫描工具 - 一次调用完成多项检查`,
-    goal: "快速发现候选漏洞与高风险模式。",
-    taskList: [
-      "批量扫描候选风险点。",
-      "按漏洞类型或语义检索相关代码。",
-      "为后续验证阶段提供优先级线索。",
-    ],
-    inputChecklist: [
-      "`target` (string, optional): 扫描目标：可以是目录路径、文件路径或文件模式（如 '*.py'）",
-      "`scan_types` (any, optional): 扫描类型列表。可选: pattern, secret, dependency, all。默认为 all",
-      "`focus_vulnerabilities` (any, optional): 重点关注的漏洞类型，如 ['sql_injection', 'xss', 'command_injection']",
-      "`max_files` (integer, optional): 最大扫描文件数",
-      "`quick_mode` (boolean, optional): 快速模式：只扫描高风险文件",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target": ".",
-  "scan_types": null,
-  "focus_vulnerabilities": null
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    id: "dataflow_analysis",
+    category: "可达性与逻辑分析",
+    summary: "分析 Source -> Sink 的传播链。",
+    goal: "沉淀结构化流证据，支撑真实性判断。",
+    taskList: ["识别 source/sink", "输出传播步骤", "标记风险等级"],
+    inputChecklist: ["`file_path` (string, required): 文件路径", "`start_line` (number, optional): 起始行"],
+    exampleInput: "```json\n{\n  \"file_path\": \"src/time64.c\",\n  \"start_line\": 120\n}\n```",
+    pitfalls: ["不要把数据流结果直接当成最终确认。"],
   },
   {
-    id: "test_command_injection",
+    id: "controlflow_analysis_light",
+    category: "可达性与逻辑分析",
+    summary: "分析控制流、条件分支与可达性。",
+    goal: "验证候选漏洞是否真实可触达。",
+    taskList: ["定位目标函数", "分析调用链", "输出 blocked reasons"],
+    inputChecklist: ["`file_path` (string, required): 文件路径", "`function_name` (string, optional): 函数名"],
+    exampleInput: "```json\n{\n  \"file_path\": \"src/time64.c\",\n  \"function_name\": \"asctime64_r\"\n}\n```",
+    pitfalls: ["path_found=false 不等于漏洞不存在。"],
+  },
+  {
+    id: "logic_authz_analysis",
+    category: "可达性与逻辑分析",
+    summary: "分析认证、授权与业务逻辑约束。",
+    goal: "识别鉴权缺陷、越权与边界失效。",
+    taskList: ["识别鉴权点", "分析边界条件", "输出授权风险"],
+    inputChecklist: ["`file_path` (string, required): 文件路径"],
+    exampleInput: "```json\n{\n  \"file_path\": \"src/auth/controller.py\"\n}\n```",
+    pitfalls: ["不要忽略业务前置条件和角色边界。"],
+  },
+  {
+    id: "run_code",
     category: "漏洞验证与 PoC 规划",
-    summary: `专门测试命令注入漏洞的工具。`,
-    goal: "执行非武器化验证步骤并收集可复现实验信号。",
-    taskList: [
-      "构造安全可控的测试输入。",
-      "观察返回、日志与行为差异。",
-      "输出验证结果与证据摘要。",
-    ],
-    inputChecklist: [
-      "`target_file` (string, required): 目标文件路径",
-      "`param_name` (string, optional): 注入参数名",
-      "`test_command` (string, optional): 测试命令: id, whoami, echo test, cat /etc/passwd",
-      "`language` (string, optional): 语言: auto, php, python, javascript, java, go, ruby, shell",
-      "`injection_point` (any, optional): 注入点描述，如 'shell_exec($_GET[cmd])'",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target_file": "<text>",
-  "param_name": "cmd",
-  "test_command": "id"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "运行 Harness/PoC，收集动态执行证据。",
+    goal: "用非武器化方式验证候选漏洞。",
+    taskList: ["编写 Harness", "执行验证", "输出动态证据"],
+    inputChecklist: ["`code` (string, required): 待执行代码", "`language` (string, optional): 语言"],
+    exampleInput: "```json\n{\n  \"language\": \"python\",\n  \"code\": \"print(1)\"\n}\n```",
+    pitfalls: ["不要在缺少隔离前提时执行高风险 payload。"],
   },
   {
-    id: "test_deserialization",
+    id: "sandbox_exec",
     category: "漏洞验证与 PoC 规划",
-    summary: `测试不安全反序列化漏洞的工具。`,
-    goal: "执行非武器化验证步骤并收集可复现实验信号。",
-    taskList: [
-      "构造安全可控的测试输入。",
-      "观察返回、日志与行为差异。",
-      "输出验证结果与证据摘要。",
-    ],
-    inputChecklist: [
-      "`target_file` (string, required): 目标文件路径",
-      "`language` (string, optional): 语言: auto, php, python, java, ruby",
-      "`payload_type` (string, optional): payload 类型: detect, pickle, yaml, php_serialize",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target_file": "<text>",
-  "language": "auto",
-  "payload_type": "detect"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "在隔离沙箱中执行命令与观察行为。",
+    goal: "验证运行时行为、环境差异与命令执行证据。",
+    taskList: ["执行命令", "采集输出", "记录实验条件"],
+    inputChecklist: ["`command` (string, required): 命令文本"],
+    exampleInput: "```json\n{\n  \"command\": \"echo hello\"\n}\n```",
+    pitfalls: ["不要把沙箱输出脱离代码证据单独解读。"],
   },
   {
-    id: "test_path_traversal",
+    id: "verify_vulnerability",
     category: "漏洞验证与 PoC 规划",
-    summary: `专门测试路径遍历/LFI/RFI 漏洞的工具。`,
-    goal: "执行非武器化验证步骤并收集可复现实验信号。",
-    taskList: [
-      "构造安全可控的测试输入。",
-      "观察返回、日志与行为差异。",
-      "输出验证结果与证据摘要。",
-    ],
-    inputChecklist: [
-      "`target_file` (string, required): 目标文件路径",
-      "`param_name` (string, optional): 文件参数名",
-      "`payload` (string, optional): 路径遍历 payload",
-      "`language` (string, optional): 语言",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target_file": "<text>",
-  "param_name": "file",
-  "payload": "../../../etc/passwd"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "编排漏洞验证步骤并输出收敛结论。",
+    goal: "统一管理验证过程与最终 verdict。",
+    taskList: ["制定验证路径", "整合实验结果", "输出 verdict"],
+    inputChecklist: ["`finding` (object, required): 待验证漏洞对象"],
+    exampleInput: "```json\n{\n  \"finding\": {\n    \"file_path\": \"src/app.py\",\n    \"line_start\": 42\n  }\n}\n```",
+    pitfalls: ["不要在证据不足时给出 confirmed。"],
   },
   {
-    id: "test_sql_injection",
-    category: "漏洞验证与 PoC 规划",
-    summary: `专门测试 SQL 注入漏洞的工具。`,
-    goal: "执行非武器化验证步骤并收集可复现实验信号。",
-    taskList: [
-      "构造安全可控的测试输入。",
-      "观察返回、日志与行为差异。",
-      "输出验证结果与证据摘要。",
-    ],
-    inputChecklist: [
-      "`target_file` (string, required): 目标文件路径",
-      "`param_name` (string, optional): 注入参数名",
-      "`payload` (string, optional): SQL 注入 payload",
-      "`language` (string, optional): 语言: auto, php, python, javascript, java, go, ruby",
-      "`db_type` (string, optional): 数据库类型: mysql, postgresql, sqlite, oracle, mssql",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target_file": "<text>",
-  "param_name": "id",
-  "payload": "1' OR '1'='1"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "test_ssti",
-    category: "漏洞验证与 PoC 规划",
-    summary: `专门测试 SSTI (服务端模板注入) 漏洞的工具。`,
-    goal: "执行非武器化验证步骤并收集可复现实验信号。",
-    taskList: [
-      "构造安全可控的测试输入。",
-      "观察返回、日志与行为差异。",
-      "输出验证结果与证据摘要。",
-    ],
-    inputChecklist: [
-      "`target_file` (string, required): 目标文件路径",
-      "`param_name` (string, optional): 注入参数名",
-      "`payload` (string, optional): SSTI payload",
-      "`template_engine` (string, optional): 模板引擎: auto, jinja2, twig, freemarker, velocity, smarty",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target_file": "<text>",
-  "param_name": "name",
-  "payload": "{{7*7}}"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
-  },
-  {
-    id: "test_xss",
-    category: "漏洞验证与 PoC 规划",
-    summary: `专门测试 XSS (跨站脚本) 漏洞的工具。`,
-    goal: "执行非武器化验证步骤并收集可复现实验信号。",
-    taskList: [
-      "构造安全可控的测试输入。",
-      "观察返回、日志与行为差异。",
-      "输出验证结果与证据摘要。",
-    ],
-    inputChecklist: [
-      "`target_file` (string, required): 目标文件路径",
-      "`param_name` (string, optional): 注入参数名",
-      "`payload` (string, optional): XSS payload",
-      "`xss_type` (string, optional): XSS 类型: reflected, stored, dom",
-      "`language` (string, optional): 语言: auto, php, python, javascript",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target_file": "<text>",
-  "param_name": "input",
-  "payload": "<script>alert('XSS')</script>"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    id: "create_vulnerability_report",
+    category: "报告与协作编排",
+    summary: "创建正式漏洞报告。",
+    goal: "沉淀可交付结果与可追溯证据。",
+    taskList: ["整理结论", "结构化报告", "输出修复建议"],
+    inputChecklist: ["`title` (string, required): 标题", "`file_path` (string, required): 文件路径"],
+    exampleInput: "```json\n{\n  \"title\": \"src/time64.c中asctime64_r栈溢出漏洞\",\n  \"file_path\": \"src/time64.c\"\n}\n```",
+    pitfalls: ["不要在未完成验证时创建正式报告。"],
   },
   {
     id: "think",
     category: "报告与协作编排",
-    summary: `深度思考工具。用于：
-1. 分析复杂的代码逻辑或安全问题
-2. 规划下一步的分析策略
-3. 评估发现的漏洞是否真实存在
-4. 决定是否需要深入调查某个方向`,
-    goal: "在 analysis/orchestrator/recon/verification 阶段支撑扫描编排和结果产出。",
-    taskList: [
-      "协助 Agent 制定下一步行动。",
-      "沉淀中间结论与可追溯信息。",
-      "保障任务收敛与结果可交付性。",
-    ],
-    inputChecklist: [
-      "`thought` (string, required): 思考内容，可以是分析、规划、评估等",
-      "`category` (any, optional): 思考类别: analysis(分析), planning(规划), evaluation(评估), decision(决策)",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "thought": "<text>",
-  "category": "general"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    summary: "分析、规划与决策工具。",
+    goal: "帮助 Agent 明确下一步动作与取舍。",
+    taskList: ["分析现状", "规划下一步", "输出决策理由"],
+    inputChecklist: ["`thought` (string, required): 思考内容"],
+    exampleInput: "```json\n{\n  \"thought\": \"先补代码证据，再做动态验证\"\n}\n```",
+    pitfalls: ["不要把 think 输出当成最终证据。"],
   },
   {
-    id: "universal_vuln_test",
-    category: "漏洞验证与 PoC 规划",
-    summary: `通用漏洞测试工具，支持多种漏洞类型的自动化测试。`,
-    goal: "执行非武器化验证步骤并收集可复现实验信号。",
-    taskList: [
-      "构造安全可控的测试输入。",
-      "观察返回、日志与行为差异。",
-      "输出验证结果与证据摘要。",
-    ],
-    inputChecklist: [
-      "`target_file` (string, required): 目标文件路径",
-      "`vuln_type` (string, required): 漏洞类型: command_injection, sql_injection, xss, path_traversal, ssti, deserialization",
-      "`param_name` (string, optional): 参数名",
-      "`payload` (any, optional): 自定义 payload",
-      "`language` (string, optional): 语言",
-    ],
-    exampleInput: `\`\`\`json
-{
-  "target_file": "<text>",
-  "vuln_type": "<text>",
-  "param_name": "input"
-}
-\`\`\``,
-    pitfalls: [
-      "不要在输入缺失关键参数时盲目调用。",
-      "不要将该工具输出直接当作最终结论，必须结合上下文复核。",
-      "不要在权限不足或路径不合法时重复重试同一输入。",
-    ],
+    id: "reflect",
+    category: "报告与协作编排",
+    summary: "复盘、校验与策略调整工具。",
+    goal: "避免无效重试并及时纠偏。",
+    taskList: ["复盘失败原因", "校验当前假设", "调整执行策略"],
+    inputChecklist: ["`thought` (string, required): 复盘内容"],
+    exampleInput: "```json\n{\n  \"thought\": \"当前证据不足，需要先定位函数范围\"\n}\n```",
+    pitfalls: ["不要在未回看错误信息时机械重试。"],
   },
 ];
-
-const REMOVED_SKILL_IDS = new Set<string>([
-  "function_context",
-  "get_vulnerability_knowledge",
-  "query_security_knowledge",
-  "rag_query",
-  "security_search",
-  "test_command_injection",
-  "test_deserialization",
-  "test_path_traversal",
-  "test_sql_injection",
-  "test_ssti",
-  "test_xss",
-  "universal_vuln_test",
-]);
-
-export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] =
-  SKILL_TOOLS_CATALOG_RAW.filter((item) => !REMOVED_SKILL_IDS.has(item.id));
 
 export function buildSkillToolPrompt(tool: SkillToolCatalogItem): string {
   const taskLines = tool.taskList.map((item) => `- ${item}`).join("\n");

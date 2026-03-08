@@ -52,22 +52,10 @@ from app.services.agent.utils.vulnerability_naming import (
 )
 from app.services.agent.mcp import (
     HARD_MAX_WRITABLE_FILES_PER_TASK,
-    FastMCPHttpAdapter,
     FastMCPStdioAdapter,
     MCPRuntime,
-    MCPDeprecatedTool,
-    MCPVirtualReadTool,
-    QmdLazyIndexAdapter,
     TaskWriteScopeGuard,
     build_mcp_catalog,
-)
-from app.services.agent.mcp.daemon_manager import (
-    MCPDaemonManager,
-    normalize_qmd_loopback_url,
-    resolve_code_index_backend_url,
-    resolve_filesystem_backend_url,
-    resolve_qmd_backend_url,
-    resolve_sequential_backend_url,
 )
 from app.services.agent.mcp.protocol_verify import (
     build_tool_args as build_mcp_probe_tool_args,
@@ -720,6 +708,11 @@ def _build_task_mcp_runtime(
 ) -> MCPRuntime:
     from app.core.config import settings
 
+    _ = project_id
+    _ = prefer_stdio_when_http_unavailable
+
+    normalized_project_root = os.path.abspath(project_root)
+
     user_other_config = (user_config or {}).get("otherConfig", {})
     mcp_config = user_other_config.get("mcpConfig") if isinstance(user_other_config, dict) else {}
     if not isinstance(mcp_config, dict):
@@ -740,7 +733,7 @@ def _build_task_mcp_runtime(
     max_writable_files = max(1, min(max_writable_files, hard_limit))
 
     write_guard = TaskWriteScopeGuard(
-        project_root=project_root,
+        project_root=normalized_project_root,
         max_writable_files_per_task=max_writable_files,
         require_evidence_binding=bool(
             write_policy.get(
@@ -748,481 +741,81 @@ def _build_task_mcp_runtime(
                 getattr(settings, "MCP_REQUIRE_EVIDENCE_BINDING", True),
             )
         ),
-        # hard lock: always forbid project-wide writes
         forbid_project_wide_writes=True,
     )
-    write_guard.seed_from_task_inputs(
-        target_files=target_files,
-        findings=bootstrap_findings or [],
-    )
+    write_guard.seed_from_task_inputs(target_files=target_files, findings=bootstrap_findings or [])
 
     runtime_policy = mcp_config.get("runtimePolicy") if isinstance(mcp_config.get("runtimePolicy"), dict) else {}
     if not isinstance(runtime_policy, dict):
         runtime_policy = {}
 
-    def _policy_for(name: str) -> Dict[str, Any]:
-        candidate = runtime_policy.get(name)
-        if isinstance(candidate, dict):
-            return candidate
-        return {}
+    active_ids = {str(item).strip().lower() for item in (active_mcp_ids or []) if str(item).strip()}
 
-    def _runtime_mode(name: str, setting_name: str, default: str = "backend_then_sandbox") -> str:
-        policy_value = _policy_for(name).get("runtime_mode")
-        if isinstance(policy_value, str) and policy_value.strip():
-            return policy_value.strip()
-        setting_value = getattr(settings, setting_name, default)
-        return str(setting_value or default).strip() or default
+    def _is_active_mcp(name: str) -> bool:
+        if not active_ids:
+            return True
+        return str(name or "").strip().lower() in active_ids
 
-    def _domain_enabled(
-        name: str,
-        domain: str,
-        default_setting_name: str,
-    ) -> bool:
-        policy_value = _policy_for(name).get(f"{domain}_enabled")
-        if isinstance(policy_value, bool):
-            return policy_value
-        return bool(getattr(settings, default_setting_name, False))
-
-    def _ensure_writable_dir(path_value: Any, *, label: str) -> str:
-        raw = str(path_value or "").strip()
-        if not raw:
-            raise RuntimeError(f"{label} 未配置持久化目录")
-        candidate = raw
-        if not os.path.isabs(candidate):
-            candidate = os.path.normpath(os.path.join(project_root, candidate))
-        try:
-            os.makedirs(candidate, exist_ok=True)
-        except Exception as exc:
-            can_fallback = (
-                os.path.isabs(candidate)
-                and candidate.startswith("/app/")
-                and not os.path.exists("/.dockerenv")
-            )
-            if not can_fallback:
-                raise RuntimeError(f"{label} 创建目录失败: {candidate} ({exc})") from exc
-            fallback_path = os.path.normpath(
-                os.path.join(
-                    project_root,
-                    ".mcp_data",
-                    candidate.lstrip("/"),
-                )
-            )
-            try:
-                os.makedirs(fallback_path, exist_ok=True)
-            except Exception as fallback_exc:
-                raise RuntimeError(
-                    f"{label} 创建目录失败: {candidate} (fallback={fallback_path}, err={fallback_exc})"
-                ) from fallback_exc
-            candidate = fallback_path
-        if not os.path.isdir(candidate):
-            raise RuntimeError(f"{label} 不是目录: {candidate}")
-        if not os.access(candidate, os.W_OK):
-            raise RuntimeError(f"{label} 目录不可写: {candidate}")
-        return candidate
-
-    def _extract_indexer_path(args: List[str]) -> Optional[str]:
-        for idx, item in enumerate(args):
-            text = str(item or "").strip()
-            if not text:
-                continue
-            if text.startswith("--indexer-path="):
-                value = text.split("=", 1)[1].strip()
-                return value or None
-            if text == "--indexer-path" and idx + 1 < len(args):
-                value = str(args[idx + 1] or "").strip()
-                return value or None
-        return None
-
-    def _upsert_indexer_path(args: List[str], indexer_path: str) -> List[str]:
-        updated = [str(item) for item in (args or [])]
-        path_value = str(indexer_path or "").strip()
-        if not path_value:
-            return updated
-        for idx, item in enumerate(updated):
-            text = str(item or "").strip()
-            if text.startswith("--indexer-path="):
-                updated[idx] = f"--indexer-path={path_value}"
-                return updated
-            if text == "--indexer-path":
-                if idx + 1 < len(updated):
-                    updated[idx + 1] = path_value
-                else:
-                    updated.append(path_value)
-                return updated
-        updated.extend(["--indexer-path", path_value])
-        return updated
+    def _policy_enabled(name: str, setting_name: str, default: bool = True) -> bool:
+        entry = runtime_policy.get(name) if isinstance(runtime_policy.get(name), dict) else {}
+        if isinstance(entry.get("enabled"), bool):
+            return bool(entry.get("enabled"))
+        return bool(getattr(settings, setting_name, default))
 
     def _build_filesystem_args(raw_args: Any) -> List[str]:
-        parsed = _parse_mcp_args(raw_args)
-        if not parsed:
-            parsed = ["dlx", "@modelcontextprotocol/server-filesystem"]
-        last = str(parsed[-1] or "").strip() if parsed else ""
-        looks_like_package_name = bool(last.startswith("@") and "/" in last)
-        looks_like_mount_path = bool(
-            last
-            and not looks_like_package_name
-            and not last.startswith("-")
-            and (
-                last in {".", "..", "./", "../"}
-                or "/" in last
-                or "\\" in last
-                or last.startswith("~")
-            )
-        )
-        if looks_like_mount_path:
-            parsed = parsed[:-1]
-        return [*parsed, str(project_root)]
+        args = _parse_mcp_args(raw_args)
+        if normalized_project_root not in args:
+            args.append(normalized_project_root)
+        return args
+
+    def _ensure_code_index_args(raw_args: Any) -> List[str]:
+        args = _parse_mcp_args(raw_args)
+        fallback_indexer_path = os.path.join(normalized_project_root, ".deepaudit", "mcp", "code-index")
+        if "--indexer-path" not in args:
+            args = [*args, "--indexer-path", fallback_indexer_path]
+        option_index = None
+        for index, token in enumerate(args):
+            if str(token).strip() == "--indexer-path" and index + 1 < len(args):
+                option_index = index + 1
+                break
+        if option_index is not None:
+            path_value = str(args[option_index] or "").strip() or fallback_indexer_path
+            try:
+                os.makedirs(path_value, exist_ok=True)
+            except OSError:
+                path_value = fallback_indexer_path
+                os.makedirs(path_value, exist_ok=True)
+            args[option_index] = path_value
+        return args
 
     adapters: Dict[str, Any] = {}
-    domain_adapters: Dict[str, Dict[str, Any]] = {}
     runtime_modes: Dict[str, str] = {}
-    required_mcps: List[str] = []
-    active_mcp_filter = {
-        str(item).strip().lower()
-        for item in (active_mcp_ids or [])
-        if str(item).strip()
-    }
 
-    def _is_active_mcp(mcp_name: str) -> bool:
-        if not active_mcp_filter:
-            return True
-        return str(mcp_name or "").strip().lower() in active_mcp_filter
-
-    def _register_domain_adapter(name: str, domain: str, adapter: Any) -> None:
-        domain_map = domain_adapters.setdefault(name, {})
-        domain_map[domain] = adapter
-        # Backward-compatible adapter map exposure for tests and diagnostics.
-        if domain == "backend" or name not in adapters:
-            adapters[name] = adapter
-
-    def _choose_http_or_stdio_adapter(
-        *,
-        mcp_name: str,
-        domain: str,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        stdio_command: str,
-        stdio_args: List[str],
-        allow_stdio_fallback: bool = True,
-    ) -> Any:
-        endpoint = str(url or "").strip()
-        if endpoint:
-            http_adapter = FastMCPHttpAdapter(
-                url=endpoint,
-                timeout=int(getattr(settings, "MCP_TIMEOUT_SECONDS", 30)),
-                runtime_domain=domain,
-                headers=headers,
-            )
-            if not allow_stdio_fallback:
-                return http_adapter
-            if (not prefer_stdio_when_http_unavailable) or http_adapter.is_available():
-                return http_adapter
-            logger.warning(
-                "MCP endpoint unavailable; fallback to stdio (%s/%s -> %s)",
-                mcp_name,
-                domain,
-                endpoint,
-            )
-        if not allow_stdio_fallback:
-            return FastMCPHttpAdapter(
-                url=endpoint,
-                timeout=int(getattr(settings, "MCP_TIMEOUT_SECONDS", 30)),
-                runtime_domain=domain,
-                headers=headers,
-            )
-        return FastMCPStdioAdapter(
-            command=str(stdio_command or "").strip(),
-            args=[str(item) for item in (stdio_args or [])],
-            cwd=project_root,
+    if _is_active_mcp("filesystem") and _policy_enabled("filesystem", "MCP_FILESYSTEM_ENABLED", True):
+        adapters["filesystem"] = FastMCPStdioAdapter(
+            command=str(getattr(settings, "MCP_FILESYSTEM_COMMAND", "pnpm") or "pnpm"),
+            args=_build_filesystem_args(
+                getattr(settings, "MCP_FILESYSTEM_ARGS", "dlx @modelcontextprotocol/server-filesystem")
+            ),
+            cwd=normalized_project_root,
             timeout=int(getattr(settings, "MCP_TIMEOUT_SECONDS", 30)),
-            runtime_domain=domain,
+            runtime_domain="stdio",
         )
+        runtime_modes["filesystem"] = "stdio_only"
 
-    # ============ filesystem ============
-    filesystem_backend_enabled = _domain_enabled("filesystem", "backend", "MCP_FILESYSTEM_ENABLED")
-    filesystem_sandbox_enabled = _domain_enabled(
-        "filesystem",
-        "sandbox",
-        "MCP_FILESYSTEM_SANDBOX_ENABLED",
-    )
-    if _is_active_mcp("filesystem") and (filesystem_backend_enabled or filesystem_sandbox_enabled):
-        filesystem_force_stdio = bool(getattr(settings, "MCP_FILESYSTEM_FORCE_STDIO", True))
-        filesystem_backend_url = "" if filesystem_force_stdio else resolve_filesystem_backend_url(settings)
-        filesystem_sandbox_url = "" if filesystem_force_stdio else str(
-            getattr(settings, "MCP_FILESYSTEM_SANDBOX_URL", "") or ""
-        ).strip()
-        if (not filesystem_force_stdio) and (not filesystem_sandbox_url):
-            filesystem_sandbox_url = filesystem_backend_url
-        if filesystem_backend_enabled:
-            _register_domain_adapter(
-                "filesystem",
-                "backend",
-                _choose_http_or_stdio_adapter(
-                    mcp_name="filesystem",
-                    domain="backend",
-                    url=filesystem_backend_url,
-                    stdio_command=str(getattr(settings, "MCP_FILESYSTEM_COMMAND", "pnpm") or "pnpm"),
-                    stdio_args=_build_filesystem_args(
-                        getattr(
-                            settings,
-                            "MCP_FILESYSTEM_ARGS",
-                            "dlx @modelcontextprotocol/server-filesystem",
-                        )
-                    ),
-                ),
-            )
-        if filesystem_sandbox_enabled:
-            _register_domain_adapter(
-                "filesystem",
-                "sandbox",
-                _choose_http_or_stdio_adapter(
-                    mcp_name="filesystem",
-                    domain="sandbox",
-                    url=filesystem_sandbox_url,
-                    stdio_command=str(getattr(settings, "MCP_FILESYSTEM_SANDBOX_COMMAND", "pnpm") or "pnpm"),
-                    stdio_args=_build_filesystem_args(
-                        getattr(
-                            settings,
-                            "MCP_FILESYSTEM_SANDBOX_ARGS",
-                            "dlx @modelcontextprotocol/server-filesystem",
-                        )
-                    ),
-                ),
-            )
-        runtime_modes["filesystem"] = _runtime_mode(
-            "filesystem",
-            "MCP_FILESYSTEM_RUNTIME_MODE",
+    if _is_active_mcp("code_index") and _policy_enabled("code_index", "MCP_CODE_INDEX_ENABLED", True):
+        adapters["code_index"] = FastMCPStdioAdapter(
+            command=str(getattr(settings, "MCP_CODE_INDEX_COMMAND", "code-index-mcp") or "code-index-mcp"),
+            args=_ensure_code_index_args(
+                getattr(settings, "MCP_CODE_INDEX_ARGS", "--indexer-path /app/data/mcp/code-index")
+            ),
+            cwd=normalized_project_root,
+            timeout=int(getattr(settings, "MCP_TIMEOUT_SECONDS", 30)),
+            runtime_domain="stdio",
         )
+        runtime_modes["code_index"] = "stdio_only"
 
-    # ============ code_index ============
-    code_index_backend_enabled = _domain_enabled("code_index", "backend", "MCP_CODE_INDEX_ENABLED")
-    code_index_sandbox_enabled = _domain_enabled(
-        "code_index",
-        "sandbox",
-        "MCP_CODE_INDEX_SANDBOX_ENABLED",
-    )
-    if _is_active_mcp("code_index") and (code_index_backend_enabled or code_index_sandbox_enabled):
-        code_index_backend_url = resolve_code_index_backend_url(settings)
-        code_index_sandbox_url = str(getattr(settings, "MCP_CODE_INDEX_SANDBOX_URL", "") or "").strip()
-        if not code_index_sandbox_url:
-            code_index_sandbox_url = code_index_backend_url
-        code_index_headers = (
-            {"Mcp-Project-Path": str(project_root)}
-            if str(project_root or "").strip()
-            else {}
-        )
-
-        backend_code_index_args = _parse_mcp_args(
-            getattr(settings, "MCP_CODE_INDEX_ARGS", "--indexer-path /app/data/mcp/code-index")
-        )
-        sandbox_code_index_args = _parse_mcp_args(
-            getattr(settings, "MCP_CODE_INDEX_SANDBOX_ARGS", "--indexer-path /app/data/mcp/code-index")
-        )
-        if code_index_backend_enabled:
-            backend_index_path = _extract_indexer_path(backend_code_index_args)
-            ensured_backend_path = _ensure_writable_dir(
-                backend_index_path or "/app/data/mcp/code-index",
-                label="MCP_CODE_INDEX_ARGS.indexer_path",
-            )
-            backend_code_index_args = _upsert_indexer_path(backend_code_index_args, ensured_backend_path)
-        if code_index_sandbox_enabled:
-            sandbox_index_path = _extract_indexer_path(sandbox_code_index_args)
-            ensured_sandbox_path = _ensure_writable_dir(
-                sandbox_index_path or "/app/data/mcp/code-index",
-                label="MCP_CODE_INDEX_SANDBOX_ARGS.indexer_path",
-            )
-            sandbox_code_index_args = _upsert_indexer_path(sandbox_code_index_args, ensured_sandbox_path)
-        if code_index_backend_enabled:
-            _register_domain_adapter(
-                "code_index",
-                "backend",
-                _choose_http_or_stdio_adapter(
-                    mcp_name="code_index",
-                    domain="backend",
-                    url=code_index_backend_url,
-                    headers=code_index_headers,
-                    stdio_command=str(getattr(settings, "MCP_CODE_INDEX_COMMAND", "code-index-mcp") or "code-index-mcp"),
-                    stdio_args=backend_code_index_args,
-                ),
-            )
-        if code_index_sandbox_enabled:
-            _register_domain_adapter(
-                "code_index",
-                "sandbox",
-                _choose_http_or_stdio_adapter(
-                    mcp_name="code_index",
-                    domain="sandbox",
-                    url=code_index_sandbox_url,
-                    headers=code_index_headers,
-                    stdio_command=str(
-                        getattr(settings, "MCP_CODE_INDEX_SANDBOX_COMMAND", "code-index-mcp") or "code-index-mcp"
-                    ),
-                    stdio_args=sandbox_code_index_args,
-                ),
-            )
-        runtime_modes["code_index"] = _runtime_mode(
-            "code_index",
-            "MCP_CODE_INDEX_RUNTIME_MODE",
-        )
-
-    # ============ sequentialthinking ============
-    sequential_backend_enabled = _domain_enabled(
-        "sequentialthinking",
-        "backend",
-        "MCP_SEQUENTIAL_THINKING_ENABLED",
-    )
-    sequential_sandbox_enabled = _domain_enabled(
-        "sequentialthinking",
-        "sandbox",
-        "MCP_SEQUENTIAL_THINKING_SANDBOX_ENABLED",
-    )
-    if _is_active_mcp("sequentialthinking") and (sequential_backend_enabled or sequential_sandbox_enabled):
-        sequential_force_stdio = bool(
-            getattr(settings, "MCP_SEQUENTIAL_THINKING_FORCE_STDIO", True)
-        )
-        sequential_backend_url = (
-            ""
-            if sequential_force_stdio
-            else resolve_sequential_backend_url(settings)
-        )
-        sequential_sandbox_url = ""
-        if not sequential_force_stdio:
-            sequential_sandbox_url = str(
-                getattr(settings, "MCP_SEQUENTIAL_THINKING_SANDBOX_URL", "") or ""
-            ).strip()
-            if not sequential_sandbox_url:
-                sequential_sandbox_url = sequential_backend_url
-        if sequential_backend_enabled:
-            _register_domain_adapter(
-                "sequentialthinking",
-                "backend",
-                _choose_http_or_stdio_adapter(
-                    mcp_name="sequentialthinking",
-                    domain="backend",
-                    url=sequential_backend_url,
-                    stdio_command=str(
-                        getattr(
-                            settings,
-                            "MCP_SEQUENTIAL_THINKING_COMMAND",
-                            "mcp-server-sequential-thinking",
-                        )
-                        or "mcp-server-sequential-thinking"
-                    ),
-                    stdio_args=_parse_mcp_args(
-                        getattr(
-                            settings,
-                            "MCP_SEQUENTIAL_THINKING_ARGS",
-                            "",
-                        )
-                    ),
-                ),
-            )
-        if sequential_sandbox_enabled:
-            _register_domain_adapter(
-                "sequentialthinking",
-                "sandbox",
-                _choose_http_or_stdio_adapter(
-                    mcp_name="sequentialthinking",
-                    domain="sandbox",
-                    url=sequential_sandbox_url,
-                    stdio_command=str(
-                        getattr(
-                            settings,
-                            "MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND",
-                            "mcp-server-sequential-thinking",
-                        )
-                        or "mcp-server-sequential-thinking"
-                    ),
-                    stdio_args=_parse_mcp_args(
-                        getattr(
-                            settings,
-                            "MCP_SEQUENTIAL_THINKING_SANDBOX_ARGS",
-                            "",
-                        )
-                    ),
-                ),
-            )
-        runtime_modes["sequentialthinking"] = _runtime_mode(
-            "sequentialthinking",
-            "MCP_SEQUENTIAL_THINKING_RUNTIME_MODE",
-        )
-
-    # ============ qmd ============
-    qmd_backend_enabled = _domain_enabled("qmd", "backend", "MCP_QMD_ENABLED")
-    qmd_sandbox_enabled = _domain_enabled("qmd", "sandbox", "MCP_QMD_SANDBOX_ENABLED")
-    if _is_active_mcp("qmd") and (qmd_backend_enabled or qmd_sandbox_enabled):
-        qmd_project_id = str(project_id or "default")
-        qmd_prefix = str(getattr(settings, "QMD_COLLECTION_PREFIX", "project") or "project")
-        qmd_glob = str(getattr(settings, "QMD_INDEX_GLOB", "**/*") or "**/*")
-        qmd_lazy = bool(getattr(settings, "QMD_LAZY_INDEX_ENABLED", True))
-        qmd_auto_embed = bool(getattr(settings, "QMD_AUTO_EMBED_ON_FIRST_USE", False))
-        _ensure_writable_dir(
-            getattr(settings, "QMD_DATA_DIR", "./data/qmd"),
-            label="QMD_DATA_DIR",
-        )
-        qmd_backend_url = normalize_qmd_loopback_url(resolve_qmd_backend_url(settings))
-        qmd_sandbox_url = normalize_qmd_loopback_url(
-            str(getattr(settings, "MCP_QMD_SANDBOX_URL", "") or "").strip()
-        )
-        if not qmd_sandbox_url:
-            qmd_sandbox_url = qmd_backend_url
-
-        if qmd_backend_enabled:
-            backend_qmd = _choose_http_or_stdio_adapter(
-                mcp_name="qmd",
-                domain="backend",
-                url=qmd_backend_url,
-                stdio_command=str(getattr(settings, "MCP_QMD_COMMAND", "qmd") or "qmd"),
-                stdio_args=_parse_mcp_args(getattr(settings, "MCP_QMD_ARGS", "mcp")),
-                allow_stdio_fallback=True,
-            )
-            _register_domain_adapter(
-                "qmd",
-                "backend",
-                QmdLazyIndexAdapter(
-                    adapter=backend_qmd,
-                    project_root=project_root,
-                    project_id=qmd_project_id,
-                    command=str(getattr(settings, "MCP_QMD_COMMAND", "qmd") or "qmd"),
-                    collection_prefix=qmd_prefix,
-                    index_glob=qmd_glob,
-                    lazy_enabled=qmd_lazy,
-                    auto_embed_on_first_use=qmd_auto_embed,
-                ),
-            )
-        if qmd_sandbox_enabled:
-            sandbox_qmd = _choose_http_or_stdio_adapter(
-                mcp_name="qmd",
-                domain="sandbox",
-                url=qmd_sandbox_url,
-                stdio_command=str(getattr(settings, "MCP_QMD_SANDBOX_COMMAND", "qmd") or "qmd"),
-                stdio_args=_parse_mcp_args(getattr(settings, "MCP_QMD_SANDBOX_ARGS", "mcp")),
-                allow_stdio_fallback=True,
-            )
-            _register_domain_adapter(
-                "qmd",
-                "sandbox",
-                QmdLazyIndexAdapter(
-                    adapter=sandbox_qmd,
-                    project_root=project_root,
-                    project_id=qmd_project_id,
-                    command=str(getattr(settings, "MCP_QMD_SANDBOX_COMMAND", "qmd") or "qmd"),
-                    collection_prefix=qmd_prefix,
-                    index_glob=qmd_glob,
-                    lazy_enabled=qmd_lazy,
-                    auto_embed_on_first_use=qmd_auto_embed,
-                ),
-            )
-        runtime_modes["qmd"] = _runtime_mode("qmd", "MCP_QMD_RUNTIME_MODE")
-
-    required_gate_mcps = ["filesystem", "code_index"]
-    required_mcps = []
-    for name in required_gate_mcps:
-        normalized_name = str(name).strip()
-        if not normalized_name or not _is_active_mcp(normalized_name):
-            continue
-        if normalized_name in domain_adapters or normalized_name in adapters:
-            required_mcps.append(normalized_name)
+    required_mcps = [name for name in ("filesystem", "code_index") if name in adapters]
 
     return MCPRuntime(
         enabled=bool(mcp_config.get("enabled", getattr(settings, "MCP_ENABLED", True))),
@@ -1232,22 +825,18 @@ def _build_task_mcp_runtime(
             else bool(mcp_config.get("preferMcp", getattr(settings, "MCP_PREFER", True)))
         ),
         adapters=adapters,
-        domain_adapters=domain_adapters,
+        domain_adapters={},
         runtime_modes=runtime_modes,
         required_mcps=required_mcps,
         write_scope_guard=write_guard,
         allow_filesystem_writes=False,
-        default_runtime_mode=str(
-            runtime_policy.get("default_mode", getattr(settings, "MCP_RUNTIME_MODE_DEFAULT", "backend_then_sandbox"))
-            if isinstance(runtime_policy, dict)
-            else getattr(settings, "MCP_RUNTIME_MODE_DEFAULT", "backend_then_sandbox")
-        ),
-        strict_mode=bool(
+        default_runtime_mode="stdio_only",
+        strict_mode=(
             True
             if enforce_mcp_only
-            else mcp_config.get("strictMode", getattr(settings, "MCP_STRICT_MODE", True))
+            else bool(mcp_config.get("strictMode", getattr(settings, "MCP_STRICT_MODE", True)))
         ),
-        project_root=project_root,
+        project_root=normalized_project_root,
     )
 
 
@@ -1327,12 +916,27 @@ async def _probe_required_mcp_runtime(
             return True
         return normalized.startswith(WRITE_TOOL_PREFIXES)
 
-    def _tool_priority(tool_name: str) -> int:
+    def _tool_priority(mcp_name: str, tool_name: str) -> int:
+        normalized_mcp = str(mcp_name or "").strip().lower()
         normalized = str(tool_name or "").strip().lower()
         if not normalized:
             return -999
         if _is_write_tool(normalized):
             return -500
+
+        if normalized_mcp == "filesystem":
+            filesystem_priority = {
+                "list_allowed_directories": 1000,
+                "read_file": 900,
+                "read_text_file": 890,
+                "search_files": 800,
+                "list_directory": 700,
+                "list_directory_with_sizes": 690,
+                "directory_tree": 680,
+                "get_file_info": 500,
+            }
+            return filesystem_priority.get(normalized, 0)
+
         score = 0
         if normalized.startswith(("search", "list", "read", "get", "status", "sequential")):
             score += 100
@@ -1341,6 +945,50 @@ async def _probe_required_mcp_runtime(
         if "media" in normalized:
             score -= 20
         return score
+
+    def _extract_allowed_directories(payload: Any) -> list[str]:
+        candidate = payload
+        if isinstance(candidate, str):
+            stripped = candidate.strip()
+            if stripped:
+                try:
+                    candidate = json.loads(stripped)
+                except Exception:
+                    candidate = stripped
+        if isinstance(candidate, dict):
+            for key in ("allowedDirectories", "allowed_directories", "directories", "paths"):
+                value = candidate.get(key)
+                if isinstance(value, list):
+                    return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(candidate, list):
+            return [str(item).strip() for item in candidate if str(item).strip()]
+        return []
+
+    def _probe_failure_reason(
+        *,
+        mcp_name: str,
+        tool_name: str,
+        error_text: str,
+        tool_args: dict[str, Any],
+        project_root_value: str,
+    ) -> tuple[str, str, Optional[str]]:
+        normalized_mcp = str(mcp_name or "").strip().lower()
+        normalized_error = str(error_text or "").strip()
+        normalized_tool = str(tool_name or "").strip().lower()
+        probe_path = None
+        for key in ("path", "file_path", "directory", "source"):
+            raw = tool_args.get(key)
+            if isinstance(raw, str) and raw.strip():
+                probe_path = raw.strip()
+                break
+        if probe_path and project_root_value and not os.path.isabs(probe_path):
+            probe_path = os.path.normpath(os.path.join(project_root_value, probe_path))
+        lowered_error = normalized_error.lower()
+        if normalized_mcp == "filesystem" and "outside allowed directories" in lowered_error:
+            return "filesystem_project_root_not_allowed", "filesystem_project_root_not_allowed", probe_path
+        if normalized_mcp == "filesystem" and normalized_tool == "list_allowed_directories":
+            return "filesystem_allowed_dirs_probe_failed", "filesystem_allowed_dirs_probe_failed", probe_path
+        return normalized_error or "mcp_probe_call_failed", "mcp_probe_call_failed", probe_path
 
     required_mcps: List[str] = []
     if hasattr(runtime, "_required_mcp_names"):
@@ -1466,7 +1114,7 @@ async def _probe_required_mcp_runtime(
 
         selected_tool = sorted(
             visible_tools,
-            key=lambda item: _tool_priority(str(item.get("name") or "")),
+            key=lambda item: _tool_priority(normalized_mcp, str(item.get("name") or "")),
             reverse=True,
         )[0]
         selected_tool_name = str(selected_tool.get("name") or "").strip()
@@ -1514,6 +1162,9 @@ async def _probe_required_mcp_runtime(
 
         total_attempts = 1 + int(CALL_RETRY_COUNT)
         last_error = "mcp_probe_call_failed"
+        last_reason_class = "mcp_probe_call_failed"
+        last_probe_path = None
+        last_allowed_directories: list[str] = []
         last_runtime_domain = list_runtime_domain
         call_ok = False
         for attempt in range(1, total_attempts + 1):
@@ -1530,6 +1181,7 @@ async def _probe_required_mcp_runtime(
                 call_result = None
                 call_duration_ms = int((time.perf_counter() - call_started) * 1000)
                 last_error = f"mcp_call_exception:{exc.__class__.__name__}"
+                last_reason_class = "mcp_call_exception"
                 mcp_detail["tools_call_duration_ms"] = call_duration_ms
                 if attempt < total_attempts:
                     await asyncio.sleep(CALL_BACKOFF_SECONDS)
@@ -1540,23 +1192,72 @@ async def _probe_required_mcp_runtime(
             call_metadata = dict(call_result.metadata) if isinstance(call_result.metadata, dict) else {}
             call_runtime_domain = str(call_metadata.get("mcp_runtime_domain") or "").strip() or list_runtime_domain
             last_runtime_domain = call_runtime_domain
-            if bool(call_result.handled and call_result.success):
+            call_data = call_result.data
+            if normalized_mcp == "filesystem" and selected_tool_name == "list_allowed_directories" and bool(call_result.handled and call_result.success):
+                allowed_directories = _extract_allowed_directories(call_data)
+                last_allowed_directories = allowed_directories
+                project_root_text = str(probe_context.get("project_root") or "").strip()
+                project_allowed = any(
+                    project_root_text == item or project_root_text.startswith(f"{item.rstrip(os.sep)}{os.sep}")
+                    for item in allowed_directories
+                )
+                if not project_allowed:
+                    last_error = "filesystem_project_root_not_allowed"
+                    last_reason_class = "filesystem_project_root_not_allowed"
+                    last_probe_path = project_root_text
+                    mcp_detail.update(
+                        {
+                            "tools_call_duration_ms": call_duration_ms,
+                            "selected_tool": selected_tool_name,
+                            "mcp_runtime_domain": call_runtime_domain,
+                            "attempt": attempt,
+                            "max_attempts": total_attempts,
+                            "project_root": project_root_text,
+                            "allowed_directories": allowed_directories,
+                            "probe_path": project_root_text,
+                        }
+                    )
+                    if attempt < total_attempts:
+                        await asyncio.sleep(CALL_BACKOFF_SECONDS)
+                        continue
+                else:
+                    mcp_detail.update(
+                        {
+                            "allowed_directories": allowed_directories,
+                            "project_root": project_root_text,
+                            "probe_path": project_root_text,
+                        }
+                    )
+            if bool(call_result.handled and call_result.success) and not (last_reason_class == "filesystem_project_root_not_allowed"):
                 mcp_detail.update(
                     {
                         "probe_ready": True,
                         "reason": "probe_ok",
+                        "reason_class": "probe_ok",
                         "tools_call_success": True,
                         "tools_call_duration_ms": call_duration_ms,
                         "selected_tool": selected_tool_name,
                         "mcp_runtime_domain": call_runtime_domain,
                         "attempt": attempt,
                         "max_attempts": total_attempts,
+                        "probe_path": last_probe_path or (tool_args.get("path") if isinstance(tool_args.get("path"), str) else None),
+                        "project_root": str(probe_context.get("project_root") or "").strip() or None,
+                        "allowed_directories": last_allowed_directories,
                     }
                 )
                 call_ok = True
                 break
 
-            last_error = str(call_result.error or "mcp_call_failed")
+            classified_reason, classified_reason_class, classified_probe_path = _probe_failure_reason(
+                mcp_name=normalized_mcp,
+                tool_name=selected_tool_name,
+                error_text=str(call_result.error or "mcp_call_failed"),
+                tool_args=dict(tool_args),
+                project_root_value=str(probe_context.get("project_root") or ""),
+            )
+            last_error = classified_reason
+            last_reason_class = classified_reason_class
+            last_probe_path = classified_probe_path
             mcp_detail.update(
                 {
                     "tools_call_duration_ms": call_duration_ms,
@@ -1564,6 +1265,11 @@ async def _probe_required_mcp_runtime(
                     "mcp_runtime_domain": call_runtime_domain,
                     "attempt": attempt,
                     "max_attempts": total_attempts,
+                    "probe_path": classified_probe_path,
+                    "project_root": str(probe_context.get("project_root") or "").strip() or None,
+                    "allowed_directories": last_allowed_directories,
+                    "reason_class": classified_reason_class,
+                    "raw_reason": str(call_result.error or "mcp_call_failed"),
                 }
             )
             if attempt < total_attempts:
@@ -1577,7 +1283,11 @@ async def _probe_required_mcp_runtime(
             {
                 "probe_ready": False,
                 "reason": last_error,
+                "reason_class": last_reason_class,
                 "tools_call_success": False,
+                "probe_path": last_probe_path,
+                "project_root": str(probe_context.get("project_root") or "").strip() or None,
+                "allowed_directories": last_allowed_directories,
             }
         )
         details[normalized_mcp] = mcp_detail
@@ -1586,8 +1296,10 @@ async def _probe_required_mcp_runtime(
                 "mcp": normalized_mcp,
                 "runtime_domain": last_runtime_domain or domain_value,
                 "reason": last_error,
+                "reason_class": last_reason_class,
                 "step": "tools/call",
                 "tool_name": selected_tool_name,
+                "probe_path": last_probe_path,
             }
         )
 
@@ -2496,7 +2208,7 @@ def _discover_entry_points_deterministic(
 
         ast_target_files = entry_files or (target_files or None)
         ast_index = ASTCallIndex(
-            project_root=project_root,
+            project_root=normalized_project_root,
             target_files=ast_target_files if isinstance(ast_target_files, list) else None,
         )
         inferred = ast_index.infer_entry_points()
@@ -2682,7 +2394,6 @@ async def _execute_agent_task(task_id: str):
         mcp_runtime: Optional[MCPRuntime] = None
         memory_store = None
         markdown_memory: Dict[str, str] = {}
-        qmd_task_kb = None
         start_time = time.time()
 
         async def _qmd_upsert_json(relative_path: str, payload: Any) -> bool:
@@ -2832,104 +2543,7 @@ async def _execute_agent_task(task_id: str):
                 logger.info(f"[Cancel] Task {task_id} cancelled after project preparation")
                 raise asyncio.CancelledError("任务已取消")
 
-            async def _qmd_upsert_json(relative_path: str, payload: Any) -> bool:
-                if qmd_task_kb is None:
-                    return False
-                try:
-                    return bool(
-                        await asyncio.to_thread(
-                            qmd_task_kb.upsert_json,
-                            relative_path,
-                            payload,
-                        )
-                    )
-                except Exception as exc:
-                    logger.warning("[QMD TaskKB] upsert_json failed (%s): %s", relative_path, exc)
-                    return False
-
-            async def _qmd_upsert_text(relative_path: str, text: str) -> bool:
-                if qmd_task_kb is None:
-                    return False
-                try:
-                    return bool(
-                        await asyncio.to_thread(
-                            qmd_task_kb.upsert_text,
-                            relative_path,
-                            text,
-                        )
-                    )
-                except Exception as exc:
-                    logger.warning("[QMD TaskKB] upsert_text failed (%s): %s", relative_path, exc)
-                    return False
-
-            async def _qmd_update_index(force: bool = False) -> bool:
-                if qmd_task_kb is None:
-                    return False
-                try:
-                    result = await asyncio.to_thread(qmd_task_kb.update_index, force=bool(force))
-                except Exception as exc:
-                    logger.warning("[QMD TaskKB] update_index failed: %s", exc)
-                    return False
-                if not bool(result.get("success")):
-                    logger.warning("[QMD TaskKB] update_index unsuccessful: %s", result.get("error"))
-                    return False
-                return bool(result.get("updated")) or bool(force)
-
-            if bool(getattr(settings, "QMD_TASK_KB_ENABLED", True)):
-                try:
-                    from app.services.agent.qmd.task_kb import QmdTaskKnowledgeBase
-
-                    qmd_task_kb = QmdTaskKnowledgeBase(
-                        project_root=project_root,
-                        task_id=task_id,
-                        command=str(
-                            getattr(settings, "QMD_CLI_COMMAND", "qmd") or "qmd"
-                        ),
-                        task_root_rel=str(getattr(settings, "QMD_TASK_ROOT_REL", ".deepaudit/qmd") or ".deepaudit/qmd"),
-                        collection_prefix=str(getattr(settings, "QMD_TASK_COLLECTION_PREFIX", "task") or "task"),
-                        doc_glob=str(
-                            getattr(
-                                settings,
-                                "QMD_TASK_DOC_GLOB",
-                                "**/*.{md,txt,json,yml,yaml}",
-                            )
-                            or "**/*.{md,txt,json,yml,yaml}"
-                        ),
-                        auto_embed=bool(getattr(settings, "QMD_TASK_AUTO_EMBED", False)),
-                        query_cache=bool(getattr(settings, "QMD_TASK_QUERY_CACHE", True)),
-                        timeout_seconds=int(getattr(settings, "QMD_CLI_TIMEOUT_SECONDS", 120) or 120),
-                    )
-                    qmd_ready_result = await asyncio.to_thread(qmd_task_kb.ensure_ready)
-                    if bool(qmd_ready_result.get("success")):
-                        await event_emitter.emit_info(
-                            f"🧠 QMD 任务知识库已启用: {qmd_task_kb.task_root}"
-                        )
-                        await _qmd_upsert_json(
-                            "artifacts/task_context.json",
-                            {
-                                "task_id": task_id,
-                                "project_id": str(project.id),
-                                "project_name": project.name,
-                                "project_root": project_root,
-                                "target_files_count": len(task.target_files or []),
-                            },
-                        )
-                        await _qmd_update_index(force=False)
-                    else:
-                        qmd_task_kb = None
-                        await event_emitter.emit_warning(
-                            "⚠️ QMD 任务知识库初始化失败，已降级为普通审计流程"
-                        )
-                        logger.warning(
-                            "[QMD TaskKB] ensure_ready failed: %s",
-                            qmd_ready_result.get("error"),
-                        )
-                except Exception as exc:
-                    qmd_task_kb = None
-                    logger.warning("[QMD TaskKB] initialize failed: %s", exc)
-                    await event_emitter.emit_warning(
-                        "⚠️ QMD 任务知识库初始化失败，已降级为普通审计流程"
-                    )
+            await event_emitter.emit_info("🧠 QMD 任务知识库已移除，跳过任务内知识库初始化")
 
             # 创建 LLM 服务
             llm_service = LLMService(user_config=user_config)
@@ -2975,7 +2589,6 @@ async def _execute_agent_task(task_id: str):
                     project_id=str(project.id),  # 🔥 传递 project_id 用于 RAG
                     event_emitter=event_emitter,  # 🔥 新增
                     task_id=task_id,  # 🔥 新增：用于取消检查
-                    qmd_task_kb=qmd_task_kb,
                     queue_service=queue_service,  # 🔥 新增：漏洞队列服务
                     recon_queue_service=recon_queue_service,  # 🔥 新增：Recon 风险队列服务
                 )
@@ -2990,7 +2603,7 @@ async def _execute_agent_task(task_id: str):
             await db.commit()
 
             mcp_runtime = _build_task_mcp_runtime(
-                project_root=project_root,
+                project_root=normalized_project_root,
                 user_config=user_config,
                 target_files=task.target_files,
                 bootstrap_findings=None,
@@ -2998,22 +2611,6 @@ async def _execute_agent_task(task_id: str):
                 prefer_stdio_when_http_unavailable=True,
                 enforce_mcp_only=True,
             )
-
-            if mcp_runtime and hasattr(mcp_runtime, "register_local_tools"):
-                local_proxy_registry: Dict[str, Any] = {}
-                for bucket_name in ("recon", "analysis", "verification", "orchestrator"):
-                    bucket_tools = tools.get(bucket_name)
-                    if not isinstance(bucket_tools, dict):
-                        continue
-                    for tool_name, tool_obj in bucket_tools.items():
-                        normalized_name = str(tool_name or "").strip()
-                        if not normalized_name or not hasattr(tool_obj, "execute"):
-                            continue
-                        local_proxy_registry[normalized_name] = tool_obj
-                registered_local_tools = mcp_runtime.register_local_tools(local_proxy_registry)
-                await event_emitter.emit_info(
-                    f"🧩 MCP Local-Proxy 已注册 {registered_local_tools} 个本地工具"
-                )
 
             if mcp_runtime:
                 adapter_entries: List[str] = []
@@ -3047,51 +2644,6 @@ async def _execute_agent_task(task_id: str):
                     for item in (getattr(mcp_runtime, "required_mcps", []) or [])
                     if str(item).strip()
                 ]
-                if bool(getattr(settings, "MCP_DAEMON_AUTOSTART", False)) and required_gate_mcps:
-                    daemon_manager = MCPDaemonManager()
-                    daemon_specs = {
-                        spec.name: spec
-                        for spec in daemon_manager.build_specs(
-                            settings,
-                            project_root=project_root,
-                        )
-                    }
-                    prewarm_not_ready: list[str] = []
-                    for daemon_name in required_gate_mcps:
-                        if (
-                            daemon_name == "filesystem"
-                            and bool(getattr(settings, "MCP_FILESYSTEM_FORCE_STDIO", True))
-                        ):
-                            continue
-                        spec = daemon_specs.get(daemon_name)
-                        if spec is None:
-                            prewarm_not_ready.append(f"{daemon_name}:spec_missing")
-                            continue
-                        timeout_seconds = max(
-                            5,
-                            int(getattr(spec, "startup_timeout_seconds", 10) or 10) + 2,
-                        )
-                        try:
-                            launch_result = await asyncio.wait_for(
-                                asyncio.to_thread(daemon_manager.ensure_daemon, spec),
-                                timeout=timeout_seconds,
-                            )
-                        except asyncio.TimeoutError:
-                            prewarm_not_ready.append(f"{daemon_name}:prewarm_timeout")
-                            continue
-                        if not bool(getattr(launch_result, "ready", False)):
-                            reason = str(getattr(launch_result, "reason", "") or "prewarm_failed")
-                            prewarm_not_ready.append(f"{daemon_name}:{reason}")
-                    if prewarm_not_ready:
-                        await event_emitter.emit_warning(
-                            "⚠️ required MCP 预热未全部就绪: "
-                            + "; ".join(prewarm_not_ready[:8])
-                        )
-                    else:
-                        await event_emitter.emit_info(
-                            "✅ required MCP daemon 预热完成"
-                        )
-
                 required_domain = str(
                     getattr(settings, "MCP_REQUIRED_RUNTIME_DOMAIN", "all") or "all"
                 ).strip().lower()
@@ -3250,7 +2802,7 @@ async def _execute_agent_task(task_id: str):
                 async def _prepare_bootstrap_once():
                     return await _prepare_embedded_bootstrap_findings(
                         db=db,
-                        project_root=project_root,
+                        project_root=normalized_project_root,
                         event_emitter=event_emitter,
                         exclude_patterns=task.exclude_patterns,
                         opengrep_enabled=bool(
@@ -3303,7 +2855,7 @@ async def _execute_agent_task(task_id: str):
                         "⚠️ 静态预扫未筛选出 ERROR + HIGH/MEDIUM 候选，启动入口点回退流程"
                     )
                 entry = _discover_entry_points_deterministic(
-                    project_root=project_root,
+                    project_root=normalized_project_root,
                     target_files=task.target_files,
                     exclude_patterns=task.exclude_patterns,
                 )
@@ -3315,7 +2867,7 @@ async def _execute_agent_task(task_id: str):
                 ) or []
 
                 seed_findings = await _build_seed_from_entrypoints(
-                    project_root=project_root,
+                    project_root=normalized_project_root,
                     target_vulns=task.target_vulnerabilities or [],
                     entry_function_names=entry_function_names,
                     exclude_patterns=task.exclude_patterns or [],
@@ -3463,7 +3015,7 @@ async def _execute_agent_task(task_id: str):
                     db,
                     task_id,
                     findings_list,
-                    project_root=project_root,
+                    project_root=normalized_project_root,
                     save_diagnostics=finding_save_diagnostics,
                 )
                 if isinstance(seen_payload_digests, set):
@@ -3627,7 +3179,7 @@ async def _execute_agent_task(task_id: str):
                             db,
                             task_id,
                             findings,
-                            project_root=project_root,
+                            project_root=normalized_project_root,
                             save_diagnostics=finding_save_diagnostics,
                         )
 
@@ -4422,26 +3974,11 @@ async def _initialize_tools(
     project_id: Optional[str] = None,  # 🔥 用于 RAG collection_name
     event_emitter: Optional[Any] = None,  # 🔥 新增：用于发送实时日志
     task_id: Optional[str] = None,  # 🔥 新增：用于取消检查
-    qmd_task_kb: Optional[Any] = None,
     queue_service: Optional[Any] = None,  # 🔥 新增：漏洞队列服务
     recon_queue_service: Optional[Any] = None,  # 🔥 新增：Recon 风险队列服务
     save_callback: Optional[Any] = None,  # 🔥 新增：验证结果持久化回调 async (findings) -> int
 ) -> Dict[str, Dict[str, Any]]:
-    """初始化工具集
-
-    Args:
-        project_root: 项目根目录
-        llm_service: LLM 服务
-        user_config: 用户配置
-        sandbox_manager: 沙箱管理器
-        verification_level: 验证级别（统一为 analysis_with_poc_plan）
-        exclude_patterns: 排除模式列表
-        target_files: 目标文件列表
-        project_id: 项目 ID（用于 RAG collection_name）
-        event_emitter: 事件发送器（用于发送实时日志）
-        task_id: 任务 ID（用于取消检查）
-        qmd_task_kb: 任务级 QMD 知识库实例（可选）
-    """
+    """初始化工具集。"""
     from app.services.agent.tools import (
         FileReadTool,
         FileSearchTool,
@@ -4450,15 +3987,15 @@ async def _initialize_tools(
         DataFlowAnalysisTool,
         ThinkTool,
         ReflectTool,
-        SkillLookupTool,
         CreateVulnerabilityReportTool,
         ControlFlowAnalysisLightTool,
-        JoernReachabilityVerifyTool,
         LogicAuthzAnalysisTool,
         ExtractFunctionTool,
-        OpengrepTool, BanditTool, GitleaksTool,
-        NpmAuditTool, SafetyTool, TruffleHogTool, OSVScannerTool,
-        PMDTool,PHPStanTool,
+        SandboxTool,
+        VulnerabilityVerifyTool,
+        RunCodeTool,
+        SmartScanTool,
+        QuickAuditTool,
     )
     from app.services.agent.tools.queue_tools import (
         GetQueueStatusTool, DequeueFindingTool, PushFindingToQueueTool, IsFindingInQueueTool
@@ -4471,24 +4008,12 @@ async def _initialize_tools(
         ClearReconRiskQueueTool,
         IsReconRiskPointInQueueTool,
     )
-    from app.services.agent.vulnerability_queue import (
-        RedisVulnerabilityQueue, InMemoryVulnerabilityQueue
-    )
-    from app.services.agent.tools.qmd_cli_tools import (
-        QmdGetTool,
-        QmdMultiGetTool,
-        QmdQueryTool,
-        QmdStatusTool,
-    )
-    from app.services.agent.knowledge import (
-        SecurityKnowledgeQueryTool,
-        GetVulnerabilityKnowledgeTool,
-    )
-    # 🔥 RAG 相关导入（已禁用）
-    # from app.services.rag import CodeIndexer, CodeRetriever, EmbeddingService, IndexUpdateMode
-    from app.core.config import settings
 
-    # 辅助函数：发送事件
+    _ = rag_enabled
+    _ = verification_level
+    _ = project_id
+    _ = user_config
+
     async def emit(message: str, level: str = "info"):
         if event_emitter:
             logger.debug(f"[EMIT-TOOLS] Sending {level}: {message[:60]}...")
@@ -4501,140 +4026,18 @@ async def _initialize_tools(
         else:
             logger.warning(f"[EMIT-TOOLS] No event_emitter, skipping: {message[:60]}...")
 
-    # ============ 🔥 初始化 RAG 系统（已禁用） ============
-    retriever = None
     logger.info("RAG 模块已禁用，跳过向量索引初始化")
     await emit("⏭️ RAG 模块已禁用，跳过向量索引初始化")
 
-    # 基础工具 - 传递排除模式和目标文件
     base_tools = {
-        "read_file": FileReadTool(
-            project_root,
-            exclude_patterns,
-            target_files,
-        ),
+        "read_file": FileReadTool(project_root, exclude_patterns, target_files),
         "list_files": ListFilesTool(project_root, exclude_patterns, target_files),
         "search_code": FileSearchTool(project_root, exclude_patterns, target_files),
         "think": ThinkTool(),
         "reflect": ReflectTool(),
-        "skill_lookup": SkillLookupTool(),
     }
 
-    user_other_config = (user_config or {}).get("otherConfig", {})
-    mcp_config = user_other_config.get("mcpConfig") if isinstance(user_other_config, dict) else {}
-    if not isinstance(mcp_config, dict):
-        mcp_config = {}
-    runtime_policy = mcp_config.get("runtimePolicy") if isinstance(mcp_config.get("runtimePolicy"), dict) else {}
-    catalog_items = build_mcp_catalog(
-        mcp_enabled=bool(mcp_config.get("enabled", getattr(settings, "MCP_ENABLED", True))),
-        runtime_policy=runtime_policy if isinstance(runtime_policy, dict) else None,
-    )
-    catalog_by_id: Dict[str, Dict[str, Any]] = {
-        str(item.get("id")): item
-        for item in catalog_items
-        if isinstance(item, dict) and str(item.get("id", "")).strip()
-    }
-
-    def _mcp_ready(mcp_id: str) -> bool:
-        item = catalog_by_id.get(mcp_id, {})
-        return bool(item.get("enabled")) and bool(item.get("startup_ready"))
-
-    qmd_ready = _mcp_ready("qmd")
-    code_index_ready = _mcp_ready("code_index")
-    sequential_ready = _mcp_ready("sequentialthinking")
-
-    # 智能审计场景强制 Filesystem 只读：不向 Agent 暴露 MCP 写入入口。
-    mcp_write_tools: Dict[str, Any] = {}
-
-    mcp_read_tools: Dict[str, Any] = {}
-    qmd_cli_enabled = bool(getattr(settings, "QMD_TASK_KB_ENABLED", True))
-    if qmd_cli_enabled and qmd_task_kb is not None:
-        mcp_read_tools.update(
-            {
-                "qmd_query": QmdQueryTool(qmd_task_kb),
-                "qmd_get": QmdGetTool(qmd_task_kb),
-                "qmd_multi_get": QmdMultiGetTool(qmd_task_kb),
-                "qmd_status": QmdStatusTool(qmd_task_kb),
-            }
-        )
-    elif qmd_ready:
-        mcp_read_tools.update(
-            {
-                "qmd_query": MCPVirtualReadTool(
-                    name="qmd_query",
-                    description="通过 QMD MCP 执行语义检索。",
-                ),
-                "qmd_get": MCPVirtualReadTool(
-                    name="qmd_get",
-                    description="通过 QMD MCP 获取文档详情。",
-                ),
-                "qmd_multi_get": MCPVirtualReadTool(
-                    name="qmd_multi_get",
-                    description="通过 QMD MCP 批量获取文档。",
-                ),
-                "qmd_status": MCPVirtualReadTool(
-                    name="qmd_status",
-                    description="查询 QMD 集合状态。",
-                ),
-            }
-        )
-
-    if code_index_ready:
-        mcp_read_tools.update(
-            {
-                "locate_enclosing_function": MCPVirtualReadTool(
-                    name="locate_enclosing_function",
-                    description="通过 Code Index MCP 定位命中代码所属函数。",
-                ),
-            }
-        )
-
-    if sequential_ready:
-        mcp_read_tools.update(
-            {
-                "sequential_thinking": MCPVirtualReadTool(
-                    name="sequential_thinking",
-                    description="通过 SequentialThinking MCP 执行分步推理。",
-                ),
-                "reasoning_trace": MCPVirtualReadTool(
-                    name="reasoning_trace",
-                    description="通过 SequentialThinking MCP 生成推理轨迹。",
-                ),
-            }
-        )
-
-    deprecated_skill_tools: Dict[str, Any] = {
-        # skill_name: MCPDeprecatedTool(name=skill_name, message="该 skill 已下线，请改用 verify_reachability + flow 证据链。")
-        # for skill_name in [
-        #     "test_command_injection",
-        #     "test_deserialization",
-        #     "test_path_traversal",
-        #     "test_sql_injection",
-        #     "test_ssti",
-        #     "test_xss",
-        #     "universal_vuln_test",
-        # ]
-    }
-    
-    # Recon 工具
-    recon_tools = {
-        **base_tools,
-        **mcp_read_tools,
-        **mcp_write_tools,
-        **deprecated_skill_tools,
-        # 🔥 外部侦察工具 (Recon 阶段也需要使用这些工具来收集初步信息)
-        # "opengrep_scan": OpengrepTool(project_root, sandbox_manager),
-        # "bandit_scan": BanditTool(project_root, sandbox_manager),
-        # NOTE: Smart audit policy: gitleaks_scan is disabled in orchestrated audit flow.
-        # Keep the tool implementation for other entrypoints / manual usage.
-        # "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
-        # "npm_audit": NpmAuditTool(project_root, sandbox_manager),
-        # "safety_scan": SafetyTool(project_root, sandbox_manager),
-        # "trufflehog_scan": TruffleHogTool(project_root, sandbox_manager),
-        # "osv_scan": OSVScannerTool(project_root, sandbox_manager),
-        # "pmd_scan": PMDTool(project_root, sandbox_manager),
-        # "phpstan_scan": PHPStanTool(project_root, sandbox_manager),
-    }
+    recon_tools = {**base_tools}
     if recon_queue_service and task_id:
         recon_tools["push_risk_point_to_queue"] = PushRiskPointToQueueTool(
             queue_service=recon_queue_service,
@@ -4646,49 +4049,13 @@ async def _initialize_tools(
         )
         logger.info(f"[Tools] Added Recon risk queue tools for task {task_id}")
 
-    # 🔥 注册 RAG 工具到 Recon Agent（已禁用）
-    # if retriever:
-    #     from app.services.agent.tools import RAGQueryTool
-    #     recon_tools["rag_query"] = RAGQueryTool(retriever)
-    #     logger.info("✅ RAG 工具 (rag_query) 已注册到 Recon Agent")
-
-    # Analysis 工具
-    # 🔥 导入智能扫描工具
-    from app.services.agent.tools import SmartScanTool, QuickAuditTool, BusinessLogicScanTool, ExtractFunctionTool, PatternMatchTool
-    
-    # 🔥 业务逻辑扫描核心工具集
-    # BusinessLogicScanAgent 5 个阶段需要的分析工具
-    # Phase 1 (HTTP 入口发现): search_code, read_file, extract_function
-    # Phase 2 (入口分析): read_file, extract_function, logic_authz_analysis
-    # Phase 3 (敏感操作): read_file, search_code, pattern_match
-    # Phase 4 (污点分析): dataflow_analysis, controlflow_analysis_light, read_file
-    # Phase 5 (漏洞确认): read_file, 综合前4阶段结果
-    business_logic_scan_core_tools = {
-        **base_tools,
-        **mcp_read_tools,
-    }
-    
     analysis_tools = {
         **base_tools,
-        **mcp_read_tools,
-        **mcp_write_tools,
-        **deprecated_skill_tools,
-        # 🔥 智能扫描工具（推荐首先使用）
         "smart_scan": SmartScanTool(project_root, exclude_patterns=exclude_patterns or []),
         "quick_audit": QuickAuditTool(project_root),
-        "business_logic_scan": BusinessLogicScanTool(
-            project_root=project_root,
-            llm_service=llm_service,
-            tools_registry=business_logic_scan_core_tools,
-            event_emitter=event_emitter,
-        ),
-        # 模式匹配工具（增强版）
         "pattern_match": PatternMatchTool(project_root),
-        # 函数提取工具（用于业务逻辑扫描等分析任务）
         "extract_function": ExtractFunctionTool(project_root=project_root),
-        # 数据流分析
         "dataflow_analysis": DataFlowAnalysisTool(llm_service, project_root=project_root),
-        # 三轨流分析主链
         "controlflow_analysis_light": ControlFlowAnalysisLightTool(
             project_root=project_root,
             target_files=target_files,
@@ -4697,139 +4064,31 @@ async def _initialize_tools(
             project_root=project_root,
             target_files=target_files,
         ),
-        # 安全知识查询
-        "query_security_knowledge": SecurityKnowledgeQueryTool(),
-        "get_vulnerability_knowledge": GetVulnerabilityKnowledgeTool(),
-        # 外部安全工具 (传入共享的 sandbox_manager)
-        # "opengrep_scan": OpengrepTool(project_root, sandbox_manager),
-        # "bandit_scan": BanditTool(project_root, sandbox_manager),
-        # NOTE: Smart audit policy: gitleaks_scan is disabled in orchestrated audit flow.
-        # "gitleaks_scan": GitleaksTool(project_root, sandbox_manager),
-        # "npm_audit": NpmAuditTool(project_root, sandbox_manager),
-        # "safety_scan": SafetyTool(project_root, sandbox_manager),
-        # "trufflehog_scan": TruffleHogTool(project_root, sandbox_manager),
-        # "osv_scan": OSVScannerTool(project_root, sandbox_manager),
-        # "pmd_scan": PMDTool(project_root, sandbox_manager),
-        # "phpstan_scan": PHPStanTool(project_root, sandbox_manager),
     }
-    
-    # 🔥 注册 RAG 工具到 Analysis Agent（已禁用）
-    # if retriever:
-    #     from app.services.agent.tools import RAGQueryTool, SecurityCodeSearchTool, FunctionContextTool
-    #     analysis_tools["rag_query"] = RAGQueryTool(retriever)
-    #     analysis_tools["security_search"] = SecurityCodeSearchTool(retriever)
-    #     analysis_tools["function_context"] = FunctionContextTool(retriever)
-    #     logger.info("✅ RAG 工具 (rag_query, security_search, function_context) 已注册到 Analysis Agent")
-    # else:
-    logger.info("⏭️ RAG 工具已禁用，不注册 rag_query/security_search/function_context")
-    
-    # 🔥 完成工具集构建后，补充完整工具集给 business_logic_scan
-    # 这确保 Sub Agent 有足够的工具在各个分析阶段使用
-    business_logic_scan_core_tools.update({
-        "extract_function": analysis_tools["extract_function"],
-        # "rag_query": analysis_tools["rag_query"],  # RAG 已禁用
-        "pattern_match": analysis_tools["pattern_match"],
-        "dataflow_analysis": analysis_tools["dataflow_analysis"],
-    })
-    analysis_tools["business_logic_scan"].tools_registry = business_logic_scan_core_tools
-    logger.info(
-        "[Tools] Business Logic Scanner enabled with %d tools: %s",
-        len(business_logic_scan_core_tools),
-        project_root,
-    )
-    # 🔥 导入沙箱工具
-    from app.services.agent.tools import (
-        SandboxTool, SandboxHttpTool, VulnerabilityVerifyTool,
-        # 多语言代码测试工具
-        PhpTestTool, PythonTestTool, JavaScriptTestTool, JavaTestTool,
-        GoTestTool, RubyTestTool, ShellTestTool, UniversalCodeTestTool,
-        # 漏洞验证专用工具
-        CommandInjectionTestTool, SqlInjectionTestTool, XssTestTool,
-        PathTraversalTestTool, SstiTestTool, DeserializationTestTool,
-        UniversalVulnTestTool,
-        # 🔥 新增：通用代码执行工具 (LLM 驱动的 Fuzzing Harness)
-        RunCodeTool, ExtractFunctionTool,
-    )
-    # Verification 工具
+
     verification_tools = {
         **base_tools,
-        **mcp_read_tools,
-        **mcp_write_tools,
-        # 🔥 沙箱验证工具
         "sandbox_exec": SandboxTool(sandbox_manager),
-        "sandbox_http": SandboxHttpTool(sandbox_manager),
         "verify_vulnerability": VulnerabilityVerifyTool(sandbox_manager),
-
-        # 🔥 多语言代码测试工具
-        "php_test": PhpTestTool(sandbox_manager, project_root),
-        "python_test": PythonTestTool(sandbox_manager, project_root),
-        "javascript_test": JavaScriptTestTool(sandbox_manager, project_root),
-        "java_test": JavaTestTool(sandbox_manager, project_root),
-        "go_test": GoTestTool(sandbox_manager, project_root),
-        "ruby_test": RubyTestTool(sandbox_manager, project_root),
-        "shell_test": ShellTestTool(sandbox_manager, project_root),
-        "universal_code_test": UniversalCodeTestTool(sandbox_manager, project_root),
-        
-        # 🔥 漏洞验证专用工具
-        "test_command_injection": CommandInjectionTestTool(sandbox_manager, project_root),
-        "test_sql_injection": SqlInjectionTestTool(sandbox_manager, project_root),
-        "test_xss": XssTestTool(sandbox_manager, project_root),
-        "test_path_traversal": PathTraversalTestTool(sandbox_manager, project_root),
-        "test_ssti": SstiTestTool(sandbox_manager, project_root),
-        "test_deserialization": DeserializationTestTool(sandbox_manager, project_root),
-        "universal_vuln_test": UniversalVulnTestTool(sandbox_manager, project_root),
-        
         "run_code": RunCodeTool(sandbox_manager, project_root),
         "extract_function": ExtractFunctionTool(project_root),
-        
-        # !!! 存在问题，改用大模型判断
-        # "dataflow_analysis": DataFlowAnalysisTool(llm_service, project_root=project_root),
-        # "controlflow_analysis_light": ControlFlowAnalysisLightTool(
-        #     project_root=project_root,
-        #     target_files=target_files,
-        # ),
-        # "joern_reachability_verify": JoernReachabilityVerifyTool(
-        #     project_root=project_root,
-        #     enabled=bool(getattr(settings, "FLOW_JOERN_ENABLED", True)),
-        #     timeout_sec=int(getattr(settings, "FLOW_JOERN_TIMEOUT_SEC", 45)),
-        # ),
-        # "logic_authz_analysis": LogicAuthzAnalysisTool(
-        #     project_root=project_root,
-        #     target_files=target_files,
-        # ),
-
-        # 报告工具 - 🔥 v2.1: 传递 project_root 用于文件验证
         "create_vulnerability_report": CreateVulnerabilityReportTool(project_root),
     }
-    verification_tools.update(deprecated_skill_tools)
 
-    # 🔥 验证结果保存工具（与 Analysis 队列工具相同的注入模式）
     if task_id:
         from app.services.agent.tools.verification_result_tools import SaveVerificationResultsTool
-        _save_tool = SaveVerificationResultsTool(
+
+        verification_tools["save_verification_results"] = SaveVerificationResultsTool(
             task_id=task_id,
-            save_callback=save_callback,  # 可为 None，工具仍会缓存结果
+            save_callback=save_callback,
         )
-        verification_tools["save_verification_results"] = _save_tool
         logger.info("[Tools] Added save_verification_results tool for task %s", task_id)
 
-    # Orchestrator 工具（主要是思考工具）
-    orchestrator_tools = {
-        "think": ThinkTool(),
-        "reflect": ReflectTool(),
-        **mcp_read_tools,
-        **mcp_write_tools,
-        **deprecated_skill_tools,
-    }
-    
-    # 🔥 为 Orchestrator 添加队列管理工具
+    orchestrator_tools = {**base_tools}
+
     if queue_service and task_id:
         orchestrator_tools["get_queue_status"] = GetQueueStatusTool(queue_service, task_id)
         orchestrator_tools["dequeue_finding"] = DequeueFindingTool(queue_service, task_id)
-        logger.info(f"[Tools] Added queue management tools for task {task_id}")
-    
-    # 🔥 为 Analysis 添加队列工具
-    if queue_service and task_id:
         analysis_tools["push_finding_to_queue"] = PushFindingToQueueTool(queue_service, task_id)
         analysis_tools["is_finding_in_queue"] = IsFindingInQueueTool(queue_service, task_id)
         logger.info(f"[Tools] Added analysis queue tools for task {task_id}")
@@ -4856,7 +4115,7 @@ async def _initialize_tools(
             task_id=task_id,
         )
         logger.info(f"[Tools] Added Recon queue tools for task {task_id}")
-    
+
     return {
         "recon": recon_tools,
         "analysis": analysis_tools,

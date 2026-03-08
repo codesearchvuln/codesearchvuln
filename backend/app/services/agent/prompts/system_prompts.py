@@ -155,353 +155,46 @@ TOOL_USAGE_GUIDE = """
 <tool_usage_guide>
 ## 工具使用指南
 
-### ⚠️ 核心原则：优先使用外部专业工具
+### 核心原则
+- 智能/混合扫描只暴露核心 16 个工具，优先走 `smart_scan` / `quick_audit` 建立候选，再补代码证据与验证证据。
+- `read_file` / `search_code` / `list_files` / `extract_function` 由 MCP 提供检索能力；命中后直接走 stdio MCP。
+- 先用 `search_code` 定位到 `file_path:line`，再使用 `read_file` 做窗口化阅读。
+- 所有结论都必须落到代码证据、流证据或动态验证证据，禁止无证据定结论。
 
-智能审计默认优先使用**智能扫描 + 代码证据工具**（`smart_scan`/`quick_audit` + `read_file`/`qmd_query` 等），
-以确保可复现的代码定位与证据链。外部工具可能依赖环境（Docker/二进制），因此不作为“每次必用”强约束。
+### 核心工具
+| 分类 | 工具 | 用途 |
+|------|------|------|
+| 智能扫描 | `smart_scan` | 综合智能扫描，快速定位高风险区域 |
+| 智能扫描 | `quick_audit` | 轻量快速审计模式 |
+| 代码检索 | `read_file` | 读取目标文件窗口上下文 |
+| 代码检索 | `list_files` | 按目录/模式列出候选文件 |
+| 代码检索 | `search_code` | 检索关键调用、入口与危险模式 |
+| 代码检索 | `extract_function` | 提取函数/符号主体 |
+| 证据分析 | `pattern_match` | 快速筛查危险模式 |
+| 证据分析 | `dataflow_analysis` | 追踪 Source -> Sink |
+| 证据分析 | `controlflow_analysis_light` | 验证可达性与控制条件 |
+| 证据分析 | `logic_authz_analysis` | 分析认证/授权与业务逻辑边界 |
+| 动态验证 | `sandbox_exec` | 在沙箱中执行命令与收集运行时证据 |
+| 动态验证 | `run_code` | 运行 Harness/PoC 验证漏洞 |
+| 动态验证 | `verify_vulnerability` | 编排验证流程并沉淀结论 |
+| 报告输出 | `create_vulnerability_report` | 创建正式漏洞报告 |
+| 思考编排 | `think` | 分析、规划与决策 |
+| 思考编排 | `reflect` | 复盘、校验与调整策略 |
 
-### 🔧 工具优先级（从高到低）
+### 推荐流程
+1. 使用 `smart_scan` 或 `quick_audit` 建立候选。
+2. 使用 `search_code`、`list_files`、`read_file`、`extract_function` 收集代码证据。
+3. 使用 `dataflow_analysis`、`controlflow_analysis_light`、`logic_authz_analysis` 补齐流证据。
+4. 使用 `run_code`、`sandbox_exec`、`verify_vulnerability` 做动态验证。
+5. 确认后调用 `create_vulnerability_report` 输出正式结论。
 
-#### 第一优先级：智能扫描工具 ⭐⭐⭐
-| 工具 | 用途 |
-|------|------|
-| `smart_scan` | 综合智能扫描，快速定位高风险区域 |
-| `quick_audit` | 快速审计模式 |
-
-#### 第二优先级：沙箱与多语言验证工具 (Sandbox & Dynamic Verification) ⭐⭐
-| 分类 | 工具名称 | 核心 Mock & 验证能力 |
-|------|------|---------|
-| **沙箱验证** | `sandbox_exec` | 在隔离沙箱中执行系统命令，获取 RCE 证据 |
-| | `sandbox_http` | 探测内网服务或验证 SSRF 漏洞 |
-| | `verify_vulnerability` | 自动化漏洞验证编排，生成最终确认报告 |
-| **多语言测试** | `php_test` | 模拟 PHP 环境，支持 `$_GET/$_POST` 等超全局变量 |
-| | `python_test` | 模拟 Python 环境，支持 Flask/Django 风格参数模拟 |
-| | `javascript_test` | 模拟 Express `req/res`，支持 `client_ip` 伪造测试 |
-| | `java_test` | 编译执行 Java 片段，模拟 Servlet `request` 参数 Map |
-| | `go_test` | 运行 Go 代码，智能处理 Unused Imports 并支持 `os.Args` |
-| | `ruby_test` | 模拟 Rails 环境，支持 `params` 的 Indifferent Access |
-| | `shell_test` | 执行 Bash 脚本，支持位置参数 `$1, $2` 的重置注入 |
-| **通用工具** | `universal_code_test` | 针对未分类语言或跨语言逻辑的通用沙箱测试 |
-
-#### 第三优先级：内置分析工具 ⭐⭐
-| 工具 | 用途 |
-|------|------|
-| `pattern_match` | 正则模式匹配（补充定位/交叉验证） |
-| `dataflow_analysis` | 数据流追踪验证 |
-| `controlflow_analysis_light` | 轻量控制流/可达性打分与调用链验证 |
-| `logic_authz_analysis` | 认证/授权与业务逻辑边界验证 |
-| `code_analysis` | 代码结构分析 |
-
-#### 辅助工具（MCP 检索优先）
-| 工具 | 用途 |
-|------|------|
-| `qmd_query` | **🔥 首选语义检索工具** - MCP 检索上下文 |
-| `locate_enclosing_function` | **🔥 函数归属定位** - 基于 Code Index MCP 定位命中代码所属函数 |
-| `verify_reachability` | **🔥 执行层编排 Skill** - 固定执行 `search/read -> locate/extract -> joern(/cpg)`，并限制读取范围预算 |
-| `brainstorming` | **🔥 序列化思考模板** - 使用 sequentialthinking MCP 进行分步推理 |
-| `file_planning` | **🔥 文件规划模板** - 参考 planning-with-files 按文件拆解任务 |
-| `mcp_builder` | MCP 设计模板（能力清单/输入输出契约/安全边界），用于新 MCP 方案设计 |
-| `skill_creator` | Skill 设计模板（提示词/误用约束/示例），用于新 skill 规范化创建 |
-| `read_file` | 严格锚点窗口读取（先定位行号，再读局部上下文） |
-| `list_files` | ⚠️ **仅用于** 了解根目录结构，**严禁** 用于遍历代码查找内容 |
-| `search_code` | ⚠️ **仅用于** 查找非常具体的字符串常量，**严禁** 作为主要代码搜索手段 |
-
-### 🔍 代码搜索工具对比
-| 工具 | 特点 | 适用场景 |
-|------|------|---------|
-| `qmd_query` | **🔥 语义搜索**，理解代码含义 | **首选！** 查找“处理用户输入的函数”“数据库查询逻辑” |
-| `locate_enclosing_function` | **🔥 函数归属定位** | 命中代码归属函数定位、函数范围定位 |
-| `verify_reachability` | **🔥 固定证据链编排**（先代码后流） | 验证“命中代码在所属函数可达且可触发”时优先使用 |
-| `brainstorming` | **🔥 顺序推理模板** | 复杂策略讨论、候选优先级权衡 |
-| `file_planning` | **🔥 文件执行计划模板** | 多文件漏洞链路的拆解与执行排程 |
-| `search_code` | **❌ 关键词搜索**，仅精确匹配 | **不推荐**，仅用于查找确定的常量或变量名 |
-
-**❌ 严禁行为**：
-1. **不要** 使用 `list_files` 递归列出所有文件来查找代码
-2. **不要** 使用 `search_code` 搜索通用关键词（如 "function", "user"），这会产生大量无用结果
-
-**✅ 推荐行为**：
-1. **始终优先使用 MCP 检索工具** (`qmd_query`, `search_code`)
-2. `qmd_query` 可以理解自然语言，如 "Show me the login function"
-3. 先用 `search_code` 定位到 `file_path:line`，再使用 `read_file` 做窗口化阅读
-4. 可达性验证优先使用 `verify_reachability`，由系统按固定流程执行并收敛 read_file 范围
-5. 仅在确实需要精确匹配特定字符串时才使用 `search_code`
-6. 需要复杂策略时先使用 `brainstorming` 产出序列化思路，再执行工具调用
-7. 多文件执行前使用 `file_planning` 先生成文件级 TODO，避免重复读写
-8. `read_file` 禁止无锚点直接读取，必须提供行号或先完成定位
-
-### 📋 推荐分析流程
-
-#### 第一步：快速侦察（5%时间）
-```
-```
-Action: list_files
-Action Input: {"directory": ".", "max_depth": 2}
-```
-了解项目根目录结构（不要遍历全项目）
-
-**🔥 RAG 搜索关键逻辑（RAG 优先！）：**
-```
-Action: qmd_query
-Action Input: {"query": "用户的登录认证逻辑在哪里？", "top_k": 5}
-```
-
-#### 第二步：外部工具全面扫描（60%时间）⚡重点！
-**智能审计默认不强制外部工具。优先执行智能扫描：**
-
-```
-Action: smart_scan
-Action Input: {"target_path": "."}
-```
-
-#### 第三步：深度分析（25%时间）
-对外部工具发现的问题进行深入分析：
-- 使用 `read_file` 查看完整上下文
-- 使用 `dataflow_analysis` 追踪 Source -> Sink
-- 使用 `controlflow_analysis_light` 验证可达性与控制条件
-- 在验证阶段优先调用 `verify_reachability`，由执行层按固定证据链编排并避免无效重试
-- 对鉴权/越权场景使用 `logic_authz_analysis` 补齐业务约束证据
-- 验证是否为真实漏洞
-
-### ⛔ 停止重试规则（验证阶段）
-- 同一漏洞同一参数连续失败 2 次后，必须改参数或切换工具，禁止原样重试。
-- 当 `read_file` 与 flow 工具均给出确定性失败时，将该候选标记为 `blocked/false_positive` 并推进下一个候选。
-- 每个候选必须输出“代码证据 + 流证据”两类信息；证据不足不能直接给 `confirmed`。
-
-#### 第四步：验证和报告（10%时间）
-- 确认漏洞可利用性
-- 评估影响范围
-- 生成修复建议
-
-### ⚠️ 重要提醒
-
-1. **不要跳过外部工具！** 即使内置模式匹配可能更快，外部工具的检测能力更强
-2. **并行执行**：可以同时调用多个不相关的外部工具以提高效率
-3. **Docker依赖**：外部工具需要Docker环境，如果Docker不可用，再回退到内置工具
-4. **结果整合**：综合多个工具的结果，交叉验证提高准确性
-
-### 工具调用格式
-
-```
-Action: 工具名称
-Action Input: {}
-```
-
-### 错误处理指南
-
-当工具执行返回错误时，你会收到详细的错误信息，包括：
-- 工具名称和参数
-- 错误类型和错误信息
-- 堆栈跟踪（如有）
-
-**错误处理策略**：
-
-1. **参数错误** - 检查并修正参数格式
-   - 确保 JSON 格式正确
-   - 检查必填参数是否提供
-   - 验证参数类型（字符串、数字、列表等）
-
-2. **资源不存在** - 调整目标
-   - 文件不存在：使用 list_files 确认路径
-   - 工具不可用：使用其他替代工具
-
-3. **权限/超时错误** - 跳过或简化
-   - 记录问题，继续其他分析
-   - 尝试更小范围的操作
-
-4. **沙箱错误** - 检查环境
-   - Docker 不可用时使用代码分析替代
-   - 记录无法验证的原因
-
-**重要**：遇到错误时，不要放弃！分析错误原因，尝试其他方法完成任务。
-
-### 完成输出格式
-
-```
-Final Answer: {
-    "findings": [...],
-    "summary": "分析总结"
-}
-```
+### 禁止事项
+- 不要使用已删除工具或 skill。
+- 不要跳过证据链直接输出 confirmed。
+- 不要把 `list_files` 当作全文代码搜索工具。
 </tool_usage_guide>
 """
 
-'''
-# 工具使用指南
-TOOL_USAGE_GUIDE = """
-<tool_usage_guide>
-## 工具使用指南
-
-### ⚠️ 核心原则：优先使用外部专业工具
-
-**外部工具优先级最高！** 外部安全工具（Opengrep、Bandit、Gitleaks、Kunlun-M 等）是经过业界验证的专业工具，具有：
-- 更全面的规则库和漏洞检测能力
-- 更低的误报率
-- 更专业的安全分析算法
-- 持续更新的安全规则
-
-**必须优先调用外部工具，而非依赖内置的模式匹配！**
-
-### 🔧 工具优先级（从高到低）
-
-#### 第一优先级：外部专业安全工具 ⭐⭐⭐
-| 工具 | 用途 | 何时使用 |
-|------|------|---------|
-| `opengrep_scan` | 多语言静态分析 | **每次分析必用**，支持30+语言，OWASP规则 |
-| `bandit_scan` | Python安全扫描 | Python项目**必用**，检测注入/反序列化等 |
-| `gitleaks_scan` | 密钥泄露检测 | **每次分析必用**，检测150+种密钥类型 |
-| `kunlun_scan` | 深度代码审计 | 大型项目推荐，支持PHP/Java/JS深度分析 |
-| `npm_audit` | Node.js依赖漏洞 | package.json项目**必用** |
-| `safety_scan` | Python依赖漏洞 | requirements.txt项目**必用** |
-| `osv_scan` | 开源漏洞扫描 | 多语言依赖检查 |
-| `trufflehog_scan` | 深度密钥扫描 | 需要验证密钥有效性时使用 |
-
-#### 第二优先级：智能扫描工具 ⭐⭐
-| 工具 | 用途 |
-|------|------|
-| `smart_scan` | 综合智能扫描，快速定位高风险区域 |
-| `quick_audit` | 快速审计模式 |
-
-#### 第三优先级：内置分析工具 ⭐
-| 工具 | 用途 |
-|------|------|
-| `pattern_match` | 正则模式匹配（外部工具不可用时的备选） |
-| `dataflow_analysis` | 数据流追踪验证 |
-| `code_analysis` | 代码结构分析 |
-
-#### 辅助工具（MCP 检索优先）
-| 工具 | 用途 |
-|------|------|
-| `qmd_query` | **🔥 首选语义检索工具** - MCP 检索上下文 |
-| `locate_enclosing_function` | **🔥 函数归属定位** - 基于 Code Index MCP 定位命中代码所属函数 |
-| `read_file` | 严格锚点窗口读取（先定位行号，再读局部上下文） |
-| `list_files` | ⚠️ **仅用于** 了解根目录结构，**严禁** 用于遍历代码查找内容 |
-| `search_code` | ⚠️ **仅用于** 查找非常具体的字符串常量，**严禁** 作为主要代码搜索手段 |
-
-### 🔍 代码搜索工具对比
-| 工具 | 特点 | 适用场景 |
-|------|------|---------|
-| `qmd_query` | **🔥 语义搜索**，理解代码含义 | **首选！** 查找"处理用户输入的函数"、"数据库查询逻辑" |
-| `locate_enclosing_function` | **🔥 函数归属定位** | 查找命中代码所属函数和范围 |
-| `search_code` | **❌ 关键词搜索**，仅精确匹配 | **不推荐**，仅用于查找确定的常量或变量名 |
-
-**❌ 严禁行为**：
-1. **不要** 使用 `list_files` 递归列出所有文件来查找代码
-2. **不要** 使用 `search_code` 搜索通用关键词（如 "function", "user"），这会产生大量无用结果
-
-**✅ 推荐行为**：
-1. **始终优先使用 MCP 检索工具** (`qmd_query`, `search_code`)
-2. `qmd_query` 可以理解自然语言，如 "Show me the login function"
-3. 先用 `search_code` 定位到 `file_path:line`，再使用 `read_file` 做窗口化阅读
-4. `read_file` 禁止无锚点直接读取，必须提供行号或先完成定位
-
-### 📋 推荐分析流程
-
-#### 第一步：快速侦察（5%时间）
-```
-```
-Action: list_files
-Action Input: {"directory": ".", "max_depth": 2}
-```
-了解项目根目录结构（不要遍历全项目）
-
-**🔥 MCP 检索关键逻辑（QMD 优先）：**
-```
-Action: qmd_query
-Action Input: {"query": "用户的登录认证逻辑在哪里？", "top_k": 5}
-```
-
-#### 第二步：外部工具全面扫描（60%时间）⚡重点！
-**根据技术栈选择对应工具，并行执行多个扫描：**
-
-```
-# 通用项目（必做）
-Action: opengrep_scan
-Action Input: {"target_path": ".", "rules": "p/security-audit"}
-
-Action: gitleaks_scan
-Action Input: {"target_path": "."}
-
-# Python项目（必做）
-Action: bandit_scan
-Action Input: {"target_path": ".", "severity": "medium"}
-
-Action: safety_scan
-Action Input: {"requirements_file": "requirements.txt"}
-
-# Node.js项目（必做）
-Action: npm_audit
-Action Input: {"target_path": "."}
-
-# 大型项目（推荐）
-Action: kunlun_scan
-Action Input: {"target_path": ".", "rules": "all"}
-```
-
-#### 第三步：深度分析（25%时间）
-对外部工具发现的问题进行深入分析：
-- 使用 `read_file` 查看完整上下文
-- 使用 `dataflow_analysis` 追踪数据流
-- 验证是否为真实漏洞
-
-#### 第四步：验证和报告（10%时间）
-- 确认漏洞可利用性
-- 评估影响范围
-- 生成修复建议
-
-### ⚠️ 重要提醒
-
-1. **不要跳过外部工具！** 即使内置模式匹配可能更快，外部工具的检测能力更强
-2. **并行执行**：可以同时调用多个不相关的外部工具以提高效率
-3. **Docker依赖**：外部工具需要Docker环境，如果Docker不可用，再回退到内置工具
-4. **结果整合**：综合多个工具的结果，交叉验证提高准确性
-
-### 工具调用格式
-
-```
-Action: 工具名称
-Action Input: {}
-```
-
-### 错误处理指南
-
-当工具执行返回错误时，你会收到详细的错误信息，包括：
-- 工具名称和参数
-- 错误类型和错误信息
-- 堆栈跟踪（如有）
-
-**错误处理策略**：
-
-1. **参数错误** - 检查并修正参数格式
-   - 确保 JSON 格式正确
-   - 检查必填参数是否提供
-   - 验证参数类型（字符串、数字、列表等）
-
-2. **资源不存在** - 调整目标
-   - 文件不存在：使用 list_files 确认路径
-   - 工具不可用：使用其他替代工具
-
-3. **权限/超时错误** - 跳过或简化
-   - 记录问题，继续其他分析
-   - 尝试更小范围的操作
-
-4. **沙箱错误** - 检查环境
-   - Docker 不可用时使用代码分析替代
-   - 记录无法验证的原因
-
-**重要**：遇到错误时，不要放弃！分析错误原因，尝试其他方法完成任务。
-
-### 完成输出格式
-
-```
-Final Answer: {
-    "findings": [...],
-    "summary": "分析总结"
-}
-```
-</tool_usage_guide>
-"""
-'''
 # 动态Agent系统规则
 MULTI_AGENT_RULES = """
 <multi_agent_rules>

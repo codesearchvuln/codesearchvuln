@@ -7,7 +7,10 @@ from pydantic import BaseModel, Field
 
 from app.api import deps
 from app.models.user import User
-from app.services.agent.skills.registry import get_skill_registry_service
+from app.services.agent.skills.scan_core import (
+    get_scan_core_skill_detail,
+    search_scan_core_skills,
+)
 
 
 router = APIRouter()
@@ -64,8 +67,7 @@ async def get_skill_catalog(
     current_user: User = Depends(deps.get_current_user),
 ) -> SkillCatalogResponse:
     _ = current_user
-    registry = get_skill_registry_service()
-    payload = registry.search(query=q, namespace=namespace, limit=limit, offset=offset)
+    payload = search_scan_core_skills(query=q, namespace=namespace, limit=limit, offset=offset)
     return SkillCatalogResponse(**payload)
 
 
@@ -76,12 +78,10 @@ async def get_skill_detail(
     current_user: User = Depends(deps.get_current_user),
 ) -> SkillDetailResponse:
     _ = current_user
-    registry = get_skill_registry_service()
-    detail = registry.get_detail(skill_id=skill_id, include_workflow=include_workflow)
+    _ = include_workflow
+    detail = get_scan_core_skill_detail(skill_id=skill_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
-
     payload = dict(detail)
-    payload["enabled"] = registry.enabled
+    payload["enabled"] = True
     return SkillDetailResponse(**payload)
-

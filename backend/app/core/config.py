@@ -1,9 +1,7 @@
 from __future__ import annotations
-from typing import Annotated, List, Union, Optional
-from pathlib import Path
+from typing import List, Union, Optional
 from pydantic import AnyHttpUrl, validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "DeepAudit"
@@ -44,39 +42,6 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return [str(item).strip() for item in v if str(item).strip()]
         return []
-
-    @validator("SKILL_REGISTRY_ROOT", pre=True)
-    def normalize_skill_registry_root(cls, v: Optional[str]) -> str:
-        text = str(v or "").strip() or "./data/mcp/skill-registry"
-        return str(Path(text).expanduser())
-
-    @validator("SKILL_SOURCE_ROOTS", pre=True)
-    def assemble_skill_source_roots(cls, v: Union[str, List[str], None]) -> List[str]:
-        default_roots = [
-            "./data/mcp/codex-home/skills",
-            "~/.agents/skills",
-            "~/.codex/skills",
-            "~/.codex/superpowers/skills",
-        ]
-        if v is None:
-            return [str(Path(item).expanduser()) for item in default_roots]
-        if isinstance(v, str):
-            text = v.strip()
-            if not text:
-                return [str(Path(item).expanduser()) for item in default_roots]
-            if text.startswith("[") and text.endswith("]"):
-                try:
-                    import json
-
-                    parsed = json.loads(text)
-                    if isinstance(parsed, list):
-                        return [str(Path(str(item).strip()).expanduser()) for item in parsed if str(item).strip()]
-                except Exception:
-                    pass
-            return [str(Path(item.strip()).expanduser()) for item in text.split(",") if item.strip()]
-        if isinstance(v, list):
-            return [str(Path(str(item).strip()).expanduser()) for item in v if str(item).strip()]
-        return [str(Path(item).expanduser()) for item in default_roots]
 
     # POSTGRES
     POSTGRES_SERVER: str = "db"
@@ -214,8 +179,8 @@ class Settings(BaseSettings):
     MCP_STRICT_MODE: bool = True
     MCP_TIMEOUT_SECONDS: int = 30
     MCP_REQUIRE_ALL_READY_ON_STARTUP: bool = True
-    MCP_REQUIRED_RUNTIME_DOMAIN: str = "all"  # backend | sandbox | all
-    MCP_RUNTIME_MODE_DEFAULT: str = "backend_then_sandbox"
+    MCP_REQUIRED_RUNTIME_DOMAIN: str = "stdio"
+    MCP_RUNTIME_MODE_DEFAULT: str = "stdio_only"
 
     # Write policy hard constraints (applies to every task)
     MCP_WRITE_HARD_LIMIT: int = 50
@@ -225,36 +190,14 @@ class Settings(BaseSettings):
     MCP_FORBID_PROJECT_WIDE_WRITES: bool = True
 
     # MCP adapters (stdio)
-    MCP_FILESYSTEM_ENABLED: bool = False
-    MCP_FILESYSTEM_RUNTIME_MODE: str = "sandbox_only"
+    MCP_FILESYSTEM_ENABLED: bool = True
+    MCP_FILESYSTEM_RUNTIME_MODE: str = "stdio_only"
     MCP_FILESYSTEM_COMMAND: str = "pnpm"
     MCP_FILESYSTEM_ARGS: str = "dlx @modelcontextprotocol/server-filesystem"
-    MCP_FILESYSTEM_SANDBOX_ENABLED: bool = True
-    MCP_FILESYSTEM_SANDBOX_COMMAND: str = "pnpm"
-    MCP_FILESYSTEM_SANDBOX_ARGS: str = "dlx @modelcontextprotocol/server-filesystem"
-    MCP_FILESYSTEM_FORCE_STDIO: bool = True
-    MCP_FILESYSTEM_BACKEND_URL: Optional[str] = None
-    MCP_FILESYSTEM_SANDBOX_URL: Optional[str] = None
-    MCP_FILESYSTEM_DAEMON_HOST: str = "127.0.0.1"
-    MCP_FILESYSTEM_DAEMON_PORT: int = 8770
-    MCP_FILESYSTEM_DAEMON_COMMAND: str = "fastmcp"
-    MCP_FILESYSTEM_DAEMON_ARGS: str = ""
-    MCP_FILESYSTEM_DAEMON_ALLOWED_DIRS: str = "/tmp,/app"
-    MCP_FILESYSTEM_DAEMON_SOURCE_DIR: str = "/app/mcp-src/filesystem"
-    MCP_FILESYSTEM_DAEMON_STARTUP_TIMEOUT_SECONDS: int = 45
-
     MCP_CODE_INDEX_ENABLED: bool = True
-    MCP_CODE_INDEX_RUNTIME_MODE: str = "backend_then_sandbox"
+    MCP_CODE_INDEX_RUNTIME_MODE: str = "stdio_only"
     MCP_CODE_INDEX_COMMAND: str = "code-index-mcp"
     MCP_CODE_INDEX_ARGS: str = "--indexer-path /app/data/mcp/code-index"
-    MCP_CODE_INDEX_SANDBOX_ENABLED: bool = True
-    MCP_CODE_INDEX_SANDBOX_COMMAND: str = "code-index-mcp"
-    MCP_CODE_INDEX_SANDBOX_ARGS: str = "--indexer-path /app/data/mcp/code-index"
-    MCP_CODE_INDEX_BACKEND_URL: Optional[str] = None
-    MCP_CODE_INDEX_SANDBOX_URL: Optional[str] = None
-
-    MCP_DAEMON_AUTOSTART: bool = True
-    MCP_DAEMON_LOG_DIR: str = "/tmp/deepaudit/mcp-daemons"
     GIT_MIRROR_ENABLED: bool = True
     GIT_MIRROR_PREFIX: str = "https://gh-proxy.org"
     GIT_MIRROR_PREFIXES: str = "https://gh-proxy.org,https://v6.gh-proxy.org"
@@ -262,70 +205,6 @@ class Settings(BaseSettings):
     GIT_MIRROR_ALLOW_AUTH_URL: bool = False
     GIT_MIRROR_FALLBACK_TO_ORIGIN: bool = False
 
-    # Unified Skill Registry
-    SKILL_REGISTRY_ENABLED: bool = True
-    SKILL_REGISTRY_ROOT: str = "./data/mcp/skill-registry"
-    SKILL_SOURCE_ROOTS: Annotated[List[str], NoDecode] = [
-        "./data/mcp/codex-home/skills",
-        "~/.agents/skills",
-        "~/.codex/skills",
-        "~/.codex/superpowers/skills",
-    ]
-    SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP: bool = True
-
-    MCP_CODE_INDEX_DAEMON_HOST: str = "127.0.0.1"
-    MCP_CODE_INDEX_DAEMON_PORT: int = 8765
-    MCP_CODE_INDEX_DAEMON_COMMAND: str = "code-index-mcp"
-    MCP_CODE_INDEX_DAEMON_ARGS: str = "--transport streamable-http"
-    MCP_CODE_INDEX_DAEMON_INDEXER_PATH: str = "/app/data/mcp/code-index"
-    MCP_CODE_INDEX_DAEMON_SOURCE_DIR: str = "/app/mcp-src/code-index-mcp"
-    MCP_CODE_INDEX_DAEMON_STARTUP_TIMEOUT_SECONDS: int = 45
-
-    MCP_SEQUENTIAL_THINKING_ENABLED: bool = True
-    MCP_SEQUENTIAL_THINKING_RUNTIME_MODE: str = "backend_then_sandbox"
-    MCP_SEQUENTIAL_THINKING_FORCE_STDIO: bool = True
-    MCP_SEQUENTIAL_THINKING_COMMAND: str = "mcp-server-sequential-thinking"
-    MCP_SEQUENTIAL_THINKING_ARGS: str = ""
-    MCP_SEQUENTIAL_THINKING_SANDBOX_ENABLED: bool = True
-    MCP_SEQUENTIAL_THINKING_SANDBOX_COMMAND: str = "mcp-server-sequential-thinking"
-    MCP_SEQUENTIAL_THINKING_SANDBOX_ARGS: str = ""
-    MCP_SEQUENTIAL_THINKING_BACKEND_URL: Optional[str] = None
-    MCP_SEQUENTIAL_THINKING_SANDBOX_URL: Optional[str] = None
-    MCP_SEQUENTIAL_THINKING_DAEMON_HOST: str = "127.0.0.1"
-    MCP_SEQUENTIAL_THINKING_DAEMON_PORT: int = 8771
-    MCP_SEQUENTIAL_THINKING_DAEMON_COMMAND: str = "node"
-    MCP_SEQUENTIAL_THINKING_DAEMON_ARGS: str = "dist/index.js --transport streamable-http --port 8771"
-    MCP_SEQUENTIAL_THINKING_DAEMON_SOURCE_DIR: str = "/app/mcp-src/sequential-thinking"
-    MCP_SEQUENTIAL_THINKING_DAEMON_STARTUP_TIMEOUT_SECONDS: int = 45
-
-    MCP_QMD_ENABLED: bool = False
-    MCP_QMD_RUNTIME_MODE: str = "sandbox_only"
-    MCP_QMD_COMMAND: str = "qmd"
-    MCP_QMD_ARGS: str = "mcp"
-    MCP_QMD_SANDBOX_ENABLED: bool = False
-    MCP_QMD_SANDBOX_COMMAND: str = "qmd"
-    MCP_QMD_SANDBOX_ARGS: str = "mcp"
-    MCP_QMD_BACKEND_URL: Optional[str] = None
-    MCP_QMD_SANDBOX_URL: Optional[str] = None
-    MCP_QMD_DAEMON_HOST: str = "localhost"
-    MCP_QMD_DAEMON_PORT: int = 8181
-    MCP_QMD_DAEMON_COMMAND: str = "node"
-    MCP_QMD_DAEMON_ARGS: str = "dist/index.js mcp --transport streamable-http"
-    MCP_QMD_DAEMON_SOURCE_DIR: str = "/app/mcp-src/qmd"
-    MCP_QMD_DAEMON_STARTUP_TIMEOUT_SECONDS: int = 60
-    QMD_COLLECTION_PREFIX: str = "project"
-    QMD_INDEX_GLOB: str = "**/*.{c,cc,cpp,cxx,h,hpp,hh,py,js,ts,tsx,java,go,rs,php,rb,swift}"
-    QMD_LAZY_INDEX_ENABLED: bool = True
-    QMD_AUTO_EMBED_ON_FIRST_USE: bool = False
-    QMD_DATA_DIR: str = "./data/qmd"
-    QMD_CLI_COMMAND: str = "qmd"
-    QMD_CLI_TIMEOUT_SECONDS: int = 120
-    QMD_TASK_KB_ENABLED: bool = True
-    QMD_TASK_ROOT_REL: str = ".deepaudit/qmd"
-    QMD_TASK_COLLECTION_PREFIX: str = "task"
-    QMD_TASK_DOC_GLOB: str = "**/*.{md,txt,json,yml,yaml}"
-    QMD_TASK_AUTO_EMBED: bool = False
-    QMD_TASK_QUERY_CACHE: bool = True
     XDG_CONFIG_HOME: str = "/app/data/mcp/xdg-config"
 
     MCP_CATALOG_SOURCE_URL: str = ""
@@ -341,6 +220,5 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",  # 忽略额外的环境变量（如 VITE_* 前端变量）
     )
-
 
 settings = Settings()

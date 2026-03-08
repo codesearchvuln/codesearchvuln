@@ -69,7 +69,7 @@ class _StrictDeterministicRuntime:
             error="'dict' object is not callable",
             metadata={
                 "mcp_used": True,
-                "mcp_adapter": "local_proxy",
+                "mcp_adapter": "filesystem",
                 "mcp_runtime_mode": "strict",
             },
         )

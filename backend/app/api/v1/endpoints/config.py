@@ -28,6 +28,7 @@ from app.models.project import Project
 from app.core.config import settings
 from app.core.encryption import encrypt_sensitive_data, decrypt_sensitive_data
 from app.services.agent.mcp.catalog import build_mcp_catalog
+from app.services.agent.skills.scan_core import build_scan_core_skill_availability
 from app.services.agent.mcp.protocol_verify import (
     normalize_listed_tools,
     run_protocol_verification,
@@ -116,24 +117,20 @@ LLM_PROVIDER_META_OVERRIDES: dict[str, dict[str, Any]] = {
     },
 }
 
-
 def _normalize_llm_provider_id(provider: Any) -> str:
     normalized = str(provider or "").strip().lower()
     if not normalized:
         return ""
     return LLM_PROVIDER_ALIASES.get(normalized, normalized)
 
-
 def _resolve_llm_runtime_provider(provider: Any) -> tuple[str, Optional[LLMProvider]]:
     provider_id = _normalize_llm_provider_id(provider)
     return provider_id, LLM_PROVIDER_RUNTIME_MAP.get(provider_id)
-
 
 def _get_provider_default_model(provider_id: str, runtime_provider: Optional[LLMProvider]) -> str:
     if not runtime_provider:
         return ""
     return LLMFactory.get_default_model(runtime_provider)
-
 
 def _get_provider_default_base_url(provider_id: str, runtime_provider: Optional[LLMProvider]) -> str:
     override = LLM_PROVIDER_META_OVERRIDES.get(provider_id, {}).get("defaultBaseUrl")
@@ -143,12 +140,10 @@ def _get_provider_default_base_url(provider_id: str, runtime_provider: Optional[
         return ""
     return DEFAULT_BASE_URLS.get(runtime_provider, "")
 
-
 def _get_provider_static_models(provider_id: str, runtime_provider: Optional[LLMProvider]) -> list[str]:
     if not runtime_provider:
         return []
     return LLMFactory.get_available_models(runtime_provider)
-
 
 def _build_llm_provider_catalog() -> list[dict[str, Any]]:
     providers: list[dict[str, Any]] = []
@@ -215,7 +210,6 @@ def _build_llm_provider_catalog() -> list[dict[str, Any]]:
     providers.sort(key=lambda item: (preferred_order.get(item["id"], 100), item["id"]))
     return providers
 
-
 def _extract_model_names_from_payload(payload: Any) -> list[str]:
     candidates: list[str] = []
     if isinstance(payload, list):
@@ -238,7 +232,6 @@ def _extract_model_names_from_payload(payload: Any) -> list[str]:
     )
     return normalized
 
-
 def _iter_model_items_from_payload(payload: Any) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     if isinstance(payload, list):
@@ -254,14 +247,12 @@ def _iter_model_items_from_payload(payload: Any) -> list[dict[str, Any]]:
                         items.append(item)
     return items
 
-
 def _parse_positive_int(value: Any) -> Optional[int]:
     try:
         parsed = int(float(value))
     except Exception:
         return None
     return parsed if parsed > 0 else None
-
 
 def _extract_int_from_paths(payload: dict[str, Any], paths: list[tuple[str, ...]]) -> Optional[int]:
     for path in paths:
@@ -278,7 +269,6 @@ def _extract_int_from_paths(payload: dict[str, Any], paths: list[tuple[str, ...]
         if parsed is not None:
             return parsed
     return None
-
 
 def _recommend_tokens_from_static_map(model_name: str) -> Optional[int]:
     normalized = str(model_name or "").strip().lower()
@@ -318,7 +308,6 @@ def _recommend_tokens_from_static_map(model_name: str) -> Optional[int]:
     if any(hint in normalized for hint in medium_hints):
         return 8192
     return None
-
 
 def _extract_model_metadata_from_payload(payload: Any) -> dict[str, dict[str, Optional[int] | str]]:
     metadata: dict[str, dict[str, Optional[int] | str]] = {}
@@ -378,7 +367,6 @@ def _extract_model_metadata_from_payload(payload: Any) -> dict[str, dict[str, Op
         }
     return metadata
 
-
 def _build_static_model_metadata(models: list[str]) -> dict[str, dict[str, Optional[int] | str]]:
     metadata: dict[str, dict[str, Optional[int] | str]] = {}
     for model in models:
@@ -394,7 +382,6 @@ def _build_static_model_metadata(models: list[str]) -> dict[str, dict[str, Optio
         }
     return metadata
 
-
 async def _fetch_models_openai_compatible(
     base_url: str,
     api_key: str,
@@ -407,7 +394,6 @@ async def _fetch_models_openai_compatible(
         response.raise_for_status()
         payload = response.json()
         return _extract_model_names_from_payload(payload), _extract_model_metadata_from_payload(payload)
-
 
 async def _fetch_models_anthropic(
     base_url: str,
@@ -422,7 +408,6 @@ async def _fetch_models_anthropic(
         response.raise_for_status()
         payload = response.json()
         return _extract_model_names_from_payload(payload), _extract_model_metadata_from_payload(payload)
-
 
 async def _fetch_models_azure_openai(
     base_url: str,
@@ -454,15 +439,7 @@ async def _fetch_models_azure_openai(
         raise last_error
     return [], {}
 
-_VALID_MCP_RUNTIME_MODES = {
-    "backend_only",
-    "sandbox_only",
-    "prefer_backend",
-    "prefer_sandbox",
-    "backend_then_sandbox",
-    "sandbox_then_backend",
-}
-
+_VALID_MCP_RUNTIME_MODES = {"stdio_only"}
 
 def _default_mcp_write_policy() -> dict:
     hard_limit = max(1, int(getattr(settings, "MCP_WRITE_HARD_LIMIT", 50)))
@@ -481,44 +458,18 @@ def _default_mcp_write_policy() -> dict:
         ),
     }
 
-
 def _default_mcp_runtime_policy() -> dict:
-    def _entry(
-        *,
-        runtime_mode: str,
-        backend_enabled: bool,
-        sandbox_enabled: bool,
-    ) -> dict:
-        return {
-            "runtime_mode": runtime_mode,
-            "backend_enabled": bool(backend_enabled),
-            "sandbox_enabled": bool(sandbox_enabled),
-        }
-
     return {
-        "default_mode": str(
-            getattr(settings, "MCP_RUNTIME_MODE_DEFAULT", "backend_then_sandbox")
-            or "backend_then_sandbox"
-        ),
-        "filesystem": _entry(
-            runtime_mode=str(getattr(settings, "MCP_FILESYSTEM_RUNTIME_MODE", "backend_then_sandbox")),
-            backend_enabled=bool(getattr(settings, "MCP_FILESYSTEM_ENABLED", False)),
-            sandbox_enabled=bool(getattr(settings, "MCP_FILESYSTEM_SANDBOX_ENABLED", False)),
-        ),
-        "code_index": _entry(
-            runtime_mode=str(getattr(settings, "MCP_CODE_INDEX_RUNTIME_MODE", "backend_then_sandbox")),
-            backend_enabled=bool(getattr(settings, "MCP_CODE_INDEX_ENABLED", False)),
-            sandbox_enabled=bool(getattr(settings, "MCP_CODE_INDEX_SANDBOX_ENABLED", False)),
-        ),
-        "sequentialthinking": _entry(
-            runtime_mode=str(
-                getattr(settings, "MCP_SEQUENTIAL_THINKING_RUNTIME_MODE", "backend_then_sandbox")
-            ),
-            backend_enabled=bool(getattr(settings, "MCP_SEQUENTIAL_THINKING_ENABLED", False)),
-            sandbox_enabled=bool(getattr(settings, "MCP_SEQUENTIAL_THINKING_SANDBOX_ENABLED", False)),
-        ),
+        "default_mode": "stdio_only",
+        "filesystem": {
+            "runtime_mode": "stdio_only",
+            "enabled": bool(getattr(settings, "MCP_FILESYSTEM_ENABLED", True)),
+        },
+        "code_index": {
+            "runtime_mode": "stdio_only",
+            "enabled": bool(getattr(settings, "MCP_CODE_INDEX_ENABLED", True)),
+        },
     }
-
 
 def _sanitize_runtime_mode(raw_mode: Any, default_mode: str) -> str:
     mode = str(raw_mode or "").strip().lower()
@@ -527,98 +478,34 @@ def _sanitize_runtime_mode(raw_mode: Any, default_mode: str) -> str:
     fallback = str(default_mode or "").strip().lower()
     if fallback in _VALID_MCP_RUNTIME_MODES:
         return fallback
-    return "backend_then_sandbox"
-
+    return "stdio_only"
 
 def _sanitize_mcp_runtime_policy(raw_policy: Any) -> dict:
+    _ = raw_policy
     default_policy = _default_mcp_runtime_policy()
-    candidate = raw_policy if isinstance(raw_policy, dict) else {}
-    default_mode = _sanitize_runtime_mode(
-        candidate.get("default_mode"),
-        default_policy.get("default_mode", "backend_then_sandbox"),
-    )
-
-    sanitized: dict = {"default_mode": default_mode}
-    for mcp_name, mcp_default in default_policy.items():
-        if mcp_name == "default_mode":
-            continue
-        custom = candidate.get(mcp_name) if isinstance(candidate.get(mcp_name), dict) else {}
-        sanitized[mcp_name] = {
-            "runtime_mode": _sanitize_runtime_mode(
-                custom.get("runtime_mode"),
-                mcp_default.get("runtime_mode", default_mode),
-            ),
-            "backend_enabled": bool(
-                custom.get("backend_enabled", mcp_default.get("backend_enabled", False))
-            ),
-            "sandbox_enabled": bool(
-                custom.get("sandbox_enabled", mcp_default.get("sandbox_enabled", False))
-            ),
-        }
-
-    filesystem_policy = sanitized.get("filesystem")
-    if isinstance(filesystem_policy, dict):
-        filesystem_policy["runtime_mode"] = "sandbox_only"
-        filesystem_policy["backend_enabled"] = False
-        filesystem_policy["sandbox_enabled"] = True
-    return sanitized
-
+    return {
+        "default_mode": "stdio_only",
+        "filesystem": {
+            "runtime_mode": "stdio_only",
+            "enabled": bool(default_policy["filesystem"]["enabled"]),
+        },
+        "code_index": {
+            "runtime_mode": "stdio_only",
+            "enabled": bool(default_policy["code_index"]["enabled"]),
+        },
+    }
 
 def _build_mcp_runtime_persistence() -> dict:
     return {
-        "backend_data_dir": "/app/data/mcp",
-        "sandbox_data_dir": "/tmp/deepaudit/mcp-cache",
-        "qmd_data_dir": str(getattr(settings, "QMD_DATA_DIR", "./data/qmd") or "./data/qmd"),
+        "data_dir": "/app/data/mcp",
         "xdg_config_home": str(
             getattr(settings, "XDG_CONFIG_HOME", "/app/data/mcp/xdg-config")
             or "/app/data/mcp/xdg-config"
         ),
-        "daemon_log_dir": str(
-            getattr(settings, "MCP_DAEMON_LOG_DIR", "/tmp/deepaudit/mcp-daemons")
-            or "/tmp/deepaudit/mcp-daemons"
-        ),
     }
 
-
 def _build_skill_availability(catalog: list[dict]) -> dict:
-    availability: dict[str, dict] = {}
-    for item in catalog:
-        if not isinstance(item, dict):
-            continue
-        source_type = str(item.get("type") or "").strip().lower()
-        enabled = bool(item.get("enabled"))
-        startup_ready = bool(item.get("startup_ready", True))
-        runtime_ready = enabled and startup_ready
-        reason = str(item.get("startup_error") or "").strip() or (
-            "ready" if runtime_ready else "mcp_not_ready"
-        )
-        source = "mcp" if source_type == "mcp-server" else "hybrid"
-        for skill_name in item.get("includedSkills") or []:
-            skill_key = str(skill_name or "").strip()
-            if not skill_key:
-                continue
-            availability[skill_key] = {
-                "enabled": runtime_ready,
-                "startup_ready": startup_ready,
-                "runtime_ready": runtime_ready,
-                "reason": reason,
-                "source": source,
-            }
-
-    # Local fallback skills should remain available regardless of MCP readiness.
-    for local_skill in ("think", "reflect", "read_file", "search_code", "list_files"):
-        availability.setdefault(
-            local_skill,
-            {
-                "enabled": True,
-                "startup_ready": True,
-                "runtime_ready": True,
-                "reason": "local_tool",
-                "source": "local",
-            },
-        )
-    return availability
-
+    return build_scan_core_skill_availability(catalog)
 
 def _sanitize_mcp_write_policy(raw_policy: Any) -> dict:
     default_policy = _default_mcp_write_policy()
@@ -649,7 +536,6 @@ def _sanitize_mcp_write_policy(raw_policy: Any) -> dict:
         "forbid_project_wide_writes": True,
     }
 
-
 def _sanitize_mcp_config(raw_mcp_config: Any) -> dict:
     # MCP runtime policy is backend-owned. Frontend input is ignored.
     _ = raw_mcp_config
@@ -670,24 +556,20 @@ def _sanitize_mcp_config(raw_mcp_config: Any) -> dict:
         "skillAvailability": _build_skill_availability(catalog),
     }
 
-
 def _sanitize_other_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
     candidate["mcpConfig"] = _sanitize_mcp_config(candidate.get("mcpConfig"))
     return candidate
-
 
 def _strip_mcp_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
     candidate.pop("mcpConfig", None)
     return candidate
 
-
 _VERIFY_DEFAULT_PROJECT_NAME = "libplist"
 _VERIFY_SUPPORTED_MCP_IDS = {
     "filesystem",
     "code_index",
-    "sequentialthinking",
 }
 _MCP_INTERNAL_TOOLS = {
     "set_project_path",
@@ -695,7 +577,6 @@ _MCP_INTERNAL_TOOLS = {
     "refresh_index",
     "build_deep_index",
 }
-
 
 def _normalize_extracted_project_root(base_path: str) -> str:
     candidates = [
@@ -709,7 +590,6 @@ def _normalize_extracted_project_root(base_path: str) -> str:
     if os.path.isdir(nested):
         return nested
     return base_path
-
 
 def _is_mcp_infra_failure(*, handled: bool, error_text: str, metadata: dict[str, Any]) -> bool:
     normalized_error = str(error_text or "").strip()
@@ -726,7 +606,6 @@ def _is_mcp_infra_failure(*, handled: bool, error_text: str, metadata: dict[str,
             "command_not_found",
         }
     )
-
 
 def _prepare_code_probe_file(project_root: str) -> dict[str, Any]:
     probe_rel_path = "tmp/.mcp_verify_code_probe.c"
@@ -750,8 +629,6 @@ def _prepare_code_probe_file(project_root: str) -> dict[str, Any]:
         "function_name": "mcp_probe_sum",
         "line_start": 2,
     }
-
-
 
 async def _resolve_verify_project(
     *,
@@ -818,7 +695,6 @@ async def _resolve_verify_project(
 
     return selected_project, selected_zip_path, fallback_used
 
-
 def encrypt_config(config: dict, sensitive_fields: list) -> dict:
     """加密配置中的敏感字段"""
     encrypted = config.copy()
@@ -827,7 +703,6 @@ def encrypt_config(config: dict, sensitive_fields: list) -> dict:
             encrypted[field] = encrypt_sensitive_data(encrypted[field])
     return encrypted
 
-
 def decrypt_config(config: dict, sensitive_fields: list) -> dict:
     """解密配置中的敏感字段"""
     decrypted = config.copy()
@@ -835,7 +710,6 @@ def decrypt_config(config: dict, sensitive_fields: list) -> dict:
         if field in decrypted and decrypted[field]:
             decrypted[field] = decrypt_sensitive_data(decrypted[field])
     return decrypted
-
 
 class LLMConfigSchema(BaseModel):
     """LLM配置Schema"""
@@ -868,7 +742,6 @@ class LLMConfigSchema(BaseModel):
     doubaoApiKey: Optional[str] = None
     ollamaBaseUrl: Optional[str] = None
 
-
 class OtherConfigSchema(BaseModel):
     """其他配置Schema"""
     githubToken: Optional[str] = None
@@ -879,12 +752,10 @@ class OtherConfigSchema(BaseModel):
     outputLanguage: Optional[str] = None
     mcpConfig: Optional[dict] = None
 
-
 class UserConfigRequest(BaseModel):
     """用户配置请求"""
     llmConfig: Optional[LLMConfigSchema] = None
     otherConfig: Optional[OtherConfigSchema] = None
-
 
 class UserConfigResponse(BaseModel):
     """用户配置响应"""
@@ -897,10 +768,8 @@ class UserConfigResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-
 class MCPVerifyRequest(BaseModel):
     mcp_id: str
-
 
 class MCPVerifyCheck(BaseModel):
     step: str
@@ -911,7 +780,6 @@ class MCPVerifyCheck(BaseModel):
     duration_ms: int
     error: Optional[str] = None
 
-
 class MCPVerifyResponse(BaseModel):
     success: bool
     mcp_id: str
@@ -921,17 +789,14 @@ class MCPVerifyResponse(BaseModel):
     discovered_tools: list[dict[str, Any]]
     protocol_summary: dict[str, Any]
 
-
 class MCPToolsListRequest(BaseModel):
     mcp_ids: Optional[list[str]] = None
     include_internal: bool = False
-
 
 class MCPToolsListTool(BaseModel):
     name: str
     description: str
     inputSchema: dict[str, Any]
-
 
 class MCPToolsListItem(BaseModel):
     mcp_id: str
@@ -942,17 +807,14 @@ class MCPToolsListItem(BaseModel):
     listed_count: int
     visible_count: int
 
-
 class MCPToolsListResponse(BaseModel):
     results: list[MCPToolsListItem]
-
 
 class MCPToolsCallRequest(BaseModel):
     mcp_id: str
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
     include_internal: bool = False
-
 
 class MCPToolsCallResponse(BaseModel):
     success: bool
@@ -963,152 +825,6 @@ class MCPToolsCallResponse(BaseModel):
     error: Optional[str] = None
     runtime_domain: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class QmdCliCheckResult(BaseModel):
-    name: str
-    success: bool
-    command: list[str]
-    exit_code: Optional[int] = None
-    duration_ms: int
-    stdout: str = ""
-    stderr: str = ""
-    error: Optional[str] = None
-
-
-class QmdCliTestResponse(BaseModel):
-    success: bool
-    checks: list[QmdCliCheckResult]
-    command_base: list[str]
-
-
-def _resolve_target_mcp_ids(
-    requested_ids: Optional[list[str]],
-    *,
-    mcp_catalog: Any,
-) -> list[str]:
-    if isinstance(requested_ids, list) and requested_ids:
-        return [
-            mcp_id
-            for mcp_id in dict.fromkeys(
-                str(item or "").strip().lower() for item in requested_ids
-            )
-            if mcp_id
-        ]
-
-    target_ids: list[str] = []
-    for item in mcp_catalog if isinstance(mcp_catalog, list) else []:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("type") or "").strip().lower() != "mcp-server":
-            continue
-        mcp_id = str(item.get("id") or "").strip().lower()
-        if mcp_id:
-            target_ids.append(mcp_id)
-    return list(dict.fromkeys(target_ids))
-
-
-def _filter_internal_tools(
-    tools: list[dict[str, Any]],
-    *,
-    include_internal: bool,
-) -> list[dict[str, Any]]:
-    if include_internal:
-        return list(tools)
-    visible: list[dict[str, Any]] = []
-    for tool in tools:
-        name = str(tool.get("name") or "").strip()
-        if not name or name in _MCP_INTERNAL_TOOLS:
-            continue
-        visible.append(tool)
-    return visible
-
-
-def _split_qmd_cli_command(raw_command: Any) -> list[str]:
-    fallback = "qmd"
-    text = str(raw_command or "").strip() or fallback
-    try:
-        parts = shlex.split(text)
-    except Exception:
-        parts = []
-    if not parts:
-        parts = shlex.split(fallback)
-    return [str(item) for item in parts if str(item).strip()]
-
-
-def _truncate_output_text(raw: Any, limit: int = 2000) -> str:
-    text = str(raw or "")
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit]}\n...[truncated]"
-
-
-def _run_qmd_cli_check(
-    *,
-    name: str,
-    command: list[str],
-    timeout_seconds: int,
-    cwd: Optional[str] = None,
-) -> dict[str, Any]:
-    started_at = time.perf_counter()
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=cwd or None,
-            text=True,
-            capture_output=True,
-            timeout=max(5, int(timeout_seconds)),
-            check=False,
-            shell=False,
-        )
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
-        return {
-            "name": name,
-            "success": completed.returncode == 0,
-            "command": command,
-            "exit_code": int(completed.returncode),
-            "duration_ms": duration_ms,
-            "stdout": _truncate_output_text(completed.stdout),
-            "stderr": _truncate_output_text(completed.stderr),
-            "error": None,
-        }
-    except subprocess.TimeoutExpired as exc:
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
-        return {
-            "name": name,
-            "success": False,
-            "command": command,
-            "exit_code": None,
-            "duration_ms": duration_ms,
-            "stdout": _truncate_output_text(exc.stdout),
-            "stderr": _truncate_output_text(exc.stderr),
-            "error": f"timeout:{max(5, int(timeout_seconds))}s",
-        }
-    except FileNotFoundError:
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
-        return {
-            "name": name,
-            "success": False,
-            "command": command,
-            "exit_code": None,
-            "duration_ms": duration_ms,
-            "stdout": "",
-            "stderr": "",
-            "error": "command_not_found",
-        }
-    except Exception as exc:
-        duration_ms = int((time.perf_counter() - started_at) * 1000)
-        return {
-            "name": name,
-            "success": False,
-            "command": command,
-            "exit_code": None,
-            "duration_ms": duration_ms,
-            "stdout": "",
-            "stderr": "",
-            "error": f"execution_failed:{exc.__class__.__name__}:{exc}",
-        }
-
 
 def get_default_config() -> dict:
     """获取系统默认配置"""
@@ -1152,12 +868,10 @@ def get_default_config() -> dict:
         }
     }
 
-
 @router.get("/defaults")
 async def get_default_config_endpoint() -> Any:
     """获取系统默认配置（无需认证）"""
     return get_default_config()
-
 
 @router.get("/me", response_model=UserConfigResponse)
 async def get_my_config(
@@ -1211,7 +925,6 @@ async def get_my_config(
         created_at=config.created_at.isoformat() if config.created_at else "",
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
-
 
 @router.put("/me", response_model=UserConfigResponse)
 async def update_my_config(
@@ -1289,7 +1002,6 @@ async def update_my_config(
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
 
-
 @router.delete("/me")
 async def delete_my_config(
     db: AsyncSession = Depends(get_db),
@@ -1306,7 +1018,6 @@ async def delete_my_config(
         await db.commit()
     
     return {"message": "配置已删除"}
-
 
 @router.post("/mcp/verify", response_model=MCPVerifyResponse)
 async def verify_mcp_runtime(
@@ -1406,7 +1117,6 @@ async def verify_mcp_runtime(
     finally:
         shutil.rmtree(extracted_dir, ignore_errors=True)
 
-
 @router.post("/mcp/tools/list", response_model=MCPToolsListResponse)
 async def list_mcp_tools_runtime(
     request: MCPToolsListRequest,
@@ -1503,7 +1213,6 @@ async def list_mcp_tools_runtime(
     finally:
         shutil.rmtree(temp_project_root, ignore_errors=True)
 
-
 @router.post("/mcp/tools/call", response_model=MCPToolsCallResponse)
 async def call_mcp_tool_runtime(
     request: MCPToolsCallRequest,
@@ -1567,44 +1276,12 @@ async def call_mcp_tool_runtime(
     finally:
         shutil.rmtree(temp_project_root, ignore_errors=True)
 
-
-@router.post("/qmd/cli/test", response_model=QmdCliTestResponse)
-async def verify_qmd_cli_runtime(
-    _current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    command_base = _split_qmd_cli_command(getattr(settings, "QMD_CLI_COMMAND", "qmd"))
-    timeout_seconds = int(getattr(settings, "QMD_CLI_TIMEOUT_SECONDS", 120) or 120)
-    checks_to_run = [
-        ("help", [*command_base, "--help"]),
-        ("status", [*command_base, "status"]),
-        ("collection_list", [*command_base, "collection", "list"]),
-    ]
-    check_payloads = await asyncio.gather(
-        *[
-            asyncio.to_thread(
-                _run_qmd_cli_check,
-                name=check_name,
-                command=command_args,
-                timeout_seconds=timeout_seconds,
-            )
-            for check_name, command_args in checks_to_run
-        ]
-    )
-    checks = [QmdCliCheckResult(**item) for item in check_payloads]
-    return QmdCliTestResponse(
-        success=all(item.success for item in checks),
-        checks=checks,
-        command_base=command_base,
-    )
-
-
 class LLMTestRequest(BaseModel):
     """LLM测试请求"""
     provider: str
     apiKey: Optional[str] = None
     model: Optional[str] = None
     baseUrl: Optional[str] = None
-
 
 class LLMTestResponse(BaseModel):
     """LLM测试响应"""
@@ -1615,13 +1292,11 @@ class LLMTestResponse(BaseModel):
     # 调试信息
     debug: Optional[dict] = None
 
-
 class LLMFetchModelsRequest(BaseModel):
     """按提供商拉取模型列表请求"""
     provider: str
     apiKey: str
     baseUrl: Optional[str] = None
-
 
 class LLMFetchModelsResponse(BaseModel):
     """按提供商拉取模型列表响应"""
@@ -1635,7 +1310,6 @@ class LLMFetchModelsResponse(BaseModel):
     baseUrlUsed: Optional[str] = None
     modelMetadata: Optional[dict[str, dict[str, Optional[int] | str]]] = None
     tokenRecommendationSource: Optional[str] = None
-
 
 @router.post("/test-llm", response_model=LLMTestResponse)
 async def test_llm_connection(
@@ -1868,7 +1542,6 @@ async def test_llm_connection(
             debug=debug_info
         )
 
-
 @router.post("/fetch-llm-models", response_model=LLMFetchModelsResponse)
 async def fetch_llm_models(
     request: LLMFetchModelsRequest,
@@ -2007,7 +1680,6 @@ async def fetch_llm_models(
         modelMetadata=static_model_metadata,
         tokenRecommendationSource="static_mapping",
     )
-
 
 @router.get("/llm-providers")
 async def get_llm_providers() -> Any:
