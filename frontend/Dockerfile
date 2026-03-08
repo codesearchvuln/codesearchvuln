@@ -58,7 +58,7 @@ RUN --mount=type=cache,id=vulhunter-frontend-pnpm,target=/pnpm/store \
     --mount=type=cache,id=vulhunter-frontend-npm,target=/root/.npm \
     set -eux; \
     FALLBACK_REGISTRY="${FRONTEND_NPM_REGISTRY_FALLBACK}"; \
-    step_timeout=90; \
+    step_timeout=300; \
     pnpm config set network-timeout 120000; \
     pnpm config set fetch-retries 1; \
     run_frontend_install() { \
