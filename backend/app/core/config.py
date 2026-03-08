@@ -4,7 +4,7 @@ from pydantic import AnyHttpUrl, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "DeepAudit"
+    PROJECT_NAME: str = "VulHunter"
     API_V1_STR: str = "/api/v1"
     
     # SECURITY
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     POSTGRES_SERVER: str = "db"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "deepaudit"
+    POSTGRES_DB: str = "vulhunter"
     DATABASE_URL: str | None = None
 
     @validator("DATABASE_URL", pre=True)
@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT_SECONDS: int = 1800  # Agent 超时时间（30分钟）
     
     # 沙箱配置（必须）
-    SANDBOX_IMAGE: str = "deepaudit/sandbox:latest"  # 沙箱 Docker 镜像
+    SANDBOX_IMAGE: str = "vulhunter/sandbox:latest"  # 沙箱 Docker 镜像
     SANDBOX_MEMORY_LIMIT: str = "512m"  # 沙箱内存限制
     SANDBOX_CPU_LIMIT: float = 1.0  # 沙箱 CPU 限制
     SANDBOX_TIMEOUT: int = 60  # 沙箱命令超时（秒）
