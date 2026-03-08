@@ -58,6 +58,42 @@ class MCPToolRouter:
         return None
 
     @staticmethod
+    def _normalize_search_scope_directory(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().replace("\\", "/").strip("`'\"")
+        if not normalized:
+            return None
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        normalized = normalized.rstrip("/")
+        if normalized in {"", "."}:
+            return None
+        return normalized
+
+    @classmethod
+    def _merge_search_file_pattern(
+        cls,
+        directory: Optional[str],
+        file_pattern: Optional[str],
+    ) -> Optional[str]:
+        normalized_directory = cls._normalize_search_scope_directory(directory)
+        normalized_pattern = file_pattern.strip() if isinstance(file_pattern, str) else ""
+        normalized_pattern = normalized_pattern.replace("\\", "/").strip("`'\"")
+        while normalized_pattern.startswith("./"):
+            normalized_pattern = normalized_pattern[2:]
+
+        if not normalized_directory:
+            return normalized_pattern or None
+
+        directory_prefix = f"{normalized_directory}/**"
+        if not normalized_pattern:
+            return directory_prefix
+        if normalized_pattern.startswith(f"{normalized_directory}/"):
+            return normalized_pattern
+        return f"{directory_prefix}/{normalized_pattern}"
+
+    @staticmethod
     def _normalize_arguments(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         payload = dict(tool_input or {})
 
@@ -91,24 +127,29 @@ class MCPToolRouter:
             if explicit_regex is None:
                 explicit_regex = payload.get("regex")
             is_regex = bool(explicit_regex)
-            query = (
-                _non_empty_string(payload.get("query"))
+            pattern = (
+                _non_empty_string(payload.get("pattern"))
+                or _non_empty_string(payload.get("query"))
                 or _non_empty_string(payload.get("keyword"))
-                or _non_empty_string(payload.get("pattern"))
             )
-            if query:
-                payload["query"] = query
-                if is_regex:
-                    payload["pattern"] = query
-                else:
-                    payload.pop("pattern", None)
-            payload["regex"] = is_regex
+
             path_value = _sanitize_path(payload.get("path") or payload.get("file_path"))
+            normalized_file_pattern = MCPToolRouter._merge_search_file_pattern(
+                payload.get("directory"),
+                _non_empty_string(payload.get("file_pattern")) or _non_empty_string(payload.get("glob")),
+            )
+
+            normalized_payload: Dict[str, Any] = {"regex": is_regex}
+            if pattern:
+                normalized_payload["pattern"] = pattern
             if path_value:
-                payload["path"] = path_value
-            glob_value = _non_empty_string(payload.get("glob") or payload.get("file_pattern"))
-            if glob_value:
-                payload["glob"] = glob_value
+                normalized_payload["path"] = path_value
+            if normalized_file_pattern:
+                normalized_payload["file_pattern"] = normalized_file_pattern
+            for key in ("case_sensitive", "context_lines", "fuzzy", "start_index", "max_results"):
+                if payload.get(key) is not None:
+                    normalized_payload[key] = payload.get(key)
+            payload = normalized_payload
 
         elif tool_name == "read_file":
             path_value = _sanitize_path(payload.get("file_path") or payload.get("path"))

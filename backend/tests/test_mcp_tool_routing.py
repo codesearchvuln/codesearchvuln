@@ -141,18 +141,41 @@ def test_mcp_router_exposes_only_core_stdio_routes():
     assert search_route is not None
     assert search_route.adapter_name == "code_index"
     assert search_route.mcp_tool_name == "search_code_advanced"
-    assert search_route.arguments["query"] == "dangerous_call"
+    assert search_route.arguments["pattern"] == "dangerous_call"
     assert search_route.arguments["regex"] is False
-    assert "pattern" not in search_route.arguments
+    assert "query" not in search_route.arguments
 
     regex_search_route = router.route(
         "search_code",
         {"keyword": r"foo\\s*\\(", "is_regex": True},
     )
     assert regex_search_route is not None
-    assert regex_search_route.arguments["query"] == r"foo\\s*\\("
     assert regex_search_route.arguments["pattern"] == r"foo\\s*\\("
     assert regex_search_route.arguments["regex"] is True
+    assert "query" not in regex_search_route.arguments
+
+    query_search_route = router.route("search_code", {"query": "danger"})
+    assert query_search_route is not None
+    assert query_search_route.arguments["pattern"] == "danger"
+    assert query_search_route.arguments["regex"] is False
+    assert "query" not in query_search_route.arguments
+
+    scoped_search_route = router.route(
+        "search_code",
+        {"keyword": "danger", "directory": "src", "glob": "*.py"},
+    )
+    assert scoped_search_route is not None
+    assert scoped_search_route.arguments["file_pattern"] == "src/**/*.py"
+    assert "glob" not in scoped_search_route.arguments
+    assert "directory" not in scoped_search_route.arguments
+
+    directory_only_search_route = router.route(
+        "search_code",
+        {"keyword": "danger", "directory": "src"},
+    )
+    assert directory_only_search_route is not None
+    assert directory_only_search_route.arguments["file_pattern"] == "src/**"
+    assert "directory" not in directory_only_search_route.arguments
 
     extract_route = router.route(
         "extract_function",
