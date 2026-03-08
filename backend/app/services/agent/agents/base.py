@@ -110,6 +110,31 @@ STRICT_MCP_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
     "connection refused",
     "network",
 )
+STRICT_MCP_LOCAL_ALLOWLIST: Set[str] = {
+    "think",
+    "reflect",
+    "smart_scan",
+    "quick_audit",
+    "pattern_match",
+    "dataflow_analysis",
+    "controlflow_analysis_light",
+    "logic_authz_analysis",
+    "sandbox_exec",
+    "verify_vulnerability",
+    "run_code",
+    "create_vulnerability_report",
+    "save_verification_results",
+    "push_finding_to_queue",
+    "is_finding_in_queue",
+    "get_queue_status",
+    "dequeue_finding",
+    "push_risk_point_to_queue",
+    "get_recon_risk_queue_status",
+    "dequeue_recon_risk_point",
+    "peek_recon_risk_queue",
+    "clear_recon_risk_queue",
+    "is_recon_risk_point_in_queue",
+}
 
 if TYPE_CHECKING:
     from ..mcp.runtime import MCPRuntime
@@ -684,6 +709,29 @@ class BaseAgent(ABC):
         if not runtime:
             return False
         return bool(getattr(runtime, "strict_mode", False))
+
+    def _allow_local_tool_in_mcp_strict_mode(
+        self,
+        *,
+        runtime: Optional["MCPRuntime"],
+        tool_name: str,
+        local_tool_available: bool,
+    ) -> bool:
+        if not runtime or not local_tool_available:
+            return False
+        normalized_tool_name = str(tool_name or "").strip().lower()
+        if not normalized_tool_name:
+            return False
+        router = getattr(runtime, "router", None)
+        if not router or not hasattr(router, "can_route"):
+            return False
+        try:
+            route_registered = bool(router.can_route(normalized_tool_name))
+        except Exception:
+            route_registered = False
+        if not route_registered:
+            return False
+        return normalized_tool_name in STRICT_MCP_LOCAL_ALLOWLIST
 
     def _runtime_metadata(self) -> Dict[str, Any]:
         metadata = getattr(self.config, "metadata", None)
@@ -4317,21 +4365,24 @@ class BaseAgent(ABC):
         local_tool_available = bool(tool and hasattr(tool, "execute"))
 
         mcp_runtime = self._mcp_runtime
+        mcp_strict_mode = self._is_mcp_strict_mode(mcp_runtime) or mcp_only_enforced
+        mcp_route_registered = bool(
+            mcp_runtime
+            and hasattr(mcp_runtime, "router")
+            and getattr(mcp_runtime, "router", None)
+            and hasattr(getattr(mcp_runtime, "router", None), "can_route")
+            and getattr(mcp_runtime, "router").can_route(resolved_tool_name)
+        )
         mcp_can_handle = bool(
             mcp_runtime
             and hasattr(mcp_runtime, "can_handle")
             and mcp_runtime.can_handle(resolved_tool_name)
         )
-        strict_local_tool_allowed = self._is_strict_mcp_local_tool_allowed(
+        strict_local_fallback_allowed = self._allow_local_tool_in_mcp_strict_mode(
+            runtime=mcp_runtime,
             tool_name=resolved_tool_name,
             local_tool_available=local_tool_available,
-            mcp_can_handle=mcp_can_handle,
         )
-        if strict_local_tool_allowed:
-            runtime_policy_metadata["local_tool_allowed_in_strict_mode"] = True
-        mcp_strict_mode = (
-            self._is_mcp_strict_mode(mcp_runtime) or mcp_only_enforced
-        ) and not strict_local_tool_allowed
 
         normalized_requested_tool = str(requested_tool_name or "").strip().lower()
         alias_blocked = bool(
@@ -4686,6 +4737,7 @@ class BaseAgent(ABC):
                 )
                 return failure_output
 
+            strict_local_fallback_metadata: Dict[str, Any] = {}
             if mcp_strict_mode:
                 strict_metadata = {
                     **write_scope_metadata,
@@ -4739,14 +4791,145 @@ class BaseAgent(ABC):
                     return strict_error
 
                 if not mcp_can_handle:
-                    strict_error = f"MCP Router 未匹配工具 {resolved_tool_name}，无法执行。"
+                    if strict_local_fallback_allowed:
+                        strict_local_fallback_metadata = {
+                            **strict_metadata,
+                            "mcp_local_whitelist_bypass": True,
+                            "mcp_route_registered": bool(mcp_route_registered),
+                            "mcp_local_tool": str(resolved_tool_name or "").strip().lower(),
+                        }
+                    else:
+                        strict_error = (
+                            f"MCP Router 已匹配工具 {resolved_tool_name}，但当前 Runtime 无可用 adapter，无法执行。"
+                            if mcp_route_registered
+                            else f"MCP Router 未匹配工具 {resolved_tool_name}，无法执行。"
+                        )
+                        strict_failure_metadata = _build_strict_failure_metadata(
+                            strict_error=strict_error,
+                            base_metadata={
+                                **strict_metadata,
+                                "mcp_route_registered": bool(mcp_route_registered),
+                            },
+                        )
+                        await self.emit_tool_result(
+                            resolved_tool_name,
+                            strict_error,
+                            0,
+                            tool_call_id=tool_call_id,
+                            tool_status="failed",
+                            alias_used=alias_used,
+                            input_repaired=repaired_changes or None,
+                            extra_metadata=strict_failure_metadata or None,
+                        )
+                        return strict_error
+
+                if not strict_local_fallback_allowed:
+                    mcp_result = await mcp_runtime.execute_tool(
+                        tool_name=resolved_tool_name,
+                        tool_input=repaired_input,
+                        agent_name=self.name,
+                        alias_used=alias_used,
+                    )
+                    mcp_result_meta = (
+                        dict(mcp_result.metadata)
+                        if isinstance(mcp_result.metadata, dict)
+                        else {}
+                    )
+                    merged_meta = {**strict_metadata, **mcp_result_meta}
+                    mcp_output = str(mcp_result.data or mcp_result.error or "")
+
+                    if mcp_result.handled and mcp_result.success:
+                        await self.emit_tool_result(
+                            resolved_tool_name,
+                            mcp_output,
+                            0,
+                            tool_call_id=tool_call_id,
+                            tool_status="completed",
+                            alias_used=alias_used,
+                            input_repaired=repaired_changes or None,
+                            extra_metadata=merged_meta or None,
+                        )
+                        if retry_guard_key:
+                            self._deterministic_failure_counts.pop(retry_guard_key, None)
+                            self._deterministic_failure_last_error.pop(retry_guard_key, None)
+                        self._record_tool_context(
+                            tool_name=resolved_tool_name,
+                            tool_input=repaired_input,
+                            tool_metadata=mcp_result_meta,
+                        )
+                        if not is_write_tool and not cache_bypass:
+                            self._tool_success_cache[tool_call_key] = mcp_output
+                            if len(self._tool_success_cache) > 500:
+                                oldest_key = next(iter(self._tool_success_cache))
+                                self._tool_success_cache.pop(oldest_key, None)
+                        return mcp_output
+
+                    strict_error = mcp_result.error or "mcp_unhandled_in_strict_mode"
                     strict_failure_metadata = _build_strict_failure_metadata(
                         strict_error=strict_error,
-                        base_metadata=strict_metadata,
+                        base_metadata=merged_meta,
                     )
+                    normalized_resolved_tool = str(resolved_tool_name or "").strip().lower()
+                    auto_retry_used = False
+                    if (
+                        normalized_resolved_tool == "read_file"
+                        and not bool(strict_metadata.get("auto_retry_once"))
+                        and self._is_read_file_path_not_found_error(strict_error)
+                    ):
+                        failed_path = str(
+                            repaired_input.get("file_path")
+                            or self._extract_path_from_error_text(strict_error)
+                            or ""
+                        ).strip()
+                        if failed_path:
+                            failed_basename = os.path.basename(failed_path)
+                            failed_stem = os.path.splitext(failed_basename)[0]
+                            search_payload: Dict[str, Any] = {
+                                "keyword": failed_stem or failed_basename,
+                                "max_results": 8,
+                            }
+                            failed_dir = os.path.dirname(failed_path).strip()
+                            if failed_dir:
+                                search_payload["directory"] = failed_dir
+                            if failed_basename:
+                                search_payload["file_pattern"] = failed_basename
+                            search_output = await self.execute_tool(
+                                "search_code",
+                                search_payload,
+                                _fallback_depth=_fallback_depth + 1,
+                            )
+                            if not self._looks_like_tool_failure_output(search_output):
+                                repaired_path, repaired_line = self._extract_location_from_search_output(search_output)
+                                repaired_path = str(repaired_path or "").strip()
+                                if repaired_path and repaired_path != failed_path:
+                                    retry_input = dict(repaired_input)
+                                    retry_input["file_path"] = repaired_path
+                                    retry_input["__auto_retry_once"] = True
+                                    retry_input["__auto_repaired_file_path"] = repaired_path
+                                    if (
+                                        repaired_line
+                                        and retry_input.get("start_line") in (None, "")
+                                        and retry_input.get("end_line") in (None, "")
+                                    ):
+                                        start_line, end_line, max_lines = self._strict_read_window(int(repaired_line))
+                                        retry_input["start_line"] = int(start_line)
+                                        retry_input["end_line"] = int(end_line)
+                                        retry_input["max_lines"] = int(max_lines)
+                                    retry_output = await self.execute_tool(
+                                        requested_tool_name,
+                                        retry_input,
+                                        _fallback_depth=_fallback_depth + 1,
+                                    )
+                                    auto_retry_used = True
+                                    if not self._looks_like_tool_failure_output(retry_output):
+                                        return retry_output
+                                    strict_failure_metadata["auto_retry_once"] = True
+                                    strict_failure_metadata["auto_repaired_file_path"] = repaired_path
+                                    strict_failure_metadata["auto_retry_failed"] = True
+
                     await self.emit_tool_result(
                         resolved_tool_name,
-                        strict_error,
+                        mcp_output or strict_error,
                         0,
                         tool_call_id=tool_call_id,
                         tool_status="failed",
@@ -4754,126 +4937,11 @@ class BaseAgent(ABC):
                         input_repaired=repaired_changes or None,
                         extra_metadata=strict_failure_metadata or None,
                     )
-                    return strict_error
-
-                mcp_result = await mcp_runtime.execute_tool(
-                    tool_name=resolved_tool_name,
-                    tool_input=repaired_input,
-                    agent_name=self.name,
-                    alias_used=alias_used,
-                )
-                mcp_result_meta = (
-                    dict(mcp_result.metadata)
-                    if isinstance(mcp_result.metadata, dict)
-                    else {}
-                )
-                merged_meta = {**strict_metadata, **mcp_result_meta}
-                mcp_output = str(mcp_result.data or mcp_result.error or "")
-
-                if mcp_result.handled and mcp_result.success:
-                    await self.emit_tool_result(
-                        resolved_tool_name,
-                        mcp_output,
-                        0,
-                        tool_call_id=tool_call_id,
-                        tool_status="completed",
-                        alias_used=alias_used,
-                        input_repaired=repaired_changes or None,
-                        extra_metadata=merged_meta or None,
-                    )
-                    if retry_guard_key:
-                        self._deterministic_failure_counts.pop(retry_guard_key, None)
-                        self._deterministic_failure_last_error.pop(retry_guard_key, None)
-                    self._record_tool_context(
-                        tool_name=resolved_tool_name,
-                        tool_input=repaired_input,
-                        tool_metadata=mcp_result_meta,
-                    )
-                    if not is_write_tool and not cache_bypass:
-                        self._tool_success_cache[tool_call_key] = mcp_output
-                        if len(self._tool_success_cache) > 500:
-                            oldest_key = next(iter(self._tool_success_cache))
-                            self._tool_success_cache.pop(oldest_key, None)
-                    return mcp_output
-
-                strict_error = mcp_result.error or "mcp_unhandled_in_strict_mode"
-                strict_failure_metadata = _build_strict_failure_metadata(
-                    strict_error=strict_error,
-                    base_metadata=merged_meta,
-                )
-                normalized_resolved_tool = str(resolved_tool_name or "").strip().lower()
-                auto_retry_used = False
-                if (
-                    normalized_resolved_tool == "read_file"
-                    and not bool(strict_metadata.get("auto_retry_once"))
-                    and self._is_read_file_path_not_found_error(strict_error)
-                ):
-                    failed_path = str(
-                        repaired_input.get("file_path")
-                        or self._extract_path_from_error_text(strict_error)
-                        or ""
-                    ).strip()
-                    if failed_path:
-                        failed_basename = os.path.basename(failed_path)
-                        failed_stem = os.path.splitext(failed_basename)[0]
-                        search_payload: Dict[str, Any] = {
-                            "keyword": failed_stem or failed_basename,
-                            "max_results": 8,
-                        }
-                        failed_dir = os.path.dirname(failed_path).strip()
-                        if failed_dir:
-                            search_payload["directory"] = failed_dir
-                        if failed_basename:
-                            search_payload["file_pattern"] = failed_basename
-                        search_output = await self.execute_tool(
-                            "search_code",
-                            search_payload,
-                            _fallback_depth=_fallback_depth + 1,
-                        )
-                        if not self._looks_like_tool_failure_output(search_output):
-                            repaired_path, repaired_line = self._extract_location_from_search_output(search_output)
-                            repaired_path = str(repaired_path or "").strip()
-                            if repaired_path and repaired_path != failed_path:
-                                retry_input = dict(repaired_input)
-                                retry_input["file_path"] = repaired_path
-                                retry_input["__auto_retry_once"] = True
-                                retry_input["__auto_repaired_file_path"] = repaired_path
-                                if (
-                                    repaired_line
-                                    and retry_input.get("start_line") in (None, "")
-                                    and retry_input.get("end_line") in (None, "")
-                                ):
-                                    start_line, end_line, max_lines = self._strict_read_window(int(repaired_line))
-                                    retry_input["start_line"] = int(start_line)
-                                    retry_input["end_line"] = int(end_line)
-                                    retry_input["max_lines"] = int(max_lines)
-                                retry_output = await self.execute_tool(
-                                    requested_tool_name,
-                                    retry_input,
-                                    _fallback_depth=_fallback_depth + 1,
-                                )
-                                auto_retry_used = True
-                                if not self._looks_like_tool_failure_output(retry_output):
-                                    return retry_output
-                                strict_failure_metadata["auto_retry_once"] = True
-                                strict_failure_metadata["auto_repaired_file_path"] = repaired_path
-                                strict_failure_metadata["auto_retry_failed"] = True
-
-                await self.emit_tool_result(
-                    resolved_tool_name,
-                    mcp_output or strict_error,
-                    0,
-                    tool_call_id=tool_call_id,
-                    tool_status="failed",
-                    alias_used=alias_used,
-                    input_repaired=repaired_changes or None,
-                    extra_metadata=strict_failure_metadata or None,
-                )
-                # 直接返回错误信息给模型，而不是封装成"阻断"消息
-                failure_output = mcp_output or strict_error
-                if auto_retry_used:
-                    failure_output += "\n\n(注：已执行一次自动路径修复重试，但仍失败。)"
-                return failure_output
+                    # 直接返回错误信息给模型，而不是封装成"阻断"消息
+                    failure_output = mcp_output or strict_error
+                    if auto_retry_used:
+                        failure_output += "\n\n(注：已执行一次自动路径修复重试，但仍失败。)"
+                    return failure_output
 
             is_mcp_proxy_tool = bool(local_tool_available and getattr(tool, "mcp_proxy_only", False))
             if is_mcp_proxy_tool and not mcp_can_handle:
@@ -4941,7 +5009,7 @@ class BaseAgent(ABC):
                     )
                 )
             )
-            mcp_fallback_metadata: Dict[str, Any] = {}
+            mcp_fallback_metadata: Dict[str, Any] = dict(strict_local_fallback_metadata)
             if use_mcp_first and mcp_runtime:
                 mcp_result = await mcp_runtime.execute_tool(
                     tool_name=resolved_tool_name,

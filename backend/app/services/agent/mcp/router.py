@@ -16,6 +16,8 @@ class MCPToolRoute:
 class MCPToolRouter:
     """Route public scan-core tool names to stdio MCP tools."""
 
+    _LOCAL_ROUTE_ADAPTER = "__local__"
+
     def __init__(self) -> None:
         self._route_map = {
             "read_file": ("filesystem", "read_file", False),
@@ -23,6 +25,67 @@ class MCPToolRouter:
             "search_code": ("code_index", "search_code_advanced", False),
             "extract_function": ("code_index", "get_symbol_body", False),
             "locate_enclosing_function": ("code_index", "get_file_summary", False),
+            # Local-registered routes: these tools are valid Agent tools but are currently
+            # executed via local tool implementations (strict-mode fallback allowlist).
+            "think": (self._LOCAL_ROUTE_ADAPTER, "think", False),
+            "reflect": (self._LOCAL_ROUTE_ADAPTER, "reflect", False),
+            "smart_scan": (self._LOCAL_ROUTE_ADAPTER, "smart_scan", False),
+            "quick_audit": (self._LOCAL_ROUTE_ADAPTER, "quick_audit", False),
+            "pattern_match": (self._LOCAL_ROUTE_ADAPTER, "pattern_match", False),
+            "dataflow_analysis": (self._LOCAL_ROUTE_ADAPTER, "dataflow_analysis", False),
+            "controlflow_analysis_light": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "controlflow_analysis_light",
+                False,
+            ),
+            "logic_authz_analysis": (self._LOCAL_ROUTE_ADAPTER, "logic_authz_analysis", False),
+            "sandbox_exec": (self._LOCAL_ROUTE_ADAPTER, "sandbox_exec", False),
+            "verify_vulnerability": (self._LOCAL_ROUTE_ADAPTER, "verify_vulnerability", False),
+            "run_code": (self._LOCAL_ROUTE_ADAPTER, "run_code", False),
+            "create_vulnerability_report": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "create_vulnerability_report",
+                False,
+            ),
+            "save_verification_results": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "save_verification_results",
+                False,
+            ),
+            "push_finding_to_queue": (self._LOCAL_ROUTE_ADAPTER, "push_finding_to_queue", True),
+            "is_finding_in_queue": (self._LOCAL_ROUTE_ADAPTER, "is_finding_in_queue", False),
+            "get_queue_status": (self._LOCAL_ROUTE_ADAPTER, "get_queue_status", False),
+            "dequeue_finding": (self._LOCAL_ROUTE_ADAPTER, "dequeue_finding", True),
+            "push_risk_point_to_queue": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "push_risk_point_to_queue",
+                True,
+            ),
+            "get_recon_risk_queue_status": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "get_recon_risk_queue_status",
+                False,
+            ),
+            "dequeue_recon_risk_point": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "dequeue_recon_risk_point",
+                True,
+            ),
+            "peek_recon_risk_queue": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "peek_recon_risk_queue",
+                False,
+            ),
+            "clear_recon_risk_queue": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "clear_recon_risk_queue",
+                True,
+            ),
+            "is_recon_risk_point_in_queue": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "is_recon_risk_point_in_queue",
+                False,
+            ),
         }
 
     @staticmethod
@@ -202,7 +265,19 @@ class MCPToolRouter:
         return self._normalize_tool_name(tool_name) in self._route_map
 
     def is_write_tool(self, tool_name: str) -> bool:
-        return False
+        normalized_name = self._normalize_tool_name(tool_name)
+        route = self._route_map.get(normalized_name)
+        if route is None:
+            return False
+        return bool(route[2])
+
+    def is_local_only_tool(self, tool_name: str) -> bool:
+        normalized_name = self._normalize_tool_name(tool_name)
+        route = self._route_map.get(normalized_name)
+        if route is None:
+            return False
+        adapter_name, _, _ = route
+        return str(adapter_name or "").strip().lower() == self._LOCAL_ROUTE_ADAPTER
 
     def route(self, tool_name: str, tool_input: Optional[Dict[str, Any]] = None) -> Optional[MCPToolRoute]:
         normalized_name = self._normalize_tool_name(tool_name)
