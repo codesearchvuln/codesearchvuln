@@ -2136,6 +2136,7 @@ export default function Projects() {
                         onOpenChange={handleCreateScanDialogOpenChange}
                         onTaskCreated={handleTaskCreated}
                         preselectedProjectId={scanPreselectedProjectId}
+                        lockProjectSelection={Boolean(scanPreselectedProjectId)}
                         initialMode={scanInitialMode}
                         navigateOnSuccess={scanNavigateOnSuccess}
                     />

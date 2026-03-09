@@ -48,6 +48,7 @@ interface CreateProjectScanDialogProps {
 	onOpenChange: (open: boolean) => void;
 	onTaskCreated?: () => void;
 	preselectedProjectId?: string;
+	lockProjectSelection?: boolean;
 	initialMode?: ScanCreateMode;
 	lockMode?: boolean;
 	allowUploadProject?: boolean;
@@ -134,6 +135,7 @@ export default function CreateProjectScanDialog({
 	onOpenChange,
 	onTaskCreated,
 	preselectedProjectId,
+	lockProjectSelection = false,
 	initialMode = "static",
 	lockMode = false,
 	allowUploadProject = false,
@@ -270,9 +272,24 @@ export default function CreateProjectScanDialog({
 	useEffect(() => {
 		if (!open) return;
 		if (selectedProjectId) return;
+		if (lockProjectSelection && preselectedProjectId) return;
 		if (activeProjects.length === 0) return;
 		setSelectedProjectId(activeProjects[0].id);
-	}, [open, selectedProjectId, activeProjects]);
+	}, [
+		open,
+		selectedProjectId,
+		activeProjects,
+		lockProjectSelection,
+		preselectedProjectId,
+	]);
+
+	useEffect(() => {
+		if (!open) return;
+		if (!lockProjectSelection) return;
+		if (!preselectedProjectId) return;
+		if (selectedProjectId === preselectedProjectId) return;
+		setSelectedProjectId(preselectedProjectId);
+	}, [open, lockProjectSelection, preselectedProjectId, selectedProjectId]);
 
 	useEffect(() => {
 		if (!selectedProject) return;
@@ -815,19 +832,52 @@ export default function CreateProjectScanDialog({
 
 					{sourceMode === "existing" ? (
 						<div className="space-y-3">
-							<Input
-								value={searchTerm}
-								onChange={(event) => setSearchTerm(event.target.value)}
-								placeholder="搜索项目..."
-								className="h-9 cyber-input"
-								disabled={creating}
-							/>
+							{lockProjectSelection ? null : (
+								<Input
+									value={searchTerm}
+									onChange={(event) => setSearchTerm(event.target.value)}
+									placeholder="搜索项目..."
+									className="h-9 cyber-input"
+									disabled={creating}
+								/>
+							)}
 							<div className="border border-border rounded-lg max-h-[280px] overflow-y-auto p-2 space-y-2">
 								{loadingProjects ? (
 									<div className="py-10 flex items-center justify-center text-sm text-muted-foreground">
 										<Loader2 className="w-4 h-4 animate-spin mr-2" />
 										加载项目中...
 									</div>
+								) : lockProjectSelection ? (
+									selectedProject ? (
+										<div className="w-full text-left p-3 rounded border border-sky-500/50 bg-sky-500/10">
+											<div className="flex items-start justify-between gap-3">
+												<div className="min-w-0">
+													<p className="text-sm font-semibold text-foreground">{selectedProject.name}</p>
+													{selectedProject.description && (
+														<p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+															{selectedProject.description}
+														</p>
+													)}
+												</div>
+												<div className="flex items-center gap-2 shrink-0">
+													<Badge
+														className={
+															selectedProject.source_type === "zip"
+																? "cyber-badge-warning"
+																: "cyber-badge-info"
+														}
+													>
+														{selectedProject.source_type === "zip" ? "ZIP" : "仓库"}
+													</Badge>
+													<CheckCircle2 className="w-4 h-4 text-sky-400" />
+												</div>
+											</div>
+										</div>
+									) : (
+										<div className="py-10 text-center text-sm text-muted-foreground">
+											目标项目不可用，请返回项目管理页重试
+										</div>
+									)
 								) : filteredProjects.length > 0 ? (
 									filteredProjects.map((project) => (
 										<button
