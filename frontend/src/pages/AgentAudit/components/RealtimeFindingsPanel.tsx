@@ -152,22 +152,18 @@ export default function RealtimeFindingsPanel(props: {
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_160px_160px]">
-        <div className="relative">
-          <span className="pointer-events-none absolute inset-y-0 left-0 flex w-11 items-center justify-center text-muted-foreground">
-            <Search className="h-4 w-4" />
-          </span>
-          <Input
-            value={props.filters.keyword}
-            onChange={(event) =>
-              props.onFiltersChange({
-                ...props.filters,
-                keyword: event.target.value,
-              })
-            }
-            placeholder="搜索漏洞类型 / 标题 / 文件"
-            className="cyber-input h-10 pl-11 pr-3 text-sm"
-          />
-        </div>
+        <Input
+          value={props.filters.keyword}
+          onChange={(event) =>
+            props.onFiltersChange({
+              ...props.filters,
+              keyword: event.target.value,
+            })
+          }
+          placeholder="搜索漏洞类型 / 标题 / 文件"
+          startIcon={<Search className="h-4 w-4 mb-1" />}
+          className="cyber-input h-10 pr-3 text-sm"
+        />
         <Select
           value={props.filters.severity}
           onValueChange={(value) =>
