@@ -3540,22 +3540,18 @@ async def _execute_agent_task(task_id: str):
                 if filter_reason_text:
                     task.current_step += f"（主要过滤原因：{filter_reason_text}）"
 
+                # 🔥 从 Workflow 编排结果直接获取统计数据（已由 AgentResult 集计）
+                # 优先级：result > runtime_snapshot（确保 workflow 编排的准确数据优先使用）
+                workflow_state_summary = None
+                if isinstance(result.data, dict):
+                    workflow_state_summary = result.data.get("workflow_state")
+                
                 runtime_snapshot = _snapshot_runtime_stats_to_task(task, orchestrator)
-                task.total_iterations = max(
-                    int(task.total_iterations or 0),
-                    int(result.iterations or 0),
-                    int(runtime_snapshot["iterations"]),
-                )
-                task.tool_calls_count = max(
-                    int(task.tool_calls_count or 0),
-                    int(result.tool_calls or 0),
-                    int(runtime_snapshot["tool_calls"]),
-                )
-                task.tokens_used = max(
-                    int(task.tokens_used or 0),
-                    int(result.tokens_used or 0),
-                    int(runtime_snapshot["tokens_used"]),
-                )
+                
+                # 🔥 设置迭代统计：使用 AgentResult 中的值（已由 Workflow Orchestrator 聚合）
+                task.total_iterations = int(result.iterations or 0) if result.iterations > 0 else int(runtime_snapshot["iterations"] or 0)
+                task.tool_calls_count = int(result.tool_calls or 0) if result.tool_calls > 0 else int(runtime_snapshot["tool_calls"] or 0)
+                task.tokens_used = int(result.tokens_used or 0) if result.tokens_used > 0 else int(runtime_snapshot["tokens_used"] or 0)
 
                 # 🔥 统计文件数量
                 # analyzed_files = 实际扫描过的文件数（任务完成时等于 total_files）
@@ -3586,6 +3582,27 @@ async def _execute_agent_task(task_id: str):
                         task.low_count += 1
                     if finding_item.is_verified:
                         task.verified_count += 1
+                
+                # 🔥 保存 Workflow 编排元数据到 audit_plan（包含队列处理统计）
+                if workflow_state_summary and isinstance(workflow_state_summary, dict):
+                    audit_plan_metadata = {
+                        "workflow_mode": "deterministic_workflow_engine",
+                        "workflow_phase": workflow_state_summary.get("phase"),
+                        "recon_done": workflow_state_summary.get("recon_done"),
+                        "analysis_risk_points_total": workflow_state_summary.get("analysis_risk_points_total", 0),
+                        "analysis_risk_points_processed": workflow_state_summary.get("analysis_risk_points_processed", 0),
+                        "vuln_queue_findings_total": workflow_state_summary.get("vuln_queue_findings_total", 0),
+                        "vuln_queue_findings_processed": workflow_state_summary.get("vuln_queue_findings_processed", 0),
+                        "step_count": len(workflow_state_summary.get("step_records", [])),
+                    }
+                    task.audit_plan = audit_plan_metadata
+                    logger.info(
+                        "[AgentTask] Workflow metadata saved: analysis_points=%s/%s, vuln_findings=%s/%s",
+                        audit_plan_metadata.get("analysis_risk_points_processed"),
+                        audit_plan_metadata.get("analysis_risk_points_total"),
+                        audit_plan_metadata.get("vuln_queue_findings_processed"),
+                        audit_plan_metadata.get("vuln_queue_findings_total"),
+                    )
                 
                 # 计算安全评分
                 task.security_score = _calculate_security_score(
