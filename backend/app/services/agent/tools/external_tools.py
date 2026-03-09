@@ -1218,31 +1218,90 @@ PMD 直接分析源代码，无需编译！
         if error_msg:
             return ToolResult(success=False, data=error_msg, error=error_msg)
 
-        # 检查是否有 Java 源文件
-        has_java_files = False
-        for root, dirs, files in os.walk(host_check_path):
-            dirs[:] = [d for d in dirs if d not in {'.git', 'node_modules', 'target', 'build', '.idea', '.gradle'}]
-            for f in files:
-                if f.endswith('.java') or f.endswith('.jsp'):
-                    has_java_files = True
-                    break
-            if has_java_files:
-                break
+        # # 检查是否有 Java 源文件
+        # has_java_files = False
+        # for root, dirs, files in os.walk(host_check_path):
+        #     dirs[:] = [d for d in dirs if d not in {'.git', 'node_modules', 'target', 'build', '.idea', '.gradle'}]
+        #     for f in files:
+        #         if f.endswith('.java') or f.endswith('.jsp'):
+        #             has_java_files = True
+        #             break
+        #     if has_java_files:
+        #         break
         
-        if not has_java_files:
-            return ToolResult(
-                success=False,
-                data="未找到 Java 源文件 (.java 或 .jsp)。请确认这是一个 Java 项目。",
-                error="no_java_source"
-            )
+        # if not has_java_files:
+        #     return ToolResult(
+        #         success=False,
+        #         data="未找到 Java 源文件 (.java 或 .jsp)。请确认这是一个 Java 项目。",
+        #         error="no_java_source"
+        #     )
 
         # 选择规则集
         ruleset_map = {
-            "security": "category/java/security.xml,category/java/errorprone.xml",
-            "quickstart": "rulesets/java/quickstart.xml",
-            "all": "category/java/security.xml,category/java/errorprone.xml,category/java/bestpractices.xml,category/java/codestyle.xml"
+            "security": "category/java/security.xml,category/java/errorprone.xml,category/apex/security.xml",
+            # 快速启动（包含最常用的 Java 和 JavaScript 安全规则）
+            "quickstart": "category/java/security.xml,category/jsp/security.xml,category/javascript/security.xml",
+            # 全语言安全扫描策略 (包含所有官方支持 security 分类的语言)
+            "all": (
+                "category/java/security.xml,"          # Java
+                "category/jsp/security.xml,"           # JSP
+                "category/javascript/security.xml,"    # JavaScript
+                "category/html/security.xml,"          # HTML
+                "category/xml/security.xml,"           # XML
+                "category/plsql/security.xml,"         # PL/SQL
+                "category/apex/security.xml,"          # Apex (Salesforce)
+                "category/visualforce/security.xml"    # Visualforce
+            )
         }
-        selected_ruleset = ruleset_map.get(ruleset, ruleset_map["security"])
+
+        # 允许传入本地 ruleset 文件路径（例如 backend/app/db/rules_pmd/security.xml）
+        # 支持以下几种情况：
+        # 1) 传入绝对主机路径
+        # 2) 传入相对于 `project_root` 的路径
+        # 3) 传入相对于仓库根（本文件上溯）的路径，例如在测试脚本中使用 backend/app/db/...
+        # 如果找到了本地规则文件，会把主机路径转换为容器内 /workspace/<relpath> 引用；否则回退到内置 ruleset_map
+        selected_ruleset = None
+        try:
+            host_rules_path = None
+
+            # 计算仓库根（基于本模块位置，向上多级到达仓库根）
+            module_dir = os.path.dirname(__file__)
+            repo_root = os.path.abspath(os.path.join(module_dir, "../../../../.."))
+
+            if ruleset.endswith('.xml'):
+                # 优先当作绝对路径或相对于 project_root 的路径
+                candidate = ruleset if os.path.isabs(ruleset) else os.path.join(self.project_root, ruleset)
+                if os.path.exists(candidate):
+                    host_rules_path = candidate
+                else:
+                    # 回退：尝试仓库根下的同一路径（适配测试脚本以仓库相对路径传入的场景）
+                    candidate_repo = os.path.join(repo_root, ruleset)
+                    if os.path.exists(candidate_repo):
+                        host_rules_path = candidate_repo
+                    else:
+                        # 最后尝试相对于当前工作目录或直接作为绝对路径
+                        candidate_cwd = os.path.abspath(ruleset)
+                        if os.path.exists(candidate_cwd):
+                            host_rules_path = candidate_cwd
+
+            # 如果找到了本地规则文件，则转换为容器内 /workspace 路径
+            if host_rules_path:
+                try:
+                    # 优先基于 project_root 计算相对路径，使得映射到容器的路径尽量与工作目录对齐
+                    if os.path.commonpath([host_rules_path, self.project_root]) == self.project_root:
+                        rel = os.path.relpath(host_rules_path, self.project_root)
+                    else:
+                        rel = os.path.relpath(host_rules_path, repo_root)
+                except Exception:
+                    rel = os.path.basename(host_rules_path)
+
+                # 在容器内，工作目录映射到 /workspace
+                selected_ruleset = os.path.join('/workspace', rel).replace('\\', '/')
+            else:
+                # 回退到预定义规则集
+                selected_ruleset = ruleset_map.get(ruleset, ruleset_map['security'])
+        except Exception:
+            selected_ruleset = ruleset_map.get(ruleset, ruleset_map['security'])
 
         # 构建 PMD 命令
         cmd = [
@@ -1279,9 +1338,17 @@ PMD 直接分析源代码，无需编译！
                     metadata={"findings_count": 0}
                 )
             
-            # 解析 JSON 结果
+            # 与 Opengrep 保持一致：从输出中定位 JSON 起始位置再解析
             try:
-                pmd_result = json.loads(stdout)
+                json_start = stdout.find('{')
+                if json_start >= 0:
+                    pmd_result = json.loads(stdout[json_start:])
+                else:
+                    return ToolResult(
+                        success=True,
+                        data=f"🔍 PMD 扫描结果:\n{stdout[:3000]}",
+                        metadata={"raw_output": True}
+                    )
             except json.JSONDecodeError:
                 return ToolResult(
                     success=True,
@@ -1353,7 +1420,10 @@ PMD 直接分析源代码，无需编译！
                     "findings_count": len(violations),
                     "high_count": high_count,
                     "medium_count": medium_count,
-                    "low_count": low_count
+                    "low_count": low_count,
+                    # 结构化 Python 对象，便于 Agent 后续处理（对齐 Opengrep）
+                    "findings": violations[:10],
+                    "raw_result": pmd_result,
                 }
             )
             
@@ -1515,15 +1585,20 @@ PHPStan 是 PHP 静态分析工具，无需运行代码即可发现错误。
                         error="phpstan_error"
                     )
             
-            # 解析 JSON 结果
+            # 解析 JSON 结果（对齐 Opengrep/PMD：容忍 stdout 前缀噪音）
             try:
-                phpstan_result = json.loads(stdout)
-            except json.JSONDecodeError:
-                return ToolResult(
-                    success=True,
-                    data=f"🔍 PHPStan 扫描结果:\n{stdout[:3000]}",
-                    metadata={"raw_output": True}
-                )
+                json_start = stdout.find('{')
+                if json_start >= 0:
+                    phpstan_result = json.loads(stdout[json_start:])
+                else:
+                    error_msg = "PHPStan 输出中未找到 JSON 起始符 '{'"
+                    logger.error(f"[PHPStan] {error_msg}, stdout前500字符: {stdout[:500]}")
+                    return ToolResult(success=False, data=error_msg, error=error_msg)
+            except json.JSONDecodeError as e:
+                error_msg = f"无法解析 PHPStan JSON 输出 (位置 {e.pos}): {e.msg}"
+                logger.error(f"[PHPStan] {error_msg}")
+                logger.error(f"[PHPStan] 原始输出前500字符: {stdout[:500]}")
+                return ToolResult(success=False, data=error_msg, error=error_msg)
             
             # 提取错误信息
             files = phpstan_result.get('files', {})
@@ -1589,7 +1664,10 @@ PHPStan 是 PHP 静态分析工具，无需运行代码即可发现错误。
                 metadata={
                     "findings_count": total_errors,
                     "security_count": security_count,
-                    "level": level
+                    "level": level,
+                    # 结构化 Python 对象，便于 Agent 后续处理（对齐 Opengrep/PMD）
+                    "findings": all_issues[:10],
+                    "raw_result": phpstan_result,
                 }
             )
             

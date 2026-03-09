@@ -289,9 +289,10 @@ async def test_pmd(project_root: str):
     print(f"工具描述: {tool.description[:200]}...")
     
     print("\n执行扫描...")
+    # 使用本仓库内提供的 PMD 规则文件进行测试
     result = await tool.execute(
         target_path=".",
-        ruleset="security",
+        ruleset="backend/app/db/rules_pmd/HardCodedCryptoKey.xml",
         max_results=30
     )
     
