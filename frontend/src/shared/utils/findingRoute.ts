@@ -1,6 +1,11 @@
 export type FindingSource = "static" | "agent";
 export type StaticFindingEngine = "opengrep" | "gitleaks";
 
+export type FindingDetailLocationState = {
+	fromTaskDetail: true;
+	preferHistoryBack: true;
+};
+
 function normalizeSegment(value: string): string {
 	return encodeURIComponent(String(value || "").trim());
 }
@@ -54,6 +59,13 @@ export function sanitizeAgentAuditReturnTo(route: string): string {
 	return query ? `${pathPart}?${query}` : pathPart;
 }
 
+export function buildFindingDetailLocationState(): FindingDetailLocationState {
+	return {
+		fromTaskDetail: true,
+		preferHistoryBack: true,
+	};
+}
+
 export function buildAgentFindingDetailRoute(params: {
 	taskId: string;
 	findingId: string;
@@ -65,4 +77,45 @@ export function buildAgentFindingDetailRoute(params: {
 		findingId: params.findingId,
 	});
 	return appendReturnTo(targetPath, sanitizeAgentAuditReturnTo(params.currentRoute));
+}
+
+export function buildAgentFindingDetailNavigation(params: {
+	taskId: string;
+	findingId: string;
+	currentRoute: string;
+}): { route: string; state: FindingDetailLocationState } {
+	return {
+		route: buildAgentFindingDetailRoute(params),
+		state: buildFindingDetailLocationState(),
+	};
+}
+
+export function isFindingDetailLocationState(
+	value: unknown,
+): value is FindingDetailLocationState {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Record<string, unknown>;
+	return (
+		candidate.fromTaskDetail === true &&
+		candidate.preferHistoryBack === true
+	);
+}
+
+export function resolveFindingDetailBackTarget(params: {
+	returnTo: string | null | undefined;
+	hasHistory: boolean;
+	state: unknown;
+}): string | -1 {
+	if (params.hasHistory && isFindingDetailLocationState(params.state)) {
+		return -1;
+	}
+
+	const normalizedReturnTo = normalizeReturnToPath(params.returnTo);
+	if (normalizedReturnTo) {
+		return normalizedReturnTo;
+	}
+	if (params.hasHistory) {
+		return -1;
+	}
+	return "/dashboard";
 }

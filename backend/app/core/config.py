@@ -194,10 +194,6 @@ class Settings(BaseSettings):
     MCP_FILESYSTEM_RUNTIME_MODE: str = "stdio_only"
     MCP_FILESYSTEM_COMMAND: str = "pnpm"
     MCP_FILESYSTEM_ARGS: str = "dlx @modelcontextprotocol/server-filesystem"
-    MCP_CODE_INDEX_ENABLED: bool = True
-    MCP_CODE_INDEX_RUNTIME_MODE: str = "stdio_only"
-    MCP_CODE_INDEX_COMMAND: str = "code-index-mcp"
-    MCP_CODE_INDEX_ARGS: str = "--indexer-path /app/data/mcp/code-index"
     GIT_MIRROR_ENABLED: bool = True
     GIT_MIRROR_PREFIX: str = "https://gh-proxy.org"
     GIT_MIRROR_PREFIXES: str = "https://gh-proxy.org,https://v6.gh-proxy.org"

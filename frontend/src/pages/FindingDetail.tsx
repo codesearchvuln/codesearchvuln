@@ -23,7 +23,10 @@ import {
 	type GitleaksFinding,
 	type GitleaksScanTask,
 } from "@/shared/api/gitleaks";
-import { normalizeReturnToPath } from "@/shared/utils/findingRoute";
+import {
+	normalizeReturnToPath,
+	resolveFindingDetailBackTarget,
+} from "@/shared/utils/findingRoute";
 
 type FindingSource = "static" | "agent";
 type StaticEngine = "opengrep" | "gitleaks";
@@ -343,11 +346,16 @@ export default function FindingDetail() {
 	const codeSections = useMemo(() => buildFindingDetailCodeSections(codeViews), [codeViews]);
 
 	const handleBack = () => {
-		if (returnTo) {
-			navigate(returnTo);
+		const target = resolveFindingDetailBackTarget({
+			returnTo,
+			hasHistory: typeof window !== "undefined" && window.history.length > 1,
+			state: location.state,
+		});
+		if (target === -1) {
+			navigate(-1);
 			return;
 		}
-		navigate(-1);
+		navigate(target);
 	};
 
 	const sourceLabel = useMemo(() => {

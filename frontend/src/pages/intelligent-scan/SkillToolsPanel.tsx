@@ -45,7 +45,6 @@ const MCP_ERROR_TEXT: Record<string, string> = {
 
 const MCP_NAME_MAP: Record<string, string> = {
   filesystem: "Filesystem MCP",
-  code_index: "Code Index MCP",
   sequentialthinking: "Sequential Thinking MCP",
 };
 

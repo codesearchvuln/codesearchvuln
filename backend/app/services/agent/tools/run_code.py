@@ -352,7 +352,10 @@ class ExtractFunctionTool(AgentTool):
             result = self._extract_php(code, function_name)
         elif ext in [".js", ".ts"]:
             result = self._extract_javascript(code, function_name)
-        elif ext in [".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh"]:
+        elif ext in [
+            ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh",
+            ".java", ".cs", ".kt", ".kts",
+        ]:
             result = self._extract_c_like(code, function_name, include_imports)
             if not result.get("success"):
                 result = self._extract_generic(code, function_name)

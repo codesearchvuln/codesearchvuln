@@ -5,19 +5,16 @@ from app.services.agent.mcp.catalog import build_mcp_catalog
 def test_mcp_catalog_only_exposes_stdio_core_mcps(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.MCP_FILESYSTEM_ENABLED", True)
     monkeypatch.setattr("app.core.config.settings.MCP_FILESYSTEM_COMMAND", "python3")
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_ENABLED", True)
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_COMMAND", "python3")
 
     catalog = build_mcp_catalog(mcp_enabled=True)
     catalog_by_id = {item["id"]: item for item in catalog}
 
-    assert set(catalog_by_id.keys()) == {"filesystem", "code_index"}
+    assert set(catalog_by_id.keys()) == {"filesystem"}
     assert all(item.get("type") == "mcp-server" for item in catalog)
     assert all(item.get("runtime_mode") == "stdio_only" for item in catalog)
     assert catalog_by_id["filesystem"].get("includedSkills") == ["read_file"]
     assert catalog_by_id["filesystem"].get("verificationTools") == ["read_file"]
-    assert catalog_by_id["code_index"].get("includedSkills") == []
-    assert catalog_by_id["code_index"].get("verificationTools") == []
+    assert "code_index" not in catalog_by_id
     assert "sequentialthinking" not in catalog_by_id
     assert all(item.get("backend") is None for item in catalog)
     assert all(item.get("sandbox") is None for item in catalog)
@@ -27,8 +24,6 @@ def test_sanitize_mcp_config_ignores_client_runtime_overrides(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.MCP_ENABLED", True)
     monkeypatch.setattr("app.core.config.settings.MCP_FILESYSTEM_ENABLED", True)
     monkeypatch.setattr("app.core.config.settings.MCP_FILESYSTEM_COMMAND", "python3")
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_ENABLED", True)
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_COMMAND", "python3")
 
     sanitized = _sanitize_mcp_config(
         {
@@ -52,19 +47,16 @@ def test_sanitize_mcp_config_ignores_client_runtime_overrides(monkeypatch):
 
     assert sanitized["enabled"] is True
     assert sanitized["preferMcp"] is True
-    assert {item["id"] for item in sanitized["catalog"]} == {"filesystem", "code_index"}
+    assert {item["id"] for item in sanitized["catalog"]} == {"filesystem"}
     assert sanitized["runtimePolicy"] == {
         "default_mode": "stdio_only",
         "filesystem": {"runtime_mode": "stdio_only", "enabled": True},
-        "code_index": {"runtime_mode": "stdio_only", "enabled": True},
     }
 
 
 def test_sanitize_mcp_config_skill_availability_only_contains_scan_core(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.MCP_FILESYSTEM_ENABLED", True)
     monkeypatch.setattr("app.core.config.settings.MCP_FILESYSTEM_COMMAND", "python3")
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_ENABLED", True)
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_COMMAND", "python3")
 
     sanitized = _sanitize_mcp_config({})
     skill_availability = sanitized["skillAvailability"]
@@ -96,3 +88,4 @@ def test_sanitize_mcp_config_skill_availability_only_contains_scan_core(monkeypa
     assert skill_availability["search_code"]["reason"] == "ready"
     assert skill_availability["list_files"]["source"] == "local"
     assert skill_availability["extract_function"]["source"] == "local"
+    assert skill_availability["locate_enclosing_function"]["source"] == "local"

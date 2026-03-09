@@ -154,7 +154,7 @@ RUN --mount=type=cache,id=deepaudit-sandbox-pnpm-store,target=/pnpm/store \
     install_mcp_packages "${SANDBOX_NPM_REGISTRY_PRIMARY}" || install_mcp_packages "${SANDBOX_NPM_REGISTRY_FALLBACK}"; \
     command -v qmd
 
-# 安装 Python 安全工具与 code-index-mcp（主源失败后回退）
+# 安装 Python 安全工具（主源失败后回退）
 RUN --mount=type=cache,id=deepaudit-sandbox-pip,target=/root/.cache/pip \
     set -eux; \
     pip_install_with_index() { \
@@ -172,7 +172,6 @@ RUN --mount=type=cache,id=deepaudit-sandbox-pip,target=/root/.cache/pip \
         sqlparse \
         bandit \
         safety \
-        code-index-mcp \
         code2flow; \
     }; \
     pip_install_with_index "${SANDBOX_PYPI_INDEX_PRIMARY}" || pip_install_with_index "${SANDBOX_PYPI_INDEX_FALLBACK}"
@@ -268,7 +267,6 @@ RUN groupadd -g 1000 sandbox && \
 
 # 创建工作目录
 RUN mkdir -p /workspace /tmp/sandbox \
-    /workspace/.deepaudit/mcp/code-index \
     /workspace/.deepaudit/mcp/xdg-data \
     /workspace/.deepaudit/mcp/xdg-cache \
     /workspace/.deepaudit/mcp/xdg-config \
@@ -284,7 +282,6 @@ ENV XDG_DATA_HOME=/workspace/.deepaudit/mcp/xdg-data
 ENV XDG_CACHE_HOME=/workspace/.deepaudit/mcp/xdg-cache
 ENV XDG_CONFIG_HOME=/workspace/.deepaudit/mcp/xdg-config
 ENV QMD_DATA_DIR=/workspace/.deepaudit/qmd
-ENV CODE_INDEX_INDEXER_PATH=/workspace/.deepaudit/mcp/code-index
 
 # 限制 Python 导入路径
 ENV PYTHONPATH=/workspace

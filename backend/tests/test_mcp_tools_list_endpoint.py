@@ -6,8 +6,10 @@ from fastapi import HTTPException
 from app.api.v1.endpoints import agent_tasks as agent_tasks_module
 from app.api.v1.endpoints import config as config_module
 from app.api.v1.endpoints.config import (
+    MCPVerifyRequest,
     MCPToolsCallRequest,
     MCPToolsListRequest,
+    verify_mcp_runtime,
     call_mcp_tool_runtime,
     list_mcp_tools_runtime,
 )
@@ -76,7 +78,6 @@ def _setup_common(monkeypatch, runtime, *, catalog):
 async def test_list_mcp_tools_filters_internal_tools_by_default(monkeypatch):
     catalog = [
         {"id": "filesystem", "type": "mcp-server"},
-        {"id": "code_index", "type": "mcp-server"},
         {"id": "skill-pack-demo", "type": "skill-pack"},
     ]
     runtime = _FakeRuntime(
@@ -89,13 +90,6 @@ async def test_list_mcp_tools_filters_internal_tools_by_default(monkeypatch):
                 ],
                 "metadata": {"mcp_runtime_domain": "sandbox"},
             },
-            "code_index": {
-                "success": True,
-                "tools": [
-                    {"name": "search_code_advanced", "description": "search", "inputSchema": {}},
-                ],
-                "metadata": {"mcp_runtime_domain": "backend"},
-            },
         }
     )
     _setup_common(monkeypatch, runtime, catalog=catalog)
@@ -106,8 +100,8 @@ async def test_list_mcp_tools_filters_internal_tools_by_default(monkeypatch):
         current_user=SimpleNamespace(id="user-1"),
     )
 
-    assert [item.mcp_id for item in response.results] == ["filesystem", "code_index"]
-    assert runtime.calls == ["filesystem", "code_index"]
+    assert [item.mcp_id for item in response.results] == ["filesystem"]
+    assert runtime.calls == ["filesystem"]
 
     filesystem = response.results[0]
     assert filesystem.success is True
@@ -149,43 +143,20 @@ async def test_list_mcp_tools_can_include_internal_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_mcp_tools_single_mcp_failure_does_not_block_others(monkeypatch):
-    catalog = [
-        {"id": "filesystem", "type": "mcp-server"},
-        {"id": "code_index", "type": "mcp-server"},
-    ]
-    runtime = _FakeRuntime(
-        {
-            "filesystem": {
-                "success": False,
-                "tools": [],
-                "error": "mcp_adapter_unavailable:filesystem",
-                "metadata": {"mcp_runtime_domain": "sandbox"},
-            },
-            "code_index": {
-                "success": True,
-                "tools": [
-                    {"name": "search_code_advanced", "description": "search", "inputSchema": {}},
-                ],
-                "metadata": {"mcp_runtime_domain": "backend"},
-            },
-        }
-    )
+async def test_list_mcp_tools_rejects_removed_code_index(monkeypatch):
+    catalog = [{"id": "filesystem", "type": "mcp-server"}]
+    runtime = _FakeRuntime({"filesystem": {"success": True, "tools": []}})
     _setup_common(monkeypatch, runtime, catalog=catalog)
 
-    response = await list_mcp_tools_runtime(
-        MCPToolsListRequest(mcp_ids=["filesystem", "code_index"]),
-        db=_FakeDB(),
-        current_user=SimpleNamespace(id="user-1"),
-    )
+    with pytest.raises(HTTPException) as excinfo:
+        await list_mcp_tools_runtime(
+            MCPToolsListRequest(mcp_ids=["filesystem", "code_index"]),
+            db=_FakeDB(),
+            current_user=SimpleNamespace(id="user-1"),
+        )
 
-    assert len(response.results) == 2
-    by_id = {item.mcp_id: item for item in response.results}
-    assert by_id["filesystem"].success is False
-    assert by_id["filesystem"].error == "mcp_adapter_unavailable:filesystem"
-    assert by_id["filesystem"].tools == []
-    assert by_id["code_index"].success is True
-    assert by_id["code_index"].visible_count == 1
+    assert excinfo.value.status_code == 400
+    assert "不支持的 MCP" in str(excinfo.value.detail)
 
 
 @pytest.mark.asyncio
@@ -220,14 +191,14 @@ async def test_call_mcp_tool_runtime_returns_unified_payload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_call_mcp_tool_runtime_blocks_internal_tool_by_default(monkeypatch):
-    catalog = [{"id": "code_index", "type": "mcp-server"}]
-    runtime = _FakeRuntime({"code_index": {"success": True, "tools": []}})
+    catalog = [{"id": "filesystem", "type": "mcp-server"}]
+    runtime = _FakeRuntime({"filesystem": {"success": True, "tools": []}})
     _setup_common(monkeypatch, runtime, catalog=catalog)
 
     with pytest.raises(HTTPException) as excinfo:
         await call_mcp_tool_runtime(
             MCPToolsCallRequest(
-                mcp_id="code_index",
+                mcp_id="filesystem",
                 tool_name="set_project_path",
                 arguments={"path": "."},
             ),
@@ -236,3 +207,39 @@ async def test_call_mcp_tool_runtime_blocks_internal_tool_by_default(monkeypatch
         )
     assert excinfo.value.status_code == 400
     assert "internal tool blocked" in str(excinfo.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_call_mcp_tool_runtime_rejects_removed_code_index(monkeypatch):
+    catalog = [{"id": "filesystem", "type": "mcp-server"}]
+    runtime = _FakeRuntime({"filesystem": {"success": True, "tools": []}})
+    _setup_common(monkeypatch, runtime, catalog=catalog)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await call_mcp_tool_runtime(
+            MCPToolsCallRequest(
+                mcp_id="code_index",
+                tool_name="list_directory",
+                arguments={"path": "."},
+            ),
+            db=_FakeDB(),
+            current_user=SimpleNamespace(id="user-1"),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "不支持的 MCP" in str(excinfo.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_verify_mcp_runtime_rejects_removed_code_index(monkeypatch):
+    _setup_common(monkeypatch, _FakeRuntime({}), catalog=[{"id": "filesystem", "type": "mcp-server"}])
+
+    with pytest.raises(HTTPException) as excinfo:
+        await verify_mcp_runtime(
+            MCPVerifyRequest(mcp_id="code_index"),
+            db=_FakeDB(),
+            current_user=SimpleNamespace(id="user-1"),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "不支持的 MCP" in str(excinfo.value.detail)

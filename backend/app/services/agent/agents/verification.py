@@ -1151,7 +1151,7 @@ class VerificationAgent(BaseAgent):
             }
             
             try:
-                logger.debug(f"[Verification] 调用 MCP locate_enclosing_function: {request_path}:{line_start}")
+                logger.debug(f"[Verification] 调用 locate_enclosing_function: {request_path}:{line_start}")
                 locator_output = await self.execute_tool(
                     "locate_enclosing_function",
                     locator_input,
@@ -1161,10 +1161,10 @@ class VerificationAgent(BaseAgent):
                 if not payload:
                     mcp_fail_count += 1
                     logger.warning(
-                        f"[Verification] MCP返回空payload: {request_path}:{line_start} | "
+                        f"[Verification] locate_enclosing_function 返回空 payload: {request_path}:{line_start} | "
                         f"raw_output={str(locator_output)[:200]}"
                     )
-                    # 标记MCP尝试但失败
+                    # 标记工具尝试但失败
                     finding["_mcp_attempt"] = "failed_empty_payload"
                     continue
                 
@@ -1172,7 +1172,7 @@ class VerificationAgent(BaseAgent):
                 if not located:
                     mcp_fail_count += 1
                     logger.warning(
-                        f"[Verification] MCP payload解析失败: {request_path}:{line_start} | "
+                        f"[Verification] locate_enclosing_function payload 解析失败: {request_path}:{line_start} | "
                         f"payload_keys={list(payload.keys())}"
                     )
                     finding["_mcp_attempt"] = "failed_payload_parsing"
@@ -1182,7 +1182,7 @@ class VerificationAgent(BaseAgent):
                 if not located_name:
                     mcp_fail_count += 1
                     logger.warning(
-                        f"[Verification] MCP返回空函数名: {request_path}:{line_start}"
+                        f"[Verification] locate_enclosing_function 返回空函数名: {request_path}:{line_start}"
                     )
                     finding["_mcp_attempt"] = "failed_empty_function_name"
                     continue

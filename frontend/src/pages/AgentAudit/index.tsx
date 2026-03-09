@@ -34,6 +34,7 @@ import {
   cancelAgentTask,
   getAgentTree,
   getAgentEvents,
+  AgentFinding,
   AgentEvent,
 } from "@/shared/api/agentTasks";
 import {
@@ -90,6 +91,10 @@ import {
   PROGRAMMATIC_SCROLL_GUARD_MS,
   shouldDisableAutoScrollOnScroll,
 } from "./autoScrollState";
+import {
+  buildAgentFindingDetailNavigation,
+  buildAgentFindingDetailRoute,
+} from "@/shared/utils/findingRoute";
 
 import type { RealtimeMergedFindingItem } from "./components/RealtimeFindingsPanel";
 import {
@@ -427,6 +432,47 @@ function toSafeTrimmedString(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function toDialogFinding(item: RealtimeMergedFindingItem): AgentFinding {
+  const falsePositive = item.display_severity === "invalid";
+  const isVerified = item.verification_progress === "verified" || item.is_verified;
+  return {
+    id: item.id,
+    task_id: "",
+    vulnerability_type: item.vulnerability_type,
+    severity: item.severity,
+    title: item.title,
+    display_title: item.display_title ?? null,
+    description: item.description ?? null,
+    description_markdown: item.description_markdown ?? null,
+    file_path: item.file_path ?? null,
+    line_start: item.line_start ?? null,
+    line_end: item.line_end ?? null,
+    code_snippet: item.code_snippet ?? null,
+    code_context: item.code_context ?? null,
+    cwe_id: item.cwe_id ?? null,
+    context_start_line: item.context_start_line ?? null,
+    context_end_line: item.context_end_line ?? null,
+    status: falsePositive ? "false_positive" : isVerified ? "verified" : "pending",
+    is_verified: isVerified,
+    reachability: null,
+    authenticity: falsePositive ? "false_positive" : null,
+    verification_evidence: item.verification_evidence ?? null,
+    reachability_file: item.reachability_file ?? null,
+    reachability_function: item.reachability_function ?? null,
+    reachability_function_start_line: item.reachability_function_start_line ?? null,
+    reachability_function_end_line: item.reachability_function_end_line ?? null,
+    has_poc: false,
+    poc_code: null,
+    suggestion: null,
+    fix_code: null,
+    ai_explanation: null,
+    ai_confidence: item.confidence ?? null,
+    confidence: item.confidence ?? null,
+    function_trigger_flow: item.function_trigger_flow ?? null,
+    created_at: item.timestamp ?? new Date().toISOString(),
+  };
+}
+
 function resolveRealtimeFindingMergeKey(
   item: RealtimeMergedFindingItem | null | undefined,
 ): string {
@@ -693,11 +739,14 @@ function AgentAuditPageContent() {
     [detailDialog, logs],
   );
   const selectedFinding = useMemo(
-    () =>
-      detailDialog?.type === "finding"
-        ? findings.find((item) => item.id === detailDialog.id) || null
-        : null,
-    [detailDialog, findings],
+    () => {
+      if (detailDialog?.type !== "finding") return null;
+      const persistedFinding = findings.find((item) => item.id === detailDialog.id);
+      if (persistedFinding) return persistedFinding;
+      const realtimeFinding = realtimeFindings.find((item) => item.id === detailDialog.id);
+      return realtimeFinding ? toDialogFinding(realtimeFinding) : null;
+    },
+    [detailDialog, findings, realtimeFindings],
   );
   const selectedAgentNode = useMemo(
     () =>
@@ -724,6 +773,7 @@ function AgentAuditPageContent() {
       description: task?.description,
     });
   }, [location.search, task?.description, task?.name]);
+  const currentRoute = `${location.pathname}${location.search}`;
   const statsSummary = useMemo(
     () =>
       task
@@ -871,6 +921,19 @@ function AgentAuditPageContent() {
       setDetailQuery({ type: detail.type, id: detail.id });
     },
     [activeMainTab, findingsFilters, setDetailQuery],
+  );
+
+  const openFindingDetailPage = useCallback(
+    (findingId: string) => {
+      if (!taskId) return;
+      const target = buildAgentFindingDetailNavigation({
+        taskId,
+        findingId,
+        currentRoute,
+      });
+      navigate(target.route, { state: target.state });
+    },
+    [currentRoute, navigate, taskId],
   );
 
   const handleDetailBack = useCallback(() => {
@@ -1025,16 +1088,27 @@ function AgentAuditPageContent() {
     const detailType = params.get("detailType");
     const detailId = params.get("detailId");
     if (!detailType || !detailId) return;
+    if (detailType === "finding") {
+      if (!taskId) return;
+      if (
+        findings.some((item) => item.id === detailId) ||
+        realtimeFindings.some((item) => item.id === detailId)
+      ) {
+        navigate(
+          buildAgentFindingDetailRoute({
+            taskId,
+            findingId: detailId,
+            currentRoute,
+          }),
+          { replace: true },
+        );
+      }
+      return;
+    }
     if (detailDialog?.type === detailType && detailDialog?.id === detailId) return;
     if (detailType === "log") {
       if (logs.some((item) => item.id === detailId)) {
         setDetailDialog({ type: "log", id: detailId });
-      }
-      return;
-    }
-    if (detailType === "finding") {
-      if (findings.some((item) => item.id === detailId)) {
-        setDetailDialog({ type: "finding", id: detailId });
       }
       return;
     }
@@ -1043,7 +1117,18 @@ function AgentAuditPageContent() {
         setDetailDialog({ type: "agent", id: detailId });
       }
     }
-  }, [detailDialog?.id, detailDialog?.type, findings, location.search, logs, treeNodes]);
+  }, [
+    currentRoute,
+    detailDialog?.id,
+    detailDialog?.type,
+    findings,
+    location.search,
+    logs,
+    navigate,
+    realtimeFindings,
+    taskId,
+    treeNodes,
+  ]);
 
   // ============ Data Loading ============
 
@@ -3072,8 +3157,10 @@ function AgentAuditPageContent() {
                 taskId={task?.id || ""}
                 items={realtimeFindings}
                 isRunning={isRunning}
+                currentPhase={task?.current_phase ?? null}
                 filters={findingsFilters}
                 onFiltersChange={setFindingsFilters}
+                onOpenDetail={(item) => openFindingDetailPage(item.id)}
               />
             </div>
           </div>

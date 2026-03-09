@@ -114,7 +114,6 @@ def build_scan_core_skill_availability(catalog: List[Dict[str, Any]]) -> Dict[st
         return bool(item.get("enabled")) and bool(item.get("startup_ready", True))
 
     filesystem_ready = _mcp_ready("filesystem")
-    code_index_ready = _mcp_ready("code_index")
 
     availability: Dict[str, Dict[str, Any]] = {}
     for skill_id in SCAN_CORE_SKILL_IDS:
@@ -122,10 +121,6 @@ def build_scan_core_skill_availability(catalog: List[Dict[str, Any]]) -> Dict[st
             enabled = filesystem_ready
             source = "mcp"
             reason = "ready" if enabled else "mcp_not_ready:filesystem"
-        elif skill_id in SCAN_CORE_CODE_INDEX_BOUND_SKILL_IDS:
-            enabled = code_index_ready
-            source = "mcp"
-            reason = "ready" if enabled else "mcp_not_ready:code_index"
         else:
             enabled = True
             source = "local"

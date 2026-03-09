@@ -14,8 +14,8 @@ def test_router_maps_extract_function_new_contract_to_symbol_name_and_symbol():
     )
 
     assert route is not None
-    assert route.adapter_name == "code_index"
-    assert route.mcp_tool_name == "get_symbol_body"
+    assert route.adapter_name == "__local__"
+    assert route.mcp_tool_name == "extract_function"
     assert route.arguments.get("path") == "src/authz.c"
     assert route.arguments.get("symbol_name") == "validate_access"
     assert route.arguments.get("symbol") == "validate_access"
@@ -36,8 +36,8 @@ def test_router_maps_extract_function_legacy_function_name_for_compatibility():
     )
 
     assert route is not None
-    assert route.adapter_name == "code_index"
-    assert route.mcp_tool_name == "get_symbol_body"
+    assert route.adapter_name == "__local__"
+    assert route.mcp_tool_name == "extract_function"
     assert route.arguments.get("path") == "src/authz.c"
     assert route.arguments.get("symbol_name") == "validate_access"
     assert route.arguments.get("symbol") == "validate_access"

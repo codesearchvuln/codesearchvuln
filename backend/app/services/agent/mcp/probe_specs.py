@@ -22,7 +22,6 @@ class MCPProbeCheck:
 
 MCP_VERIFICATION_TOOLS: Dict[str, List[str]] = {
     "filesystem": ["read_file"],
-    "code_index": ["extract_function", "list_files", "locate_enclosing_function"],
     "sequentialthinking": ["sequential_thinking", "reasoning_trace"],
     "qmd": ["qmd_status", "qmd_query", "qmd_get", "qmd_multi_get"],
 }
@@ -45,49 +44,12 @@ def build_probe_checks(
         probe_rel_path = str(filesystem_probe_file or "").strip()
         if not probe_rel_path:
             probe_rel_path = f"tmp/.mcp_probe_{uuid.uuid4().hex}.txt"
-        probe_keyword = "mcp verify filesystem probe"
         return [
             MCPProbeCheck(
                 step="read_probe_file",
                 tool_name="read_file",
                 arguments={"file_path": probe_rel_path},
             ),
-        ]
-    if normalized_id == "code_index":
-        probe_file = str(code_probe_file or "").strip() or "tmp/.mcp_verify_code_probe.c"
-        probe_function = str(code_probe_function or "").strip() or "mcp_probe_sum"
-        probe_line = int(code_probe_line or 3)
-        return [
-            MCPProbeCheck(
-                step="list_files_probe",
-                tool_name="list_files",
-                arguments={
-                    "directory": "tmp",
-                    "pattern": "*.c",
-                },
-            ),
-            MCPProbeCheck(
-                step="extract_function_probe",
-                tool_name="extract_function",
-                arguments={
-                    "code": (
-                        f"int {probe_function}(int a, int b) {{\n"
-                        "    return a + b;\n"
-                        "}\n"
-                    ),
-                    "file_name": probe_file.split("/")[-1],
-                    "file_path": probe_file,
-                    "line": probe_line,
-                },
-            ),
-            MCPProbeCheck(
-                step="locate_enclosing_function_probe",
-                tool_name="locate_enclosing_function",
-                arguments={
-                    "file_path": probe_file,
-                    "line_start": probe_line,
-                },
-            )
         ]
     if normalized_id == "sequentialthinking":
         return [

@@ -16,7 +16,7 @@
     "format": "biome format --write .",
     "type-check": "tsc --noEmit",
     "type-check:docker": "bash scripts/run-in-dev-container.sh pnpm type-check",
-    "test:node": "tsx --test tests/*.test.ts",
+    "test:node": "node scripts/run-node-tests.mjs",
     "test:docker": "bash scripts/run-in-dev-container.sh pnpm test:node",
     "lint:docker": "bash scripts/run-in-dev-container.sh pnpm lint",
     "clean": "rm -rf dist node_modules/.vite",

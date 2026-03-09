@@ -100,7 +100,7 @@ async def test_get_my_config_rebuilds_backend_owned_mcp_even_if_legacy_data_cont
         "preferMcp": True,
         "runtimePolicy": {"default_mode": "backend_then_sandbox"},
         "writePolicy": {"max_writable_files_per_task": 50},
-        "catalog": [{"id": "code_index", "type": "mcp-server"}],
+        "catalog": [{"id": "filesystem", "type": "mcp-server"}],
         "skillAvailability": {"search_code": {"enabled": True}},
     }
     monkeypatch.setattr(

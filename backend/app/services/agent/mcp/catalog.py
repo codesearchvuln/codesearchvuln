@@ -67,18 +67,6 @@ _CORE_MCP_DEFINITIONS = {
         "command_setting": "MCP_FILESYSTEM_COMMAND",
         "enabled_setting": "MCP_FILESYSTEM_ENABLED",
     },
-    "code_index": {
-        "name": "Code Index MCP",
-        "description": "代码索引、符号级检索与函数定位。",
-        "executionFunctions": ["find_files", "search_code_advanced", "get_symbol_body", "get_file_summary"],
-        "inputInterface": ["query/keyword", "path/file_path", "glob/file_pattern", "line_start/function_name"],
-        "outputInterface": ["symbols", "matches", "file_summary", "metadata.engine"],
-        "includedSkills": [],
-        "verificationTools": [],
-        "source": "https://github.com/johnhuang316/code-index-mcp",
-        "command_setting": "MCP_CODE_INDEX_COMMAND",
-        "enabled_setting": "MCP_CODE_INDEX_ENABLED",
-    },
 }
 
 

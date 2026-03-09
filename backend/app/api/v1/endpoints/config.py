@@ -465,10 +465,6 @@ def _default_mcp_runtime_policy() -> dict:
             "runtime_mode": "stdio_only",
             "enabled": bool(getattr(settings, "MCP_FILESYSTEM_ENABLED", True)),
         },
-        "code_index": {
-            "runtime_mode": "stdio_only",
-            "enabled": bool(getattr(settings, "MCP_CODE_INDEX_ENABLED", True)),
-        },
     }
 
 def _sanitize_runtime_mode(raw_mode: Any, default_mode: str) -> str:
@@ -488,10 +484,6 @@ def _sanitize_mcp_runtime_policy(raw_policy: Any) -> dict:
         "filesystem": {
             "runtime_mode": "stdio_only",
             "enabled": bool(default_policy["filesystem"]["enabled"]),
-        },
-        "code_index": {
-            "runtime_mode": "stdio_only",
-            "enabled": bool(default_policy["code_index"]["enabled"]),
         },
     }
 
@@ -569,7 +561,6 @@ def _strip_mcp_config(raw_other_config: Any) -> dict:
 _VERIFY_DEFAULT_PROJECT_NAME = "libplist"
 _VERIFY_SUPPORTED_MCP_IDS = {
     "filesystem",
-    "code_index",
 }
 _MCP_INTERNAL_TOOLS = {
     "set_project_path",
@@ -577,6 +568,17 @@ _MCP_INTERNAL_TOOLS = {
     "refresh_index",
     "build_deep_index",
 }
+
+
+def _ensure_supported_mcp_ids(mcp_ids: list[str]) -> list[str]:
+    normalized_ids = [str(item or "").strip().lower() for item in mcp_ids if str(item or "").strip()]
+    unsupported = [mcp_id for mcp_id in normalized_ids if mcp_id not in _VERIFY_SUPPORTED_MCP_IDS]
+    if unsupported:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的 MCP: {', '.join(sorted(dict.fromkeys(unsupported)))}",
+        )
+    return normalized_ids
 
 def _normalize_extracted_project_root(base_path: str) -> str:
     candidates = [
@@ -1190,6 +1192,7 @@ async def list_mcp_tools_runtime(
         request.mcp_ids,
         mcp_catalog=mcp_config.get("catalog"),
     )
+    target_mcp_ids = _ensure_supported_mcp_ids(target_mcp_ids)
     if not target_mcp_ids:
         return MCPToolsListResponse(results=[])
 
@@ -1282,6 +1285,7 @@ async def call_mcp_tool_runtime(
     tool_name = str(request.tool_name or "").strip()
     if not mcp_id or not tool_name:
         raise HTTPException(status_code=400, detail="mcp_id and tool_name are required")
+    _ensure_supported_mcp_ids([mcp_id])
     if not bool(request.include_internal) and tool_name in _MCP_INTERNAL_TOOLS:
         raise HTTPException(status_code=400, detail=f"internal tool blocked: {tool_name}")
 

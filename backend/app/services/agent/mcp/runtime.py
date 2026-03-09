@@ -138,14 +138,7 @@ class MCPExecutionResult:
 
 class FastMCPStdioAdapter:
     """Minimal stdio MCP adapter backed by fastmcp.Client."""
-    _PROJECT_PATH_BOOTSTRAP_TOOLS = {
-        "search_code_advanced",
-        "find_files",
-        "refresh_index",
-        "build_deep_index",
-        "get_symbol_body",
-        "get_file_summary",
-    }
+    _PROJECT_PATH_BOOTSTRAP_TOOLS: set[str] = set()
     _NPX_PACKAGE_BINARIES = {
         "@modelcontextprotocol/server-filesystem": "mcp-server-filesystem",
         "@modelcontextprotocol/server-sequential-thinking": "mcp-server-sequential-thinking",
@@ -341,22 +334,13 @@ class FastMCPStdioAdapter:
 
     @staticmethod
     def _is_project_path_not_set_text(text: str) -> bool:
-        lowered = str(text or "").lower()
-        if not lowered:
-            return False
-        return (
-            "project path not set" in lowered
-            or ("set_project_path" in lowered and "project" in lowered and "path" in lowered)
-        )
+        _ = text
+        return False
 
     @classmethod
     def _should_bootstrap_for_tool(cls, tool_name: str, text: str) -> bool:
-        normalized_tool = str(tool_name or "").strip().lower()
-        if not normalized_tool or normalized_tool == "set_project_path":
-            return False
-        if cls._is_project_path_not_set_text(text):
-            return True
-        return normalized_tool in cls._PROJECT_PATH_BOOTSTRAP_TOOLS
+        _ = tool_name, text
+        return False
 
     def _resolve_project_root_for_bootstrap(self, arguments: Dict[str, Any]) -> Optional[str]:
         for key in ("project_root", "project_path", "root"):
@@ -895,23 +879,10 @@ class MCPRuntime:
             arguments["path"] = self.project_root
         return arguments
 
-    def _normalize_code_index_arguments(self, route: MCPToolRoute) -> Dict[str, Any]:
-        arguments = dict(route.arguments or {})
-        if not self.project_root:
-            return arguments
-        arguments.setdefault("project_root", self.project_root)
-        arguments.setdefault("project_path", self.project_root)
-        normalized_tool = str(route.mcp_tool_name or "").strip().lower()
-        if normalized_tool in {"search_code_advanced", "search_code", "find_files"}:
-            arguments.setdefault("path", ".")
-        return arguments
-
     def _prepare_route(self, route: MCPToolRoute) -> MCPToolRoute:
         adapter_name = str(route.adapter_name or "").strip().lower()
         if adapter_name == "filesystem":
             normalized_arguments = self._normalize_filesystem_arguments(route)
-        elif adapter_name == "code_index":
-            normalized_arguments = self._normalize_code_index_arguments(route)
         else:
             return route
         if normalized_arguments == route.arguments:
@@ -1025,11 +996,7 @@ class MCPRuntime:
                 "read_file",
                 "write_file",
                 "edit_file",
-                "find_files",
                 "search_files",
-                "search_code_advanced",
-                "get_symbol_body",
-                "get_file_summary",
             }
             if normalized_tool in input_sensitive_tools:
                 return False

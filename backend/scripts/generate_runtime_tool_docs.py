@@ -435,11 +435,11 @@ def _build_mcp_tool_playbook() -> str:
 
 | 标准工具名 | MCP Server | MCP Tool | 必填参数 | 典型输出 |
 | --- | --- | --- | --- | --- |
-| `search_code` | `code_index` (fallback `filesystem`) | `search_code_advanced` (`search_files`) | `keyword/pattern` | 命中位置（含 file_path 与 line） |
+| `search_code` | `local` | `FileSearchTool` | 公开输入 `keyword`；优先补充 `directory/file_pattern` 缩小范围 | 命中位置（含 file_path 与 line） |
 | `read_file` | `filesystem` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |
-| `list_files` | `code_index` | `find_files` | `directory/path` | 文件列表 |
-| `locate_enclosing_function` | `code_index` | `get_file_summary` | `file_path`, `line_start` | 所属函数与范围 |
-| `extract_function` | `code_index` | `get_symbol_body` | `file_path`, `function_name/symbol_name` | 函数代码 |
+| `list_files` | `local` | `ListFilesTool` | `directory/path` | 文件列表 |
+| `locate_enclosing_function` | `local` | `LocateEnclosingFunctionTool` | `file_path`, `line_start` | 所属函数与范围 |
+| `extract_function` | `local` | `ExtractFunctionTool` | `file_path`, `function_name/symbol_name` | 函数代码 |
 | `qmd_query` | `qmd` | `deep_search` | `query/searches` | 语义检索结果 |
 | `qmd_get` | `qmd` | `get` | `doc_id/id` | 文档详情 |
 | `qmd_multi_get` | `qmd` | `multi_get` | `ids` | 批量文档结果 |

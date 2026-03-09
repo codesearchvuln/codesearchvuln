@@ -314,7 +314,6 @@ def _public_local_scan_core_skill_ids() -> set[str]:
     availability = build_scan_core_skill_availability(
         [
             {"id": "filesystem", "enabled": True, "startup_ready": True},
-            {"id": "code_index", "enabled": True, "startup_ready": True},
         ]
     )
     return {

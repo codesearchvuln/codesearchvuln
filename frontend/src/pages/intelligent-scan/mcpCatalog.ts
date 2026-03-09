@@ -46,25 +46,6 @@ export const DEFAULT_MCP_CATALOG: McpCatalogItem[] = [
     backend: undefined,
     sandbox: undefined,
   },
-  {
-    id: "code_index",
-    name: "Code Index MCP",
-    type: "mcp-server",
-    enabled: true,
-    description: "代码索引、符号级检索与函数定位。",
-    executionFunctions: ["find_files", "search_code_advanced", "get_symbol_body", "get_file_summary"],
-    inputInterface: ["query/keyword", "path/file_path", "glob/file_pattern", "line_start/function_name"],
-    outputInterface: ["symbols", "matches", "file_summary", "metadata.engine"],
-    includedSkills: ["list_files", "search_code", "extract_function"],
-    verificationTools: ["list_files", "search_code", "extract_function"],
-    source: "https://github.com/johnhuang316/code-index-mcp",
-    runtime_mode: "stdio_only",
-    required: true,
-    startup_ready: true,
-    startup_error: null,
-    backend: undefined,
-    sandbox: undefined,
-  },
 ];
 
 function toStringArray(value: unknown): string[] {

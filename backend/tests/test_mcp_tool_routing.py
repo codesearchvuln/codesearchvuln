@@ -102,12 +102,6 @@ async def test_task_mcp_runtime_uses_only_stdio_adapters(monkeypatch, tmp_path):
         "app.core.config.settings.MCP_FILESYSTEM_ARGS",
         "-c 'print(\"filesystem\")'",
     )
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_ENABLED", True)
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_COMMAND", "python3")
-    monkeypatch.setattr(
-        "app.core.config.settings.MCP_CODE_INDEX_ARGS",
-        "-c 'print(\"code-index\")'",
-    )
 
     runtime = _build_task_mcp_runtime(
         project_root=str(tmp_path),
@@ -116,15 +110,13 @@ async def test_task_mcp_runtime_uses_only_stdio_adapters(monkeypatch, tmp_path):
     )
 
     assert isinstance(runtime, MCPRuntime)
-    assert set(runtime.adapters.keys()) == {"filesystem", "code_index"}
+    assert set(runtime.adapters.keys()) == {"filesystem"}
     assert "local_proxy" not in runtime.adapters
     assert runtime.domain_adapters == {}
     assert isinstance(runtime.adapters["filesystem"], FastMCPStdioAdapter)
-    assert isinstance(runtime.adapters["code_index"], FastMCPStdioAdapter)
     assert runtime.default_runtime_mode == "stdio_only"
     assert runtime.runtime_modes == {
         "filesystem": "stdio_only",
-        "code_index": "stdio_only",
     }
     assert runtime.required_mcps == ["filesystem"]
 
@@ -138,7 +130,6 @@ async def test_task_mcp_runtime_injects_project_root_into_filesystem_stdio_args(
         "app.core.config.settings.MCP_FILESYSTEM_ARGS",
         "dlx @modelcontextprotocol/server-filesystem",
     )
-    monkeypatch.setattr("app.core.config.settings.MCP_CODE_INDEX_ENABLED", False)
 
     runtime = _build_task_mcp_runtime(
         project_root=str(tmp_path),
@@ -284,18 +275,12 @@ async def test_probe_runtime_prefers_list_allowed_directories_for_filesystem(tmp
             "metadata": {},
         },
     )
-    code_index_adapter = _ProbeAdapter(
-        tools=[
-            {"name": "get_file_summary", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "line": {"type": "number"}}}},
-        ],
-        call_result={"success": True, "data": "ok", "metadata": {}},
-    )
     runtime = MCPRuntime(
         enabled=True,
         prefer_mcp=True,
-        adapters={"filesystem": filesystem_adapter, "code_index": code_index_adapter},
-        runtime_modes={"filesystem": "stdio_only", "code_index": "stdio_only"},
-        required_mcps=["filesystem", "code_index"],
+        adapters={"filesystem": filesystem_adapter},
+        runtime_modes={"filesystem": "stdio_only"},
+        required_mcps=["filesystem"],
         default_runtime_mode="stdio_only",
         strict_mode=True,
         project_root=str(tmp_path),
@@ -325,18 +310,12 @@ async def test_probe_runtime_accepts_stringified_allowed_directories_payload(tmp
         ],
         call_result={"success": True, "data": stringified_payload, "metadata": {}},
     )
-    code_index_adapter = _ProbeAdapter(
-        tools=[
-            {"name": "get_file_summary", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "line": {"type": "number"}}}},
-        ],
-        call_result={"success": True, "data": "ok", "metadata": {}},
-    )
     runtime = MCPRuntime(
         enabled=True,
         prefer_mcp=True,
-        adapters={"filesystem": filesystem_adapter, "code_index": code_index_adapter},
-        runtime_modes={"filesystem": "stdio_only", "code_index": "stdio_only"},
-        required_mcps=["filesystem", "code_index"],
+        adapters={"filesystem": filesystem_adapter},
+        runtime_modes={"filesystem": "stdio_only"},
+        required_mcps=["filesystem"],
         default_runtime_mode="stdio_only",
         strict_mode=True,
         project_root=str(tmp_path),
@@ -358,18 +337,12 @@ async def test_probe_runtime_classifies_filesystem_allowed_dir_failure(tmp_path)
         ],
         call_result={"success": False, "error": raw_error, "metadata": {}},
     )
-    code_index_adapter = _ProbeAdapter(
-        tools=[
-            {"name": "get_file_summary", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}, "line": {"type": "number"}}}},
-        ],
-        call_result={"success": True, "data": "ok", "metadata": {}},
-    )
     runtime = MCPRuntime(
         enabled=True,
         prefer_mcp=True,
-        adapters={"filesystem": filesystem_adapter, "code_index": code_index_adapter},
-        runtime_modes={"filesystem": "stdio_only", "code_index": "stdio_only"},
-        required_mcps=["filesystem", "code_index"],
+        adapters={"filesystem": filesystem_adapter},
+        runtime_modes={"filesystem": "stdio_only"},
+        required_mcps=["filesystem"],
         default_runtime_mode="stdio_only",
         strict_mode=True,
         project_root=str(tmp_path),

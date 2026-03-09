@@ -26,23 +26,6 @@ test("buildExternalToolRows merges MCP before SKILL and keeps unloaded items vis
 				startup_ready: true,
 				startup_error: null,
 			},
-			{
-				id: "code_index",
-				name: "Code Index MCP",
-				type: "mcp-server",
-				enabled: true,
-				description: "Index code",
-				executionFunctions: ["find_files"],
-				inputInterface: [],
-				outputInterface: [],
-				includedSkills: [],
-				verificationTools: [],
-				source: "builtin",
-				runtime_mode: "stdio_only",
-				required: true,
-				startup_ready: false,
-				startup_error: "healthcheck_failed:timeout",
-			},
 		],
 		skillCatalog: [
 			{
@@ -87,12 +70,6 @@ test("buildExternalToolRows merges MCP before SKILL and keeps unloaded items vis
 				type: "mcp",
 				isLoaded: true,
 				capabilities: ["read_file", "list_directory", "search_files"],
-			},
-			{
-				id: "code_index",
-				type: "mcp",
-				isLoaded: false,
-				capabilities: ["find_files"],
 			},
 			{
 				id: "smart_scan",

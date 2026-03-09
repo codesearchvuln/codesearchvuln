@@ -909,26 +909,6 @@ def _build_task_mcp_runtime(
             args.append(normalized_project_root)
         return args
 
-    def _ensure_code_index_args(raw_args: Any) -> List[str]:
-        args = _parse_mcp_args(raw_args)
-        fallback_indexer_path = os.path.join(normalized_project_root, ".deepaudit", "mcp", "code-index")
-        if "--indexer-path" not in args:
-            args = [*args, "--indexer-path", fallback_indexer_path]
-        option_index = None
-        for index, token in enumerate(args):
-            if str(token).strip() == "--indexer-path" and index + 1 < len(args):
-                option_index = index + 1
-                break
-        if option_index is not None:
-            path_value = str(args[option_index] or "").strip() or fallback_indexer_path
-            try:
-                os.makedirs(path_value, exist_ok=True)
-            except OSError:
-                path_value = fallback_indexer_path
-                os.makedirs(path_value, exist_ok=True)
-            args[option_index] = path_value
-        return args
-
     adapters: Dict[str, Any] = {}
     runtime_modes: Dict[str, str] = {}
 
@@ -943,18 +923,6 @@ def _build_task_mcp_runtime(
             runtime_domain="stdio",
         )
         runtime_modes["filesystem"] = "stdio_only"
-
-    if _is_active_mcp("code_index") and _policy_enabled("code_index", "MCP_CODE_INDEX_ENABLED", True):
-        adapters["code_index"] = FastMCPStdioAdapter(
-            command=str(getattr(settings, "MCP_CODE_INDEX_COMMAND", "code-index-mcp") or "code-index-mcp"),
-            args=_ensure_code_index_args(
-                getattr(settings, "MCP_CODE_INDEX_ARGS", "--indexer-path /app/data/mcp/code-index")
-            ),
-            cwd=normalized_project_root,
-            timeout=int(getattr(settings, "MCP_TIMEOUT_SECONDS", 30)),
-            runtime_domain="stdio",
-        )
-        runtime_modes["code_index"] = "stdio_only"
 
     required_mcps = [name for name in ("filesystem",) if name in adapters]
 

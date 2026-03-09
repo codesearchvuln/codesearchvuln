@@ -441,6 +441,29 @@ const arrow = (x) => {
         assert "executeCommand" in result.data
         assert "exec" in result.data
 
+    async def test_extract_java_method(self, tmp_path):
+        """测试提取 Java 方法"""
+        test_file = tmp_path / "Demo.java"
+        test_file.write_text(
+            """
+public class Demo {
+    public String login(String username) {
+        return username.trim();
+    }
+}
+"""
+        )
+
+        tool = ExtractFunctionTool(project_root=str(tmp_path))
+        result = await tool._execute(
+            file_path="Demo.java",
+            function_name="login",
+        )
+
+        assert result.success is True
+        assert "login" in result.data
+        assert "username.trim" in result.data
+
     async def test_extract_c_function(self, tmp_path):
         """测试提取 C 函数"""
         test_file = tmp_path / "test.c"
