@@ -5531,6 +5531,11 @@ user: Observation: ❌ 数据库连接失败
                     return None
                 
                 logger.info(f"[{self.name}] 开始补救推送 {len(findings)} 个 findings")
+                await self.emit_event(
+                    "info",
+                    f"🔧 兜底机制启动：开始补救推送 {len(findings)} 个漏洞到队列",
+                    metadata={"agent_type": agent_type, "total_findings": len(findings)},
+                )
                 pushed_count = 0
                 
                 for finding in findings:
@@ -5541,6 +5546,18 @@ user: Observation: ❌ 数据库连接失败
                             logger.info(f"[{self.name}] 补救推送成功: {finding.get('title', 'N/A')}")
                     except Exception as e:
                         logger.error(f"[{self.name}] 补救推送失败: {e}")
+                
+                await self.emit_event(
+                    "success" if pushed_count > 0 else "warning",
+                    f"✅ 兜底机制完成：成功补救推送 {pushed_count}/{len(findings)} 个漏洞",
+                    metadata={
+                        "agent_type": agent_type,
+                        "tool": expected_tool,
+                        "pushed_count": pushed_count,
+                        "total_findings": len(findings),
+                        "success_rate": f"{pushed_count}/{len(findings)}",
+                    },
+                )
                 
                 return {
                     "fallback_executed": True,
@@ -5558,6 +5575,11 @@ user: Observation: ❌ 数据库连接失败
                     return None
                 
                 logger.info(f"[{self.name}] 开始补救保存验证结果（共 {len(findings)} 条）")
+                await self.emit_event(
+                    "info",
+                    f"🔧 兜底机制启动：开始补救保存 {len(findings)} 个验证结果",
+                    metadata={"agent_type": agent_type, "total_findings": len(findings)},
+                )
                 
                 saved_count = 0
                 for idx, finding in enumerate(findings):
@@ -5589,6 +5611,17 @@ user: Observation: ❌ 数据库连接失败
                 
                 if saved_count > 0:
                     logger.info(f"[{self.name}] 补救保存完成：{saved_count}/{len(findings)} 条成功")
+                    await self.emit_event(
+                        "success",
+                        f"✅ 兜底机制完成：成功补救保存 {saved_count}/{len(findings)} 个验证结果",
+                        metadata={
+                            "agent_type": agent_type,
+                            "tool": expected_tool,
+                            "saved_count": saved_count,
+                            "total_findings": len(findings),
+                            "success_rate": f"{saved_count}/{len(findings)}",
+                        },
+                    )
                     return {
                         "fallback_executed": True,
                         "tool": expected_tool,
@@ -5596,12 +5629,27 @@ user: Observation: ❌ 数据库连接失败
                         "total_findings": len(findings),
                     }
                 else:
+                    await self.emit_event(
+                        "error",
+                        f"❌ 兜底机制失败：未能补救保存任何验证结果（共 {len(findings)} 条）",
+                        metadata={"agent_type": agent_type, "total_findings": len(findings)},
+                    )
                     return None
             
             else:
                 logger.warning(f"[{self.name}] 不支持的兜底类型: {agent_type}/{expected_tool}")
+                await self.emit_event(
+                    "warning",
+                    f"⚠️ 兜底机制：不支持的类型 {agent_type}/{expected_tool}",
+                    metadata={"agent_type": agent_type, "expected_tool": expected_tool},
+                )
                 return None
                 
         except Exception as e:
             logger.error(f"[{self.name}] 执行补救保存失败: {e}", exc_info=True)
+            await self.emit_event(
+                "error",
+                f"❌ 兜底机制异常：{str(e)[:100]}",
+                metadata={"agent_type": agent_type, "error": str(e)},
+            )
             return None
