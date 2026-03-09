@@ -518,7 +518,11 @@ class BaseAgent(ABC):
     @property
     def name(self) -> str:
         return self.config.name
-    
+
+    @name.setter
+    def name(self, value: str) -> None:
+        self.config.name = value
+
     @property
     def agent_id(self) -> str:
         return self._agent_id
@@ -835,10 +839,8 @@ class BaseAgent(ABC):
 
         normalized_file = getattr(decision, "file_path", None)
         if bool(getattr(decision, "allowed", False)) and isinstance(normalized_file, str) and normalized_file:
-            if "file_path" in normalized_input or "path" not in normalized_input:
-                normalized_input["file_path"] = normalized_file
-            if "path" in normalized_input:
-                normalized_input["path"] = normalized_file
+            # 🔥 修复：不修改大模型输出的原始路径，只记录规范化路径到 metadata
+            metadata["write_scope_normalized_path"] = normalized_file
             return normalized_input, metadata, None
 
         reason = str(getattr(decision, "reason", "") or "write_scope_not_allowed")
@@ -3726,9 +3728,8 @@ class BaseAgent(ABC):
                         "start_line": explicit_hint.get("start_line"),
                         "end_line": explicit_hint.get("end_line"),
                     }
-                    if sanitized_path != file_path:
-                        repaired["file_path"] = sanitized_path
-                        repaired_changes["__sanitize.file_path"] = "file_path"
+                    # 🔥 修复：不修改大模型输出的原始路径，只用于提取行号信息
+                    # 原来的逻辑：if sanitized_path != file_path: repaired["file_path"] = sanitized_path
                 else:
                     file_hint = {"file_path": file_path}
 
@@ -3825,10 +3826,9 @@ class BaseAgent(ABC):
                 normalized_file_path = str(controlflow_hint.get("file_path") or "").strip()
                 if not normalized_file_path:
                     normalized_file_path = self._sanitize_file_path_text(file_path_candidate)
-                if normalized_file_path:
-                    if repaired.get("file_path") != normalized_file_path:
-                        repaired["file_path"] = normalized_file_path
-                        repaired_changes["__sanitize.file_path"] = "file_path"
+                # 🔥 修复：不修改大模型输出的原始路径
+                # 原来的逻辑：if normalized_file_path and repaired.get("file_path") != normalized_file_path: 
+                #           repaired["file_path"] = normalized_file_path
                 if "line_start" in schema_fields and repaired.get("line_start") in (None, "") and controlflow_hint.get("start_line") is not None:
                     repaired["line_start"] = int(controlflow_hint["start_line"])
                     repaired_changes["__sanitize.file_path_line"] = "line_start"
@@ -3871,11 +3871,9 @@ class BaseAgent(ABC):
                 if hinted_path:
                     repaired["file_path"] = hinted_path
                     repaired_changes["__context_or_raw.file_path"] = "file_path"
-            else:
-                sanitized_path = self._sanitize_file_path_text(file_path)
-                if sanitized_path and sanitized_path != file_path:
-                    repaired["file_path"] = sanitized_path
-                    repaired_changes["__sanitize.file_path"] = "file_path"
+            # 🔥 修复：不清理大模型已经提供的路径
+            # 原来的逻辑：else: sanitized_path = self._sanitize_file_path_text(file_path)
+            #           if sanitized_path and sanitized_path != file_path: repaired["file_path"] = sanitized_path
 
             line_start = _safe_positive_int(repaired.get("line_start"))
             if line_start is None:
@@ -4728,7 +4726,7 @@ class BaseAgent(ABC):
                         base_metadata=merged_meta,
                     )
                     normalized_resolved_tool = str(resolved_tool_name or "").strip().lower()
-                    auto_retry_used = False
+                    # 🔥 修复：移除 auto_retry_used 变量，不再自动修复路径
                     if (
                         normalized_resolved_tool == "read_file"
                         and not bool(strict_metadata.get("auto_retry_once"))
@@ -4760,30 +4758,10 @@ class BaseAgent(ABC):
                                 repaired_path, repaired_line = self._extract_location_from_search_output(search_output)
                                 repaired_path = str(repaired_path or "").strip()
                                 if repaired_path and repaired_path != failed_path:
-                                    retry_input = dict(repaired_input)
-                                    retry_input["file_path"] = repaired_path
-                                    retry_input["__auto_retry_once"] = True
-                                    retry_input["__auto_repaired_file_path"] = repaired_path
-                                    if (
-                                        repaired_line
-                                        and retry_input.get("start_line") in (None, "")
-                                        and retry_input.get("end_line") in (None, "")
-                                    ):
-                                        start_line, end_line, max_lines = self._strict_read_window(int(repaired_line))
-                                        retry_input["start_line"] = int(start_line)
-                                        retry_input["end_line"] = int(end_line)
-                                        retry_input["max_lines"] = int(max_lines)
-                                    retry_output = await self.execute_tool(
-                                        requested_tool_name,
-                                        retry_input,
-                                        _fallback_depth=_fallback_depth + 1,
-                                    )
-                                    auto_retry_used = True
-                                    if not self._looks_like_tool_failure_output(retry_output):
-                                        return retry_output
-                                    strict_failure_metadata["auto_retry_once"] = True
-                                    strict_failure_metadata["auto_repaired_file_path"] = repaired_path
-                                    strict_failure_metadata["auto_retry_failed"] = True
+                                    # 🔥 修复：不自动使用修复后的路径，只记录到 metadata 供用户参考
+                                    strict_failure_metadata["auto_suggested_path"] = repaired_path
+                                    if repaired_line:
+                                        strict_failure_metadata["auto_suggested_line"] = repaired_line
 
                     await self.emit_tool_result(
                         resolved_tool_name,
@@ -4797,8 +4775,9 @@ class BaseAgent(ABC):
                     )
                     # 直接返回错误信息给模型，而不是封装成"阻断"消息
                     failure_output = mcp_output or strict_error
-                    if auto_retry_used:
-                        failure_output += "\n\n(注：已执行一次自动路径修复重试，但仍失败。)"
+                    # 🔥 修复：移除自动重试提示，因为不再自动修复路径
+                    if strict_failure_metadata.get("auto_suggested_path"):
+                        failure_output += f"\n\n提示：在 {strict_failure_metadata['auto_suggested_path']} 找到相似文件，请检查路径是否正确。"
                     return failure_output
 
             is_mcp_proxy_tool = bool(local_tool_available and getattr(tool, "mcp_proxy_only", False))

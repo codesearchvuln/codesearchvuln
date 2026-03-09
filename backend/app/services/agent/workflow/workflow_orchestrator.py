@@ -114,6 +114,7 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
         self._all_findings = []
         self._agent_results = {}
         self._agent_handoffs = {}
+        self._dispatched_tasks = {}
         self._phase_planning_applied = {}
         self._verified_queue_fingerprints = set()
         self._recon_queue_snapshot = {}
