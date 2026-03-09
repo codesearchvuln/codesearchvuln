@@ -81,9 +81,23 @@ import { useI18n } from "@/shared/i18n";
 
 interface OpengrepRulesProps {
 	embedded?: boolean;
+	showEngineSelector?: boolean;
+	engineValue?: "opengrep" | "gitleaks";
+	onEngineChange?: (value: "opengrep" | "gitleaks") => void;
 }
 
-export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) {
+export default function OpengrepRules({
+	embedded = false,
+	showEngineSelector = false,
+	engineValue = "opengrep",
+	onEngineChange,
+}: OpengrepRulesProps) {
+	const activeEngine = showEngineSelector ? engineValue : "opengrep";
+	const isGitleaksEngine = activeEngine === "gitleaks";
+	const showGitleaksNotReady = () => {
+		toast.info("gitleaks 规则管理暂未接入");
+	};
+
 	const { t, isEnglish } = useI18n();
 	const navigate = useNavigate();
 	const location = useLocation();
@@ -179,10 +193,18 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	const returnTo = queryParams.get("returnTo") || "";
 
 	useEffect(() => {
-		loadRules();
-		loadRuleStats();
-		loadGeneratingRules();
-	}, []);
+		setCurrentPage(1);
+		setSelectedRuleIds(new Set());
+		if (isGitleaksEngine) {
+			setGeneratingRules(new Map());
+			setShowGeneratingQueue(false);
+		}
+		void loadRules();
+		void loadRuleStats();
+		if (!isGitleaksEngine) {
+			void loadGeneratingRules();
+		}
+	}, [activeEngine, isGitleaksEngine]);
 
 	useEffect(() => {
 		if (!highlightRuleKeyword) return;
@@ -282,14 +304,14 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	useEffect(() => {
-		if (generatingRules.size === 0) {
+		if (isGitleaksEngine || generatingRules.size === 0) {
 			return;
 		}
 		const timer = window.setInterval(() => {
-			loadGeneratingRules();
+			void loadGeneratingRules();
 		}, 2000);
 		return () => window.clearInterval(timer);
-	}, [generatingRules.size]);
+	}, [generatingRules.size, isGitleaksEngine]);
 
 	const loadRules = async (options?: { silent?: boolean }) => {
 		const silent = options?.silent ?? false;
@@ -297,6 +319,14 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 			if (!silent) {
 				setLoading(true);
 			}
+
+			if (isGitleaksEngine) {
+				setRules([]);
+				setAvailableLanguages([]);
+				setOpengrepActiveRules([]);
+				return;
+			}
+
 			const data = await getOpengrepRules({
 				language: selectedLanguage || undefined,
 				source: (selectedSource as "internal" | "patch") || undefined,
@@ -412,6 +442,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleToggleRule = async (rule: OpengrepRule) => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		const nextActive = !rule.is_active;
 		const previousRules = rules;
 		const nextRules = rules.map((item) =>
@@ -447,6 +481,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleSaveRule = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (!selectedRule) return;
 
 		const name = editRuleForm.name.trim();
@@ -502,6 +540,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleDeleteRule = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (!pendingDeleteRule) return;
 		const deletingTarget = pendingDeleteRule;
 		try {
@@ -535,6 +577,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleGenerateRule = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (
 			!generateFormData.repo_owner ||
 			!generateFormData.repo_name ||
@@ -566,6 +612,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleGenerateGenericRule = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (!manualRuleForm.name.trim()) {
 			toast.error("请输入规则名称");
 			return;
@@ -680,6 +730,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleUploadCompressedRules = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (!compressedFile) {
 			toast.error("请选择压缩文件");
 			return;
@@ -705,6 +759,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleUploadDirectoryRules = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (directoryFiles.length === 0) {
 			toast.error("请选择规则文件");
 			return;
@@ -730,6 +788,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleUploadPatchArchive = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (!patchArchive) {
 			toast.error("请选择 Patch 压缩包");
 			return;
@@ -764,6 +826,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleUploadPatchDirectory = async () => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		if (patchDirectoryFiles.length === 0) {
 			toast.error("请选择 Patch 文件");
 			return;
@@ -798,6 +864,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const startPollingRules = async (ruleIds: string[]) => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		// 初始化生成队列显示，先获取所有规则信息
 		const initialProgress = new Map<
 			string,
@@ -956,6 +1026,10 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 	};
 
 	const handleBatchUpdateRules = async (isActive: boolean) => {
+		if (isGitleaksEngine) {
+			showGitleaksNotReady();
+			return;
+		}
 		// 如果有直接选中的规则 ID，使用 rule_ids 方式
 		if (selectedRuleIds.size > 0) {
 			try {
@@ -1209,6 +1283,30 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 							</div>
 
 							<div className="flex flex-1 flex-wrap items-end gap-3">
+								{showEngineSelector ? (
+									<div className="min-w-[150px] flex-1">
+										<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+											扫描引擎
+										</Label>
+										<Select
+											value={engineValue}
+											onValueChange={(val) => {
+												if (val === "opengrep" || val === "gitleaks") {
+													onEngineChange?.(val);
+												}
+											}}
+										>
+											<SelectTrigger className="cyber-input mt-1.5 h-10">
+												<SelectValue placeholder="选择引擎" />
+											</SelectTrigger>
+											<SelectContent className="cyber-dialog border-border">
+												<SelectItem value="opengrep">opengrep</SelectItem>
+												<SelectItem value="gitleaks">gitleaks</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
+								) : null}
+
 								<div className="min-w-[150px] flex-1">
 									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
 										编程语言
@@ -1329,7 +1427,13 @@ export default function OpengrepRules({ embedded = false }: OpengrepRulesProps) 
 										</Button>
 									)}
 									<Button
-										onClick={() => setShowRuleTypeDialog(true)}
+										onClick={() => {
+									if (isGitleaksEngine) {
+										showGitleaksNotReady();
+										return;
+									}
+									setShowRuleTypeDialog(true);
+								}}
 										className="cyber-btn-primary h-10 min-w-[116px]"
 									>
 										新建规则
