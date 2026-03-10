@@ -14,6 +14,13 @@ from pydantic import BaseModel, Field
 from dataclasses import dataclass
 
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    build_execution_status,
+    build_inline_code_lines,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -670,21 +677,52 @@ class SandboxTool(AgentTool):
         await self.sandbox_manager.initialize()
         
         if not self.sandbox_manager.is_available:
-            return ToolResult(
+            return self._build_execution_tool_result(
                 success=False,
-                error="沙箱环境不可用（Docker 未安装或未运行）",
+                command=command,
+                result_payload={
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": "沙箱环境不可用（Docker 未安装或未运行）",
+                },
+                error_message="沙箱环境不可用（Docker 未安装或未运行）",
+                fallback_data="沙箱环境不可用（Docker 未安装或未运行）",
             )
         
         # 安全检查：验证命令是否允许
         cmd_parts = command.strip().split()
         if not cmd_parts:
-            return ToolResult(success=False, error="命令不能为空")
+            return self._build_execution_tool_result(
+                success=False,
+                command=command,
+                result_payload={
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": "命令不能为空",
+                },
+                error_message="命令不能为空",
+                fallback_data="命令不能为空",
+            )
         
         base_cmd = cmd_parts[0]
         if not any(base_cmd.startswith(allowed) for allowed in self.ALLOWED_COMMANDS):
-            return ToolResult(
+            error_text = f"命令 '{base_cmd}' 不在允许列表中。允许的命令: {', '.join(self.ALLOWED_COMMANDS)}"
+            return self._build_execution_tool_result(
                 success=False,
-                error=f"命令 '{base_cmd}' 不在允许列表中。允许的命令: {', '.join(self.ALLOWED_COMMANDS)}",
+                command=command,
+                result_payload={
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": error_text,
+                },
+                error_message=error_text,
+                fallback_data=error_text,
             )
         
         # 执行命令
@@ -723,17 +761,97 @@ class SandboxTool(AgentTool):
             elif result.get("exit_code", 0) != 0:
                 error_message = f"命令执行失败，退出码: {result.get('exit_code')}"
         
-        return ToolResult(
+        return self._build_execution_tool_result(
             success=result["success"],
-            data="\n".join(output_parts),
-            error=error_message,  # 确保 error 字段有值
-            metadata={
-                "command": command,
-                "exit_code": result["exit_code"],
-                "image": result.get("image"),
-                "image_candidates": result.get("image_candidates") or [],
-            }
+            command=command,
+            result_payload=result,
+            error_message=error_message,
+            fallback_data="\n".join(output_parts),
         )
+
+    def _build_execution_tool_result(
+        self,
+        *,
+        success: bool,
+        command: str,
+        result_payload: Dict[str, Any],
+        fallback_data: str,
+        error_message: Optional[str] = None,
+    ) -> ToolResult:
+        base_cmd = str(command or "").strip().split()[0] if str(command or "").strip() else "sandbox_exec"
+        command_chain = unique_command_chain(["sandbox_exec", base_cmd])
+        display_command = build_display_command(command_chain)
+        exit_code = int(result_payload.get("exit_code", -1))
+        inline_code = self._extract_inline_code(command)
+        entry: Dict[str, Any] = {
+            "exit_code": exit_code,
+            "status": build_execution_status(
+                success=success,
+                error=error_message or result_payload.get("error"),
+                exit_code=exit_code,
+            ),
+            "title": "沙箱命令执行",
+            "execution_command": command,
+            "runtime_image": result_payload.get("image"),
+            "stdout_preview": self._preview_text(result_payload.get("stdout", ""), 300),
+            "stderr_preview": self._preview_text(result_payload.get("stderr", ""), 300),
+            "artifacts": self._build_execution_artifacts(exit_code, result_payload),
+            "code": inline_code,
+        }
+        validate_evidence_metadata(
+            render_type="execution_result",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=[entry],
+        )
+        return ToolResult(
+            success=success,
+            data=fallback_data,
+            error=error_message,
+            metadata={
+                "render_type": "execution_result",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": [entry],
+                "command": command,
+                "exit_code": exit_code,
+                "image": result_payload.get("image"),
+                "image_candidates": result_payload.get("image_candidates") or [],
+            },
+        )
+
+    @staticmethod
+    def _preview_text(value: Any, max_length: int) -> str:
+        text = str(value or "")
+        if len(text) <= max_length:
+            return text
+        return text[:max_length] + "..."
+
+    @staticmethod
+    def _build_execution_artifacts(exit_code: int, result_payload: Dict[str, Any]) -> list[Dict[str, str]]:
+        artifacts = [{"label": "退出码", "value": str(exit_code)}]
+        if result_payload.get("image"):
+            artifacts.append({"label": "镜像", "value": str(result_payload["image"])})
+        image_candidates = result_payload.get("image_candidates") or []
+        if image_candidates:
+            artifacts.append(
+                {"label": "镜像候选", "value": ", ".join(str(item) for item in image_candidates)}
+            )
+        return artifacts
+
+    @staticmethod
+    def _extract_inline_code(command: str) -> Optional[Dict[str, Any]]:
+        text = str(command or "").strip()
+        if "python3 -c " in text or "python -c " in text:
+            snippet = text.split(" -c ", 1)[1].strip().strip("'").strip('"')
+            return build_inline_code_lines(snippet, language="python")
+        if "node -e " in text:
+            snippet = text.split(" -e ", 1)[1].strip().strip("'").strip('"')
+            return build_inline_code_lines(snippet, language="javascript")
+        if text.startswith("bash -c ") or text.startswith("sh -c "):
+            snippet = text.split(" -c ", 1)[1].strip().strip("'").strip('"')
+            return build_inline_code_lines(snippet, language="bash")
+        return None
 
 
 class HttpRequestInput(BaseModel):

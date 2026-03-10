@@ -123,6 +123,39 @@ function Section({
   );
 }
 
+function summarizeLogOverview(logItem: LogItem): string[] {
+  const evidence = logItem.toolEvidence;
+  if (!evidence) return [];
+
+  if (evidence.renderType === "search_hits") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [
+      `${first.filePath}:${first.matchLine}`,
+      `${evidence.entries.length} 条命中`,
+      first.language,
+    ].filter(Boolean);
+  }
+
+  if (evidence.renderType === "code_window") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [
+      `${first.filePath}:${first.startLine}-${first.endLine}`,
+      first.focusLine ? `焦点行 ${first.focusLine}` : "",
+      first.language,
+    ].filter(Boolean);
+  }
+
+  const first = evidence.entries[0];
+  if (!first) return [];
+  return [
+    `退出码 ${first.exitCode}`,
+    first.language || "",
+    first.executionCommand || first.description || "",
+  ].filter(Boolean);
+}
+
 export interface AuditDetailContentProps
   extends Omit<AuditDetailDialogProps, "open" | "onBack" | "onOpenChange"> {}
 
@@ -148,10 +181,15 @@ export function AuditDetailContent({
                   工具状态: {toZhStatus(logItem.tool.status)}
                 </Badge>
               )}
+              {logItem.tool?.name ? (
+                <Badge variant="outline">{logItem.tool.name}</Badge>
+              ) : null}
+              {summarizeLogOverview(logItem).map((item) => (
+                <Badge key={item} variant="outline" className="font-mono normal-case">
+                  {item}
+                </Badge>
+              ))}
             </div>
-            <h3 className="text-sm font-semibold break-words">
-              {localizeAuditText(logItem.title)}
-            </h3>
           </Section>
 
           {isToolEvidenceCapableTool(logItem.tool?.name) ? (
@@ -174,9 +212,17 @@ export function AuditDetailContent({
 
           {logItem.detail && (
             <Section title="原始事件元数据">
-              <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh]">
-                {prettyJson(logItem.detail)}
-              </pre>
+              <Collapsible className="rounded-md border border-border bg-card/60">
+                <CollapsibleTrigger className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground">
+                  <span>查看原始事件元数据</span>
+                  <ChevronDown className="w-4 h-4" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="px-3 pb-3">
+                  <pre className="text-xs font-mono bg-background border border-border rounded-md p-3 whitespace-pre-wrap break-words overflow-auto max-h-[60vh]">
+                    {prettyJson(logItem.detail)}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
             </Section>
           )}
         </>

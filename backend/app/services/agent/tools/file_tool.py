@@ -16,6 +16,15 @@ from pydantic import BaseModel, Field
 from app.services.agent.flow.lightweight.function_locator import EnclosingFunctionLocator
 
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command as _build_display_command,
+    build_structured_lines as _build_structured_lines,
+    detect_language as _detect_language,
+    format_structured_lines_for_code_block as _format_structured_lines_for_code_block,
+    format_structured_lines_for_search as _format_structured_lines_for_search,
+    unique_command_chain as _unique_command_chain,
+    validate_evidence_metadata as _validate_evidence_metadata,
+)
 
 
 def _normalize_rel_path(path: str) -> str:

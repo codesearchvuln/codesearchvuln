@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import FindingCodeWindow from "./FindingCodeWindow";
 import type {
   ToolEvidenceCodeWindowEntry,
+  ToolEvidenceExecutionResultEntry,
   ToolEvidencePayload,
   ToolEvidenceSearchHitEntry,
 } from "../toolEvidence";
@@ -28,7 +29,13 @@ function UnsupportedProtocol({
   );
 }
 
-function SearchHitDetail({ entry }: { entry: ToolEvidenceSearchHitEntry }) {
+function statusLabel(status: ToolEvidenceExecutionResultEntry["status"]) {
+  if (status === "passed") return "执行成功";
+  if (status === "failed") return "执行失败";
+  return "执行错误";
+}
+
+function SearchHitDetail({ entry, command }: { entry: ToolEvidenceSearchHitEntry; command: string }) {
   return (
     <FindingCodeWindow
       code={toolEvidenceLinesToCode(entry.lines)}
@@ -39,12 +46,14 @@ function SearchHitDetail({ entry }: { entry: ToolEvidenceSearchHitEntry }) {
       highlightEndLine={entry.matchLine}
       focusLine={entry.matchLine}
       title="命中窗口"
-      variant="detail"
+      density="detail"
+      badges={[command, "命中"]}
+      meta={[entry.language, `命中行 ${entry.matchLine}`]}
     />
   );
 }
 
-function CodeWindowDetail({ entry }: { entry: ToolEvidenceCodeWindowEntry }) {
+function CodeWindowDetail({ entry, command }: { entry: ToolEvidenceCodeWindowEntry; command: string }) {
   return (
     <FindingCodeWindow
       code={toolEvidenceLinesToCode(entry.lines)}
@@ -54,9 +63,140 @@ function CodeWindowDetail({ entry }: { entry: ToolEvidenceCodeWindowEntry }) {
       highlightStartLine={entry.focusLine}
       highlightEndLine={entry.focusLine}
       focusLine={entry.focusLine}
-      title="代码窗口"
-      variant="detail"
+      title={entry.title || "代码窗口"}
+      density="detail"
+      badges={[
+        command,
+        entry.symbolName ? `${entry.symbolKind || "symbol"} ${entry.symbolName}` : "窗口",
+      ]}
+      meta={[
+        entry.language,
+        entry.focusLine ? `焦点行 ${entry.focusLine}` : "",
+      ]}
     />
+  );
+}
+
+function ExecutionTextWindow({
+  title,
+  content,
+  tone = "default",
+}: {
+  title: string;
+  content: string;
+  tone?: "default" | "error";
+}) {
+  return (
+    <FindingCodeWindow
+      code={content}
+      filePath={title}
+      lineStart={1}
+      lineEnd={String(content || "").split("\n").length}
+      focusLine={1}
+      title={title}
+      density="detail"
+      chrome="plain"
+      badges={[tone === "error" ? "stderr" : "stdout"]}
+    />
+  );
+}
+
+function ExecutionResultDetail({
+  entry,
+  command,
+}: {
+  entry: ToolEvidenceExecutionResultEntry;
+  command: string;
+}) {
+  const codeFocusLine = entry.code?.lines.find((line) => line.kind === "focus")?.lineNumber ?? 1;
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-border/60 bg-card/60 p-4">
+        <div className="mb-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">执行摘要</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+            {command}
+          </Badge>
+          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-sky-200">
+            {statusLabel(entry.status)}
+          </Badge>
+          <span className="rounded-md border border-border/70 bg-background/60 px-2 py-1 text-[11px] font-mono text-foreground">
+            退出码 {entry.exitCode}
+          </span>
+          {entry.language ? (
+            <span className="rounded-md border border-border/70 bg-background/60 px-2 py-1 text-[11px] font-mono text-muted-foreground">
+              {entry.language}
+            </span>
+          ) : null}
+          {entry.runtimeImage ? (
+            <span className="rounded-md border border-border/70 bg-background/60 px-2 py-1 text-[11px] font-mono text-muted-foreground">
+              {entry.runtimeImage}
+            </span>
+          ) : null}
+        </div>
+        {entry.description ? (
+          <div className="mt-3 text-sm text-foreground">{entry.description}</div>
+        ) : null}
+      </section>
+
+      {entry.executionCommand ? (
+        <FindingCodeWindow
+          code={entry.executionCommand}
+          filePath={entry.title || "execution-command"}
+          lineStart={1}
+          lineEnd={String(entry.executionCommand).split("\n").length}
+          focusLine={1}
+          title="执行命令"
+          density="detail"
+          chrome="plain"
+          badges={[command]}
+        />
+      ) : null}
+
+      {entry.code ? (
+        <FindingCodeWindow
+          code={toolEvidenceLinesToCode(entry.code.lines)}
+          filePath={entry.title || "inline-harness"}
+          lineStart={entry.code.lines[0]?.lineNumber ?? 1}
+          lineEnd={entry.code.lines.at(-1)?.lineNumber ?? 1}
+          highlightStartLine={codeFocusLine}
+          highlightEndLine={codeFocusLine}
+          focusLine={codeFocusLine}
+          title="执行代码"
+          density="detail"
+          badges={[command, statusLabel(entry.status)]}
+          meta={[entry.code.language]}
+        />
+      ) : null}
+
+      {entry.stdoutPreview ? (
+        <ExecutionTextWindow title="执行输出" content={entry.stdoutPreview} />
+      ) : null}
+
+      {entry.stderrPreview ? (
+        <ExecutionTextWindow title="错误输出" content={entry.stderrPreview} tone="error" />
+      ) : null}
+
+      {entry.artifacts.length > 0 ? (
+        <section className="rounded-xl border border-border/60 bg-card/60 p-4">
+          <div className="mb-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">附加证据</div>
+          <div className="grid gap-2">
+            {entry.artifacts.map((artifact) => (
+              <div
+                key={`${artifact.label}-${artifact.value}`}
+                className="rounded-md border border-border/70 bg-background/60 px-3 py-2"
+              >
+                <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+                  {artifact.label}
+                </div>
+                <div className="mt-1 break-all font-mono text-xs text-foreground">{artifact.value}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -87,7 +227,11 @@ export default function ToolEvidenceDetail({
           {evidence.displayCommand}
         </Badge>
         <span className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
-          {evidence.renderType === "search_hits" ? `${evidence.entries.length} 条命中` : `${evidence.entries.length} 个窗口`}
+          {evidence.renderType === "search_hits"
+            ? `${evidence.entries.length} 条命中`
+            : evidence.renderType === "execution_result"
+              ? `${evidence.entries.length} 次执行`
+              : `${evidence.entries.length} 个窗口`}
         </span>
       </div>
 
@@ -99,10 +243,10 @@ export default function ToolEvidenceDetail({
                 key={`${entry.filePath}-${entry.matchLine}`}
                 type="button"
                 onClick={() => setActiveIndex(index)}
-                className={`rounded-md border px-3 py-2 text-left transition-colors ${
+                className={`rounded-lg border px-3 py-2 text-left transition-colors ${
                   index === activeIndex
-                    ? "border-cyan-500/50 bg-cyan-500/10 text-foreground"
-                    : "border-border bg-background/70 text-muted-foreground hover:text-foreground"
+                    ? "border-cyan-400/30 bg-cyan-400/10 text-foreground"
+                    : "border-border/60 bg-background/60 text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <div className="text-xs font-mono">{entry.filePath}:{entry.matchLine}</div>
@@ -110,13 +254,26 @@ export default function ToolEvidenceDetail({
               </button>
             ))}
           </div>
-          {activeSearchEntry ? <SearchHitDetail entry={activeSearchEntry} /> : null}
+          {activeSearchEntry ? (
+            <SearchHitDetail entry={activeSearchEntry} command={evidence.displayCommand} />
+          ) : null}
         </>
+      ) : evidence.renderType === "execution_result" ? (
+        <div className="space-y-4">
+          {evidence.entries.map((entry, index) => (
+            <ExecutionResultDetail
+              key={`${entry.executionCommand || entry.description || "execution"}-${index}`}
+              entry={entry}
+              command={evidence.displayCommand}
+            />
+          ))}
+        </div>
       ) : (
         evidence.entries.map((entry) => (
           <CodeWindowDetail
             key={`${entry.filePath}-${entry.startLine}-${entry.endLine}`}
             entry={entry}
+            command={evidence.displayCommand}
           />
         ))
       )}

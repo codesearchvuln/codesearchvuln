@@ -9,6 +9,10 @@ interface FindingCodeWindowProps {
   highlightEndLine?: number | null;
   focusLine?: number | null;
   title?: string;
+  density?: "compact" | "detail";
+  chrome?: "editor" | "plain";
+  badges?: string[];
+  meta?: string[];
   variant?: "default" | "detail";
 }
 
@@ -42,6 +46,10 @@ export default function FindingCodeWindow({
   highlightEndLine,
   focusLine,
   title = "命中代码",
+  density,
+  chrome = "editor",
+  badges = [],
+  meta = [],
   variant = "default",
 }: FindingCodeWindowProps) {
   const lines = useMemo(() => String(code || "").replace(/\r\n/g, "\n").split("\n"), [code]);
@@ -61,7 +69,11 @@ export default function FindingCodeWindow({
     typeof focusLine === "number" && Number.isFinite(focusLine)
       ? focusLine
       : lineStart ?? null;
-  const isDetail = variant === "detail";
+  const resolvedDensity = density ?? (variant === "detail" ? "detail" : "compact");
+  const isDetail = resolvedDensity === "detail";
+  const headerMeta = meta.filter((item) => String(item || "").trim().length > 0);
+  const headerBadges = badges.filter((item) => String(item || "").trim().length > 0);
+  const showEditorChrome = chrome === "editor";
 
   useEffect(() => {
     if (!containerRef.current || !normalizedFocusLine) return;
@@ -72,18 +84,72 @@ export default function FindingCodeWindow({
   }, [normalizedFocusLine, code]);
 
   return (
-    <section className="rounded-lg border border-border bg-card/70 overflow-hidden">
-      <div className={`border-b border-border bg-muted/40 ${isDetail ? "px-4 py-3" : "px-3 py-2"}`}>
-        <div className={`${isDetail ? "text-sm" : "text-xs"} font-mono uppercase text-muted-foreground`}>
-          {title}
+    <section className="overflow-hidden rounded-xl border border-border/70 bg-[linear-gradient(180deg,rgba(15,23,42,0.86),rgba(15,23,42,0.68))] shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+      <div
+        className={`border-b border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] ${
+          isDetail ? "px-4 py-3" : "px-3 py-2.5"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {showEditorChrome ? (
+              <div className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-rose-400/80" />
+                <span className="h-2.5 w-2.5 rounded-full bg-amber-300/80" />
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/80" />
+              </div>
+            ) : null}
+            <div className="min-w-0">
+              <div
+                className={`truncate font-mono uppercase tracking-[0.22em] text-slate-300 ${
+                  isDetail ? "text-[11px]" : "text-[10px]"
+                }`}
+              >
+                {title}
+              </div>
+              <div
+                className={`truncate font-mono text-slate-100 ${
+                  isDetail ? "text-[13px]" : "text-[12px]"
+                }`}
+              >
+                {header}
+              </div>
+            </div>
+          </div>
+
+          {headerBadges.length > 0 ? (
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              {headerBadges.map((badge) => (
+                <span
+                  key={badge}
+                  className="rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-mono uppercase tracking-[0.18em] text-cyan-100"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
-        <div className={`${isDetail ? "text-sm" : "text-xs"} text-foreground break-all`}>
-          {header}
-        </div>
+
+        {headerMeta.length > 0 ? (
+          <div className={`mt-2 flex flex-wrap items-center gap-2 ${isDetail ? "text-[11px]" : "text-[10px]"}`}>
+            {headerMeta.map((item) => (
+              <span
+                key={item}
+                className="rounded-md border border-white/8 bg-white/5 px-2 py-0.5 font-mono text-slate-300"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
-      <div ref={containerRef} className={isDetail ? "max-h-[52vh] overflow-auto" : "max-h-[46vh] overflow-auto"}>
-        <div className={`min-w-max font-mono ${isDetail ? "text-[13px] leading-7" : "text-[12px] leading-6"}`}>
+      <div
+        ref={containerRef}
+        className={`${isDetail ? "max-h-[52vh]" : "max-h-[46vh]"} overflow-auto overflow-x-auto bg-[#151922]/85`}
+      >
+        <div className={`min-w-max font-mono ${isDetail ? "text-[12.5px] leading-6" : "text-[11.5px] leading-5"}`}>
           {lines.map((line, index) => {
             const lineNumber = firstLine + index;
             const inHighlightRange =
@@ -92,32 +158,33 @@ export default function FindingCodeWindow({
               lineNumber >= normalizedHighlightStart &&
               lineNumber <= normalizedHighlightEnd;
             const isFocusLine = normalizedFocusLine !== null && lineNumber === normalizedFocusLine;
+
             return (
               <div
                 key={`${lineNumber}-${index}`}
                 data-line-number={lineNumber}
-                className={`grid ${isDetail ? "grid-cols-[72px_1fr]" : "grid-cols-[64px_1fr]"} border-b border-border/30 last:border-b-0 ${
-                  inHighlightRange ? "bg-orange-500/10" : ""
-                } ${isFocusLine ? "ring-1 ring-red-500/60 ring-inset" : ""}`}
+                className={`grid ${isDetail ? "grid-cols-[64px_1fr]" : "grid-cols-[56px_1fr]"} ${
+                  inHighlightRange ? "bg-cyan-400/8" : ""
+                } ${isFocusLine ? "bg-cyan-400/12" : ""}`}
               >
                 <div
-                  className={`${isDetail ? "px-3 py-1" : "px-2 py-0.5"} text-right text-muted-foreground select-none ${
+                  className={`${isDetail ? "px-3 py-0.5" : "px-2 py-0.5"} select-none text-right font-mono ${
                     isFocusLine
-                      ? "bg-red-500/15 text-red-700 dark:text-red-200"
+                      ? "border-r border-cyan-300/30 bg-cyan-400/10 text-cyan-100"
                       : inHighlightRange
-                        ? "bg-orange-500/15 text-orange-700 dark:text-orange-200"
-                        : "bg-muted/20"
+                        ? "border-r border-cyan-300/15 bg-cyan-400/5 text-cyan-200/85"
+                        : "border-r border-white/6 bg-white/[0.03] text-slate-500"
                   }`}
                 >
                   {lineNumber}
                 </div>
                 <pre
-                  className={`${isDetail ? "px-4 py-1" : "px-3 py-0.5"} whitespace-pre-wrap break-words text-foreground ${
+                  className={`${isDetail ? "px-4 py-0.5" : "px-3 py-0.5"} overflow-visible whitespace-pre text-slate-100 ${
                     isFocusLine
-                      ? "bg-red-500/10"
+                      ? "bg-cyan-400/6"
                       : inHighlightRange
-                        ? "bg-orange-500/5"
-                        : "bg-background/60"
+                        ? "bg-cyan-400/[0.03]"
+                        : "bg-transparent"
                   }`}
                 >
                   {line || " "}

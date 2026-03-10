@@ -14,6 +14,7 @@ import pytest
 from app.services.agent.tools.run_code import RunCodeTool, RunCodeInput, ExtractFunctionTool
 from app.services.agent.tools.base import ToolResult
 from app.services.agent.tools.sandbox_tool import SandboxManager, SandboxConfig
+from app.services.agent.tools.sandbox_tool import SandboxTool
 
 
 class TestRunCodeInput:
@@ -75,6 +76,22 @@ class TestRunCodeToolBasic:
         
         assert tool.sandbox_manager is not None
         assert isinstance(tool.sandbox_manager, SandboxManager)
+
+
+class StubSandboxManager:
+    def __init__(self, result):
+        self.is_available = True
+        self.result = result
+        self.last_command = None
+        self.last_timeout = None
+
+    async def initialize(self):
+        return None
+
+    async def execute_command(self, command: str, timeout: int):
+        self.last_command = command
+        self.last_timeout = timeout
+        return self.result
 
 
 class TestSandboxManagerImageResolution:
@@ -327,6 +344,42 @@ class TestRunCodeToolExecution:
         assert "stdout_length" in result.metadata
         assert "stderr_length" in result.metadata
 
+    async def test_execute_returns_execution_result_metadata(self):
+        """run_code 应返回 execution_result 结构化证据"""
+        sandbox_manager = StubSandboxManager(
+            {
+                "success": True,
+                "exit_code": 0,
+                "stdout": "payload detected\\nproof line",
+                "stderr": "",
+                "image": "vulhunter/sandbox:latest",
+                "image_candidates": ["vulhunter/sandbox:latest"],
+            }
+        )
+        tool = RunCodeTool(sandbox_manager=sandbox_manager, project_root="/test")
+
+        result = await tool._execute(
+            code="print('payload detected')",
+            language="python",
+            timeout=12,
+            description="验证命令注入 harness",
+        )
+
+        assert result.success is True
+        assert result.metadata["render_type"] == "execution_result"
+        assert result.metadata["command_chain"][0] == "run_code"
+        assert result.metadata["entries"]
+
+        entry = result.metadata["entries"][0]
+        assert entry["status"] == "passed"
+        assert entry["exit_code"] == 0
+        assert entry["description"] == "验证命令注入 harness"
+        assert "python3 -c" in entry["execution_command"]
+        assert entry["stdout_preview"].startswith("payload detected")
+        assert entry["runtime_image"] == "vulhunter/sandbox:latest"
+        assert entry["code"]["language"] == "python"
+        assert entry["code"]["lines"][0]["line_number"] == 1
+
 
 class TestExtractFunctionToolBasic:
     """测试 ExtractFunctionTool 基本功能"""
@@ -371,6 +424,37 @@ def another_function():
         assert "vulnerable_function" in result.data
         assert "os.system" in result.data
         assert "import os" in result.data or "imports" in result.metadata
+
+    async def test_extract_python_function_returns_code_window_metadata(self, tmp_path):
+        """extract_function 应返回 code_window 结构化证据"""
+        test_file = tmp_path / "test.py"
+        test_file.write_text("""
+import os
+
+def vulnerable_function(user_input):
+    os.system(f"echo {user_input}")
+    return True
+""")
+
+        tool = ExtractFunctionTool(project_root=str(tmp_path))
+        result = await tool._execute(
+            file_path="test.py",
+            function_name="vulnerable_function",
+            include_imports=True,
+        )
+
+        assert result.success is True
+        assert result.metadata["render_type"] == "code_window"
+        assert result.metadata["command_chain"] == ["extract_function"]
+
+        entry = result.metadata["entries"][0]
+        assert entry["file_path"] == "test.py"
+        assert entry["symbol_name"] == "vulnerable_function"
+        assert entry["start_line"] == 4
+        assert entry["end_line"] == 6
+        assert entry["focus_line"] == 4
+        assert entry["lines"][0]["line_number"] == 4
+        assert entry["lines"][0]["kind"] == "focus"
 
     async def test_extract_function_not_found(self, tmp_path):
         """测试提取不存在的函数"""
@@ -586,6 +670,33 @@ def test_run_code_tool_description_format():
     assert "python" in tool.description
     assert "php" in tool.description
     assert "javascript" in tool.description
+
+
+@pytest.mark.asyncio
+async def test_sandbox_exec_returns_execution_result_metadata():
+    sandbox_manager = StubSandboxManager(
+        {
+            "success": False,
+            "exit_code": 7,
+            "stdout": "partial output",
+            "stderr": "permission denied",
+            "image": "vulhunter/sandbox:latest",
+            "image_candidates": ["vulhunter/sandbox:latest", "deepaudit/sandbox:latest"],
+        }
+    )
+    tool = SandboxTool(sandbox_manager=sandbox_manager)
+
+    result = await tool._execute(command="echo hello", timeout=8)
+
+    assert result.success is False
+    assert result.metadata["render_type"] == "execution_result"
+    assert result.metadata["command_chain"] == ["sandbox_exec", "echo"]
+    entry = result.metadata["entries"][0]
+    assert entry["status"] == "failed"
+    assert entry["exit_code"] == 7
+    assert entry["execution_command"] == "echo hello"
+    assert entry["stdout_preview"] == "partial output"
+    assert entry["stderr_preview"] == "permission denied"
 
 
 if __name__ == "__main__":

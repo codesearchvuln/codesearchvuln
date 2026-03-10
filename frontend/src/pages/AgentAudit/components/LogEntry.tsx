@@ -9,8 +9,8 @@ import {
   normalizeSeverityKey,
   toZhSeverityLabel,
 } from "../localization";
-import ToolEvidencePreview from "./ToolEvidencePreview";
 import { isToolEvidenceCapableTool } from "../toolEvidence";
+import type { LogItem } from "../types";
 
 const LOG_TYPE_LABELS: Record<string, string> = {
   thinking: "思考",
@@ -40,6 +40,84 @@ const TOOL_STATUS_CLASS: Record<ToolStatus, string> = {
 
 function formatTitle(title: string): string {
   return sanitizeAuditText(localizeAuditText(title));
+}
+
+function formatCodeWindowLocation(entry: {
+  filePath: string;
+  startLine: number;
+  endLine: number;
+}): string {
+  if (entry.startLine === entry.endLine) {
+    return `${entry.filePath}:${entry.startLine}`;
+  }
+  return `${entry.filePath}:${entry.startLine}-${entry.endLine}`;
+}
+
+function buildToolListSummary(item: LogItem): {
+  primaryTitle: string;
+  secondarySummary: string;
+  resultBadgeText?: string;
+} {
+  const primaryTitle =
+    String(item.tool?.name || "").trim() || formatTitle(item.title);
+
+  if (item.tool?.status === "running") {
+    return {
+      primaryTitle,
+      secondarySummary: "正在执行",
+    };
+  }
+
+  const evidence = item.toolEvidence;
+  if (evidence?.renderType === "search_hits") {
+    const count = evidence.entries.length;
+    return {
+      primaryTitle,
+      secondarySummary: `${count} 条命中`,
+      resultBadgeText: `${count} 条命中`,
+    };
+  }
+
+  if (evidence?.renderType === "code_window") {
+    const first = evidence.entries[0];
+    const location = first ? formatCodeWindowLocation(first) : "详情可查看代码窗口";
+    return {
+      primaryTitle,
+      secondarySummary: `代码窗口 · ${location}`,
+      resultBadgeText: "代码窗口",
+    };
+  }
+
+  if (evidence?.renderType === "execution_result") {
+    const first = evidence.entries[0];
+    const exitCode = first?.exitCode;
+    return {
+      primaryTitle,
+      secondarySummary:
+        typeof exitCode === "number" ? `执行结果 · 退出码 ${exitCode}` : "执行结果已生成",
+      resultBadgeText:
+        typeof exitCode === "number" ? `退出码 ${exitCode}` : "执行结果",
+    };
+  }
+
+  if (item.tool?.status === "failed") {
+    return {
+      primaryTitle,
+      secondarySummary: "执行失败，详情可查看原始结果",
+    };
+  }
+
+  if (item.tool?.status === "cancelled") {
+    return {
+      primaryTitle,
+      secondarySummary: "已取消，详情可查看原始结果",
+    };
+  }
+
+  return {
+    primaryTitle,
+    secondarySummary: "已完成，详情可查看原始结果",
+  };
 }
 
 export const LogEntry = memo(function LogEntry({
@@ -74,19 +152,15 @@ export const LogEntry = memo(function LogEntry({
     : "";
   const normalizedTitle = formattedTitle.replace(/\.\.\.$/, "").trim();
   const normalizedPreview = contentPreview.replace(/\.\.\.$/, "").trim();
+  const isToolRow = item.type === "tool" && Boolean(item.tool?.name);
+  const toolListSummary = isToolRow ? buildToolListSummary(item) : null;
   const shouldRenderPreview =
     Boolean(contentPreview) &&
+    !isToolRow &&
     normalizedPreview !== formattedTitle &&
     normalizedPreview !== normalizedTitle &&
     !(normalizedTitle && normalizedPreview.startsWith(normalizedTitle));
   const isEvidenceTool = isToolEvidenceCapableTool(item.tool?.name);
-  const showEvidencePreview =
-    item.type === "tool" && item.toolEvidence && item.tool?.status !== "running";
-  const showUnsupportedPreview =
-    item.type === "tool" &&
-    isEvidenceTool &&
-    !item.toolEvidence &&
-    item.tool?.status !== "running";
 
   return (
     <div
@@ -111,12 +185,33 @@ export const LogEntry = memo(function LogEntry({
           </div>
 
           <div className="min-w-0">
-            {showEvidencePreview ? (
-              <ToolEvidencePreview evidence={item.toolEvidence} />
-            ) : showUnsupportedPreview ? (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
-                该工具结果未提供新版结构化证据，详情中可查看原始 JSON。
-              </div>
+            {isToolRow && toolListSummary ? (
+              <>
+                <p className="line-clamp-1 break-words text-sm font-semibold leading-5 text-foreground">
+                  {toolListSummary.primaryTitle}
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="line-clamp-1 break-words text-xs text-muted-foreground">
+                    {toolListSummary.secondarySummary}
+                  </p>
+                  {toolListSummary.resultBadgeText ? (
+                    <Badge
+                      variant="outline"
+                      className="h-5 rounded-full border-border/70 px-2 text-[10px] font-medium text-muted-foreground"
+                    >
+                      {toolListSummary.resultBadgeText}
+                    </Badge>
+                  ) : null}
+                  {isEvidenceTool && !item.toolEvidence && item.tool?.status !== "running" ? (
+                    <Badge
+                      variant="outline"
+                      className="h-5 rounded-full border-amber-500/30 bg-amber-500/10 px-2 text-[10px] font-medium text-amber-700 dark:text-amber-200"
+                    >
+                      原始结果
+                    </Badge>
+                  ) : null}
+                </div>
+              </>
             ) : (
               <>
                 <p className="line-clamp-1 break-words text-sm font-semibold leading-5 text-foreground">

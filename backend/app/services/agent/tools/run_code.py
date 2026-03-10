@@ -20,6 +20,15 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    build_execution_status,
+    build_inline_code_lines,
+    build_structured_lines,
+    detect_language,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 from .sandbox_tool import SandboxManager, SandboxConfig
 
 logger = logging.getLogger(__name__)
@@ -145,10 +154,20 @@ for payload in payloads:
             logger.warning(f"Sandbox init failed: {e}")
 
         if not self.sandbox_manager.is_available:
-            return ToolResult(
+            return self._build_execution_tool_result(
                 success=False,
-                error="沙箱环境不可用 (Docker 未运行)",
-                data="请确保 Docker 已启动。如果无法使用沙箱，你可以通过静态分析代码来验证漏洞。"
+                language=language,
+                command=None,
+                description=description,
+                result_payload={
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": "沙箱环境不可用 (Docker 未运行)",
+                },
+                fallback_data="请确保 Docker 已启动。如果无法使用沙箱，你可以通过静态分析代码来验证漏洞。",
+                code=code,
             )
 
         # 构建执行命令
@@ -156,10 +175,20 @@ for payload in payloads:
         command = self._build_command(code, language)
 
         if command is None:
-            return ToolResult(
+            return self._build_execution_tool_result(
                 success=False,
-                error=f"不支持的语言: {language}",
-                data=f"支持的语言: python, php, javascript, ruby, go, java, bash"
+                language=language,
+                command=None,
+                description=description,
+                result_payload={
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": f"不支持的语言: {language}",
+                },
+                fallback_data="支持的语言: python, php, javascript, ruby, go, java, bash",
+                code=code,
             )
 
         # 在沙箱中执行
@@ -210,19 +239,120 @@ for payload in payloads:
             elif result.get("exit_code", 0) != 0:
                 error_message = f"代码执行失败，退出码: {result.get('exit_code')}"
 
-        return ToolResult(
+        return self._build_execution_tool_result(
             success=result.get("success", False),
-            data="\n".join(output_parts),
-            error=error_message,  # 确保 error 字段有值
-            metadata={
-                "language": language,
-                "exit_code": result.get("exit_code", -1),
-                "stdout_length": len(result.get("stdout", "")),
-                "stderr_length": len(result.get("stderr", "")),
-                "image": result.get("image"),
-                "image_candidates": result.get("image_candidates") or [],
-            }
+            language=language,
+            command=command,
+            description=description,
+            result_payload=result,
+            fallback_data="\n".join(output_parts),
+            code=code,
+            error_message=error_message,
         )
+
+    def _build_execution_tool_result(
+        self,
+        *,
+        success: bool,
+        language: str,
+        command: Optional[str],
+        description: str,
+        result_payload: Dict[str, Any],
+        fallback_data: str,
+        code: str,
+        error_message: Optional[str] = None,
+    ) -> ToolResult:
+        effective_description = description or "代码执行请求"
+        final_error = error_message or result_payload.get("error")
+        command_chain = unique_command_chain(["run_code", self._command_binary_for_language(language)])
+        display_command = build_display_command(command_chain)
+        exit_code = int(result_payload.get("exit_code", -1))
+        entry: Dict[str, Any] = {
+            "language": language,
+            "exit_code": exit_code,
+            "status": build_execution_status(
+                success=success,
+                error=final_error,
+                exit_code=exit_code,
+            ),
+            "title": "Harness 执行结果" if description else "代码执行结果",
+            "description": effective_description,
+            "runtime_image": result_payload.get("image"),
+            "execution_command": command or "",
+            "stdout_preview": self._preview_text(result_payload.get("stdout", ""), 300),
+            "stderr_preview": self._preview_text(result_payload.get("stderr", ""), 300),
+            "artifacts": self._build_execution_artifacts(
+                language=language,
+                exit_code=exit_code,
+                result_payload=result_payload,
+            ),
+            "code": build_inline_code_lines(code, language=language) if code else None,
+        }
+        validate_evidence_metadata(
+            render_type="execution_result",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=[entry],
+        )
+        return ToolResult(
+            success=success,
+            data=fallback_data,
+            error=final_error,
+            metadata={
+                "render_type": "execution_result",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": [entry],
+                "language": language,
+                "exit_code": exit_code,
+                "stdout_length": len(result_payload.get("stdout", "")),
+                "stderr_length": len(result_payload.get("stderr", "")),
+                "image": result_payload.get("image"),
+                "image_candidates": result_payload.get("image_candidates") or [],
+            },
+        )
+
+    @staticmethod
+    def _preview_text(value: Any, max_length: int) -> str:
+        text = str(value or "")
+        if len(text) <= max_length:
+            return text
+        return text[:max_length] + "..."
+
+    @staticmethod
+    def _command_binary_for_language(language: str) -> str:
+        mapping = {
+            "python": "python3",
+            "php": "php",
+            "javascript": "node",
+            "js": "node",
+            "node": "node",
+            "ruby": "ruby",
+            "bash": "bash",
+            "go": "go",
+            "java": "javac",
+        }
+        return mapping.get(str(language or "").strip().lower(), "python")
+
+    def _build_execution_artifacts(
+        self,
+        *,
+        language: str,
+        exit_code: int,
+        result_payload: Dict[str, Any],
+    ) -> list[Dict[str, str]]:
+        artifacts: list[Dict[str, str]] = [
+            {"label": "语言", "value": language},
+            {"label": "退出码", "value": str(exit_code)},
+        ]
+        if result_payload.get("image"):
+            artifacts.append({"label": "镜像", "value": str(result_payload["image"])})
+        image_candidates = result_payload.get("image_candidates") or []
+        if image_candidates:
+            artifacts.append(
+                {"label": "镜像候选", "value": ", ".join(str(item) for item in image_candidates)}
+            )
+        return artifacts
 
     def _build_command(self, code: str, language: str) -> Optional[str]:
         """根据语言构建执行命令"""
@@ -363,6 +493,43 @@ class ExtractFunctionTool(AgentTool):
             result = self._extract_generic(code, function_name)
 
         if result["success"]:
+            line_start = result.get("line_start")
+            line_end = result.get("line_end")
+            if not isinstance(line_start, int) or not isinstance(line_end, int):
+                line_start, line_end = self._locate_snippet_lines(code, result["code"])
+            if not isinstance(line_start, int) or not isinstance(line_end, int):
+                return ToolResult(
+                    success=False,
+                    error="无法生成函数提取的结构化证据",
+                    data="提取成功，但缺少精确行号，无法在新版证据视图中展示。",
+                )
+
+            structured_lines = build_structured_lines(
+                result["code"].splitlines(),
+                line_start,
+                line_start,
+                line_start,
+                "focus",
+            )
+            metadata = {
+                "render_type": "code_window",
+                "command_chain": ["extract_function"],
+                "display_command": "extract_function",
+                "entries": [
+                    {
+                        "file_path": file_path,
+                        "start_line": line_start,
+                        "end_line": line_end,
+                        "focus_line": line_start,
+                        "language": detect_language(file_path),
+                        "title": "函数提取",
+                        "symbol_name": function_name,
+                        "symbol_kind": "function",
+                        "lines": structured_lines,
+                    }
+                ],
+            }
+            validate_evidence_metadata(**metadata)
             output_parts = [f"📦 函数提取结果\n"]
             output_parts.append(f"文件: {file_path}")
             output_parts.append(f"函数: {function_name}")
@@ -381,7 +548,7 @@ class ExtractFunctionTool(AgentTool):
             return ToolResult(
                 success=True,
                 data="\n".join(output_parts),
-                metadata=result
+                metadata={**result, **metadata}
             )
         else:
             return ToolResult(
@@ -389,6 +556,20 @@ class ExtractFunctionTool(AgentTool):
                 error=result.get("error", "提取失败"),
                 data=f"无法提取函数 '{function_name}'。你可以使用 read_file 工具直接读取文件，手动定位函数代码。"
             )
+
+    @staticmethod
+    def _locate_snippet_lines(code: str, snippet: str) -> tuple[Optional[int], Optional[int]]:
+        full_text = str(code or "")
+        snippet_text = str(snippet or "")
+        if not full_text or not snippet_text:
+            return None, None
+        start_index = full_text.find(snippet_text)
+        if start_index < 0:
+            return None, None
+        start_line = full_text[:start_index].count("\n") + 1
+        line_count = max(1, len(snippet_text.splitlines()))
+        end_line = start_line + line_count - 1
+        return start_line, end_line
 
     def _extract_python(self, code: str, function_name: str, include_imports: bool) -> Dict:
         """提取 Python 函数"""
