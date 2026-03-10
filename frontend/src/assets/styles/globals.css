@@ -285,9 +285,8 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.75rem 1rem;
+    padding: 0.75rem 1rem 1.5rem 1rem;
     background: var(--cyber-bg-elevated);
-    border-bottom: 1px solid var(--cyber-border);
   }
 
   /* ============ Terminal Window ============ */
@@ -728,7 +727,6 @@
 
   .cyber-table thead {
     background: var(--cyber-bg-elevated);
-    border-bottom: 1px solid var(--cyber-border);
   }
 
   .cyber-table th {
@@ -743,13 +741,12 @@
   }
 
   .cyber-table td {
-    padding: 0.875rem 1rem;
-    border-bottom: 1px solid var(--cyber-border);
+    padding: 1rem 1rem;
     color: var(--cyber-text);
   }
 
   .cyber-table tbody tr:hover {
-    background: var(--cyber-hover-bg);
+    background: rgba(15, 23, 42, 0.8);
   }
 
   /* ============ Empty State ============ */
