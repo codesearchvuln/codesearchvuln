@@ -201,11 +201,9 @@ skills/
 !backend/app/services/agent/skills/
 !backend/app/services/agent/skills/**
 
-CLAUDE.md
-
 # Codex integration - session logs and generated docs
-.codex/docs/
-.codex/session.log
+.codex/
+.claude/
 
 .playwright-cli/
 frontend/.playwright-cli/
