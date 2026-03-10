@@ -5563,8 +5563,10 @@ user: Observation: ❌ 数据库连接失败
                 saved_count = 0
                 for idx, finding in enumerate(findings):
                     try:
-                        # 构造单个 finding 的参数
+                        # 构造单个 finding 的参数（flat 格式，与 _execute 签名一致）
                         vr = finding.get("verification_result", {})
+                        if not isinstance(vr, dict):
+                            vr = {}
                         params = {
                             "file_path": finding.get("file_path"),
                             "line_start": finding.get("line_start"),
@@ -5573,18 +5575,34 @@ user: Observation: ❌ 数据库连接失败
                             "title": finding.get("title"),
                             "vulnerability_type": finding.get("vulnerability_type"),
                             "severity": finding.get("severity"),
-                            "verdict": vr.get("verdict"),
-                            "confidence": vr.get("confidence"),
-                            "reachability": vr.get("reachability"),
-                            "verification_evidence": vr.get("verification_evidence"),
+                            "verdict": vr.get("verdict") or finding.get("verdict"),
+                            "confidence": vr.get("confidence") or finding.get("confidence"),
+                            "reachability": vr.get("reachability") or finding.get("reachability"),
+                            "verification_evidence": vr.get("verification_evidence") or finding.get("verification_evidence"),
                             "cwe_id": finding.get("cwe_id"),
                             "description": finding.get("description"),
                             "suggestion": finding.get("suggestion"),
                         }
                         result = await self.execute_tool("save_verification_result", params)
-                        if result and ("成功" in str(result) or "已保存" in str(result)):
+                        result_str = str(result)
+                        # 成功判断：工具未返回错误，且有"已保存"/"成功"/"buffered"等成功标志
+                        tool_succeeded = (
+                            result
+                            and not result_str.startswith("⚠️")
+                            and not result_str.startswith("❌")
+                            and not result_str.startswith("Error:")
+                            and (
+                                "已保存" in result_str
+                                or "成功" in result_str
+                                or "'saved': True" in result_str
+                                or "buffered" in result_str
+                            )
+                        )
+                        if tool_succeeded:
                             saved_count += 1
                             logger.info(f"[{self.name}] 补救保存第 {idx+1}/{len(findings)} 条验证结果成功")
+                        else:
+                            logger.warning(f"[{self.name}] 补救保存第 {idx+1}/{len(findings)} 条结果未能确认成功: {result_str[:100]}")
                     except Exception as e:
                         logger.error(f"[{self.name}] 补救保存第 {idx+1} 条验证结果失败: {e}")
                 

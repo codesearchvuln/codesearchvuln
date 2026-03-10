@@ -3176,13 +3176,13 @@ async def _execute_agent_task(task_id: str):
             # 🔥 将持久化回调注入到已初始化的 Verification 保存工具
             # （工具在 _initialize_tools 时以 save_callback=None 创建，此处补注入）
             _save_tool_instance = (
-                tools.get("verification", {}).get("save_verification_results")
+                tools.get("verification", {}).get("save_verification_result")
                 if isinstance(tools, dict)
                 else None
             )
             if _save_tool_instance is not None and hasattr(_save_tool_instance, "_save_callback"):
                 _save_tool_instance._save_callback = _persist_findings_callback
-                logger.info("[Task] Injected persist_findings_callback into save_verification_results tool")
+                logger.info("[Task] Injected persist_findings_callback into save_verification_result tool")
 
             # 执行 Orchestrator
             await event_emitter.emit_phase_start("orchestration", "🎯 Orchestrator 开始编排审计流程")
@@ -3284,7 +3284,7 @@ async def _execute_agent_task(task_id: str):
                 task.current_step = "验证与结果归档中"
                 await db.commit()
 
-                # 检查 save_verification_results 工具是否已由 Agent 主动持久化
+                # 检查 save_verification_result 工具是否已由 Agent 主动持久化
                 _tool_saved_count: Optional[int] = None
                 if (
                     _save_tool_instance is not None
@@ -3293,7 +3293,7 @@ async def _execute_agent_task(task_id: str):
                 ):
                     _tool_saved_count = _save_tool_instance.saved_count
                     logger.info(
-                        "[AgentTask] save_verification_results 工具已由 Verification Agent 主动保存: saved_count=%s",
+                        "[AgentTask] save_verification_result 工具已由 Verification Agent 主动保存: saved_count=%s",
                         _tool_saved_count,
                     )
                 elif (
@@ -3305,7 +3305,7 @@ async def _execute_agent_task(task_id: str):
                     # 工具缓冲了结果但未持久化（无回调），用缓冲的 findings 作为来源
                     findings = _save_tool_instance.buffered_findings
                     logger.info(
-                        "[AgentTask] 从 save_verification_results 工具缓冲读取 %d 条 findings",
+                        "[AgentTask] 从 save_verification_result 工具缓冲读取 %d 条 findings",
                         len(findings),
                     )
 
@@ -3343,9 +3343,12 @@ async def _execute_agent_task(task_id: str):
                     select(AgentFinding).where(AgentFinding.task_id == task_id)
                 )
                 persisted_findings = persisted_findings_result.scalars().all()
+                # effective_findings: all non-false-positive findings (confirmed, likely, uncertain).
+                # uncertain findings (is_verified=False) are legitimate security concerns that
+                # should be surfaced to the user and counted in the "入库" total.
                 effective_findings = [
                     item for item in persisted_findings
-                    if str(item.status) != FindingStatus.FALSE_POSITIVE and bool(item.is_verified)
+                    if str(item.status) != FindingStatus.FALSE_POSITIVE
                 ]
                 false_positive_findings = [
                     item for item in persisted_findings
@@ -3706,24 +3709,18 @@ async def _execute_agent_task(task_id: str):
                         },
                     )
                 if orchestrator_findings_count > 0 and persisted_findings_count == 0:
-                    # 分析为什么全部被过滤，同步新的参数验证和 uncertain 状态
-                    uncertain_count = sum(
-                        1 for f in effective_findings 
-                        if f.status == FindingStatus.UNCERTAIN
-                    ) if effective_findings else 0
-                    
+                    # 分析为什么全部被过滤
                     await event_emitter.emit_warning(
                         "⚠️ 编排阶段识别到漏洞，但入库结果为 0，疑似参数验证或质量门限制",
                         metadata={
                             "orchestrator_findings_count": orchestrator_findings_count,
                             "persisted_findings_count": persisted_findings_count,
-                            "uncertain_count": uncertain_count,
                             "filtered_findings_count": filtered_findings_count,
                             "filtered_reasons": filtered_reasons or {},
                             "diagnosis_suggestions": [
                                 "参数验证失败：确认 confidence 为浮点数、verdict 为有效值、reachability 正确",
+                                "文件路径无效：检查 file_path 是否存在于项目目录中",
                                 "文件定位失败（已降级）：查看 localization_status=failed 的 findings 是否被其他原因过滤",
-                                f"uncertain 状态未入库：有 {uncertain_count} 条 uncertain findings，若数据库不支持需升级",
                                 "其他质量门：检查 verification_evidence 是否为空、cwe_id 格式是否正确",
                             ],
                             **drain_metadata,

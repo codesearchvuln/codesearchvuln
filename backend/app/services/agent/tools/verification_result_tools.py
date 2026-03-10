@@ -474,9 +474,10 @@ class SaveVerificationResultTool(AgentTool):
 - confidence 必须是浮点数，不能为字符串
 - cwe_id 必须符合 CWE-XXX 格式或为 null"""
 
-    @property
-    def args_schema(self):
-        return SaveVerificationResultInput
+    # args_schema intentionally not overridden (returns None from base class).
+    # _execute() accepts individual flat params; SaveVerificationResultInput
+    # (which expects a "findings" list) does NOT match the _execute() signature
+    # and would cause Pydantic ValidationError on every call.
 
     # ------------------------------------------------------------------ #
     # 公开属性：供 Orchestrator / 持久化兜底逻辑读取
