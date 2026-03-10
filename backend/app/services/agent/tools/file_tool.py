@@ -89,10 +89,126 @@ _SOURCE_FILE_EXTENSIONS = (
     ".kt", ".m", ".mm", ".cs", ".scala",
 )
 
+_LANGUAGE_BY_EXTENSION = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".java": "java",
+    ".go": "go",
+    ".rs": "rust",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".c": "c",
+    ".h": "c",
+    ".cs": "csharp",
+    ".php": "php",
+    ".rb": "ruby",
+    ".swift": "swift",
+    ".kt": "kotlin",
+}
+
 
 def _is_source_like_file(path_value: str) -> bool:
     ext = Path(str(path_value or "")).suffix.lower()
     return ext in _SOURCE_FILE_EXTENSIONS
+
+
+def _detect_language(path_value: str) -> str:
+    ext = os.path.splitext(str(path_value or ""))[1].lower()
+    return _LANGUAGE_BY_EXTENSION.get(ext, "text")
+
+
+def _unique_command_chain(commands: List[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for item in commands:
+        normalized = str(item or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _build_display_command(command_chain: List[str]) -> str:
+    normalized = _unique_command_chain(command_chain)
+    return " -> ".join(normalized) if normalized else "python"
+
+
+def _build_structured_lines(
+    selected_lines: List[str],
+    start_line: int,
+    focus_start_line: int,
+    focus_end_line: int,
+    focus_kind: str,
+) -> List[Dict[str, Any]]:
+    structured: List[Dict[str, Any]] = []
+    for index, raw_line in enumerate(selected_lines):
+        line_number = start_line + index
+        kind = focus_kind if focus_start_line <= line_number <= focus_end_line else "context"
+        structured.append(
+            {
+                "line_number": line_number,
+                "text": str(raw_line).rstrip("\n"),
+                "kind": kind,
+            }
+        )
+    return structured
+
+
+def _format_structured_lines_for_code_block(lines: List[Dict[str, Any]]) -> str:
+    return "\n".join(
+        f"{int(item['line_number']):4d}| {str(item.get('text') or '')}"
+        for item in lines
+    )
+
+
+def _format_structured_lines_for_search(lines: List[Dict[str, Any]]) -> str:
+    rows: List[str] = []
+    for item in lines:
+        line_number = int(item["line_number"])
+        prefix = ">" if item.get("kind") == "match" else " "
+        rows.append(f"{prefix} {line_number:4d}| {str(item.get('text') or '')}")
+    return "\n".join(rows)
+
+
+def _validate_evidence_metadata(
+    *,
+    render_type: str,
+    command_chain: List[str],
+    display_command: str,
+    entries: List[Dict[str, Any]],
+) -> None:
+    if render_type not in {"code_window", "search_hits"}:
+        raise ValueError(f"unsupported render_type: {render_type}")
+    if not isinstance(command_chain, list) or not command_chain:
+        raise ValueError("command_chain is required")
+    if not isinstance(display_command, str) or not display_command.strip():
+        raise ValueError("display_command is required")
+    if entries is None:
+        raise ValueError("entries is required")
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("entry must be an object")
+        if not str(entry.get("file_path") or "").strip():
+            raise ValueError("entry.file_path is required")
+        if not isinstance(entry.get("lines"), list):
+            raise ValueError("entry.lines is required")
+        for line in entry["lines"]:
+            if not isinstance(line, dict):
+                raise ValueError("line must be an object")
+            if not isinstance(line.get("line_number"), int):
+                raise ValueError("line.line_number is required")
+            if "text" not in line:
+                raise ValueError("line.text is required")
+            if str(line.get("kind") or "").strip() not in {"context", "focus", "match"}:
+                raise ValueError("line.kind is invalid")
 
 
 def _normalize_reason_path(path_value: Any, project_root: str) -> Optional[str]:
@@ -137,6 +253,7 @@ class FileReadInput(BaseModel):
     start_line: Optional[int] = Field(default=None, description="起始行号（从1开始）")
     end_line: Optional[int] = Field(default=None, description="结束行号")
     max_lines: int = Field(default=500, description="最大返回行数")
+    project_scope: bool = Field(default=False, description="允许基于项目范围补全 basename 路径")
 
 
 class FileReadTool(AgentTool):
@@ -168,6 +285,45 @@ class FileReadTool(AgentTool):
     def _read_all_lines_sync(file_path: str) -> List[str]:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             return f.readlines()
+
+    @staticmethod
+    def _read_window_with_sed_sync(
+        file_path: str,
+        start_line: int,
+        end_line: int,
+    ) -> Optional[List[str]]:
+        if not shutil.which("sed"):
+            return None
+        proc = subprocess.run(
+            ["sed", "-n", f"{start_line},{end_line}p", file_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return None
+        return [line.rstrip("\n") for line in str(proc.stdout or "").splitlines()]
+
+    def _resolve_project_scope_match(self, file_path: str) -> Optional[str]:
+        basename = os.path.basename(str(file_path or "").strip())
+        if not basename:
+            return None
+        matches: List[str] = []
+        for root, dirs, files in os.walk(self.project_root):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            if basename not in files:
+                continue
+            rel_path = _normalize_rel_path(
+                os.path.relpath(os.path.join(root, basename), self.project_root).replace("\\", "/")
+            )
+            if self._should_exclude(rel_path):
+                continue
+            matches.append(rel_path)
+            if len(matches) > 1:
+                break
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     @property
     def name(self) -> str:
@@ -223,35 +379,57 @@ class FileReadTool(AgentTool):
         start_line: Optional[int] = None,
         end_line: Optional[int] = None,
         max_lines: int = 500,
+        project_scope: bool = False,
         **kwargs
     ) -> ToolResult:
         """执行文件读取"""
         try:
-            # 检查是否被排除
-            if self._should_exclude(file_path):
-                return ToolResult(
-                    success=False,
-                    error=f"文件被排除或不在目标文件列表中: {file_path}",
-                )
-            
-            # 安全检查：防止路径遍历
-            full_path = os.path.realpath(os.path.join(self.project_root, file_path))
-            if not full_path.startswith(os.path.realpath(self.project_root)):
+            parsed_path, parsed_start_line, parsed_end_line = _parse_file_path_with_line_range(file_path)
+            if parsed_path:
+                file_path = parsed_path
+            if start_line is None and parsed_start_line is not None:
+                start_line = parsed_start_line
+            if end_line is None and parsed_end_line is not None:
+                end_line = parsed_end_line
+
+            requested_path = str(file_path or "").strip()
+            candidate_path = requested_path
+            if os.path.isabs(candidate_path):
+                full_path = os.path.realpath(candidate_path)
+            else:
+                full_path = os.path.realpath(os.path.join(self.project_root, candidate_path))
+
+            root_path = os.path.realpath(self.project_root)
+            if not full_path.startswith(root_path):
                 return ToolResult(
                     success=False,
                     error="安全错误：不允许访问项目目录外的文件",
                 )
-            
+
+            display_path = _normalize_display_path(candidate_path, self.project_root)
+            if project_scope and not os.path.exists(full_path):
+                scoped_match = self._resolve_project_scope_match(display_path or candidate_path)
+                if scoped_match:
+                    display_path = scoped_match
+                    full_path = os.path.realpath(os.path.join(self.project_root, scoped_match))
+
+            # 检查是否被排除
+            if self._should_exclude(display_path or requested_path):
+                return ToolResult(
+                    success=False,
+                    error=f"文件被排除或不在目标文件列表中: {display_path or requested_path}",
+                )
+
             if not os.path.exists(full_path):
                 return ToolResult(
                     success=False,
-                    error=f"文件不存在: {file_path}",
+                    error=f"文件不存在: {display_path or requested_path}",
                 )
             
             if not os.path.isfile(full_path):
                 return ToolResult(
                     success=False,
-                    error=f"不是文件: {file_path}",
+                    error=f"不是文件: {display_path or requested_path}",
                 )
             
             # 检查文件大小
@@ -280,25 +458,48 @@ class FileReadTool(AgentTool):
                 end_idx = min(total_lines, start_idx + max_lines)
 
             # 截取指定行
-            selected_lines = all_lines[start_idx:end_idx]
-            
-            # 添加行号
-            numbered_lines = []
-            for i, line in enumerate(selected_lines, start=start_idx + 1):
-                numbered_lines.append(f"{i:4d}| {line.rstrip()}")
-            
-            content = '\n'.join(numbered_lines)
-            
-            # 检测语言
-            ext = os.path.splitext(file_path)[1].lower()
-            language = {
-                ".py": "python", ".js": "javascript", ".ts": "typescript",
-                ".java": "java", ".go": "go", ".rs": "rust",
-                ".cpp": "cpp", ".c": "c", ".cs": "csharp",
-                ".php": "php", ".rb": "ruby", ".swift": "swift",
-            }.get(ext, "text")
-            
-            output = f"文件: {file_path}\n"
+            selected_lines = [line.rstrip("\n") for line in all_lines[start_idx:end_idx]]
+            command_chain = ["read_file"]
+            sed_lines = await asyncio.to_thread(
+                self._read_window_with_sed_sync,
+                full_path,
+                start_idx + 1,
+                end_idx,
+            )
+            if sed_lines is not None and len(sed_lines) == len(selected_lines):
+                selected_lines = sed_lines
+                command_chain.append("sed")
+
+            focus_line = start_idx + 1 if total_lines > 0 else 1
+            structured_lines = _build_structured_lines(
+                selected_lines=selected_lines,
+                start_line=start_idx + 1,
+                focus_start_line=focus_line,
+                focus_end_line=focus_line,
+                focus_kind="focus",
+            )
+            language = _detect_language(display_path or requested_path)
+            entries = [
+                {
+                    "file_path": display_path or requested_path,
+                    "start_line": start_idx + 1,
+                    "end_line": end_idx,
+                    "focus_line": focus_line,
+                    "language": language,
+                    "lines": structured_lines,
+                }
+            ]
+            command_chain = _unique_command_chain(command_chain)
+            display_command = _build_display_command(command_chain)
+            _validate_evidence_metadata(
+                render_type="code_window",
+                command_chain=command_chain,
+                display_command=display_command,
+                entries=entries,
+            )
+
+            content = _format_structured_lines_for_code_block(structured_lines)
+            output = f"文件: {display_path or requested_path}\n"
             output += f"行数: {start_idx + 1}-{end_idx} / {total_lines}\n\n"
             output += f"```{language}\n{content}\n```"
             
@@ -309,11 +510,15 @@ class FileReadTool(AgentTool):
                 success=True,
                 data=output,
                 metadata={
-                    "file_path": file_path,
+                    "file_path": display_path or requested_path,
                     "total_lines": total_lines,
                     "start_line": start_idx + 1,
                     "end_line": end_idx,
                     "language": language,
+                    "render_type": "code_window",
+                    "command_chain": command_chain,
+                    "display_command": display_command,
+                    "entries": entries,
                 }
             )
             
@@ -376,6 +581,24 @@ class FileSearchTool(AgentTool):
             return f.readlines()
 
     @staticmethod
+    def _read_window_with_sed_sync(
+        file_path: str,
+        start_line: int,
+        end_line: int,
+    ) -> Optional[List[str]]:
+        if not shutil.which("sed"):
+            return None
+        proc = subprocess.run(
+            ["sed", "-n", f"{start_line},{end_line}p", file_path],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return None
+        return [line.rstrip("\n") for line in str(proc.stdout or "").splitlines()]
+
+    @staticmethod
     def _is_path_within_root(candidate_path: str, root_path: str) -> bool:
         try:
             return os.path.commonpath(
@@ -428,23 +651,48 @@ class FileSearchTool(AgentTool):
         full_path: str,
         line_number: int,
         cache: Dict[str, List[str]],
-    ) -> str:
+    ) -> Dict[str, Any]:
         lines = cache.get(full_path)
         if lines is None:
             try:
                 lines = self._read_file_lines_sync(full_path)
             except Exception:
-                return f"> {line_number:4d}| <无法读取上下文>"
+                return {
+                    "window_start_line": line_number,
+                    "window_end_line": line_number,
+                    "lines": [
+                        {
+                            "line_number": line_number,
+                            "text": "<无法读取上下文>",
+                            "kind": "match",
+                        }
+                    ],
+                    "command_chain": [],
+                }
             cache[full_path] = lines
 
         start = max(1, line_number - 1)
         end = min(len(lines), line_number + 1)
-        context_rows: List[str] = []
-        for cursor in range(start, end + 1):
-            prefix = ">" if cursor == line_number else " "
-            text = lines[cursor - 1].rstrip("\n")
-            context_rows.append(f"{prefix} {cursor:4d}| {text}")
-        return "\n".join(context_rows)
+        window_lines = self._read_window_with_sed_sync(full_path, start, end)
+        command_chain: List[str] = []
+        if window_lines is not None and len(window_lines) == (end - start + 1):
+            command_chain.append("sed")
+        else:
+            window_lines = [lines[cursor - 1].rstrip("\n") for cursor in range(start, end + 1)]
+
+        structured_lines = _build_structured_lines(
+            selected_lines=window_lines,
+            start_line=start,
+            focus_start_line=line_number,
+            focus_end_line=line_number,
+            focus_kind="match",
+        )
+        return {
+            "window_start_line": start,
+            "window_end_line": end,
+            "lines": structured_lines,
+            "command_chain": command_chain,
+        }
 
     def _build_rg_command(
         self,
@@ -527,13 +775,16 @@ class FileSearchTool(AgentTool):
             seen_key.add(dedup_key)
             matched_files.add(relative_path)
 
-            context = self._build_context_block(full_path, line_number, file_context_cache)
+            context_window = self._build_context_block(full_path, line_number, file_context_cache)
             results.append(
                 {
                     "file": relative_path,
                     "line": line_number,
                     "match": str(match_part or "").strip()[:200],
-                    "context": context,
+                    "window_start_line": context_window["window_start_line"],
+                    "window_end_line": context_window["window_end_line"],
+                    "lines": context_window["lines"],
+                    "command_chain": context_window["command_chain"],
                 }
             )
             if len(results) >= max_results:
@@ -618,13 +869,16 @@ class FileSearchTool(AgentTool):
             seen_key.add(dedup_key)
             matched_files.add(relative_path)
 
-            context = self._build_context_block(full_path, line_number, file_context_cache)
+            context_window = self._build_context_block(full_path, line_number, file_context_cache)
             results.append(
                 {
                     "file": relative_path,
                     "line": line_number,
                     "match": str(match_part or "").strip()[:200],
-                    "context": context,
+                    "window_start_line": context_window["window_start_line"],
+                    "window_end_line": context_window["window_end_line"],
+                    "lines": context_window["lines"],
+                    "command_chain": context_window["command_chain"],
                 }
             )
             if len(results) >= max_results:
@@ -678,18 +932,27 @@ class FileSearchTool(AgentTool):
                         continue
                     start = max(1, idx - 1)
                     end = min(len(lines), idx + 1)
-                    context_rows: List[str] = []
-                    for cursor in range(start, end + 1):
-                        prefix = ">" if cursor == idx else " "
-                        context_rows.append(
-                            f"{prefix} {cursor:4d}| {lines[cursor - 1].rstrip()}"
-                        )
+                    window_lines = self._read_window_with_sed_sync(file_path, start, end)
+                    command_chain: List[str] = []
+                    if window_lines is not None and len(window_lines) == (end - start + 1):
+                        command_chain.append("sed")
+                    else:
+                        window_lines = [lines[cursor - 1].rstrip("\n") for cursor in range(start, end + 1)]
                     results.append(
                         {
                             "file": relative_path,
                             "line": idx,
                             "match": line.strip()[:200],
-                            "context": "\n".join(context_rows),
+                            "window_start_line": start,
+                            "window_end_line": end,
+                            "lines": _build_structured_lines(
+                                selected_lines=window_lines,
+                                start_line=start,
+                                focus_start_line=idx,
+                                focus_end_line=idx,
+                                focus_kind="match",
+                            ),
+                            "command_chain": command_chain,
                         }
                     )
                     if len(results) >= max_results:
@@ -828,6 +1091,15 @@ class FileSearchTool(AgentTool):
                     engine = fallback_engine
 
             if not results:
+                command_chain = _unique_command_chain([engine])
+                display_command = _build_display_command(command_chain)
+                entries: List[Dict[str, Any]] = []
+                _validate_evidence_metadata(
+                    render_type="search_hits",
+                    command_chain=command_chain,
+                    display_command=display_command,
+                    entries=entries,
+                )
                 return ToolResult(
                     success=True,
                     data=(
@@ -842,20 +1114,53 @@ class FileSearchTool(AgentTool):
                         "matches": 0,
                         "normalized_file_patterns": normalized_patterns,
                         "engine": engine,
+                        "render_type": "search_hits",
+                        "command_chain": command_chain,
+                        "display_command": display_command,
+                        "entries": entries,
                         "scope_fallback_applied": scope_fallback_applied,
                         "original_directory": search_dir_rel,
                         "effective_directory": effective_directory,
                     },
                 )
 
+            entries: List[Dict[str, Any]] = []
+            aggregate_command_chain: List[str] = [engine]
+            for item in results:
+                entry_command_chain = _unique_command_chain(
+                    [engine, *list(item.get("command_chain") or [])]
+                )
+                aggregate_command_chain.extend(entry_command_chain)
+                entries.append(
+                    {
+                        "file_path": item["file"],
+                        "match_line": int(item["line"]),
+                        "match_text": str(item["match"]),
+                        "window_start_line": int(item["window_start_line"]),
+                        "window_end_line": int(item["window_end_line"]),
+                        "language": _detect_language(item["file"]),
+                        "lines": list(item["lines"]),
+                    }
+                )
+
+            aggregate_command_chain = _unique_command_chain(aggregate_command_chain)
+            display_command = _build_display_command(aggregate_command_chain)
+            _validate_evidence_metadata(
+                render_type="search_hits",
+                command_chain=aggregate_command_chain,
+                display_command=display_command,
+                entries=entries,
+            )
+
             output_parts = [
                 f"搜索关键字: '{keyword}'",
                 f"匹配数: {len(results)}（搜索文件数: {files_searched}）",
-                f"执行引擎: {engine}",
+                f"执行链路: {display_command}",
             ]
-            for item in results:
-                output_parts.append(f"\n{item['file']}:{item['line']}")
-                output_parts.append(f"```\n{item['context']}\n```")
+            for entry in entries:
+                context = _format_structured_lines_for_search(entry["lines"])
+                output_parts.append(f"\n{entry['file_path']}:{entry['match_line']}")
+                output_parts.append(f"```\n{context}\n```")
             if len(results) >= safe_max_results:
                 output_parts.append(f"\n结果已截断（最大 {safe_max_results} 条）")
 
@@ -867,8 +1172,20 @@ class FileSearchTool(AgentTool):
                     "files_searched": files_searched,
                     "matches": len(results),
                     "normalized_file_patterns": normalized_patterns,
-                    "results": results[:10],
+                    "results": [
+                        {
+                            "file": entry["file_path"],
+                            "line": entry["match_line"],
+                            "match": entry["match_text"],
+                            "context": _format_structured_lines_for_search(entry["lines"]),
+                        }
+                        for entry in entries[:10]
+                    ],
                     "engine": engine,
+                    "render_type": "search_hits",
+                    "command_chain": aggregate_command_chain,
+                    "display_command": display_command,
+                    "entries": entries,
                     "scope_fallback_applied": scope_fallback_applied,
                     "original_directory": search_dir_rel,
                     "effective_directory": effective_directory,

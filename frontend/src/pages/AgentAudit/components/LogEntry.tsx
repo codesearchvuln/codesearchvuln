@@ -9,6 +9,8 @@ import {
   normalizeSeverityKey,
   toZhSeverityLabel,
 } from "../localization";
+import ToolEvidencePreview from "./ToolEvidencePreview";
+import { isToolEvidenceCapableTool } from "../toolEvidence";
 
 const LOG_TYPE_LABELS: Record<string, string> = {
   thinking: "思考",
@@ -77,6 +79,14 @@ export const LogEntry = memo(function LogEntry({
     normalizedPreview !== formattedTitle &&
     normalizedPreview !== normalizedTitle &&
     !(normalizedTitle && normalizedPreview.startsWith(normalizedTitle));
+  const isEvidenceTool = isToolEvidenceCapableTool(item.tool?.name);
+  const showEvidencePreview =
+    item.type === "tool" && item.toolEvidence && item.tool?.status !== "running";
+  const showUnsupportedPreview =
+    item.type === "tool" &&
+    isEvidenceTool &&
+    !item.toolEvidence &&
+    item.tool?.status !== "running";
 
   return (
     <div
@@ -101,13 +111,23 @@ export const LogEntry = memo(function LogEntry({
           </div>
 
           <div className="min-w-0">
-            <p className="line-clamp-1 break-words text-sm font-semibold leading-5 text-foreground">
-              {formattedTitle}
-            </p>
-            {shouldRenderPreview && (
-              <p className="mt-0.5 line-clamp-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                {contentPreview}
-              </p>
+            {showEvidencePreview ? (
+              <ToolEvidencePreview evidence={item.toolEvidence} />
+            ) : showUnsupportedPreview ? (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
+                该工具结果未提供新版结构化证据，详情中可查看原始 JSON。
+              </div>
+            ) : (
+              <>
+                <p className="line-clamp-1 break-words text-sm font-semibold leading-5 text-foreground">
+                  {formattedTitle}
+                </p>
+                {shouldRenderPreview && (
+                  <p className="mt-0.5 line-clamp-1 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                    {contentPreview}
+                  </p>
+                )}
+              </>
             )}
           </div>
 

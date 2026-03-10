@@ -7,7 +7,6 @@ import { buildOpengrepRulesRedirectPath } from "@/shared/utils/legacyRouteRedire
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Projects = lazy(() => import("@/pages/Projects"));
 const AgentAudit = lazy(() => import("@/pages/AgentAudit"));
-const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
 const ProjectDetail = lazy(() => import("@/pages/ProjectDetail"));
 const StaticAnalysis = lazy(() => import("@/pages/StaticAnalysis"));
 const StaticFindingDetail = lazy(() => import("@/pages/StaticFindingDetail"));
@@ -198,14 +197,12 @@ const routes: RouteConfig[] = [
         navVisible: false,
     },
     {
-        name: "系统管理",
+        name: "系统管理重定向",
         nameKey: "route.admin",
         path: "/admin",
-        element: <AdminDashboard />,
-        visible: true,
+        element: <Navigate to="/scan-config/intelligent-engine" replace />,
+        visible: false,
         navVisible: false,
-        navGroup: "main",
-        navOrder: 60,
     },
 ];
 

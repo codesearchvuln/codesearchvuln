@@ -35,7 +35,7 @@ def _llm_config_http_exception(error: Exception) -> HTTPException:
 def normalize_path(path: str) -> str:
     """
     统一路径分隔符为正斜杠，确保跨平台兼容性
-    Windows 使用反斜杠 (\)，Unix/Mac 使用正斜杠 (/)
+    Windows 使用反斜杠 (\\)，Unix/Mac 使用正斜杠 (/)
     统一转换为正斜杠以保证一致性
     """
     return path.replace("\\", "/")

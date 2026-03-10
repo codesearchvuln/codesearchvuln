@@ -95,6 +95,7 @@ import {
   buildAgentFindingDetailNavigation,
   buildAgentFindingDetailRoute,
 } from "@/shared/utils/findingRoute";
+import { isToolEvidenceCapableTool, parseToolEvidence } from "./toolEvidence";
 
 import type { RealtimeMergedFindingItem } from "./components/RealtimeFindingsPanel";
 import {
@@ -1631,6 +1632,7 @@ function AgentAuditPageContent() {
             null
           : null;
         if (existingLogId) {
+          const existing = logsRef.current.find((item) => item.id === existingLogId);
           updateLog(existingLogId, {
             time: displayTime,
             eventTimestamp,
@@ -1643,6 +1645,7 @@ function AgentAuditPageContent() {
               callId: toolCallId || undefined,
             },
             agentName,
+            toolEvidence: existing?.toolEvidence ?? null,
             detail: baseDetail,
           });
           return;
@@ -1672,6 +1675,7 @@ function AgentAuditPageContent() {
             tool: { name: toolName, status: "running", callId: toolCallId || undefined },
             agentName,
             agentRawName: agentRawName || undefined,
+            toolEvidence: null,
             detail: baseDetail,
           },
         });
@@ -1723,6 +1727,8 @@ function AgentAuditPageContent() {
         const resolvedToolTitle = buildToolTitle(statusLabel, toolName, metadata);
         const routePrefix = buildToolRouteContentPrefix(metadata);
         const outputText = sanitizeAuditText(extractToolOutputText(event.tool_output));
+        const parsedToolEvidence = parseToolEvidence(baseDetail.tool_output);
+        const expectsStructuredEvidence = isToolEvidenceCapableTool(toolName);
         const toolCallId = extractToolCallId(metadata, event);
         const writeScopeAllowed =
           typeof metadata?.write_scope_allowed === "boolean"
@@ -1805,6 +1811,7 @@ function AgentAuditPageContent() {
               callId: toolCallId ?? existing?.tool?.callId,
             },
             agentName: agentName || existing?.agentName,
+            toolEvidence: parsedToolEvidence ?? (expectsStructuredEvidence ? null : existing?.toolEvidence ?? null),
             detail: baseDetail,
           });
           if (toolCallId) {
@@ -1838,6 +1845,7 @@ function AgentAuditPageContent() {
             },
             agentName,
             agentRawName: agentRawName || undefined,
+            toolEvidence: parsedToolEvidence ?? (expectsStructuredEvidence ? null : undefined),
             detail: baseDetail,
           },
         });

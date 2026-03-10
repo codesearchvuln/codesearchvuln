@@ -9,6 +9,10 @@ const frontendDir = path.resolve(
 	"..",
 );
 const routesFile = path.join(frontendDir, "src/app/routes.tsx");
+const intelligentEngineFile = path.join(
+	frontendDir,
+	"src/pages/ScanConfigIntelligentEngine.tsx",
+);
 
 interface ParsedRoute {
 	name: string;
@@ -117,4 +121,36 @@ test("runtime-dead business files scheduled for phase-two trim are absent", () =
 			`${relativePath} should be removed in phase-two trimming`,
 		);
 	}
+});
+
+test("runtime-dead files scheduled for phase-three trim are absent", () => {
+	const removedFiles = [
+		"src/pages/AdminDashboard.tsx",
+		"src/shared/api/prompts.ts",
+		"src/shared/config/index.ts",
+	];
+
+	for (const relativePath of removedFiles) {
+		assert.equal(
+			fs.existsSync(path.join(frontendDir, relativePath)),
+			false,
+			`${relativePath} should be removed in phase-three trimming`,
+		);
+	}
+});
+
+test("admin becomes a redirect-only route to the intelligent-engine config page", () => {
+	const content = fs.readFileSync(routesFile, "utf8");
+
+	assert.match(
+		content,
+		/name:\s*"系统管理重定向"[\s\S]*?path:\s*"\/admin"[\s\S]*?<Navigate to="\/scan-config\/intelligent-engine" replace \/>/,
+	);
+});
+
+test("intelligent-engine config page embeds the database manager", () => {
+	const content = fs.readFileSync(intelligentEngineFile, "utf8");
+
+	assert.match(content, /import\s+\{\s*DatabaseManager\s*\}\s+from\s+"@\/components\/database\/DatabaseManager"/);
+	assert.match(content, /<DatabaseManager\s*\/>/);
 });

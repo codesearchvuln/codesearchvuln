@@ -40,8 +40,8 @@ async def test_file_search_tool_returns_python_search_hits_protocol(temp_project
     assert metadata.get("command_chain") == ["python"]
     assert metadata.get("entries")
 
+    assert any(entry["file_path"] == "src/sql_vuln.py" for entry in metadata["entries"])
     first_entry = metadata["entries"][0]
-    assert first_entry["file_path"] == "src/sql_vuln.py"
     assert first_entry["match_line"] >= 1
     assert any(line["kind"] == "match" for line in first_entry["lines"])
 

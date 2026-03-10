@@ -31,7 +31,7 @@ These routes are not shown in navigation but remain active for detail flows, com
 | `/static-analysis/:taskId` | `frontend/src/pages/StaticAnalysis.tsx` | Static result detail |
 | `/finding-detail/:source/:taskId/:findingId` | `frontend/src/pages/FindingDetail.tsx` | Unified finding detail |
 | `/static-analysis/:taskId/findings/:findingId` | `frontend/src/pages/StaticFindingDetail.tsx` | Compatibility redirect |
-| `/admin` | `frontend/src/pages/AdminDashboard.tsx` | Hidden admin page; keep for now |
+| `/admin` | legacy redirect | Redirects to intelligent-engine config |
 
 ## redirect-only
 
@@ -42,6 +42,7 @@ These routes exist only to normalize old entry points.
 | `/opengrep-rules` | `/scan-config/engines?tab=opengrep` |
 | `/tasks/overview` | `/tasks/static` |
 | `/scan-config` | `/scan-config/engines` |
+| `/admin` | `/scan-config/intelligent-engine` |
 
 ## orphan-page-file
 
@@ -68,3 +69,5 @@ These runtime-dead business files were removed in phase two.
 - `frontend/src/components/scan/CreateStaticScanDialog.tsx`
 - `frontend/src/components/scan/components/ZipFileSection.tsx`
 - `frontend/src/features/reports/services/reportExport.ts`
+- `frontend/src/shared/api/prompts.ts`
+- `frontend/src/shared/config/index.ts`

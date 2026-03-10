@@ -50,12 +50,15 @@ export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] = [
   {
     id: "read_file",
     category: "代码读取与定位",
-    summary: "读取目标文件窗口上下文。",
-    goal: "获取真实代码证据与附近逻辑。",
-    taskList: ["读取目标片段", "提取证据行", "补齐上下文"],
-    inputChecklist: ["`file_path` (string, required): 目标文件路径"],
+    summary: "窗口化读取代码并返回按行结构化证据。",
+    goal: "获取真实代码窗口、焦点行和附近逻辑，供前端代码证据卡片渲染。",
+    taskList: ["读取目标片段", "返回行号窗口", "高亮焦点行"],
+    inputChecklist: [
+      "`file_path` (string, required): 目标文件路径",
+      "`start_line` / `end_line` (number, optional): 窗口范围",
+    ],
     exampleInput: "```json\n{\n  \"file_path\": \"src/app.py\"\n}\n```",
-    pitfalls: ["不要无锚点大段读取整个项目。"],
+    pitfalls: ["不要无锚点大段读取整个项目。", "优先传入窗口范围，避免生成超长代码块。"],
   },
   {
     id: "list_files",
@@ -70,12 +73,17 @@ export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] = [
   {
     id: "search_code",
     category: "代码读取与定位",
-    summary: "检索关键调用、常量与危险模式。",
-    goal: "快速定位证据点与调用链入口。",
-    taskList: ["检索关键字", "输出 file_path:line", "返回命中摘要"],
-    inputChecklist: ["`query` (string, required): 搜索内容"],
-    exampleInput: "```json\n{\n  \"query\": \"dangerous_call\"\n}\n```",
-    pitfalls: ["不要只凭搜索命中就下结论。"],
+    summary: "通过 `rg/grep/python fallback` 检索代码并返回按行命中证据。",
+    goal: "快速定位证据点、调用链入口和可继续阅读的命中窗口。",
+    taskList: ["检索关键字", "返回命中窗口", "标注 file_path:line 证据锚点"],
+    inputChecklist: [
+      "`keyword` (string, required): 搜索内容",
+      "`directory` (string, optional): 搜索目录",
+      "`file_pattern` (string, optional): 文件模式",
+    ],
+    exampleInput:
+      "```json\n{\n  \"keyword\": \"dangerous_call\",\n  \"directory\": \"src\",\n  \"file_pattern\": \"*.ts\"\n}\n```",
+    pitfalls: ["不要只凭搜索命中就下结论。", "命中后应继续使用 read_file 读取完整窗口。"],
   },
   {
     id: "extract_function",

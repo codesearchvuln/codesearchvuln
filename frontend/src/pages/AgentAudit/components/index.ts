@@ -18,3 +18,5 @@ export { BootstrapInputsPanel } from "./BootstrapInputsPanel";
 export { default as RealtimeFindingsPanel } from "./RealtimeFindingsPanel";
 export { default as RealtimeVerifiedReportPanel } from "./RealtimeVerifiedReportPanel";
 export { default as FindingCodeWindow } from "./FindingCodeWindow";
+export { default as ToolEvidencePreview } from "./ToolEvidencePreview";
+export { default as ToolEvidenceDetail } from "./ToolEvidenceDetail";
