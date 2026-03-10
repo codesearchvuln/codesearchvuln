@@ -188,6 +188,13 @@ class FileReadTool(AgentTool):
 - end_line: 可选，结束行号
 - max_lines: 最大返回行数（默认500）
 
+输出格式: 每行代码前带有文件中的原始行号，格式为 `行号| 代码`，例如：
+```
+   4| def world():
+   5|     return 42
+```
+可直接引用行号定位代码位置。
+
 注意: 为避免输出过长，建议指定行范围或使用 RAG 搜索定位代码。"""
     
     @property
@@ -753,8 +760,13 @@ class FileSearchTool(AgentTool):
 - keyword: 搜索关键字或正则表达式
 - file_pattern: 可选，文件名模式（如 *.py）
 - directory: 可选，搜索目录 (相对于项目根目录)
-- case_sensitive: 是否区分大小写
-- is_regex: 是否使用正则表达式
+- case_sensitive: 是否区分大小写（默认 false）
+- is_regex: 是否使用正则表达式（默认 false）
+- max_results: 最大返回结果数（默认50，最大200）
+
+注意:
+- test / tests 目录默认被排除在搜索范围之外
+- 若指定的 directory 中无结果，会自动回退到整个项目根目录重新搜索
 
 这是一个快速搜索工具，结果包含匹配行和上下文。"""
     
