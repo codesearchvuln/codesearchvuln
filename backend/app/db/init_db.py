@@ -30,6 +30,7 @@ from app.models.user import User
 from app.services.seed_archive import download_seed_archive
 from app.services.upload.language_detection import detect_languages_from_paths
 from app.services.zip_storage import delete_project_zip, has_project_zip, save_project_zip
+from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
 
 logger = logging.getLogger(__name__)
 
@@ -1007,6 +1008,12 @@ async def init_db(db: AsyncSession) -> None:
 
     # 初始化 Patch 来源的 opengrep 规则
     await create_patch_opengrep_rules(db)
+
+    # 初始化 gitleaks 内置规则（失败不阻断启动）
+    try:
+        await ensure_builtin_gitleaks_rules(db)
+    except Exception as e:
+        logger.warning(f"初始化 gitleaks 内置规则跳过: {e}")
 
     # 初始化系统模板和规则
     try:

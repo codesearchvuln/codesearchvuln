@@ -11,6 +11,5 @@ from .agent_task import (
     AgentTaskStatus, AgentTaskPhase, AgentEventType,
     VulnerabilitySeverity, VulnerabilityType, FindingStatus
 )
-from .gitleaks import GitleaksScanTask, GitleaksFinding
-
+from .gitleaks import GitleaksScanTask, GitleaksFinding, GitleaksRule
 

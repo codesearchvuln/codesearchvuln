@@ -10,11 +10,14 @@ from sqlalchemy import (
     Column,
     String,
     Integer,
+    Float,
+    Boolean,
     Text,
     DateTime,
     ForeignKey,
     JSON,
     Index,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -95,3 +98,32 @@ class GitleaksFinding(Base):
 
     # Relationships
     scan_task = relationship("GitleaksScanTask", back_populates="findings")
+
+
+class GitleaksRule(Base):
+    """Gitleaks 规则定义（结构化字段，运行时渲染为 TOML）"""
+
+    __tablename__ = "gitleaks_rules"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    rule_id = Column(String, nullable=False, comment="gitleaks 规则 ID")
+    secret_group = Column(Integer, nullable=False, default=0)
+    regex = Column(Text, nullable=False)
+    keywords = Column(JSON, nullable=False, default=list)
+    path = Column(Text, nullable=True)
+    tags = Column(JSON, nullable=False, default=list)
+    entropy = Column(Float, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    source = Column(String, nullable=False, default="custom")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_gitleaks_rules_name"),
+        UniqueConstraint("rule_id", name="uq_gitleaks_rules_rule_id"),
+        Index("ix_gitleaks_rules_is_active", "is_active"),
+        Index("ix_gitleaks_rules_rule_id", "rule_id"),
+        Index("ix_gitleaks_rules_source_active", "source", "is_active"),
+    )

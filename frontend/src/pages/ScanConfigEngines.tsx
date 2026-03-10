@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import OpengrepRules from "@/pages/OpengrepRules";
+import GitleaksRules from "@/pages/GitleaksRules";
 
 type EngineTab = "opengrep" | "gitleaks";
 
@@ -33,12 +34,20 @@ export default function ScanConfigEngines() {
 			<div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
 			<div className="relative z-10">
 				<div className="cyber-card p-0">
-					<OpengrepRules
-						embedded
-						showEngineSelector
-						engineValue={currentTab}
-						onEngineChange={handleEngineChange}
-					/>
+					{currentTab === "opengrep" ? (
+						<OpengrepRules
+							embedded
+							showEngineSelector
+							engineValue={currentTab}
+							onEngineChange={handleEngineChange}
+						/>
+					) : (
+						<GitleaksRules
+							showEngineSelector
+							engineValue={currentTab}
+							onEngineChange={handleEngineChange}
+						/>
+					)}
 				</div>
 			</div>
 		</div>
