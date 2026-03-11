@@ -20,9 +20,11 @@ class _LocalTool:
         self.description = f"tool:{name}"
         self.execute_calls = 0
         self._output = output
+        self.execute_kwargs = []
 
     async def execute(self, **kwargs):
         self.execute_calls += 1
+        self.execute_kwargs.append(dict(kwargs))
         return SimpleNamespace(success=True, data=self._output, error=None, metadata={})
 
 
@@ -91,3 +93,63 @@ async def test_verify_reachability_pipeline_completes_without_deep_verifier():
 
     assert "verify_reachability pipeline completed" in output
     assert "reachability: reachable" in output
+    assert extract_tool.execute_kwargs == [{"path": "src/demo.c", "symbol_name": "target"}]
+
+
+@pytest.mark.asyncio
+async def test_verify_reachability_pipeline_prefers_covering_symbol_from_locator_payload():
+    read_tool = _LocalTool("read_file", "文件: src/demo.py\n行数: 1-40 / 40")
+    locate_tool = _LocalTool(
+        "locate_enclosing_function",
+        str(
+            {
+                "file_path": "src/demo.py",
+                "line_start": 3,
+                "enclosing_function": {
+                    "name": "wrapper",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "language": "python",
+                },
+                "symbols": [
+                    {
+                        "name": "wrapper",
+                        "kind": "function",
+                        "start_line": 1,
+                        "end_line": 10,
+                        "language": "python",
+                    },
+                    {
+                        "name": "target",
+                        "kind": "function",
+                        "start_line": 2,
+                        "end_line": 4,
+                        "language": "python",
+                    },
+                ],
+                "diagnostics": ["python_tree_sitter"],
+            }
+        ),
+    )
+    extract_tool = _LocalTool("extract_function", "function body")
+    dataflow_tool = _LocalTool("dataflow_analysis", '{"risk_level":"medium"}')
+    controlflow_tool = _LocalTool("controlflow_analysis_light", '{"flow":{"path_found":true}}')
+
+    agent = _make_agent(
+        {
+            "read_file": read_tool,
+            "locate_enclosing_function": locate_tool,
+            "extract_function": extract_tool,
+            "dataflow_analysis": dataflow_tool,
+            "controlflow_analysis_light": controlflow_tool,
+        }
+    )
+
+    output = await agent.execute_tool(
+        "verify_reachability",
+        {"file_path": "src/demo.py", "line_start": 3},
+    )
+
+    assert "verify_reachability pipeline completed" in output
+    assert extract_tool.execute_calls == 1
+    assert extract_tool.execute_kwargs[0]["symbol_name"] == "target"

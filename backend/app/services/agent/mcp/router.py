@@ -138,6 +138,25 @@ class MCPToolRouter:
             return None
         return normalized
 
+    @staticmethod
+    def _split_path_and_line(value: Any) -> tuple[Optional[str], Optional[int]]:
+        if not isinstance(value, str):
+            return None, None
+        normalized = value.strip().replace("\\", "/").strip("`'\"")
+        if not normalized:
+            return None, None
+        match = re.match(r"^(.*?):(\d+)(?:-(\d+))?$", normalized)
+        if not match:
+            return normalized, None
+        path_part = str(match.group(1) or "").strip()
+        if not path_part:
+            return normalized, None
+        try:
+            line_start = max(1, int(match.group(2)))
+        except Exception:
+            line_start = None
+        return path_part, line_start
+
     @classmethod
     def _merge_search_file_pattern(
         cls,
@@ -227,14 +246,13 @@ class MCPToolRouter:
 
         elif tool_name == "extract_function":
             path_value = _sanitize_path(
-                payload.get("file_path") or payload.get("path") or payload.get("file_name")
+                payload.get("path") or payload.get("file_name")
             )
             if path_value:
                 payload["path"] = path_value
             symbol = (
                 _non_empty_string(payload.get("symbol_name"))
                 or _non_empty_string(payload.get("symbol"))
-                or _non_empty_string(payload.get("function_name"))
                 or MCPToolRouter._infer_function_name_from_code(payload.get("code"))
             )
             if symbol:
@@ -251,16 +269,26 @@ class MCPToolRouter:
                     payload["line_start"] = normalized_line
             payload.pop("code", None)
             payload.pop("file_name", None)
+            payload.pop("file_path", None)
             payload.pop("function_name", None)
 
         elif tool_name == "locate_enclosing_function":
-            path_value = _sanitize_path(payload.get("file_path") or payload.get("path"))
-            if path_value:
-                payload["path"] = path_value
-            raw_line = payload.get("line") if payload.get("line") is not None else payload.get("line_start")
+            raw_path_value = _sanitize_path(payload.get("file_path") or payload.get("path"))
+            parsed_path, parsed_line = MCPToolRouter._split_path_and_line(raw_path_value)
+            if parsed_path:
+                payload["path"] = parsed_path
+            raw_line = (
+                payload.get("line_start")
+                if payload.get("line_start") is not None
+                else payload.get("line")
+            )
+            if raw_line is None:
+                raw_line = parsed_line
             if raw_line is not None:
                 try:
-                    payload["line"] = max(1, int(raw_line))
+                    normalized_line = max(1, int(raw_line))
+                    payload["line"] = normalized_line
+                    payload["line_start"] = normalized_line
                 except Exception:
                     pass
             payload.setdefault("include_symbols", True)

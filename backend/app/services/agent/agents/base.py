@@ -29,6 +29,10 @@ import ast
 from ..core.state import AgentState, AgentStatus
 from ..core.registry import agent_registry
 from ..core.message import message_bus, MessageType, AgentMessage
+from ..flow.lightweight.function_locator_payload import (
+    parse_locator_payload,
+    select_locator_function,
+)
 from ..utils.vulnerability_naming import (
     build_cn_structured_description_markdown,
     normalize_cwe_id,
@@ -1942,14 +1946,18 @@ class BaseAgent(ABC):
                     payload["line_start"] = line_start
             elif candidate == "extract_function":
                 file_path = str(
-                    source_input.get("file_path")
-                    or source_input.get("path")
+                    source_input.get("path")
+                    or source_input.get("file_path")
                     or ""
                 ).strip()
-                function_name = str(source_input.get("function_name") or "").strip()
-                if not file_path or not function_name:
+                symbol_name = str(
+                    source_input.get("symbol_name")
+                    or source_input.get("function_name")
+                    or ""
+                ).strip()
+                if not file_path or not symbol_name:
                     continue
-                payload = {"file_path": file_path, "function_name": function_name}
+                payload = {"path": file_path, "symbol_name": symbol_name}
             fallback_requests.append((candidate, payload))
         return fallback_requests
 
@@ -2556,74 +2564,20 @@ class BaseAgent(ABC):
         *,
         target_line: Optional[int] = None,
     ) -> Dict[str, Any]:
-        payload = self._extract_jsonish_dict(output)
+        payload = parse_locator_payload(output)
+        selected = (
+            select_locator_function(payload, line_start=target_line)
+            if isinstance(payload, dict)
+            else None
+        )
+
         best_name: Optional[str] = None
         best_start: Optional[int] = None
         best_end: Optional[int] = None
-
-        if isinstance(payload, dict):
-            symbols = payload.get("symbols")
-            if isinstance(symbols, list):
-                candidates: List[Dict[str, Any]] = []
-                for symbol in symbols:
-                    if not isinstance(symbol, dict):
-                        continue
-                    symbol_name = str(
-                        symbol.get("name")
-                        or symbol.get("function")
-                        or symbol.get("symbol")
-                        or ""
-                    ).strip()
-                    if not symbol_name:
-                        continue
-                    symbol_kind = str(symbol.get("kind") or "").strip().lower()
-                    if symbol_kind and "function" not in symbol_kind and symbol_kind != "method":
-                        continue
-                    start_line = self._coerce_positive_int(
-                        symbol.get("start_line") or symbol.get("startLine")
-                    )
-                    end_line = self._coerce_positive_int(
-                        symbol.get("end_line") or symbol.get("endLine")
-                    )
-                    if start_line is not None and end_line is not None and end_line < start_line:
-                        end_line = start_line
-                    distance = 10**9
-                    if target_line is not None and start_line is not None:
-                        if end_line is not None and start_line <= target_line <= end_line:
-                            distance = 0
-                        else:
-                            distance = abs(start_line - target_line)
-                    candidates.append(
-                        {
-                            "name": symbol_name,
-                            "start_line": start_line,
-                            "end_line": end_line,
-                            "distance": distance,
-                        }
-                    )
-                if candidates:
-                    candidates.sort(
-                        key=lambda item: (
-                            int(item.get("distance") or 10**9),
-                            int(item.get("start_line") or 10**9),
-                        )
-                    )
-                    best = candidates[0]
-                    best_name = str(best.get("name") or "").strip() or None
-                    best_start = self._coerce_positive_int(best.get("start_line"))
-                    best_end = self._coerce_positive_int(best.get("end_line"))
-
-            if best_name is None:
-                direct_name = str(
-                    payload.get("function")
-                    or payload.get("name")
-                    or payload.get("symbol")
-                    or ""
-                ).strip()
-                if direct_name:
-                    best_name = direct_name
-                    best_start = self._coerce_positive_int(payload.get("start_line"))
-                    best_end = self._coerce_positive_int(payload.get("end_line"))
+        if isinstance(selected, dict):
+            best_name = str(selected.get("function") or "").strip() or None
+            best_start = self._coerce_positive_int(selected.get("start_line"))
+            best_end = self._coerce_positive_int(selected.get("end_line"))
 
         if best_name is None:
             match = re.search(
@@ -2908,8 +2862,8 @@ class BaseAgent(ABC):
                 ) or function_end_line
                 if function_name:
                     extract_input = {
-                        "file_path": file_path,
-                        "function_name": function_name,
+                        "path": file_path,
+                        "symbol_name": function_name,
                     }
                     pipeline_steps.append("extract_function")
                     extract_output = await self.execute_tool(

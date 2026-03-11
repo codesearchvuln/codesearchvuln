@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.services.agent.flow.lightweight.function_locator import EnclosingFunctionLocator
 
@@ -1467,9 +1467,16 @@ class ListFilesTool(AgentTool):
 
 
 class LocateEnclosingFunctionInput(BaseModel):
-    file_path: str = Field(description="文件路径（相对于项目根目录）")
+    file_path: Optional[str] = Field(default=None, description="文件路径（相对于项目根目录）")
+    path: Optional[str] = Field(default=None, description="兼容字段：文件路径（相对于项目根目录）")
     line_start: Optional[int] = Field(default=None, description="目标行号（从1开始）")
     line: Optional[int] = Field(default=None, description="兼容字段：目标行号（从1开始）")
+
+    @model_validator(mode="after")
+    def validate_path_fields(self) -> "LocateEnclosingFunctionInput":
+        if str(self.file_path or self.path or "").strip():
+            return self
+        raise ValueError("必须提供 file_path 或 path")
 
 
 class LocateEnclosingFunctionTool(AgentTool):
@@ -1515,21 +1522,32 @@ class LocateEnclosingFunctionTool(AgentTool):
 
     async def _execute(
         self,
-        file_path: str,
+        file_path: Optional[str] = None,
+        path: Optional[str] = None,
         line_start: Optional[int] = None,
         line: Optional[int] = None,
     ) -> ToolResult:
-        target_line = line_start if line_start is not None else line
+        requested_path = str(file_path or path or "").strip()
+        parsed_path, parsed_start_line, _parsed_end_line = _parse_file_path_with_line_range(requested_path)
+        effective_path = parsed_path or requested_path
+
+        target_line = (
+            line_start
+            if line_start is not None
+            else line
+            if line is not None
+            else parsed_start_line
+        )
         try:
             normalized_line = max(1, int(target_line or 1))
         except Exception:
             normalized_line = 1
 
-        full_path, error = self._resolve_full_path(file_path)
+        full_path, error = self._resolve_full_path(effective_path)
         if full_path is None:
             return ToolResult(success=False, error=error or "文件定位失败")
 
-        relative_path = _normalize_rel_path(file_path)
+        relative_path = _normalize_rel_path(effective_path)
         located = self.locator.locate(
             full_file_path=full_path,
             line_start=normalized_line,

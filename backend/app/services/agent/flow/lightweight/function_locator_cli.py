@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 
 _PSEUDO_FUNCTION_NAMES = {"__attribute__", "__declspec"}
-_CONTROL_KEYWORDS = {"if", "for", "while", "switch", "catch"}
+_CONTROL_KEYWORDS = {"if", "for", "while", "switch", "catch", "else", "return"}
 
 
 def _is_pseudo_function_name(name: Optional[str]) -> bool:
@@ -78,7 +78,7 @@ def _regex_locate_enclosing_function(
     elif language == "kotlin":
         patterns = [re.compile(r"^\s*(?:public|private|protected|internal|open|override|suspend|inline|tailrec|operator|infix|\s)*fun\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")]
     elif language in {"c", "cpp"}:
-        patterns = [re.compile(r"^\s*[A-Za-z_][\w\s\*:&<>~]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{")]
+        patterns = [re.compile(r"^\s*(?:[A-Za-z_~][\w:<>,\s]*\s+)?[*&\s]*([A-Za-z_~][A-Za-z0-9_:]*)\s*\([^;]*\)\s*(?:const)?\s*(?:noexcept)?\s*\{?$")]
 
     for idx in range(start_idx, -1, -1):
         line = file_lines[idx]
@@ -96,7 +96,7 @@ def _regex_locate_enclosing_function(
             name = str(match.group(1) or "").strip()
             if not name:
                 continue
-            if name in _CONTROL_KEYWORDS or _is_pseudo_function_name(name):
+            if name.lower() in _CONTROL_KEYWORDS or _is_pseudo_function_name(name):
                 continue
 
             start_line = idx + 1
@@ -166,4 +166,3 @@ def locate_with_tree_sitter_cli(
         "resolution_method": "tree_sitter_cli_regex",
         "diagnostics": diagnostics,
     }
-

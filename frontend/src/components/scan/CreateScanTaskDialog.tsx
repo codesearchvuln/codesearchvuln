@@ -16,22 +16,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Checkbox } from "@/components/ui/checkbox";
 import { BranchSelector } from "@/components/ui/branch-selector";
 import {
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
 	Search,
-	ChevronRight,
 	GitBranch,
 	Upload,
-	FolderOpen,
-	Settings2,
 	Package,
-	Globe,
 	Shield,
 	Loader2,
 	Zap,
@@ -53,12 +43,20 @@ import {
 } from "@/shared/stores/opengrepRulesStore";
 
 import { useProjects } from "./hooks/useTaskForm";
-import { useZipFile, formatFileSize } from "./hooks/useZipFile";
+import { useZipFile } from "./hooks/useZipFile";
 import FileSelectionDialog from "./FileSelectionDialog";
 import AgentModeSelector, {
 	type ScanMode,
 	type StaticToolSelection,
 } from "@/components/agent/AgentModeSelector";
+import AdvancedOptionsSection from "./create-scan-task/AdvancedOptionsSection";
+import ProjectCard from "./create-scan-task/ProjectCard";
+import ZipUploadCard from "./create-scan-task/ZipUploadCard";
+import {
+	DEFAULT_SCAN_EXCLUDES,
+	extractCreateScanTaskApiErrorMessage,
+	stripScanArchiveSuffix,
+} from "./create-scan-task/utils";
 
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import { uploadZipFile } from "@/shared/utils/zipStorage";
@@ -78,52 +76,6 @@ interface CreateScanTaskDialogProps {
 	onReturn?: () => void;
 	allowUploadProject?: boolean;
 }
-
-const DEFAULT_EXCLUDES = [
-	"node_modules/**",
-	".git/**",
-	"dist/**",
-	"build/**",
-	"*.log",
-];
-
-const ARCHIVE_SUFFIXES = [
-	".tar.gz",
-	".tar.bz2",
-	".tar.xz",
-	".tgz",
-	".tbz2",
-	".zip",
-	".tar",
-	".7z",
-	".rar",
-];
-
-const stripArchiveSuffix = (filename: string) => {
-	const lower = filename.toLowerCase();
-	const matched = ARCHIVE_SUFFIXES.find((suffix) => lower.endsWith(suffix));
-	if (!matched) return filename;
-	return filename.slice(0, filename.length - matched.length);
-};
-
-const extractApiErrorMessage = (error: unknown): string => {
-	if (error instanceof Error) {
-		const detail = (error as any)?.response?.data?.detail;
-		if (typeof detail === "string" && detail.trim()) return detail;
-		if (Array.isArray(detail) && detail.length > 0) {
-			const msgs = detail
-				.map((item: any) =>
-					typeof item?.msg === "string" ? item.msg : String(item),
-				)
-				.filter(Boolean);
-			if (msgs.length > 0) return msgs.join("; ");
-		}
-		return error.message || "未知错误";
-	}
-	const detail = (error as any)?.response?.data?.detail;
-	if (typeof detail === "string" && detail.trim()) return detail;
-	return "未知错误";
-};
 
 const isSevereRule = (rule: OpengrepRule) =>
 	String(rule.severity || "").toUpperCase() === "ERROR";
@@ -150,7 +102,7 @@ export default function CreateScanTaskDialog({
 	const [branch, setBranch] = useState("main");
 	const [branches, setBranches] = useState<string[]>([]);
 	const [loadingBranches, setLoadingBranches] = useState(false);
-	const [excludePatterns, setExcludePatterns] = useState(DEFAULT_EXCLUDES);
+	const [excludePatterns, setExcludePatterns] = useState(DEFAULT_SCAN_EXCLUDES);
 	const [selectedFiles, setSelectedFiles] = useState<string[] | undefined>();
 	const [showAdvanced, setShowAdvanced] = useState(false);
 	const [showFileSelection, setShowFileSelection] = useState(false);
@@ -332,6 +284,14 @@ export default function CreateScanTaskDialog({
 		}
 		return [];
 	}, [selectedFiles]);
+	const canSelectFiles = useMemo(() => {
+		if (!selectedProject) return false;
+		const isRepo = isRepositoryProject(selectedProject);
+		const isZip = isZipProject(selectedProject);
+		const hasStoredZip = zipState.storedZipInfo?.has_file;
+		const useStored = zipState.useStoredZip;
+		return isRepo || (isZip && useStored && hasStoredZip);
+	}, [selectedProject, zipState.storedZipInfo?.has_file, zipState.useStoredZip]);
 
 	const createStaticScanTasksForProject = async (
 		projectId: string,
@@ -366,7 +326,7 @@ export default function CreateScanTaskDialog({
 					target_path: ".",
 				});
 			} catch (error) {
-				const apiMsg = extractApiErrorMessage(error);
+				const apiMsg = extractCreateScanTaskApiErrorMessage(error);
 				const shouldReloadRules =
 					apiMsg.includes("部分规则不存在") || apiMsg.includes("规则不存在");
 				if (!shouldReloadRules) throw error;
@@ -572,12 +532,12 @@ export default function CreateScanTaskDialog({
 				);
 			}
 		} catch (error) {
-			const msg = extractApiErrorMessage(error);
+			const msg = extractCreateScanTaskApiErrorMessage(error);
 			toast.error(`启动失败: ${msg}`);
 		} finally {
 			setCreating(false);
 			setSelectedFiles(undefined);
-			setExcludePatterns(DEFAULT_EXCLUDES);
+			setExcludePatterns(DEFAULT_SCAN_EXCLUDES);
 		}
 	};
 
@@ -843,146 +803,34 @@ export default function CreateScanTaskDialog({
 
 								{scanMode === "static" && null}
 
-								{/* 高级选项 */}
-								<Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
-									<CollapsibleTrigger className="flex items-center gap-2 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors">
-										<ChevronRight
-											className={`w-4 h-4 transition-transform ${showAdvanced ? "rotate-90" : ""}`}
-										/>
-										<Settings2 className="w-4 h-4" />
-										<span className="uppercase font-bold">高级选项</span>
-									</CollapsibleTrigger>
-									<CollapsibleContent className="mt-3 space-y-3">
-										{/* 排除模式 */}
-										<div className="p-3 border border-dashed border-border rounded bg-muted/50 space-y-3">
-											<div className="flex items-center justify-between">
-												<span className="font-mono text-xs uppercase font-bold text-muted-foreground">
-													排除模式
-												</span>
-												<button
-													type="button"
-													onClick={() => setExcludePatterns(DEFAULT_EXCLUDES)}
-													className="text-xs font-mono text-primary hover:text-primary/80"
-												>
-													重置为默认
-												</button>
-											</div>
-
-											<div className="flex flex-wrap gap-1.5">
-												{excludePatterns.map((p) => (
-													<Badge
-														key={p}
-														className="bg-muted text-foreground border-0 font-mono text-xs cursor-pointer hover:bg-rose-100 dark:hover:bg-rose-900/50 hover:text-rose-600 dark:hover:text-rose-400"
-														onClick={() =>
-															setExcludePatterns((prev) =>
-																prev.filter((x) => x !== p),
-															)
-														}
-													>
-														{p} ×
-													</Badge>
-												))}
-												{excludePatterns.length === 0 && (
-													<span className="text-xs text-muted-foreground font-mono">
-														无排除模式
-													</span>
-												)}
-											</div>
-
-											<div className="flex flex-wrap gap-1">
-												<span className="text-xs text-muted-foreground font-mono mr-1">
-													快捷添加:
-												</span>
-												{[
-													".test.",
-													".spec.",
-													".min.",
-													"coverage/",
-													"docs/",
-													".md",
-												].map((pattern) => (
-													<button
-														key={pattern}
-														type="button"
-														disabled={excludePatterns.includes(pattern)}
-														onClick={() => {
-															if (!excludePatterns.includes(pattern)) {
-																setExcludePatterns((prev) => [
-																	...prev,
-																	pattern,
-																]);
-															}
-														}}
-														className="text-xs font-mono px-1.5 py-0.5 border border-border bg-muted hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed rounded"
-													>
-														+{pattern}
-													</button>
-												))}
-											</div>
-
-											<Input
-												placeholder="添加自定义排除模式，回车确认"
-												className="h-8 cyber-input text-sm"
-												onKeyDown={(e) => {
-													if (e.key === "Enter" && e.currentTarget.value) {
-														const val = e.currentTarget.value.trim();
-														if (val && !excludePatterns.includes(val)) {
-															setExcludePatterns((prev) => [...prev, val]);
-														}
-														e.currentTarget.value = "";
-													}
-												}}
-											/>
-										</div>
-
-										{/* 文件选择 */}
-										{(() => {
-											const isRepo = isRepositoryProject(selectedProject);
-											const isZip = isZipProject(selectedProject);
-											const hasStoredZip = zipState.storedZipInfo?.has_file;
-											const useStored = zipState.useStoredZip;
-											const canSelectFiles =
-												isRepo || (isZip && useStored && hasStoredZip);
-
-											return (
-												<div className="flex items-center justify-between p-3 border border-dashed border-border rounded bg-muted/50">
-													<div>
-														<p className="font-mono text-xs uppercase font-bold text-muted-foreground">
-															扫描范围
-														</p>
-														<p className="text-sm font-bold text-foreground mt-1">
-															{selectedFiles
-																? `已选 ${selectedFiles.length} 个文件`
-																: "全部文件"}
-														</p>
-													</div>
-													<div className="flex gap-2">
-														{selectedFiles && canSelectFiles && (
-															<Button
-																size="sm"
-																variant="ghost"
-																onClick={() => setSelectedFiles(undefined)}
-																className="h-8 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/30 hover:text-rose-700 dark:hover:text-rose-300"
-															>
-																重置
-															</Button>
-														)}
-														<Button
-															size="sm"
-															variant="outline"
-															onClick={() => setShowFileSelection(true)}
-															disabled={!canSelectFiles}
-															className="h-8 text-xs cyber-btn-outline font-mono font-bold disabled:opacity-50"
-														>
-															<FolderOpen className="w-3 h-3 mr-1" />
-															选择文件
-														</Button>
-													</div>
-												</div>
-											);
-										})()}
-									</CollapsibleContent>
-								</Collapsible>
+								<AdvancedOptionsSection
+									open={showAdvanced}
+									onOpenChange={setShowAdvanced}
+									excludePatterns={excludePatterns}
+									onResetExcludes={() =>
+										setExcludePatterns(DEFAULT_SCAN_EXCLUDES)
+									}
+									onRemoveExclude={(pattern) =>
+										setExcludePatterns((prev) =>
+											prev.filter((item) => item !== pattern),
+										)
+									}
+									onAddExclude={(pattern) => {
+										if (!excludePatterns.includes(pattern)) {
+											setExcludePatterns((prev) => [...prev, pattern]);
+										}
+									}}
+									onCustomExcludeEnter={(value) => {
+										const trimmed = value.trim();
+										if (trimmed && !excludePatterns.includes(trimmed)) {
+											setExcludePatterns((prev) => [...prev, trimmed]);
+										}
+									}}
+									canSelectFiles={canSelectFiles}
+									selectedFiles={selectedFiles}
+									onResetSelectedFiles={() => setSelectedFiles(undefined)}
+									onOpenFileSelection={() => setShowFileSelection(true)}
+								/>
 							</div>
 						)}
 					</div>
@@ -1047,227 +895,5 @@ export default function CreateScanTaskDialog({
 				/>
 			) : null}
 		</>
-	);
-}
-
-function ProjectCard({
-	project,
-	selected,
-	onSelect,
-}: {
-	project: Project;
-	selected: boolean;
-	onSelect: () => void;
-}) {
-	const isRepo = isRepositoryProject(project);
-
-	return (
-		<div
-			className={`flex items-center gap-3 p-3 cursor-pointer rounded transition-all ${selected
-					? "bg-primary/10 border border-primary/50"
-					: "hover:bg-muted border border-transparent"
-				}`}
-			onClick={onSelect}
-		>
-			<Checkbox
-				checked={selected}
-				className="border-border data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-			/>
-
-			<div
-				className={`p-1.5 rounded ${isRepo ? "bg-blue-500/20" : "bg-amber-500/20"}`}
-			>
-				{isRepo ? (
-					<Globe className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-				) : (
-					<Package className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-				)}
-			</div>
-
-			<div className="flex-1 min-w-0 overflow-hidden">
-				<div className="flex items-center gap-2">
-					<span
-						className={`font-mono text-base truncate ${selected ? "text-foreground font-bold" : "text-foreground"}`}
-					>
-						{project.name}
-					</span>
-					<Badge
-						className={`text-xs px-1 py-0 font-mono ${isRepo
-								? "bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-500/30"
-								: "bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30"
-							}`}
-					>
-						{isRepo ? "REPO" : "ZIP"}
-					</Badge>
-				</div>
-				{project.description && (
-					<p
-						className="text-sm text-muted-foreground mt-0.5 font-mono line-clamp-2"
-						title={project.description}
-					>
-						{project.description}
-					</p>
-				)}
-			</div>
-		</div>
-	);
-}
-
-function ZipUploadCard({
-	zipState,
-	onUpload,
-	uploading,
-}: {
-	zipState: ReturnType<typeof useZipFile>;
-	onUpload: () => void;
-	uploading: boolean;
-}) {
-	if (zipState.loading) {
-		return (
-			<div className="flex items-center gap-3 p-3 border border-border rounded bg-blue-50 dark:bg-blue-950/20">
-				<Loader2 className="w-5 h-5 animate-spin text-blue-600 dark:text-blue-400" />
-				<span className="text-sm font-mono text-blue-600 dark:text-blue-400">
-					检查文件中...
-				</span>
-			</div>
-		);
-	}
-
-	if (zipState.storedZipInfo?.has_file) {
-		return (
-			<div className="p-3 border border-border rounded bg-emerald-50 dark:bg-emerald-950/20 space-y-3">
-				<div className="flex items-center gap-3">
-					<div className="p-1.5 bg-emerald-500/20 rounded">
-						<Package className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-					</div>
-					<div className="flex-1">
-						<p className="text-sm font-bold text-emerald-700 dark:text-emerald-300 font-mono">
-							{zipState.storedZipInfo.original_filename}
-						</p>
-						<p className="text-xs text-emerald-600 dark:text-emerald-500 font-mono">
-							{zipState.storedZipInfo.file_size &&
-								formatFileSize(zipState.storedZipInfo.file_size)}
-							{zipState.storedZipInfo.uploaded_at &&
-								` · ${new Date(zipState.storedZipInfo.uploaded_at).toLocaleDateString("zh-CN")}`}
-						</p>
-					</div>
-				</div>
-
-				<div className="flex gap-4 pt-2 border-t border-emerald-500/20 hidden">
-					<label className="flex items-center gap-2 cursor-pointer font-mono text-sm">
-						<input
-							type="radio"
-							checked={zipState.useStoredZip}
-							onChange={() => zipState.switchToStored()}
-							className="w-4 h-4 accent-emerald-500"
-						/>
-						<span className="text-emerald-700 dark:text-emerald-300">
-							使用此文件
-						</span>
-					</label>
-					<label className="flex items-center gap-2 cursor-pointer font-mono text-sm">
-						<input
-							type="radio"
-							checked={!zipState.useStoredZip}
-							onChange={() => zipState.switchToUpload()}
-							className="w-4 h-4 accent-emerald-500"
-						/>
-						<span className="text-emerald-700 dark:text-emerald-300">
-							上传新文件
-						</span>
-					</label>
-				</div>
-
-				{!zipState.useStoredZip && (
-					<div className="flex gap-2 items-center">
-						<Input
-							type="file"
-							accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
-							onChange={(e) => {
-								const file = e.target.files?.[0];
-								if (file) {
-									const v = validateZipFile(file);
-									if (!v.valid) {
-										toast.error(v.error || "文件无效");
-										e.target.value = "";
-										return;
-									}
-									zipState.handleFileSelect(file, e.target);
-								}
-							}}
-							className="h-9 flex-1 border border-border rounded bg-background px-3 py-1.5 text-sm font-mono file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-mono file:bg-primary/20 file:text-primary hover:file:bg-primary/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
-						/>
-						{zipState.zipFile && (
-							<Button
-								size="sm"
-								onClick={onUpload}
-								disabled={uploading}
-								className="h-9 px-3 cyber-btn-primary"
-							>
-								{uploading ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
-								) : (
-									<Upload className="w-4 h-4" />
-								)}
-							</Button>
-						)}
-					</div>
-				)}
-			</div>
-		);
-	}
-
-	return (
-		<div className="p-3 border border-dashed border-amber-500/50 rounded bg-amber-50 dark:bg-amber-950/20">
-			<div className="flex items-start gap-3">
-				<div className="p-1.5 bg-amber-500/20 rounded">
-					<Upload className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-				</div>
-				<div className="flex-1">
-					<p className="text-sm font-bold text-amber-700 dark:text-amber-300 font-mono uppercase">
-						上传源码归档
-					</p>
-					<div className="flex gap-2 items-center mt-2">
-						<Input
-							type="file"
-							accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
-							onChange={(e) => {
-								const file = e.target.files?.[0];
-								if (file) {
-									const v = validateZipFile(file);
-									if (!v.valid) {
-										toast.error(v.error || "文件无效");
-										e.target.value = "";
-										return;
-									}
-									zipState.handleFileSelect(file, e.target);
-								}
-							}}
-							className="h-9 flex-1 border border-border rounded bg-background px-3 py-1.5 text-sm font-mono file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-mono file:bg-primary/20 file:text-primary hover:file:bg-primary/30 focus:outline-none focus:ring-1 focus:ring-primary/50"
-						/>
-						{zipState.zipFile && (
-							<Button
-								size="sm"
-								onClick={onUpload}
-								disabled={uploading}
-								className="h-9 px-3 cyber-btn-primary"
-							>
-								{uploading ? (
-									<Loader2 className="w-4 h-4 animate-spin" />
-								) : (
-									<Upload className="w-4 h-4" />
-								)}
-							</Button>
-						)}
-					</div>
-					{zipState.zipFile && (
-						<p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-mono">
-							已选: {zipState.zipFile.name} (
-							{formatFileSize(zipState.zipFile.size)})
-						</p>
-					)}
-				</div>
-			</div>
-		</div>
 	);
 }

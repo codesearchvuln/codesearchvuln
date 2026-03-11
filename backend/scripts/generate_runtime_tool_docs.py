@@ -67,7 +67,7 @@ FILE_TOOL_SKILL_SPECS: Dict[str, Dict[str, Any]] = {
     "extract_function": {
         "goal": "提取函数体，支撑漏洞根因与修复分析。",
         "contracts": [
-            "必填: `file_path`, `function_name`。",
+            "必填: `path`, `symbol_name`。",
         ],
         "workflow": [
             "`search_code` 定位函数符号。",
@@ -78,8 +78,9 @@ FILE_TOOL_SKILL_SPECS: Dict[str, Dict[str, Any]] = {
     "locate_enclosing_function": {
         "goal": "将命中行绑定到所属函数，补齐函数级证据。",
         "contracts": [
-            "必填: `file_path`。",
-            "推荐: `line_start`（或 `line`）。",
+            "至少提供其一: `file_path` 或 `path`。",
+            "行号优先级: `line_start` > `line` > `file_path:line` / `path:line`。",
+            "稳定输出: `enclosing_function`, `symbols`, `resolution_method`, `resolution_engine`, `diagnostics`。",
         ],
         "workflow": [
             "`search_code` 找到命中行。",
@@ -438,8 +439,8 @@ def _build_mcp_tool_playbook() -> str:
 | `search_code` | `local` | `FileSearchTool` | 公开输入 `keyword`；优先补充 `directory/file_pattern` 缩小范围 | 命中位置（含 file_path 与 line） |
 | `read_file` | `filesystem` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |
 | `list_files` | `local` | `ListFilesTool` | `directory/path` | 文件列表 |
-| `locate_enclosing_function` | `local` | `LocateEnclosingFunctionTool` | `file_path`, `line_start` | 所属函数与范围 |
-| `extract_function` | `local` | `ExtractFunctionTool` | `file_path`, `function_name/symbol_name` | 函数代码 |
+| `locate_enclosing_function` | `local` | `LocateEnclosingFunctionTool` | `file_path/path` + `line_start/line`（或 `file_path:line`） | 所属函数、范围与诊断 |
+| `extract_function` | `local` | `ExtractFunctionTool` | `path`, `symbol_name` | 函数代码 |
 | `qmd_query` | `qmd` | `deep_search` | `query/searches` | 语义检索结果 |
 | `qmd_get` | `qmd` | `get` | `doc_id/id` | 文档详情 |
 | `qmd_multi_get` | `qmd` | `multi_get` | `ids` | 批量文档结果 |

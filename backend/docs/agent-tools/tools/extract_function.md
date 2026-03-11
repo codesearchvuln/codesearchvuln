@@ -6,8 +6,8 @@
 用于构建 Fuzzing Harness 时获取目标函数代码。
 
 输入：
-- file_path: 源文件路径 (相对于项目根目录)
-- function_name: 要提取的函数名
+- path: 源文件路径 (相对于项目根目录)
+- symbol_name: 要提取的符号名
 - include_imports: 是否包含文件开头的 import 语句（默认 true）
 
 返回：
@@ -16,7 +16,7 @@
 - 函数参数列表
 
 示例：
-{"file_path": "app/api.py", "function_name": "process_command"}
+{"path": "app/api.py", "symbol_name": "process_command"}
 
 ## Goal
 定位目标代码、函数上下文与证据位置。
@@ -28,16 +28,16 @@
 
 
 ## Inputs
-- `file_path` (string, required): 源文件路径
-- `function_name` (string, required): 要提取的函数名
+- `path` (string, required): 源文件路径
+- `symbol_name` (string, required): 要提取的符号名
 - `include_imports` (boolean, optional): 是否包含 import 语句
 
 
 ### Example Input
 ```json
 {
-  "file_path": "<text>",
-  "function_name": "<text>",
+  "path": "<text>",
+  "symbol_name": "<text>",
   "include_imports": true
 }
 ```

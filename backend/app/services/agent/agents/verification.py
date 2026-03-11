@@ -26,6 +26,10 @@ from .react_parser import parse_react_response
 from .verification_table import VerificationFindingTable
 from ..json_parser import AgentJsonParser
 from ..flow.lightweight.function_locator import EnclosingFunctionLocator
+from ..flow.lightweight.function_locator_payload import (
+    parse_locator_payload,
+    select_locator_function,
+)
 from ..prompts import CORE_SECURITY_PRINCIPLES, VULNERABILITY_PRIORITIES
 from ..utils.vulnerability_naming import (
     build_cn_structured_description,
@@ -39,6 +43,7 @@ from ..utils.vulnerability_naming import (
 logger = logging.getLogger(__name__)
 
 _PSEUDO_FUNCTION_NAMES = {"__attribute__", "__declspec"}
+_CONTROL_KEYWORDS = {"if", "for", "while", "switch", "catch", "else", "return"}
 
 # === 全局置信度阈值常量 ===
 # 统一所有地方的置信度判定逻辑，避免阈值不一致导致的误判
@@ -867,8 +872,8 @@ class VerificationAgent(BaseAgent):
             # C/C++ 改进版: 支持复杂签名（指针、const、引用、模板等）
             ("c_cpp", re.compile(
                 r"^\s*(?:inline|virtual|static|const|volatile|explicit|constexpr)?\s*"
-                r"(?:[\w:&*<>, ]+\s+)*?"  # complex return types with templates  
-                r"(\w+)\s*\([^;]*\)\s*(?:const)?\s*(?:noexcept)?\s*\{?"
+                r"(?:[A-Za-z_~][\w:<>,\s]*\s+)?[*&\s]*"
+                r"([A-Za-z_~][A-Za-z0-9_:]*)\s*\([^;]*\)\s*(?:const)?\s*(?:noexcept)?\s*\{?$"
             )),
         ]
         
@@ -894,7 +899,12 @@ class VerificationAgent(BaseAgent):
                         continue
                     
                     name = match.group(1).strip()
-                    if not name or len(name) < 1 or name in _PSEUDO_FUNCTION_NAMES:
+                    if (
+                        not name
+                        or len(name) < 1
+                        or name in _PSEUDO_FUNCTION_NAMES
+                        or name.lower() in _CONTROL_KEYWORDS
+                    ):
                         continue
                     
                     start_line = idx + 1
@@ -954,6 +964,8 @@ class VerificationAgent(BaseAgent):
                     logger.debug(
                         f"[Verification] 函数定位成功 (regex): {name} @ {start_line}-{end_line} (语言={lang})"
                     )
+                    if not (start_line <= line_start <= end_line):
+                        continue
                     return name, start_line, end_line
                     
                 except Exception as e:
@@ -980,137 +992,14 @@ class VerificationAgent(BaseAgent):
         self,
         raw_output: str,
     ) -> Optional[Dict[str, Any]]:
-        text = str(raw_output or "").strip()
-        if not text:
-            return None
-        if text.startswith("⚠️") or text.startswith("❌"):
-            return None
-
-        candidates = [text]
-        if "```" in text:
-            fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", text)
-            if fence_match:
-                candidates.append(fence_match.group(1))
-        json_match = re.search(r"(\{[\s\S]*\})", text)
-        if json_match:
-            candidates.append(json_match.group(1))
-
-        for candidate in candidates:
-            candidate_text = str(candidate or "").strip()
-            if not candidate_text:
-                continue
-            try:
-                data = json.loads(candidate_text)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                continue
-        return None
+        return parse_locator_payload(raw_output)
 
     def _extract_function_from_locator_payload(
         self,
         payload: Dict[str, Any],
         line_start: int,
     ) -> Optional[Dict[str, Any]]:
-        direct_target = payload.get("enclosing_function") or payload.get("enclosingFunction")
-        if isinstance(direct_target, dict):
-            name = str(
-                direct_target.get("name")
-                or direct_target.get("function")
-                or direct_target.get("symbol")
-                or ""
-            ).strip()
-            if name:
-                return {
-                    "function": name,
-                    "start_line": self._safe_int(
-                        direct_target.get("start_line")
-                        or direct_target.get("startLine")
-                        or direct_target.get("line")
-                    ),
-                    "end_line": self._safe_int(
-                        direct_target.get("end_line")
-                        or direct_target.get("endLine")
-                    ),
-                    "language": payload.get("language") or direct_target.get("language"),
-                    "diagnostics": payload.get("diagnostics"),
-                }
-
-        symbol_candidates: List[Dict[str, Any]] = []
-        for key in ("symbols", "functions", "definitions", "items", "members"):
-            values = payload.get(key)
-            if isinstance(values, list):
-                for raw in values:
-                    if isinstance(raw, dict):
-                        symbol_candidates.append(raw)
-
-        if not symbol_candidates:
-            return None
-
-        normalized_symbols: List[Dict[str, Any]] = []
-        for symbol in symbol_candidates:
-            name = str(
-                symbol.get("name")
-                or symbol.get("symbol")
-                or symbol.get("identifier")
-                or ""
-            ).strip()
-            if not name:
-                continue
-            kind = str(symbol.get("kind") or symbol.get("type") or "").strip().lower()
-            if kind and all(tag not in kind for tag in ("function", "method", "constructor")):
-                continue
-            start = self._safe_int(
-                symbol.get("start_line")
-                or symbol.get("startLine")
-                or symbol.get("line")
-            )
-            end = self._safe_int(symbol.get("end_line") or symbol.get("endLine"))
-            if start and not end:
-                end = start
-            normalized_symbols.append(
-                {
-                    "function": name,
-                    "start_line": start,
-                    "end_line": end,
-                    "distance": abs((start or line_start) - line_start),
-                }
-            )
-
-        if not normalized_symbols:
-            return None
-
-        covering = [
-            item
-            for item in normalized_symbols
-            if item["start_line"] is not None
-            and item["end_line"] is not None
-            and int(item["start_line"]) <= line_start <= int(item["end_line"])
-        ]
-        if covering:
-            best = min(
-                covering,
-                key=lambda item: (
-                    int(item["end_line"]) - int(item["start_line"]),
-                    int(item["start_line"]),
-                ),
-            )
-        else:
-            prefix = [
-                item
-                for item in normalized_symbols
-                if item["start_line"] is not None
-                and int(item["start_line"]) <= line_start
-            ]
-            best = min(prefix or normalized_symbols, key=lambda item: item["distance"])
-
-        return {
-            "function": best["function"],
-            "start_line": best.get("start_line"),
-            "end_line": best.get("end_line"),
-            "language": payload.get("language"),
-            "diagnostics": payload.get("diagnostics"),
-        }
+        return select_locator_function(payload, line_start=line_start)
 
     async def _enrich_function_metadata_with_locator(
         self,
@@ -1233,6 +1122,7 @@ class VerificationAgent(BaseAgent):
         resolved_file_path, full_file_path = self._resolve_file_paths(file_path, project_root)
         
         diagnostics_trace = []
+        read_error_reason: Optional[str] = None
 
         # === 层级 1: 显式函数名提取 ===
         reachability_target = finding.get("reachability_target")

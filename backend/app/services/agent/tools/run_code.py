@@ -415,8 +415,8 @@ for payload in payloads:
 
 class ExtractFunctionInput(BaseModel):
     """函数提取输入"""
-    file_path: str = Field(..., description="源文件路径")
-    function_name: str = Field(..., description="要提取的函数名")
+    path: str = Field(..., min_length=1, description="源文件路径")
+    symbol_name: str = Field(..., min_length=1, description="要提取的符号名")
     include_imports: bool = Field(default=True, description="是否包含 import 语句")
 
 
@@ -442,8 +442,8 @@ class ExtractFunctionTool(AgentTool):
 用于构建 Fuzzing Harness 时获取目标函数代码。
 
 输入：
-- file_path: 源文件路径
-- function_name: 要提取的函数名
+- path: 源文件路径
+- symbol_name: 要提取的符号名
 - include_imports: 是否包含文件开头的 import 语句（默认 true）
 
 返回：
@@ -452,7 +452,7 @@ class ExtractFunctionTool(AgentTool):
 - 函数参数列表
 
 示例：
-{"file_path": "app/api.py", "function_name": "process_command"}"""
+{"path": "app/api.py", "symbol_name": "process_command"}"""
 
     @property
     def args_schema(self):
@@ -460,12 +460,13 @@ class ExtractFunctionTool(AgentTool):
 
     async def _execute(
         self,
-        file_path: str,
-        function_name: str,
+        path: str,
+        symbol_name: str,
         include_imports: bool = True,
         **kwargs
     ) -> ToolResult:
         """提取函数代码"""
+        file_path = str(path or "").strip().replace("\\", "/")
         full_path = os.path.join(self.project_root, file_path)
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {file_path}")
@@ -477,20 +478,20 @@ class ExtractFunctionTool(AgentTool):
         ext = os.path.splitext(file_path)[1].lower()
 
         if ext == ".py":
-            result = self._extract_python(code, function_name, include_imports)
+            result = self._extract_python(code, symbol_name, include_imports)
         elif ext == ".php":
-            result = self._extract_php(code, function_name)
+            result = self._extract_php(code, symbol_name)
         elif ext in [".js", ".ts"]:
-            result = self._extract_javascript(code, function_name)
+            result = self._extract_javascript(code, symbol_name)
         elif ext in [
             ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh",
             ".java", ".cs", ".kt", ".kts",
         ]:
-            result = self._extract_c_like(code, function_name, include_imports)
+            result = self._extract_c_like(code, symbol_name, include_imports)
             if not result.get("success"):
-                result = self._extract_generic(code, function_name)
+                result = self._extract_generic(code, symbol_name)
         else:
-            result = self._extract_generic(code, function_name)
+            result = self._extract_generic(code, symbol_name)
 
         if result["success"]:
             line_start = result.get("line_start")
@@ -523,7 +524,7 @@ class ExtractFunctionTool(AgentTool):
                         "focus_line": line_start,
                         "language": detect_language(file_path),
                         "title": "函数提取",
-                        "symbol_name": function_name,
+                        "symbol_name": symbol_name,
                         "symbol_kind": "function",
                         "lines": structured_lines,
                     }
@@ -532,7 +533,7 @@ class ExtractFunctionTool(AgentTool):
             validate_evidence_metadata(**metadata)
             output_parts = [f"📦 函数提取结果\n"]
             output_parts.append(f"文件: {file_path}")
-            output_parts.append(f"函数: {function_name}")
+            output_parts.append(f"函数: {symbol_name}")
 
             if result.get("imports"):
                 output_parts.append(f"\n相关 imports:\n```\n{result['imports']}\n```")
@@ -554,7 +555,7 @@ class ExtractFunctionTool(AgentTool):
             return ToolResult(
                 success=False,
                 error=result.get("error", "提取失败"),
-                data=f"无法提取函数 '{function_name}'。你可以使用 read_file 工具直接读取文件，手动定位函数代码。"
+                data=f"无法提取函数 '{symbol_name}'。你可以使用 read_file 工具直接读取文件，手动定位函数代码。"
             )
 
     @staticmethod
@@ -570,6 +571,11 @@ class ExtractFunctionTool(AgentTool):
         line_count = max(1, len(snippet_text.splitlines()))
         end_line = start_line + line_count - 1
         return start_line, end_line
+
+    @staticmethod
+    def _line_number_from_offset(code: str, offset: int) -> int:
+        safe_offset = max(0, min(len(code), int(offset)))
+        return code.count("\n", 0, safe_offset) + 1
 
     def _extract_python(self, code: str, function_name: str, include_imports: bool) -> Dict:
         """提取 Python 函数"""
@@ -648,6 +654,8 @@ class ExtractFunctionTool(AgentTool):
 
             func_code = code[start_pos:end_pos]
 
+        line_end_offset = max(start_pos, end_pos - 1)
+
         # 提取参数
         param_match = re.search(r'function\s+\w+\s*\(([^)]*)\)', func_code)
         params = []
@@ -660,40 +668,41 @@ class ExtractFunctionTool(AgentTool):
             "success": True,
             "code": func_code,
             "parameters": params,
+            "line_start": self._line_number_from_offset(code, start_pos),
+            "line_end": self._line_number_from_offset(code, line_end_offset),
         }
 
     def _extract_javascript(self, code: str, function_name: str) -> Dict:
-        """提取 JavaScript 函数"""
+        """提取 JavaScript / TypeScript 函数与类方法"""
         import re
 
         patterns = [
-            rf'function\s+{re.escape(function_name)}\s*\([^)]*\)\s*\{{',
-            rf'(?:const|let|var)\s+{re.escape(function_name)}\s*=\s*function\s*\([^)]*\)\s*\{{',
-            rf'(?:const|let|var)\s+{re.escape(function_name)}\s*=\s*\([^)]*\)\s*=>\s*\{{',
-            rf'async\s+function\s+{re.escape(function_name)}\s*\([^)]*\)\s*\{{',
+            rf'(?:export\s+)?(?:async\s+)?function\s+{re.escape(function_name)}\s*\([^)]*\)\s*\{{',
+            rf'(?:const|let|var)\s+{re.escape(function_name)}\s*=\s*(?:async\s+)?function\s*\([^)]*\)\s*\{{',
+            rf'(?:const|let|var)\s+{re.escape(function_name)}\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{{',
+            rf'(?:^|\n)[ \t]*(?:(?:public|protected|private)\s+)?(?:static\s+)?(?:async\s+)?{re.escape(function_name)}\s*\([^;{{}}]*\)\s*\{{',
         ]
 
         for pattern in patterns:
-            match = re.search(pattern, code)
+            match = re.search(pattern, code, re.MULTILINE)
             if match:
                 start_pos = match.start()
-                brace_count = 0
-                end_pos = match.end() - 1
+                if code[start_pos:start_pos + 1] == "\n":
+                    start_pos += 1
+                brace_pos = code.find("{", match.start(), match.end())
+                if brace_pos < 0:
+                    continue
+                body_end = self._find_matching_delimiter(code, brace_pos, "{", "}")
+                if body_end == -1:
+                    continue
 
-                for i, char in enumerate(code[match.end() - 1:], start=match.end() - 1):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_pos = i + 1
-                            break
-
-                func_code = code[start_pos:end_pos]
+                func_code = code[start_pos:body_end + 1]
 
                 return {
                     "success": True,
                     "code": func_code,
+                    "line_start": self._line_number_from_offset(code, start_pos),
+                    "line_end": self._line_number_from_offset(code, body_end),
                 }
 
         return {"success": False, "error": f"未找到函数 '{function_name}'"}
@@ -916,26 +925,28 @@ class ExtractFunctionTool(AgentTool):
         for pattern in patterns:
             match = re.search(pattern, code, re.MULTILINE)
             if match:
-                start_line = code[:match.start()].count('\n')
+                start_idx = code[:match.start()].count('\n')
                 lines = code.split('\n')
 
                 # 尝试找到函数结束
-                end_line = start_line + 1
-                indent = len(lines[start_line]) - len(lines[start_line].lstrip())
+                end_idx = start_idx
+                indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
 
-                for i in range(start_line + 1, min(start_line + 100, len(lines))):
+                for i in range(start_idx + 1, min(start_idx + 100, len(lines))):
                     line = lines[i]
                     if line.strip() and not line.startswith(' ' * (indent + 1)):
                         if not line.strip().startswith('#'):
-                            end_line = i
+                            end_idx = max(start_idx, i - 1)
                             break
-                    end_line = i + 1
+                    end_idx = i
 
-                func_code = '\n'.join(lines[start_line:end_line])
+                func_code = '\n'.join(lines[start_idx:end_idx + 1])
 
                 return {
                     "success": True,
                     "code": func_code,
+                    "line_start": start_idx + 1,
+                    "line_end": end_idx + 1,
                 }
 
         return {"success": False, "error": f"未找到函数 '{function_name}'"}

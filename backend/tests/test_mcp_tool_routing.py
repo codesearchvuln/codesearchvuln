@@ -192,7 +192,7 @@ def test_mcp_router_exposes_only_core_stdio_routes():
 
     extract_route = router.route(
         "extract_function",
-        {"file_path": "src/time64.c", "function_name": "asctime64_r"},
+        {"path": "src/time64.c", "symbol_name": "asctime64_r"},
     )
     assert extract_route is not None
     assert extract_route.adapter_name == "__local__"
@@ -205,6 +205,19 @@ def test_mcp_router_exposes_only_core_stdio_routes():
     assert locate_route is not None
     assert locate_route.adapter_name == "__local__"
     assert locate_route.mcp_tool_name == "locate_enclosing_function"
+    assert locate_route.arguments["path"] == "src/time64.c"
+    assert locate_route.arguments["line"] == 22
+    assert locate_route.arguments["line_start"] == 22
+    assert locate_route.arguments["include_symbols"] is True
+
+    locate_embedded_line_route = router.route(
+        "locate_enclosing_function",
+        {"path": "src/time64.c:8", "line": 7, "line_start": 22},
+    )
+    assert locate_embedded_line_route is not None
+    assert locate_embedded_line_route.arguments["path"] == "src/time64.c"
+    assert locate_embedded_line_route.arguments["line"] == 22
+    assert locate_embedded_line_route.arguments["line_start"] == 22
 
     assert router.route("edit_file", {"file_path": "src/main.py"}) is None
     assert router.route("qmd_query", {"query": "auth"}) is None

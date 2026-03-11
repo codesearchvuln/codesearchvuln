@@ -311,8 +311,8 @@ class TestToolRegressions:
             )
 
         result = await tool.execute(
-            file_path="src/time64.c",
-            function_name="asctime64_r",
+            path="src/time64.c",
+            symbol_name="asctime64_r",
         )
 
         assert result.success is True

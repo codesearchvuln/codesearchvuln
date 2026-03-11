@@ -15,7 +15,11 @@ function toPosixPath(value) {
 export function listDefaultTestFiles({ testsDirPath = defaultTestsDir } = {}) {
   return fs
     .readdirSync(testsDirPath, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".test.ts"))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name.endsWith(".test.ts") || entry.name.endsWith(".test.tsx")),
+    )
     .map((entry) => `tests/${entry.name}`)
     .sort();
 }

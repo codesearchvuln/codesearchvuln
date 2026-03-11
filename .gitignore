@@ -214,3 +214,6 @@ frontend/.pnpm-store
 
 skills-lock.json
 CLAUDE.md
+
+docs/plans/
+.agents/

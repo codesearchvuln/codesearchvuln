@@ -414,9 +414,9 @@ def another_function():
 """)
 
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="test.py",
-            function_name="vulnerable_function",
+        result = await tool.execute(
+            path="test.py",
+            symbol_name="vulnerable_function",
             include_imports=True
         )
 
@@ -437,9 +437,9 @@ def vulnerable_function(user_input):
 """)
 
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="test.py",
-            function_name="vulnerable_function",
+        result = await tool.execute(
+            path="test.py",
+            symbol_name="vulnerable_function",
             include_imports=True,
         )
 
@@ -462,27 +462,43 @@ def vulnerable_function(user_input):
         test_file.write_text("def other_func():\n    pass")
 
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="test.py",
-            function_name="nonexistent"
+        result = await tool.execute(
+            path="test.py",
+            symbol_name="nonexistent"
         )
 
         assert result.success is False
         assert "未找到函数" in result.error or "无法提取函数" in result.data
 
+    async def test_extract_function_rejects_legacy_contract(self, tmp_path):
+        """extract_function 弃用 file_path/function_name 旧契约"""
+        test_file = tmp_path / "test.py"
+        test_file.write_text("def legacy_name():\n    return True\n")
+
+        tool = ExtractFunctionTool(project_root=str(tmp_path))
+        result = await tool.execute(
+            file_path="test.py",
+            function_name="legacy_name",
+        )
+
+        assert result.success is False
+        assert result.error == "参数校验失败"
+        assert result.data["expected_args"]["path"] == "<str>"
+        assert result.data["expected_args"]["symbol_name"] == "<str>"
+
     async def test_extract_function_file_not_found(self, tmp_path):
         """测试文件不存在"""
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="nonexistent.py",
-            function_name="test"
+        result = await tool.execute(
+            path="nonexistent.py",
+            symbol_name="test"
         )
 
         assert result.success is False
         assert "文件不存在" in result.error
 
-    async def test_extract_php_function(self, tmp_path):
-        """测试提取 PHP 函数"""
+    async def test_extract_php_function_returns_precise_metadata(self, tmp_path):
+        """PHP 提取应直接返回精确行号元数据"""
         test_file = tmp_path / "test.php"
         test_file.write_text("""
 <?php
@@ -493,20 +509,22 @@ function process_command($input) {
 """)
 
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="test.php",
-            function_name="process_command"
+        result = await tool.execute(
+            path="test.php",
+            symbol_name="process_command"
         )
 
         assert result.success is True
         assert "process_command" in result.data
         assert "system" in result.data
+        assert result.metadata["line_start"] == 3
+        assert result.metadata["line_end"] == 5
 
-    async def test_extract_javascript_function(self, tmp_path):
-        """测试提取 JavaScript 函数"""
-        test_file = tmp_path / "test.js"
+    async def test_extract_javascript_export_function_returns_precise_metadata(self, tmp_path):
+        """JS/TS 导出函数提取应直接返回精确行号元数据"""
+        test_file = tmp_path / "test.ts"
         test_file.write_text("""
-function executeCommand(cmd) {
+export async function executeCommand(cmd: string) {
     exec(cmd);
 }
 
@@ -516,14 +534,43 @@ const arrow = (x) => {
 """)
 
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="test.js",
-            function_name="executeCommand"
+        result = await tool.execute(
+            path="test.ts",
+            symbol_name="executeCommand"
         )
 
         assert result.success is True
         assert "executeCommand" in result.data
         assert "exec" in result.data
+        assert result.metadata["line_start"] == 2
+        assert result.metadata["line_end"] == 4
+
+    async def test_extract_javascript_class_method(self, tmp_path):
+        """JS/TS 类方法提取应支持 class method / static async method"""
+        test_file = tmp_path / "service.ts"
+        test_file.write_text("""
+class AccountService {
+    async validate(user) {
+        return user && user.id;
+    }
+
+    static async dangerous(cmd) {
+        return exec(cmd);
+    }
+}
+""")
+
+        tool = ExtractFunctionTool(project_root=str(tmp_path))
+        result = await tool.execute(
+            path="service.ts",
+            symbol_name="dangerous",
+        )
+
+        assert result.success is True
+        assert "dangerous" in result.data
+        assert "exec" in result.data
+        assert result.metadata["line_start"] == 7
+        assert result.metadata["line_end"] == 9
 
     async def test_extract_java_method(self, tmp_path):
         """测试提取 Java 方法"""
@@ -539,9 +586,9 @@ public class Demo {
         )
 
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="Demo.java",
-            function_name="login",
+        result = await tool.execute(
+            path="Demo.java",
+            symbol_name="login",
         )
 
         assert result.success is True
@@ -564,9 +611,9 @@ int vulnerable_function(char* input) {
 """)
 
         tool = ExtractFunctionTool(project_root=str(tmp_path))
-        result = await tool._execute(
-            file_path="test.c",
-            function_name="vulnerable_function",
+        result = await tool.execute(
+            path="test.c",
+            symbol_name="vulnerable_function",
             include_imports=True
         )
 

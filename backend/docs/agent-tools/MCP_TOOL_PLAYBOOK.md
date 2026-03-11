@@ -9,8 +9,8 @@
 | `search_code` | `local` | `FileSearchTool` | 公开输入 `keyword`；优先补充 `directory/file_pattern` 缩小范围 | 命中位置（含 file_path 与 line） |
 | `read_file` | `filesystem` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |
 | `list_files` | `local` | `ListFilesTool` | `directory/path` | 文件列表 |
-| `locate_enclosing_function` | `local` | `LocateEnclosingFunctionTool` | `file_path`, `line_start` | 所属函数与范围 |
-| `extract_function` | `local` | `ExtractFunctionTool` | `file_path`, `function_name/symbol_name` | 函数代码 |
+| `locate_enclosing_function` | `local` | `LocateEnclosingFunctionTool` | `file_path/path` + `line_start/line`（或 `file_path:line`） | 所属函数、范围与诊断 |
+| `extract_function` | `local` | `ExtractFunctionTool` | `path`, `symbol_name` | 函数代码 |
 | `push_finding_to_queue` | local queue tool | `push_finding_to_queue` | `file_path`, `line_start`, `title`, `description`, `vulnerability_type` | 入队结果与队列大小 |
 | `get_recon_risk_queue_status` | local queue tool | `get_recon_risk_queue_status` | 无 | `pending_count` 与统计快照 |
 | `qmd_query` | `qmd` | `deep_search` | `query/searches` | 语义检索结果 |
@@ -24,6 +24,13 @@
 1. 先 `search_code` 定位：拿到 `file_path:line`。
 2. 再 `read_file` 窗口读取：优先 `line-60 ~ line+99`（最多 200 行）。
 3. 需要函数级证据时：调用 `locate_enclosing_function`，再按需 `extract_function`。
+
+### `locate_enclosing_function` 调用规则
+
+- 输入接受 `file_path` 或 `path`；也接受 `file_path:line` / `path:line`。
+- 行号优先级固定为 `line_start` > `line` > 路径内嵌行号。
+- 输出稳定包含 `enclosing_function`、`symbols`、`resolution_method`、`resolution_engine`、`diagnostics`。
+- 解析顺序为 tree-sitter 优先，regex 回退兜底；`diagnostics` 用于下游推理与降级，不是用户提示语。
 
 ### `search_code` 调用规则
 
