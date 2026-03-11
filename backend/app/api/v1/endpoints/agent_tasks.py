@@ -50,6 +50,7 @@ from app.services.agent.utils.vulnerability_naming import (
     resolve_cwe_id as resolve_cwe_id_util,
     resolve_vulnerability_profile as resolve_vulnerability_profile_util,
 )
+from app.services.agent.bootstrap import OpenGrepBootstrapScanner
 from app.services.agent.mcp import (
     HARD_MAX_WRITABLE_FILES_PER_TASK,
     FastMCPStdioAdapter,
@@ -1863,10 +1864,8 @@ async def _prepare_embedded_bootstrap_findings(
                 },
             )
         try:
-            parsed_opengrep_findings = await _run_bootstrap_opengrep_scan(
-                project_root,
-                active_rules,
-            )
+            scanner = OpenGrepBootstrapScanner(active_rules=active_rules)
+            scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
             if event_emitter:
                 await event_emitter.emit_error("❌ OpenGrep 预处理失败：未安装 opengrep")
@@ -1876,17 +1875,16 @@ async def _prepare_embedded_bootstrap_findings(
                 await event_emitter.emit_error(f"❌ OpenGrep 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"OpenGrep 预处理失败：{str(exc)[:200]}") from exc
 
-        opengrep_total_findings = len(parsed_opengrep_findings)
-        confidence_map = _build_bootstrap_confidence_map_from_rules(active_rules)
-        normalized_opengrep_findings = [
-            _normalize_bootstrap_finding_from_opengrep_payload(
-                finding,
-                confidence_map,
-                index,
-            )
-            for index, finding in enumerate(parsed_opengrep_findings)
-            if isinstance(finding, dict)
-        ]
+        opengrep_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
+        normalized_opengrep_findings = []
+        for finding in getattr(scan_result, "findings", []) or []:
+            if hasattr(finding, "to_dict"):
+                finding_payload = finding.to_dict()
+            elif isinstance(finding, dict):
+                finding_payload = dict(finding)
+            else:
+                continue
+            normalized_opengrep_findings.append(finding_payload)
         opengrep_candidates = _filter_bootstrap_findings(
             normalized_opengrep_findings,
             exclude_patterns=exclude_patterns,
@@ -3108,6 +3106,9 @@ async def _execute_agent_task(task_id: str):
                     "target_files": task.target_files or [],
                     "single_risk_mode": True,
                     "max_iterations": task.max_iterations or 50,
+                    "audit_source_mode": source_mode,
+                    "static_bootstrap_candidate_count": len(bootstrap_findings or []),
+                    "skip_recon_when_bootstrap_available": True,
                     # 🔥 seed_findings（继续使用 bootstrap_findings 字段承载：固定优先候选种子）
                     "bootstrap_findings": seed_findings,
                     "bootstrap_source": bootstrap_source,

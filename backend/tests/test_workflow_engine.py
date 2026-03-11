@@ -235,6 +235,47 @@ class TestAuditWorkflowEnginePhases:
         assert len(recon_calls) == 1
 
     @pytest.mark.asyncio
+    async def test_hybrid_with_bootstrap_candidates_skips_recon(self, orchestrator_with_queues):
+        """混合扫描且静态预扫有候选时：跳过 Recon，直接进入 Analysis。"""
+        orch, recon_q, vuln_q = orchestrator_with_queues
+        calls = _install_dispatch_mock(orch, vuln_q)
+        config = {
+            "audit_source_mode": "hybrid",
+            "skip_recon_when_bootstrap_available": True,
+            "static_bootstrap_candidate_count": 1,
+            "bootstrap_findings": [_make_risk_point("seed.py", 88)],
+        }
+
+        engine = AuditWorkflowEngine(recon_q, vuln_q, TASK_ID, orch)
+        state = await engine.run({}, config, "/tmp", TASK_ID)
+
+        recon_calls = [c for c in calls if c["agent"] == "recon"]
+        analysis_calls = [c for c in calls if c["agent"] == "analysis"]
+        assert len(recon_calls) == 0
+        assert len(analysis_calls) >= 1
+        assert state.recon_done is True
+
+    @pytest.mark.asyncio
+    async def test_intelligent_mode_does_not_skip_recon_even_with_bootstrap_candidates(
+        self, orchestrator_with_queues
+    ):
+        """智能审计模式下不启用跳过 Recon 逻辑。"""
+        orch, recon_q, vuln_q = orchestrator_with_queues
+        calls = _install_dispatch_mock(orch, vuln_q)
+        config = {
+            "audit_source_mode": "intelligent",
+            "skip_recon_when_bootstrap_available": True,
+            "static_bootstrap_candidate_count": 2,
+            "bootstrap_findings": [_make_risk_point("seed.py", 99)],
+        }
+
+        engine = AuditWorkflowEngine(recon_q, vuln_q, TASK_ID, orch)
+        await engine.run({}, config, "/tmp", TASK_ID)
+
+        recon_calls = [c for c in calls if c["agent"] == "recon"]
+        assert len(recon_calls) == 1
+
+    @pytest.mark.asyncio
     async def test_analysis_called_per_risk_point(self, orchestrator_with_queues):
         """Analysis 被调度次数 == Recon 队列风险点数量"""
         orch, recon_q, vuln_q = orchestrator_with_queues

@@ -29,16 +29,17 @@ async def test_prepare_embedded_bootstrap_opengrep_only_no_static_task_record(
     active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="HIGH")]
     parsed_findings = [
         {
-            "check_id": "rule-1",
-            "path": "src/a.py",
-            "start": {"line": 6},
-            "end": {"line": 6},
-            "extra": {
-                "severity": "ERROR",
-                "message": "danger",
-                "lines": "danger()",
-                "metadata": {"confidence": "HIGH"},
-            },
+            "id": "rule-1",
+            "title": "danger",
+            "description": "danger",
+            "file_path": "src/a.py",
+            "line_start": 6,
+            "line_end": 6,
+            "code_snippet": "danger()",
+            "severity": "ERROR",
+            "confidence": "HIGH",
+            "vulnerability_type": "rule-1",
+            "source": "opengrep_bootstrap",
         },
     ]
 
@@ -55,8 +56,13 @@ async def test_prepare_embedded_bootstrap_opengrep_only_no_static_task_record(
     )
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.agent_tasks._run_bootstrap_opengrep_scan",
-        AsyncMock(return_value=parsed_findings),
+        "app.api.v1.endpoints.agent_tasks.OpenGrepBootstrapScanner.scan",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                total_findings=len(parsed_findings),
+                findings=parsed_findings,
+            )
+        ),
     )
 
     candidates, bootstrap_task_id, source = await _prepare_embedded_bootstrap_findings(
@@ -89,15 +95,16 @@ async def test_prepare_embedded_bootstrap_with_gitleaks(monkeypatch):
     active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="MEDIUM")]
     parsed_opengrep = [
         {
-            "check_id": "rule-1",
-            "path": "src/a.py",
-            "start": {"line": 10},
-            "end": {"line": 10},
-            "extra": {
-                "severity": "ERROR",
-                "message": "danger",
-                "metadata": {"confidence": "MEDIUM"},
-            },
+            "id": "rule-1",
+            "title": "danger",
+            "description": "danger",
+            "file_path": "src/a.py",
+            "line_start": 10,
+            "line_end": 10,
+            "severity": "ERROR",
+            "confidence": "MEDIUM",
+            "vulnerability_type": "rule-1",
+            "source": "opengrep_bootstrap",
         },
     ]
     parsed_gitleaks = [
@@ -124,8 +131,13 @@ async def test_prepare_embedded_bootstrap_with_gitleaks(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.agent_tasks._run_bootstrap_opengrep_scan",
-        AsyncMock(return_value=parsed_opengrep),
+        "app.api.v1.endpoints.agent_tasks.OpenGrepBootstrapScanner.scan",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                total_findings=len(parsed_opengrep),
+                findings=parsed_opengrep,
+            )
+        ),
     )
     monkeypatch.setattr(
         "app.api.v1.endpoints.agent_tasks._run_bootstrap_gitleaks_scan",

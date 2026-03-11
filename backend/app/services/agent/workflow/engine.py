@@ -112,6 +112,19 @@ class AuditWorkflowEngine:
         """
         state = WorkflowState()
         orc = self.orchestrator
+        runtime_config = config if isinstance(config, dict) else {}
+        audit_source_mode = str(runtime_config.get("audit_source_mode") or "hybrid").strip().lower()
+        static_bootstrap_candidate_count = int(
+            runtime_config.get("static_bootstrap_candidate_count") or 0
+        )
+        skip_recon_when_bootstrap_available = bool(
+            runtime_config.get("skip_recon_when_bootstrap_available", True)
+        )
+        should_skip_recon_phase = (
+            audit_source_mode == "hybrid"
+            and skip_recon_when_bootstrap_available
+            and static_bootstrap_candidate_count > 0
+        )
         
         # 🔥 记录起始内存
         if self.enable_memory_monitoring:
@@ -120,8 +133,46 @@ class AuditWorkflowEngine:
         try:
             # ── 阶段 1: RECON ──────────────────────────────────────────────
             state.phase = WorkflowPhase.RECON
-            await orc.emit_event("info", "🔎 [Workflow] 开始 Recon 阶段")
-            await self._run_recon_phase(state)
+            if should_skip_recon_phase:
+                seeded_count = 0
+                bootstrap_findings = runtime_config.get("bootstrap_findings") or []
+                for finding in bootstrap_findings:
+                    if not isinstance(finding, dict):
+                        continue
+                    try:
+                        enqueued = self.recon_queue.enqueue(task_id, finding)
+                    except Exception:
+                        enqueued = False
+                    if enqueued:
+                        seeded_count += 1
+
+                state.recon_done = True
+                state.step_records.append(
+                    WorkflowStepRecord(
+                        phase=WorkflowPhase.RECON,
+                        agent="recon",
+                        success=True,
+                        error=None,
+                        findings_count=len(orc._all_findings),
+                        duration_ms=0,
+                    )
+                )
+                await orc.emit_event(
+                    "info",
+                    (
+                        "⏭️ [Workflow] 混合扫描检测到静态预扫结果，跳过 Recon 阶段，"
+                        f"并注入 {seeded_count} 条候选进入 Analysis 队列"
+                    ),
+                )
+                logger.info(
+                    "[WorkflowEngine] Skip recon for hybrid mode: "
+                    "static_bootstrap_candidate_count=%s seeded_to_recon_queue=%s",
+                    static_bootstrap_candidate_count,
+                    seeded_count,
+                )
+            else:
+                await orc.emit_event("info", "🔎 [Workflow] 开始 Recon 阶段")
+                await self._run_recon_phase(state)
             
             # 🔥 Recon 结束后调用 LLM 对风险点进行去重
             if state.recon_done and not orc.is_cancelled:

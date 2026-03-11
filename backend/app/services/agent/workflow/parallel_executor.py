@@ -468,6 +468,11 @@ class ParallelPhaseExecutor:
                 async with self.lock:
                     worker_result = getattr(worker_agent, '_agent_results', {}).get(self.agent_type, {})
                     analysis_success = bool(worker_result.get("_run_success"))
+                    self.orchestrator._tool_calls += int(worker_result.get("_worker_tool_calls", 0) or 0)
+                    self.orchestrator._total_tokens += int(
+                        worker_result.get("_worker_tokens_used", 0) or 0
+                    )
+                    self.orchestrator._iteration += int(worker_result.get("_worker_iterations", 0) or 0)
 
                     if worker_result:
                         self._merge_phase_result(
@@ -526,12 +531,27 @@ class ParallelPhaseExecutor:
 
         result = await worker_agent.run(agent_input)
 
-        worker_payload: dict[str, Any] = {}
+        # 优先使用 agent 内部聚合结果，避免被 result.data 的空结构覆盖
+        existing_payload = {}
+        existing_results = getattr(worker_agent, "_agent_results", {})
+        if isinstance(existing_results, dict):
+            maybe_existing = existing_results.get(self.agent_type, {})
+            if isinstance(maybe_existing, dict):
+                existing_payload = dict(maybe_existing)
+
+        worker_payload: dict[str, Any] = dict(existing_payload)
         if isinstance(getattr(result, "data", None), dict):
-            worker_payload.update(result.data)
+            for key, value in result.data.items():
+                if key not in worker_payload:
+                    worker_payload[key] = value
+                elif value not in (None, "", [], {}):
+                    worker_payload[key] = value
         worker_payload["_run_success"] = bool(result.success)
         if result.error:
             worker_payload["_run_error"] = str(result.error)
+        worker_payload["_worker_tool_calls"] = int(getattr(result, "tool_calls", 0) or 0)
+        worker_payload["_worker_tokens_used"] = int(getattr(result, "tokens_used", 0) or 0)
+        worker_payload["_worker_iterations"] = int(getattr(result, "iterations", 0) or 0)
 
         if not hasattr(worker_agent, '_agent_results'):
             worker_agent._agent_results = {}
@@ -687,6 +707,11 @@ class ParallelPhaseExecutor:
                 async with self.lock:
                     worker_result = getattr(worker_agent, '_agent_results', {}).get(self.agent_type, {})
                     verification_success = bool(worker_result.get("_run_success"))
+                    self.orchestrator._tool_calls += int(worker_result.get("_worker_tool_calls", 0) or 0)
+                    self.orchestrator._total_tokens += int(
+                        worker_result.get("_worker_tokens_used", 0) or 0
+                    )
+                    self.orchestrator._iteration += int(worker_result.get("_worker_iterations", 0) or 0)
 
                     if worker_result:
                         self._merge_phase_result(
