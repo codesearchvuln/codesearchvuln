@@ -184,11 +184,14 @@ $env:BACKEND_PYPI_INDEX_PRIMARY="https://pypi.org/simple"
 # 克隆仓库后直接运行
 ./scripts/compose-up-with-fallback.sh
 
-# 或直接使用默认 Compose 构建链路（仓库内唯一支持的本地 Dockerfile 构建入口）
-docker compose up -d --build
+# 或使用推荐的 dev 覆盖层（前后端容器内热重载）
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
-# 显式启用 Joern / CodeBadger
-docker compose --profile joern up -d --build
+# dev 覆盖层也可通过脚本透传
+./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+# 或直接使用默认 Compose 全功能构建链路
+docker compose up -d --build
 ```
 
 ### Windows
@@ -201,13 +204,12 @@ scripts\compose-up-with-fallback.bat
 
 # 或直接使用 docker compose
 docker compose up -d --build
-
-# 显式启用 Joern / CodeBadger
-docker compose --profile joern up -d --build
 ```
 
 ## 当前构建边界
 
-- 仓库内仅保留默认 `docker compose up --build` 会实际使用到的 Dockerfile。
-- 默认 Compose 不会启动 `codebadger-mcp`、`codebadger-joern-server`；启用时需显式加 `--profile joern`。
-- `docker-compose.prod.yml` 与 `docker-compose.prod.cn.yml` 不在仓库内构建 CodeBadger；如需 Joern 深度分析，请通过环境变量接入外部 CodeBadger 服务。
+- 推荐的快速重复开发入口是 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`。
+- dev 覆盖层会把 `backend`/`frontend` 切到源码挂载 + 热重载，并默认关闭 `MCP_REQUIRE_ALL_READY_ON_STARTUP`、`SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP` 等重型启动项。
+- 默认 `docker compose up --build` 仍是全功能本地镜像构建路径。
+- `docker-compose.frontend-dev.yml` 保留为前端单独开发的次级入口。
+- `docker-compose.prod.yml` 与 `docker-compose.prod.cn.yml` 保留为预构建镜像部署入口。

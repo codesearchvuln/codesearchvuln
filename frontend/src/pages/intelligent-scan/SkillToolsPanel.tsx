@@ -38,15 +38,8 @@ function renderCapabilities(capabilities: string[]) {
 	}
 
 	return (
-		<div className="space-y-1.5 py-0.5">
-			{capabilities.map((capability) => (
-				<div
-					key={capability}
-					className="text-sm leading-6 text-foreground/90 break-words"
-				>
-					{capability}
-				</div>
-			))}
+		<div className="text-sm leading-6 text-foreground/90 break-words">
+			{capabilities.join(", ")}
 		</div>
 	);
 }
@@ -188,13 +181,8 @@ export default function SkillToolsPanel() {
 											{order}
 										</TableCell>
 										<TableCell className="align-top">
-											<div className="space-y-1">
-												<div className="text-sm font-semibold tracking-[0.02em] text-foreground break-all">
-													{row.name}
-												</div>
-												<div className="text-xs font-mono text-muted-foreground break-all">
-													{row.id}
-												</div>
+											<div className="text-sm font-semibold tracking-[0.02em] text-foreground break-all">
+												{row.name}
 											</div>
 										</TableCell>
 										<TableCell className="text-center align-top">

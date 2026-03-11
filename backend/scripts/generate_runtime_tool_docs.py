@@ -223,7 +223,7 @@ def _infer_goal_and_tasks(runtime_key: str, description: str, phases: Iterable[s
             ],
             "候选发现与模式扫描",
         )
-    if key in {"dataflow_analysis", "controlflow_analysis_light", "logic_authz_analysis", "joern_reachability_verify"}:
+    if key in {"dataflow_analysis", "controlflow_analysis_light", "logic_authz_analysis"}:
         return (
             "判断漏洞是否可达、是否受逻辑/授权路径约束。",
             [

@@ -3,7 +3,7 @@
 # =============================================
 
 ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS builder
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS pnpm-base
 
 WORKDIR /app
 
@@ -49,6 +49,16 @@ RUN --mount=type=cache,id=vulhunter-frontend-npm,target=/root/.npm \
     npm config set registry "${FRONTEND_NPM_REGISTRY}" && \
     pnpm config set registry "${FRONTEND_NPM_REGISTRY}" && \
     pnpm config set store-dir /pnpm/store
+
+FROM pnpm-base AS dev
+
+WORKDIR /app
+
+EXPOSE 5173
+
+CMD ["node", "--version"]
+
+FROM pnpm-base AS builder
 
 # 复制依赖文件
 COPY package.json pnpm-lock.yaml ./

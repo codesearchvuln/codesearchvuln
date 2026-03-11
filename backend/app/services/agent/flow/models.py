@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal
 
 
-FlowEngine = Literal["ts_code2flow", "joern", "logic_graph"]
+FlowEngine = Literal["ts_code2flow", "logic_graph"]
 
 
 @dataclass

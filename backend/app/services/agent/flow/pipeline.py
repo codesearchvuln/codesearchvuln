@@ -7,20 +7,17 @@ from app.core.config import settings
 from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
 from app.services.agent.flow.lightweight.callgraph_code2flow import Code2FlowCallGraph
 from app.services.agent.flow.lightweight.path_scorer import build_lightweight_flow_evidence
-from app.services.agent.flow.joern.joern_client import JoernClient
-from app.services.agent.flow.joern.codebadger_poc_query import infer_codebadger_language
-from app.services.agent.flow.models import FlowEvidence, merge_flow_evidence
+from app.services.agent.flow.models import FlowEvidence
 from app.services.agent.logic.authz_rules import AuthzRuleEngine
 
 logger = logging.getLogger(__name__)
 
 
 class FlowEvidencePipeline:
-    """Three-track flow evidence pipeline.
+    """Flow evidence pipeline.
 
     1) tree-sitter + code2flow lightweight path
-    2) Joern deep verification for high-risk candidates
-    3) logic authz graph rules for auth/IDOR style issues
+    2) logic authz graph rules for auth/IDOR style issues
     """
 
     def __init__(
@@ -33,61 +30,17 @@ class FlowEvidencePipeline:
         self.target_files = target_files or []
 
         self.light_enabled = bool(getattr(settings, "FLOW_LIGHTWEIGHT_ENABLED", True))
-        self.joern_enabled = bool(getattr(settings, "FLOW_JOERN_ENABLED", True))
         self.logic_enabled = bool(getattr(settings, "LOGIC_AUTHZ_ENABLED", True))
         self.unreachable_policy = str(getattr(settings, "FLOW_UNREACHABLE_POLICY", "degrade_likely"))
-
-        self.joern_trigger_severity = {
-            item.strip().lower()
-            for item in str(
-                getattr(settings, "FLOW_JOERN_TRIGGER_SEVERITY", "high,critical")
-            ).split(",")
-            if item.strip()
-        }
-        self.joern_trigger_confidence = float(
-            getattr(settings, "FLOW_JOERN_TRIGGER_CONFIDENCE", 0.7)
-        )
 
         self.ast_index = ASTCallIndex(project_root=project_root, target_files=target_files)
         self.code2flow = Code2FlowCallGraph(project_root=project_root, target_files=target_files)
         self.code2flow_result = None
-
-        self.joern_client = JoernClient(
-            enabled=self.joern_enabled,
-            timeout_sec=int(getattr(settings, "FLOW_JOERN_TIMEOUT_SEC", 45)),
-            mcp_enabled=bool(getattr(settings, "JOERN_MCP_ENABLED", False)),
-            mcp_url=str(
-                getattr(settings, "JOERN_MCP_URL", "")
-                or getattr(settings, "MCP_CODEBADGER_BACKEND_URL", "")
-                or ""
-            ),
-            mcp_prefer=bool(getattr(settings, "JOERN_MCP_PREFER", False)),
-            mcp_cpg_timeout_sec=int(getattr(settings, "JOERN_MCP_CPG_TIMEOUT_SEC", 240)),
-            mcp_query_timeout_sec=int(getattr(settings, "JOERN_MCP_QUERY_TIMEOUT_SEC", 90)),
-        )
         self.logic_engine = (
             AuthzRuleEngine(project_root=project_root, target_files=target_files)
             if self.logic_enabled
             else None
         )
-
-    def _normalize_confidence(self, value: Any) -> float:
-        if value is None:
-            return 0.0
-        if isinstance(value, (int, float)):
-            return max(0.0, min(float(value), 1.0))
-        text = str(value).strip().lower()
-        if text in {"high", "h"}:
-            return 0.9
-        if text in {"medium", "med", "m"}:
-            return 0.7
-        if text in {"low", "l"}:
-            return 0.4
-        try:
-            parsed = float(text)
-            return max(0.0, min(parsed, 1.0))
-        except Exception:
-            return 0.0
 
     def _normalize_line(self, value: Any) -> int:
         try:
@@ -95,30 +48,6 @@ class FlowEvidencePipeline:
             return max(1, line)
         except Exception:
             return 1
-
-    def _should_trigger_joern(self, finding: Dict[str, Any], lightweight: FlowEvidence) -> bool:
-        if not self.joern_enabled:
-            return False
-
-        # Smart audit policy: only allow Joern for Java / C / C++.
-        file_path = str(finding.get("file_path") or "").strip()
-        if not infer_codebadger_language(file_path):
-            return False
-
-        severity = str(finding.get("severity") or "").strip().lower()
-        if severity not in self.joern_trigger_severity:
-            return False
-
-        confidence = self._normalize_confidence(
-            finding.get("confidence")
-            or finding.get("ai_confidence")
-            or finding.get("verification_result", {}).get("confidence")
-        )
-        if confidence < self.joern_trigger_confidence:
-            return False
-
-        # Prefer Joern for gray-zone path scores as configured in design.
-        return 0.35 <= lightweight.path_score <= 0.75
 
     def _ensure_code2flow(self) -> None:
         if self.code2flow_result is not None:
@@ -199,25 +128,10 @@ class FlowEvidencePipeline:
 
     async def analyze_finding(self, finding: Dict[str, Any]) -> Dict[str, Any]:
         lightweight = await self._build_lightweight(finding)
-        selected = lightweight
-
-        if self._should_trigger_joern(finding, lightweight):
-            try:
-                joern = await self.joern_client.verify_reachability(
-                    project_root=self.project_root,
-                    file_path=str(finding.get("file_path") or ""),
-                    line_start=self._normalize_line(finding.get("line_start")),
-                    call_chain=lightweight.call_chain,
-                    control_conditions=lightweight.control_conditions,
-                )
-                selected = merge_flow_evidence(joern, lightweight)
-            except Exception as exc:
-                logger.warning("Joern verification failed, fallback to lightweight: %s", exc)
-
         logic_authz = await self._build_logic_evidence(finding)
 
         return {
-            "flow": selected.to_dict(),
+            "flow": lightweight.to_dict(),
             "logic_authz": logic_authz,
         }
 
@@ -230,7 +144,6 @@ class FlowEvidencePipeline:
             "total": len(findings),
             "path_found": 0,
             "logic_hits": 0,
-            "joern_upgrades": 0,
         }
 
         for finding in findings:
@@ -269,10 +182,6 @@ class FlowEvidencePipeline:
                     if authenticity == "confirmed":
                         merged["authenticity"] = "likely"
                         merged["verdict"] = "likely"
-
-            if isinstance(flow, dict) and flow.get("engine") == "joern":
-                counters["joern_upgrades"] += 1
-
             enriched.append(merged)
 
         return enriched, counters

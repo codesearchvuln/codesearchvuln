@@ -38,15 +38,7 @@ def test_resolve_tool_timeout_extends_dataflow_analysis_budget():
     assert agent._resolve_tool_timeout("dataflow_analysis") == 150
 
 
-def test_resolve_tool_timeout_extends_joern_budget_from_setting(monkeypatch):
-    monkeypatch.setattr("app.core.config.settings.FLOW_JOERN_TIMEOUT_SEC", 45)
+def test_resolve_tool_timeout_keeps_default_for_unknown_verifier():
     agent = _make_agent(tool_timeout=60)
 
-    assert agent._resolve_tool_timeout("joern_reachability_verify") == 60
-
-
-def test_resolve_tool_timeout_prefers_larger_joern_budget(monkeypatch):
-    monkeypatch.setattr("app.core.config.settings.FLOW_JOERN_TIMEOUT_SEC", 90)
-    agent = _make_agent(tool_timeout=60)
-
-    assert agent._resolve_tool_timeout("joern_reachability_verify") == 105
+    assert agent._resolve_tool_timeout("legacy_deep_verifier") == 60

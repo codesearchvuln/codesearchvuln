@@ -1,7 +1,8 @@
 # =============================================
-# VulHunter 前端增量开发配置
+# VulHunter 前端单独增量开发配置
 # =============================================
 # 用法:
+# 这是次级入口；全栈开发优先使用 docker-compose.dev.yml
 # docker compose -f docker-compose.yml -f docker-compose.frontend-dev.yml up -d frontend-dev
 
 services:

@@ -2327,15 +2327,10 @@ class BaseAgent(ABC):
         return bool(re.search(r"\{\d+(?:,\d*)?\}", text))
 
     def _resolve_tool_timeout(self, resolved_tool_name: str) -> int:
-        from app.core.config import settings
-
         default_tool_timeout = int(self._timeout_config.get('tool_timeout', 60) or 60)
         normalized_tool_name = str(resolved_tool_name or "").strip().lower()
         if normalized_tool_name == "dataflow_analysis":
             return max(default_tool_timeout, 150)
-        if normalized_tool_name == "joern_reachability_verify":
-            joern_timeout = int(getattr(settings, 'FLOW_JOERN_TIMEOUT_SEC', 45) or 45)
-            return max(default_tool_timeout, joern_timeout + 15)
         tool_timeouts = {
             "opengrep_scan": 120,
             "bandit_scan": 90,
@@ -2652,7 +2647,9 @@ class BaseAgent(ABC):
         lowered = str(text or "").lower()
         positive_markers = (
             '"path_found": true',
+            '"path_found":true',
             "'path_found': true",
+            "'path_found':true",
             "likely_reachable",
             "reachable",
             "可达",
@@ -2660,7 +2657,9 @@ class BaseAgent(ABC):
         )
         negative_markers = (
             '"path_found": false',
+            '"path_found":false',
             "'path_found': false",
+            "'path_found':false",
             "unreachable",
             "不可达",
             "no_flow",
@@ -2725,30 +2724,6 @@ class BaseAgent(ABC):
         if "参数校验失败" in text or "工具参数缺失" in text:
             return "insufficient_flow_evidence"
         return None
-
-    def _build_cpg_query_text(
-        self,
-        payload: Dict[str, Any],
-        *,
-        file_path: str,
-        line_start: int,
-        function_name: Optional[str],
-    ) -> str:
-        source_hint = " | ".join(payload.get("source_hints") or [])
-        sink_hint = " | ".join(payload.get("sink_hints") or [])
-        vuln_type = str(payload.get("vulnerability_type") or "").strip()
-        segments = [
-            f"file={file_path}",
-            f"line={line_start}",
-            f"function={function_name or 'unknown'}",
-        ]
-        if vuln_type:
-            segments.append(f"type={vuln_type}")
-        if source_hint:
-            segments.append(f"source_hint={source_hint[:160]}")
-        if sink_hint:
-            segments.append(f"sink_hint={sink_hint[:160]}")
-        return "verify_reachability_cpg_query: " + "; ".join(segments)
 
     async def _execute_verify_reachability_pipeline(
         self,
@@ -3021,97 +2996,6 @@ class BaseAgent(ABC):
                     f"{flow_observation_text}\n\n[controlflow_analysis_light]\n{str(controlflow_output or '')}"
                 ).strip()
 
-            joern_input: Dict[str, Any] = {
-                "file_path": file_path,
-                "line_start": int(line_start),
-            }
-            call_chain_hint = normalized_input.get("call_chain_hint") or []
-            if call_chain_hint:
-                joern_input["call_chain"] = call_chain_hint
-            control_conditions_hint = normalized_input.get("control_conditions_hint") or []
-            if control_conditions_hint:
-                joern_input["control_conditions"] = control_conditions_hint
-
-            pipeline_steps.append("joern_reachability_verify")
-            flow_tools_used.append("joern_reachability_verify")
-            joern_output = await self.execute_tool(
-                "joern_reachability_verify",
-                joern_input,
-                _fallback_depth=fallback_depth + 1,
-            )
-            flow_observation_text = (
-                f"{flow_observation_text}\n\n[joern_reachability_verify]\n{str(joern_output or '')}"
-            ).strip()
-            if self._looks_like_tool_failure_output(joern_output):
-                flow_blocked = self._classify_verify_blocked_reason(joern_output)
-                if flow_blocked in {
-                    "mcp_unavailable",
-                    "missing_location",
-                    "read_budget_exhausted",
-                    "cancelled",
-                }:
-                    blocked_reason = flow_blocked
-                    blocked_stage = "joern_reachability_verify"
-                    if flow_blocked == "mcp_unavailable":
-                        _record_mcp_failure("joern_reachability_verify", joern_output)
-                    break
-                blocked_reason = flow_blocked or "insufficient_flow_evidence"
-                if round_index < max_rounds and blocked_reason == "insufficient_flow_evidence":
-                    blocked_reason = None
-                    continue
-                blocked_stage = "joern_reachability_verify"
-                break
-
-            flow_state = self._classify_flow_observation(flow_observation_text)
-            if flow_state == "negative":
-                reachability = "unreachable"
-                authenticity_hint = "false_positive"
-                round_success = True
-                break
-            if flow_state == "positive":
-                reachability = "reachable"
-                authenticity_hint = "likely"
-                round_success = True
-                break
-
-            cpg_input = {
-                "file_path": file_path,
-                "line_start": int(line_start),
-                "query": self._build_cpg_query_text(
-                    normalized_input,
-                    file_path=file_path,
-                    line_start=int(line_start),
-                    function_name=function_name,
-                ),
-            }
-            pipeline_steps.append("cpg_query")
-            flow_tools_used.append("cpg_query")
-            cpg_output = await self.execute_tool(
-                "cpg_query",
-                cpg_input,
-                _fallback_depth=fallback_depth + 1,
-            )
-            if self._looks_like_tool_failure_output(cpg_output):
-                flow_blocked = self._classify_verify_blocked_reason(cpg_output)
-                if flow_blocked in {
-                    "mcp_unavailable",
-                    "missing_location",
-                    "read_budget_exhausted",
-                    "cancelled",
-                }:
-                    blocked_reason = flow_blocked
-                    blocked_stage = "cpg_query"
-                    if flow_blocked == "mcp_unavailable":
-                        _record_mcp_failure("cpg_query", cpg_output)
-                    break
-                blocked_reason = flow_blocked or "insufficient_flow_evidence"
-                if round_index < max_rounds and blocked_reason == "insufficient_flow_evidence":
-                    blocked_reason = None
-                    continue
-                blocked_stage = "cpg_query"
-                break
-
-            flow_observation_text = f"{flow_observation_text}\n\n[cpg_query]\n{cpg_output}"
             flow_state = self._classify_flow_observation(flow_observation_text)
             if flow_state == "negative":
                 reachability = "unreachable"
@@ -3128,7 +3012,7 @@ class BaseAgent(ABC):
             if round_index < max_rounds:
                 blocked_reason = None
                 continue
-            blocked_stage = "cpg_query"
+            blocked_stage = "controlflow_analysis_light"
             break
 
         if not round_success and blocked_reason is None:

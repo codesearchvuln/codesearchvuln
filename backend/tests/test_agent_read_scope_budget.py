@@ -28,16 +28,16 @@ class _RecorderTool:
 async def test_verify_reachability_read_scope_is_bounded():
     read_tool = _RecorderTool("read_file", "文件: src/time64.c\n行数: 1-160 / 500")
     locate_tool = _RecorderTool("locate_enclosing_function", "{'symbols':[]}")
-    joern_tool = _RecorderTool("joern_reachability_verify", '{"engine":"joern"}')
-    cpg_tool = _RecorderTool("cpg_query", '{"path_found": true}')
+    dataflow_tool = _RecorderTool("dataflow_analysis", '{"risk_level":"low"}')
+    controlflow_tool = _RecorderTool("controlflow_analysis_light", '{"flow":{"path_found":true}}')
     agent = _DummyAgent(
         config=AgentConfig(name="budget-agent", agent_type=AgentType.VERIFICATION),
         llm_service=SimpleNamespace(),
         tools={
             "read_file": read_tool,
             "locate_enclosing_function": locate_tool,
-            "joern_reachability_verify": joern_tool,
-            "cpg_query": cpg_tool,
+            "dataflow_analysis": dataflow_tool,
+            "controlflow_analysis_light": controlflow_tool,
         },
         event_emitter=None,
     )

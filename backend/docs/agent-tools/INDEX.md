@@ -1,6 +1,6 @@
 # Agent Tool Docs Index
 
-- Runtime 工具总数: **24**
+- Runtime 工具总数: **23**
 - 共享目录: `docs/agent-tools/TOOL_SHARED_CATALOG.md`
 
 ## Tool Docs
@@ -8,7 +8,6 @@
 - `create_vulnerability_report` -> `docs/agent-tools/tools/create_vulnerability_report.md`
 - `dataflow_analysis` -> `docs/agent-tools/tools/dataflow_analysis.md`
 - `extract_function` -> `docs/agent-tools/tools/extract_function.md`
-- `joern_reachability_verify` -> `docs/agent-tools/tools/joern_reachability_verify.md`
 - `list_files` -> `docs/agent-tools/tools/list_files.md`
 - `logic_authz_analysis` -> `docs/agent-tools/tools/logic_authz_analysis.md`
 - `pattern_match` -> `docs/agent-tools/tools/pattern_match.md`

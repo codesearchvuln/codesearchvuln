@@ -116,7 +116,7 @@ export interface FindingTableRow {
   severityLabel: string;
   severityScore: number;
   confidence: number | null;
-  confidenceLabel: string;
+  confidenceLabel: string | null;
   confidenceScore: number;
   verification: "verified" | "pending";
   verificationLabel: string;
@@ -131,6 +131,7 @@ export interface FindingTableState {
   allRows: RealtimeFindingLike[];
   filteredRows: FindingTableRow[];
   rows: FindingTableRow[];
+  hasVisibleConfidence: boolean;
   totalRows: number;
   totalPages: number;
   page: number;
@@ -221,7 +222,7 @@ export function accumulateTokenUsage(
   };
 }
 
-export function countRealtimeFindings(items: RealtimeFindingLike[]): {
+export function countDisplayFindings(items: RealtimeFindingLike[]): {
   total: number;
   effective: number;
   falsePositive: number;
@@ -241,20 +242,20 @@ export function countRealtimeFindings(items: RealtimeFindingLike[]): {
 
 export function buildStatsSummary(input: {
   task: TaskStatsLike | null;
-  realtimeFindings: RealtimeFindingLike[];
+  displayFindings: RealtimeFindingLike[];
   tokenUsage: TokenUsageAccumulator;
   now: Date;
 }): AgentAuditStatsSummary {
-  const { task, realtimeFindings, tokenUsage, now } = input;
-  const counts = realtimeFindings.length
-    ? countRealtimeFindings(realtimeFindings)
+  const { task, displayFindings, tokenUsage, now } = input;
+  const counts = displayFindings.length
+    ? countDisplayFindings(displayFindings)
     : {
         effective: Math.max(toFiniteNumber(task?.findings_count), 0),
         falsePositive: Math.max(toFiniteNumber(task?.false_positive_count), 0),
         total: 0,
       };
 
-  if (!realtimeFindings.length) {
+  if (!displayFindings.length) {
     counts.total = counts.effective + counts.falsePositive;
   }
 
@@ -316,10 +317,8 @@ function getConfidenceScore(confidence: number | null): number {
 
 function getConfidenceLabel(
   confidence: number | null,
-  falsePositive: boolean,
-): string {
-  if (falsePositive) return "误报";
-  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return "-";
+): string | null {
+  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
   if (confidence >= 0.85) return "高";
   if (confidence >= 0.5) return "中";
   return "低";
@@ -346,7 +345,6 @@ function getLocation(item: RealtimeFindingLike): string {
 
 function buildFindingRow(item: RealtimeFindingLike): FindingTableRow {
   const severity = normalizeSeverityKey(item) || "info";
-  const falsePositive = isFalsePositiveFinding(item);
   const confidence =
     typeof item.confidence === "number" && Number.isFinite(item.confidence)
       ? item.confidence
@@ -363,7 +361,7 @@ function buildFindingRow(item: RealtimeFindingLike): FindingTableRow {
     severityLabel: getSeverityLabel(severity),
     severityScore: SEVERITY_SCORE[severity] ?? 0,
     confidence,
-    confidenceLabel: getConfidenceLabel(confidence, falsePositive),
+    confidenceLabel: getConfidenceLabel(confidence),
     confidenceScore: getConfidenceScore(confidence),
     verification,
     verificationLabel: verification === "verified" ? "已验证" : "待验证",
@@ -415,6 +413,7 @@ export function buildFindingTableState(input: {
     });
 
   const totalRows = filteredRows.length;
+  const hasVisibleConfidence = filteredRows.some((row) => Boolean(row.confidenceLabel));
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const requestedPage = Math.max(Math.floor(toFiniteNumber(input.page) || 1), 1);
   const page = Math.min(requestedPage, totalPages);
@@ -424,6 +423,7 @@ export function buildFindingTableState(input: {
     allRows: input.items,
     filteredRows,
     rows: filteredRows.slice(pageStart, pageStart + pageSize),
+    hasVisibleConfidence,
     totalRows,
     totalPages,
     page,

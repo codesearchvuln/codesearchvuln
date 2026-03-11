@@ -14,7 +14,6 @@ REMOVED_PROMPT_TOKENS = [
     "sequential_thinking",
     "reasoning_trace",
     "skill_lookup",
-    "joern_reachability_verify",
     "sandbox_http",
     "php_test",
     "python_test",
@@ -57,7 +56,6 @@ def test_analysis_prompt_requires_two_evidence_classes_and_structured_title():
     assert "dataflow_analysis/controlflow_analysis_light" in ANALYSIS_SYSTEM_PROMPT
     assert "src/time64.c中asctime64_r栈溢出漏洞" in ANALYSIS_SYSTEM_PROMPT
     assert '"file_path": "src/example.py"' in ANALYSIS_SYSTEM_PROMPT
-    assert "兼容说明：如果你拿到的是 `{\"finding\": {...}}` 结构" in ANALYSIS_SYSTEM_PROMPT
     assert "Action Input: {\n    \"finding\": {" not in ANALYSIS_SYSTEM_PROMPT
     assert "file_path:line" in ANALYSIS_SYSTEM_PROMPT
     assert "line_start" in ANALYSIS_SYSTEM_PROMPT
@@ -67,12 +65,11 @@ def test_analysis_prompt_requires_two_evidence_classes_and_structured_title():
 def test_verification_prompt_requires_flow_fields_and_report_preconditions():
     assert "verification_result.flow" in VERIFICATION_SYSTEM_PROMPT
     assert "function_trigger_flow" in VERIFICATION_SYSTEM_PROMPT
-    assert "create_vulnerability_report" in VERIFICATION_SYSTEM_PROMPT
+    assert "save_verification_result" in VERIFICATION_SYSTEM_PROMPT
     assert "标题结构化" in VERIFICATION_SYSTEM_PROMPT
     assert "src/time64.c中asctime64_r栈溢出漏洞" in VERIFICATION_SYSTEM_PROMPT
     assert "run_code" in VERIFICATION_SYSTEM_PROMPT
     assert "sandbox_exec" in VERIFICATION_SYSTEM_PROMPT
-    assert "verify_vulnerability" in VERIFICATION_SYSTEM_PROMPT
 
 
 

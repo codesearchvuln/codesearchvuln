@@ -176,7 +176,7 @@ agent_checkpoints/
 data/
 *.checkpoint
 
-# Joern / CPG artifacts
+# CPG artifacts
 workspace/
 
 # Scan result files (temporary)

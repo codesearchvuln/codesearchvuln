@@ -107,7 +107,8 @@ function normalizeAgentConfidence(value: number | null | undefined): string {
 	return "-";
 }
 
-function resolveAgentConfidenceValue(finding: AgentFinding): number | null {
+function resolveAgentConfidenceValue(finding: AgentFinding | null): number | null {
+	if (!finding) return null;
 	if (typeof finding.ai_confidence === "number" && Number.isFinite(finding.ai_confidence)) {
 		return finding.ai_confidence;
 	}
@@ -423,6 +424,10 @@ export default function FindingDetail() {
 		() => getAgentFalsePositiveEvidence(agentFinding),
 		[agentFinding],
 	);
+	const agentConfidenceLabel = useMemo(() => {
+		const normalized = normalizeAgentConfidence(resolveAgentConfidenceValue(agentFinding));
+		return normalized === "-" ? null : normalized;
+	}, [agentFinding]);
 
 	const handleBack = () => {
 		const target = resolveFindingDetailBackTarget({
@@ -614,9 +619,11 @@ export default function FindingDetail() {
 											<Badge className="cyber-badge-muted">
 												状态：{agentFinding.status || "false_positive"}
 											</Badge>
-											<Badge className="cyber-badge-muted">
-												置信度：{normalizeAgentConfidence(resolveAgentConfidenceValue(agentFinding))}
-											</Badge>
+											{agentConfidenceLabel ? (
+												<Badge className="cyber-badge-muted">
+													置信度：{agentConfidenceLabel}
+												</Badge>
+											) : null}
 										</div>
 										<div className="space-y-1.5 text-sm">
 											<p className="text-muted-foreground uppercase">误报类型 / 漏洞类型</p>
@@ -657,9 +664,11 @@ export default function FindingDetail() {
 												严重级别：{agentFinding.severity}
 											</Badge>
 											<Badge className="cyber-badge-muted">状态：{agentFinding.status}</Badge>
-											<Badge className="cyber-badge-muted">
-												置信度：{normalizeAgentConfidence(resolveAgentConfidenceValue(agentFinding))}
-											</Badge>
+											{agentConfidenceLabel ? (
+												<Badge className="cyber-badge-muted">
+													置信度：{agentConfidenceLabel}
+												</Badge>
+											) : null}
 										</div>
 										<div className="space-y-1.5 text-sm">
 											<p className="text-muted-foreground uppercase">规则/类型</p>

@@ -16,7 +16,7 @@ ARG BACKEND_NPM_REGISTRY_CANDIDATES=https://registry.npmmirror.com,https://mirro
 ARG BACKEND_PNPM_VERSION=9.15.4
 ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS=420
 ARG BACKEND_PNPM_INSTALL_OPTIONAL=0
-ARG BACKEND_INSTALL_CJK_FONTS=1
+ARG BACKEND_INSTALL_CJK_FONTS=0
 FROM ${UV_IMAGE} AS uvbin
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS nodebase
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS builder
@@ -401,6 +401,20 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
 # ============================================
 # 多阶段构建 - 运行阶段
 # ============================================
+FROM runtime-base AS dev-runtime
+
+COPY --from=builder /app/.venv /opt/backend-venv
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --chmod=755 scripts/dev-entrypoint.sh /usr/local/bin/backend-dev-entrypoint.sh
+
+ENV PATH=/app/.venv/bin:/pnpm:${PATH}
+
+RUN mkdir -p /app /app/.venv /root/.cache/uv /app/uploads/zip_files /app/data/mcp /app/data/qmd
+
+EXPOSE 8000
+
+CMD ["/usr/local/bin/backend-dev-entrypoint.sh"]
+
 FROM runtime-base AS runtime
 
 # 提前复制 builder 产物，避免 runtime 与 builder 并行下载导致网络争抢

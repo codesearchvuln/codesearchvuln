@@ -123,16 +123,22 @@ cp backend/env.example backend/.env
 ./scripts/compose-up-with-fallback.sh
 ```
 
-如需直接使用 Docker Compose 默认构建链路：
+如需快速重复开发（推荐，前后端容器内热重载）：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+如需使用带镜像源测速/回退的脚本：
+
+```bash
+./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+如需直接使用 Docker Compose 默认全功能本地构建链路：
 
 ```bash
 docker compose up -d --build
-```
-
-如需显式启用 Joern / CodeBadger：
-
-```bash
-docker compose --profile joern up -d --build
 ```
 
 如需使用预构建镜像部署（生产/快速拉起）：
@@ -185,9 +191,11 @@ powershell -ExecutionPolicy Bypass -File scripts\compose-up-with-fallback.ps1
 ### 重要说明
 
 - 后端需要访问 Docker，用于沙箱验证，因此默认会挂载 `/var/run/docker.sock`。生产环境请评估权限边界与隔离策略。
-- 仓库内唯一支持的本地镜像构建链路是根目录默认 Compose：`docker compose up -d --build`（或 `./scripts/compose-up-with-fallback.sh`）。默认不会启动 Joern / CodeBadger 容器。
-- 如需启用本地 Joern / CodeBadger，请使用 `docker compose --profile joern up -d --build`，或 `./scripts/compose-up-with-fallback.sh --profile joern up -d --build`。
-- `docker-compose.prod.yml` / `docker-compose.prod.cn.yml` 用于预构建镜像部署；这两条链路不在仓库内构建 CodeBadger。
+- 快速重复开发推荐使用 dev 覆盖层：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`。该路径会把前后端切到源码挂载 + 热重载，并默认关闭 `MCP_REQUIRE_ALL_READY_ON_STARTUP`、`SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP` 等重型启动项。
+- 如需脚本版快速重复开发，可使用：`./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build`。
+- 默认根目录 Compose 仍是全功能本地镜像构建链路：`docker compose up -d --build`（或 `./scripts/compose-up-with-fallback.sh`）。
+- 如只需单独做前端 HMR 调试，可继续使用 `docker-compose.frontend-dev.yml`：`docker compose -f docker-compose.yml -f docker-compose.frontend-dev.yml up -d frontend-dev`。
+- `docker-compose.prod.yml` / `docker-compose.prod.cn.yml` 用于预构建镜像部署。
 - `docker-compose.prod.yml` 与 `docker-compose.prod.cn.yml` 默认使用南京大学 GHCR 镜像站（`ghcr.nju.edu.cn/lintsinghua/*`）加速拉取。如需生产镜像部署，可替换为你们自己的镜像地址/私有仓库。
 - 开发构建链路默认使用 `./scripts/compose-up-with-fallback.sh`：先对候选镜像源测速并按延迟排序，再按排序分阶段重试构建（不再固定“国内→官方”两段式）。
 - Docker 镜像拉取（DockerHub/GHCR）测速采用并行探测，失败候选会自动降到排序末位，不阻塞其他可用源。
@@ -203,12 +211,6 @@ powershell -ExecutionPolicy Bypass -File scripts\compose-up-with-fallback.ps1
 - 直接执行 `docker compose up -d --build` 不包含自动切换镜像源逻辑。
 - GitHub 源码同步与任务仓库下载/克隆默认走双代理：`https://gh-proxy.org` -> `https://v6.gh-proxy.org`。
 - 默认不回源 GitHub（`GIT_MIRROR_FALLBACK_TO_ORIGIN=false`）；仅在排障时建议临时开启回源。
-- 默认本地 Compose 不会启动内置 CodeBadger 服务；未启用时 Joern 深度分析会自动降级为轻量分析。
-- `docker-compose.prod.yml` / `docker-compose.prod.cn.yml` 如需 Joern 深度分析，必须显式提供外部 CodeBadger：
-  - `MCP_CODEBADGER_ENABLED=true`
-  - `MCP_CODEBADGER_BACKEND_URL=http://your-codebadger-host:4242/mcp`
-  - `JOERN_MCP_ENABLED=true`
-  - `JOERN_MCP_URL=http://your-codebadger-host:4242/mcp`
 - MCP 源码同步默认采用“首次下载后持久化缓存”策略：`MCP_SOURCE_UPDATE_ON_STARTUP=false`（已有缓存时跳过更新，提升启动稳定性）。
 - 如需临时强制刷新 MCP 源码，可设置：`MCP_SOURCE_UPDATE_ON_STARTUP=true`（或 `MCP_SOURCE_FORCE_REFRESH=true`）。
 
@@ -237,16 +239,6 @@ BACKEND_PNPM_VERSION=9.15.4 \
 BACKEND_PNPM_INSTALL_OPTIONAL=0 \
 BACKEND_INSTALL_CJK_FONTS=0 \
 ./scripts/compose-up-with-fallback.sh
-```
-
-生产链路接入外部 CodeBadger 示例：
-
-```bash
-MCP_CODEBADGER_ENABLED=true \
-MCP_CODEBADGER_BACKEND_URL=http://codebadger.example.internal:4242/mcp \
-JOERN_MCP_ENABLED=true \
-JOERN_MCP_URL=http://codebadger.example.internal:4242/mcp \
-docker compose -f docker-compose.prod.yml up -d
 ```
 
 GitHub 代理链路示例：

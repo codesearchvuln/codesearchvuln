@@ -459,19 +459,13 @@ def _default_mcp_write_policy() -> dict:
     }
 
 def _default_mcp_runtime_policy() -> dict:
-    policy = {
+    return {
         "default_mode": "stdio_only",
         "filesystem": {
             "runtime_mode": "stdio_only",
             "enabled": bool(getattr(settings, "MCP_FILESYSTEM_ENABLED", True)),
         },
     }
-    if bool(getattr(settings, "MCP_CODEBADGER_ENABLED", False)):
-        policy["codebadger"] = {
-            "runtime_mode": "backend_only",
-            "enabled": bool(getattr(settings, "MCP_CODEBADGER_ENABLED", False)),
-        }
-    return policy
 
 def _sanitize_runtime_mode(raw_mode: Any, default_mode: str) -> str:
     mode = str(raw_mode or "").strip().lower()
@@ -485,20 +479,13 @@ def _sanitize_runtime_mode(raw_mode: Any, default_mode: str) -> str:
 def _sanitize_mcp_runtime_policy(raw_policy: Any) -> dict:
     _ = raw_policy
     default_policy = _default_mcp_runtime_policy()
-    sanitized = {
+    return {
         "default_mode": "stdio_only",
         "filesystem": {
             "runtime_mode": "stdio_only",
             "enabled": bool(default_policy["filesystem"]["enabled"]),
         },
     }
-    codebadger = default_policy.get("codebadger")
-    if isinstance(codebadger, dict):
-        sanitized["codebadger"] = {
-            "runtime_mode": "backend_only",
-            "enabled": bool(codebadger.get("enabled", False)),
-        }
-    return sanitized
 
 def _build_mcp_runtime_persistence() -> dict:
     return {

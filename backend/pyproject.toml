@@ -32,7 +32,7 @@ dependencies = [
     "bcrypt>=4.0.0,<4.1.0",
     # ============ HTTP Client ============
     "httpx>=0.28.1",
-    # ============ MCP Client (CodeBadger) ============
+    # ============ MCP Client ============
     "fastmcp>=2.14.4",
     # ============ LLM Integration ============
     "litellm>=1.0.0",

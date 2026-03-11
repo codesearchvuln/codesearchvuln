@@ -273,7 +273,9 @@ export default function RealtimeFindingsPanel(props: {
 						{tableState.page} / {tableState.totalPages} 页
 					</span>
 					<span>
-						排序规则：危害降序；同危害按置信度降序；其后按路径+行号升序
+						{tableState.hasVisibleConfidence
+							? "排序规则：危害降序；同危害按置信度降序；其后按路径+行号升序"
+							: "排序规则：危害降序；其后按路径+行号升序"}
 					</span>
 				</div>
 
@@ -302,7 +304,9 @@ export default function RealtimeFindingsPanel(props: {
 										<TableHead className="w-[120px]" data-no-i18n="true">
 											漏洞危害
 										</TableHead>
-										<TableHead className="w-[110px]">置信度</TableHead>
+										{tableState.hasVisibleConfidence ? (
+											<TableHead className="w-[110px]">置信度</TableHead>
+										) : null}
 										<TableHead className="w-[120px]">处理状态</TableHead>
 										<TableHead className="w-[160px] text-center">操作</TableHead>
 									</TableRow>
@@ -355,14 +359,18 @@ export default function RealtimeFindingsPanel(props: {
 														{row.severityLabel}
 													</Badge>
 												</TableCell>
-												<TableCell>
-													<Badge
-														variant="outline"
-														className={`text-[11px] ${getConfidenceBadgeClass(row.confidenceLabel)}`}
-													>
-														{row.confidenceLabel}
-													</Badge>
-												</TableCell>
+												{tableState.hasVisibleConfidence ? (
+													<TableCell>
+														{row.confidenceLabel ? (
+															<Badge
+																variant="outline"
+																className={`text-[11px] ${getConfidenceBadgeClass(row.confidenceLabel)}`}
+															>
+																{row.confidenceLabel}
+															</Badge>
+														) : null}
+													</TableCell>
+												) : null}
 												<TableCell>
 													<Badge
 														variant="outline"

@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { useLogoVariant } from "@/shared/branding/useLogoVariant";
 import type { StreamErrorContext } from "@/shared/api/agentStream";
+import { api } from "@/shared/api/database";
 import {
   getAgentTask,
   getAgentFindings,
@@ -558,6 +559,7 @@ function AgentAuditPageContent() {
 
   // Realtime panels state
   const [realtimeFindings, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
+  const [projectName, setProjectName] = useState<string | null>(null);
   const [tokenUsage, setTokenUsage] = useState(() => createTokenUsageAccumulator());
   const [statsNow, setStatsNow] = useState(() => new Date());
   const verifiedFindingsManuallyClearedRef = useRef(false);
@@ -646,17 +648,22 @@ function AgentAuditPageContent() {
     });
   }, [location.search, task?.description, task?.name]);
   const currentRoute = `${location.pathname}${location.search}`;
+  const persistedDisplayFindings = useMemo(() => {
+    return findings
+      .map(agentFindingToRealtimeItem)
+      .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+  }, [findings]);
   const statsSummary = useMemo(
     () =>
       task
         ? buildStatsSummary({
             task,
-            realtimeFindings,
+            displayFindings: persistedDisplayFindings,
             tokenUsage,
             now: statsNow,
           })
         : null,
-    [realtimeFindings, statsNow, task, tokenUsage],
+    [persistedDisplayFindings, statsNow, task, tokenUsage],
   );
   const homeScanCards: HomeScanCard[] = useMemo(
   () => [
@@ -1036,6 +1043,33 @@ function AgentAuditPageContent() {
       toast.error("加载任务失败");
     }
   }, [taskId, setTask]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProjectName() {
+      const projectId = String(task?.project_id || "").trim();
+      if (!projectId) {
+        setProjectName(null);
+        return;
+      }
+
+      try {
+        const project = await api.getProjectById(projectId);
+        if (cancelled) return;
+        setProjectName(String(project?.name || "").trim() || "-");
+      } catch {
+        if (!cancelled) {
+          setProjectName("-");
+        }
+      }
+    }
+
+    void loadProjectName();
+    return () => {
+      cancelled = true;
+    };
+  }, [task?.project_id]);
 
   const loadFindings = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -3089,7 +3123,7 @@ function AgentAuditPageContent() {
               ref={agentContainerRef}
               className="overflow-x-auto custom-scrollbar"
             >
-              <StatsPanel summary={statsSummary} />
+              <StatsPanel summary={statsSummary} projectName={projectName} />
             </div>
           </div>
 
@@ -3098,7 +3132,7 @@ function AgentAuditPageContent() {
             <div className="h-full">
               <RealtimeFindingsPanel
                 taskId={task?.id || ""}
-                items={realtimeFindings}
+                items={persistedDisplayFindings}
                 isRunning={isRunning}
                 currentPhase={task?.current_phase ?? null}
                 filters={findingsFilters}

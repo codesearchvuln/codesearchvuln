@@ -64,11 +64,6 @@ async def test_verify_reachability_runs_pipeline_sequence():
         "controlflow_analysis_light",
         '{"flow":{"path_found":true,"path_score":0.72}}',
     )
-    joern_tool = _RecorderTool(
-        "joern_reachability_verify",
-        '{"path_found": true, "call_chain": ["main->asctime64_r"]}',
-    )
-    cpg_tool = _RecorderTool("cpg_query", '{"path_found": true}')
     agent, emitter = _make_agent(
         {
             "read_file": read_tool,
@@ -76,8 +71,6 @@ async def test_verify_reachability_runs_pipeline_sequence():
             "extract_function": extract_tool,
             "dataflow_analysis": dataflow_tool,
             "controlflow_analysis_light": controlflow_tool,
-            "joern_reachability_verify": joern_tool,
-            "cpg_query": cpg_tool,
         }
     )
 
@@ -93,8 +86,6 @@ async def test_verify_reachability_runs_pipeline_sequence():
     assert extract_tool.calls == 1
     assert dataflow_tool.calls == 1
     assert controlflow_tool.calls == 1
-    assert joern_tool.calls == 1
-    assert cpg_tool.calls == 0
 
     tool_call_events = _events_by_type(emitter, "tool_call")
     ordered_names = [event.tool_name for event in tool_call_events]
@@ -105,7 +96,6 @@ async def test_verify_reachability_runs_pipeline_sequence():
         "extract_function",
         "dataflow_analysis",
         "controlflow_analysis_light",
-        "joern_reachability_verify",
     ]
 
 
@@ -116,14 +106,6 @@ async def test_verify_reachability_uses_search_when_location_missing():
     locate_tool = _RecorderTool("locate_enclosing_function", "{'symbols':[]}")
     dataflow_tool = _RecorderTool("dataflow_analysis", '{"risk_level":"low"}')
     controlflow_tool = _RecorderTool("controlflow_analysis_light", '{"flow":{"path_found":true}}')
-    joern_tool = _RecorderTool(
-        "joern_reachability_verify",
-        '{"engine": "joern"}',
-    )
-    cpg_tool = _RecorderTool(
-        "cpg_query",
-        '{"path_found": true, "call_chain": ["main->authz_check"]}',
-    )
     agent, _emitter = _make_agent(
         {
             "search_code": search_tool,
@@ -131,8 +113,6 @@ async def test_verify_reachability_uses_search_when_location_missing():
             "locate_enclosing_function": locate_tool,
             "dataflow_analysis": dataflow_tool,
             "controlflow_analysis_light": controlflow_tool,
-            "joern_reachability_verify": joern_tool,
-            "cpg_query": cpg_tool,
         }
     )
 
@@ -148,24 +128,17 @@ async def test_verify_reachability_uses_search_when_location_missing():
 
 
 @pytest.mark.asyncio
-async def test_verify_reachability_runs_cpg_query_when_joern_inconclusive():
+async def test_verify_reachability_marks_unreachable_from_lightweight_negative_signal():
     read_tool = _RecorderTool("read_file", "文件: src/demo.c\n行数: 1-80 / 200")
     locate_tool = _RecorderTool("locate_enclosing_function", "{'symbols':[]}")
     dataflow_tool = _RecorderTool("dataflow_analysis", '{"risk_level":"low"}')
     controlflow_tool = _RecorderTool("controlflow_analysis_light", '{"flow":{"path_found":false}}')
-    joern_tool = _RecorderTool("joern_reachability_verify", '{"engine": "joern"}')
-    cpg_tool = _RecorderTool(
-        "cpg_query",
-        '{"path_found": true, "call_chain": ["entry->target"]}',
-    )
     agent, _ = _make_agent(
         {
             "read_file": read_tool,
             "locate_enclosing_function": locate_tool,
             "dataflow_analysis": dataflow_tool,
             "controlflow_analysis_light": controlflow_tool,
-            "joern_reachability_verify": joern_tool,
-            "cpg_query": cpg_tool,
         }
     )
 
@@ -174,7 +147,4 @@ async def test_verify_reachability_runs_cpg_query_when_joern_inconclusive():
         {"file_path": "src/demo.c", "line_start": 12, "line_end": 12},
     )
 
-    assert joern_tool.calls == 1
-    assert cpg_tool.calls == 1
-    assert "cpg_query" in output
-    assert "reachability: reachable" in output
+    assert "reachability: unreachable" in output

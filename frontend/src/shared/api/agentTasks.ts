@@ -95,7 +95,7 @@ export interface PocTriggerChainNode {
 
 export interface PocTriggerChain {
   version: number;
-  engine: "joern_dataflow" | "llm_dataflow_estimate" | string;
+  engine: "llm_dataflow_estimate" | string;
   source: {
     file_path: string;
     line: number;

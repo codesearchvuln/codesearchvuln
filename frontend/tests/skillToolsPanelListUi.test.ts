@@ -23,3 +23,17 @@ test("SkillToolsPanel source keeps search-first headers and route-based detail e
 	assert.doesNotMatch(content, /Dialog/);
 	assert.doesNotMatch(content, /是否加载/);
 });
+
+test("SkillToolsPanel name column shows only tool name without ID", () => {
+	const content = fs.readFileSync(skillToolsPanelFile, "utf8");
+
+	assert.match(content, /\{row\.name\}/);
+	assert.doesNotMatch(content, /<div[^>]*text-xs[^>]*font-mono[^>]*>\s*\{row\.id\}/);
+});
+
+test("SkillToolsPanel capabilities render as single line", () => {
+	const content = fs.readFileSync(skillToolsPanelFile, "utf8");
+
+	assert.match(content, /capabilities\.join\(/);
+	assert.doesNotMatch(content, /capabilities\.map\([^)]*capability[^)]*=>/);
+});

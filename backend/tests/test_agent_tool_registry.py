@@ -15,7 +15,6 @@ REMOVED_TOOL_NAMES = {
     "reasoning_trace",
     "query_security_knowledge",
     "get_vulnerability_knowledge",
-    "joern_reachability_verify",
     "php_test",
     "python_test",
     "javascript_test",

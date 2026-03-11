@@ -18,11 +18,6 @@ This product includes third-party components. Source, license and notice details
 - License: MIT
 - Source: https://github.com/scottrogowski/code2flow
 
-4) Joern
-- Version: TBD
-- License: Apache-2.0
-- Source: https://github.com/joernio/joern
-
 License Summary:
 - MIT / Apache-2.0 / BSD family components are used according to their license terms.
 - Apache-2.0 NOTICE requirements are preserved where applicable.

@@ -4,17 +4,14 @@ import {
   Activity,
   Bug,
   Clock3,
+  FolderOpen,
   Repeat,
   Wrench,
   TrendingUp,
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import type { AgentAuditStatsSummary } from "../detailViewModel";
 import { formatDurationMs, formatTokenValue } from "../detailViewModel";
-
-interface StatsPanelProps {
-  summary: AgentAuditStatsSummary | null;
-}
+import type { StatsPanelProps } from "../types";
 
 function MetricCard({
   icon,
@@ -22,12 +19,14 @@ function MetricCard({
   value,
   subtext,
   progress,
+  valueClassName,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   subtext: ReactNode;
   progress?: number;
+  valueClassName?: string;
 }) {
   return (
     <div className="cyber-card flex min-w-[180px] flex-col gap-2 p-4">
@@ -35,7 +34,7 @@ function MetricCard({
         <span className="text-primary">{icon}</span>
         <span>{label}</span>
       </div>
-      <div className="text-xl font-bold text-foreground">{value}</div>
+      <div className={valueClassName || "text-xl font-bold text-foreground"}>{value}</div>
       {typeof progress === "number" ? (
         <Progress
           value={Math.max(Math.min(progress, 100), 0)}
@@ -47,12 +46,19 @@ function MetricCard({
   );
 }
 
-export const StatsPanel = memo(function StatsPanel({ summary }: StatsPanelProps) {
+export const StatsPanel = memo(function StatsPanel({ summary, projectName }: StatsPanelProps) {
   if (!summary) return null;
 
   return (
     <div className="overflow-x-auto custom-scrollbar">
-      <div className="grid min-w-[1120px] grid-cols-6 gap-3">
+      <div className="grid min-w-[1300px] grid-cols-7 gap-3">
+        <MetricCard
+          icon={<FolderOpen className="h-4 w-4" />}
+          label="当前项目"
+          value={String(projectName || "-")}
+          valueClassName="line-clamp-2 min-h-[3.5rem] break-all text-lg font-bold leading-snug text-foreground"
+          subtext="当前扫描项目"
+        />
         <MetricCard
           icon={<Activity className="h-4 w-4" />}
           label="进度比例"

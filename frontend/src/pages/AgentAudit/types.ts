@@ -165,6 +165,7 @@ export interface AgentDetailPanelProps {
 
 export interface StatsPanelProps {
   summary: AgentAuditStatsSummary | null;
+  projectName?: string | null;
 }
 
 export interface HeaderProps {

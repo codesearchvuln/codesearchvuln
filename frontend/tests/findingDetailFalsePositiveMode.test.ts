@@ -23,3 +23,14 @@ test("FindingDetail 为 Agent 误报预留判定依据专用视图", () => {
 	assert.match(content, /agentFindingSnapshot/);
 	assert.match(content, /setAgentFinding\(agentFindingSnapshot\)/);
 });
+
+test("FindingDetail 的 Agent 分支仅在存在真实置信度时渲染置信度徽标", () => {
+	const content = read("src/pages/FindingDetail.tsx");
+
+	assert.match(content, /const agentConfidenceLabel = /);
+	assert.match(content, /agentConfidenceLabel \? \(/);
+	assert.doesNotMatch(
+		content,
+		/置信度：\{normalizeAgentConfidence\(resolveAgentConfidenceValue\(agentFinding\)\)\}/,
+	);
+});
