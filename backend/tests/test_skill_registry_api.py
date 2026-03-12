@@ -37,6 +37,34 @@ async def test_skill_detail_endpoint_returns_static_scan_core_detail():
 
 
 @pytest.mark.asyncio
+async def test_skill_detail_endpoint_exposes_supported_test_metadata():
+    response = await skills_module.get_skill_detail(
+        skill_id="read_file",
+        include_workflow=False,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert response.test_supported is True
+    assert response.test_mode == "single_skill_strict"
+    assert response.test_reason in (None, "")
+    assert response.default_test_project_name == "libplist"
+
+
+@pytest.mark.asyncio
+async def test_skill_detail_endpoint_exposes_disabled_test_metadata():
+    response = await skills_module.get_skill_detail(
+        skill_id="dataflow_analysis",
+        include_workflow=False,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert response.test_supported is False
+    assert response.test_mode == "disabled"
+    assert response.default_test_project_name == "libplist"
+    assert "首版" in str(response.test_reason)
+
+
+@pytest.mark.asyncio
 async def test_skill_detail_endpoint_returns_404_for_missing_skill():
     with pytest.raises(HTTPException) as exc_info:
         await skills_module.get_skill_detail(

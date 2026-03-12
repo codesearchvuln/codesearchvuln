@@ -1,4 +1,9 @@
 import { api } from "@/shared/config/database";
+import {
+	normalizeLlmProviderId,
+	resolveEffectiveLlmApiKey,
+	shouldRequireApiKey,
+} from "@/shared/llm/providerCatalog";
 
 type PreflightStage = "llm_config" | "llm_test";
 export type PreflightMissingField = "llmModel" | "llmBaseUrl" | "llmApiKey";
@@ -11,52 +16,22 @@ export interface AgentPreflightResult {
 	missingFields?: PreflightMissingField[];
 }
 
-const normalizeProvider = (provider: string | undefined | null) =>
-	(provider || "").trim().toLowerCase();
-
-const resolveEffectiveApiKey = (
-	provider: string,
-	llmConfig: Record<string, unknown>,
-): string => {
-	const directKey = String(llmConfig.llmApiKey || "").trim();
-	if (directKey) return directKey;
-
-	const providerKeyMap: Record<string, string> = {
-		openai: "openaiApiKey",
-		openrouter: "openaiApiKey",
-		azure_openai: "openaiApiKey",
-		custom: "openaiApiKey",
-		anthropic: "claudeApiKey",
-		claude: "claudeApiKey",
-		gemini: "geminiApiKey",
-		qwen: "qwenApiKey",
-		deepseek: "deepseekApiKey",
-		zhipu: "zhipuApiKey",
-		moonshot: "moonshotApiKey",
-		baidu: "baiduApiKey",
-		minimax: "minimaxApiKey",
-		doubao: "doubaoApiKey",
-	};
-	const providerKeyField = providerKeyMap[provider];
-	if (!providerKeyField) return "";
-	return String(llmConfig[providerKeyField] || "").trim();
-};
-
 export async function runAgentPreflightCheck(): Promise<AgentPreflightResult> {
 	const userConfig = await api.getUserConfig();
 	const llmConfig = (userConfig?.llmConfig || {}) as Record<string, unknown>;
 
-	const llmProvider =
-		normalizeProvider(
-			typeof llmConfig.llmProvider === "string" ? llmConfig.llmProvider : undefined,
-		) || "openai";
-	const llmApiKey = resolveEffectiveApiKey(llmProvider, llmConfig);
+	const llmProvider = normalizeLlmProviderId(
+		typeof llmConfig.llmProvider === "string" ? llmConfig.llmProvider : undefined,
+	);
+	const llmApiKey = resolveEffectiveLlmApiKey(llmProvider, llmConfig);
 	const llmModel = String(llmConfig.llmModel || "").trim();
 	const llmBaseUrl = String(llmConfig.llmBaseUrl || "").trim();
 	const missingFields: PreflightMissingField[] = [];
 	if (!llmModel) missingFields.push("llmModel");
 	if (!llmBaseUrl) missingFields.push("llmBaseUrl");
-	if (llmProvider !== "ollama" && !llmApiKey) missingFields.push("llmApiKey");
+	if (shouldRequireApiKey(undefined, llmProvider) && !llmApiKey) {
+		missingFields.push("llmApiKey");
+	}
 
 	if (missingFields.length > 0) {
 		const fieldLabelMap: Record<PreflightMissingField, string> = {

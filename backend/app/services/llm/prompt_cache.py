@@ -316,7 +316,7 @@ def estimate_tokens(text: str, model: str = "gpt-4") -> int:
     """
     估算文本的 token 数量
 
-    使用TokenEstimator进行精确计数（tiktoken）或改进的启发式估算。
+    始终使用快速启发式估算，避免缓存阈值判定阻塞主请求。
 
     Args:
         text: 文本内容
@@ -325,4 +325,4 @@ def estimate_tokens(text: str, model: str = "gpt-4") -> int:
     Returns:
         Token数量
     """
-    return TokenEstimator.count_tokens(text, model)
+    return TokenEstimator.fast_count_tokens(text, model)

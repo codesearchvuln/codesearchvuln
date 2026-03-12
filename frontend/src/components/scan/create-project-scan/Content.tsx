@@ -11,6 +11,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
   Bot,
   CheckCircle2,
   Layers,
@@ -22,6 +29,10 @@ import {
 } from "lucide-react";
 import type { Project } from "@/shared/types";
 import type { PreflightMissingField } from "@/shared/api/agentPreflight";
+import {
+	getCreateProjectScanProviderLabel,
+	type LLMProviderItem,
+} from "@/shared/llm/providerCatalog";
 import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
 import {
   normalizeCreateProjectScanProvider,
@@ -50,6 +61,10 @@ export default function CreateProjectScanDialogContent({
   searchTerm,
   setSearchTerm,
   filteredProjects,
+  visibleProjects,
+  projectPage,
+  projectTotalPages,
+  setProjectPage,
   selectedProject,
   selectedProjectId,
   setSelectedProjectId,
@@ -71,10 +86,14 @@ export default function CreateProjectScanDialogContent({
   quickFixTesting,
   quickFixPanelOpening,
   lastPreflightMessage,
+  llmProviderOptions,
   llmQuickConfig,
   missingFieldClass,
+  handleQuickFixProviderChange,
   handleQuickFixConfigChange,
   quickFixTestResult,
+  disableQuickFixTest,
+  llmTestBlockedMessage,
   handleQuickFixTest,
   handleQuickFixSave,
   branchName,
@@ -102,6 +121,10 @@ export default function CreateProjectScanDialogContent({
   searchTerm: string;
   setSearchTerm: (value: string) => void;
   filteredProjects: Project[];
+  visibleProjects: Project[];
+  projectPage: number;
+  projectTotalPages: number;
+  setProjectPage: (page: number) => void;
   selectedProject: Project | undefined;
   selectedProjectId: string;
   setSelectedProjectId: (id: string) => void;
@@ -123,14 +146,18 @@ export default function CreateProjectScanDialogContent({
   quickFixTesting: boolean;
   quickFixPanelOpening: boolean;
   lastPreflightMessage: string;
+  llmProviderOptions: LLMProviderItem[];
   llmQuickConfig: LlmQuickConfig;
   missingFieldClass: (field: PreflightMissingField) => string;
+  handleQuickFixProviderChange: (provider: string) => void;
   handleQuickFixConfigChange: (key: keyof LlmQuickConfig, value: string) => void;
   quickFixTestResult: {
     success: boolean;
     message: string;
     model?: string;
   } | null;
+  disableQuickFixTest: boolean;
+  llmTestBlockedMessage: string;
   handleQuickFixTest: () => void | Promise<void>;
   handleQuickFixSave: () => void | Promise<void>;
   branchName: string;
@@ -262,10 +289,10 @@ export default function CreateProjectScanDialogContent({
                   disabled={creating}
                 />
               )}
-              <div className="border border-border rounded-lg max-h-[280px] overflow-y-auto p-2 space-y-2">
-                {loadingProjects ? (
-                  <div className="py-10 flex items-center justify-center text-sm text-muted-foreground">
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+	              <div className="border border-border rounded-lg p-2 space-y-2">
+	                {loadingProjects ? (
+	                  <div className="py-10 flex items-center justify-center text-sm text-muted-foreground">
+	                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
                     加载项目中...
                   </div>
                 ) : lockProjectSelection ? (
@@ -301,11 +328,11 @@ export default function CreateProjectScanDialogContent({
                       目标项目不可用，请返回项目管理页重试
                     </div>
                   )
-                ) : filteredProjects.length > 0 ? (
-                  filteredProjects.map((project) => (
-                    <button
-                      key={project.id}
-                      type="button"
+	                ) : filteredProjects.length > 0 ? (
+	                  visibleProjects.map((project) => (
+	                    <button
+	                      key={project.id}
+	                      type="button"
                       onClick={() => setSelectedProjectId(project.id)}
                       className={`w-full text-left p-3 rounded border transition-colors ${
                         project.id === selectedProjectId
@@ -339,17 +366,47 @@ export default function CreateProjectScanDialogContent({
                             <CheckCircle2 className="w-4 h-4 text-sky-400" />
                           )}
                         </div>
-                      </div>
-                    </button>
-                  ))
-                ) : (
-                  <div className="py-10 text-center text-sm text-muted-foreground">
-                    未找到可用项目
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
+	                      </div>
+	                    </button>
+	                  ))
+	                ) : (
+	                  <div className="py-10 text-center text-sm text-muted-foreground">
+	                    未找到可用项目
+	                  </div>
+	                )}
+	              </div>
+	              {!lockProjectSelection && filteredProjects.length > 0 && (
+	                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+	                  <span>每页 3 个项目卡片</span>
+	                  <div className="flex items-center gap-2">
+	                    <Button
+	                      type="button"
+	                      variant="outline"
+	                      className="cyber-btn-outline h-8 px-3"
+	                      onClick={() => setProjectPage(Math.max(1, projectPage - 1))}
+	                      disabled={creating || projectPage <= 1}
+	                    >
+	                      上一页
+	                    </Button>
+	                    <span>
+	                      第 {projectPage} / {projectTotalPages} 页
+	                    </span>
+	                    <Button
+	                      type="button"
+	                      variant="outline"
+	                      className="cyber-btn-outline h-8 px-3"
+	                      onClick={() =>
+	                        setProjectPage(Math.min(projectTotalPages, projectPage + 1))
+	                      }
+	                      disabled={creating || projectPage >= projectTotalPages}
+	                    >
+	                      下一页
+	                    </Button>
+	                  </div>
+	                </div>
+	              )}
+	            </div>
+	          ) : (
             <div className="space-y-3 border border-border rounded-lg p-4">
               <div>
                 <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
@@ -460,17 +517,18 @@ export default function CreateProjectScanDialogContent({
             <div className="space-y-3">
               <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-violet-200">
-                      {t("task.llmPrecheckHint", "创建前会自动校验 LLM 配置。")}
-                    </p>
-                    <p className="text-xs text-violet-300/80 mt-1">
-                      {t(
-                        "task.llmQuickFixDesc",
-                        "未通过时可在下方直接补配并测试连接。",
-                      )}
-                    </p>
-                  </div>
+	                  <div>
+	                    <p className="text-sm text-violet-200">
+	                      {t("task.llmPrecheckHint", "创建前会自动校验 LLM 配置。")}
+	                    </p>
+	                    <p className="text-xs text-violet-300/80 mt-1">
+	                      {lastPreflightMessage ||
+	                        t(
+	                          "task.llmQuickFixDesc",
+	                          "未通过时可在下方直接补配并测试连接。",
+	                        )}
+	                    </p>
+	                  </div>
                   <Button
                     type="button"
                     variant="outline"
@@ -496,8 +554,8 @@ export default function CreateProjectScanDialogContent({
 
               {showLlmQuickFixPanel && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-1">
+	                  <div className="flex items-start justify-between gap-2">
+	                    <div className="space-y-1">
                       <p className="text-sm font-semibold text-amber-100">
                         {t("task.llmQuickFixTitle", "LLM 快速补配")}
                       </p>
@@ -508,30 +566,60 @@ export default function CreateProjectScanDialogContent({
                             "未通过时可在下方直接补配并测试连接。",
                           )}
                       </p>
-                    </div>
-                    <Badge className="cyber-badge-info uppercase">
-                      {normalizeCreateProjectScanProvider(llmQuickConfig.provider)}
-                    </Badge>
-                  </div>
+	                    </div>
+	                    <Badge className="cyber-badge-info uppercase">
+	                      {getCreateProjectScanProviderLabel(
+	                        llmProviderOptions.find(
+	                          (provider) =>
+	                            provider.id ===
+	                            normalizeCreateProjectScanProvider(llmQuickConfig.provider),
+	                        ),
+	                      ) || normalizeCreateProjectScanProvider(llmQuickConfig.provider)}
+	                    </Badge>
+	                  </div>
 
-                  <div className="grid grid-cols-1 gap-3">
-                    <div className="space-y-1">
-                      <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                        模型
-                      </p>
-                      <Input
-                        value={llmQuickConfig.model}
-                        onChange={(event) =>
-                          handleQuickFixConfigChange("model", event.target.value)
-                        }
-                        placeholder="例如：gpt-5"
-                        className={`h-9 cyber-input ${missingFieldClass("llmModel")}`}
-                        disabled={creating || quickFixSaving || quickFixTesting}
-                      />
-                    </div>
+	                  <div className="grid grid-cols-1 gap-3">
+	                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]">
+	                      <div className="space-y-1">
+	                        <p className="text-xs uppercase tracking-wider text-muted-foreground">
+	                          提供商
+	                        </p>
+	                        <Select
+	                          value={normalizeCreateProjectScanProvider(llmQuickConfig.provider)}
+	                          onValueChange={handleQuickFixProviderChange}
+	                          disabled={creating || quickFixSaving || quickFixTesting}
+	                        >
+	                          <SelectTrigger className="h-9 cyber-input">
+	                            <SelectValue placeholder="选择提供商" />
+	                          </SelectTrigger>
+	                          <SelectContent>
+	                            {llmProviderOptions.map((provider) => (
+	                              <SelectItem key={provider.id} value={provider.id}>
+	                                {getCreateProjectScanProviderLabel(provider)}
+	                              </SelectItem>
+	                            ))}
+	                          </SelectContent>
+	                        </Select>
+	                      </div>
 
-                    <div className="space-y-1">
-                      <p className="text-xs uppercase tracking-wider text-muted-foreground">
+	                      <div className="space-y-1">
+	                        <p className="text-xs uppercase tracking-wider text-muted-foreground">
+	                          模型
+	                        </p>
+	                        <Input
+	                          value={llmQuickConfig.model}
+	                          onChange={(event) =>
+	                            handleQuickFixConfigChange("model", event.target.value)
+	                          }
+	                          placeholder="例如：gpt-5"
+	                          className={`h-9 cyber-input ${missingFieldClass("llmModel")}`}
+	                          disabled={creating || quickFixSaving || quickFixTesting}
+	                        />
+	                      </div>
+	                    </div>
+
+	                    <div className="space-y-1">
+	                      <p className="text-xs uppercase tracking-wider text-muted-foreground">
                         Base URL
                       </p>
                       <Input
@@ -564,11 +652,15 @@ export default function CreateProjectScanDialogContent({
                         className={`h-9 cyber-input ${missingFieldClass("llmApiKey")}`}
                         disabled={creating || quickFixSaving || quickFixTesting}
                       />
-                    </div>
-                  </div>
+	                    </div>
+	                  </div>
 
-                  {quickFixTestResult && (
-                    <p
+	                  {llmTestBlockedMessage ? (
+	                    <p className="text-xs text-amber-200/90">{llmTestBlockedMessage}</p>
+	                  ) : null}
+
+	                  {quickFixTestResult && (
+	                    <p
                       className={`text-xs ${
                         quickFixTestResult.success
                           ? "text-emerald-300"
@@ -582,13 +674,18 @@ export default function CreateProjectScanDialogContent({
                   )}
 
                   <div className="flex items-center justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="cyber-btn-outline h-9"
-                      onClick={handleQuickFixTest}
-                      disabled={creating || quickFixSaving || quickFixTesting}
-                    >
+	                    <Button
+	                      type="button"
+	                      variant="outline"
+	                      className="cyber-btn-outline h-9"
+	                      onClick={handleQuickFixTest}
+	                      disabled={
+	                        creating ||
+	                        quickFixSaving ||
+	                        quickFixTesting ||
+	                        disableQuickFixTest
+	                      }
+	                    >
                       {quickFixTesting ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin mr-2" />

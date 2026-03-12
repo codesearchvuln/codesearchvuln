@@ -60,8 +60,8 @@ mkdir -p "$STAGING_DIR" "$STAGING_DIR/DEBIAN"
 cp -R "$DEB_DIR/rootfs/." "$STAGING_DIR/"
 
 # Always bundle current compose templates from repository.
-cp "$ROOT_DIR/docker-compose.prod.yml" "$STAGING_DIR/etc/vulhunter/docker-compose.prod.yml"
-cp "$ROOT_DIR/docker-compose.prod.cn.yml" "$STAGING_DIR/etc/vulhunter/docker-compose.prod.cn.yml"
+cp "$ROOT_DIR/deploy/compose/docker-compose.prod.yml" "$STAGING_DIR/etc/vulhunter/docker-compose.prod.yml"
+cp "$ROOT_DIR/deploy/compose/docker-compose.prod.cn.yml" "$STAGING_DIR/etc/vulhunter/docker-compose.prod.cn.yml"
 
 # Remove hard-coded ports from bundled compose; runtime ports come from override file.
 for compose_file in \

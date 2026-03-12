@@ -1,0 +1,154 @@
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from app.api.v1.endpoints import skills as skills_module
+
+
+def _build_agent_event(
+    event_type: str,
+    *,
+    message: str = "",
+    tool_name: str | None = None,
+    tool_input=None,
+    tool_output=None,
+    metadata=None,
+):
+    return SimpleNamespace(
+        event_type=event_type,
+        message=message,
+        tool_name=tool_name,
+        tool_input=tool_input,
+        tool_output=tool_output,
+        metadata=metadata,
+    )
+
+
+async def _collect_sse_events(response) -> list[dict]:
+    chunks: list[str] = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk.decode() if isinstance(chunk, bytes) else str(chunk))
+
+    payload = "".join(chunks)
+    events: list[dict] = []
+    for block in payload.split("\n\n"):
+        if not block.strip():
+            continue
+        data_lines = [line[5:].strip() for line in block.splitlines() if line.startswith("data:")]
+        if not data_lines:
+            continue
+        events.append(json.loads("\n".join(data_lines)))
+    return events
+
+
+def test_build_skill_test_tool_allowlist_only_allows_selected_skill_and_reasoning_helpers():
+    from app.services.agent.skill_test_runner import build_skill_test_tool_allowlist
+
+    assert build_skill_test_tool_allowlist("read_file") == ("read_file", "think", "reflect")
+    assert build_skill_test_tool_allowlist("think") == ("think", "reflect")
+
+
+@pytest.mark.asyncio
+async def test_run_skill_test_endpoint_streams_expected_events_and_result(monkeypatch):
+    class _FakeRunner:
+        def __init__(self, **kwargs):
+            self.event_emitter = kwargs["event_emitter"]
+            self.skill_id = kwargs["skill_id"]
+
+        async def run(self):
+            await self.event_emitter.emit_event(
+                "project_prepare",
+                "默认测试项目命中 libplist",
+                {
+                    "project_name": "libplist",
+                    "temp_dir": "/tmp/skill-test-read_file-1234",
+                },
+            )
+            await self.event_emitter.emit(
+                _build_agent_event(
+                    "llm_action",
+                    message="Action: read_file",
+                    metadata={"selected_skill": self.skill_id},
+                )
+            )
+            await self.event_emitter.emit(
+                _build_agent_event(
+                    "tool_call",
+                    tool_name="read_file",
+                    tool_input={"file_path": "src/main.c"},
+                )
+            )
+            await self.event_emitter.emit(
+                _build_agent_event(
+                    "tool_result",
+                    tool_name="read_file",
+                    tool_output="文件: src/main.c",
+                    metadata={
+                        "display_command": "read_file -> sed",
+                        "command_chain": ["read_file", "sed"],
+                        "entries": [
+                            {
+                                "file_path": "src/main.c",
+                                "start_line": 1,
+                                "end_line": 3,
+                                "focus_line": 2,
+                                "language": "c",
+                                "lines": [
+                                    {"line_number": 1, "text": "int main() {", "kind": "context"},
+                                    {"line_number": 2, "text": "  return 0;", "kind": "focus"},
+                                    {"line_number": 3, "text": "}", "kind": "context"},
+                                ],
+                            }
+                        ],
+                    },
+                )
+            )
+            await self.event_emitter.emit_event(
+                "project_cleanup",
+                "临时目录清理完成",
+                {
+                    "temp_dir": "/tmp/skill-test-read_file-1234",
+                    "cleanup_success": True,
+                },
+            )
+            return {
+                "skill_id": self.skill_id,
+                "final_text": "已基于 libplist 回答用户问题。",
+                "project_name": "libplist",
+                "cleanup": {
+                    "success": True,
+                    "temp_dir": "/tmp/skill-test-read_file-1234",
+                },
+            }
+
+    monkeypatch.setattr(skills_module, "_get_user_config", AsyncMock(return_value={"llmConfig": {}}), raising=False)
+    monkeypatch.setattr(skills_module, "_init_llm_service", AsyncMock(return_value=object()), raising=False)
+    monkeypatch.setattr(skills_module, "SkillTestRunner", _FakeRunner, raising=False)
+
+    response = await skills_module.run_skill_test(
+        skill_id="read_file",
+        request=skills_module.SkillTestRequest(prompt="读取 plist 解析入口", max_iterations=3),
+        db=AsyncMock(),
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    events = await _collect_sse_events(response)
+    event_types = [event["type"] for event in events]
+
+    assert "project_prepare" in event_types
+    assert "llm_action" in event_types
+    assert "tool_call" in event_types
+    assert "tool_result" in event_types
+    assert "result" in event_types
+    assert "project_cleanup" in event_types
+    assert event_types[-1] == "done"
+
+    tool_result_event = next(event for event in events if event["type"] == "tool_result")
+    assert tool_result_event["metadata"]["display_command"] == "read_file -> sed"
+    assert tool_result_event["metadata"]["entries"][0]["file_path"] == "src/main.c"
+
+    result_event = next(event for event in events if event["type"] == "result")
+    assert result_event["data"]["final_text"] == "已基于 libplist 回答用户问题。"
+    assert result_event["data"]["cleanup"]["success"] is True

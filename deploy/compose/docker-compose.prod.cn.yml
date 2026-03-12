@@ -2,7 +2,7 @@
 # VulHunter v3.0.4 生产环境一键部署配置（国内加速版）
 # =============================================
 # 使用南京大学镜像站加速拉取 GHCR 镜像
-# 部署命令: curl -fsSL https://raw.githubusercontent.com/unbengable12/AuditTool/main/docker-compose.prod.cn.yml | docker compose -f - up -d
+# 部署命令: curl -fsSL https://raw.githubusercontent.com/unbengable12/AuditTool/main/deploy/compose/docker-compose.prod.cn.yml | docker compose -f - up -d
 # 镜像加速说明：
 # - 原始地址：ghcr.io
 # - 加速地址：ghcr.nju.edu.cn（南京大学开源镜像站）
@@ -95,7 +95,6 @@ services:
     networks:
       - vulhunter-network
 
-  # 数据库迁移服务 - 在后端启动前自动执行
   db-migrate:
     image: ${GHCR_REGISTRY:-ghcr.nju.edu.cn}/lintsinghua/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}
     restart: "no"
@@ -114,7 +113,6 @@ services:
     ports:
       - "3000:80"
     environment:
-      # 禁用代理 - nginx 需要直连后端
       - HTTP_PROXY=
       - HTTPS_PROXY=
       - http_proxy=
@@ -127,7 +125,6 @@ services:
     networks:
       - vulhunter-network
 
-  # 预拉取沙箱镜像（后端会按需调用）
   sandbox-pull:
     image: ${GHCR_REGISTRY:-ghcr.nju.edu.cn}/lintsinghua/vulhunter-sandbox:${VULHUNTER_IMAGE_TAG:-latest}
     restart: "no"

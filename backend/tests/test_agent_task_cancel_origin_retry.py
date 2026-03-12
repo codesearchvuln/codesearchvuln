@@ -62,7 +62,7 @@ async def test_run_with_retries_system_cancel_retries_when_marked():
         return "ok"
 
     result = await _run_with_retries(
-        "RAG_INDEX_AND_TOOLS_INIT",
+        "TOOLS_INIT",
         task_id,
         emitter,
         cancelled_then_success,

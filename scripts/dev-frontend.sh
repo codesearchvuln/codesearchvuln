@@ -15,10 +15,7 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 echo "[INFO] starting backend dependencies..."
-docker compose up -d db redis backend
+docker compose up -d db redis backend frontend
 
-echo "[INFO] starting frontend-dev (hot reload)..."
-docker compose -f docker-compose.yml -f docker-compose.frontend-dev.yml up -d frontend-dev
-
-echo "[INFO] frontend dev ready: http://localhost:5173"
+echo "[INFO] frontend dev ready: http://localhost:3000"
 echo "[INFO] backend api docs: http://localhost:8000/docs"

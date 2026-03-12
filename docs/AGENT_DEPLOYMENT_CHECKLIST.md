@@ -4,16 +4,22 @@
 
 ### 0. Compose 默认加载口径
 
-默认在仓库根目录执行 `docker-compose up --build` 时，会加载：
+默认在仓库根目录执行 `docker compose up --build` 时，会加载：
 
 1. `docker-compose.yml`
-2. `docker-compose.override.yml`
+
+如需显式执行全量本地构建，请叠加：
+
+1. `docker-compose.yml`
+2. `docker-compose.full.yml`
 
 可用以下命令自检当前生效配置：
 
 ```bash
-docker-compose config --services
-docker-compose config
+docker compose config --services
+docker compose config
+docker compose -f docker-compose.yml -f docker-compose.full.yml config --services
+docker compose -f docker-compose.yml -f docker-compose.full.yml config
 ```
 
 ### 1. 环境依赖 ✅

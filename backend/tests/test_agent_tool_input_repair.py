@@ -86,6 +86,29 @@ class _ReadTool:
         )
 
 
+class _ListSchema(BaseModel):
+    directory: str = "."
+    recursive: bool = False
+    max_files: Optional[int] = None
+
+
+class _ListTool:
+    args_schema = _ListSchema
+    name = "list_files"
+
+    async def execute(self, **kwargs):
+        return SimpleNamespace(
+            success=True,
+            data={
+                "directory": kwargs.get("directory"),
+                "recursive": kwargs.get("recursive"),
+                "max_files": kwargs.get("max_files"),
+            },
+            error=None,
+            metadata={},
+        )
+
+
 class _PushFindingSchema(BaseModel):
     file_path: str
     line_start: int
@@ -220,6 +243,38 @@ async def test_execute_tool_blocks_virtual_alias_when_virtual_routing_disabled()
     output = await agent.execute_tool("rag_query", {"query": "auth"})
 
     assert "工具名不可用" in output or "工具 'rag_query' 不存在" in output
+    tool_result_events = _events_by_type(emitter, "tool_result")
+    if tool_result_events:
+        metadata = tool_result_events[0].metadata or {}
+        assert metadata.get("alias_blocked") is True
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_resolves_list_alias_to_list_files():
+    agent, emitter = _make_agent(tools={"list_files": _ListTool()})
+
+    output = await agent.execute_tool("list", {"directory": ".", "max_files": 20})
+
+    assert "directory" in output
+    assert "max_files" in output
+    assert "20" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    assert tool_call_events[0].tool_name == "list_files"
+    metadata = tool_call_events[0].metadata or {}
+    assert metadata.get("alias_used") == "list"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_blocks_list_alias_when_virtual_routing_disabled():
+    agent, emitter = _make_agent(
+        tools={"list_files": _ListTool()},
+        metadata={"disable_virtual_routing": True},
+    )
+
+    output = await agent.execute_tool("list", {"directory": "."})
+
+    assert "工具名不可用" in output or "工具 'list' 不存在" in output
     tool_result_events = _events_by_type(emitter, "tool_result")
     if tool_result_events:
         metadata = tool_result_events[0].metadata or {}

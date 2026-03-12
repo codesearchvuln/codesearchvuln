@@ -64,10 +64,13 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 150  # 超时时间（秒）
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 4096
+    LLM_TOKEN_COUNTING_MODE: str = "heuristic"  # heuristic, auto, precise
+    TIKTOKEN_CACHE_DIR: str = "./data/cache/tiktoken"
+    LLM_TOKENIZER_PREWARM: bool = False
 
     # Agent 流式超时配置（秒）
-    LLM_FIRST_TOKEN_TIMEOUT: int = 90  # 等待首个Token的超时时间
-    LLM_STREAM_TIMEOUT: int = 60  # 流式输出中两个Token之间的超时时间
+    LLM_FIRST_TOKEN_TIMEOUT: int = 45  # 等待首个Token的超时时间
+    LLM_STREAM_TIMEOUT: int = 120  # 流式输出中两个Token之间的超时时间
     SUB_AGENT_TIMEOUT_SECONDS: int = 600  # 子Agent超时时间（10分钟）
     TOOL_TIMEOUT_SECONDS: int = 60  # 工具执行默认超时时间
     

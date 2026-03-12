@@ -120,6 +120,7 @@ pack_docker_layout() {
     "$tmp_root/backend"
 
   cp "$ROOT_DIR/docker-compose.yml" "$tmp_root/"
+  cp "$ROOT_DIR/docker-compose.full.yml" "$tmp_root/"
   cp "$ROOT_DIR/backend/Dockerfile" "$tmp_root/backend/"
   cp "$ROOT_DIR/frontend/Dockerfile" "$tmp_root/frontend/"
   cp "$ROOT_DIR/docker/sandbox/Dockerfile" "$tmp_root/docker/sandbox/"
@@ -132,7 +133,12 @@ pack_docker_layout() {
 run_compose_build_with_retries() {
   local -a services=("$@")
   local attempt=1
-  local -a compose_cmd=("$DOCKER_BIN" compose -f "${ROOT_DIR}/docker-compose.yml")
+  local -a compose_cmd=(
+    "$DOCKER_BIN"
+    compose
+    -f "${ROOT_DIR}/docker-compose.yml"
+    -f "${ROOT_DIR}/docker-compose.full.yml"
+  )
 
   while true; do
     log "docker compose build attempt ${attempt}/${BUILD_RETRIES} for services: ${services[*]}"

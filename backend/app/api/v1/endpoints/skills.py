@@ -1,12 +1,24 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Literal, Optional
+
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
+from app.api.v1.endpoints.agent_test import (
+    QueueEventEmitter,
+    _get_user_config,
+    _init_llm_service,
+    _run_agent_streaming,
+)
+from app.db.session import get_db
 from app.models.user import User
+from app.services.agent.skill_test_runner import SkillTestRunner
 from app.services.agent.skills.scan_core import (
     get_scan_core_skill_detail,
     search_scan_core_skills,
@@ -56,6 +68,15 @@ class SkillDetailResponse(BaseModel):
     workflow_content: Optional[str] = None
     workflow_truncated: Optional[bool] = None
     workflow_error: Optional[str] = None
+    test_supported: bool = False
+    test_mode: Literal["single_skill_strict", "disabled"] = "disabled"
+    test_reason: Optional[str] = None
+    default_test_project_name: Literal["libplist"] = "libplist"
+
+
+class SkillTestRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=4000, description="自然语言测试输入")
+    max_iterations: int = Field(default=4, ge=1, le=20)
 
 
 @router.get("/catalog", response_model=SkillCatalogResponse)
@@ -85,3 +106,37 @@ async def get_skill_detail(
     payload = dict(detail)
     payload["enabled"] = True
     return SkillDetailResponse(**payload)
+
+
+@router.post("/{skill_id}/test")
+async def run_skill_test(
+    skill_id: str,
+    request: SkillTestRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    detail = get_scan_core_skill_detail(skill_id=skill_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+    if not bool(detail.get("test_supported")):
+        raise HTTPException(status_code=400, detail=str(detail.get("test_reason") or "当前 skill 暂不支持测试"))
+
+    user_config = await _get_user_config(db, str(current_user.id))
+    llm_service = await _init_llm_service(user_config)
+    queue: asyncio.Queue = asyncio.Queue()
+    emitter = QueueEventEmitter(queue)
+    runner = SkillTestRunner(
+        skill_id=skill_id,
+        prompt=request.prompt,
+        max_iterations=request.max_iterations,
+        llm_service=llm_service,
+        db=db,
+        current_user=current_user,
+        event_emitter=emitter,
+    )
+
+    return StreamingResponse(
+        _run_agent_streaming(runner.run(), queue),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

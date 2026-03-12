@@ -60,10 +60,8 @@ async def test_smart_audit_tool_registry_contains_only_core_scan_surface(tmp_pat
         llm_service=MagicMock(),
         user_config=None,
         sandbox_manager=MagicMock(),
-        rag_enabled=False,
         exclude_patterns=[],
         target_files=[],
-        project_id=None,
         event_emitter=None,
         task_id=None,
     )

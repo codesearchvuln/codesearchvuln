@@ -34,7 +34,7 @@ async def test_run_with_retries_recovers_on_last_attempt():
         return "ok"
 
     result = await _run_with_retries(
-        "RAG_INDEX_AND_TOOLS_INIT",
+        "TOOLS_INIT",
         "task-1",
         emitter,
         flaky,
@@ -45,7 +45,7 @@ async def test_run_with_retries_recovers_on_last_attempt():
     assert attempts["count"] == 3
     assert len(emitter.warnings) == 2
     assert len(emitter.errors) == 0
-    assert emitter.warnings[0][1]["step_name"] == "RAG_INDEX_AND_TOOLS_INIT"
+    assert emitter.warnings[0][1]["step_name"] == "TOOLS_INIT"
 
 
 @pytest.mark.asyncio
@@ -59,7 +59,7 @@ async def test_run_with_retries_aborts_after_max_attempts():
 
     with pytest.raises(StepRetryExceededError) as exc_info:
         await _run_with_retries(
-            "RAG_INDEX",
+            "TOOLS_INIT",
             "task-2",
             emitter,
             always_fail,
@@ -67,7 +67,7 @@ async def test_run_with_retries_aborts_after_max_attempts():
         )
 
     assert attempts["count"] == 3
-    assert exc_info.value.step_name == "RAG_INDEX"
+    assert exc_info.value.step_name == "TOOLS_INIT"
     assert exc_info.value.attempts == 3
     assert "第 3/3 次失败" in exc_info.value.final_message
     assert len(emitter.errors) == 1

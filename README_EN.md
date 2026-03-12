@@ -121,30 +121,38 @@ Do not commit real API keys into the repository.
 ./scripts/compose-up-with-fallback.sh
 ```
 
-For fast iterative development (recommended, containerized hot reload for both frontend and backend):
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-To use the mirror-probing fallback script with the dev overlay:
-
-```bash
-./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-To use the repository's default full local Docker build path directly:
+To use the default day-to-day incremental development flow directly (recommended, containerized hot reload for both frontend and backend):
 
 ```bash
 docker compose up -d --build
 ```
 
+To run the explicit full local build path:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build
+```
+
+To run the full local build path through the mirror-probing fallback script:
+
+```bash
+./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.full.yml up -d --build
+```
+
+If you want attached-mode debugging on WSL/Linux, explicitly disable the Compose interactive menu to avoid `watch` shortcut crashes on affected Compose builds:
+
+```bash
+COMPOSE_MENU=false docker compose up --build
+# or
+docker compose up --build --menu=false
+```
+
 If you want prebuilt-image deployment (production / quick bootstrap), use:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f deploy/compose/docker-compose.prod.yml up -d
 # or (CN-accelerated variant)
-docker compose -f docker-compose.prod.cn.yml up -d
+docker compose -f deploy/compose/docker-compose.prod.cn.yml up -d
 ```
 
 ### 4) Open
@@ -156,12 +164,17 @@ docker compose -f docker-compose.prod.cn.yml up -d
 ### Notes
 
 - The backend mounts `/var/run/docker.sock` for sandbox execution. Review security boundaries before using in production.
-- For fast iterative development, use the dev overlay: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`. This path switches frontend/backend to bind-mounted source + hot reload and disables heavyweight startup defaults such as `MCP_REQUIRE_ALL_READY_ON_STARTUP` and `SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP`.
-- The fallback-script variant of that flow is `./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build`.
-- The root default Compose flow remains the full local image build path: `docker compose up -d --build` (or `./scripts/compose-up-with-fallback.sh`).
-- If you only want frontend HMR, `docker-compose.frontend-dev.yml` remains available as the secondary frontend-only path: `docker compose -f docker-compose.yml -f docker-compose.frontend-dev.yml up -d frontend-dev`.
-- `docker-compose.prod.yml` / `docker-compose.prod.cn.yml` remain prebuilt-image deployment flows.
-- `docker-compose.prod.yml` and `docker-compose.prod.cn.yml` use the Nanjing University GHCR mirror (`ghcr.nju.edu.cn/lintsinghua/*`) for faster pulls in CN regions. Replace with your own images/registry for production deployments if needed.
+- The root Compose default now targets day-to-day incremental development: `docker compose up -d --build`. This path switches frontend/backend to bind-mounted source + hot reload and disables heavyweight startup defaults such as `MCP_REQUIRE_ALL_READY_ON_STARTUP` and `SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP`.
+- For the explicit full local build path, add `docker-compose.full.yml`: `docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build`.
+- The fallback-script variant of the full local build path is `./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.full.yml up -d --build`.
+- Local Compose startup, including the `docker-compose.full.yml` overlay, now disables Codex skills preinstallation by default so remote skill sync cannot block the backend.
+- To temporarily restore that preinstall step, run: `CODEX_SKILLS_AUTO_INSTALL=true docker compose -f docker-compose.yml -f docker-compose.full.yml up --build --menu=false`.
+- To install Codex skills manually after the container is up, run: `docker compose -f docker-compose.yml -f docker-compose.full.yml exec backend /app/scripts/install_codex_skills.sh`.
+- If you run attached `docker compose up` on WSL/Linux, use `COMPOSE_MENU=false docker compose up --build` or `docker compose up --build --menu=false`; after upgrading to Docker Compose `>= 2.37.2`, the default menu behavior is safe again.
+- Adminer is now an on-demand tools profile: `docker compose --profile tools up -d adminer`.
+- If you only need the default frontend dev container, use `./scripts/dev-frontend.sh` or `frontend/scripts/run-in-dev-container.sh`.
+- Prebuilt-image deployment templates now live at `deploy/compose/docker-compose.prod.yml` and `deploy/compose/docker-compose.prod.cn.yml`.
+- Those production templates use the Nanjing University GHCR mirror (`ghcr.nju.edu.cn/lintsinghua/*`) for faster pulls in CN regions. Replace with your own images/registry for production deployments if needed.
 - The dev build flow defaults to `./scripts/compose-up-with-fallback.sh`: it probes candidate mirrors first, ranks by latency, then retries build phases in ranked order (instead of fixed CN->official phases).
 - Docker image source probing (DockerHub/GHCR) now runs in parallel; failed candidates are downgraded to the tail instead of blocking other sources.
 - Default DockerHub candidates: `docker.m.daocloud.io/library,docker.1ms.run/library,docker.io/library`; default GHCR candidates: `ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.io`.

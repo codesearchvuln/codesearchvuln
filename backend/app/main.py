@@ -183,6 +183,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Git 项目缓存初始化失败: {e}")
 
+    # 初始化 tiktoken 缓存目录，并按需预热。
+    try:
+        from app.services.llm.tokenizer import ensure_tiktoken_cache_dir, prewarm_tiktoken
+
+        tiktoken_cache_dir = ensure_tiktoken_cache_dir()
+        if tiktoken_cache_dir:
+            logger.info(f"  - tiktoken 缓存目录就绪: {tiktoken_cache_dir}")
+
+        if getattr(settings, "LLM_TOKENIZER_PREWARM", False):
+            prewarm_tiktoken(settings.LLM_MODEL or "gpt-4o-mini")
+    except Exception as e:
+        logger.warning(f"tiktoken 启动预热初始化失败: {e}")
+
     # 初始化数据库（创建默认账户）
     # 注意：需要先运行 alembic upgrade head 创建表结构
     try:

@@ -1708,15 +1708,6 @@ export default function Projects() {
                                     />
                                 </div>
 
-                                <div className="rounded-lg border border-dashed border-sky-500/30 bg-sky-500/8 p-4">
-                                    <p className="text-xs font-mono font-bold uppercase text-sky-100 mb-1">
-                                        自动生成简介
-                                    </p>
-                                    <p className="text-sm text-sky-50/85 leading-6">
-                                        系统会在压缩包上传完成后，基于项目结构自动生成 1-2 句项目使用场景简介，无需手动填写。
-                                    </p>
-                                </div>
-
                                 <div className="space-y-4">
                                     <Label className="font-mono font-bold uppercase text-base text-muted-foreground">
                                         源代码

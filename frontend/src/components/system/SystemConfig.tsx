@@ -60,116 +60,21 @@ import { toast } from "sonner";
 import { api } from "@/shared/api/database";
 import EmbeddingConfig from "@/components/agent/EmbeddingConfig";
 import {
+	buildLlmProviderOptions,
+	getDefaultBaseUrlForProvider as resolveDefaultBaseUrlForProvider,
+	getDefaultModelForProvider as resolveDefaultModelForProvider,
+	getLlmProviderInfo,
+	normalizeLlmProviderId,
+	shouldRequireApiKey as resolveShouldRequireApiKey,
+	type LLMProviderItem,
+} from "@/shared/llm/providerCatalog";
+import {
 	resolvePreferredModelStats,
 	type LlmModelStatsCounts,
 	type LlmModelStatsFetchState,
 	type LlmModelStatsSource,
 	type LlmModelStatsStatus,
 } from "@/components/system/llmModelStatsSummary";
-
-const DEFAULT_MODELS: Record<string, string> = {
-	openai: "gpt-5",
-	anthropic: "claude-sonnet-4-20250514",
-	gemini: "gemini-2.5-pro",
-	deepseek: "deepseek-chat",
-	ollama: "llama3.1",
-	openrouter: "openai/gpt-5-mini",
-};
-
-type LLMFetchStyle =
-	| "openai_compatible"
-	| "anthropic"
-	| "azure_openai"
-	| "native_static";
-
-interface LLMProviderItem {
-	id: string;
-	name: string;
-	description: string;
-	defaultModel: string;
-	models: string[];
-	defaultBaseUrl: string;
-	requiresApiKey: boolean;
-	supportsModelFetch: boolean;
-	fetchStyle: LLMFetchStyle;
-}
-
-const BUILTIN_LLM_PROVIDERS: LLMProviderItem[] = [
-	{
-		id: "openai",
-		name: "OpenAI",
-		description: "OpenAI 官方模型服务",
-		defaultModel: "gpt-5",
-		models: ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4o"],
-		defaultBaseUrl: "https://api.openai.com/v1",
-		requiresApiKey: true,
-		supportsModelFetch: true,
-		fetchStyle: "openai_compatible",
-	},
-	{
-		id: "anthropic",
-		name: "Anthropic",
-		description: "Claude 系列模型服务",
-		defaultModel: "claude-sonnet-4-20250514",
-		models: [
-			"claude-sonnet-4-20250514",
-			"claude-opus-4-20250514",
-			"claude-3-5-haiku-latest",
-		],
-		defaultBaseUrl: "https://api.anthropic.com",
-		requiresApiKey: true,
-		supportsModelFetch: true,
-		fetchStyle: "anthropic",
-	},
-	{
-		id: "gemini",
-		name: "Google Gemini",
-		description: "Google Gemini 模型服务",
-		defaultModel: "gemini-2.5-pro",
-		models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
-		defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-		requiresApiKey: true,
-		supportsModelFetch: true,
-		fetchStyle: "openai_compatible",
-	},
-	{
-		id: "deepseek",
-		name: "DeepSeek",
-		description: "DeepSeek 推理与对话模型",
-		defaultModel: "deepseek-chat",
-		models: ["deepseek-chat", "deepseek-reasoner"],
-		defaultBaseUrl: "https://api.deepseek.com/v1",
-		requiresApiKey: true,
-		supportsModelFetch: true,
-		fetchStyle: "openai_compatible",
-	},
-	{
-		id: "openrouter",
-		name: "OpenRouter",
-		description: "统一多模型路由聚合服务",
-		defaultModel: "openai/gpt-5-mini",
-		models: [
-			"openai/gpt-5-mini",
-			"anthropic/claude-3.7-sonnet",
-			"google/gemini-2.5-pro",
-		],
-		defaultBaseUrl: "https://openrouter.ai/api/v1",
-		requiresApiKey: true,
-		supportsModelFetch: true,
-		fetchStyle: "openai_compatible",
-	},
-	{
-		id: "ollama",
-		name: "Ollama",
-		description: "本地部署 LLM（无 API Key）",
-		defaultModel: "llama3.1",
-		models: ["llama3.1", "qwen2.5", "deepseek-r1:latest"],
-		defaultBaseUrl: "http://localhost:11434/v1",
-		requiresApiKey: false,
-		supportsModelFetch: true,
-		fetchStyle: "openai_compatible",
-	},
-];
 
 interface LLMModelMetadata {
 	contextWindow?: number | null;
@@ -181,15 +86,6 @@ interface LLMModelMetadata {
 type TokenRecommendation = {
 	value: number;
 	source: string;
-};
-
-const normalizeLlmProviderId = (
-	provider: string | undefined | null,
-): string => {
-	const normalized = (provider || "").trim().toLowerCase();
-	if (!normalized) return "openai";
-	if (normalized === "claude") return "anthropic";
-	return normalized;
 };
 
 const recommendTokensFromStaticRules = (modelName: string): number | null => {
@@ -939,28 +835,10 @@ export function SystemConfig({
 	}, [sections.length]);
 
 	const llmProviderOptions = useMemo(() => {
-		const backendProviders = Array.isArray(llmProvidersFromBackend)
-			? llmProvidersFromBackend
-			: [];
-		const baseProviders: LLMProviderItem[] =
-			backendProviders.length > 0 ? backendProviders : BUILTIN_LLM_PROVIDERS;
-		const currentProviderId = normalizeLlmProviderId(config?.llmProvider || "");
-		if (!currentProviderId) return baseProviders;
-		if (baseProviders.some((provider) => provider.id === currentProviderId)) {
-			return baseProviders;
-		}
-		const customProvider: LLMProviderItem = {
-			id: currentProviderId,
-			name: currentProviderId,
-			description: "自定义模型提供商",
-			defaultModel: "",
-			models: [],
-			defaultBaseUrl: "",
-			requiresApiKey: true,
-			supportsModelFetch: false,
-			fetchStyle: "openai_compatible",
-		};
-		return [...baseProviders, customProvider];
+		return buildLlmProviderOptions({
+			backendProviders: llmProvidersFromBackend,
+			currentProviderId: config?.llmProvider || "",
+		});
 	}, [llmProvidersFromBackend, config?.llmProvider]);
 
 	const loadConfig = reloadConfig;
@@ -1016,17 +894,15 @@ export function SystemConfig({
 	};
 
 	const getProviderInfo = (providerId: string): LLMProviderItem | undefined => {
-		return llmProviderOptions.find((p) => p.id === providerId);
+		return getLlmProviderInfo(llmProviderOptions, providerId);
 	};
 
 	const getDefaultModelForProvider = (providerId: string): string => {
-		const backend = getProviderInfo(providerId);
-		return backend?.defaultModel || DEFAULT_MODELS[providerId] || "";
+		return resolveDefaultModelForProvider(llmProviderOptions, providerId);
 	};
 
 	const getDefaultBaseUrlForProvider = (providerId: string): string => {
-		const backend = getProviderInfo(providerId);
-		return backend?.defaultBaseUrl || "";
+		return resolveDefaultBaseUrlForProvider(llmProviderOptions, providerId);
 	};
 
 	const getModelsForProvider = (providerId: string): string[] => {
@@ -1129,9 +1005,7 @@ export function SystemConfig({
 	};
 
 	const shouldRequireApiKey = (providerId: string): boolean => {
-		const provider = getProviderInfo(providerId);
-		if (provider) return Boolean(provider.requiresApiKey);
-		return providerId !== "ollama";
+		return resolveShouldRequireApiKey(llmProviderOptions, providerId);
 	};
 
 	const validateStrictLlmInputs = (

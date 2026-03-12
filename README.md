@@ -4,20 +4,7 @@
   <strong>简体中文</strong> | <a href="README_EN.md">English</a>
 </p>
 
-<div align="center">
-  <img src="frontend/public/images/logo.png" alt="VulHunter Logo" width="420" />
-</div>
 
-<div align="center">
-
-[![Version](https://img.shields.io/badge/version-3.0.4-blue.svg)](CHANGELOG.md)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
-[![Python](https://img.shields.io/badge/Python-3.11+-3776ab.svg)](https://www.python.org/)
-
-</div>
 
 VulHunter 是一个面向仓库级项目的智能审计平台，基于 **Multi-Agent（编排/侦察/分析/验证）** 协作架构，结合：
 
@@ -123,30 +110,38 @@ cp backend/env.example backend/.env
 ./scripts/compose-up-with-fallback.sh
 ```
 
-如需快速重复开发（推荐，前后端容器内热重载）：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-如需使用带镜像源测速/回退的脚本：
-
-```bash
-./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-如需直接使用 Docker Compose 默认全功能本地构建链路：
+如需直接使用 Docker Compose 默认日常增量开发链路（推荐，前后端容器内热重载）：
 
 ```bash
 docker compose up -d --build
 ```
 
+如需显式执行全量本地构建：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build
+```
+
+如需使用带镜像源测速/回退的脚本执行全量本地构建：
+
+```bash
+./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.full.yml up -d --build
+```
+
+如需在 WSL/Linux 上以前台附着模式调试，请显式关闭 Compose 交互菜单，避免受影响版本的 `docker compose` 因 `watch` 快捷键崩溃：
+
+```bash
+COMPOSE_MENU=false docker compose up --build
+# 或
+docker compose up --build --menu=false
+```
+
 如需使用预构建镜像部署（生产/快速拉起）：
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f deploy/compose/docker-compose.prod.yml up -d
 # 或（国内加速版）
-docker compose -f docker-compose.prod.cn.yml up -d
+docker compose -f deploy/compose/docker-compose.prod.cn.yml up -d
 ```
 
 ### Windows 用户特别说明
@@ -191,12 +186,17 @@ powershell -ExecutionPolicy Bypass -File scripts\compose-up-with-fallback.ps1
 ### 重要说明
 
 - 后端需要访问 Docker，用于沙箱验证，因此默认会挂载 `/var/run/docker.sock`。生产环境请评估权限边界与隔离策略。
-- 快速重复开发推荐使用 dev 覆盖层：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`。该路径会把前后端切到源码挂载 + 热重载，并默认关闭 `MCP_REQUIRE_ALL_READY_ON_STARTUP`、`SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP` 等重型启动项。
-- 如需脚本版快速重复开发，可使用：`./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build`。
-- 默认根目录 Compose 仍是全功能本地镜像构建链路：`docker compose up -d --build`（或 `./scripts/compose-up-with-fallback.sh`）。
-- 如只需单独做前端 HMR 调试，可继续使用 `docker-compose.frontend-dev.yml`：`docker compose -f docker-compose.yml -f docker-compose.frontend-dev.yml up -d frontend-dev`。
-- `docker-compose.prod.yml` / `docker-compose.prod.cn.yml` 用于预构建镜像部署。
-- `docker-compose.prod.yml` 与 `docker-compose.prod.cn.yml` 默认使用南京大学 GHCR 镜像站（`ghcr.nju.edu.cn/lintsinghua/*`）加速拉取。如需生产镜像部署，可替换为你们自己的镜像地址/私有仓库。
+- 默认根目录 Compose 已切到日常增量开发：`docker compose up -d --build`。该路径会把前后端切到源码挂载 + 热重载，并默认关闭 `MCP_REQUIRE_ALL_READY_ON_STARTUP`、`SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP` 等重型启动项。
+- 如需显式执行全量本地构建，请叠加 `docker-compose.full.yml`：`docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build`。
+- 如需脚本版全量本地构建，可使用：`./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.full.yml up -d --build`。
+- 本地 Compose 启动（包括 `docker-compose.full.yml` 覆盖层）默认关闭 Codex skills 预安装，避免远程拉取阻塞后端启动。
+- 如需临时恢复预安装，可显式设置：`CODEX_SKILLS_AUTO_INSTALL=true docker compose -f docker-compose.yml -f docker-compose.full.yml up --build --menu=false`。
+- 如需在容器启动后手动安装，可执行：`docker compose -f docker-compose.yml -f docker-compose.full.yml exec backend /app/scripts/install_codex_skills.sh`。
+- 如需以前台附着模式执行 `docker compose up`，在 WSL/Linux 上请使用 `COMPOSE_MENU=false docker compose up --build` 或 `docker compose up --build --menu=false`；升级到 Docker Compose `>= 2.37.2` 后可恢复默认菜单行为。
+- 开发者数据库界面已改为按需 profile：`docker compose --profile tools up -d adminer`。
+- 如只需使用默认前端开发容器，可运行 `./scripts/dev-frontend.sh` 或 `frontend/scripts/run-in-dev-container.sh`。
+- 预构建镜像部署模板已迁移到 `deploy/compose/docker-compose.prod.yml` 与 `deploy/compose/docker-compose.prod.cn.yml`。
+- 上述生产模板默认使用南京大学 GHCR 镜像站（`ghcr.nju.edu.cn/lintsinghua/*`）加速拉取。如需生产镜像部署，可替换为你们自己的镜像地址/私有仓库。
 - 开发构建链路默认使用 `./scripts/compose-up-with-fallback.sh`：先对候选镜像源测速并按延迟排序，再按排序分阶段重试构建（不再固定“国内→官方”两段式）。
 - Docker 镜像拉取（DockerHub/GHCR）测速采用并行探测，失败候选会自动降到排序末位，不阻塞其他可用源。
 - DockerHub 默认候选池：`docker.m.daocloud.io/library,docker.1ms.run/library,docker.io/library`；GHCR 默认候选池：`ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.io`。

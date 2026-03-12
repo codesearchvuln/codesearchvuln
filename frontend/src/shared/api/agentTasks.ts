@@ -428,7 +428,6 @@ export interface AgentTreeNode {
   parent_agent_id: string | null;
   depth: number;
   task_description: string | null;
-  knowledge_modules: string[] | null;
   status: "created" | "running" | "completed" | "failed" | "waiting";
   result_summary: string | null;
   findings_count: number;

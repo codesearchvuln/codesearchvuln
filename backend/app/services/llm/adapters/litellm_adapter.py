@@ -9,6 +9,7 @@ LiteLLM 统一适配器
 """
 
 import logging
+import time
 from typing import Dict, Any, Optional, List
 from ..base_adapter import BaseLLMAdapter
 from ..types import (
@@ -164,6 +165,46 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
         return None
 
+    def _estimate_message_tokens(self, messages: List[Dict[str, Any]]) -> int:
+        """使用快速估算计算消息 token，避免阻塞首包。"""
+        total = 0
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                total += estimate_tokens(content, self.config.model)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        total += estimate_tokens(part.get("text", ""), self.config.model)
+        return total
+
+    def _build_usage_fallback(
+        self,
+        messages: List[Dict[str, Any]],
+        accumulated_content: str,
+    ) -> tuple[Dict[str, int], float, str]:
+        """在上游未返回 usage 时，用快速估算补齐。"""
+        started_at = time.perf_counter()
+        prompt_tokens = self._estimate_message_tokens(messages)
+        completion_tokens = estimate_tokens(accumulated_content, self.config.model) if accumulated_content else 0
+        token_estimate_ms = round((time.perf_counter() - started_at) * 1000, 3)
+        return (
+            {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+            token_estimate_ms,
+            "heuristic",
+        )
+
+    @staticmethod
+    def _build_stream_diagnostics(usage_source: str, token_estimate_ms: float) -> Dict[str, Any]:
+        return {
+            "usage_source": usage_source,
+            "token_estimate_ms": token_estimate_ms,
+        }
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """使用 LiteLLM 发送请求"""
         try:
@@ -313,11 +354,6 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
-        # 🔥 估算输入 token 数量（用于在无法获取真实 usage 时进行估算）
-        input_tokens_estimate = sum(
-            estimate_tokens(msg["content"], self.config.model) for msg in messages
-        )
-
         kwargs = {
             "model": self._litellm_model,
             "messages": messages,
@@ -344,6 +380,8 @@ class LiteLLMAdapter(BaseLLMAdapter):
         final_usage = None  # 🔥 存储最终的 usage 信息
         chunk_count = 0  # 🔥 跟踪 chunk 数量
         terminal_emitted = False  # 防止结束后重复补发 empty_stream
+        usage_source = "none"
+        token_estimate_ms = 0.0
 
         try:
             response = await litellm.acompletion(**kwargs)
@@ -358,6 +396,8 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         "completion_tokens": chunk.usage.completion_tokens or 0,
                         "total_tokens": chunk.usage.total_tokens or 0,
                     }
+                    usage_source = "provider"
+                    token_estimate_ms = 0.0
                     logger.debug(f"Got usage from chunk: {final_usage}")
 
                 if not chunk.choices:
@@ -388,14 +428,10 @@ class LiteLLMAdapter(BaseLLMAdapter):
                     # 流式完成
                     # 🔥 如果没有从 chunk 获取到 usage，进行估算
                     if not final_usage:
-                        output_tokens_estimate = estimate_tokens(
-                            accumulated_content, self.config.model
+                        final_usage, token_estimate_ms, usage_source = self._build_usage_fallback(
+                            messages,
+                            accumulated_content,
                         )
-                        final_usage = {
-                            "prompt_tokens": input_tokens_estimate,
-                            "completion_tokens": output_tokens_estimate,
-                            "total_tokens": input_tokens_estimate + output_tokens_estimate,
-                        }
                         logger.debug(f"Estimated usage: {final_usage}")
 
                     # 🔥 ENHANCED: 如果累积内容为空但有 finish_reason，转为空响应错误而不是 done("")
@@ -417,6 +453,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                             "usage": final_usage,
                             "finish_reason": finish_reason,
                             "chunk_count": chunk_count,
+                            "diagnostics": self._build_stream_diagnostics(usage_source, token_estimate_ms),
                         }
                         terminal_emitted = True
                         break
@@ -426,6 +463,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                         "content": accumulated_content,
                         "usage": final_usage,
                         "finish_reason": finish_reason,
+                        "diagnostics": self._build_stream_diagnostics(usage_source, token_estimate_ms),
                     }
                     terminal_emitted = True
                     break
@@ -436,19 +474,16 @@ class LiteLLMAdapter(BaseLLMAdapter):
             elif accumulated_content:
                 logger.warning(f"Stream ended without finish_reason, returning accumulated content ({len(accumulated_content)} chars)")
                 if not final_usage:
-                    output_tokens_estimate = estimate_tokens(
-                        accumulated_content, self.config.model
+                    final_usage, token_estimate_ms, usage_source = self._build_usage_fallback(
+                        messages,
+                        accumulated_content,
                     )
-                    final_usage = {
-                        "prompt_tokens": input_tokens_estimate,
-                        "completion_tokens": output_tokens_estimate,
-                        "total_tokens": input_tokens_estimate + output_tokens_estimate,
-                    }
                 yield {
                     "type": "done",
                     "content": accumulated_content,
                     "usage": final_usage,
                     "finish_reason": "complete",
+                    "diagnostics": self._build_stream_diagnostics(usage_source, token_estimate_ms),
                 }
             else:
                 yield {
@@ -463,6 +498,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                     "usage": final_usage,
                     "finish_reason": None,
                     "chunk_count": chunk_count,
+                    "diagnostics": self._build_stream_diagnostics(usage_source, token_estimate_ms),
                 }
 
         except litellm.exceptions.RateLimitError as e:
@@ -481,20 +517,22 @@ class LiteLLMAdapter(BaseLLMAdapter):
                 retry_seconds = float(retry_match.group(1)) if retry_match else 60
                 user_message = f"API 调用频率超限，建议等待 {int(retry_seconds)} 秒后重试"
 
-            output_tokens_estimate = estimate_tokens(
-                accumulated_content, self.config.model
-            ) if accumulated_content else 0
+            usage = None
+            error_usage_source = "none"
+            error_token_estimate_ms = 0.0
+            if accumulated_content:
+                usage, error_token_estimate_ms, error_usage_source = self._build_usage_fallback(
+                    messages,
+                    accumulated_content,
+                )
             yield {
                 "type": "error",
                 "error_type": error_type,
                 "error": error_msg,
                 "user_message": user_message,
                 "accumulated": accumulated_content,
-                "usage": {
-                    "prompt_tokens": input_tokens_estimate,
-                    "completion_tokens": output_tokens_estimate,
-                    "total_tokens": input_tokens_estimate + output_tokens_estimate,
-                } if accumulated_content else None,
+                "usage": usage,
+                "diagnostics": self._build_stream_diagnostics(error_usage_source, error_token_estimate_ms),
             }
 
         except litellm.exceptions.AuthenticationError as e:
@@ -507,6 +545,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                 "user_message": "API Key 无效或已过期，请检查配置",
                 "accumulated": accumulated_content,
                 "usage": None,
+                "diagnostics": self._build_stream_diagnostics("none", 0.0),
             }
 
         except litellm.exceptions.APIConnectionError as e:
@@ -519,6 +558,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                 "user_message": "无法连接到 API 服务，请检查网络连接",
                 "accumulated": accumulated_content,
                 "usage": None,
+                "diagnostics": self._build_stream_diagnostics("none", 0.0),
             }
 
         except Exception as e:
@@ -548,20 +588,22 @@ class LiteLLMAdapter(BaseLLMAdapter):
                 error_type = "unknown"
                 user_message = "LLM 调用发生错误，请重试"
 
-            output_tokens_estimate = estimate_tokens(
-                accumulated_content, self.config.model
-            ) if accumulated_content else 0
+            usage = None
+            error_usage_source = "none"
+            error_token_estimate_ms = 0.0
+            if accumulated_content:
+                usage, error_token_estimate_ms, error_usage_source = self._build_usage_fallback(
+                    messages,
+                    accumulated_content,
+                )
             yield {
                 "type": "error",
                 "error_type": error_type,
                 "error": error_msg,
                 "user_message": user_message,
                 "accumulated": accumulated_content,
-                "usage": {
-                    "prompt_tokens": input_tokens_estimate,
-                    "completion_tokens": output_tokens_estimate,
-                    "total_tokens": input_tokens_estimate + output_tokens_estimate,
-                } if accumulated_content else None,
+                "usage": usage,
+                "diagnostics": self._build_stream_diagnostics(error_usage_source, error_token_estimate_ms),
             }
 
     async def validate_config(self) -> bool:

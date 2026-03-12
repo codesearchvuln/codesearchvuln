@@ -59,8 +59,13 @@ LLM_API_KEY=sk-your-api-key        # API 密钥
 LLM_MODEL=                         # 模型名称（留空使用默认模型）
 LLM_BASE_URL=                      # 自定义 API 端点（API 中转站）
 LLM_TIMEOUT=150                    # 请求超时时间（秒）
+LLM_TOKEN_COUNTING_MODE=heuristic  # Token 计数：heuristic / auto / precise
+TIKTOKEN_CACHE_DIR=./data/cache/tiktoken  # tiktoken 本地缓存目录
+LLM_TOKENIZER_PREWARM=false        # 启动时是否预热常见编码
 LLM_TEMPERATURE=0.1                # 生成温度（0-1，越低越确定）
 LLM_MAX_TOKENS=4096                # 最大生成 Token 数
+LLM_FIRST_TOKEN_TIMEOUT=45         # 首 Token 超时（秒）
+LLM_STREAM_TIMEOUT=120             # 流式 chunk 间超时（秒）
 
 # ========== 各平台独立配置（可选） ==========
 # 如果需要同时配置多个平台，可以单独设置

@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1.endpoints.config import LLMTestRequest, test_llm_connection as llm_connection_endpoint
+from app.api.v1.endpoints.config import get_default_config
 from app.services.llm.factory import LLMFactory
 from app.services.llm.service import LLMConfigError, LLMService
 from app.services.llm.types import LLMConfig, LLMProvider
@@ -84,6 +85,13 @@ def test_llm_factory_create_adapter_does_not_reuse_cache(monkeypatch):
     first = LLMFactory.create_adapter(config)
     second = LLMFactory.create_adapter(config)
     assert first is not second
+
+
+def test_default_config_uses_updated_agent_stream_timeouts():
+    config = get_default_config()
+
+    assert config["llmConfig"]["llmFirstTokenTimeout"] == 45
+    assert config["llmConfig"]["llmStreamTimeout"] == 120
 
 
 @pytest.mark.asyncio

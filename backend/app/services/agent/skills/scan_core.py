@@ -33,6 +33,51 @@ SCAN_CORE_MCP_BOUND_SKILL_IDS = (
 SCAN_CORE_LOCAL_SKILL_IDS = frozenset(
     skill_id for skill_id in SCAN_CORE_SKILL_IDS if skill_id not in SCAN_CORE_MCP_BOUND_SKILL_IDS
 )
+SCAN_CORE_DEFAULT_TEST_PROJECT_NAME = "libplist"
+SCAN_CORE_SKILL_TEST_SUPPORTED_IDS = frozenset(
+    {
+        "read_file",
+        "list_files",
+        "search_code",
+        "extract_function",
+        "pattern_match",
+        "smart_scan",
+        "quick_audit",
+        "think",
+        "reflect",
+    }
+)
+SCAN_CORE_SKILL_TEST_DISABLED_REASONS: Dict[str, str] = {
+    "dataflow_analysis": "首版仅开放可直接基于 libplist 自然语言提问的 skill；数据流分析依赖更复杂的上下文建模。",
+    "controlflow_analysis_light": "首版仅开放可直接基于 libplist 自然语言提问的 skill；控制流分析依赖更复杂的上下文建模。",
+    "logic_authz_analysis": "首版仅开放可直接基于 libplist 自然语言提问的 skill；鉴权/业务逻辑分析依赖更复杂的上下文建模。",
+    "run_code": "首版详情页暂不开放动态执行类 skill，避免引入额外运行时依赖。",
+    "sandbox_exec": "首版详情页暂不开放动态执行类 skill，避免引入额外运行时依赖。",
+    "verify_vulnerability": "首版详情页暂不开放多步骤编排型验证 skill。",
+    "create_vulnerability_report": "首版详情页暂不开放报告生成型 skill。",
+}
+
+
+def get_scan_core_skill_test_policy(skill_id: str) -> Dict[str, Any]:
+    normalized = str(skill_id or "").strip()
+    if normalized in SCAN_CORE_SKILL_TEST_SUPPORTED_IDS:
+        return {
+            "test_supported": True,
+            "test_mode": "single_skill_strict",
+            "test_reason": None,
+            "default_test_project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+        }
+
+    disabled_reason = SCAN_CORE_SKILL_TEST_DISABLED_REASONS.get(
+        normalized,
+        "首版仅开放直接可在 libplist 上进行自然语言提问测试的单技能集合。",
+    )
+    return {
+        "test_supported": False,
+        "test_mode": "disabled",
+        "test_reason": disabled_reason,
+        "default_test_project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+    }
 
 
 def _base_detail(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -55,6 +100,7 @@ def _base_detail(item: Dict[str, Any]) -> Dict[str, Any]:
         "workflow_content": None,
         "workflow_truncated": False,
         "workflow_error": "scan_core_static_catalog",
+        **get_scan_core_skill_test_policy(skill_id),
     }
 
 

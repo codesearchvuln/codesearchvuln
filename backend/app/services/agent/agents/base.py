@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 MAX_EVENT_PAYLOAD_CHARS = 120000
 
 TOOL_ALIAS_CANDIDATES: Dict[str, List[str]] = {
+    "list": ["list_files"],
     "smart_scan": ["smart_scan", "quick_audit", "pattern_match", "search_code", "read_file"],
     "quick_audit": ["quick_audit", "smart_scan", "pattern_match", "search_code", "read_file"],
 }
@@ -513,8 +514,8 @@ class BaseAgent(ABC):
 
         # 回退到环境变量默认值
         return {
-            'llm_first_token_timeout': getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 90),
-            'llm_stream_timeout': getattr(settings, 'LLM_STREAM_TIMEOUT', 60),
+            'llm_first_token_timeout': getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 45),
+            'llm_stream_timeout': getattr(settings, 'LLM_STREAM_TIMEOUT', 120),
             'agent_timeout': getattr(settings, 'AGENT_TIMEOUT_SECONDS', 1800),
             'sub_agent_timeout': getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),
             'tool_timeout': getattr(settings, 'TOOL_TIMEOUT_SECONDS', 60),
@@ -1636,6 +1637,12 @@ class BaseAgent(ABC):
             "empty_reason": None,
             "error_type": None,
             "error": None,
+            "timeout_stage": None,
+            "token_estimate_ms": 0.0,
+            "llm_request_start_ts": None,
+            "first_token_latency_ms": None,
+            "max_chunk_gap_ms": 0.0,
+            "usage_source": "none",
         }
 
         # 🔥 在开始 LLM 调用前检查取消
@@ -1659,7 +1666,18 @@ class BaseAgent(ABC):
 
             import time
             first_token_received = False
-            last_activity = time.time()
+            request_started_perf = time.perf_counter()
+            last_chunk_at = request_started_perf
+            self._last_llm_stream_meta["llm_request_start_ts"] = datetime.now(timezone.utc).isoformat()
+
+            def _merge_stream_diagnostics(chunk: Dict[str, Any]) -> None:
+                diagnostics = chunk.get("diagnostics") if isinstance(chunk, dict) else None
+                if not isinstance(diagnostics, dict):
+                    return
+                if "token_estimate_ms" in diagnostics:
+                    self._last_llm_stream_meta["token_estimate_ms"] = diagnostics.get("token_estimate_ms")
+                if diagnostics.get("usage_source"):
+                    self._last_llm_stream_meta["usage_source"] = diagnostics.get("usage_source")
 
             while True:
                 # 检查取消
@@ -1675,12 +1693,24 @@ class BaseAgent(ABC):
                     timeout = first_token_timeout if not first_token_received else stream_timeout
 
                     chunk = await asyncio.wait_for(iterator.__anext__(), timeout=timeout)
+                    chunk_received_at = time.perf_counter()
+                    gap_ms = max(0.0, (chunk_received_at - last_chunk_at) * 1000)
+                    if chunk_count > 0:
+                        self._last_llm_stream_meta["max_chunk_gap_ms"] = max(
+                            float(self._last_llm_stream_meta.get("max_chunk_gap_ms") or 0.0),
+                            round(gap_ms, 3),
+                        )
+                    last_chunk_at = chunk_received_at
                     chunk_count += 1
                     self._last_llm_stream_meta["chunk_count"] = chunk_count
-
-                    last_activity = time.time()
+                    _merge_stream_diagnostics(chunk)
                     
                     if chunk["type"] == "token":
+                        if not first_token_received:
+                            self._last_llm_stream_meta["first_token_latency_ms"] = round(
+                                (chunk_received_at - request_started_perf) * 1000,
+                                3,
+                            )
                         first_token_received = True
                         token = chunk["content"]
                         # 🔥 累积 content，确保 accumulated 变量更新
@@ -1750,14 +1780,27 @@ class BaseAgent(ABC):
                     break
                 except asyncio.TimeoutError:
                     timeout_type = "First Token" if not first_token_received else "Stream"
+                    timeout_stage = "preflight_timeout" if not first_token_received else "stream_idle_timeout"
                     logger.error(f"[{self.name}] LLM {timeout_type} Timeout ({timeout}s)")
                     error_msg = f"LLM 响应超时 ({timeout_type}, {timeout}s)"
-                    await self.emit_event("error", error_msg)
+                    await self.emit_event(
+                        "error",
+                        error_msg,
+                        metadata={
+                            "timeout_stage": timeout_stage,
+                            "llm_request_start_ts": self._last_llm_stream_meta.get("llm_request_start_ts"),
+                            "first_token_latency_ms": self._last_llm_stream_meta.get("first_token_latency_ms"),
+                            "max_chunk_gap_ms": self._last_llm_stream_meta.get("max_chunk_gap_ms"),
+                            "usage_source": self._last_llm_stream_meta.get("usage_source"),
+                            "token_estimate_ms": self._last_llm_stream_meta.get("token_estimate_ms"),
+                        },
+                    )
                     self._last_llm_stream_meta.update(
                         {
                             "finish_reason": None,
                             "empty_reason": "timeout",
-                            "error_type": "timeout",
+                            "error_type": timeout_stage,
+                            "timeout_stage": timeout_stage,
                             "error": error_msg,
                             "chunk_count": chunk_count,
                         }

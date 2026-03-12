@@ -30,6 +30,41 @@ detect_compose_cmd() {
   exit 127
 }
 
+compose_args_target_attached_up() {
+  local -a args=("$@")
+  local seen_up=0
+  local idx=0
+  local arg=""
+
+  while [ "$idx" -lt "${#args[@]}" ]; do
+    arg="${args[$idx]}"
+    if [ "$seen_up" -eq 0 ]; then
+      case "$arg" in
+        up)
+          seen_up=1
+          ;;
+        -f|--file|--env-file|-p|--project-name|--project-directory|--profile|--ansi|--parallel)
+          idx=$((idx + 1))
+          ;;
+        -*)
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+    else
+      case "$arg" in
+        -d|--detach)
+          return 1
+          ;;
+      esac
+    fi
+    idx=$((idx + 1))
+  done
+
+  [ "$seen_up" -eq 1 ]
+}
+
 require_positive_int() {
   local name="$1"
   local value="$2"
@@ -450,6 +485,11 @@ if [ "$#" -eq 0 ]; then
   COMPOSE_ARGS=(up -d --build)
 else
   COMPOSE_ARGS=("$@")
+fi
+
+if compose_args_target_attached_up "${COMPOSE_ARGS[@]}" && [ -z "${COMPOSE_MENU+x}" ]; then
+  export COMPOSE_MENU=false
+  log_info "Detected attached 'docker compose up'; defaulting COMPOSE_MENU=false to avoid Compose menu/watch crashes on affected versions."
 fi
 
 export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"

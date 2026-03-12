@@ -184,14 +184,14 @@ $env:BACKEND_PYPI_INDEX_PRIMARY="https://pypi.org/simple"
 # 克隆仓库后直接运行
 ./scripts/compose-up-with-fallback.sh
 
-# 或使用推荐的 dev 覆盖层（前后端容器内热重载）
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-
-# dev 覆盖层也可通过脚本透传
-./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-
-# 或直接使用默认 Compose 全功能构建链路
+# 或直接使用默认日常增量开发链路（前后端容器内热重载）
 docker compose up -d --build
+
+# 显式执行全量本地构建
+docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build
+
+# 通过脚本执行全量本地构建
+./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.full.yml up -d --build
 ```
 
 ### Windows
@@ -208,8 +208,8 @@ docker compose up -d --build
 
 ## 当前构建边界
 
-- 推荐的快速重复开发入口是 `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`。
-- dev 覆盖层会把 `backend`/`frontend` 切到源码挂载 + 热重载，并默认关闭 `MCP_REQUIRE_ALL_READY_ON_STARTUP`、`SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP` 等重型启动项。
-- 默认 `docker compose up --build` 仍是全功能本地镜像构建路径。
-- `docker-compose.frontend-dev.yml` 保留为前端单独开发的次级入口。
-- `docker-compose.prod.yml` 与 `docker-compose.prod.cn.yml` 保留为预构建镜像部署入口。
+- 默认 `docker compose up --build` 已切到日常增量开发链路。
+- 该默认链路会把 `backend`/`frontend` 切到源码挂载 + 热重载，并默认关闭 `MCP_REQUIRE_ALL_READY_ON_STARTUP`、`SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP` 等重型启动项。
+- 显式全量本地构建请叠加 `docker-compose.full.yml`。
+- Adminer 已并入 `tools` profile：`docker compose --profile tools up -d adminer`。
+- 预构建镜像部署模板已迁移到 `deploy/compose/docker-compose.prod.yml` 与 `deploy/compose/docker-compose.prod.cn.yml`。

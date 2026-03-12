@@ -97,3 +97,51 @@ async def test_stream_complete_emits_empty_stream_error(monkeypatch):
     assert len(chunks) == 1
     assert chunks[0]["type"] == "error"
     assert chunks[0]["error_type"] == "empty_stream"
+
+
+@pytest.mark.asyncio
+async def test_stream_complete_does_not_estimate_prompt_tokens_before_first_chunk(monkeypatch):
+    adapter = _build_adapter()
+    request = _build_request()
+    state = {"started": False}
+
+    token_chunk = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content="hi", reasoning_content=None, text=None),
+                finish_reason=None,
+            )
+        ],
+        usage=None,
+    )
+    done_chunk = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=None, reasoning_content=None, text=None),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+    )
+
+    async def _fake_acompletion(**kwargs):
+        state["started"] = True
+        return _AsyncStream([token_chunk, done_chunk])
+
+    def _fake_estimate_tokens(*_args, **_kwargs):
+        if not state["started"]:
+            raise AssertionError("prompt token estimation should not happen before upstream stream starts")
+        return 2
+
+    import litellm
+    from app.services.llm.adapters import litellm_adapter as litellm_adapter_module
+
+    monkeypatch.setattr(litellm, "acompletion", _fake_acompletion)
+    monkeypatch.setattr(litellm_adapter_module, "estimate_tokens", _fake_estimate_tokens)
+
+    chunks = []
+    async for chunk in adapter.stream_complete(request):
+        chunks.append(chunk)
+
+    assert chunks[0]["type"] == "token"
+    assert chunks[-1]["type"] == "done"
