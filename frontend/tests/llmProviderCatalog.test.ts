@@ -24,7 +24,7 @@ test("builtin provider catalog exposes the OpenAI compatible entry and Kimi pres
 	);
 
 	assert.ok(customProvider);
-	assert.equal(customProvider.name, "OpenAI Compatible / 自定义站点");
+	assert.equal(customProvider.name, "OpenAI Compatible");
 	assert.equal(customProvider.supportsCustomHeaders, true);
 	assert.ok(customProvider.exampleBaseUrls?.includes("https://api.openai.com/v1"));
 	assert.ok(customProvider.exampleBaseUrls?.includes("https://api.moonshot.cn/v1"));
@@ -76,7 +76,7 @@ test("getCreateProjectScanProviderLabel highlights the compatibility entry", () 
 	assert.equal(
 		getCreateProjectScanProviderLabel({
 			id: "custom",
-			name: "OpenAI Compatible / 自定义站点",
+			name: "OpenAI Compatible",
 		}),
 		"OpenAI 兼容",
 	);

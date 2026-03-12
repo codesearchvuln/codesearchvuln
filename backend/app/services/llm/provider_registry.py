@@ -46,7 +46,7 @@ LLM_PROVIDER_RUNTIME_MAP: dict[str, LLMProvider] = {
 
 LLM_PROVIDER_META_OVERRIDES: dict[str, dict[str, Any]] = {
     "custom": {
-        "name": "OpenAI Compatible / 自定义站点",
+        "name": "OpenAI Compatible",
         "description": "适用于 OpenAI 兼容站点、中转服务和自建网关。",
         "defaultBaseUrl": "",
         "requiresApiKey": True,

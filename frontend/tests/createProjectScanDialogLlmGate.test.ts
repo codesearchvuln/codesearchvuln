@@ -63,7 +63,7 @@ test("provider switching refreshes default model and only refreshes Base URL bef
 
 	assert.deepEqual(untouchedBaseUrl, {
 		provider: "ollama",
-		model: "llama3.1",
+		model: "llama3.3-70b",
 		baseUrl: "http://localhost:11434/v1",
 		apiKey: "demo-key",
 	});
@@ -82,7 +82,7 @@ test("provider switching refreshes default model and only refreshes Base URL bef
 
 	assert.deepEqual(manualBaseUrl, {
 		provider: "ollama",
-		model: "llama3.1",
+		model: "llama3.3-70b",
 		baseUrl: "https://gateway.internal/v1",
 		apiKey: "demo-key",
 	});
@@ -188,6 +188,88 @@ test("LLM gate stays locked until saved and manually tested, then re-locks after
 		}),
 		false,
 	);
+});
+
+test("agent preflight delegates to backend task preflight and does not fall back to local probing", async () => {
+	const agentPreflight = await importOrFail<any>(
+		"../src/shared/api/agentPreflight.ts",
+	);
+	const database = await importOrFail<any>("../src/shared/api/database.ts");
+
+	const originalRunAgentTaskPreflight = database.api.runAgentTaskPreflight;
+	const originalGetUserConfig = database.api.getUserConfig;
+	const originalTestLLMConnection = database.api.testLLMConnection;
+	let taskPreflightCalls = 0;
+	let legacyGetUserConfigCalls = 0;
+	let legacyTestCalls = 0;
+
+	database.api.runAgentTaskPreflight = async () => {
+		taskPreflightCalls += 1;
+		return {
+			ok: false,
+			stage: "llm_config",
+			reasonCode: "default_config",
+			message: "检测到默认配置",
+			effectiveConfig: {
+				provider: "openai",
+				model: "gpt-5",
+				baseUrl: "https://api.openai.com/v1",
+				apiKey: "",
+			},
+			savedConfig: null,
+		};
+	};
+	database.api.getUserConfig = async () => {
+		legacyGetUserConfigCalls += 1;
+		throw new Error("legacy getUserConfig should not be called");
+	};
+	database.api.testLLMConnection = async () => {
+		legacyTestCalls += 1;
+		throw new Error("legacy testLLMConnection should not be called");
+	};
+
+	try {
+		const result = await agentPreflight.runAgentPreflightCheck();
+
+		assert.equal(taskPreflightCalls, 1);
+		assert.equal(legacyGetUserConfigCalls, 0);
+		assert.equal(legacyTestCalls, 0);
+		assert.equal(result.reasonCode, "default_config");
+		assert.equal(result.savedConfig, null);
+		assert.deepEqual(result.effectiveConfig, {
+			provider: "openai",
+			model: "gpt-5",
+			baseUrl: "https://api.openai.com/v1",
+			apiKey: "",
+		});
+	} finally {
+		database.api.runAgentTaskPreflight = originalRunAgentTaskPreflight;
+		database.api.getUserConfig = originalGetUserConfig;
+		database.api.testLLMConnection = originalTestLLMConnection;
+	}
+});
+
+test("LLM gate treats prefilled default config as unsaved until the user saves it", async () => {
+	const llmGate = await importOrFail<any>(
+		"../src/components/scan/create-project-scan/llmGate.ts",
+	);
+
+	const status = llmGate.getLlmQuickGateStatus({
+		providerOptions: [],
+		currentConfig: {
+			provider: "openai",
+			model: "gpt-5",
+			baseUrl: "https://api.openai.com/v1",
+			apiKey: "prefilled-key",
+		},
+		savedConfig: null,
+		hasSuccessfulManualTest: false,
+	});
+
+	assert.equal(status.hasUnsavedChanges, true);
+	assert.equal(status.canTest, false);
+	assert.equal(status.canCreate, false);
+	assert.match(status.testBlockMessage, /先保存/);
 });
 
 test("project pagination slices three cards per page and clamps invalid pages", async () => {

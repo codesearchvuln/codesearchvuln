@@ -7,6 +7,7 @@ import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
 import { createAgentTask } from "@/shared/api/agentTasks";
 import {
 	runAgentPreflightCheck,
+	type AgentPreflightResult,
 	type PreflightMissingField,
 } from "@/shared/api/agentPreflight";
 import {
@@ -41,7 +42,6 @@ import {
 	extractCreateProjectScanApiErrorMessage,
 	isSevereCreateProjectScanRule,
 	normalizeCreateProjectScanProvider,
-	resolveCreateProjectScanEffectiveApiKey,
 	stripCreateProjectScanArchiveSuffix,
 } from "./create-project-scan/utils";
 
@@ -185,6 +185,52 @@ export default function CreateProjectScanDialog({
 		[llmProviderOptions, llmQuickConfig, savedLlmQuickConfig, quickFixManualTestPassed],
 	);
 
+	const loadLlmProviderOptions = async (currentProviderId: string) => {
+		const providerResponse = await api
+			.getLLMProviders()
+			.catch(() => ({ providers: [] as LLMProviderItem[] }));
+		return buildLlmProviderOptions({
+			backendProviders: providerResponse.providers || [],
+			currentProviderId,
+		});
+	};
+
+	const syncGateWithPreflightResult = async (
+		preflightResult: AgentPreflightResult,
+	) => {
+		const providerOptions = await loadLlmProviderOptions(
+			preflightResult.effectiveConfig.provider,
+		);
+		const effectiveQuickConfig: LlmQuickConfig = {
+			provider: normalizeCreateProjectScanProvider(
+				preflightResult.effectiveConfig.provider,
+			),
+			model: String(preflightResult.effectiveConfig.model || ""),
+			baseUrl: String(preflightResult.effectiveConfig.baseUrl || ""),
+			apiKey: String(preflightResult.effectiveConfig.apiKey || ""),
+		};
+		const savedQuickConfig = preflightResult.savedConfig
+			? {
+					provider: normalizeCreateProjectScanProvider(
+						preflightResult.savedConfig.provider,
+					),
+					model: String(preflightResult.savedConfig.model || ""),
+					baseUrl: String(preflightResult.savedConfig.baseUrl || ""),
+					apiKey: String(preflightResult.savedConfig.apiKey || ""),
+				}
+			: null;
+
+		setLlmProviderOptions(providerOptions);
+		setLlmQuickConfig(effectiveQuickConfig);
+		setSavedLlmQuickConfig(savedQuickConfig);
+		setQuickFixBaseUrlTouched(false);
+		setQuickFixManualTestPassed(preflightResult.ok);
+		setQuickFixTestResult(null);
+		setShowLlmQuickFixPanel(!preflightResult.ok);
+		setLastPreflightMessage(preflightResult.message);
+		return preflightResult;
+	};
+
 	useEffect(() => {
 		if (!open) return;
 		setSearchTerm("");
@@ -299,27 +345,12 @@ export default function CreateProjectScanDialog({
 			setQuickFixTestResult(null);
 			setQuickFixManualTestPassed(false);
 			try {
-				const { providerOptions, quickConfig } = await loadQuickFixConfigFromUser();
+				const preflightResult = await runAgentPreflightCheck();
 				if (cancelled) return;
-				const initialGateStatus = getLlmQuickGateStatus({
-					providerOptions,
-					currentConfig: quickConfig,
-					savedConfig: quickConfig,
-					hasSuccessfulManualTest: false,
-				});
-				setLlmProviderOptions(providerOptions);
-				setLlmQuickConfig(quickConfig);
-				setSavedLlmQuickConfig(quickConfig);
-				setQuickFixBaseUrlTouched(false);
-				setShowLlmQuickFixPanel(initialGateStatus.missingFields.length > 0);
-				setLastPreflightMessage(
-					initialGateStatus.missingFields.length > 0
-						? "检测到 LLM 缺少必填配置，请先补全并保存，再手动测试连接。"
-						: "请先手动测试连接，测试成功后才能创建任务。",
-				);
+				await syncGateWithPreflightResult(preflightResult);
 			} catch (error) {
 				if (cancelled) return;
-				console.error("加载 LLM 快速补配配置失败:", error);
+				console.error("加载 LLM 任务预检失败:", error);
 				setShowLlmQuickFixPanel(true);
 				setLastPreflightMessage("加载 LLM 配置失败，请在下方重新补配并测试连接。");
 			} finally {
@@ -339,11 +370,21 @@ export default function CreateProjectScanDialog({
 		let baseCanCreate = false;
 		if (sourceMode === "upload") {
 			if (!newProjectName.trim() || !newProjectFile) return false;
-			baseCanCreate = mode === "agent" ? true : opengrepEnabled || gitleaksEnabled;
+			if (mode === "agent") {
+				baseCanCreate = true;
+			} else if (mode === "hybrid") {
+				baseCanCreate = opengrepEnabled || gitleaksEnabled;
+			} else {
+				baseCanCreate = opengrepEnabled || gitleaksEnabled || banditEnabled;
+			}
 		} else {
 			if (!selectedProject) return false;
-			if (mode === "static" || mode === "hybrid") {
+			if (mode === "hybrid") {
 				if (!opengrepEnabled && !gitleaksEnabled) return false;
+			} else if (mode === "static") {
+				if (!opengrepEnabled && !gitleaksEnabled && !banditEnabled) {
+					return false;
+				}
 			}
 			if (mode === "agent" && isRepositoryProject(selectedProject)) {
 				baseCanCreate = Boolean(branchName.trim());
@@ -358,21 +399,6 @@ export default function CreateProjectScanDialog({
 		if (!isLlmMode) return true;
 		if (!llmQuickInitialized || quickFixPanelOpening) return false;
 		return llmGateStatus.canCreate;
-			if (mode === "agent") return true;
-			return opengrepEnabled || gitleaksEnabled;
-		}
-
-		if (!selectedProject) return false;
-		if (mode === "static" || mode === "hybrid") {
-			if (!opengrepEnabled && !gitleaksEnabled) return false;
-		}
-		if (mode === "agent" && isRepositoryProject(selectedProject)) {
-			return Boolean(branchName.trim());
-		}
-		if (mode === "hybrid" && !isZipProject(selectedProject)) {
-			return false;
-		}
-		return true;
 	}, [
 		sourceMode,
 		newProjectName,
@@ -383,6 +409,12 @@ export default function CreateProjectScanDialog({
 		gitleaksEnabled,
 		branchName,
 	]);
+
+	useEffect(() => {
+		if (mode !== "hybrid") return;
+		if (!banditEnabled) return;
+		setBanditEnabled(false);
+	}, [mode, banditEnabled]);
 
 	const createStaticTasksForProject = async (
 		project: Project,
@@ -463,30 +495,6 @@ export default function CreateProjectScanDialog({
 		},
 		verification_level: "analysis_with_poc_plan" as const,
 	});
-
-	const loadQuickFixConfigFromUser = async () => {
-		const providerResponse = await api
-			.getLLMProviders()
-			.catch(() => ({ providers: [] as LLMProviderItem[] }));
-		const userConfig = await api.getUserConfig();
-		const llmConfig = (userConfig?.llmConfig || {}) as Record<string, unknown>;
-		const provider = normalizeCreateProjectScanProvider(
-			String(llmConfig.llmProvider || "openai"),
-		);
-		const providerOptions = buildLlmProviderOptions({
-			backendProviders: providerResponse.providers || [],
-			currentProviderId: provider,
-		});
-		return {
-			providerOptions,
-			quickConfig: {
-				provider,
-				model: String(llmConfig.llmModel || ""),
-				baseUrl: String(llmConfig.llmBaseUrl || ""),
-				apiKey: resolveCreateProjectScanEffectiveApiKey(provider, llmConfig),
-			},
-		};
-	};
 
 	const openLlmQuickFixPanelManual = async () => {
 		if (showLlmQuickFixPanel) {
@@ -734,10 +742,9 @@ export default function CreateProjectScanDialog({
 		}
 
 		const preflightResult = await runAgentPreflightCheck();
+		await syncGateWithPreflightResult(preflightResult);
 		if (!preflightResult.ok) {
 			setShowLlmQuickFixPanel(true);
-			setLastPreflightMessage(preflightResult.message);
-			setQuickFixManualTestPassed(false);
 			return false;
 		}
 		return true;

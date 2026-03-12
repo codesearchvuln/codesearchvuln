@@ -702,14 +702,7 @@ export default function FindingDetail() {
 							<div className="text-base text-muted-foreground">暂无缺陷信息</div>
 						)}
 
-						{!isAgentFalsePositive ? (
-							<div className="rounded border border-dashed border-border p-4">
-								<p className="text-sm text-muted-foreground uppercase mb-1.5">其他信息（待优化）</p>
-								<p className="text-base text-muted-foreground">
-									此区域预留给后续扩展（修复建议、证据链、关联规则等）。
-								</p>
-							</div>
-						) : null}
+						
 					</div>
 				</div>
 			)}

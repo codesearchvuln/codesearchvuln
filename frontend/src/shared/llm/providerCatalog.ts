@@ -52,7 +52,7 @@ export const LLM_PROVIDER_API_KEY_FIELD_MAP: Record<string, string> = {
 export const BUILTIN_LLM_PROVIDERS: LLMProviderItem[] = [
 	{
 		id: "custom",
-		name: "OpenAI Compatible / 自定义站点",
+		name: "OpenAI Compatible",
 		description: "适用于 OpenAI 兼容站点、中转服务和自建网关。",
 		defaultModel: "gpt-5",
 		models: ["gpt-5", "kimi-k2", "deepseek-chat", "qwen-max"],

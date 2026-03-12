@@ -53,6 +53,31 @@ SENSITIVE_LLM_FIELDS = [
     'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
 ]
 SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
+LLM_PROVIDER_API_KEY_FIELD_MAP = {
+    "custom": "openaiApiKey",
+    "openai": "openaiApiKey",
+    "openrouter": "openaiApiKey",
+    "azure_openai": "openaiApiKey",
+    "anthropic": "claudeApiKey",
+    "claude": "claudeApiKey",
+    "gemini": "geminiApiKey",
+    "qwen": "qwenApiKey",
+    "deepseek": "deepseekApiKey",
+    "zhipu": "zhipuApiKey",
+    "moonshot": "moonshotApiKey",
+    "baidu": "baiduApiKey",
+    "minimax": "minimaxApiKey",
+    "doubao": "doubaoApiKey",
+}
+LLM_CONNECTION_CONFIG_KEYS = (
+    "llmProvider",
+    "llmApiKey",
+    "llmModel",
+    "llmBaseUrl",
+    "ollamaBaseUrl",
+    *tuple(LLM_PROVIDER_API_KEY_FIELD_MAP.values()),
+)
+AGENT_TASK_PREFLIGHT_TIMEOUT_SECONDS = 10
 
 
 def _resolve_llm_runtime_provider(provider: Any) -> tuple[str, Optional[LLMProvider]]:
@@ -61,6 +86,100 @@ def _resolve_llm_runtime_provider(provider: Any) -> tuple[str, Optional[LLMProvi
 
 def _build_llm_provider_catalog() -> list[dict[str, Any]]:
     return build_provider_catalog()
+
+
+def _normalize_llm_provider_id(provider: Any) -> str:
+    resolved_provider_id, _ = _resolve_llm_runtime_provider(provider)
+    normalized = str(resolved_provider_id or provider or "").strip().lower()
+    if not normalized:
+        return "openai"
+    return normalized
+
+
+def _resolve_effective_llm_api_key(provider_id: str, llm_config: dict[str, Any]) -> str:
+    direct_key = str(llm_config.get("llmApiKey") or "").strip()
+    if direct_key:
+        return direct_key
+    provider_key_field = LLM_PROVIDER_API_KEY_FIELD_MAP.get(
+        _normalize_llm_provider_id(provider_id)
+    )
+    if not provider_key_field:
+        return ""
+    return str(llm_config.get(provider_key_field) or "").strip()
+
+
+def _has_saved_llm_connection_config(llm_config: dict[str, Any]) -> bool:
+    for key in LLM_CONNECTION_CONFIG_KEYS:
+        if str(llm_config.get(key) or "").strip():
+            return True
+    return False
+
+
+def _build_llm_quick_config_snapshot(
+    llm_config: dict[str, Any],
+) -> "LLMQuickConfigSnapshot":
+    provider = _normalize_llm_provider_id(llm_config.get("llmProvider"))
+    base_url = normalize_llm_base_url(
+        llm_config.get("llmBaseUrl") or llm_config.get("ollamaBaseUrl")
+    )
+    return LLMQuickConfigSnapshot(
+        provider=provider,
+        model=str(llm_config.get("llmModel") or "").strip(),
+        baseUrl=base_url,
+        apiKey=_resolve_effective_llm_api_key(provider, llm_config),
+    )
+
+
+def _collect_preflight_missing_fields(
+    snapshot: "LLMQuickConfigSnapshot",
+) -> list[str]:
+    missing_fields: list[str] = []
+    if not snapshot.model:
+        missing_fields.append("llmModel")
+    if not snapshot.baseUrl:
+        missing_fields.append("llmBaseUrl")
+    if snapshot.provider != "ollama" and not snapshot.apiKey:
+        missing_fields.append("llmApiKey")
+    return missing_fields
+
+
+def _format_missing_fields_message(missing_fields: list[str]) -> str:
+    field_label_map = {
+        "llmModel": "模型（llmModel）",
+        "llmBaseUrl": "Base URL（llmBaseUrl）",
+        "llmApiKey": "API Key（llmApiKey）",
+    }
+    return "、".join(
+        field_label_map[field]
+        for field in missing_fields
+        if field in field_label_map
+    )
+
+
+async def _load_user_config_payload(
+    *,
+    db: AsyncSession,
+    user_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    result = await db.execute(select(UserConfig).where(UserConfig.user_id == user_id))
+    user_config_record = result.scalar_one_or_none()
+
+    saved_llm_config: dict[str, Any] = {}
+    saved_other_config: dict[str, Any] = {}
+    if not user_config_record:
+        return saved_llm_config, saved_other_config
+
+    if user_config_record.llm_config:
+        saved_llm_config = decrypt_config(
+            json.loads(user_config_record.llm_config),
+            SENSITIVE_LLM_FIELDS,
+        )
+    if user_config_record.other_config:
+        saved_other_config = decrypt_config(
+            json.loads(user_config_record.other_config),
+            SENSITIVE_OTHER_FIELDS,
+        )
+    return saved_llm_config, saved_other_config
 
 def _extract_model_names_from_payload(payload: Any) -> list[str]:
     candidates: list[str] = []
@@ -1225,6 +1344,23 @@ class LLMTestResponse(BaseModel):
     # 调试信息
     debug: Optional[dict] = None
 
+
+class LLMQuickConfigSnapshot(BaseModel):
+    provider: str
+    model: str
+    baseUrl: str
+    apiKey: str
+
+
+class AgentTaskLLMPreflightResponse(BaseModel):
+    ok: bool
+    stage: Optional[str] = None
+    message: str
+    reasonCode: Optional[str] = None
+    missingFields: Optional[list[str]] = None
+    effectiveConfig: LLMQuickConfigSnapshot
+    savedConfig: Optional[LLMQuickConfigSnapshot] = None
+
 class LLMFetchModelsRequest(BaseModel):
     """按提供商拉取模型列表请求"""
     provider: str
@@ -1245,43 +1381,22 @@ class LLMFetchModelsResponse(BaseModel):
     modelMetadata: Optional[dict[str, dict[str, Optional[int] | str]]] = None
     tokenRecommendationSource: Optional[str] = None
 
-@router.post("/test-llm", response_model=LLMTestResponse)
-async def test_llm_connection(
+
+async def _execute_llm_test_request(
     request: LLMTestRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    """测试LLM连接是否正常"""
+    *,
+    saved_llm_config: Optional[dict[str, Any]] = None,
+    saved_other_config: Optional[dict[str, Any]] = None,
+) -> LLMTestResponse:
     from app.services.llm.factory import NATIVE_ONLY_PROVIDERS
     from app.services.llm.adapters import LiteLLMAdapter, BaiduAdapter, MinimaxAdapter, DoubaoAdapter
     from app.services.llm.types import LLMConfig, LLMProvider, LLMRequest, LLMMessage
     import traceback
-    import time
 
     start_time = time.time()
+    saved_llm_config = saved_llm_config or {}
+    saved_other_config = saved_other_config or {}
 
-    # 获取用户保存的配置
-    result = await db.execute(
-        select(UserConfig).where(UserConfig.user_id == current_user.id)
-    )
-    user_config_record = result.scalar_one_or_none()
-
-    # 解析用户配置
-    saved_llm_config = {}
-    saved_other_config = {}
-    if user_config_record:
-        if user_config_record.llm_config:
-            saved_llm_config = decrypt_config(
-                json.loads(user_config_record.llm_config),
-                SENSITIVE_LLM_FIELDS
-            )
-        if user_config_record.other_config:
-            saved_other_config = decrypt_config(
-                json.loads(user_config_record.other_config),
-                SENSITIVE_OTHER_FIELDS
-            )
-
-    # 从保存的配置中获取参数（用于调试显示）
     saved_timeout_ms = saved_llm_config.get('llmTimeout', settings.LLM_TIMEOUT * 1000)
     saved_temperature = saved_llm_config.get('llmTemperature', settings.LLM_TEMPERATURE)
     saved_max_tokens = saved_llm_config.get('llmMaxTokens', settings.LLM_MAX_TOKENS)
@@ -1296,7 +1411,6 @@ async def test_llm_connection(
         "base_url_requested": request.baseUrl,
         "api_key_length": len(request.apiKey) if request.apiKey else 0,
         "api_key_prefix": request.apiKey[:8] + "..." if request.apiKey and len(request.apiKey) > 8 else "(empty)",
-        # 用户保存的配置参数
         "saved_config": {
             "timeout_ms": saved_timeout_ms,
             "temperature": saved_temperature,
@@ -1315,7 +1429,7 @@ async def test_llm_connection(
             return LLMTestResponse(
                 success=False,
                 message=f"不支持的LLM提供商: {request.provider}",
-                debug=debug_info
+                debug=debug_info,
             )
         debug_info["provider_resolved"] = resolved_provider_id
         debug_info["provider_runtime"] = provider.value
@@ -1338,10 +1452,8 @@ async def test_llm_connection(
                 detail=f"LLM 配置缺失：提供商 `{resolved_provider_id}` 必须提供 `apiKey`。",
             )
         if provider == LLMProvider.OLLAMA and not api_key:
-            # 兼容基类 validate_config 的 API Key 必填校验
             api_key = "ollama"
 
-        # 测试时使用用户保存的所有配置参数
         test_timeout = int(saved_timeout_ms / 1000) if saved_timeout_ms else settings.LLM_TIMEOUT
         test_temperature = saved_temperature if saved_temperature is not None else settings.LLM_TEMPERATURE
         test_max_tokens = saved_max_tokens if saved_max_tokens else settings.LLM_MAX_TOKENS
@@ -1356,9 +1468,13 @@ async def test_llm_connection(
             "max_tokens": test_max_tokens,
         }
 
-        print(f"[LLM Test] 开始测试: provider={provider.value}, model={model}, base_url={base_url}, temperature={test_temperature}, timeout={test_timeout}s, max_tokens={test_max_tokens}")
+        print(
+            "[LLM Test] 开始测试: "
+            f"provider={provider.value}, model={model}, base_url={base_url}, "
+            f"temperature={test_temperature}, timeout={test_timeout}s, "
+            f"max_tokens={test_max_tokens}"
+        )
 
-        # 创建配置
         config = LLMConfig(
             provider=provider,
             api_key=api_key,
@@ -1370,7 +1486,6 @@ async def test_llm_connection(
             custom_headers=custom_headers,
         )
 
-        # 直接创建新的适配器实例（不使用缓存），确保使用最新的配置
         if provider in NATIVE_ONLY_PROVIDERS:
             native_adapter_map = {
                 LLMProvider.BAIDU: BaiduAdapter,
@@ -1382,24 +1497,24 @@ async def test_llm_connection(
         else:
             adapter = LiteLLMAdapter(config)
             debug_info["adapter_type"] = "LiteLLMAdapter"
-            # 获取 LiteLLM 实际使用的模型名
-            debug_info["litellm_model"] = getattr(adapter, '_get_litellm_model', lambda: model)() if hasattr(adapter, '_get_litellm_model') else model
+            debug_info["litellm_model"] = (
+                getattr(adapter, '_get_litellm_model', lambda: model)()
+                if hasattr(adapter, '_get_litellm_model')
+                else model
+            )
 
         test_request = LLMRequest(
-            messages=[
-                LLMMessage(role="user", content="Say 'Hello' in one word.")
-            ],
+            messages=[LLMMessage(role="user", content="Say 'Hello' in one word.")],
             temperature=test_temperature,
             max_tokens=test_max_tokens,
         )
 
-        print(f"[LLM Test] 发送测试请求...")
+        print("[LLM Test] 发送测试请求...")
         response = await adapter.complete(test_request)
 
         elapsed_time = time.time() - start_time
         debug_info["elapsed_time_ms"] = round(elapsed_time * 1000, 2)
 
-        # 验证响应内容
         if not response or not response.content:
             debug_info["error_type"] = "empty_response"
             debug_info["raw_response"] = str(response) if response else None
@@ -1407,7 +1522,7 @@ async def test_llm_connection(
             return LLMTestResponse(
                 success=False,
                 message="LLM 返回空响应，请检查 API Key 和配置",
-                debug=debug_info
+                debug=debug_info,
             )
 
         debug_info["response_length"] = len(response.content)
@@ -1424,7 +1539,7 @@ async def test_llm_connection(
             message=f"连接成功 ({elapsed_time:.2f}s)",
             model=model,
             response=response.content[:100] if response.content else None,
-            debug=debug_info
+            debug=debug_info,
         )
 
     except HTTPException:
@@ -1439,7 +1554,6 @@ async def test_llm_connection(
         debug_info["error_message"] = error_msg
         debug_info["traceback"] = traceback.format_exc()
 
-        # 提取 LLMError 中的 api_response
         if hasattr(e, 'api_response') and e.api_response:
             debug_info["api_response"] = e.api_response
         if hasattr(e, 'status_code') and e.status_code:
@@ -1448,10 +1562,7 @@ async def test_llm_connection(
         print(f"[LLM Test] 失败: {error_type}: {error_msg}")
         print(f"[LLM Test] Traceback:\n{traceback.format_exc()}")
 
-        # 提供更友好的错误信息
         friendly_message = error_msg
-
-        # 优先检查余额不足（因为某些 API 用 429 表示余额不足）
         if any(keyword in error_msg for keyword in ["余额不足", "资源包", "充值", "quota", "insufficient", "balance", "402"]):
             friendly_message = "账户余额不足或配额已用尽，请充值后重试"
             debug_info["error_category"] = "insufficient_balance"
@@ -1479,8 +1590,133 @@ async def test_llm_connection(
         return LLMTestResponse(
             success=False,
             message=friendly_message,
-            debug=debug_info
+            debug=debug_info,
         )
+
+
+@router.post("/test-llm", response_model=LLMTestResponse)
+async def test_llm_connection(
+    request: LLMTestRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """测试LLM连接是否正常"""
+    saved_llm_config, saved_other_config = await _load_user_config_payload(
+        db=db,
+        user_id=current_user.id,
+    )
+    return await _execute_llm_test_request(
+        request,
+        saved_llm_config=saved_llm_config,
+        saved_other_config=saved_other_config,
+    )
+
+
+@router.post("/agent-task-preflight", response_model=AgentTaskLLMPreflightResponse)
+async def agent_task_llm_preflight(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    default_config = get_default_config()
+    saved_llm_config, saved_other_config = await _load_user_config_payload(
+        db=db,
+        user_id=current_user.id,
+    )
+
+    merged_llm_config = {**default_config["llmConfig"], **saved_llm_config}
+    effective_snapshot = _build_llm_quick_config_snapshot(merged_llm_config)
+
+    if not _has_saved_llm_connection_config(saved_llm_config):
+        return AgentTaskLLMPreflightResponse(
+            ok=False,
+            stage="llm_config",
+            reasonCode="default_config",
+            message="检测到当前仍在使用默认 LLM 配置，请先保存并测试专属 LLM 配置。",
+            effectiveConfig=effective_snapshot,
+            savedConfig=None,
+        )
+
+    saved_snapshot = _build_llm_quick_config_snapshot(saved_llm_config)
+    missing_fields = _collect_preflight_missing_fields(saved_snapshot)
+    if missing_fields:
+        return AgentTaskLLMPreflightResponse(
+            ok=False,
+            stage="llm_config",
+            reasonCode="missing_fields",
+            missingFields=missing_fields,
+            message=(
+                "智能扫描初始化失败：LLM 缺少必填配置 "
+                f"{_format_missing_fields_message(missing_fields)}，请先补全并保存。"
+            ),
+            effectiveConfig=effective_snapshot,
+            savedConfig=saved_snapshot,
+        )
+
+    test_request = LLMTestRequest(
+        provider=saved_snapshot.provider,
+        apiKey=saved_snapshot.apiKey,
+        model=saved_snapshot.model,
+        baseUrl=saved_snapshot.baseUrl,
+        customHeaders=str(saved_llm_config.get("llmCustomHeaders") or ""),
+    )
+
+    try:
+        llm_result = await asyncio.wait_for(
+            _execute_llm_test_request(
+                test_request,
+                saved_llm_config=saved_llm_config,
+                saved_other_config=saved_other_config,
+            ),
+            timeout=AGENT_TASK_PREFLIGHT_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return AgentTaskLLMPreflightResponse(
+            ok=False,
+            stage="llm_test",
+            reasonCode="llm_test_timeout",
+            message=(
+                f"智能扫描初始化失败：LLM 测试超时（>{AGENT_TASK_PREFLIGHT_TIMEOUT_SECONDS}s），"
+                "请检查网络、模型服务或改用更稳定的配置。"
+            ),
+            effectiveConfig=effective_snapshot,
+            savedConfig=saved_snapshot,
+        )
+    except HTTPException as exc:
+        detail = str(exc.detail or "未知错误").strip() or "未知错误"
+        return AgentTaskLLMPreflightResponse(
+            ok=False,
+            stage="llm_test",
+            reasonCode="llm_test_exception",
+            message=f"智能扫描初始化失败：{detail}",
+            effectiveConfig=effective_snapshot,
+            savedConfig=saved_snapshot,
+        )
+    except Exception as exc:
+        return AgentTaskLLMPreflightResponse(
+            ok=False,
+            stage="llm_test",
+            reasonCode="llm_test_exception",
+            message=f"智能扫描初始化失败：LLM 测试异常（{exc}）。",
+            effectiveConfig=effective_snapshot,
+            savedConfig=saved_snapshot,
+        )
+
+    if not llm_result.success:
+        return AgentTaskLLMPreflightResponse(
+            ok=False,
+            stage="llm_test",
+            reasonCode="llm_test_failed",
+            message=f"智能扫描初始化失败：LLM 测试未通过（{llm_result.message or '未知错误'}）。",
+            effectiveConfig=effective_snapshot,
+            savedConfig=saved_snapshot,
+        )
+
+    return AgentTaskLLMPreflightResponse(
+        ok=True,
+        message="LLM 配置测试通过。",
+        effectiveConfig=effective_snapshot,
+        savedConfig=saved_snapshot,
+    )
 
 @router.post("/fetch-llm-models", response_model=LLMFetchModelsResponse)
 async def fetch_llm_models(

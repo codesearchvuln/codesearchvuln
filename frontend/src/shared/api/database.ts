@@ -30,6 +30,28 @@ interface UserConfigPayload {
   updated_at?: string;
 }
 
+interface LlmQuickConfigSnapshotPayload {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
+interface AgentTaskPreflightPayload {
+  ok: boolean;
+  stage?: "llm_config" | "llm_test";
+  message: string;
+  reasonCode?:
+    | "default_config"
+    | "missing_fields"
+    | "llm_test_failed"
+    | "llm_test_timeout"
+    | "llm_test_exception";
+  missingFields?: Array<"llmModel" | "llmBaseUrl" | "llmApiKey">;
+  effectiveConfig: LlmQuickConfigSnapshotPayload;
+  savedConfig?: LlmQuickConfigSnapshotPayload | null;
+}
+
 // Implement the same interface as the original localDatabase.ts but using backend API
 export const api = {
   // ==================== Profile 相关方法 ====================
@@ -520,6 +542,11 @@ export const api = {
     response?: string;
   }> {
     const res = await apiClient.post('/config/test-llm', params);
+    return res.data;
+  },
+
+  async runAgentTaskPreflight(): Promise<AgentTaskPreflightPayload> {
+    const res = await apiClient.post('/config/agent-task-preflight');
     return res.data;
   },
 
