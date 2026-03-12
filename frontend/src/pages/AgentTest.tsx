@@ -7,7 +7,6 @@
 import {
   Bot,
   ChevronRight,
-  Code2,
   Cpu,
   Search,
   Shield,
@@ -17,7 +16,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AnalysisPanel,
-  BusinessLogicPanel,
   BusinessLogicReconPanel,
   BusinessLogicAnalysisPanel,
   ReconPanel,
@@ -46,7 +44,7 @@ export default function AgentTestPage() {
 
         <div className="cyber-card flex-1 min-h-0 p-4 overflow-hidden flex flex-col">
           <Tabs defaultValue="recon" className="flex flex-col flex-1 min-h-0">
-            <TabsList className="shrink-0 grid grid-cols-6 w-full mb-4">
+            <TabsList className="shrink-0 grid grid-cols-5 w-full mb-4">
               <TabsTrigger value="recon" className="gap-1.5 text-xs">
                 <Search className="w-3.5 h-3.5" /> Recon
               </TabsTrigger>
@@ -55,9 +53,6 @@ export default function AgentTestPage() {
               </TabsTrigger>
               <TabsTrigger value="verification" className="gap-1.5 text-xs">
                 <Shield className="w-3.5 h-3.5" /> Verification
-              </TabsTrigger>
-              <TabsTrigger value="business-logic" className="gap-1.5 text-xs">
-                <Code2 className="w-3.5 h-3.5" /> BL Scan
               </TabsTrigger>
               <TabsTrigger value="bl-recon" className="gap-1.5 text-xs">
                 <Telescope className="w-3.5 h-3.5" /> BL Recon
@@ -98,20 +93,6 @@ export default function AgentTestPage() {
                   </p>
                 </div>
                 <VerificationPanel />
-              </TabsContent>
-
-              <TabsContent value="business-logic" className="mt-0">
-                <div className="mb-3 p-2.5 rounded bg-muted/30 border border-border/30">
-                  <p className="text-xs text-muted-foreground">
-                    <strong className="text-cyan-400">
-                      BusinessLogicScanAgent
-                    </strong>{" "}
-                    —
-                    业务逻辑漏洞扫描（旧版单体 Agent）：检测 IDOR、权限绕过、金额篡改、批量赋值、竞态条件等业务逻辑缺陷。
-                    指定入口点列表可启用聚焦模式，留空则全局扫描。
-                  </p>
-                </div>
-                <BusinessLogicPanel />
               </TabsContent>
 
               <TabsContent value="bl-recon" className="mt-0">
