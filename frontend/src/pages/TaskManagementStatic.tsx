@@ -16,7 +16,9 @@ const CreateProjectScanDialog = lazy(
 );
 
 export default function TaskManagementStatic() {
-	const { activities, loading, error, refresh } = useTaskActivitiesSnapshot();
+	const { activities, loading, error, refresh } = useTaskActivitiesSnapshot({
+		pollingIntervalMs: 5000,
+	});
 	const [keyword, setKeyword] = useState("");
 	const [showCreateStaticDialog, setShowCreateStaticDialog] = useState(false);
 	const [searchParams, setSearchParams] = useSearchParams();

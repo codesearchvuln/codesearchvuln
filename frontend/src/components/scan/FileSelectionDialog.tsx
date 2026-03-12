@@ -31,8 +31,6 @@ import {
     RotateCcw,
     RefreshCw,
     Terminal,
-    ChevronsUpDown,
-    ChevronsDownUp,
 } from "lucide-react";
 import { api } from "@/shared/config/database";
 import { toast } from "sonner";

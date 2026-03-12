@@ -5,7 +5,7 @@ import {
   Database,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import type { QueuePeekItem, QueueSnapshot } from "../types";
+import type { QueueInfo, QueuePeekItem, QueueSnapshot } from "../types";
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "text-red-500",
@@ -91,7 +91,11 @@ export default function QueueStatusPanel({
   const [pages, setPages] = useState<Record<string, number>>({});
 
   const pageSize = 10;
-  const entries = Object.entries(snapshot).filter(([, info]) => info !== undefined);
+  const entries = Object.entries(snapshot).filter(
+    (
+      entry,
+    ): entry is [string, QueueInfo] => entry[1] !== undefined,
+  );
   if (entries.length === 0) return null;
 
   const toggle = (key: string) => {

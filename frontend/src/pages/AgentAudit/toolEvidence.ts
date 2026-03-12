@@ -690,7 +690,7 @@ function synthesizeExecutionFallback(
     toStringValue(inputRecord?.shell),
     extractCommandHead(executionCommand || ""),
     language || "",
-  ].filter((item) => String(item).trim().length > 0);
+  ].filter((item): item is string => String(item).trim().length > 0);
   const commandChain = buildFallbackCommandChain({
     toolName,
     toolMetadata,

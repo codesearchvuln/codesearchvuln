@@ -1,5 +1,4 @@
 import { memo, type ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import FindingNarrativeMarkdown from "../components/FindingNarrativeMarkdown";
 import type { AgentTask } from "@/shared/api/agentTasks";
@@ -10,11 +9,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  FileText,
   Search,
   Settings2,
-  Sparkles,
-  TrendingUp,
   X,
   Zap,
 } from "lucide-react";

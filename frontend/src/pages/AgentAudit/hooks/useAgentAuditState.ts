@@ -15,7 +15,6 @@ import type {
 } from "../types";
 import { createLogItem, filterLogsByAgent, buildAgentTree } from "../utils";
 import { isAgentAuditTerminalStatus } from "../taskStatus";
-import type { AgentTreeNode } from "@/shared/api/agentTasks";
 
 // ============ Initial State ============
 

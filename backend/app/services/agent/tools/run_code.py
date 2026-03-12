@@ -191,11 +191,12 @@ for payload in payloads:
                 code=code,
             )
 
-        # 在沙箱中执行，同时挂载项目目录（只读），便于代码 import 项目模块
+        # 在沙箱中执行（挂载项目源码到 /workspace，验证智能体可访问项目代码），同时挂载项目目录（只读），便于代码 import 项目模块
         host_project_dir = self.project_root if os.path.isdir(str(self.project_root or "")) else None
         result = await self.sandbox_manager.execute_command(
             command=command,
             timeout=timeout,
+            project_root=self.project_root,
             host_project_dir=host_project_dir,
         )
 

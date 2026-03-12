@@ -41,15 +41,6 @@ interface EmbeddingProvider {
   default_model: string;
 }
 
-interface EmbeddingConfig {
-  provider: string;
-  model: string;
-  api_key: string | null;
-  base_url: string | null;
-  dimensions: number;
-  batch_size: number;
-}
-
 interface TestResult {
   success: boolean;
   message: string;
@@ -382,7 +373,6 @@ export default function EmbeddingConfigPanel({ compact = false }: EmbeddingConfi
                   ? selectedProviderInfo.models
                   : [];
                 const defaultModel = String(selectedProviderInfo.default_model || "").trim();
-                const currentModel = String(selectedModel || "").trim();
 
                 if (!models.length) {
                   return (

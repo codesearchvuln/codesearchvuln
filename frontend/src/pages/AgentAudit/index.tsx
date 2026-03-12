@@ -13,7 +13,6 @@ import {
   Zap,
   Loader2,
   ArrowDown,
-  ArrowRight,
   Download,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";

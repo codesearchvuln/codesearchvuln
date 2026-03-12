@@ -6,7 +6,6 @@
 import { useState, memo } from "react";
 import { ChevronDown, ChevronRight, Bot, Cpu, Scan, FileSearch, ShieldCheck, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { AGENT_STATUS_CONFIG } from "../constants";
 import type { AgentTreeNodeItemProps } from "../types";
 
 // Agent type icons

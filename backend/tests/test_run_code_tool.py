@@ -88,9 +88,10 @@ class StubSandboxManager:
     async def initialize(self):
         return None
 
-    async def execute_command(self, command: str, timeout: int):
+    async def execute_command(self, command: str, timeout: int, **kwargs):
         self.last_command = command
         self.last_timeout = timeout
+        self.last_kwargs = kwargs
         return self.result
 
 

@@ -51,7 +51,6 @@ import {
     Search,
     GitBranch,
     Code,
-    Shield,
     Upload,
     FileText,
     AlertCircle,
@@ -59,10 +58,6 @@ import {
     Edit,
     CheckCircle,
     Terminal,
-    Github,
-    Folder,
-    Key,
-    ChevronRight,
 } from "lucide-react";
 import { api } from "@/shared/config/database";
 import { validateZipFile } from "@/features/projects/services";
@@ -71,20 +66,14 @@ import {
     uploadZipFile,
     type ZipFileMeta,
 } from "@/shared/utils/zipStorage";
-import {
-    getSourceTypeBadge,
-} from "@/shared/utils/projectUtils";
 import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import DeferredSection from "@/components/performance/DeferredSection";
 import type { ScanCreateMode } from "@/components/scan/CreateProjectScanDialog";
 import { SUPPORTED_LANGUAGES, REPOSITORY_PLATFORMS } from "@/shared/constants";
 import { useI18n } from "@/shared/i18n";
 import { apiClient } from "@/shared/api/serverClient";
 import {
-    getAgentFindings,
     getAgentTasks,
-    type AgentFinding,
     type AgentTask,
 } from "@/shared/api/agentTasks";
 import {
@@ -92,24 +81,18 @@ import {
     type GitleaksScanTask,
 } from "@/shared/api/gitleaks";
 import {
-    getOpengrepScanFindings,
     getOpengrepScanTasks,
-    type OpengrepFinding,
     type OpengrepScanTask,
 } from "@/shared/api/opengrep";
 import {
-    getProjectCardPotentialVulnerabilities,
     getProjectCardSummaryStats,
-    getProjectCardRecentTasks,
     normalizeProjectCardLanguageStats,
     type ProjectCardLanguageStats,
     type ProjectCardPotentialVulnerability,
 } from "@/features/projects/services/projectCardPreview";
 import {
     buildStaticScanGroups,
-    formatDurationMs,
     resolveStaticScanGroupStatus,
-    resolveSourceModeFromTaskMeta,
 } from "@/features/tasks/services/taskActivities";
 const PROJECT_PAGE_SIZE = 10;
 const PROJECT_FETCH_BATCH_SIZE = 200;
@@ -120,18 +103,6 @@ const OPENGREP_TASK_PAGE_LIMIT = 200;
 const GITLEAKS_TASK_PAGE_LIMIT = 200;
 const LANGUAGE_STATS_RETRY_INTERVAL_MS = 2500;
 const LANGUAGE_STATS_MAX_RETRIES = 6;
-const PROJECT_CARD_POTENTIAL_SOURCE_TASK_LIMIT = 3;
-const PROJECT_CARD_POTENTIAL_FINDINGS_FETCH_LIMIT = 200;
-const PROJECT_CARD_POTENTIAL_TOP_LIMIT = 5;
-const PROJECT_CARD_PIE_COLORS = [
-    "#0ea5e9",
-    "#22c55e",
-    "#f59e0b",
-    "#a855f7",
-    "#ef4444",
-    "#14b8a6",
-];
-
 function getErrorStatusCode(error: unknown): number {
     const apiError = error as { response?: { status?: number } };
     return Number(apiError?.response?.status || 0);
@@ -151,9 +122,6 @@ const ARCHIVE_SUFFIXES = [
 
 const CreateProjectScanDialog = lazy(
     () => import("@/components/scan/CreateProjectScanDialog"),
-);
-const ProjectLanguagePieChart = lazy(
-    () => import("@/features/projects/components/ProjectLanguagePieChart"),
 );
 
 const stripArchiveSuffix = (filename: string) => {
@@ -184,7 +152,6 @@ type ProjectTaskPoolState = {
 
 export default function Projects() {
     const location = useLocation();
-    const currentRoute = `${location.pathname}${location.search}`;
     const { t } = useI18n();
     const [projects, setProjects] = useState<Project[]>([]);
     const [projectPage, setProjectPage] = useState(1);
@@ -241,7 +208,7 @@ export default function Projects() {
     const [projectLanguageStatsMap, setProjectLanguageStatsMap] = useState<
         Record<string, ProjectCardLanguageStats>
     >({});
-    const [projectPotentialVulnerabilityMap, setProjectPotentialVulnerabilityMap] = useState<
+    const [, setProjectPotentialVulnerabilityMap] = useState<
         Record<string, ProjectCardPotentialVulnerabilityState>
     >({});
     const languageStatsRetryCountRef = useRef<Record<string, number>>({});
@@ -374,136 +341,6 @@ export default function Projects() {
             }
         },
         [clearLanguageStatsPollTimer],
-    );
-
-    const fetchProjectPotentialVulnerabilities = useCallback(
-        async (projectId: string) => {
-            if (potentialVulnerabilityLoadingRef.current[projectId]) {
-                return;
-            }
-
-            potentialVulnerabilityLoadingRef.current[projectId] = true;
-            try {
-                const sourceOpengrepTasks = (projectTaskPoolsMap[projectId]?.opengrepTasks || [])
-                    .filter((task) => task.project_id === projectId)
-                    .sort(
-                        (a, b) =>
-                            new Date(b.created_at).getTime() -
-                            new Date(a.created_at).getTime(),
-                    )
-                    .slice(0, PROJECT_CARD_POTENTIAL_SOURCE_TASK_LIMIT);
-
-                const sourceAgentTasks = (projectTaskPoolsMap[projectId]?.agentTasks || [])
-                    .filter(
-                        (task) => {
-                            if (task.project_id !== projectId) return false;
-                            const verifiedCount = Math.max(Number(task.verified_count ?? 0), 0);
-                            if (verifiedCount <= 0) return false;
-                            const sourceMode = resolveSourceModeFromTaskMeta(
-                                "intelligent_audit",
-                                task.name,
-                                task.description,
-                            );
-                            return sourceMode === "intelligent" || sourceMode === "hybrid";
-                        },
-                    )
-                    .sort(
-                        (a, b) =>
-                            new Date(b.created_at).getTime() -
-                            new Date(a.created_at).getTime(),
-                    )
-                    .slice(0, PROJECT_CARD_POTENTIAL_SOURCE_TASK_LIMIT);
-
-                if (sourceOpengrepTasks.length === 0 && sourceAgentTasks.length === 0) {
-                    setProjectPotentialVulnerabilityMap((previous) => ({
-                        ...previous,
-                        [projectId]: { status: "empty", items: [] },
-                    }));
-                    return;
-                }
-
-                const staticFindingsResult = await Promise.allSettled(
-                    sourceOpengrepTasks.map((task) =>
-                        getOpengrepScanFindings({
-                            taskId: task.id,
-                            limit: PROJECT_CARD_POTENTIAL_FINDINGS_FETCH_LIMIT,
-                            confidence: "HIGH",
-                        }),
-                    ),
-                );
-
-                const staticFindings: OpengrepFinding[] = staticFindingsResult.flatMap(
-                    (result, index) => {
-                        if (
-                            result.status !== "fulfilled" ||
-                            !Array.isArray(result.value)
-                        ) {
-                            return [];
-                        }
-                        const fallbackTaskId = sourceOpengrepTasks[index]?.id || "";
-                        return result.value.map((finding) => ({
-                            ...finding,
-                            scan_task_id: finding.scan_task_id || fallbackTaskId,
-                        }));
-                    },
-                );
-
-                const agentFindingsResult = await Promise.allSettled(
-                    sourceAgentTasks.map((task) =>
-                        getAgentFindings(task.id, {
-                            is_verified: true,
-                            include_false_positive: false,
-                        }),
-                    ),
-                );
-
-                const verifiedAgentFindings: AgentFinding[] = agentFindingsResult.flatMap(
-                    (result) => {
-                        if (
-                            result.status !== "fulfilled" ||
-                            !Array.isArray(result.value)
-                        ) {
-                            return [];
-                        }
-                        return result.value;
-                    },
-                );
-                const agentTaskCategoryMap: Record<string, "intelligent" | "hybrid"> =
-                    {};
-                for (const task of sourceAgentTasks) {
-                    const mode = resolveSourceModeFromTaskMeta(
-                        "intelligent_audit",
-                        task.name,
-                        task.description,
-                    );
-                    agentTaskCategoryMap[task.id] =
-                        mode === "hybrid" ? "hybrid" : "intelligent";
-                }
-
-                const topVulnerabilities = getProjectCardPotentialVulnerabilities({
-                    opengrepFindings: staticFindings,
-                    verifiedAgentFindings,
-                    agentTaskCategoryMap,
-                    limit: PROJECT_CARD_POTENTIAL_TOP_LIMIT,
-                });
-
-                setProjectPotentialVulnerabilityMap((previous) => ({
-                    ...previous,
-                    [projectId]:
-                        topVulnerabilities.length > 0
-                            ? { status: "ready", items: topVulnerabilities }
-                            : { status: "empty", items: [] },
-                }));
-            } catch {
-                setProjectPotentialVulnerabilityMap((previous) => ({
-                    ...previous,
-                    [projectId]: { status: "failed", items: [] },
-                }));
-            } finally {
-                delete potentialVulnerabilityLoadingRef.current[projectId];
-            }
-        },
-        [projectTaskPoolsMap],
     );
 
     const fetchAgentTaskPoolByProject = useCallback(
@@ -1049,25 +886,6 @@ export default function Projects() {
         };
     }, []);
 
-    const projectRecentTasksMap = useMemo(() => {
-        return new Map(
-            pagedProjects.map((project) => {
-                const projectTaskPools = projectTaskPoolsMap[project.id];
-                return [
-                    project.id,
-                    getProjectCardRecentTasks({
-                        projectId: project.id,
-                        auditTasks: projectTaskPools?.auditTasks || [],
-                        agentTasks: projectTaskPools?.agentTasks || [],
-                        opengrepTasks: projectTaskPools?.opengrepTasks || [],
-                        gitleaksTasks: projectTaskPools?.gitleaksTasks || [],
-                        limit: 3,
-                    }),
-                ];
-            }),
-        );
-    }, [pagedProjects, projectTaskPoolsMap]);
-
     const projectSummaryStatsMap = useMemo(() => {
         return new Map(
             pagedProjects.map((project) => {
@@ -1129,126 +947,6 @@ export default function Projects() {
     }, [pagedProjects, projectTaskPoolsMap]);
 
     const projectDetailFrom = `${location.pathname}${location.search}${location.hash}`;
-
-    const formatCreatedAt = (time: string) => {
-        const date = new Date(time);
-        if (Number.isNaN(date.getTime())) return time;
-        return date.toLocaleString("zh-CN", {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-        });
-    };
-
-    const formatTaskDuration = (durationMs: number | null | undefined) => {
-        if (
-            typeof durationMs !== "number" ||
-            !Number.isFinite(durationMs) ||
-            durationMs <= 0
-        ) {
-            return "-";
-        }
-        return formatDurationMs(durationMs);
-    };
-
-    const getRepositoryIcon = (type?: string) => {
-        switch (type) {
-            case "github":
-                return <Github className="w-5 h-5" />;
-            case "gitlab":
-                return <GitBranch className="w-5 h-5 text-orange-500" />;
-            case "gitea":
-                return <GitBranch className="w-5 h-5 text-green-600" />;
-            case "other":
-                return <Key className="w-5 h-5 text-cyan-500" />;
-            default:
-                return <Folder className="w-5 h-5 text-muted-foreground" />;
-        }
-    };
-
-    const getTaskStatusBadgeClassName = (status: string) => {
-        if (status === "completed") return "cyber-badge-success";
-        if (status === "running") return "cyber-badge-info";
-        if (status === "failed") return "cyber-badge-danger";
-        if (status === "interrupted" || status === "cancelled" || status === "aborted") {
-            return "cyber-badge-warning";
-        }
-        return "cyber-badge-muted";
-    };
-
-    const getTaskStatusText = (status: string) => {
-        switch (status) {
-            case "completed":
-                return "完成";
-            case "running":
-                return "运行中";
-            case "failed":
-                return "失败";
-            case "interrupted":
-            case "cancelled":
-            case "aborted":
-                return "已中断";
-            case "pending":
-                return "等待中";
-            default:
-                return status || "未知";
-        }
-    };
-
-    const normalizeTaskStatus = (status: string) => String(status || "").trim().toLowerCase();
-
-    const getTaskProgressBarClassName = (status: string) => {
-        const normalized = normalizeTaskStatus(status);
-        if (normalized === "running") return "[&>div]:bg-sky-500";
-        if (normalized === "completed") return "[&>div]:bg-emerald-500";
-        if (
-            normalized === "failed" ||
-            normalized === "pending" ||
-            normalized === "cancelled" ||
-            normalized === "interrupted" ||
-            normalized === "aborted"
-        ) {
-            return "[&>div]:bg-slate-400";
-        }
-        return "[&>div]:bg-slate-400";
-    };
-
-    const formatRecentTaskMetricValue = (value: number | null) => {
-        if (value === null || !Number.isFinite(value)) return "--";
-        return value.toLocaleString();
-    };
-
-    const getVulnerabilitySeverityBadgeClassName = (
-        severity: ProjectCardPotentialVulnerability["severity"],
-    ) => {
-        if (severity === "CRITICAL") return "cyber-badge-danger";
-        if (severity === "HIGH") return "cyber-badge-warning";
-        if (severity === "MEDIUM") return "cyber-badge-info";
-        if (severity === "LOW") return "cyber-badge-muted";
-        return "cyber-badge-muted";
-    };
-
-    const getVulnerabilitySeverityText = (
-        severity: ProjectCardPotentialVulnerability["severity"],
-    ) => {
-        if (severity === "CRITICAL") return "严重";
-        if (severity === "HIGH") return "高危";
-        if (severity === "MEDIUM") return "中危";
-        if (severity === "LOW") return "低危";
-        return "未知";
-    };
-
-    const getVulnerabilityConfidenceText = (
-        confidence: ProjectCardPotentialVulnerability["confidence"],
-    ) => {
-        if (confidence === "HIGH") return "高";
-        if (confidence === "MEDIUM") return "中";
-        if (confidence === "LOW") return "低";
-        return "未知";
-    };
 
     const getProjectSizeText = (projectId: string) => {
         const languageStats = projectLanguageStatsMap[projectId];

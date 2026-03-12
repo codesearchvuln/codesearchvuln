@@ -11,15 +11,9 @@
  */
 
 import {
+    Player,
     BigPlayButton,
     ControlBar,
-    PlayToggle,
-    CurrentTimeDisplay,
-    TimeDivider,
-    DurationDisplay,
-    FullscreenToggle,
-    VolumeMenuButton,
-    ProgressControl
 } from 'video-react';
 import 'video-react/dist/video-react.css';
 
@@ -91,19 +85,7 @@ display: block;
         muted={muted}
         aspectRatio={aspectRatio}
     >
-        <ControlBar
-        disableDefaultControls
-        autoHide
-        disableCompletely={!controls}
-        >
-        <PlayToggle key="play-toggle" />
-        <VolumeMenuButton key="volume-menu-button" vertical />
-        <CurrentTimeDisplay key="current-time-display" />
-        <TimeDivider key="time-divider" />
-        <DurationDisplay key="duration-display" />
-        <ProgressControl key="progress-control" />
-        <FullscreenToggle key="fullscreen-toggle" />
-        </ControlBar>
+        <ControlBar autoHide disableCompletely={!controls} />
         <BigPlayButton position="center" />
     </Player>
     </div>

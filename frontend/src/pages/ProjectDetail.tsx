@@ -732,19 +732,21 @@ export default function ProjectDetail() {
 																任务详情
 															</Link>
 														</Button>
-														{task.supportsFindingsDetail && task.taskCategory ? (
+								{task.supportsFindingsDetail && task.taskCategory ? (
 															<Button
 																type="button"
 																size="sm"
 																variant="outline"
 																className="cyber-btn-ghost h-7 px-3"
-																onClick={() =>
+																onClick={() => {
+																	const taskCategory = task.taskCategory;
+																	if (!taskCategory) return;
 																	openTaskFindingsDialog(
 																		task.id,
-																		task.taskCategory,
-																		getTaskCategoryText(task.taskCategory),
-																	)
-																}
+																		taskCategory,
+																		getTaskCategoryText(taskCategory),
+																	);
+																}}
 															>
 																缺陷详情
 															</Button>

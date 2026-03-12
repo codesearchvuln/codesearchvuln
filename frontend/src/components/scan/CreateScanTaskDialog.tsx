@@ -119,7 +119,6 @@ export default function CreateScanTaskDialog({
 	});
 	const [staticRules, setStaticRules] = useState<OpengrepRule[]>([]);
 	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
-	const [loadingStaticRules, setLoadingStaticRules] = useState(false);
 
 	const { projects, loading, loadProjects } = useProjects();
 	const selectedProject = projects.find((p) => p.id === selectedProjectId);
@@ -165,15 +164,6 @@ export default function CreateScanTaskDialog({
 		);
 	}, [projects, searchTerm]);
 
-	const staticRuleOptions = useMemo(
-		() =>
-			staticRules.map((rule) => ({
-				value: rule.id,
-				label: `${rule.name} (${rule.language.toUpperCase()} · ${rule.severity})`,
-			})),
-		[staticRules],
-	);
-
 	useEffect(() => {
 		const cached = getOpengrepActiveRules().filter(isSevereRule);
 		if (cached.length > 0) {
@@ -190,7 +180,6 @@ export default function CreateScanTaskDialog({
 	useEffect(() => {
 		const loadStaticRules = async () => {
 			if (!open || scanMode !== "static" || !staticTools.opengrep) return;
-			setLoadingStaticRules(true);
 			try {
 				const rules = (await getOpengrepRules({ is_active: true })).filter(
 					isSevereRule,
@@ -204,8 +193,6 @@ export default function CreateScanTaskDialog({
 				});
 			} catch (error) {
 				console.error("加载静态分析规则失败:", error);
-			} finally {
-				setLoadingStaticRules(false);
 			}
 		};
 		loadStaticRules();
@@ -255,7 +242,7 @@ export default function CreateScanTaskDialog({
 			return;
 		}
 
-		const inferredName = stripArchiveSuffix(file.name).trim();
+		const inferredName = stripScanArchiveSuffix(file.name).trim();
 		if (inferredName) {
 			setNewProjectName(inferredName);
 		}
@@ -288,7 +275,7 @@ export default function CreateScanTaskDialog({
 		if (!selectedProject) return false;
 		const isRepo = isRepositoryProject(selectedProject);
 		const isZip = isZipProject(selectedProject);
-		const hasStoredZip = zipState.storedZipInfo?.has_file;
+		const hasStoredZip = Boolean(zipState.storedZipInfo?.has_file);
 		const useStored = zipState.useStoredZip;
 		return isRepo || (isZip && useStored && hasStoredZip);
 	}, [selectedProject, zipState.storedZipInfo?.has_file, zipState.useStoredZip]);

@@ -185,18 +185,20 @@ class SandboxManager:
         env: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
         host_project_dir: Optional[str] = None,
+        project_root: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         在沙箱中执行命令
-        
+
         Args:
             command: 要执行的命令
             working_dir: 工作目录
             env: 环境变量
             timeout: 超时时间（秒）
+            project_root: 项目根目录（绝对路径），提供时将只读挂载到 /workspace
             host_project_dir: 宿主机上的项目根目录，将以只读方式挂载到容器 /project，
                               并自动设置 PYTHONPATH=/project，便于导入项目模块。
-            
+
         Returns:
             执行结果
         """
@@ -208,7 +210,7 @@ class SandboxManager:
                 "stderr": "",
                 "exit_code": -1,
             }
-        
+
         timeout = timeout or self.config.timeout
 
         # 禁用代理环境变量，防止 Docker 自动注入的代理干扰容器网络
@@ -228,8 +230,30 @@ class SandboxManager:
         container_env = {**no_proxy_env, **project_env, **(env or {})}
 
         try:
-            # 创建临时目录
+            # 确定 /workspace 挂载源：优先使用项目根目录（只读），否则使用临时目录（读写）
+            resolved_project_root = None
+            if project_root:
+                abs_root = os.path.abspath(project_root)
+                if os.path.isdir(abs_root):
+                    resolved_project_root = abs_root
+
+            # 创建临时目录（作为无项目源码时的 fallback 或作为沙箱写入区域）
             with tempfile.TemporaryDirectory() as temp_dir:
+                # 修复临时目录权限：确保沙箱用户（UID 1000）可访问
+                os.chmod(temp_dir, 0o777)
+
+                if resolved_project_root:
+                    # 有项目源码：只读挂载到 /workspace，临时目录挂载到 /sandbox_data
+                    volumes = {
+                        resolved_project_root: {"bind": "/workspace", "mode": "ro"},
+                        temp_dir: {"bind": "/sandbox_data", "mode": "rw"},
+                    }
+                else:
+                    # 无项目源码（降级模式）：临时目录挂载到 /workspace
+                    volumes = {
+                        temp_dir: {"bind": "/workspace", "mode": "rw"},
+                    }
+
                 # 挂载卷：workspace（可读写）+ 可选的项目目录（只读）
                 volumes: Dict[str, Any] = {
                     temp_dir: {"bind": "/workspace", "mode": "rw"},
@@ -249,8 +273,8 @@ class SandboxManager:
                     "read_only": self.config.read_only,
                     "volumes": volumes,
                     "tmpfs": {
-                            "/home/sandbox": "rw,size=100m,mode=1777",
-                            "/tmp": "rw,size=100m,mode=1777"
+                            "/home/sandbox": "rw,exec,size=512m,mode=1777",
+                            "/tmp": "rw,exec,size=512m,mode=1777"
                         },
                     "working_dir": working_dir or "/workspace",
                     "environment": container_env,

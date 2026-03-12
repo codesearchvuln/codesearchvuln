@@ -16,7 +16,9 @@ const CreateProjectScanDialog = lazy(
 );
 
 export default function TaskManagementIntelligent() {
-	const { activities, loading, error, refresh } = useTaskActivitiesSnapshot();
+	const { activities, loading, error, refresh } = useTaskActivitiesSnapshot({
+		pollingIntervalMs: 5000,
+	});
 	const [keyword, setKeyword] = useState("");
 	const [showCreateIntelligentDialog, setShowCreateIntelligentDialog] =
 		useState(false);

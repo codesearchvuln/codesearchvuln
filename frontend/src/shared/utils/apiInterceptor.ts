@@ -3,7 +3,7 @@
  * 自动记录所有API调用和响应
  */
 
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
 import { logger, LogCategory } from './logger';
 import { errorHandler } from './errorHandler';
 

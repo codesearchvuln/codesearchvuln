@@ -1168,7 +1168,6 @@ export function SystemConfig({
 		const parsedCustomHeaders = parseLlmCustomHeadersInput(
 			configSnapshot.llmCustomHeaders,
 		);
-		const currentModelBeforeFetch = String(configSnapshot.llmModel || "").trim();
 		const requiresApiKey = shouldRequireApiKey(providerId);
 		const signature = `${providerId}|${baseUrl}|${requiresApiKey ? apiKey : ""}|${
 			parsedCustomHeaders.ok ? parsedCustomHeaders.normalizedText : "invalid"
