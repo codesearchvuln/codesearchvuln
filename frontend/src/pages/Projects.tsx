@@ -1097,6 +1097,7 @@ export default function Projects() {
                 const staticGroups = buildStaticScanGroups({
                     opengrepTasks: projectTaskPools?.opengrepTasks || [],
                     gitleaksTasks: projectTaskPools?.gitleaksTasks || [],
+                    banditTasks: [],
                 });
                 const staticStats = staticGroups.reduce(
                     (acc, group) => {

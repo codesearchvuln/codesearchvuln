@@ -9,11 +9,12 @@ import { cn } from "@/shared/utils/utils";
 
 export type ScanMode = "static" | "agent";
 
-export type StaticTool = "opengrep" | "gitleaks";
+export type StaticTool = "opengrep" | "gitleaks" | "bandit";
 
 export interface StaticToolSelection {
   opengrep: boolean;
   gitleaks: boolean;
+  bandit: boolean;
 }
 
 interface AgentModeSelectorProps {
@@ -36,6 +37,7 @@ export default function AgentModeSelector({
   const resolvedTools: StaticToolSelection = staticTools || {
     opengrep: true,
     gitleaks: false,
+    bandit: false,
   };
 
   const updateStaticTool = (tool: StaticTool, checked: boolean) => {
@@ -150,6 +152,17 @@ export default function AgentModeSelector({
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">密钥泄露扫描</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs font-mono text-sky-700 dark:text-sky-300 cursor-pointer">
+                <Checkbox
+                  checked={resolvedTools.bandit}
+                  onCheckedChange={(checked) =>
+                    updateStaticTool("bandit", Boolean(checked))
+                  }
+                  disabled={disabled}
+                  className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
+                />
+                <span className="tracking-wider">Python 安全扫描</span>
               </label>
             </div>
           )}
