@@ -4,6 +4,10 @@ import {
 	getGitleaksScanTasks,
 } from "@/shared/api/gitleaks";
 import {
+	type BanditScanTask,
+	getBanditScanTasks,
+} from "@/shared/api/bandit";
+import {
 	getOpengrepScanTasks,
 	type OpengrepScanTask,
 } from "@/shared/api/opengrep";
@@ -285,6 +289,52 @@ function toStandaloneGitleaksActivities(
 	});
 }
 
+function toStandaloneBanditActivities(
+	banditTasks: BanditScanTask[],
+	resolveProjectName: (projectId: string) => string,
+): TaskActivityItem[] {
+	return banditTasks.map((task) => {
+		const severeCount = Math.max(task.high_count || 0, 0);
+		const hintCount = Math.max(task.medium_count || 0, 0) + Math.max(task.low_count || 0, 0);
+		const totalFindings = Math.max(task.total_findings || severeCount + hintCount, 0);
+		const params = new URLSearchParams();
+		params.set("banditTaskId", task.id);
+		params.set("tool", "bandit");
+		params.set("muteToast", "1");
+
+		const durationMs =
+			typeof task.scan_duration_ms === "number" &&
+			Number.isFinite(task.scan_duration_ms) &&
+			task.scan_duration_ms > 0
+				? task.scan_duration_ms
+				: null;
+
+		const isTerminal =
+			task.status === "completed" ||
+			task.status === "failed" ||
+			INTERRUPTED_STATUSES.has(task.status);
+
+		return {
+			id: `bandit-${task.id}`,
+			projectName: resolveProjectName(task.project_id),
+			kind: "rule_scan" as const,
+			sourceMode: resolveSourceModeFromTaskMeta("rule_scan", task.name),
+			status: task.status,
+			gitleaksEnabled: false,
+			staticFindingStats: {
+				severe: severeCount,
+				hint: hintCount,
+				total: totalFindings,
+			},
+			createdAt: task.created_at,
+			startedAt: task.created_at,
+			completedAt: isTerminal ? (task.updated_at ?? null) : null,
+			durationMs,
+			route: `/static-analysis/${task.id}?${params.toString()}`,
+		};
+	});
+}
+
 function toAgentActivities(
 	agentTasks: AgentTask[],
 	resolveProjectName: (projectId: string) => string,
@@ -310,10 +360,11 @@ export async function fetchTaskActivities(
 	projects: Project[],
 	limit = 100,
 ): Promise<TaskActivityItem[]> {
-	const [agentTasks, opengrepTasks, gitleaksTasks] = await Promise.all([
+	const [agentTasks, opengrepTasks, gitleaksTasks, banditTasks] = await Promise.all([
 		getAgentTasks({ limit }),
 		getOpengrepScanTasks({ limit }),
 		getGitleaksScanTasks({ limit }),
+		getBanditScanTasks({ limit }),
 	]);
 
 	const projectNameMap = mapProjectNames(projects);
@@ -331,6 +382,10 @@ export async function fetchTaskActivities(
 		),
 		...toStandaloneGitleaksActivities(
 			getUnpairedGitleaksTasks(),
+			resolveProjectName,
+		),
+		...toStandaloneBanditActivities(
+			banditTasks,
 			resolveProjectName,
 		),
 		...toAgentActivities(agentTasks, resolveProjectName),

@@ -36,6 +36,7 @@ import {
 	type OpengrepRule,
 } from "@/shared/api/opengrep";
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
+import { createBanditScanTask } from "@/shared/api/bandit";
 import {
 	getOpengrepActiveRules,
 	setOpengrepActiveRules,
@@ -116,6 +117,7 @@ export default function CreateScanTaskDialog({
 	const [staticTools, setStaticTools] = useState<StaticToolSelection>({
 		opengrep: true,
 		gitleaks: false,
+		bandit: false,
 	});
 	const [staticRules, setStaticRules] = useState<OpengrepRule[]>([]);
 	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
@@ -206,7 +208,7 @@ export default function CreateScanTaskDialog({
 			setShowAdvanced(false);
 			setSelectedRuleIds([]);
 			setScanMode(initialScanMode || "agent");
-			setStaticTools({ opengrep: true, gitleaks: false });
+			setStaticTools({ opengrep: true, gitleaks: false, bandit: false });
 			setSourceMode("existing");
 			setNewProjectName("");
 			setNewProjectFile(null);
@@ -284,12 +286,13 @@ export default function CreateScanTaskDialog({
 		projectId: string,
 		projectName: string,
 	) => {
-		if (!staticTools.opengrep && !staticTools.gitleaks) {
+		if (!staticTools.opengrep && !staticTools.gitleaks && !staticTools.bandit) {
 			throw new Error("请选择至少一个静态分析工具");
 		}
 
 		let opengrepTask: { id: string } | null = null;
 		let gitleaksTask: { id: string } | null = null;
+		let banditTask: { id: string } | null = null;
 
 		if (staticTools.opengrep) {
 			const pickActiveRuleIds = (rules: OpengrepRule[]) => {
@@ -347,18 +350,34 @@ export default function CreateScanTaskDialog({
 			});
 		}
 
-		const primaryTaskId = opengrepTask?.id || gitleaksTask?.id;
+		if (staticTools.bandit) {
+			banditTask = await createBanditScanTask({
+				project_id: projectId,
+				name: `静态分析-Bandit-${projectName}`,
+				target_path: ".",
+			});
+		}
+
+		const primaryTaskId = opengrepTask?.id || gitleaksTask?.id || banditTask?.id;
 		if (!primaryTaskId) {
 			throw new Error("静态分析任务创建失败");
 		}
 
 		const params = new URLSearchParams();
-		if (opengrepTask && gitleaksTask) {
-			params.set("gitleaksTaskId", gitleaksTask.id);
+		if (opengrepTask) {
 			params.set("opengrepTaskId", opengrepTask.id);
 		}
-		if (!opengrepTask && gitleaksTask) {
+		if (gitleaksTask) {
+			params.set("gitleaksTaskId", gitleaksTask.id);
+		}
+		if (banditTask) {
+			params.set("banditTaskId", banditTask.id);
+		}
+		if (!opengrepTask && !banditTask && gitleaksTask) {
 			params.set("tool", "gitleaks");
+		}
+		if (!opengrepTask && !gitleaksTask && banditTask) {
+			params.set("tool", "bandit");
 		}
 
 		return {
@@ -532,7 +551,7 @@ export default function CreateScanTaskDialog({
 			if (sourceMode === "upload") {
 				if (!newProjectName.trim() || !newProjectFile) return false;
 				if (scanMode === "static") {
-					return staticTools.opengrep || staticTools.gitleaks;
+					return staticTools.opengrep || staticTools.gitleaks || staticTools.bandit;
 				}
 				return true;
 			}
@@ -541,7 +560,7 @@ export default function CreateScanTaskDialog({
 				return (
 					isZipProject(selectedProject) &&
 				!!zipState.storedZipInfo?.has_file &&
-				(staticTools.opengrep || staticTools.gitleaks)
+				(staticTools.opengrep || staticTools.gitleaks || staticTools.bandit)
 			);
 		}
 			if (isZipProject(selectedProject)) {
@@ -564,6 +583,7 @@ export default function CreateScanTaskDialog({
 			effectiveTargetFiles,
 			staticTools.opengrep,
 			staticTools.gitleaks,
+			staticTools.bandit,
 		]);
 
 	return (

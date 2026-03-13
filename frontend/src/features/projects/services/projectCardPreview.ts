@@ -1,5 +1,6 @@
 import type { AgentTask } from "@/shared/api/agentTasks";
 import type { AgentFinding } from "@/shared/api/agentTasks";
+import type { BanditScanTask } from "@/shared/api/bandit";
 import type { GitleaksScanTask } from "@/shared/api/gitleaks";
 import type { OpengrepFinding, OpengrepScanTask } from "@/shared/api/opengrep";
 import type { AuditTask } from "@/shared/types";
@@ -261,31 +262,45 @@ export function getProjectCardSummaryStats(params: {
   auditTasks: AuditTask[];
   agentTasks: AgentTask[];
   opengrepTasks: OpengrepScanTask[];
+  gitleaksTasks?: GitleaksScanTask[];
+  banditTasks?: BanditScanTask[];
 }): ProjectCardSummaryStats {
   const { projectId, auditTasks, agentTasks, opengrepTasks } = params;
+  const gitleaksTasks = params.gitleaksTasks || [];
+  const banditTasks = params.banditTasks || [];
 
   const projectAuditTasks = auditTasks.filter((task) => task.project_id === projectId);
   const projectAgentTasks = agentTasks.filter((task) => task.project_id === projectId);
   const projectOpengrepTasks = opengrepTasks.filter((task) => task.project_id === projectId);
+  const projectGitleaksTasks = gitleaksTasks.filter((task) => task.project_id === projectId);
+  const projectBanditTasks = banditTasks.filter((task) => task.project_id === projectId);
 
   const totalTasks =
     projectAuditTasks.length +
     projectAgentTasks.length +
-    projectOpengrepTasks.length;
+    projectOpengrepTasks.length +
+    projectGitleaksTasks.length +
+    projectBanditTasks.length;
 
   const completedTasks =
     projectAuditTasks.filter((task) => isCompletedStatus(task.status)).length +
     projectAgentTasks.filter((task) => isCompletedStatus(task.status)).length +
-    projectOpengrepTasks.filter((task) => isCompletedStatus(task.status)).length;
+    projectOpengrepTasks.filter((task) => isCompletedStatus(task.status)).length +
+    projectGitleaksTasks.filter((task) => isCompletedStatus(task.status)).length +
+    projectBanditTasks.filter((task) => isCompletedStatus(task.status)).length;
   const runningTasks =
     projectAuditTasks.filter((task) => isRunningStatus(task.status)).length +
     projectAgentTasks.filter((task) => isRunningStatus(task.status)).length +
-    projectOpengrepTasks.filter((task) => isRunningStatus(task.status)).length;
+    projectOpengrepTasks.filter((task) => isRunningStatus(task.status)).length +
+    projectGitleaksTasks.filter((task) => isRunningStatus(task.status)).length +
+    projectBanditTasks.filter((task) => isRunningStatus(task.status)).length;
 
   const issueBreakdown = getProjectFoundIssuesBreakdown({
     projectId,
     agentTasks,
     opengrepTasks,
+    gitleaksTasks,
+    banditTasks,
   });
 
   return {
@@ -300,16 +315,34 @@ export function getProjectFoundIssuesBreakdown(params: {
   projectId: string;
   agentTasks: AgentTask[];
   opengrepTasks: OpengrepScanTask[];
+  gitleaksTasks?: GitleaksScanTask[];
+  banditTasks?: BanditScanTask[];
 }): ProjectFoundIssuesBreakdown {
   const { projectId, agentTasks, opengrepTasks } = params;
+  const gitleaksTasks = params.gitleaksTasks || [];
+  const banditTasks = params.banditTasks || [];
 
-  const staticIssues = opengrepTasks
+  const opengrepIssues = opengrepTasks
     .filter((task) => task.project_id === projectId)
     .reduce(
       (sum, task) =>
         sum + Math.max(Number(task.high_confidence_count ?? 0), 0),
       0,
     );
+  const banditIssues = banditTasks
+    .filter((task) => task.project_id === projectId)
+    .reduce(
+      (sum, task) =>
+        sum +
+        Math.max(Number(task.high_count || 0), 0) +
+        Math.max(Number(task.medium_count || 0), 0) +
+        Math.max(Number(task.low_count || 0), 0),
+      0,
+    );
+  const gitleaksIssues = gitleaksTasks
+    .filter((task) => task.project_id === projectId)
+    .reduce((sum, task) => sum + Math.max(Number(task.total_findings || 0), 0), 0);
+  const staticIssues = opengrepIssues + gitleaksIssues + banditIssues;
 
   const projectAgentTasks = agentTasks.filter((task) => task.project_id === projectId);
 
@@ -406,10 +439,12 @@ export function getProjectCardRecentTasks(params: {
   agentTasks: AgentTask[];
   opengrepTasks: OpengrepScanTask[];
   gitleaksTasks: GitleaksScanTask[];
+  banditTasks?: BanditScanTask[];
   limit?: number;
 }): ProjectCardRecentTask[] {
   const { projectId, auditTasks, agentTasks, opengrepTasks, gitleaksTasks } =
     params;
+  const banditTasks = params.banditTasks || [];
   const limit = params.limit ?? 3;
   const staticRouteMap = buildStaticRouteMap(opengrepTasks, gitleaksTasks);
   const gitleaksById = new Map(gitleaksTasks.map((task) => [task.id, task]));
@@ -447,6 +482,35 @@ export function getProjectCardRecentTasks(params: {
         scannedFiles: toNullableNonNegativeNumber(task.files_scanned),
         scannedLines: toNullableNonNegativeNumber(task.lines_scanned),
         vulnerabilities: toNullableNonNegativeNumber(task.high_confidence_count ?? 0),
+        taskCategory: "static",
+        supportsFindingsDetail: true,
+        findingsButtonDisabledReason: null,
+      };
+    });
+
+  const standaloneBanditItems: ProjectCardRecentTask[] = banditTasks
+    .filter((task) => task.project_id === projectId)
+    .map((task) => {
+      const params = new URLSearchParams();
+      params.set("banditTaskId", task.id);
+      params.set("tool", "bandit");
+
+      return {
+        id: task.id,
+        projectId: task.project_id,
+        kind: "static",
+        status: task.status,
+        progressPercent: getStatusProgressBaseline(task.status),
+        createdAt: task.created_at,
+        startedAt: task.created_at,
+        completedAt: task.updated_at ?? null,
+        durationMs: toNullableNonNegativeNumber(task.scan_duration_ms),
+        route: `/static-analysis/${task.id}?${params.toString()}`,
+        label: "静态扫描",
+        scanTypeLabel: "静态扫描",
+        scannedFiles: toNullableNonNegativeNumber(task.files_scanned),
+        scannedLines: null,
+        vulnerabilities: toNullableNonNegativeNumber(task.total_findings),
         taskCategory: "static",
         supportsFindingsDetail: true,
         findingsButtonDisabledReason: null,
@@ -523,7 +587,7 @@ export function getProjectCardRecentTasks(params: {
       findingsButtonDisabledReason: "当前任务类型暂不支持缺陷详情",
     }));
 
-  return [...staticItems, ...intelligentItems, ...auditItems]
+  return [...staticItems, ...standaloneBanditItems, ...intelligentItems, ...auditItems]
     .sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     )
