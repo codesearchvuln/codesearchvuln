@@ -50,7 +50,7 @@ from app.services.agent.utils.vulnerability_naming import (
     resolve_cwe_id as resolve_cwe_id_util,
     resolve_vulnerability_profile as resolve_vulnerability_profile_util,
 )
-from app.services.agent.bootstrap import OpenGrepBootstrapScanner
+from app.services.agent.bootstrap import OpenGrepBootstrapScanner, BanditBootstrapScanner
 from app.services.agent.mcp import (
     HARD_MAX_WRITABLE_FILES_PER_TASK,
     FastMCPHttpAdapter,
@@ -652,12 +652,14 @@ def _resolve_static_bootstrap_config(
     defaults: Dict[str, Any] = {
         "mode": "disabled",
         "opengrep_enabled": False,
+        "bandit_enabled": False,
         "gitleaks_enabled": False,
     }
     if source_mode == "hybrid":
         defaults = {
             "mode": "embedded",
             "opengrep_enabled": True,
+            "bandit_enabled": False,
             "gitleaks_enabled": False,
         }
 
@@ -676,16 +678,21 @@ def _resolve_static_bootstrap_config(
     opengrep_enabled = bool(
         static_bootstrap.get("opengrep_enabled", defaults["opengrep_enabled"])
     )
+    bandit_enabled = bool(
+        static_bootstrap.get("bandit_enabled", defaults["bandit_enabled"])
+    )
     gitleaks_enabled = bool(
         static_bootstrap.get("gitleaks_enabled", defaults["gitleaks_enabled"])
     )
     if mode == "disabled":
         opengrep_enabled = False
+        bandit_enabled = False
         gitleaks_enabled = False
 
     return {
         "mode": mode,
         "opengrep_enabled": opengrep_enabled,
+        "bandit_enabled": bandit_enabled,
         "gitleaks_enabled": gitleaks_enabled,
     }
 
@@ -1825,14 +1832,17 @@ async def _prepare_embedded_bootstrap_findings(
     event_emitter: Any,
     exclude_patterns: Optional[List[str]] = None,
     opengrep_enabled: bool = True,
+    bandit_enabled: bool = False,
     gitleaks_enabled: bool = False,
 ) -> Tuple[List[Dict[str, Any]], Optional[str], str]:
     opengrep_candidates: List[Dict[str, Any]] = []
+    bandit_candidates: List[Dict[str, Any]] = []
     gitleaks_candidates: List[Dict[str, Any]] = []
     opengrep_total_findings = 0
+    bandit_total_findings = 0
     gitleaks_total_findings = 0
 
-    if not opengrep_enabled and not gitleaks_enabled:
+    if not opengrep_enabled and not bandit_enabled and not gitleaks_enabled:
         if event_emitter:
             await event_emitter.emit_info(
                 "⏭️ 静态预扫未启用：返回空候选，继续后续流程",
@@ -1896,6 +1906,45 @@ async def _prepare_embedded_bootstrap_findings(
             exclude_patterns=exclude_patterns,
         )
 
+    if bandit_enabled:
+        if event_emitter:
+            await event_emitter.emit_info(
+                "🧪 Bandit 内嵌预扫开始",
+                metadata={
+                    "bootstrap": True,
+                    "bootstrap_task_id": None,
+                    "bootstrap_source": "embedded_bandit",
+                    "bootstrap_total_findings": 0,
+                    "bootstrap_candidate_count": 0,
+                },
+            )
+        try:
+            scanner = BanditBootstrapScanner()
+            scan_result = await scanner.scan(project_root)
+        except FileNotFoundError as exc:
+            if event_emitter:
+                await event_emitter.emit_error("❌ Bandit 预处理失败：未安装 bandit")
+            raise RuntimeError("Bandit 预处理失败：未安装 bandit") from exc
+        except Exception as exc:
+            if event_emitter:
+                await event_emitter.emit_error(f"❌ Bandit 预处理失败：{str(exc)[:160]}")
+            raise RuntimeError(f"Bandit 预处理失败：{str(exc)[:200]}") from exc
+
+        bandit_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
+        normalized_bandit_findings = []
+        for finding in getattr(scan_result, "findings", []) or []:
+            if hasattr(finding, "to_dict"):
+                finding_payload = finding.to_dict()
+            elif isinstance(finding, dict):
+                finding_payload = dict(finding)
+            else:
+                continue
+            normalized_bandit_findings.append(finding_payload)
+        bandit_candidates = _filter_bootstrap_findings(
+            normalized_bandit_findings,
+            exclude_patterns=exclude_patterns,
+        )
+
     if gitleaks_enabled:
         if event_emitter:
             await event_emitter.emit_info(
@@ -1931,16 +1980,18 @@ async def _prepare_embedded_bootstrap_findings(
         )
 
     merged_candidates = _dedupe_bootstrap_findings(
-        [*opengrep_candidates, *gitleaks_candidates]
+        [*opengrep_candidates, *bandit_candidates, *gitleaks_candidates]
     )
-    total_findings = opengrep_total_findings + gitleaks_total_findings
+    total_findings = opengrep_total_findings + bandit_total_findings + gitleaks_total_findings
 
-    if opengrep_enabled and gitleaks_enabled:
-        bootstrap_source = "embedded_opengrep_gitleaks"
-    elif opengrep_enabled:
-        bootstrap_source = "embedded_opengrep"
-    else:
-        bootstrap_source = "embedded_gitleaks"
+    enabled_sources: List[str] = []
+    if opengrep_enabled:
+        enabled_sources.append("opengrep")
+    if bandit_enabled:
+        enabled_sources.append("bandit")
+    if gitleaks_enabled:
+        enabled_sources.append("gitleaks")
+    bootstrap_source = f"embedded_{'_'.join(enabled_sources)}"
 
     if event_emitter:
         await event_emitter.emit_info(
@@ -1953,6 +2004,8 @@ async def _prepare_embedded_bootstrap_findings(
                 "bootstrap_candidate_count": len(merged_candidates),
                 "bootstrap_opengrep_total_findings": opengrep_total_findings,
                 "bootstrap_opengrep_candidate_count": len(opengrep_candidates),
+                "bootstrap_bandit_total_findings": bandit_total_findings,
+                "bootstrap_bandit_candidate_count": len(bandit_candidates),
                 "bootstrap_gitleaks_total_findings": gitleaks_total_findings,
                 "bootstrap_gitleaks_candidate_count": len(gitleaks_candidates),
             },
@@ -2989,6 +3042,9 @@ async def _execute_agent_task(task_id: str):
                         exclude_patterns=task.exclude_patterns,
                         opengrep_enabled=bool(
                             static_bootstrap_config.get("opengrep_enabled")
+                        ),
+                        bandit_enabled=bool(
+                            static_bootstrap_config.get("bandit_enabled")
                         ),
                         gitleaks_enabled=bool(
                             static_bootstrap_config.get("gitleaks_enabled")

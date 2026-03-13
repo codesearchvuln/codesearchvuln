@@ -380,14 +380,14 @@ export default function CreateProjectScanDialog({
 			if (mode === "agent") {
 				baseCanCreate = true;
 			} else if (mode === "hybrid") {
-				baseCanCreate = opengrepEnabled || gitleaksEnabled;
+				baseCanCreate = opengrepEnabled || gitleaksEnabled || banditEnabled;
 			} else {
 				baseCanCreate = opengrepEnabled || gitleaksEnabled || banditEnabled;
 			}
 		} else {
 			if (!selectedProject) return false;
 			if (mode === "hybrid") {
-				if (!opengrepEnabled && !gitleaksEnabled) return false;
+				if (!opengrepEnabled && !gitleaksEnabled && !banditEnabled) return false;
 			} else if (mode === "static") {
 				if (!opengrepEnabled && !gitleaksEnabled && !banditEnabled) {
 					return false;
@@ -421,12 +421,6 @@ export default function CreateProjectScanDialog({
 		quickFixPanelOpening,
 		llmGateStatus.canCreate,
 	]);
-
-	useEffect(() => {
-		if (mode !== "hybrid") return;
-		if (!banditEnabled) return;
-		setBanditEnabled(false);
-	}, [mode, banditEnabled]);
 
 	const createStaticTasksForProject = async (
 		project: Project,
@@ -525,11 +519,13 @@ export default function CreateProjectScanDialog({
 					? {
 							mode: "embedded" as const,
 							opengrep_enabled: opengrepEnabled,
+							bandit_enabled: banditEnabled,
 							gitleaks_enabled: gitleaksEnabled,
 						}
 					: {
 							mode: "disabled" as const,
 							opengrep_enabled: false,
+							bandit_enabled: false,
 							gitleaks_enabled: false,
 						},
 		},

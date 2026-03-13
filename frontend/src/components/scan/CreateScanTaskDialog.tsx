@@ -444,6 +444,7 @@ export default function CreateScanTaskDialog({
 								static_bootstrap: {
 									mode: "disabled",
 									opengrep_enabled: false,
+									bandit_enabled: false,
 									gitleaks_enabled: false,
 								},
 							},
@@ -508,6 +509,7 @@ export default function CreateScanTaskDialog({
 						static_bootstrap: {
 							mode: "disabled",
 							opengrep_enabled: false,
+							bandit_enabled: false,
 							gitleaks_enabled: false,
 						},
 					},

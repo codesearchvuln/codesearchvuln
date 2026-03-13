@@ -198,6 +198,7 @@ export interface CreateAgentTaskRequest {
 export interface AgentStaticBootstrapScope {
   mode?: "embedded" | "disabled";
   opengrep_enabled?: boolean;
+  bandit_enabled?: boolean;
   gitleaks_enabled?: boolean;
 }
 

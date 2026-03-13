@@ -483,7 +483,7 @@ export default function CreateProjectScanDialogContent({
                   <Checkbox
                     checked={banditEnabled}
                     onCheckedChange={(checked) => setBanditEnabled(Boolean(checked))}
-                    disabled={creating || mode === "hybrid"}
+                    disabled={creating}
                     className="data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                   />
                   <div>

@@ -6,6 +6,7 @@ import pytest
 from app.api.v1.endpoints.agent_tasks import (
     _filter_bootstrap_findings,
     _prepare_embedded_bootstrap_findings,
+    _resolve_static_bootstrap_config,
 )
 import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
@@ -234,3 +235,186 @@ def test_filter_bootstrap_findings_only_error_and_high_medium_confidence():
     for item in filtered:
         assert item["severity"].upper() == "ERROR"
         assert item["confidence"] in {"HIGH", "MEDIUM"}
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedded_bootstrap_with_bandit_only(monkeypatch):
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult([]))
+
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks.BanditBootstrapScanner.scan",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                total_findings=2,
+                findings=[
+                    {
+                        "id": "bandit-0",
+                        "title": "hardcoded password",
+                        "description": "hardcoded password",
+                        "file_path": "src/a.py",
+                        "line_start": 8,
+                        "line_end": 8,
+                        "code_snippet": "password = 'secret'",
+                        "severity": "ERROR",
+                        "confidence": "HIGH",
+                        "vulnerability_type": "B105",
+                        "source": "bandit_bootstrap",
+                    },
+                    {
+                        "id": "bandit-1",
+                        "title": "low confidence sample",
+                        "description": "low confidence sample",
+                        "file_path": "src/a.py",
+                        "line_start": 18,
+                        "line_end": 18,
+                        "code_snippet": "print('debug')",
+                        "severity": "WARNING",
+                        "confidence": "LOW",
+                        "vulnerability_type": "B000",
+                        "source": "bandit_bootstrap",
+                    },
+                ],
+            )
+        ),
+    )
+
+    candidates, bootstrap_task_id, source = await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        opengrep_enabled=False,
+        bandit_enabled=True,
+        gitleaks_enabled=False,
+    )
+
+    assert bootstrap_task_id is None
+    assert source == "embedded_bandit"
+    assert len(candidates) == 1
+    assert candidates[0]["source"] == "bandit_bootstrap"
+
+    metadata = event_emitter.emit_info.await_args_list[-1].kwargs.get("metadata")
+    assert isinstance(metadata, dict)
+    assert metadata.get("bootstrap_bandit_total_findings") == 2
+    assert metadata.get("bootstrap_bandit_candidate_count") == 1
+    assert metadata.get("bootstrap_candidate_count") == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedded_bootstrap_with_opengrep_and_bandit(monkeypatch):
+    active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="HIGH")]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult(active_rules))
+
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks.OpenGrepBootstrapScanner.scan",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                total_findings=1,
+                findings=[
+                    {
+                        "id": "og-1",
+                        "title": "danger",
+                        "description": "danger",
+                        "file_path": "src/a.py",
+                        "line_start": 6,
+                        "line_end": 6,
+                        "code_snippet": "danger()",
+                        "severity": "ERROR",
+                        "confidence": "HIGH",
+                        "vulnerability_type": "rule-1",
+                        "source": "opengrep_bootstrap",
+                    }
+                ],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks.BanditBootstrapScanner.scan",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                total_findings=1,
+                findings=[
+                    {
+                        "id": "bandit-0",
+                        "title": "hardcoded password",
+                        "description": "hardcoded password",
+                        "file_path": "src/b.py",
+                        "line_start": 10,
+                        "line_end": 10,
+                        "code_snippet": "password = 'secret'",
+                        "severity": "ERROR",
+                        "confidence": "MEDIUM",
+                        "vulnerability_type": "B105",
+                        "source": "bandit_bootstrap",
+                    }
+                ],
+            )
+        ),
+    )
+
+    candidates, _, source = await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        opengrep_enabled=True,
+        bandit_enabled=True,
+        gitleaks_enabled=False,
+    )
+
+    assert source == "embedded_opengrep_bandit"
+    assert len(candidates) == 2
+    assert {item["source"] for item in candidates} == {
+        "opengrep_bootstrap",
+        "bandit_bootstrap",
+    }
+
+
+def test_resolve_static_bootstrap_config_supports_bandit():
+    task = SimpleNamespace(
+        audit_scope={
+            "static_bootstrap": {
+                "mode": "embedded",
+                "opengrep_enabled": False,
+                "bandit_enabled": True,
+                "gitleaks_enabled": True,
+            }
+        }
+    )
+    config = _resolve_static_bootstrap_config(task, source_mode="hybrid")
+    assert config == {
+        "mode": "embedded",
+        "opengrep_enabled": False,
+        "bandit_enabled": True,
+        "gitleaks_enabled": True,
+    }
+
+    disabled_task = SimpleNamespace(
+        audit_scope={
+            "static_bootstrap": {
+                "mode": "disabled",
+                "opengrep_enabled": True,
+                "bandit_enabled": True,
+                "gitleaks_enabled": True,
+            }
+        }
+    )
+    disabled_config = _resolve_static_bootstrap_config(disabled_task, source_mode="hybrid")
+    assert disabled_config == {
+        "mode": "disabled",
+        "opengrep_enabled": False,
+        "bandit_enabled": False,
+        "gitleaks_enabled": False,
+    }
