@@ -2,7 +2,6 @@ import {
 	AlertTriangle,
 	ChevronLeft,
 	ChevronRight,
-	Search,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Badge } from "@/components/ui/badge";

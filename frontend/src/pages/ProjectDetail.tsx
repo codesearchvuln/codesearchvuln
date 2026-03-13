@@ -663,7 +663,7 @@ export default function ProjectDetail() {
 						<div className="flex items-center gap-2">
 							<Activity className="w-4 h-4 text-sky-400" />
 							<h3 className="text-sm font-semibold uppercase tracking-wider">
-								最近任务（Top {DETAIL_RECENT_TASK_LIMIT}）
+								最近任务
 							</h3>
 						</div>
 						<div className="relative w-full sm:w-[320px]">
@@ -786,7 +786,7 @@ export default function ProjectDetail() {
 					<div className="flex items-center gap-2 mb-3">
 						<Bug className="w-4 h-4 text-amber-400" />
 						<h3 className="text-sm font-semibold uppercase tracking-wider">
-							潜在缺陷（Top {DETAIL_POTENTIAL_TOP_LIMIT}）
+							潜在缺陷
 						</h3>
 					</div>
 

@@ -1629,11 +1629,6 @@ export function SystemConfig({
 												<p className="stat-value text-2xl break-all">
 													{selectedProviderInfo?.name || normalizedProviderId}
 												</p>
-												<p className="text-sm text-muted-foreground mt-1">
-													{selectedProviderInfo?.supportsModelFetch
-														? "支持在线拉取"
-														: "静态模型列表"}
-												</p>
 											</div>
 											<div className="stat-icon text-primary">
 												<Settings className="w-6 h-6" />
@@ -1658,15 +1653,9 @@ export function SystemConfig({
 									<div className="cyber-card p-4">
 										<div className="flex items-center justify-between">
 											<div>
-												<p className="stat-label">模型统计</p>
-												<p className="stat-value">
-													{availableModelCount} 个模型
-												</p>
-												<p className="text-sm text-muted-foreground mt-1">
-													元数据 {availableModelMetadataCount} ·
-													{selectedProviderInfo?.supportsModelFetch
-														? " 支持在线拉取"
-														: " 使用静态列表"}
+												<p className="stat-label">支持模型数量</p>
+												<p className="stat-value text-2xl break-all">
+													{availableModelCount}
 												</p>
 											</div>
 											<div className="stat-icon text-emerald-400">
@@ -1918,13 +1907,6 @@ export function SystemConfig({
 																		</Button>
 																	</div>
 																</div>
-															<p className="text-[11px] text-muted-foreground/80">
-																{normalizedCurrentModel
-																	? models.includes(normalizedCurrentModel)
-																		? "已匹配可选模型"
-																		: "当前为自定义模型，可直接保存或测试"
-																	: "支持手动输入或从候选列表选择"}
-															</p>
 														</div>
 														<Button
 															type="button"
@@ -1970,14 +1952,6 @@ export function SystemConfig({
 									</div>
 
 									<div className="pt-4 border-t border-border border-dashed flex items-center justify-between flex-wrap gap-4">
-										<div className="text-sm">
-											<span className="font-bold text-foreground">
-												测试连接
-											</span>
-											<span className="text-muted-foreground ml-2">
-												验证配置是否正确
-											</span>
-										</div>
 										<div className="flex items-center gap-2">
 											<Button
 												onClick={testLLMConnection}

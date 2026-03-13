@@ -37,7 +37,7 @@ export default function ScanConfigIntelligentEngine() {
 			? "加载中..."
 			: summary.modelStatsStatus === "empty"
 				? "--"
-				: `${summary.availableModelCount} 个模型`;
+				: `${summary.availableModelCount}`;
 
 	return (
 		<div className="space-y-6 p-6 bg-background min-h-screen relative">
@@ -51,9 +51,6 @@ export default function ScanConfigIntelligentEngine() {
 								<p className="stat-label">模型提供商</p>
 								<p className="stat-value text-2xl break-all">
 									{summary.providerLabel}
-								</p>
-								<p className="text-sm text-muted-foreground mt-1">
-									{summary.supportsModelFetch ? "支持在线拉取" : "静态模型列表"}
 								</p>
 							</div>
 							<div className="stat-icon text-primary">
@@ -79,8 +76,10 @@ export default function ScanConfigIntelligentEngine() {
 					<div className="cyber-card p-4">
 						<div className="flex items-center justify-between">
 							<div>
-								<p className="stat-label">模型统计</p>
-								<p className="stat-value">{modelStatsValue}</p>
+								<p className="stat-label">支持模型数量</p>
+								<p className="stat-value text-2xl break-all">
+									{modelStatsValue}
+								</p>
 							</div>
 							<div className="stat-icon text-emerald-400">
 								<Zap className="w-6 h-6" />
@@ -96,9 +95,6 @@ export default function ScanConfigIntelligentEngine() {
 							<div className="font-mono font-bold uppercase text-sm text-foreground">
 								推理模块
 							</div>
-						</div>
-						<div className="text-xs text-muted-foreground">
-							配置模型参数、请求预算和超时策略。
 						</div>
 						<SystemConfig
 							visibleSections={["llm"]}

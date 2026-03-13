@@ -114,15 +114,20 @@ export function getLlmQuickGateStatus({
 }: LlmQuickGateStatusInput) {
 	const missingFields = getLlmQuickConfigMissingFields(currentConfig, providerOptions);
 	const hasUnsavedChanges = !areSameLlmQuickConfig(currentConfig, savedConfig);
-	const canTest = missingFields.length === 0;
-	const testBlockMessage = "";
+	const hasRequiredFields = missingFields.length === 0;
+	const canTest = hasRequiredFields && !hasUnsavedChanges;
+	const testBlockMessage = hasRequiredFields
+		? hasUnsavedChanges
+			? "当前 LLM 配置有未保存改动，请先保存，再手动测试连接。"
+			: ""
+		: "";
 
 	return {
 		missingFields,
 		hasUnsavedChanges,
-		canSave: missingFields.length === 0,
+		canSave: hasRequiredFields,
 		canTest,
-		canCreate: missingFields.length === 0 && !hasUnsavedChanges && hasSuccessfulManualTest,
+		canCreate: hasRequiredFields && !hasUnsavedChanges && hasSuccessfulManualTest,
 		testBlockMessage,
 	};
 }

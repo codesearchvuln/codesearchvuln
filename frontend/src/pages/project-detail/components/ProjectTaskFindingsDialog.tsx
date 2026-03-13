@@ -492,7 +492,7 @@ export default function ProjectTaskFindingsDialog({
 						<div className="min-w-0 space-y-2 text-left">
 						  <DialogTitle className="flex items-center gap-2 text-base leading-none">
 						    <Bug className="h-4 w-4 shrink-0 text-amber-400" />
-						    <span className="truncate">缺陷详情</span>
+						    <span className="truncate">{taskLabel}缺陷详情</span>
 						  </DialogTitle>
 
 						  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -501,6 +501,9 @@ export default function ProjectTaskFindingsDialog({
 						    </span>
 						    <span className="inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
 						      漏洞共 {filteredRows.length.toLocaleString()} 条
+						    </span>
+						    <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/20 px-2.5 py-1">
+						      {sortHint}
 						    </span>
 						  </div>
 						</div>
