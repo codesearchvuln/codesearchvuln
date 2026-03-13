@@ -52,7 +52,7 @@ SENSITIVE_LLM_FIELDS = [
     'qwenApiKey', 'deepseekApiKey', 'zhipuApiKey', 'moonshotApiKey',
     'baiduApiKey', 'minimaxApiKey', 'doubaoApiKey'
 ]
-SENSITIVE_OTHER_FIELDS = ['githubToken', 'gitlabToken']
+SENSITIVE_OTHER_FIELDS: list[str] = []
 LLM_PROVIDER_API_KEY_FIELD_MAP = {
     "custom": "openaiApiKey",
     "openai": "openaiApiKey",
@@ -180,6 +180,54 @@ async def _load_user_config_payload(
             SENSITIVE_OTHER_FIELDS,
         )
     return saved_llm_config, saved_other_config
+
+
+async def _load_user_config_payload_with_effective_defaults(
+    *,
+    db: AsyncSession,
+    user_id: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    saved_llm_config, saved_other_config = await _load_user_config_payload(
+        db=db,
+        user_id=user_id,
+    )
+    default_config = get_default_config()
+    effective_llm_config = {
+        **default_config["llmConfig"],
+        **saved_llm_config,
+    }
+    effective_other_config = _sanitize_other_config(
+        {
+            **default_config["otherConfig"],
+            **_strip_mcp_config(saved_other_config),
+        }
+    )
+    return (
+        saved_llm_config,
+        saved_other_config,
+        effective_llm_config,
+        effective_other_config,
+    )
+
+
+async def _load_effective_user_config(
+    *,
+    db: AsyncSession,
+    user_id: str,
+) -> dict[str, dict[str, Any]]:
+    (
+        _saved_llm_config,
+        _saved_other_config,
+        effective_llm_config,
+        effective_other_config,
+    ) = await _load_user_config_payload_with_effective_defaults(
+        db=db,
+        user_id=user_id,
+    )
+    return {
+        "llmConfig": effective_llm_config,
+        "otherConfig": effective_other_config,
+    }
 
 def _extract_model_names_from_payload(payload: Any) -> list[str]:
     candidates: list[str] = []
@@ -537,11 +585,15 @@ def _sanitize_mcp_config(raw_mcp_config: Any) -> dict:
 
 def _sanitize_other_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
+    for retired_key in ("githubToken", "gitlabToken", "giteaToken"):
+        candidate.pop(retired_key, None)
     candidate["mcpConfig"] = _sanitize_mcp_config(candidate.get("mcpConfig"))
     return candidate
 
 def _strip_mcp_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
+    for retired_key in ("githubToken", "gitlabToken", "giteaToken"):
+        candidate.pop(retired_key, None)
     candidate.pop("mcpConfig", None)
     return candidate
 
@@ -733,8 +785,6 @@ class LLMConfigSchema(BaseModel):
 
 class OtherConfigSchema(BaseModel):
     """其他配置Schema"""
-    githubToken: Optional[str] = None
-    gitlabToken: Optional[str] = None
     maxAnalyzeFiles: Optional[int] = None
     llmConcurrency: Optional[int] = None
     llmGapMs: Optional[int] = None
@@ -889,8 +939,6 @@ def get_default_config() -> dict:
             "ollamaBaseUrl": settings.OLLAMA_BASE_URL or "http://localhost:11434/v1",
         },
         "otherConfig": {
-            "githubToken": settings.GITHUB_TOKEN or "",
-            "gitlabToken": settings.GITLAB_TOKEN or "",
             "maxAnalyzeFiles": settings.MAX_ANALYZE_FILES,
             "llmConcurrency": settings.LLM_CONCURRENCY,
             "llmGapMs": settings.LLM_GAP_MS,
@@ -915,10 +963,8 @@ async def get_my_config(
     )
     config = result.scalar_one_or_none()
     
-    # 获取系统默认配置
-    default_config = get_default_config()
-    
     if not config:
+        default_config = get_default_config()
         print(f"[Config] 用户 {current_user.id} 没有保存的配置，返回默认配置")
         # 返回系统默认配置
         return UserConfigResponse(
@@ -929,25 +975,21 @@ async def get_my_config(
             created_at="",
         )
     
-    # 合并用户配置和默认配置（用户配置优先）
-    user_llm_config = json.loads(config.llm_config) if config.llm_config else {}
-    user_other_config = json.loads(config.other_config) if config.other_config else {}
-    
-    # 解密敏感字段
-    user_llm_config = decrypt_config(user_llm_config, SENSITIVE_LLM_FIELDS)
-    user_other_config = decrypt_config(user_other_config, SENSITIVE_OTHER_FIELDS)
-    user_other_config = _strip_mcp_config(user_other_config)
+    (
+        user_llm_config,
+        user_other_config,
+        merged_llm_config,
+        merged_other_config,
+    ) = await _load_user_config_payload_with_effective_defaults(
+        db=db,
+        user_id=current_user.id,
+    )
     
     print(f"[Config] 用户 {current_user.id} 的保存配置:")
     print(f"  - llmProvider: {user_llm_config.get('llmProvider')}")
     print(f"  - llmApiKey: {'***' + user_llm_config.get('llmApiKey', '')[-4:] if user_llm_config.get('llmApiKey') else '(空)'}")
     print(f"  - llmModel: {user_llm_config.get('llmModel')}")
-    
-    merged_llm_config = {**default_config["llmConfig"], **user_llm_config}
-    merged_other_config = _sanitize_other_config(
-        {**default_config["otherConfig"], **user_other_config}
-    )
-    
+
     return UserConfigResponse(
         id=config.id,
         user_id=config.user_id,
@@ -1617,14 +1659,16 @@ async def agent_task_llm_preflight(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
-    default_config = get_default_config()
-    saved_llm_config, saved_other_config = await _load_user_config_payload(
+    (
+        saved_llm_config,
+        saved_other_config,
+        effective_llm_config,
+        _effective_other_config,
+    ) = await _load_user_config_payload_with_effective_defaults(
         db=db,
         user_id=current_user.id,
     )
-
-    merged_llm_config = {**default_config["llmConfig"], **saved_llm_config}
-    effective_snapshot = _build_llm_quick_config_snapshot(merged_llm_config)
+    effective_snapshot = _build_llm_quick_config_snapshot(effective_llm_config)
 
     if not _has_saved_llm_connection_config(saved_llm_config):
         return AgentTaskLLMPreflightResponse(

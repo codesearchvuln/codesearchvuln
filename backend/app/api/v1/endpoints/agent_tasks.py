@@ -11,7 +11,6 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -64,12 +63,6 @@ from app.services.agent.mcp.protocol_verify import (
     normalize_listed_tools as normalize_mcp_listed_tools,
 )
 from app.services.agent.mcp.health_probe import probe_mcp_endpoint_readiness
-from app.services.git_mirror import (
-    HTTPS_ONLY_REPOSITORY_ERROR,
-    get_mirror_candidates,
-    is_ssh_git_url,
-)
-
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -131,10 +124,7 @@ class AgentTaskCreate(BaseModel):
         False,
         description="兼容字段：保留请求结构，不再作为强制门禁",
     )
-    
-    # 分支
-    branch_name: Optional[str] = Field(None, description="分支名称")
-    
+
     # 排除模式
     exclude_patterns: Optional[List[str]] = Field(
         default=["node_modules", "__pycache__", ".git", "*.min.js"],
@@ -2708,26 +2698,13 @@ async def _execute_agent_task(task_id: str):
             task.current_phase = AgentTaskPhase.PLANNING  # preparation 对应 PLANNING
             await db.commit()
 
-            # 获取用户配置（需要在获取项目根目录之前，以便传递 token）
             user_config = await _get_user_config(db, task.created_by)
 
-            # 从用户配置中提取 token（用于私有仓库克隆）
-            other_config = (user_config or {}).get('otherConfig', {})
-            github_token = other_config.get('githubToken') or settings.GITHUB_TOKEN
-            gitlab_token = other_config.get('gitlabToken') or settings.GITLAB_TOKEN
-            gitea_token = other_config.get('giteaToken') or settings.GITEA_TOKEN
-
-            # 获取项目根目录（传递任务指定的分支和认证 token）
-            # 🔥 传递 event_emitter 以发送克隆进度
             async def _prepare_project_root_once():
                 return await _get_project_root(
                     project,
                     task_id,
-                    task.branch_name,
-                    github_token=github_token,
-                    gitlab_token=gitlab_token,
-                    gitea_token=gitea_token,  # 🔥 新增
-                    event_emitter=event_emitter,  # 🔥 新增
+                    event_emitter=event_emitter,
                 )
 
             project_root = await _run_with_retries(
@@ -4115,29 +4092,12 @@ async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional
         return None
     
     try:
-        from app.api.v1.endpoints.config import (
-            decrypt_config, 
-            SENSITIVE_LLM_FIELDS, SENSITIVE_OTHER_FIELDS,
-            _sanitize_other_config,
+        from app.api.v1.endpoints.config import _load_effective_user_config
+
+        return await _load_effective_user_config(
+            db=db,
+            user_id=user_id,
         )
-        
-        result = await db.execute(
-            select(UserConfig).where(UserConfig.user_id == user_id)
-        )
-        config = result.scalar_one_or_none()
-        
-        if config and config.llm_config:
-            user_llm_config = json.loads(config.llm_config) if config.llm_config else {}
-            user_other_config = json.loads(config.other_config) if config.other_config else {}
-            
-            user_llm_config = decrypt_config(user_llm_config, SENSITIVE_LLM_FIELDS)
-            user_other_config = decrypt_config(user_other_config, SENSITIVE_OTHER_FIELDS)
-            user_other_config = _sanitize_other_config(user_other_config)
-            
-            return {
-                "llmConfig": user_llm_config,
-                "otherConfig": user_other_config,
-            }
     except Exception as e:
         logger.warning(f"Failed to get user config: {e}")
     
@@ -6090,6 +6050,8 @@ async def create_agent_task(
     project = await db.get(Project, request.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+    if getattr(project, "source_type", None) != "zip":
+        raise HTTPException(status_code=400, detail="仅支持 ZIP 项目")
 
     verification_level = _normalize_verification_level(request.verification_level)
     normalized_target_files = [
@@ -6113,7 +6075,6 @@ async def create_agent_task(
         audit_scope=normalized_audit_scope,
         target_vulnerabilities=request.target_vulnerabilities,
         verification_level=verification_level,
-        branch_name=request.branch_name,  # 保存用户选择的分支
         exclude_patterns=merged_exclude_patterns,
         target_files=normalized_target_files or None,
         agent_config={
@@ -7154,26 +7115,14 @@ async def update_finding_status(
 async def _get_project_root(
     project: Project,
     task_id: str,
-    branch_name: Optional[str] = None,
-    github_token: Optional[str] = None,
-    gitlab_token: Optional[str] = None,
-    gitea_token: Optional[str] = None,  # 🔥 新增
-    event_emitter: Optional[Any] = None,  # 🔥 新增：用于发送实时日志
+    event_emitter: Optional[Any] = None,
 ) -> str:
     """
-    获取项目根目录
-
-    支持两种项目类型：
-    - ZIP 项目：解压 ZIP 文件到临时目录
-    - 仓库项目：克隆仓库到临时目录
+    为 ZIP 项目准备临时工作目录。
 
     Args:
         project: 项目对象
         task_id: 任务ID
-        branch_name: 分支名称（仓库项目使用，优先于 project.default_branch）
-        github_token: GitHub 访问令牌（用于私有仓库）
-        gitlab_token: GitLab 访问令牌（用于私有仓库）
-        gitea_token: Gitea 访问令牌（用于私有仓库）
         event_emitter: 事件发送器（用于发送实时日志）
 
     Returns:
@@ -7183,9 +7132,6 @@ async def _get_project_root(
         RuntimeError: 当项目文件获取失败时
     """
     import zipfile
-    import subprocess
-    import shutil
-    from urllib.parse import urlparse, urlunparse
 
     # 辅助函数：发送事件
     async def emit(message: str, level: str = "info"):
@@ -7212,446 +7158,35 @@ async def _get_project_root(
     # 🔥 在开始任何操作前检查取消
     check_cancelled()
 
-    # 根据项目类型处理
-    if project.source_type == "zip":
-        # 🔥 ZIP 项目：解压 ZIP 文件
-        check_cancelled()  # 🔥 解压前检查
-        await emit(f"📦 正在解压项目文件...")
-        from app.services.zip_storage import load_project_zip
+    if project.source_type != "zip":
+        await emit("❌ 仅支持 ZIP 项目", "error")
+        raise RuntimeError("仅支持 ZIP 项目")
 
-        zip_path = await load_project_zip(project.id)
+    check_cancelled()
+    await emit("📦 正在解压项目文件...")
+    from app.services.zip_storage import load_project_zip
 
-        if zip_path and os.path.exists(zip_path):
-            try:
-                check_cancelled()  # 🔥 解压前再次检查
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    # 🔥 逐个文件解压，支持取消检查
-                    file_list = zip_ref.namelist()
-                    for i, file_name in enumerate(file_list):
-                        if i % 50 == 0:  # 每50个文件检查一次
-                            check_cancelled()
-                        zip_ref.extract(file_name, base_path)
-                logger.info(f"✅ Extracted ZIP project {project.id} to {base_path}")
-                await emit(f"✅ ZIP 文件解压完成")
-            except Exception as e:
-                logger.error(f"Failed to extract ZIP {zip_path}: {e}")
-                await emit(f"❌ 解压失败: {e}", "error")
-                raise RuntimeError(f"无法解压项目文件: {e}")
-        else:
-            logger.warning(f"⚠️ ZIP file not found for project {project.id}")
-            await emit(f"❌ ZIP 文件不存在", "error")
-            raise RuntimeError(f"项目 ZIP 文件不存在: {project.id}")
+    zip_path = await load_project_zip(project.id)
 
-    elif project.source_type == "repository" and project.repository_url:
-        # 🔥 仓库项目：优先使用 ZIP 下载（更快更稳定），git clone 作为回退
-        repo_url = project.repository_url
-        repo_type = project.repository_type or "other"
-
-        await emit(f"🔄 正在获取仓库: {repo_url}")
-        if is_ssh_git_url(repo_url):
-            logger.warning("检测到遗留 SSH 仓库地址，已拒绝继续处理: %s", repo_url)
-            await emit(f"❌ {HTTPS_ONLY_REPOSITORY_ERROR}", "error")
-            raise RuntimeError(HTTPS_ONLY_REPOSITORY_ERROR)
-
-        # 解析仓库 URL 获取 owner/repo
-        parsed = urlparse(repo_url)
-        path_parts = parsed.path.strip('/').replace('.git', '').split('/')
-        if len(path_parts) >= 2:
-            owner, repo = path_parts[0], path_parts[1]
-        else:
-            owner, repo = None, None
-
-        # 构建分支尝试顺序
-        branches_to_try = []
-        if branch_name:
-            branches_to_try.append(branch_name)
-        if project.default_branch and project.default_branch not in branches_to_try:
-            branches_to_try.append(project.default_branch)
-        for common_branch in ["main", "master"]:
-            if common_branch not in branches_to_try:
-                branches_to_try.append(common_branch)
-
-        download_success = False
-        last_error = ""
-
-        # ============ 方案1: 优先使用 ZIP 下载（更快更稳定）============
-        if owner and repo:
-            import httpx
-
-            for branch in branches_to_try:
-                check_cancelled()
-
-                # 清理目录
-                if os.path.exists(base_path) and os.listdir(base_path):
-                    shutil.rmtree(base_path)
-                os.makedirs(base_path, exist_ok=True)
-
-                # 构建 ZIP 下载 URL
-                if repo_type == "github" or "github.com" in repo_url:
-                    # GitHub ZIP 下载 URL
-                    zip_url = f"https://gh-proxy.org/https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
-                    headers = {}
-                    if github_token:
-                        headers["Authorization"] = f"token {github_token}"
-                elif repo_type == "gitlab" or "gitlab" in repo_url:
-                    # GitLab ZIP 下载 URL（需要对 owner/repo 进行 URL 编码）
-                    import urllib.parse
-                    project_path = urllib.parse.quote(f"{owner}/{repo}", safe='')
-                    gitlab_host = parsed.netloc
-                    zip_url = f"https://{gitlab_host}/api/v4/projects/{project_path}/repository/archive.zip?sha={branch}"
-                    headers = {}
-                    if gitlab_token:
-                        headers["PRIVATE-TOKEN"] = gitlab_token
-                else:
-                    # 其他平台，跳过 ZIP 下载
-                    break
-
-                zip_url_candidates = get_mirror_candidates(
-                    zip_url,
-                    enabled=getattr(settings, "GIT_MIRROR_ENABLED", True),
-                    mirror_prefix=getattr(settings, "GIT_MIRROR_PREFIX", "https://gh-proxy.org"),
-                    mirror_prefixes=getattr(
-                        settings, "GIT_MIRROR_PREFIXES", "https://gh-proxy.org,https://v6.gh-proxy.org"
-                    ),
-                    allow_hosts=getattr(settings, "GIT_MIRROR_HOSTS", "github.com"),
-                    allow_auth_url=getattr(settings, "GIT_MIRROR_ALLOW_AUTH_URL", False),
-                    fallback_to_origin=getattr(settings, "GIT_MIRROR_FALLBACK_TO_ORIGIN", False),
-                )
-                zip_has_origin_url = zip_url in zip_url_candidates
-
-                logger.info(f"📦 尝试下载 ZIP 归档 (分支: {branch})...")
-                await emit(f"📦 尝试下载 ZIP 归档 (分支: {branch})")
-
-                try:
-                    zip_temp_path = f"/tmp/repo_{task_id}_{branch}.zip"
-                    success = False
-                    error = None
-
-                    for idx, candidate_zip_url in enumerate(zip_url_candidates):
-                        using_mirror = candidate_zip_url != zip_url
-
-                        async def download_zip():
-                            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-                                resp = await client.get(candidate_zip_url, headers=headers)
-                                if resp.status_code == 200:
-                                    with open(zip_temp_path, "wb") as f:
-                                        f.write(resp.content)
-                                    return True, None
-                                return False, f"HTTP {resp.status_code}"
-
-                        # 使用取消检查循环
-                        download_task = asyncio.create_task(download_zip())
-                        while not download_task.done():
-                            check_cancelled()
-                            try:
-                                success, error = await asyncio.wait_for(
-                                    asyncio.shield(download_task),
-                                    timeout=1.0,
-                                )
-                                break
-                            except asyncio.TimeoutError:
-                                continue
-
-                        if download_task.done():
-                            success, error = download_task.result()
-
-                        if success:
-                            break
-                        if using_mirror:
-                            if idx < len(zip_url_candidates) - 1:
-                                next_candidate = zip_url_candidates[idx + 1]
-                                if next_candidate == zip_url:
-                                    logger.warning(
-                                        "ZIP 镜像下载失败，原因: %s，回源重试: %s",
-                                        error,
-                                        next_candidate,
-                                    )
-                                else:
-                                    logger.warning(
-                                        "ZIP 镜像下载失败，原因: %s，切换候选重试: %s",
-                                        error,
-                                        next_candidate,
-                                    )
-                            elif not zip_has_origin_url:
-                                logger.warning("ZIP 镜像全部失败，已按策略终止当前候选（未启用回源）")
-
-                    if success and os.path.exists(zip_temp_path):
-                        # 解压 ZIP
+    if zip_path and os.path.exists(zip_path):
+        try:
+            check_cancelled()
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                file_list = zip_ref.namelist()
+                for i, file_name in enumerate(file_list):
+                    if i % 50 == 0:
                         check_cancelled()
-                        with zipfile.ZipFile(zip_temp_path, 'r') as zip_ref:
-                            # ZIP 内通常有一个根目录如 repo-branch/
-                            file_list = zip_ref.namelist()
-                            # 找到公共前缀
-                            if file_list:
-                                common_prefix = file_list[0].split('/')[0] + '/'
-                                for i, file_name in enumerate(file_list):
-                                    if i % 50 == 0:
-                                        check_cancelled()
-                                    # 去掉公共前缀
-                                    if file_name.startswith(common_prefix):
-                                        target_path = file_name[len(common_prefix):]
-                                        if target_path:  # 跳过空路径（根目录本身）
-                                            full_target = os.path.join(base_path, target_path)
-                                            if file_name.endswith('/'):
-                                                os.makedirs(full_target, exist_ok=True)
-                                            else:
-                                                os.makedirs(os.path.dirname(full_target), exist_ok=True)
-                                                with zip_ref.open(file_name) as src, open(full_target, 'wb') as dst:
-                                                    dst.write(src.read())
-
-                        # 清理临时文件
-                        os.remove(zip_temp_path)
-                        logger.info(f"✅ ZIP 下载成功 (分支: {branch})")
-                        await emit(f"✅ 仓库获取成功 (ZIP下载, 分支: {branch})")
-                        download_success = True
-                        break
-                    else:
-                        last_error = error or "下载失败"
-                        logger.warning(f"ZIP 下载失败 (分支 {branch}): {last_error}")
-                        await emit(f"⚠️ ZIP 下载失败，尝试其他分支...", "warning")
-                        # 清理临时文件
-                        if os.path.exists(zip_temp_path):
-                            os.remove(zip_temp_path)
-
-                except asyncio.CancelledError:
-                    logger.info(f"[Cancel] ZIP download cancelled for task {task_id}")
-                    raise
-                except Exception as e:
-                    last_error = str(e)
-                    logger.warning(f"ZIP 下载异常 (分支 {branch}): {e}")
-                    await emit(f"⚠️ ZIP 下载异常: {str(e)[:50]}...", "warning")
-
-        # ============ 方案2: 回退到 git clone ============
-        if not download_success:
-            await emit(f"🔄 ZIP 下载失败，回退到 Git 克隆...")
-            logger.info("ZIP download failed, falling back to git clone")
-
-            # 检查 git 是否可用
-            try:
-                git_check = subprocess.run(
-                    ["git", "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if git_check.returncode != 0:
-                    await emit(f"❌ Git 未安装", "error")
-                    raise RuntimeError("Git 未安装，无法克隆仓库。")
-            except FileNotFoundError:
-                await emit(f"❌ Git 未安装", "error")
-                raise RuntimeError("Git 未安装，无法克隆仓库。")
-            except subprocess.TimeoutExpired:
-                await emit(f"❌ Git 检测超时", "error")
-                raise RuntimeError("Git 检测超时")
-
-            # 构建带认证的 URL
-            auth_url = repo_url
-            if repo_type == "github" and github_token:
-                auth_url = urlunparse((
-                    parsed.scheme,
-                    f"{github_token}@{parsed.netloc}",
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment
-                ))
-                await emit(f"🔐 使用 GitHub Token 认证")
-            elif repo_type == "gitlab" and gitlab_token:
-                auth_url = urlunparse((
-                    parsed.scheme,
-                    f"oauth2:{gitlab_token}@{parsed.netloc}",
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment
-                ))
-                await emit(f"🔐 使用 GitLab Token 认证")
-            elif repo_type == "gitea" and gitea_token:
-                auth_url = urlunparse((
-                    parsed.scheme,
-                    f"{gitea_token}@{parsed.netloc}",
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment
-                ))
-                await emit(f"🔐 使用 Gitea Token 认证")
-
-            clone_url_candidates = get_mirror_candidates(
-                auth_url,
-                enabled=getattr(settings, "GIT_MIRROR_ENABLED", True),
-                mirror_prefix=getattr(settings, "GIT_MIRROR_PREFIX", "https://gh-proxy.org"),
-                mirror_prefixes=getattr(
-                    settings, "GIT_MIRROR_PREFIXES", "https://gh-proxy.org,https://v6.gh-proxy.org"
-                ),
-                allow_hosts=getattr(settings, "GIT_MIRROR_HOSTS", "github.com"),
-                allow_auth_url=getattr(settings, "GIT_MIRROR_ALLOW_AUTH_URL", False),
-                fallback_to_origin=getattr(settings, "GIT_MIRROR_FALLBACK_TO_ORIGIN", False),
-            )
-            clone_has_origin_url = auth_url in clone_url_candidates
-
-            for branch in branches_to_try:
-                check_cancelled()
-
-                if os.path.exists(base_path) and os.listdir(base_path):
-                    shutil.rmtree(base_path)
-                    os.makedirs(base_path, exist_ok=True)
-
-                logger.info(f"🔄 尝试克隆分支: {branch}")
-                await emit(f"🔄 尝试克隆分支: {branch}")
-
-                try:
-                    result = None
-                    for idx, candidate_clone_url in enumerate(clone_url_candidates):
-                        using_mirror = candidate_clone_url != auth_url
-
-                        async def run_clone():
-                            return await asyncio.to_thread(
-                                subprocess.run,
-                                ["git", "clone", "--depth", "1", "--branch", branch, candidate_clone_url, base_path],
-                                capture_output=True,
-                                text=True,
-                                timeout=120,
-                            )
-
-                        clone_task = asyncio.create_task(run_clone())
-                        while not clone_task.done():
-                            check_cancelled()
-                            try:
-                                result = await asyncio.wait_for(asyncio.shield(clone_task), timeout=1.0)
-                                break
-                            except asyncio.TimeoutError:
-                                continue
-
-                        if clone_task.done():
-                            result = clone_task.result()
-
-                        if result.returncode == 0:
-                            break
-
-                        last_error = result.stderr
-                        if using_mirror:
-                            if idx < len(clone_url_candidates) - 1:
-                                next_candidate = clone_url_candidates[idx + 1]
-                                if next_candidate == auth_url:
-                                    logger.warning(
-                                        "Git 镜像 clone 失败 (分支 %s): %s，回源重试: %s",
-                                        branch,
-                                        (last_error or "")[:200],
-                                        next_candidate,
-                                    )
-                                else:
-                                    logger.warning(
-                                        "Git 镜像 clone 失败 (分支 %s): %s，切换候选重试: %s",
-                                        branch,
-                                        (last_error or "")[:200],
-                                        next_candidate,
-                                    )
-                            elif not clone_has_origin_url:
-                                logger.warning("Git 镜像全部失败，已按策略终止当前候选（未启用回源）")
-
-                    if result is not None and result.returncode == 0:
-                        logger.info(f"✅ Git 克隆成功 (分支: {branch})")
-                        await emit(f"✅ 仓库获取成功 (Git克隆, 分支: {branch})")
-                        download_success = True
-                        break
-
-                    logger.warning(f"克隆失败 (分支 {branch}): {str(last_error or '')[:200]}")
-                    await emit(f"⚠️ 分支 {branch} 克隆失败...", "warning")
-                except subprocess.TimeoutExpired:
-                    last_error = f"克隆分支 {branch} 超时"
-                    logger.warning(last_error)
-                    await emit(f"⚠️ 分支 {branch} 克隆超时...", "warning")
-                except asyncio.CancelledError:
-                    logger.info(f"[Cancel] Git clone cancelled for task {task_id}")
-                    raise
-
-            # 尝试默认分支
-            if not download_success:
-                check_cancelled()
-                await emit(f"🔄 尝试使用仓库默认分支...")
-
-                if os.path.exists(base_path) and os.listdir(base_path):
-                    shutil.rmtree(base_path)
-                    os.makedirs(base_path, exist_ok=True)
-
-                try:
-                    result = None
-                    for idx, candidate_clone_url in enumerate(clone_url_candidates):
-                        using_mirror = candidate_clone_url != auth_url
-
-                        async def run_default_clone():
-                            return await asyncio.to_thread(
-                                subprocess.run,
-                                ["git", "clone", "--depth", "1", candidate_clone_url, base_path],
-                                capture_output=True,
-                                text=True,
-                                timeout=120,
-                            )
-
-                        clone_task = asyncio.create_task(run_default_clone())
-                        while not clone_task.done():
-                            check_cancelled()
-                            try:
-                                result = await asyncio.wait_for(asyncio.shield(clone_task), timeout=1.0)
-                                break
-                            except asyncio.TimeoutError:
-                                continue
-
-                        if clone_task.done():
-                            result = clone_task.result()
-
-                        if result.returncode == 0:
-                            break
-
-                        last_error = result.stderr
-                        if using_mirror:
-                            if idx < len(clone_url_candidates) - 1:
-                                next_candidate = clone_url_candidates[idx + 1]
-                                if next_candidate == auth_url:
-                                    logger.warning(
-                                        "Git 镜像默认分支 clone 失败: %s，回源重试: %s",
-                                        (last_error or "")[:200],
-                                        next_candidate,
-                                    )
-                                else:
-                                    logger.warning(
-                                        "Git 镜像默认分支 clone 失败: %s，切换候选重试: %s",
-                                        (last_error or "")[:200],
-                                        next_candidate,
-                                    )
-                            elif not clone_has_origin_url:
-                                logger.warning("Git 镜像全部失败，已按策略终止当前候选（未启用回源）")
-
-                    if result is not None and result.returncode == 0:
-                        logger.info(f"✅ Git 克隆成功 (默认分支)")
-                        await emit(f"✅ 仓库获取成功 (Git克隆, 默认分支)")
-                        download_success = True
-                    else:
-                        last_error = str(last_error or "")
-                except subprocess.TimeoutExpired:
-                    last_error = "克隆超时"
-                except asyncio.CancelledError:
-                    logger.info(f"[Cancel] Git clone cancelled for task {task_id}")
-                    raise
-
-        if not download_success:
-            # 分析错误原因
-            error_msg = "克隆仓库失败"
-            if "Authentication failed" in last_error or "401" in last_error:
-                error_msg = "认证失败，请检查 GitHub/GitLab Token 配置"
-            elif "not found" in last_error.lower() or "404" in last_error:
-                error_msg = "仓库不存在或无访问权限"
-            elif "Could not resolve host" in last_error:
-                error_msg = "无法解析主机名，请检查网络连接"
-            elif "Permission denied" in last_error or "403" in last_error:
-                error_msg = "无访问权限，请检查仓库权限或 Token"
-            else:
-                error_msg = f"克隆仓库失败: {last_error[:200]}"
-
-            logger.error(f"❌ {error_msg}")
-            await emit(f"❌ {error_msg}", "error")
-            raise RuntimeError(error_msg)
+                    zip_ref.extract(file_name, base_path)
+            logger.info("✅ Extracted ZIP project %s to %s", project.id, base_path)
+            await emit("✅ ZIP 文件解压完成")
+        except Exception as exc:
+            logger.error("Failed to extract ZIP %s: %s", zip_path, exc)
+            await emit(f"❌ 解压失败: {exc}", "error")
+            raise RuntimeError(f"无法解压项目文件: {exc}")
+    else:
+        logger.warning("⚠️ ZIP file not found for project %s", project.id)
+        await emit("❌ ZIP 文件不存在", "error")
+        raise RuntimeError(f"项目 ZIP 文件不存在: {project.id}")
 
     # 验证目录不为空
     if not os.listdir(base_path):

@@ -180,8 +180,6 @@ import zipfile
 from app.services.zip_cache_manager import get_zip_cache_manager
 from app.services.scanner import (
     scan_repo_task,
-    get_github_files,
-    get_gitlab_files,
     should_exclude,
     is_text_file,
 )
@@ -204,7 +202,6 @@ from app.services.upload.project_stats import (
 from app.services.opengrep_confidence import (
     count_high_confidence_findings_by_task_ids,
 )
-from app.services.git_mirror import HTTPS_ONLY_REPOSITORY_ERROR, is_ssh_git_url
 
 
 def calculate_file_sha256(file_path: str) -> str:
@@ -480,26 +477,12 @@ async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional
         return None
 
     try:
-        from app.api.v1.endpoints.config import (
-            decrypt_config,
-            SENSITIVE_LLM_FIELDS,
-            SENSITIVE_OTHER_FIELDS,
+        from app.api.v1.endpoints.config import _load_effective_user_config
+
+        return await _load_effective_user_config(
+            db=db,
+            user_id=user_id,
         )
-
-        result = await db.execute(select(UserConfig).where(UserConfig.user_id == user_id))
-        config = result.scalar_one_or_none()
-
-        if config and config.llm_config:
-            user_llm_config = json.loads(config.llm_config) if config.llm_config else {}
-            user_other_config = json.loads(config.other_config) if config.other_config else {}
-
-            user_llm_config = decrypt_config(user_llm_config, SENSITIVE_LLM_FIELDS)
-            user_other_config = decrypt_config(user_other_config, SENSITIVE_OTHER_FIELDS)
-
-            return {
-                "llmConfig": user_llm_config,
-                "otherConfig": user_other_config,
-            }
     except Exception as e:
         logger.warning(f"Failed to get user config: {e}")
 
@@ -722,11 +705,6 @@ class FileContentResponse(BaseModel):
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
-
-
-def _ensure_supported_repository_url(repository_url: Optional[str]) -> None:
-    if is_ssh_git_url(str(repository_url or "")):
-        raise HTTPException(status_code=400, detail=HTTPS_ONLY_REPOSITORY_ERROR)
 
 
 def _build_static_scan_overview_item_from_row(
@@ -2048,7 +2026,6 @@ async def permanently_delete_project(
 @router.get("/{id}/files")
 async def get_project_files(
     id: str,
-    branch: Optional[str] = None,
     exclude_patterns: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -2056,7 +2033,6 @@ async def get_project_files(
     """
     Get list of files in the project.
     可选参数:
-    - branch: 指定仓库分支（仅对仓库类型项目有效）
     - exclude_patterns: JSON 格式的排除模式数组，如 ["node_modules/**", "*.log"]
     """
     project = await db.get(Project, id)
@@ -2098,66 +2074,12 @@ async def get_project_files(
             print(f"Error reading zip file: {e}")
             raise HTTPException(status_code=500, detail="无法读取项目文件")
 
-    elif project.source_type == "repository":
-        # Handle Repository project
-        if not project.repository_url:
-            return []
-        _ensure_supported_repository_url(project.repository_url)
-
-        # Get tokens from user config
-        from sqlalchemy.future import select
-        from app.core.encryption import decrypt_sensitive_data
-        from app.core.config import settings
-
-        SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken"]
-
-        result = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
-        config = result.scalar_one_or_none()
-
-        github_token = settings.GITHUB_TOKEN
-        gitlab_token = settings.GITLAB_TOKEN
-        if config and config.other_config:
-            other_config = json.loads(config.other_config)
-            for field in SENSITIVE_OTHER_FIELDS:
-                if field in other_config and other_config[field]:
-                    decrypted_val = decrypt_sensitive_data(other_config[field])
-                    if field == "githubToken":
-                        github_token = decrypted_val
-                    elif field == "gitlabToken":
-                        gitlab_token = decrypted_val
-        target_branch = branch or project.default_branch or "main"
-
-        try:
-            # 使用API方式获取文件列表
-            repo_type = project.repository_type or "other"
-
-            if repo_type == "github":
-                # 传入用户自定义排除模式
-                repo_files = await get_github_files(
-                    project.repository_url, target_branch, github_token, parsed_exclude_patterns
-                )
-                files = [{"path": f["path"], "size": 0} for f in repo_files]
-            elif repo_type == "gitlab":
-                # 传入用户自定义排除模式
-                repo_files = await get_gitlab_files(
-                    project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns
-                )
-                files = [{"path": f["path"], "size": 0} for f in repo_files]
-            else:
-                raise HTTPException(status_code=400, detail="不支持的仓库类型")
-        except HTTPException:
-            raise
-        except Exception as e:
-            print(f"Error fetching repo files: {e}")
-            raise HTTPException(status_code=500, detail=f"无法获取仓库文件: {str(e)}")
-
     return files
 
 
 @router.get("/{id}/files-tree", response_model=FileTreeResponse)
 async def get_project_files_tree(
     id: str,
-    branch: Optional[str] = None,
     exclude_patterns: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -2173,7 +2095,6 @@ async def get_project_files_tree(
     
     参数:
     - id: 项目ID
-    - branch: 指定仓库分支（仅对仓库类型项目有效）
     - exclude_patterns: JSON 格式的排除模式数组
     
     返回:
@@ -2217,64 +2138,8 @@ async def get_project_files_tree(
             logger.error(f"构建ZIP文件树失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"无法构建文件树: {str(e)}")
 
-    elif project.source_type == "repository":
-        # 处理仓库项目 - 先获取文件列表再构建树
-        if not project.repository_url:
-            raise HTTPException(status_code=400, detail="仓库URL未配置")
-        _ensure_supported_repository_url(project.repository_url)
-
-        from sqlalchemy.future import select
-        from app.core.encryption import decrypt_sensitive_data
-        from app.core.config import settings
-
-        SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken"]
-
-        result = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
-        config = result.scalar_one_or_none()
-
-        github_token = settings.GITHUB_TOKEN
-        gitlab_token = settings.GITLAB_TOKEN
-        if config and config.other_config:
-            other_config = json.loads(config.other_config)
-            for field in SENSITIVE_OTHER_FIELDS:
-                if field in other_config and other_config[field]:
-                    decrypted_val = decrypt_sensitive_data(other_config[field])
-                    if field == "githubToken":
-                        github_token = decrypted_val
-                    elif field == "gitlabToken":
-                        gitlab_token = decrypted_val
-        target_branch = branch or project.default_branch or "main"
-
-        try:
-            files = []
-
-            repo_type = project.repository_type or "other"
-
-            if repo_type == "github":
-                repo_files = await get_github_files(
-                    project.repository_url, target_branch, github_token, parsed_exclude_patterns
-                )
-                files = [{"path": f["path"], "size": 0} for f in repo_files]
-            elif repo_type == "gitlab":
-                repo_files = await get_gitlab_files(
-                    project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns
-                )
-                files = [{"path": f["path"], "size": 0} for f in repo_files]
-            else:
-                raise HTTPException(status_code=400, detail="不支持的仓库类型")
-
-            # 构建文件树
-            root_node = _build_file_tree_from_repo_files(files)
-            return FileTreeResponse(root=root_node)
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"构建仓库文件树失败: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"无法构建文件树: {str(e)}")
-
     else:
-        raise HTTPException(status_code=400, detail="不支持的项目类型")
+        raise HTTPException(status_code=400, detail="仅支持ZIP类型项目")
 
 
 @router.get("/{id}/files/{file_path:path}", response_model=Optional[FileContentResponse])
@@ -2490,7 +2355,6 @@ class ScanRequest(BaseModel):
     file_paths: Optional[List[str]] = None
     full_scan: bool = True
     exclude_patterns: Optional[List[str]] = None
-    branch_name: Optional[str] = None
 
 
 @router.post("/{id}/scan")
@@ -2507,8 +2371,6 @@ async def scan_project(
     project = await db.get(Project, id)
     _raise_if_project_hidden(project)
 
-    # 获取分支和排除模式
-    branch_name = scan_request.branch_name if scan_request else None
     exclude_patterns = scan_request.exclude_patterns if scan_request else None
 
     # Create Task Record
@@ -2517,9 +2379,8 @@ async def scan_project(
         created_by=current_user.id,
         task_type="repository",
         status="pending",
-        branch_name=branch_name or project.default_branch or "main",
         exclude_patterns=json.dumps(exclude_patterns or []),
-        scan_config=json.dumps(scan_request.dict()) if scan_request else "{}",
+        scan_config=json.dumps(scan_request.model_dump()) if scan_request else "{}",
     )
     db.add(task)
     await db.commit()
@@ -2542,7 +2403,7 @@ async def scan_project(
         "minimaxApiKey",
         "doubaoApiKey",
     ]
-    SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken"]
+    SENSITIVE_OTHER_FIELDS: list[str] = []
 
     def decrypt_config(config_dict: dict, sensitive_fields: list) -> dict:
         """解密配置中的敏感字段"""
@@ -3035,19 +2896,6 @@ async def delete_project_zip_file(
 
 # ============ 分支管理端点 ============
 
-
-@router.get("/{id}/branches")
-async def get_project_branches(
-    id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    """
-    获取项目仓库的分支列表
-    """
-    project = await db.get(Project, id)
-    _raise_if_project_hidden(project)
-    raise HTTPException(status_code=404, detail="项目不存在")
 
 # ============ 缓存管理端点 ============
 

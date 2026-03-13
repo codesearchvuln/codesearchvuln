@@ -61,7 +61,6 @@ export interface AuditTask {
   project_id: string;
   task_type: 'repository' | 'instant';
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-  branch_name?: string;
   exclude_patterns: string;
   scan_config: string;
   total_files: number;
@@ -165,7 +164,6 @@ export interface CreateProjectForm {
 export interface CreateAuditTaskForm {
   project_id: string;
   task_type: 'repository' | 'instant';
-  branch_name?: string;
   exclude_patterns: string[];
   rule_set_id?: string;
   prompt_template_id?: string;

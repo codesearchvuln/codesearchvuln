@@ -60,6 +60,7 @@ import {
 import { toast } from "sonner";
 import { api } from "@/shared/api/database";
 import EmbeddingConfig from "@/components/agent/EmbeddingConfig";
+import { resolveProviderSwitchFieldValue } from "@/components/system/llmProviderSwitch";
 import {
 	buildLlmProviderOptions,
 	getDefaultBaseUrlForProvider as resolveDefaultBaseUrlForProvider,
@@ -1126,26 +1127,30 @@ export function SystemConfig({
 
 	const handleProviderChange = (newProvider: string) => {
 		const defaultModel = getDefaultModelForProvider(newProvider);
+		const defaultBaseUrl = getDefaultBaseUrlForProvider(newProvider);
+		const nextModel = resolveProviderSwitchFieldValue({
+			currentValue: latestConfigRef.current?.llmModel,
+			wasTouched: llmModelTouchedRef.current,
+			nextDefaultValue: defaultModel,
+		});
 		setConfig((prev) => {
 			if (!prev) return prev;
-			const defaultBaseUrl = getDefaultBaseUrlForProvider(newProvider);
-			const shouldUpdateBaseUrl =
-				!llmBaseUrlTouchedRef.current || !(prev.llmBaseUrl || "").trim();
-			const shouldUpdateModel =
-				!llmModelTouchedRef.current || !(prev.llmModel || "").trim();
 			return {
 				...prev,
 				llmProvider: newProvider,
-				llmModel: shouldUpdateModel ? defaultModel || prev.llmModel : prev.llmModel,
-				llmBaseUrl: shouldUpdateBaseUrl ? defaultBaseUrl : prev.llmBaseUrl,
+				llmModel: resolveProviderSwitchFieldValue({
+					currentValue: prev.llmModel,
+					wasTouched: llmModelTouchedRef.current,
+					nextDefaultValue: defaultModel,
+				}),
+				llmBaseUrl: resolveProviderSwitchFieldValue({
+					currentValue: prev.llmBaseUrl,
+					wasTouched: llmBaseUrlTouchedRef.current,
+					nextDefaultValue: defaultBaseUrl,
+				}),
 			};
 		});
 		setLlmModelPopoverOpen(false);
-		const nextModel =
-			!llmModelTouchedRef.current ||
-			!(String(latestConfigRef.current?.llmModel || "").trim())
-				? defaultModel
-				: String(latestConfigRef.current?.llmModel || "").trim();
 		applyRecommendedMaxTokens(newProvider, nextModel, {
 			force: false,
 			markChanges: true,

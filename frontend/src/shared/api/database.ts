@@ -122,10 +122,9 @@ export const api = {
     }
   },
 
-  async getProjectFiles(id: string, branch?: string, excludePatterns?: string[]): Promise<Array<{ path: string; size: number }>> {
+  async getProjectFiles(id: string, excludePatterns?: string[]): Promise<Array<{ path: string; size: number }>> {
     try {
       const params: Record<string, string> = {};
-      if (branch) params.branch = branch;
       if (excludePatterns && excludePatterns.length > 0) {
         params.exclude_patterns = JSON.stringify(excludePatterns);
       }
@@ -133,15 +132,6 @@ export const api = {
       return res.data;
     } catch (_error) {
       return [];
-    }
-  },
-
-  async getProjectBranches(id: string): Promise<{ branches: string[]; default_branch: string; error?: string }> {
-    try {
-      const res = await apiClient.get(`/projects/${id}/branches`);
-      return res.data;
-    } catch (error) {
-      return { branches: ["main"], default_branch: "main", error: String(error) };
     }
   },
 
@@ -254,7 +244,6 @@ export const api = {
       file_paths: task.scan_config?.file_paths,
       full_scan: !task.scan_config?.file_paths || task.scan_config.file_paths.length === 0,
       exclude_patterns: task.exclude_patterns || [],
-      branch_name: task.branch_name || "main"
     };
     const res = await apiClient.post(`/projects/${task.project_id}/scan`, scanRequest);
     // Fetch the created task

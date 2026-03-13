@@ -16,10 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BranchSelector } from "@/components/ui/branch-selector";
 import {
 	Search,
-	GitBranch,
 	Upload,
 	Package,
 	Shield,
@@ -61,7 +59,7 @@ import {
 
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import { uploadZipFile } from "@/shared/utils/zipStorage";
-import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
+import { isZipProject } from "@/shared/utils/projectUtils";
 import type { Project } from "@/shared/types";
 import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
@@ -104,9 +102,6 @@ export default function CreateScanTaskDialog({
 	);
 	const [selectedProjectId, setSelectedProjectId] = useState<string>("");
 	const [searchTerm, setSearchTerm] = useState("");
-	const [branch, setBranch] = useState("main");
-	const [branches, setBranches] = useState<string[]>([]);
-	const [loadingBranches, setLoadingBranches] = useState(false);
 	const [excludePatterns, setExcludePatterns] = useState(DEFAULT_SCAN_EXCLUDES);
 	const [selectedFiles, setSelectedFiles] = useState<string[] | undefined>();
 	const [showAdvanced, setShowAdvanced] = useState(false);
@@ -130,40 +125,11 @@ export default function CreateScanTaskDialog({
 	const selectedProject = projects.find((p) => p.id === selectedProjectId);
 	const zipState = useZipFile(selectedProject, projects);
 
-	useEffect(() => {
-		const loadBranches = async () => {
-			const project = projects.find((p) => p.id === selectedProjectId);
-			if (!project || !isRepositoryProject(project)) {
-				setBranches([]);
-				return;
-			}
-
-			setLoadingBranches(true);
-			try {
-				const result = await api.getProjectBranches(project.id);
-				if (result.error) {
-					toast.error(`加载分支失败: ${result.error}`);
-				}
-				setBranches(result.branches);
-				if (result.default_branch) {
-					setBranch(result.default_branch);
-				}
-			} catch (error) {
-				const msg = error instanceof Error ? error.message : "未知错误";
-				toast.error(`加载分支失败: ${msg}`);
-				setBranches([project.default_branch || "main"]);
-			} finally {
-				setLoadingBranches(false);
-			}
-		};
-
-		loadBranches();
-	}, [selectedProjectId, projects]);
-
 	const filteredProjects = useMemo(() => {
-		if (!searchTerm) return projects;
+		const visibleProjects = projects.filter((project) => isZipProject(project));
+		if (!searchTerm) return visibleProjects;
 		const term = searchTerm.toLowerCase();
-		return projects.filter(
+		return visibleProjects.filter(
 			(p) =>
 				p.name.toLowerCase().includes(term) ||
 				p.description?.toLowerCase().includes(term),
@@ -261,7 +227,6 @@ export default function CreateScanTaskDialog({
 		setSelectedFiles(undefined);
 		if (mode === "upload") {
 			setSelectedProjectId("");
-			setBranch("main");
 			zipState.reset();
 			return;
 		}
@@ -279,11 +244,10 @@ export default function CreateScanTaskDialog({
 	}, [selectedFiles]);
 	const canSelectFiles = useMemo(() => {
 		if (!selectedProject) return false;
-		const isRepo = isRepositoryProject(selectedProject);
 		const isZip = isZipProject(selectedProject);
 		const hasStoredZip = Boolean(zipState.storedZipInfo?.has_file);
 		const useStored = zipState.useStoredZip;
-		return isRepo || (isZip && useStored && hasStoredZip);
+		return isZip && useStored && hasStoredZip;
 	}, [selectedProject, zipState.storedZipInfo?.has_file, zipState.useStoredZip]);
 
 	const createStaticScanTasksForProject = async (
@@ -513,9 +477,6 @@ export default function CreateScanTaskDialog({
 							gitleaks_enabled: false,
 						},
 					},
-					branch_name: isRepositoryProject(selectedProject)
-						? branch
-						: undefined,
 					exclude_patterns: excludePatterns,
 					target_files:
 						effectiveTargetFiles.length > 0 ? effectiveTargetFiles : undefined,
@@ -582,14 +543,11 @@ export default function CreateScanTaskDialog({
 				(staticTools.opengrep || staticTools.gitleaks || staticTools.bandit)
 			);
 		}
-			if (isZipProject(selectedProject)) {
-				const ready =
-					(zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
-					!!zipState.zipFile;
-				if (!ready) return false;
-				return true;
-			}
-			if (!selectedProject.repository_url || !branch.trim()) return false;
+			if (!isZipProject(selectedProject)) return false;
+			const ready =
+				(zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
+				!!zipState.zipFile;
+			if (!ready) return false;
 			return true;
 		}, [
 			sourceMode,
@@ -597,7 +555,6 @@ export default function CreateScanTaskDialog({
 			newProjectFile,
 			selectedProject,
 			zipState,
-			branch,
 			scanMode,
 			effectiveTargetFiles,
 			staticTools.opengrep,
@@ -778,54 +735,29 @@ export default function CreateScanTaskDialog({
 									配置
 								</span>
 
-								{isRepositoryProject(selectedProject) ? (
-									<div className="flex items-center gap-3 p-3 border border-border rounded bg-blue-50 dark:bg-blue-950/20">
-										<GitBranch className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-										<span className="font-mono text-base text-muted-foreground w-12">
-											分支
-										</span>
-										{loadingBranches ? (
-											<div className="flex items-center gap-2 flex-1">
-												<Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-												<span className="text-sm text-blue-600 dark:text-blue-400 font-mono">
-													加载中...
-												</span>
-											</div>
-										) : (
-											<BranchSelector
-												value={branch}
-												onChange={setBranch}
-												branches={branches}
-												placeholder="选择分支"
-												className="flex-1"
-											/>
-										)}
-									</div>
-								) : (
-									<ZipUploadCard
-										zipState={zipState}
-										onUpload={async () => {
-											if (!zipState.zipFile || !selectedProject) return;
-											setUploading(true);
-											try {
-												await api.uploadProjectZip(
-													selectedProject.id,
-													zipState.zipFile,
-												);
-												toast.success("文件上传成功");
-												zipState.switchToStored();
-												loadProjects();
-											} catch (error) {
-												const msg =
-													error instanceof Error ? error.message : "上传失败";
-												toast.error(msg);
-											} finally {
-												setUploading(false);
-											}
-										}}
-										uploading={uploading}
-									/>
-								)}
+								<ZipUploadCard
+									zipState={zipState}
+									onUpload={async () => {
+										if (!zipState.zipFile || !selectedProject) return;
+										setUploading(true);
+										try {
+											await api.uploadProjectZip(
+												selectedProject.id,
+												zipState.zipFile,
+											);
+											toast.success("文件上传成功");
+											zipState.switchToStored();
+											loadProjects();
+										} catch (error) {
+											const msg =
+												error instanceof Error ? error.message : "上传失败";
+											toast.error(msg);
+										} finally {
+											setUploading(false);
+										}
+									}}
+									uploading={uploading}
+								/>
 
 								{scanMode === "static" && null}
 
@@ -915,7 +847,6 @@ export default function CreateScanTaskDialog({
 					open={showFileSelection}
 					onOpenChange={setShowFileSelection}
 					projectId={selectedProjectId}
-					branch={branch}
 					excludePatterns={excludePatterns}
 					onConfirm={setSelectedFiles}
 				/>

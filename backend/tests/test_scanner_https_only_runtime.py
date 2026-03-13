@@ -1,4 +1,3 @@
-import builtins
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -38,13 +37,12 @@ class _FakeScannerSession:
 
 
 @pytest.mark.asyncio
-async def test_scan_repo_task_does_not_import_legacy_ssh_module_for_https_repo(monkeypatch):
+async def test_scan_repo_task_rejects_non_zip_project(monkeypatch):
     task = SimpleNamespace(
         id="task-https",
         project_id="project-https",
         status="pending",
         started_at=None,
-        branch_name="main",
         exclude_patterns=None,
         total_files=0,
         scanned_files=0,
@@ -56,22 +54,10 @@ async def test_scan_repo_task_does_not_import_legacy_ssh_module_for_https_repo(m
     project = SimpleNamespace(
         id="project-https",
         source_type="repository",
-        repository_url="https://github.com/org/repo.git",
-        repository_type="github",
         default_branch="main",
     )
-    tracked_module_name = ".".join(["app", "services", "_".join(["git", "ssh", "service"])])
-    imported_legacy_ssh_module = {"value": False}
-    original_import = builtins.__import__
-
-    def _tracked_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == tracked_module_name:
-            imported_legacy_ssh_module["value"] = True
-        return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(scanner_module, "LLMService", _FakeLLMService)
-    monkeypatch.setattr(scanner_module, "get_github_files", AsyncMock(return_value=[]))
-    monkeypatch.setattr(builtins, "__import__", _tracked_import)
 
     await scanner_module.scan_repo_task(
         "task-https",
@@ -79,4 +65,4 @@ async def test_scan_repo_task_does_not_import_legacy_ssh_module_for_https_repo(m
         user_config={"otherConfig": {}},
     )
 
-    assert imported_legacy_ssh_module["value"] is False
+    assert task.status == "failed"

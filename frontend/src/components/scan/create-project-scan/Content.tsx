@@ -33,7 +33,7 @@ import {
 	getCreateProjectScanProviderLabel,
 	type LLMProviderItem,
 } from "@/shared/llm/providerCatalog";
-import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
+import { isZipProject } from "@/shared/utils/projectUtils";
 import {
   normalizeCreateProjectScanProvider,
 } from "./utils";
@@ -96,8 +96,6 @@ export default function CreateProjectScanDialogContent({
   llmTestBlockedMessage,
   handleQuickFixTest,
   handleQuickFixSave,
-  branchName,
-  setBranchName,
   showReturnButton,
   onReturn,
   primaryCreateLabel,
@@ -160,8 +158,6 @@ export default function CreateProjectScanDialogContent({
   llmTestBlockedMessage: string;
   handleQuickFixTest: () => void | Promise<void>;
   handleQuickFixSave: () => void | Promise<void>;
-  branchName: string;
-  setBranchName: (value: string) => void;
   showReturnButton: boolean;
   onReturn?: () => void;
   primaryCreateLabel: string;
@@ -696,20 +692,6 @@ export default function CreateProjectScanDialogContent({
             </div>
           )}
 
-          {mode === "agent" && selectedProject && isRepositoryProject(selectedProject) && (
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                扫描分支
-              </p>
-              <Input
-                value={branchName}
-                onChange={(event) => setBranchName(event.target.value)}
-                placeholder="main"
-                className="h-9 cyber-input"
-                disabled={creating}
-              />
-            </div>
-          )}
         </div>
 
         <div className="px-6 py-4 border-t border-border bg-muted flex justify-end gap-2">

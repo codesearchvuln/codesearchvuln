@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/shared/config/database";
 import type { Project } from "@/shared/types";
-import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
+import { isZipProject } from "@/shared/utils/projectUtils";
 import { createAgentTask } from "@/shared/api/agentTasks";
 import {
 	runAgentPreflightCheck,
@@ -106,7 +106,6 @@ export default function CreateProjectScanDialog({
 	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
 	const [mode, setMode] = useState<ScanCreateMode>("static");
 	const [targetFilesInput, setTargetFilesInput] = useState("");
-	const [branchName, setBranchName] = useState("main");
 	const [opengrepEnabled, setOpengrepEnabled] = useState(true);
 	const [gitleaksEnabled, setGitleaksEnabled] = useState(false);
 	const [banditEnabled, setBanditEnabled] = useState(false);
@@ -140,7 +139,7 @@ export default function CreateProjectScanDialog({
 	const previousSearchTermRef = useRef("");
 
 	const activeProjects = useMemo(
-		() => projects.filter((project) => project.is_active),
+		() => projects.filter((project) => project.is_active && isZipProject(project)),
 		[projects],
 	);
 
@@ -248,7 +247,6 @@ export default function CreateProjectScanDialog({
 		setNewProjectFile(null);
 		setMode(initialMode || "static");
 		setTargetFilesInput("");
-		setBranchName("main");
 		setOpengrepEnabled(true);
 		setGitleaksEnabled(false);
 		setBanditEnabled(false);
@@ -322,11 +320,6 @@ export default function CreateProjectScanDialog({
 	}, [open, lockProjectSelection, preselectedProjectId, selectedProjectId]);
 
 	useEffect(() => {
-		if (!selectedProject) return;
-		setBranchName(selectedProject.default_branch || "main");
-	}, [selectedProject?.id]);
-
-	useEffect(() => {
 		if (!open) return;
 		setProjectPage((currentPage) =>
 			resolveProjectPageAfterSearchChange({
@@ -393,11 +386,7 @@ export default function CreateProjectScanDialog({
 					return false;
 				}
 			}
-			if (mode === "agent" && isRepositoryProject(selectedProject)) {
-				baseCanCreate = Boolean(branchName.trim());
-			} else {
-				baseCanCreate = true;
-			}
+			baseCanCreate = isZipProject(selectedProject);
 			if (mode === "hybrid" && !isZipProject(selectedProject)) {
 				return false;
 			}
@@ -415,7 +404,6 @@ export default function CreateProjectScanDialog({
 		opengrepEnabled,
 		gitleaksEnabled,
 		banditEnabled,
-		branchName,
 		isLlmMode,
 		llmQuickInitialized,
 		quickFixPanelOpening,
@@ -509,9 +497,6 @@ export default function CreateProjectScanDialog({
 			source === "hybrid"
 				? `${HYBRID_TASK_NAME_MARKER}混合扫描智能阶段任务`
 				: `${INTELLIGENT_TASK_NAME_MARKER}智能扫描任务`,
-		branch_name: isRepositoryProject(project)
-			? branchName.trim() || project.default_branch || "main"
-			: undefined,
 		target_files: parsedTargetFiles.length > 0 ? parsedTargetFiles : undefined,
 		audit_scope: {
 			static_bootstrap:
@@ -1008,8 +993,6 @@ export default function CreateProjectScanDialog({
 				llmTestBlockedMessage={llmGateStatus.testBlockMessage}
 				handleQuickFixTest={handleQuickFixTest}
 				handleQuickFixSave={handleQuickFixSave}
-			branchName={branchName}
-			setBranchName={setBranchName}
 			showReturnButton={showReturnButton}
 			onReturn={onReturn}
 			primaryCreateLabel={primaryCreateLabel}

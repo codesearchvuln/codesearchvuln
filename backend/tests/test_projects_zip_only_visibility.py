@@ -9,7 +9,6 @@ from app.api.v1.endpoints.projects import (
     create_project,
     get_project_files,
     get_project_files_tree,
-    get_project_branches,
     read_deleted_projects,
     read_project,
     read_projects,
@@ -139,28 +138,6 @@ async def test_read_project_returns_404_for_repository_project():
 
     with pytest.raises(HTTPException, match="项目不存在"):
         await read_project(
-            id="repo-1",
-            db=db,
-            current_user=SimpleNamespace(id="user-1"),
-        )
-
-
-@pytest.mark.asyncio
-async def test_get_project_branches_returns_404_for_repository_project():
-    repo_project = Project(
-        id="repo-1",
-        name="repo project",
-        source_type="repository",
-        repository_url="https://github.com/example/repo",
-        repository_type="github",
-        owner_id="user-1",
-        is_active=True,
-    )
-    db = AsyncMock()
-    db.get = AsyncMock(return_value=repo_project)
-
-    with pytest.raises(HTTPException, match="项目不存在"):
-        await get_project_branches(
             id="repo-1",
             db=db,
             current_user=SimpleNamespace(id="user-1"),

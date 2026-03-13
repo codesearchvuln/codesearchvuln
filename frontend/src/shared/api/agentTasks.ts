@@ -187,7 +187,6 @@ export interface CreateAgentTaskRequest {
   target_vulnerabilities?: string[];
   // unified mode, backend still accepts legacy values and normalizes them
   verification_level?: "analysis_with_poc_plan";
-  branch_name?: string;
   exclude_patterns?: string[];
   target_files?: string[];
   max_iterations?: number;
