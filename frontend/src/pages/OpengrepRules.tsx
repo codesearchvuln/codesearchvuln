@@ -1221,17 +1221,15 @@ export default function OpengrepRules({
 							<div className="flex items-center justify-between">
 								<div>
 									<p className="stat-label">有效规则总数</p>
-									<p className="stat-value">{ruleStats.total}</p>
-									<p className="text-sm mt-1 flex items-center gap-3">
-										<span className="inline-flex items-center gap-1 text-emerald-400">
-											<span className="w-2 h-2 rounded-full bg-emerald-400" />
-											已启用 {ruleStats.active}
-										</span>
-										<span className="inline-flex items-center gap-1 text-rose-400">
-											<span className="w-2 h-2 rounded-full bg-rose-400" />
-											已禁用 {ruleStats.inactive}
-										</span>
-									</p>
+									<div className="flex items-end gap-3">
+										<p className="stat-value">{ruleStats.total}</p>
+										<p className="text-sm mb-1 flex items-center gap-3">
+											<span className="inline-flex items-center gap-1 text-emerald-400">
+												<span className="w-2 h-2 rounded-full bg-emerald-400" />
+												已启用 {ruleStats.active}
+											</span>
+										</p>
+									</div>
 								</div>
 								<div className="stat-icon text-primary">
 									<Database className="w-6 h-6" />
@@ -1266,323 +1264,320 @@ export default function OpengrepRules({
 						</div>
 					</div>
 
-					{/* Filters */}
-					<div className="cyber-card p-4 relative z-10">
-						<div className="flex flex-wrap items-end gap-3">
-							<div className="relative w-full max-w-sm shrink-0">
-								<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-								<Input
-									placeholder={t(
-										"opengrep.searchPlaceholder",
-										"搜索规则名称或ID...",
-									)}
-									value={searchTerm}
-									onChange={(e) => setSearchTerm(e.target.value)}
-									className="cyber-input !pl-10 h-10"
-								/>
-							</div>
+					<div className="cyber-card relative z-10 overflow-hidden">
+						<div className="p-4">
+							<div className="flex flex-wrap items-end gap-3">
+								<div className="relative w-full max-w-sm shrink-0">
+									<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+									<Input
+										placeholder={t(
+											"opengrep.searchPlaceholder",
+											"搜索规则名称或ID...",
+										)}
+										value={searchTerm}
+										onChange={(e) => setSearchTerm(e.target.value)}
+										className="cyber-input !pl-10 h-10"
+									/>
+								</div>
 
-							<div className="flex flex-1 flex-wrap items-end gap-3">
-								{showEngineSelector ? (
+								<div className="flex flex-1 flex-wrap items-end gap-3">
+									{showEngineSelector ? (
+										<div className="min-w-[150px] flex-1">
+											<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+												扫描引擎
+											</Label>
+											<Select
+												value={engineValue}
+												onValueChange={(val) => {
+													if (val === "opengrep" || val === "gitleaks") {
+														onEngineChange?.(val);
+													}
+												}}
+											>
+												<SelectTrigger className="cyber-input mt-1.5 h-10">
+													<SelectValue placeholder="选择引擎" />
+												</SelectTrigger>
+												<SelectContent className="cyber-dialog border-border">
+													<SelectItem value="opengrep">opengrep</SelectItem>
+													<SelectItem value="gitleaks">gitleaks</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									) : null}
+
 									<div className="min-w-[150px] flex-1">
 										<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-											扫描引擎
+											编程语言
 										</Label>
 										<Select
-											value={engineValue}
-											onValueChange={(val) => {
-												if (val === "opengrep" || val === "gitleaks") {
-													onEngineChange?.(val);
-												}
-											}}
+											value={selectedLanguage || "all"}
+											onValueChange={(val) =>
+												setSelectedLanguage(val === "all" ? "" : val)
+											}
 										>
 											<SelectTrigger className="cyber-input mt-1.5 h-10">
-												<SelectValue placeholder="选择引擎" />
+												<SelectValue placeholder="所有语言" />
 											</SelectTrigger>
 											<SelectContent className="cyber-dialog border-border">
-												<SelectItem value="opengrep">opengrep</SelectItem>
-												<SelectItem value="gitleaks">gitleaks</SelectItem>
+												<SelectItem value="all">所有语言</SelectItem>
+												{availableLanguages.map((lang) => (
+													<SelectItem key={lang} value={lang}>
+														{lang}
+													</SelectItem>
+												))}
 											</SelectContent>
 										</Select>
 									</div>
-								) : null}
 
-								<div className="min-w-[150px] flex-1">
-									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-										编程语言
-									</Label>
-									<Select
-										value={selectedLanguage || "all"}
-										onValueChange={(val) =>
-											setSelectedLanguage(val === "all" ? "" : val)
-										}
-									>
-										<SelectTrigger className="cyber-input mt-1.5 h-10">
-											<SelectValue placeholder="所有语言" />
-										</SelectTrigger>
-										<SelectContent className="cyber-dialog border-border">
-											<SelectItem value="all">所有语言</SelectItem>
-											{availableLanguages.map((lang) => (
-												<SelectItem key={lang} value={lang}>
-													{lang}
+									<div className="min-w-[150px] flex-1">
+										<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+											规则来源
+										</Label>
+										<Select
+											value={selectedSource || "all"}
+											onValueChange={(val) =>
+												setSelectedSource(val === "all" ? "" : val)
+											}
+										>
+											<SelectTrigger className="cyber-input mt-1.5 h-10">
+												<SelectValue placeholder="所有来源" />
+											</SelectTrigger>
+											<SelectContent className="cyber-dialog border-border">
+												<SelectItem value="all">所有来源</SelectItem>
+												{RULE_SOURCES.map((source) => (
+													<SelectItem key={source.value} value={source.value}>
+														{source.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+
+									<div className="min-w-[150px] flex-1">
+										<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+											置信度
+										</Label>
+										<Select
+											value={selectedConfidence || "all"}
+											onValueChange={(val) =>
+												setSelectedConfidence(val === "all" ? "" : val)
+											}
+										>
+											<SelectTrigger className="cyber-input mt-1.5 h-10">
+												<SelectValue placeholder="所有等级" />
+											</SelectTrigger>
+											<SelectContent className="cyber-dialog border-border">
+												<SelectItem value="all">所有等级</SelectItem>
+												<SelectItem value="HIGH">
+													{getConfidenceLabel("HIGH")}
 												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-
-								<div className="min-w-[150px] flex-1">
-									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-										规则来源
-									</Label>
-									<Select
-										value={selectedSource || "all"}
-										onValueChange={(val) =>
-											setSelectedSource(val === "all" ? "" : val)
-										}
-									>
-										<SelectTrigger className="cyber-input mt-1.5 h-10">
-											<SelectValue placeholder="所有来源" />
-										</SelectTrigger>
-										<SelectContent className="cyber-dialog border-border">
-											<SelectItem value="all">所有来源</SelectItem>
-											{RULE_SOURCES.map((source) => (
-												<SelectItem key={source.value} value={source.value}>
-													{source.label}
+												<SelectItem value="MEDIUM">
+													{getConfidenceLabel("MEDIUM")}
 												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-
-								<div className="min-w-[150px] flex-1">
-									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-										置信度
-									</Label>
-									<Select
-										value={selectedConfidence || "all"}
-										onValueChange={(val) =>
-											setSelectedConfidence(val === "all" ? "" : val)
-										}
-									>
-										<SelectTrigger className="cyber-input mt-1.5 h-10">
-											<SelectValue placeholder="所有等级" />
-										</SelectTrigger>
-										<SelectContent className="cyber-dialog border-border">
-											<SelectItem value="all">所有等级</SelectItem>
-											<SelectItem value="HIGH">
-												{getConfidenceLabel("HIGH")}
-											</SelectItem>
-											<SelectItem value="MEDIUM">
-												{getConfidenceLabel("MEDIUM")}
-											</SelectItem>
-											<SelectItem value="LOW">
-												{getConfidenceLabel("LOW")}
-											</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-
-								<div className="min-w-[150px] flex-1">
-									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-										启用状态
-									</Label>
-									<Select
-										value={selectedActiveStatus || "all"}
-										onValueChange={(val) =>
-											setSelectedActiveStatus(val === "all" ? "" : val)
-										}
-									>
-										<SelectTrigger className="cyber-input mt-1.5 h-10">
-											<SelectValue placeholder="所有状态" />
-										</SelectTrigger>
-										<SelectContent className="cyber-dialog border-border">
-											<SelectItem value="all">所有状态</SelectItem>
-											{ACTIVE_STATUS.map((status) => (
-												<SelectItem key={status.value} value={status.value}>
-													{status.label}
+												<SelectItem value="LOW">
+													{getConfidenceLabel("LOW")}
 												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
+											</SelectContent>
+										</Select>
+									</div>
 
-								<div className="ml-auto flex items-end gap-2">
-									<Button
-										variant="outline"
-										onClick={handleResetFilters}
-										className="cyber-btn-outline h-10 min-w-[96px]"
-									>
-										重置
-									</Button>
-									{generatingRules.size > 0 && (
+									<div className="min-w-[150px] flex-1">
+										<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+											启用状态
+										</Label>
+										<Select
+											value={selectedActiveStatus || "all"}
+											onValueChange={(val) =>
+												setSelectedActiveStatus(val === "all" ? "" : val)
+											}
+										>
+											<SelectTrigger className="cyber-input mt-1.5 h-10">
+												<SelectValue placeholder="所有状态" />
+											</SelectTrigger>
+											<SelectContent className="cyber-dialog border-border">
+												<SelectItem value="all">所有状态</SelectItem>
+												{ACTIVE_STATUS.map((status) => (
+													<SelectItem key={status.value} value={status.value}>
+														{status.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+
+									<div className="ml-auto flex items-end gap-2">
 										<Button
-											onClick={() => setShowGeneratingQueue(!showGeneratingQueue)}
-											className="cyber-btn-primary h-10 min-w-[132px] bg-cyan-950 border-cyan-500 hover:bg-cyan-900"
-										>
-											<div className="relative w-3 h-3 mr-2">
-												<div className="absolute inset-0 bg-cyan-400 rounded-full animate-pulse opacity-50" />
-											</div>
-											生成队列 ({generatingRules.size})
-										</Button>
-									)}
-									<Button
-										onClick={() => {
-									if (isGitleaksEngine) {
-										showGitleaksNotReady();
-										return;
-									}
-									setShowRuleTypeDialog(true);
-								}}
-										className="cyber-btn-primary h-10 min-w-[116px]"
-									>
-										新建规则
-									</Button>
-								</div>
-							</div>
-						</div>
-					</div>
-
-					{/* Batch Operations */}
-					{filteredRules.length > 0 && (
-						<div className="cyber-card p-4 relative z-10 bg-primary/5 border-primary/30">
-							<div className="flex flex-wrap items-center justify-between gap-4">
-								<p className="font-mono text-sm">
-									{selectedRuleIds.size > 0 ? (
-										<>
-											已选择{" "}
-											<span className="font-bold text-primary">
-												{selectedRuleIds.size}
-											</span>{" "}
-											条规则
-										</>
-									) : hasAnyFilter ? (
-										<>
-											将对{" "}
-											<span className="font-bold text-primary">
-												{filteredRules.length}
-											</span>{" "}
-											条符合条件的规则进行操作
-										</>
-									) : (
-										<>
-											将对全部{" "}
-											<span className="font-bold text-primary">
-												{filteredRules.length}
-											</span>{" "}
-											条规则进行操作
-										</>
-									)}
-								</p>
-								<div className="flex flex-wrap gap-2">
-									<Button
-										onClick={() => handleBatchUpdateRules(true)}
-										disabled={batchOperating}
-										className="cyber-btn-primary h-9 text-sm"
-									>
-										{batchOperating ? "处理中..." : "批量启用"}
-									</Button>
-									<Button
-										onClick={() => handleBatchUpdateRules(false)}
-										disabled={batchOperating}
-										className="cyber-btn-outline h-9 text-sm"
-									>
-										{batchOperating ? "处理中..." : "批量禁用"}
-									</Button>
-									<Button
-										onClick={() => {
-											setSelectedRuleIds(new Set());
-											handleResetFilters();
-										}}
-										disabled={batchOperating}
-										className="cyber-btn-ghost h-9 text-sm"
-									>
-										取消操作
-									</Button>
-								</div>
-							</div>
-						</div>
-					)}
-
-					{/* Generating Queue Panel */}
-					{generatingRules.size > 0 && (
-						<div className="cyber-card relative z-10 bg-gradient-to-r from-blue-950/40 to-cyan-950/40 border-cyan-500/50 overflow-hidden">
-							<div className="p-4 space-y-4">
-								<div className="flex items-center justify-between">
-									<div className="flex items-center gap-3">
-										<div className="relative w-5 h-5">
-											<div className="absolute inset-0 bg-cyan-500 rounded-full animate-pulse opacity-50" />
-											<div
-												className="absolute inset-1 border border-cyan-400 rounded-full animate-spin"
-												style={{ animationDuration: "2s" }}
-											/>
-										</div>
-										<h3 className="text-lg font-bold text-cyan-400 font-mono">
-											补丁规则生成队列
-										</h3>
-										<Badge
 											variant="outline"
-											className="text-cyan-400 border-cyan-500"
+											onClick={handleResetFilters}
+											className="cyber-btn-outline h-10 min-w-[96px]"
 										>
-											{generatingRules.size} 个
-										</Badge>
-									</div>
-									<Button
-										variant="ghost"
-										size="sm"
-										onClick={() => setShowGeneratingQueue(!showGeneratingQueue)}
-										className="text-muted-foreground hover:text-cyan-400"
-									>
-										{showGeneratingQueue ? "▼" : "▶"}
-									</Button>
-								</div>
-
-								{showGeneratingQueue && (
-									<div className="space-y-3 max-h-96 overflow-y-auto">
-										{Array.from(generatingRules.entries()).map(
-											([ruleId, { name, status }]) => {
-												return (
-													<div
-														key={ruleId}
-														className="space-y-2 p-3 bg-black/30 rounded border border-cyan-500/30"
-													>
-														<div className="flex items-center justify-between">
-															<div className="flex-1">
-																<p className="text-sm font-mono text-cyan-300 truncate">
-																	{name}
-																</p>
-															</div>
-															<span className="text-xs font-mono text-muted-foreground ml-2 whitespace-nowrap">
-																{status}
-															</span>
-														</div>
-														<div className="flex items-center justify-between">
-															<span className="text-xs text-muted-foreground font-mono">
-																状态
-															</span>
-															<Button
-																variant="ghost"
-																size="sm"
-																onClick={() => {
-																	handleViewRuleById(ruleId);
-																}}
-																className="text-xs h-auto py-1 px-2 text-cyan-400 hover:text-cyan-300"
-															>
-																查看详情
-															</Button>
-														</div>
-													</div>
-												);
-											},
+											重置
+										</Button>
+										{generatingRules.size > 0 && (
+											<Button
+												onClick={() => setShowGeneratingQueue(!showGeneratingQueue)}
+												className="cyber-btn-primary h-10 min-w-[132px] bg-cyan-950 border-cyan-500 hover:bg-cyan-900"
+											>
+												<div className="relative w-3 h-3 mr-2">
+													<div className="absolute inset-0 bg-cyan-400 rounded-full animate-pulse opacity-50" />
+												</div>
+												生成队列 ({generatingRules.size})
+											</Button>
 										)}
+										<Button
+											onClick={() => {
+												if (isGitleaksEngine) {
+													showGitleaksNotReady();
+													return;
+												}
+												setShowRuleTypeDialog(true);
+											}}
+											className="cyber-btn-primary h-10 min-w-[116px]"
+										>
+											新建规则
+										</Button>
 									</div>
-								)}
+								</div>
 							</div>
 						</div>
-					)}
 
-					{/* Rules Table */}
-					<div className="cyber-card relative z-10 overflow-hidden">
+						{filteredRules.length > 0 && (
+							<div className="border-t border-primary/20 bg-primary/5 px-4 py-4">
+								<div className="flex flex-wrap items-center justify-between gap-4">
+									<p className="font-mono text-sm">
+										{selectedRuleIds.size > 0 ? (
+											<>
+												已选择{" "}
+												<span className="font-bold text-primary">
+													{selectedRuleIds.size}
+												</span>{" "}
+												条规则
+											</>
+										) : hasAnyFilter ? (
+											<>
+												将对{" "}
+												<span className="font-bold text-primary">
+													{filteredRules.length}
+												</span>{" "}
+												条符合条件的规则进行操作
+											</>
+										) : (
+											<>
+												将对全部{" "}
+												<span className="font-bold text-primary">
+													{filteredRules.length}
+												</span>{" "}
+												条规则进行操作
+											</>
+										)}
+									</p>
+									<div className="flex flex-wrap gap-2">
+										<Button
+											onClick={() => handleBatchUpdateRules(true)}
+											disabled={batchOperating}
+											className="cyber-btn-primary h-9 text-sm"
+										>
+											{batchOperating ? "处理中..." : "批量启用"}
+										</Button>
+										<Button
+											onClick={() => handleBatchUpdateRules(false)}
+											disabled={batchOperating}
+											className="cyber-btn-outline h-9 text-sm"
+										>
+											{batchOperating ? "处理中..." : "批量禁用"}
+										</Button>
+										<Button
+											onClick={() => {
+												setSelectedRuleIds(new Set());
+												handleResetFilters();
+											}}
+											disabled={batchOperating}
+											className="cyber-btn-ghost h-9 text-sm"
+										>
+											取消操作
+										</Button>
+									</div>
+								</div>
+							</div>
+						)}
+
+						{generatingRules.size > 0 && (
+							<div className="border-t border-cyan-500/30 bg-gradient-to-r from-blue-950/40 to-cyan-950/40">
+								<div className="p-4 space-y-4">
+									<div className="flex items-center justify-between">
+										<div className="flex items-center gap-3">
+											<div className="relative w-5 h-5">
+												<div className="absolute inset-0 bg-cyan-500 rounded-full animate-pulse opacity-50" />
+												<div
+													className="absolute inset-1 border border-cyan-400 rounded-full animate-spin"
+													style={{ animationDuration: "2s" }}
+												/>
+											</div>
+											<h3 className="text-lg font-bold text-cyan-400 font-mono">
+												补丁规则生成队列
+											</h3>
+											<Badge
+												variant="outline"
+												className="text-cyan-400 border-cyan-500"
+											>
+												{generatingRules.size} 个
+											</Badge>
+										</div>
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={() => setShowGeneratingQueue(!showGeneratingQueue)}
+											className="text-muted-foreground hover:text-cyan-400"
+										>
+											{showGeneratingQueue ? "▼" : "▶"}
+										</Button>
+									</div>
+
+									{showGeneratingQueue && (
+										<div className="space-y-3 max-h-96 overflow-y-auto">
+											{Array.from(generatingRules.entries()).map(
+												([ruleId, { name, status }]) => {
+													return (
+														<div
+															key={ruleId}
+															className="space-y-2 p-3 bg-black/30 rounded border border-cyan-500/30"
+														>
+															<div className="flex items-center justify-between">
+																<div className="flex-1">
+																	<p className="text-sm font-mono text-cyan-300 truncate">
+																		{name}
+																	</p>
+																</div>
+																<span className="text-xs font-mono text-muted-foreground ml-2 whitespace-nowrap">
+																	{status}
+																</span>
+															</div>
+															<div className="flex items-center justify-between">
+																<span className="text-xs text-muted-foreground font-mono">
+																	状态
+																</span>
+																<Button
+																	variant="ghost"
+																	size="sm"
+																	onClick={() => {
+																		handleViewRuleById(ruleId);
+																	}}
+																	className="text-xs h-auto py-1 px-2 text-cyan-400 hover:text-cyan-300"
+																>
+																	查看详情
+																</Button>
+															</div>
+														</div>
+													);
+												},
+											)}
+										</div>
+									)}
+								</div>
+							</div>
+						)}
+
+						<div className="border-t border-border/60">
 						{filteredRules.length === 0 ? (
 							<div className="p-16 text-center">
 								<AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -1850,6 +1845,7 @@ export default function OpengrepRules({
 								</div>
 							</>
 						)}
+						</div>
 					</div>
 
 					{/* Rule Detail Dialog */}

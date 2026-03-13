@@ -97,6 +97,12 @@ services:
       http_proxy: ""
       https_proxy: ""
       NO_PROXY: "*"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 60
     depends_on:
       db:
         condition: service_healthy
@@ -145,7 +151,8 @@ services:
       FRONTEND_DEV_INSTALL_MODE: ${FRONTEND_DEV_INSTALL_MODE:-auto}
       CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     logging:
       driver: "none"
     networks:

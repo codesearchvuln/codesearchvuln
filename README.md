@@ -139,6 +139,7 @@ powershell -ExecutionPolicy Bypass -File scripts\compose-up-with-fallback.ps1
 
 - 后端需要访问 Docker，用于沙箱验证，因此默认会挂载 `/var/run/docker.sock`。生产环境请评估权限边界与隔离策略。
 - 默认根目录 Compose 已切到日常增量开发：`docker compose up -d --build`。该路径会把前后端切到源码挂载 + 热重载，并默认关闭 `MCP_REQUIRE_ALL_READY_ON_STARTUP`、`SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP` 等重型启动项。
+- 默认开发 Compose 会等待 backend `/health` 通过后再启动 frontend；首次 `docker compose up --build` 可能会因为默认种子项目与规则初始化而停留 1 到 2 分钟，这属于预期行为。
 - 如需显式执行全量本地构建，请叠加 `docker-compose.full.yml`：`docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build`。
 - 如需脚本版全量本地构建，可使用：`./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.full.yml up -d --build`。
 - 本地 Compose 启动（包括 `docker-compose.full.yml` 覆盖层）默认关闭 Codex skills 预安装，避免远程拉取阻塞后端启动。

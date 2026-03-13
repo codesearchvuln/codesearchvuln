@@ -339,17 +339,15 @@ export default function GitleaksRules({
 					<div className="flex items-center justify-between">
 						<div>
 							<p className="stat-label">有效规则总数</p>
-							<p className="stat-value">{stats.total}</p>
-							<p className="text-sm mt-1 flex items-center gap-3">
+								<div className="flex items-end gap-3">
+									<p className="stat-value">{stats.total}</p>
+									<p className="text-sm mb-1 flex items-center gap-3">
 								<span className="inline-flex items-center gap-1 text-emerald-400">
 									<span className="w-2 h-2 rounded-full bg-emerald-400" />
-									已启用 {stats.active}
-								</span>
-								<span className="inline-flex items-center gap-1 text-rose-400">
-									<span className="w-2 h-2 rounded-full bg-rose-400" />
-									已禁用 {stats.inactive}
+										已启用 {stats.active}
 								</span>
 							</p>
+						</div>
 						</div>
 						<div className="stat-icon text-primary">
 							<Database className="w-6 h-6" />
@@ -380,180 +378,181 @@ export default function GitleaksRules({
 				</div>
 			</div>
 
-			<div className="cyber-card p-4 relative z-10">
-				<div className="flex flex-wrap items-end gap-3">
-					<div className="relative w-full max-w-sm shrink-0">
-						<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-							搜索规则
-						</Label>
-						<div className="relative mt-1.5">
-							<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-							<Input
-								value={searchTerm}
-								onChange={(e) => setSearchTerm(e.target.value)}
-								placeholder="搜索名称/ID/正则..."
-								className="cyber-input !pl-10 h-10"
-							/>
+			<div className="cyber-card relative z-10 overflow-hidden">
+				<div className="p-4">
+					<div className="flex flex-wrap items-end gap-3">
+						<div className="relative w-full max-w-sm shrink-0">
+							<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+								搜索规则
+							</Label>
+							<div className="relative mt-1.5">
+								<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+								<Input
+									value={searchTerm}
+									onChange={(e) => setSearchTerm(e.target.value)}
+									placeholder="搜索名称/ID/正则..."
+									className="cyber-input !pl-10 h-10"
+								/>
+							</div>
 						</div>
-					</div>
 
-					<div className="flex flex-1 flex-wrap items-end gap-3">
-						{showEngineSelector ? (
+						<div className="flex flex-1 flex-wrap items-end gap-3">
+							{showEngineSelector ? (
+								<div className="min-w-[150px] flex-1">
+									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+										扫描引擎
+									</Label>
+									<Select
+										value={engineValue}
+										onValueChange={(val) => {
+											if (val === "opengrep" || val === "gitleaks") {
+												onEngineChange?.(val);
+											}
+										}}
+									>
+										<SelectTrigger className="cyber-input h-10 mt-1.5">
+											<SelectValue placeholder="选择引擎" />
+										</SelectTrigger>
+										<SelectContent className="cyber-dialog border-border">
+											<SelectItem value="opengrep">opengrep</SelectItem>
+											<SelectItem value="gitleaks">gitleaks</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+							) : null}
+
 							<div className="min-w-[150px] flex-1">
 								<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-									扫描引擎
+									规则来源
 								</Label>
 								<Select
-									value={engineValue}
-									onValueChange={(val) => {
-										if (val === "opengrep" || val === "gitleaks") {
-											onEngineChange?.(val);
-										}
-									}}
+									value={selectedSource || "all"}
+									onValueChange={(val) => setSelectedSource(val === "all" ? "" : val)}
 								>
 									<SelectTrigger className="cyber-input h-10 mt-1.5">
-										<SelectValue placeholder="选择引擎" />
+										<SelectValue placeholder="所有来源" />
 									</SelectTrigger>
 									<SelectContent className="cyber-dialog border-border">
-										<SelectItem value="opengrep">opengrep</SelectItem>
-										<SelectItem value="gitleaks">gitleaks</SelectItem>
+										<SelectItem value="all">所有来源</SelectItem>
+										{sourceOptions.map((source) => (
+											<SelectItem key={source} value={source}>
+												{getSourceLabel(source)}
+											</SelectItem>
+										))}
 									</SelectContent>
 								</Select>
 							</div>
-						) : null}
 
-						<div className="min-w-[150px] flex-1">
-							<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-								规则来源
-							</Label>
-							<Select
-								value={selectedSource || "all"}
-								onValueChange={(val) => setSelectedSource(val === "all" ? "" : val)}
-							>
-								<SelectTrigger className="cyber-input h-10 mt-1.5">
-									<SelectValue placeholder="所有来源" />
-								</SelectTrigger>
-								<SelectContent className="cyber-dialog border-border">
-									<SelectItem value="all">所有来源</SelectItem>
-									{sourceOptions.map((source) => (
-										<SelectItem key={source} value={source}>
-											{getSourceLabel(source)}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</div>
+							<div className="min-w-[150px] flex-1">
+								<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+									熵值区间
+								</Label>
+								<Select
+									value={selectedEntropyRange || "all"}
+									onValueChange={(val) =>
+										setSelectedEntropyRange(val === "all" ? "" : val)
+									}
+								>
+									<SelectTrigger className="cyber-input h-10 mt-1.5">
+										<SelectValue placeholder="所有区间" />
+									</SelectTrigger>
+									<SelectContent className="cyber-dialog border-border">
+										<SelectItem value="all">所有区间</SelectItem>
+										<SelectItem value="high">高熵 (≥ 4)</SelectItem>
+										<SelectItem value="medium">中熵 (3 - 4)</SelectItem>
+										<SelectItem value="low">低熵 (0 - 3)</SelectItem>
+										<SelectItem value="none">未设置熵值</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
 
-						<div className="min-w-[150px] flex-1">
-							<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-								熵值区间
-							</Label>
-							<Select
-								value={selectedEntropyRange || "all"}
-								onValueChange={(val) =>
-									setSelectedEntropyRange(val === "all" ? "" : val)
-								}
-							>
-								<SelectTrigger className="cyber-input h-10 mt-1.5">
-									<SelectValue placeholder="所有区间" />
-								</SelectTrigger>
-								<SelectContent className="cyber-dialog border-border">
-									<SelectItem value="all">所有区间</SelectItem>
-									<SelectItem value="high">高熵 (≥ 4)</SelectItem>
-									<SelectItem value="medium">中熵 (3 - 4)</SelectItem>
-									<SelectItem value="low">低熵 (0 - 3)</SelectItem>
-									<SelectItem value="none">未设置熵值</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
+							<div className="min-w-[150px] flex-1">
+								<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+									启用状态
+								</Label>
+								<Select
+									value={selectedActiveStatus || "all"}
+									onValueChange={(val) =>
+										setSelectedActiveStatus(val === "all" ? "" : val)
+									}
+								>
+									<SelectTrigger className="cyber-input h-10 mt-1.5">
+										<SelectValue placeholder="所有状态" />
+									</SelectTrigger>
+									<SelectContent className="cyber-dialog border-border">
+										<SelectItem value="all">所有状态</SelectItem>
+										<SelectItem value="true">已启用</SelectItem>
+										<SelectItem value="false">已禁用</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
 
-						<div className="min-w-[150px] flex-1">
-							<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
-								启用状态
-							</Label>
-							<Select
-								value={selectedActiveStatus || "all"}
-								onValueChange={(val) =>
-									setSelectedActiveStatus(val === "all" ? "" : val)
-								}
-							>
-								<SelectTrigger className="cyber-input h-10 mt-1.5">
-									<SelectValue placeholder="所有状态" />
-								</SelectTrigger>
-								<SelectContent className="cyber-dialog border-border">
-									<SelectItem value="all">所有状态</SelectItem>
-									<SelectItem value="true">已启用</SelectItem>
-									<SelectItem value="false">已禁用</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
-
-						<div className="ml-auto flex items-end gap-2">
-							<Button
-								className="cyber-btn-outline h-10 min-w-[96px]"
-								onClick={() => {
-									setSearchTerm("");
-									setSelectedSource("");
-									setSelectedEntropyRange("");
-									setSelectedActiveStatus("");
-									setCurrentPage(1);
-									setSelectedRuleIds(new Set());
-								}}
-							>
-								重置
-							</Button>
-							<Button className="cyber-btn-primary h-10 min-w-[116px]" onClick={openCreateDialog}>
-								新建规则
-							</Button>
+							<div className="ml-auto flex items-end gap-2">
+								<Button
+									className="cyber-btn-outline h-10 min-w-[96px]"
+									onClick={() => {
+										setSearchTerm("");
+										setSelectedSource("");
+										setSelectedEntropyRange("");
+										setSelectedActiveStatus("");
+										setCurrentPage(1);
+										setSelectedRuleIds(new Set());
+									}}
+								>
+									重置
+								</Button>
+								<Button className="cyber-btn-primary h-10 min-w-[116px]" onClick={openCreateDialog}>
+									新建规则
+								</Button>
+							</div>
 						</div>
 					</div>
 				</div>
-			</div>
 
-			{filteredRules.length > 0 ? (
-				<div className="cyber-card p-4 relative z-10 bg-primary/5 border-primary/30">
-					<div className="flex flex-wrap items-center justify-between gap-4">
-						<p className="font-mono text-sm">
-							{selectedRuleIds.size > 0 ? (
-								<>
-									已选择 <span className="font-bold text-primary">{selectedRuleIds.size}</span> 条规则
-								</>
-							) : (
-								<>
-									将对 <span className="font-bold text-primary">{filteredRules.length}</span> 条规则进行操作
-								</>
-							)}
-						</p>
-						<div className="flex flex-wrap gap-2">
-							<Button onClick={() => void handleBatchUpdate(true)} disabled={batchOperating} className="cyber-btn-primary h-9 text-sm">
-								{batchOperating ? "处理中..." : "批量启用"}
-							</Button>
-							<Button onClick={() => void handleBatchUpdate(false)} disabled={batchOperating} className="cyber-btn-outline h-9 text-sm">
-								{batchOperating ? "处理中..." : "批量禁用"}
-							</Button>
-						</div>
-					</div>
-				</div>
-			) : null}
-
-			<div className="cyber-card relative z-10 overflow-hidden">
-				{loading ? (
-					<div className="p-16 text-center text-muted-foreground">加载中...</div>
-				) : filteredRules.length === 0 ? (
-					<div className="p-16 text-center">
-						<AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-						<h3 className="text-lg font-bold text-foreground mb-2">未找到规则</h3>
-							<p className="text-muted-foreground font-mono text-sm">
-								{searchTerm ||
-								selectedSource ||
-								selectedEntropyRange ||
-								selectedActiveStatus
-									? "调整筛选条件尝试"
-									: "暂无规则数据（系统将自动同步内置规则）"}
+				{filteredRules.length > 0 ? (
+					<div className="border-t border-primary/20 bg-primary/5 px-4 py-4">
+						<div className="flex flex-wrap items-center justify-between gap-4">
+							<p className="font-mono text-sm">
+								{selectedRuleIds.size > 0 ? (
+									<>
+										已选择 <span className="font-bold text-primary">{selectedRuleIds.size}</span> 条规则
+									</>
+								) : (
+									<>
+										将对 <span className="font-bold text-primary">{filteredRules.length}</span> 条规则进行操作
+									</>
+								)}
 							</p>
+							<div className="flex flex-wrap gap-2">
+								<Button onClick={() => void handleBatchUpdate(true)} disabled={batchOperating} className="cyber-btn-primary h-9 text-sm">
+									{batchOperating ? "处理中..." : "批量启用"}
+								</Button>
+								<Button onClick={() => void handleBatchUpdate(false)} disabled={batchOperating} className="cyber-btn-outline h-9 text-sm">
+									{batchOperating ? "处理中..." : "批量禁用"}
+								</Button>
+							</div>
+						</div>
 					</div>
-				) : (
-					<>
+				) : null}
+
+				<div className="border-t border-border/60">
+					{loading ? (
+						<div className="p-16 text-center text-muted-foreground">加载中...</div>
+					) : filteredRules.length === 0 ? (
+						<div className="p-16 text-center">
+							<AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+							<h3 className="text-lg font-bold text-foreground mb-2">未找到规则</h3>
+								<p className="text-muted-foreground font-mono text-sm">
+									{searchTerm ||
+									selectedSource ||
+									selectedEntropyRange ||
+									selectedActiveStatus
+										? "调整筛选条件尝试"
+										: "暂无规则数据（系统将自动同步内置规则）"}
+								</p>
+						</div>
+					) : (
+						<>
 						<Table>
 							<TableHeader>
 								<TableRow>
@@ -716,6 +715,7 @@ export default function GitleaksRules({
 						</div>
 					</>
 				)}
+				</div>
 			</div>
 
 			<Dialog

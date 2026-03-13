@@ -138,17 +138,6 @@ export default function SkillToolsPanel() {
 						wrapperClassName="max-w-full"
 						aria-label="搜索工具名称或执行功能"
 					/>
-					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-mono text-muted-foreground">
-						<span>总数 {rows.length}</span>
-						<span>命中 {listState.totalRows}</span>
-						<span>固定每页 {EXTERNAL_TOOLS_PAGE_SIZE} 条</span>
-						<span>
-							第 {listState.page} / {listState.totalPages} 页
-						</span>
-						{mcpCatalogLoading ? (
-							<span className="text-primary">目录加载中</span>
-						) : null}
-					</div>
 					{mcpCatalogFallbackNotice ? (
 						<div className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">
 							{mcpCatalogFallbackNotice}

@@ -1,4 +1,5 @@
 import { apiClient } from "./serverClient";
+import { retryProjectReads } from "./retryProjectReads";
 import type {
   Profile,
   Project,
@@ -106,7 +107,9 @@ export const api = {
     if (typeof options?.limit === "number") {
       params.limit = options.limit;
     }
-    const res = await apiClient.get('/projects/', { params });
+    const res = await retryProjectReads(() =>
+      apiClient.get('/projects/', { params }),
+    );
     return res.data;
   },
 

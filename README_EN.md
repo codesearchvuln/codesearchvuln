@@ -108,6 +108,7 @@ docker compose -f deploy/compose/docker-compose.prod.cn.yml up -d
 
 - The backend mounts `/var/run/docker.sock` for sandbox execution. Review security boundaries before using in production.
 - The root Compose default now targets day-to-day incremental development: `docker compose up -d --build`. This path switches frontend/backend to bind-mounted source + hot reload and disables heavyweight startup defaults such as `MCP_REQUIRE_ALL_READY_ON_STARTUP` and `SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP`.
+- The default dev Compose now waits for backend `/health` before starting the frontend; on the first `docker compose up --build`, expect a 1-2 minute delay while seed projects and rules initialize.
 - For the explicit full local build path, add `docker-compose.full.yml`: `docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build`.
 - The fallback-script variant of the full local build path is `./scripts/compose-up-with-fallback.sh -f docker-compose.yml -f docker-compose.full.yml up -d --build`.
 - Local Compose startup, including the `docker-compose.full.yml` overlay, now disables Codex skills preinstallation by default so remote skill sync cannot block the backend.
