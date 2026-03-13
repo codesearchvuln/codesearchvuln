@@ -342,6 +342,124 @@ def _build_tool_drain_metadata(drain_result: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+async def _finalize_task_terminal_state(
+    *,
+    db: AsyncSession,
+    task: AgentTask,
+    task_id: str,
+    event_emitter: Any,
+    event_manager: Optional[EventManager],
+    desired_status: str,
+    success_payload: Optional[Dict[str, Any]] = None,
+    failure_message: Optional[str] = None,
+    failure_metadata: Optional[Dict[str, Any]] = None,
+    verification_gate_message: Optional[str] = None,
+    verification_gate_metadata: Optional[Dict[str, Any]] = None,
+    cancel_message: Optional[str] = None,
+    skip_drain_wait: bool = False,
+    timeout_seconds: int = TOOL_DRAIN_TIMEOUT_SECONDS,
+) -> Dict[str, Any]:
+    if skip_drain_wait:
+        drain_result = {
+            "ready": True,
+            "timed_out": False,
+            "elapsed_ms": 0,
+            "pending_tool_calls": [],
+        }
+    else:
+        drain_result = await _wait_for_terminal_tool_drain(
+            event_manager=event_manager,
+            task_id=task_id,
+            skip_wait=False,
+            timeout_seconds=timeout_seconds,
+        )
+    drain_metadata = _build_tool_drain_metadata(drain_result)
+
+    final_status = str(desired_status or AgentTaskStatus.FAILED)
+    final_failure_message = str(failure_message or "").strip() or None
+    final_failure_metadata = dict(failure_metadata or {})
+
+    if bool(drain_result.get("timed_out")) and final_status != AgentTaskStatus.CANCELLED:
+        final_status = AgentTaskStatus.FAILED
+        final_failure_message = "终态收敛超时：存在未完成工具调用，已将任务标记为失败。"
+        final_failure_metadata = {
+            "step_name": "TERMINAL_TOOL_DRAIN",
+            "attempt": 1,
+            "retry_attempt": 1,
+            "max_attempts": 1,
+            "is_terminal": True,
+            "retry_error_class": "tool_drain_timeout",
+            "retryable": False,
+            "cancel_origin": "none",
+            **drain_metadata,
+        }
+    elif (
+        final_status != AgentTaskStatus.CANCELLED
+        and str(verification_gate_message or "").strip()
+    ):
+        final_status = AgentTaskStatus.FAILED
+        final_failure_message = str(verification_gate_message).strip()
+        final_failure_metadata = {
+            "step_name": "VERIFICATION_PENDING_GATE",
+            "attempt": 1,
+            "retry_attempt": 1,
+            "max_attempts": 1,
+            "is_terminal": True,
+            "retry_error_class": "verification_pending_gate",
+            "retryable": False,
+            "cancel_origin": "none",
+            **dict(verification_gate_metadata or {}),
+            **drain_metadata,
+        }
+    elif final_status == AgentTaskStatus.FAILED:
+        final_failure_metadata = {
+            **final_failure_metadata,
+            **drain_metadata,
+        }
+
+    task.status = final_status
+    task.completed_at = datetime.now(timezone.utc)
+    if final_status == AgentTaskStatus.FAILED:
+        task.error_message = final_failure_message or "Unknown error"
+    else:
+        task.error_message = None
+    await db.commit()
+
+    if final_status == AgentTaskStatus.COMPLETED:
+        payload = dict(success_payload or {})
+        extra_metadata = {
+            **dict(payload.get("extra_metadata") or {}),
+            **drain_metadata,
+        }
+        await event_emitter.emit_task_complete(
+            findings_count=int(payload.get("findings_count") or 0),
+            duration_ms=int(payload.get("duration_ms") or 0),
+            message=payload.get("message"),
+            extra_metadata=extra_metadata,
+        )
+    elif final_status == AgentTaskStatus.CANCELLED:
+        await event_emitter.emit_task_cancelled(cancel_message or "⚠️ 任务已取消")
+    else:
+        emit_message = task.error_message or "Unknown error"
+        await event_emitter.emit_task_error(
+            emit_message,
+            message=f"❌ 任务失败: {emit_message}",
+            metadata=final_failure_metadata,
+        )
+        await event_emitter.emit_error(
+            emit_message,
+            metadata=final_failure_metadata,
+        )
+
+    return {
+        "status": final_status,
+        "drain_result": drain_result,
+        "drain_metadata": drain_metadata,
+        "failure_message": task.error_message,
+        "failure_metadata": final_failure_metadata,
+    }
+
+
 def _compute_verification_pending_gate(
     verification_payload: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -3612,17 +3730,12 @@ async def _execute_agent_task(task_id: str):
                     "pending_examples": gate_stats.get("pending_examples") or [],
                 }
 
+                desired_terminal_status = AgentTaskStatus.COMPLETED
                 if is_task_cancelled(task_id):
                     logger.info(f"[AgentTask] Task {task_id} was cancelled, overriding success result")
-                    task.status = AgentTaskStatus.CANCELLED
-                    task.error_message = None
+                    desired_terminal_status = AgentTaskStatus.CANCELLED
                 elif verification_pending_gate_triggered:
-                    task.status = AgentTaskStatus.FAILED
-                    task.error_message = verification_pending_gate_message
-                else:
-                    task.status = AgentTaskStatus.COMPLETED
-                    task.error_message = None
-                task.completed_at = datetime.now(timezone.utc)
+                    desired_terminal_status = AgentTaskStatus.FAILED
                 task.current_phase = AgentTaskPhase.REPORTING
                 task.findings_count = len(effective_findings)
                 task.false_positive_count = false_positive_count
@@ -3730,79 +3843,41 @@ async def _execute_agent_task(task_id: str):
                     _commit_summary_once,
                 )
 
-                drain_result = await _wait_for_terminal_tool_drain(
-                    event_manager=event_manager,
+                terminal_result = await _finalize_task_terminal_state(
+                    db=db,
+                    task=task,
                     task_id=task_id,
-                    skip_wait=bool(task.status == AgentTaskStatus.CANCELLED or is_task_cancelled(task_id)),
-                    timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
-                )
-                drain_metadata = _build_tool_drain_metadata(drain_result)
-
-                terminal_failure_message: Optional[str] = None
-                terminal_failure_metadata: Dict[str, Any] = {}
-                if bool(drain_result.get("timed_out")):
-                    timeout_message = (
-                        "终态收敛超时：存在未完成工具调用，已将任务标记为失败。"
-                    )
-                    task.status = AgentTaskStatus.FAILED
-                    task.error_message = timeout_message
-                    task.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
-                    terminal_failure_message = timeout_message
-                    terminal_failure_metadata = {
-                        "step_name": "TERMINAL_TOOL_DRAIN",
-                        "attempt": 1,
-                        "retry_attempt": 1,
-                        "max_attempts": 1,
-                        "is_terminal": True,
-                        "retry_error_class": "tool_drain_timeout",
-                        "retryable": False,
-                        "cancel_origin": "none",
-                        **drain_metadata,
-                    }
-                elif verification_pending_gate_triggered:
-                    terminal_failure_message = (
-                        "终态门禁阻断：verification 队列仍有待验证候选，任务已标记失败。"
-                    )
-                    terminal_failure_metadata = {
-                        "step_name": "VERIFICATION_PENDING_GATE",
-                        "attempt": 1,
-                        "retry_attempt": 1,
-                        "max_attempts": 1,
-                        "is_terminal": True,
-                        "retry_error_class": "verification_pending_gate",
-                        "retryable": False,
-                        "cancel_origin": "none",
-                        **verification_pending_gate_metadata,
-                        **drain_metadata,
-                    }
-                if terminal_failure_message:
-                    await event_emitter.emit_task_error(
-                        terminal_failure_message,
-                        message=f"❌ 任务失败: {terminal_failure_message}",
-                        metadata=terminal_failure_metadata,
-                    )
-                    await event_emitter.emit_error(
-                        terminal_failure_message,
-                        metadata=terminal_failure_metadata,
-                    )
-                else:
-                    await event_emitter.emit_task_complete(
-                        findings_count=persisted_findings_count,
-                        duration_ms=duration_ms,
-                        message=(
+                    event_emitter=event_emitter,
+                    event_manager=event_manager,
+                    desired_status=desired_terminal_status,
+                    success_payload={
+                        "findings_count": persisted_findings_count,
+                        "duration_ms": duration_ms,
+                        "message": (
                             f"✅ 审计完成：编排发现 {orchestrator_findings_count}，"
                             f"入库 {persisted_findings_count}，过滤 {filtered_findings_count}，"
                             f"耗时 {duration_ms/1000:.1f} 秒"
                         ),
-                        extra_metadata={
+                        "extra_metadata": {
                             "orchestrator_findings_count": orchestrator_findings_count,
                             "persisted_findings_count": persisted_findings_count,
                             "filtered_findings_count": filtered_findings_count,
                             "filtered_reasons": filtered_reasons or {},
-                            **drain_metadata,
                         },
-                    )
+                    },
+                    verification_gate_message=(
+                        verification_pending_gate_message
+                        if verification_pending_gate_triggered
+                        else None
+                    ),
+                    verification_gate_metadata=verification_pending_gate_metadata,
+                    cancel_message="⚠️ 任务已取消",
+                    skip_drain_wait=bool(desired_terminal_status == AgentTaskStatus.CANCELLED),
+                    timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
+                )
+                drain_result = terminal_result["drain_result"]
+                drain_metadata = terminal_result["drain_metadata"]
+                final_terminal_status = terminal_result["status"]
                 if orchestrator_findings_count > 0 and persisted_findings_count == 0:
                     # 分析为什么全部被过滤
                     await event_emitter.emit_warning(
@@ -3836,6 +3911,8 @@ async def _execute_agent_task(task_id: str):
                         verification_pending_gate_metadata.get("candidate_count", 0),
                         verification_pending_gate_metadata.get("pending_count", 0),
                     )
+                elif final_terminal_status == AgentTaskStatus.CANCELLED:
+                    logger.info("🛑 Task %s cancelled during terminal finalization", task_id)
                 else:
                     logger.info(
                         f"✅ Task {task_id} completed: "
@@ -3847,15 +3924,22 @@ async def _execute_agent_task(task_id: str):
                 if result.error == "任务已取消":
                     # 状态可能已经被 cancel API 更新，只需确保一致性
                     _snapshot_runtime_stats_to_task(task, orchestrator)
-                    if task.status != AgentTaskStatus.CANCELLED:
-                        task.status = AgentTaskStatus.CANCELLED
-                        task.completed_at = datetime.now(timezone.utc)
-                        await db.commit()
+                    terminal_result = await _finalize_task_terminal_state(
+                        db=db,
+                        task=task,
+                        task_id=task_id,
+                        event_emitter=event_emitter,
+                        event_manager=event_manager,
+                        desired_status=AgentTaskStatus.CANCELLED,
+                        cancel_message="⚠️ 任务已取消",
+                        skip_drain_wait=True,
+                        timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
+                    )
                     await _qmd_upsert_json(
                         "artifacts/task_terminal_state.json",
                         {
                             "task_id": task_id,
-                            "status": "cancelled",
+                            "status": terminal_result["status"],
                             "error": result.error,
                         },
                     )
@@ -3863,12 +3947,7 @@ async def _execute_agent_task(task_id: str):
                     logger.info(f"🛑 Task {task_id} cancelled")
                 else:
                     _snapshot_runtime_stats_to_task(task, orchestrator)
-                    task.status = AgentTaskStatus.FAILED
-                    task.error_message = result.error or "Unknown error"
-                    task.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
-
-                    failure_message = task.error_message
+                    failure_message = result.error or "Unknown error"
                     retry_diag = _classify_retry_error(failure_message)
                     failure_metadata = {
                         "step_name": "ORCHESTRATOR_RUN",
@@ -3880,27 +3959,25 @@ async def _execute_agent_task(task_id: str):
                         "retryable": bool(retry_diag["retryable"]),
                         "cancel_origin": "none",
                     }
-                    drain_result = await _wait_for_terminal_tool_drain(
-                        event_manager=event_manager,
+                    terminal_result = await _finalize_task_terminal_state(
+                        db=db,
+                        task=task,
                         task_id=task_id,
-                        skip_wait=bool(is_task_cancelled(task_id)),
+                        event_emitter=event_emitter,
+                        event_manager=event_manager,
+                        desired_status=AgentTaskStatus.FAILED,
+                        failure_message=failure_message,
+                        failure_metadata=failure_metadata,
+                        skip_drain_wait=bool(is_task_cancelled(task_id)),
                         timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
                     )
-                    failure_metadata.update(_build_tool_drain_metadata(drain_result))
-                    await event_emitter.emit_task_error(
-                        failure_message,
-                        message=f"❌ 任务失败: {failure_message}",
-                        metadata=failure_metadata,
-                    )
-                    await event_emitter.emit_error(
-                        failure_message,
-                        metadata=failure_metadata,
-                    )
+                    failure_message = terminal_result["failure_message"] or failure_message
+                    failure_metadata = terminal_result["failure_metadata"]
                     await _qmd_upsert_json(
                         "artifacts/task_terminal_state.json",
                         {
                             "task_id": task_id,
-                            "status": "failed",
+                            "status": terminal_result["status"],
                             "error": failure_message,
                             "metadata": failure_metadata,
                         },
@@ -3914,9 +3991,17 @@ async def _execute_agent_task(task_id: str):
                 task = await db.get(AgentTask, task_id)
                 if task:
                     _snapshot_runtime_stats_to_task(task, _running_orchestrators.get(task_id))
-                    task.status = AgentTaskStatus.CANCELLED
-                    task.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
+                    await _finalize_task_terminal_state(
+                        db=db,
+                        task=task,
+                        task_id=task_id,
+                        event_emitter=event_emitter,
+                        event_manager=event_manager,
+                        desired_status=AgentTaskStatus.CANCELLED,
+                        cancel_message="⚠️ 任务已取消",
+                        skip_drain_wait=True,
+                        timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
+                    )
             except Exception:
                 pass
                 
@@ -3952,14 +4037,11 @@ async def _execute_agent_task(task_id: str):
                 }
                 failure_message = e.final_message[:1000]
 
+            task = None
             try:
                 task = await db.get(AgentTask, task_id)
                 if task:
                     _snapshot_runtime_stats_to_task(task, _running_orchestrators.get(task_id))
-                    task.status = AgentTaskStatus.FAILED
-                    task.error_message = failure_message
-                    task.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
             except Exception as db_error:
                 logger.error(f"Failed to update task status: {db_error}")
 
@@ -3968,22 +4050,31 @@ async def _execute_agent_task(task_id: str):
                     is_task_cancelled(task_id)
                     or str(failure_metadata.get("cancel_origin") or "").strip().lower() == "user"
                 )
-                drain_result = await _wait_for_terminal_tool_drain(
-                    event_manager=event_manager,
-                    task_id=task_id,
-                    skip_wait=skip_drain_wait,
-                    timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
-                )
-                failure_metadata.update(_build_tool_drain_metadata(drain_result))
-                await event_emitter.emit_task_error(
-                    failure_message,
-                    message=f"❌ 任务失败: {failure_message}",
-                    metadata=failure_metadata,
-                )
-                await event_emitter.emit_error(
-                    failure_message,
-                    metadata=failure_metadata,
-                )
+                if task:
+                    terminal_result = await _finalize_task_terminal_state(
+                        db=db,
+                        task=task,
+                        task_id=task_id,
+                        event_emitter=event_emitter,
+                        event_manager=event_manager,
+                        desired_status=AgentTaskStatus.FAILED,
+                        failure_message=failure_message,
+                        failure_metadata=failure_metadata,
+                        skip_drain_wait=skip_drain_wait,
+                        timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
+                    )
+                    failure_message = terminal_result["failure_message"] or failure_message
+                    failure_metadata = terminal_result["failure_metadata"]
+                else:
+                    await event_emitter.emit_task_error(
+                        failure_message,
+                        message=f"❌ 任务失败: {failure_message}",
+                        metadata=failure_metadata,
+                    )
+                    await event_emitter.emit_error(
+                        failure_message,
+                        metadata=failure_metadata,
+                    )
             except Exception as emit_error:
                 logger.warning(f"Failed to emit terminal task error event: {emit_error}")
             try:

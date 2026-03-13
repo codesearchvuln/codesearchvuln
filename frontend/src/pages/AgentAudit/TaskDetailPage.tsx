@@ -86,6 +86,7 @@ import {
   buildStatsSummary,
   createTokenUsageAccumulator,
 } from "./detailViewModel";
+import { getTerminalStatusTransitionPolicy } from "./terminalStatePolicy";
 import {
   getTaskAutoScroll,
   persistTaskAutoScroll,
@@ -2729,23 +2730,26 @@ function AgentAuditPageContent() {
   useEffect(() => {
     const previousStatus = previousTaskStatusRef.current;
     const currentStatus = task?.status;
-    if (
-      (previousStatus === "running" || previousStatus === "pending") &&
-      currentStatus &&
-      TERMINAL_STATUSES.has(currentStatus)
-    ) {
-      markTerminalBoundary(currentStatus, lastEventSequenceRef.current);
-      reconcileTerminalLogs(currentStatus, lastEventSequenceRef.current);
+    const normalizedCurrentStatus = String(currentStatus || "").trim().toLowerCase();
+    const terminalPolicy = getTerminalStatusTransitionPolicy({
+      previousStatus,
+      currentStatus,
+    });
+    if (terminalPolicy.didEnterTerminal) {
+      if (terminalPolicy.shouldReconcileLogs) {
+        reconcileTerminalLogs(normalizedCurrentStatus, lastEventSequenceRef.current);
+      }
       compactToolLogsAfterReplay();
-      void backfillEventsSince(
-        lastEventSequenceRef.current,
-        "status_transition_to_terminal",
-      );
+      if (terminalPolicy.shouldBackfill) {
+        void backfillEventsSince(
+          lastEventSequenceRef.current,
+          "status_transition_to_terminal",
+        );
+      }
       void loadFindings({ silent: true });
     }
     previousTaskStatusRef.current = currentStatus;
   }, [
-    markTerminalBoundary,
     task?.status,
     backfillEventsSince,
     compactToolLogsAfterReplay,

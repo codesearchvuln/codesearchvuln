@@ -31,6 +31,24 @@ type RuleCweChartItem = {
 	total: number;
 };
 
+type RotatedXAxisTickProps = {
+	x?: number;
+	y?: number;
+	payload?: {
+		value?: number | string;
+	};
+};
+
+type TreemapContentProps = {
+	x?: number;
+	y?: number;
+	width?: number;
+	height?: number;
+	name?: number | string;
+	value?: number | string;
+	fill?: string;
+};
+
 interface DashboardChartsPanelsProps {
 	rulesByLanguageData: RuleLanguageChartItem[];
 	rulesByCweData: RuleCweChartItem[];
@@ -41,8 +59,6 @@ interface DashboardChartsPanelsProps {
 
 const formatTick = (value: number | string) =>
 	Number(value || 0).toLocaleString();
-
-const CHART_MARGIN = { top: 8, right: 14, left: 10, bottom: 8 };
 const AXIS_TICK_STYLE = {
 	fontSize: 14,
 	fill: "hsl(var(--muted-foreground))",
@@ -73,6 +89,72 @@ const CHART_COLORS = {
 	tooltipIntelligent: "#6ee7b7",
 	tooltipHybrid: "#c4b5fd",
 };
+
+function RotatedXAxisTick({ x = 0, y = 0, payload }: RotatedXAxisTickProps) {
+	return (
+		<g transform={`translate(${x},${y})`}>
+			<text
+				dy={16}
+				textAnchor="end"
+				fill={AXIS_TICK_STYLE.fill}
+				fontSize={AXIS_TICK_STYLE.fontSize}
+				fontWeight={AXIS_TICK_STYLE.fontWeight}
+				transform="rotate(-35)"
+			>
+				{String(payload?.value || "")}
+			</text>
+		</g>
+	);
+}
+
+function CustomTreemapContent({
+	x = 0,
+	y = 0,
+	width = 0,
+	height = 0,
+	name,
+	value,
+	fill,
+}: TreemapContentProps) {
+	if (!width || !height || width < 20 || height < 20) return null;
+
+	return (
+		<g>
+			<rect
+				x={x}
+				y={y}
+				width={width}
+				height={height}
+				fill={fill || CHART_COLORS.cweTotal}
+				fillOpacity={0.8}
+				rx={3}
+			/>
+			{width > 40 && height > 28 ? (
+				<>
+					<text
+						x={x + width / 2}
+						y={y + height / 2 - 6}
+						textAnchor="middle"
+						fill="#fff"
+						fontSize={11}
+						fontWeight={600}
+					>
+						{name}
+					</text>
+					<text
+						x={x + width / 2}
+						y={y + height / 2 + 10}
+						textAnchor="middle"
+						fill="rgba(255,255,255,0.8)"
+						fontSize={10}
+					>
+						{value}
+					</text>
+				</>
+			) : null}
+		</g>
+	);
+}
 
 export default function DashboardChartsPanels({
 	rulesByLanguageData,
@@ -712,7 +794,7 @@ export default function DashboardChartsPanels({
 															<XAxis
 																	type="category"
 																	dataKey="projectName"
-																	tick={{ ...AXIS_TICK_STYLE, angle: -35, textAnchor: 'end' }}
+																	tick={<RotatedXAxisTick />}
 																	interval={0}
 																	axisLine={AXIS_LINE_STYLE}
 																	tickLine={AXIS_TICK_LINE_STYLE}
@@ -804,7 +886,7 @@ export default function DashboardChartsPanels({
 															<XAxis
 																	type="category"
 																	dataKey="projectName"
-																	tick={{ ...AXIS_TICK_STYLE, angle: -35, textAnchor: 'end' }}
+																	tick={<RotatedXAxisTick />}
 																	interval={0}
 																	axisLine={AXIS_LINE_STYLE}
 																	tickLine={AXIS_TICK_LINE_STYLE}
@@ -872,7 +954,7 @@ export default function DashboardChartsPanels({
 															<XAxis
 																	type="category"
 																	dataKey="language"
-																	tick={{ ...AXIS_TICK_STYLE, angle: -35, textAnchor: 'end' }}
+																	tick={<RotatedXAxisTick />}
 																	interval={0}
 																	axisLine={AXIS_LINE_STYLE}
 																	tickLine={AXIS_TICK_LINE_STYLE}
@@ -953,7 +1035,7 @@ export default function DashboardChartsPanels({
 															<XAxis
 																	type="category"
 																	dataKey="cwe"
-																	tick={{ ...AXIS_TICK_STYLE, angle: -35, textAnchor: 'end' }}
+																	tick={<RotatedXAxisTick />}
 																	interval={0}
 																	axisLine={AXIS_LINE_STYLE}
 																	tickLine={AXIS_TICK_LINE_STYLE}
@@ -1085,7 +1167,7 @@ export default function DashboardChartsPanels({
 																	fill={CHART_COLORS.totalVulns}
 																	fillOpacity={0.75}
 															>
-																	{projectVulnsData.map((entry, index) => (
+																	{projectVulnsData.map((_, index) => (
 																			<Cell
 																					key={`cell-${index}`}
 																					fill={[
@@ -1133,7 +1215,7 @@ export default function DashboardChartsPanels({
 															<CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
 															<XAxis
 																	dataKey="language"
-																	tick={{ ...AXIS_TICK_STYLE, angle: -35, textAnchor: 'end' }}
+																	tick={<RotatedXAxisTick />}
 																	interval={0}
 																	axisLine={AXIS_LINE_STYLE}
 																	tickLine={AXIS_TICK_LINE_STYLE}
@@ -1196,24 +1278,7 @@ export default function DashboardChartsPanels({
 															dataKey="size"
 															aspectRatio={4 / 3}
 															stroke="rgba(0,0,0,0.2)"
-															content={({ x, y, width, height, name, value, fill }: any) => {
-																	if (!width || !height || width < 20 || height < 20) return null;
-																	return (
-																			<g>
-																					<rect x={x} y={y} width={width} height={height} fill={fill} fillOpacity={0.8} rx={3} />
-																					{width > 40 && height > 28 && (
-																							<>
-																									<text x={x + width / 2} y={y + height / 2 - 6} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={600}>
-																											{name}
-																									</text>
-																									<text x={x + width / 2} y={y + height / 2 + 10} textAnchor="middle" fill="rgba(255,255,255,0.8)" fontSize={10}>
-																											{value}
-																									</text>
-																							</>
-																					)}
-																			</g>
-																	);
-															}}
+															content={<CustomTreemapContent />}
 													>
 															<Tooltip
 																	contentStyle={TOOLTIP_STYLE}

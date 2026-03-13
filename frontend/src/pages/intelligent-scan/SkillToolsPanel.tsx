@@ -20,7 +20,6 @@ import {
 	type McpCatalogItem,
 } from "./mcpCatalog";
 import {
-	EXTERNAL_TOOLS_PAGE_SIZE,
 	buildExternalToolListState,
 	buildExternalToolRows,
 	type SkillAvailabilityMap,
@@ -47,7 +46,6 @@ function renderCapabilities(capabilities: string[]) {
 export default function SkillToolsPanel() {
 	const [mcpCatalog, setMcpCatalog] = useState<McpCatalogItem[]>(DEFAULT_MCP_CATALOG);
 	const [skillAvailability, setSkillAvailability] = useState<SkillAvailabilityMap>({});
-	const [mcpCatalogLoading, setMcpCatalogLoading] = useState(false);
 	const [mcpCatalogFallbackNotice, setMcpCatalogFallbackNotice] = useState<string | null>(null);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [page, setPage] = useState(1);
@@ -55,7 +53,6 @@ export default function SkillToolsPanel() {
 	useEffect(() => {
 		let mounted = true;
 		const loadRuntimeCatalog = async () => {
-			setMcpCatalogLoading(true);
 			try {
 				const config = await api.getUserConfig();
 				if (!mounted) return;
@@ -82,10 +79,6 @@ export default function SkillToolsPanel() {
 				setSkillAvailability({});
 				setMcpCatalog(DEFAULT_MCP_CATALOG);
 				setMcpCatalogFallbackNotice("MCP 目录加载失败，当前展示默认目录（非实时状态）。");
-			} finally {
-				if (mounted) {
-					setMcpCatalogLoading(false);
-				}
 			}
 		};
 
