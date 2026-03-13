@@ -65,6 +65,10 @@ import { isRepositoryProject, isZipProject } from "@/shared/utils/projectUtils";
 import type { Project } from "@/shared/types";
 import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
+import {
+	appendStaticScanBatchMarker,
+	createStaticScanBatchId,
+} from "@/shared/utils/staticScanBatch";
 
 interface CreateScanTaskDialogProps {
 	open: boolean;
@@ -293,6 +297,7 @@ export default function CreateScanTaskDialog({
 		let opengrepTask: { id: string } | null = null;
 		let gitleaksTask: { id: string } | null = null;
 		let banditTask: { id: string } | null = null;
+		const staticBatchId = createStaticScanBatchId();
 
 		if (staticTools.opengrep) {
 			const pickActiveRuleIds = (rules: OpengrepRule[]) => {
@@ -311,7 +316,10 @@ export default function CreateScanTaskDialog({
 			try {
 				opengrepTask = await createOpengrepScanTask({
 					project_id: projectId,
-					name: `静态分析-Opengrep-${projectName}`,
+					name: appendStaticScanBatchMarker(
+						`静态分析-Opengrep-${projectName}`,
+						staticBatchId,
+					),
 					rule_ids: activeRuleIds,
 					target_path: ".",
 				});
@@ -334,7 +342,10 @@ export default function CreateScanTaskDialog({
 
 				opengrepTask = await createOpengrepScanTask({
 					project_id: projectId,
-					name: `静态分析-Opengrep-${projectName}`,
+					name: appendStaticScanBatchMarker(
+						`静态分析-Opengrep-${projectName}`,
+						staticBatchId,
+					),
 					rule_ids: retryRuleIds,
 					target_path: ".",
 				});
@@ -344,7 +355,10 @@ export default function CreateScanTaskDialog({
 		if (staticTools.gitleaks) {
 			gitleaksTask = await createGitleaksScanTask({
 				project_id: projectId,
-				name: `静态分析-Gitleaks-${projectName}`,
+				name: appendStaticScanBatchMarker(
+					`静态分析-Gitleaks-${projectName}`,
+					staticBatchId,
+				),
 				target_path: ".",
 				no_git: true,
 			});
@@ -353,7 +367,10 @@ export default function CreateScanTaskDialog({
 		if (staticTools.bandit) {
 			banditTask = await createBanditScanTask({
 				project_id: projectId,
-				name: `静态分析-Bandit-${projectName}`,
+				name: appendStaticScanBatchMarker(
+					`静态分析-Bandit-${projectName}`,
+					staticBatchId,
+				),
 				target_path: ".",
 			});
 		}

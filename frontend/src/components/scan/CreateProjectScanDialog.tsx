@@ -24,6 +24,10 @@ import {
 	INTELLIGENT_TASK_NAME_MARKER,
 } from "@/features/tasks/services/taskActivities";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
+import {
+	appendStaticScanBatchMarker,
+	createStaticScanBatchId,
+} from "@/shared/utils/staticScanBatch";
 import CreateProjectScanDialogContent from "./create-project-scan/Content";
 import {
 	buildLlmProviderOptions,
@@ -431,6 +435,7 @@ export default function CreateProjectScanDialog({
 		let gitleaksTask: { id: string } | null = null;
 		let banditTask: { id: string } | null = null;
 		const taskNamePrefix = "静态分析";
+		const staticBatchId = createStaticScanBatchId();
 
 		if (opengrepEnabled) {
 			const ruleIds = activeRules
@@ -441,7 +446,10 @@ export default function CreateProjectScanDialog({
 			}
 			opengrepTask = await createOpengrepScanTask({
 				project_id: project.id,
-				name: `${taskNamePrefix}-Opengrep-${project.name}`,
+				name: appendStaticScanBatchMarker(
+					`${taskNamePrefix}-Opengrep-${project.name}`,
+					staticBatchId,
+				),
 				rule_ids: ruleIds,
 				target_path: ".",
 			});
@@ -450,7 +458,10 @@ export default function CreateProjectScanDialog({
 		if (gitleaksEnabled) {
 			gitleaksTask = await createGitleaksScanTask({
 				project_id: project.id,
-				name: `${taskNamePrefix}-Gitleaks-${project.name}`,
+				name: appendStaticScanBatchMarker(
+					`${taskNamePrefix}-Gitleaks-${project.name}`,
+					staticBatchId,
+				),
 				target_path: ".",
 				no_git: true,
 			});
@@ -459,7 +470,10 @@ export default function CreateProjectScanDialog({
 		if (banditEnabled) {
 			banditTask = await createBanditScanTask({
 				project_id: project.id,
-				name: `${taskNamePrefix}-Bandit-${project.name}`,
+				name: appendStaticScanBatchMarker(
+					`${taskNamePrefix}-Bandit-${project.name}`,
+					staticBatchId,
+				),
 				target_path: ".",
 			});
 		}

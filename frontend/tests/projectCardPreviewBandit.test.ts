@@ -26,7 +26,7 @@ test("project issue breakdown adds bandit findings", () => {
   assert.equal(breakdown.totalIssues, 6);
 });
 
-test("project recent tasks includes standalone bandit route", () => {
+test("project recent tasks includes bandit route when only bandit is enabled", () => {
   const tasks = getProjectCardRecentTasks({
     projectId: "p1",
     auditTasks: [] as any,
@@ -52,3 +52,38 @@ test("project recent tasks includes standalone bandit route", () => {
   assert.equal(tasks[0]?.vulnerabilities, 4);
 });
 
+test("project recent tasks groups gitleaks and bandit into one static item", () => {
+  const tasks = getProjectCardRecentTasks({
+    projectId: "p1",
+    auditTasks: [] as any,
+    agentTasks: [] as any,
+    opengrepTasks: [] as any,
+    gitleaksTasks: [
+      {
+        id: "gl-1",
+        project_id: "p1",
+        status: "completed",
+        created_at: "2026-03-12T07:00:00.000Z",
+        updated_at: "2026-03-12T07:00:30.000Z",
+        total_findings: 2,
+        scan_duration_ms: 400,
+      },
+    ] as any,
+    banditTasks: [
+      {
+        id: "ba-1",
+        project_id: "p1",
+        status: "completed",
+        created_at: "2026-03-12T07:00:20.000Z",
+        updated_at: "2026-03-12T07:01:00.000Z",
+        total_findings: 3,
+        scan_duration_ms: 600,
+      },
+    ] as any,
+  });
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0]?.route.includes("gitleaksTaskId=gl-1"), true);
+  assert.equal(tasks[0]?.route.includes("banditTaskId=ba-1"), true);
+  assert.equal(tasks[0]?.vulnerabilities, 5);
+});
