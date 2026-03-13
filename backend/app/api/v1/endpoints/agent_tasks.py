@@ -8582,6 +8582,186 @@ async def generate_audit_report(
     )
 
 
+@router.get("/{task_id}/findings/{finding_id}/report")
+async def get_finding_report(
+    task_id: str,
+    finding_id: str,
+    format: str = Query("markdown", pattern="^(markdown|json)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    """按 finding_id 获取单条漏洞详情报告（Markdown/JSON）。"""
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    project = await db.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(status_code=403, detail="无权访问此任务")
+
+    finding_result = await db.execute(
+        select(AgentFinding).where(
+            AgentFinding.task_id == task_id,
+            AgentFinding.id == finding_id,
+        )
+    )
+    finding = finding_result.scalar_one_or_none()
+    if not finding:
+        raise HTTPException(status_code=404, detail="漏洞不存在")
+
+    serialized = _serialize_agent_findings(
+        [finding],
+        include_false_positive=True,
+    )
+    if not serialized:
+        raise HTTPException(status_code=404, detail="漏洞不存在或已被过滤")
+
+    finding_data = serialized[0].model_dump()
+
+    if format == "json":
+        return {
+            "report_metadata": {
+                "task_id": task.id,
+                "finding_id": finding.id,
+                "project_id": task.project_id,
+                "project_name": project.name,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "task_status": task.status,
+            },
+            "finding": finding_data,
+        }
+
+    md_lines: List[str] = []
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    title = str(finding_data.get("display_title") or finding_data.get("title") or "未命名漏洞")
+    severity = str(finding_data.get("severity") or "unknown").upper()
+    vuln_type = str(finding_data.get("vulnerability_type") or "unknown")
+    authenticity = str(finding_data.get("authenticity") or "unknown")
+    reachability = str(finding_data.get("reachability") or "unknown")
+
+    md_lines.append(f"# 漏洞详情报告：{_escape_markdown_inline(title)}")
+    md_lines.append("")
+    md_lines.append("---")
+    md_lines.append("")
+    md_lines.append("## 报告信息")
+    md_lines.append("")
+    md_lines.append("| 属性 | 内容 |")
+    md_lines.append("|----------|-------|")
+    md_lines.append(f"| **项目名称** | {_escape_markdown_table_cell(project.name)} |")
+    md_lines.append(f"| **任务 ID** | `{task.id[:8]}...` |")
+    md_lines.append(f"| **漏洞 ID** | `{finding.id}` |")
+    md_lines.append(f"| **生成时间** | {timestamp} |")
+    md_lines.append("")
+
+    md_lines.append("## 漏洞概览")
+    md_lines.append("")
+    md_lines.append(f"- **严重程度:** {severity}")
+    md_lines.append(f"- **漏洞类型:** `{_escape_markdown_inline(vuln_type)}`")
+    md_lines.append(f"- **真实性判定:** {_escape_markdown_inline(authenticity)}")
+    md_lines.append(f"- **可达性:** {_escape_markdown_inline(reachability)}")
+
+    confidence = finding_data.get("confidence")
+    if isinstance(confidence, (int, float)):
+        md_lines.append(f"- **AI 置信度:** {float(confidence) * 100:.1f}%")
+
+    file_path = finding_data.get("file_path")
+    line_start = finding_data.get("line_start")
+    line_end = finding_data.get("line_end")
+    if file_path:
+        location = _escape_markdown_inline(str(file_path))
+        if line_start:
+            location += f":{line_start}"
+            if line_end and line_end != line_start:
+                location += f"-{line_end}"
+        md_lines.append(f"- **位置:** {location}")
+    md_lines.append("")
+
+    description_markdown = finding_data.get("description_markdown") or finding_data.get("description")
+    if description_markdown:
+        md_lines.append("## 漏洞描述")
+        md_lines.append("")
+        md_lines.append(str(description_markdown))
+        md_lines.append("")
+
+    code_snippet = finding_data.get("code_snippet")
+    if code_snippet:
+        lang = infer_code_fence_language(str(file_path or ""))
+        md_lines.append("## 漏洞代码")
+        md_lines.append("")
+        md_lines.append(f"```{lang}")
+        md_lines.append(str(code_snippet).strip())
+        md_lines.append("```")
+        md_lines.append("")
+
+    verification_evidence = finding_data.get("verification_evidence")
+    if verification_evidence:
+        md_lines.append("## 验证证据")
+        md_lines.append("")
+        md_lines.append(str(verification_evidence))
+        md_lines.append("")
+
+    suggestion = finding_data.get("suggestion")
+    if suggestion:
+        md_lines.append("## 修复建议")
+        md_lines.append("")
+        md_lines.append(str(suggestion))
+        md_lines.append("")
+
+    fix_code = finding_data.get("fix_code")
+    if fix_code:
+        lang = infer_code_fence_language(str(file_path or ""))
+        md_lines.append("## 参考修复代码")
+        md_lines.append("")
+        md_lines.append(f"```{lang if file_path else 'text'}")
+        md_lines.append(str(fix_code).strip())
+        md_lines.append("```")
+        md_lines.append("")
+
+    if bool(finding_data.get("has_poc")):
+        md_lines.append("## 概念验证 (PoC)")
+        md_lines.append("")
+        poc_description = finding_data.get("poc_description")
+        if poc_description:
+            md_lines.append(str(poc_description))
+            md_lines.append("")
+
+        poc_steps = finding_data.get("poc_steps")
+        if isinstance(poc_steps, list) and poc_steps:
+            md_lines.append("### 复现步骤")
+            md_lines.append("")
+            for index, step in enumerate(poc_steps, start=1):
+                md_lines.append(f"{index}. {step}")
+            md_lines.append("")
+
+        poc_code = finding_data.get("poc_code")
+        if poc_code:
+            md_lines.append("### PoC 代码")
+            md_lines.append("")
+            md_lines.append("```")
+            md_lines.append(str(poc_code).strip())
+            md_lines.append("```")
+            md_lines.append("")
+
+    md_lines.append("---")
+    md_lines.append("")
+    md_lines.append("*本报告由自动化安全审计系统生成*")
+    md_lines.append("")
+
+    content = "\n".join(md_lines)
+    filename = f"finding_report_{task.id[:8]}_{finding.id[:8]}.md"
+
+    from fastapi.responses import Response
+
+    return Response(
+        content=content,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+        },
+    )
+
+
 # ==================== 🔥 漏洞队列管理 API ====================
 
 @router.get("/tasks/{task_id}/vulnerability_queue/status", response_model=Dict[str, Any])
