@@ -428,10 +428,6 @@ export default function Dashboard() {
 						<div>
 							<p className="stat-label">{t("dashboard.totalScanDuration")}</p>
 							<p className="stat-value">{formatDurationMs(totalScanDurationMs)}</p>
-							<p className="text-sm text-amber-400 mt-1 flex items-center gap-1">
-								<span className="w-2 h-2 rounded-full bg-amber-400" />
-								{t("dashboard.totalScanDurationHint")}
-							</p>
 						</div>
 						<div className="stat-icon text-amber-400">
 							<Clock3 className="w-6 h-6" />

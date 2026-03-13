@@ -94,6 +94,7 @@ import {
     buildStaticScanGroups,
     resolveStaticScanGroupStatus,
 } from "@/features/tasks/services/taskActivities";
+import { getProjectStatusToggleAction } from "@/pages/projects/viewModel";
 const PROJECT_PAGE_SIZE = 10;
 const PROJECT_FETCH_BATCH_SIZE = 200;
 const MODULE_SCROLL_DELAY_MS = 80;
@@ -1619,6 +1620,8 @@ export default function Projects() {
                                             running: 0,
                                         };
                                     const isDisabledRow = !project.is_active;
+                                    const statusToggleAction =
+                                        getProjectStatusToggleAction(project);
                                     const rowNumber =
                                         (projectPage - 1) * PROJECT_PAGE_SIZE + rowIndex + 1;
                                     return (
@@ -1714,20 +1717,20 @@ export default function Projects() {
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        className="cyber-btn-ghost h-8 px-3 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
-                                                        onClick={() => handleDisableClick(project)}
-                                                        disabled={!project.is_active}
+                                                        className={`cyber-btn-ghost h-8 px-3 ${
+                                                            statusToggleAction.action === "disable"
+                                                                ? "hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
+                                                                : "hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/30"
+                                                        }`}
+                                                        onClick={() => {
+                                                            if (statusToggleAction.requiresConfirmation) {
+                                                                handleDisableClick(project);
+                                                                return;
+                                                            }
+                                                            void handleEnableProject(project);
+                                                        }}
                                                     >
-                                                        禁用
-                                                    </Button>
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        className="cyber-btn-ghost h-8 px-3 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/30"
-                                                        onClick={() => void handleEnableProject(project)}
-                                                        disabled={project.is_active}
-                                                    >
-                                                        启用
+                                                        {statusToggleAction.label}
                                                     </Button>
                                                 </div>
                                             </TableCell>

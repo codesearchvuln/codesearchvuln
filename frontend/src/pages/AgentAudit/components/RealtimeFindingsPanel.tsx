@@ -211,9 +211,6 @@ export default function RealtimeFindingsPanel(props: {
 			<div className="flex h-full min-h-0 flex-col overflow-hidden">
 				<div className="flex flex-wrap items-center gap-3 border-b border-border/70 px-4 py-3">
 					<div className="relative min-w-0 flex-1 basis-[320px]">
-						<span className="pointer-events-none absolute inset-y-0 left-0 flex w-11 items-center justify-center text-muted-foreground">
-							<Search className="h-4 w-4" />
-						</span>
 						<Input
 							value={props.filters.keyword}
 							onChange={(event) =>
@@ -265,18 +262,6 @@ export default function RealtimeFindingsPanel(props: {
 							<SelectItem value="verified">已验证</SelectItem>
 						</SelectContent>
 					</Select>
-				</div>
-
-				<div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5 text-xs text-muted-foreground">
-					<span>
-						符合筛选 {tableState.totalRows.toLocaleString()} 条，当前第 {" "}
-						{tableState.page} / {tableState.totalPages} 页
-					</span>
-					<span>
-						{tableState.hasVisibleConfidence
-							? "排序规则：危害降序；同危害按置信度降序；其后按路径+行号升序"
-							: "排序规则：危害降序；其后按路径+行号升序"}
-					</span>
 				</div>
 
 				<div className="min-h-0 flex-1 overflow-hidden px-4 py-3">

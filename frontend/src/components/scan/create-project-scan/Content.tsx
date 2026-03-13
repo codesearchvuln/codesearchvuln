@@ -416,14 +416,6 @@ export default function CreateProjectScanDialogContent({
                   disabled={creating}
                 />
               </div>
-              <div className="rounded-lg border border-dashed border-sky-500/30 bg-sky-500/8 p-3">
-                <p className="text-xs uppercase tracking-wider font-semibold text-sky-100 mb-1">
-                  自动生成简介
-                </p>
-                <p className="text-xs leading-5 text-sky-50/85">
-                  项目上传完成后，系统会自动生成 1-2 句使用场景简介，并同步展示到项目列表与详情页。
-                </p>
-              </div>
               <div>
                 <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2">
                   源码压缩包
@@ -498,14 +490,7 @@ export default function CreateProjectScanDialogContent({
                 <div className="flex items-start justify-between gap-3">
 	                  <div>
 	                    <p className="text-sm text-violet-200">
-	                      {t("task.llmPrecheckHint", "创建前会自动校验 LLM 配置。")}
-	                    </p>
-	                    <p className="text-xs text-violet-300/80 mt-1">
-	                      {lastPreflightMessage ||
-	                        t(
-	                          "task.llmQuickFixDesc",
-	                          "未通过时可在下方直接补配并测试连接。",
-	                        )}
+	                      {t("task.llmPrecheckHint", "LLM 配置自动化验证")}
 	                    </p>
 	                  </div>
                   <Button
