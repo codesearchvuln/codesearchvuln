@@ -154,10 +154,7 @@ export default function ProjectsPage({
 				projectLanguageStatsMap: data.projectLanguageStatsMap,
 				projectDetailFrom,
 				searchTerm: browser.searchTerm,
-				searchPlaceholder: t(
-					"projects.searchPlaceholder",
-					"按项目名称/描述/仓库地址搜索",
-				),
+				searchPlaceholder: t("projects.searchPlaceholder", "按项目名称/描述搜索"),
 			}),
 		[
 			browser.projectPage,
@@ -179,26 +176,6 @@ export default function ProjectsPage({
 			new Map<string, Project>(data.projects.map((project) => [project.id, project])),
 		[data.projects],
 	);
-
-	async function handleCreateRepositoryProject(input: Parameters<typeof data.createProject>[0]) {
-		try {
-			await data.createProject(input);
-			void logUserAction("创建项目", {
-				projectName: input.name,
-				repositoryType: input.repository_type,
-				languages: input.programming_languages,
-			});
-			toast.success("项目创建成功");
-			pinToProjectBrowserHash();
-			scrollToProjectBrowser();
-		} catch (error) {
-			console.error("Failed to create project:", error);
-			void handleErrorMessage(error, "创建项目失败");
-			const errorMessage = error instanceof Error ? error.message : "未知错误";
-			toast.error(`创建项目失败: ${errorMessage}`);
-			throw error;
-		}
-	}
 
 	async function handleCreateZipProjects(
 		items: BatchCreateZipProjectItem[],
@@ -342,7 +319,6 @@ export default function ProjectsPage({
 						scrollToProjectBrowser();
 					}
 				}}
-				onCreateRepositoryProject={handleCreateRepositoryProject}
 				onCreateZipProjects={handleCreateZipProjects}
 			/>
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import List, Union, Optional
-from pydantic import AnyHttpUrl, validator
+from typing import List, Union, Optional, Self
+from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
 
-    @validator("BACKEND_CORS_ORIGINS", pre=True)
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
         if isinstance(v, str) and not v.startswith("["):
             return [i.strip() for i in v.split(",")]
@@ -23,7 +24,8 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
 
-    @validator("FUNCTION_LOCATOR_LANGUAGES", pre=True)
+    @field_validator("FUNCTION_LOCATOR_LANGUAGES", mode="before")
+    @classmethod
     def assemble_function_locator_languages(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str):
             text = v.strip()
@@ -50,11 +52,15 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "vulhunter"
     DATABASE_URL: str | None = None
 
-    @validator("DATABASE_URL", pre=True)
-    def assemble_db_connection(cls, v: str | None, values: dict[str, any]) -> str:
-        if isinstance(v, str):
-            return v
-        return str(f"postgresql+asyncpg://{values.get('POSTGRES_USER')}:{values.get('POSTGRES_PASSWORD')}@{values.get('POSTGRES_SERVER')}/{values.get('POSTGRES_DB')}")
+    @model_validator(mode="after")
+    def assemble_db_connection(self) -> Self:
+        if isinstance(self.DATABASE_URL, str) and self.DATABASE_URL:
+            return self
+        self.DATABASE_URL = (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_SERVER}/{self.POSTGRES_DB}"
+        )
+        return self
 
     # LLM配置
     LLM_PROVIDER: str = "openai"  # gemini, openai, claude, qwen, deepseek, zhipu, moonshot, baidu, minimax, doubao, ollama

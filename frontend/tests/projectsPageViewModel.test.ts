@@ -13,7 +13,7 @@ async function importOrFail<TModule = Record<string, unknown>>(
 	}
 }
 
-test("projects selectors filter by name description and repository url", async () => {
+test("projects selectors filter by name and description only", async () => {
 	const selectors = await importOrFail<any>(
 		"../src/pages/projects/lib/projectsPageSelectors.ts",
 	);
@@ -39,7 +39,7 @@ test("projects selectors filter by name description and repository url", async (
 	);
 	assert.deepEqual(
 		selectors.filterProjects(projects, "alpha.git").map((project: any) => project.id),
-		["1"],
+		[],
 	);
 	assert.equal(selectors.filterProjects(projects, "").length, 2);
 });

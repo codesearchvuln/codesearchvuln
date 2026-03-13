@@ -182,9 +182,6 @@ from app.services.scanner import (
     scan_repo_task,
     get_github_files,
     get_gitlab_files,
-    get_github_branches,
-    get_gitlab_branches,
-    get_gitea_branches,
     should_exclude,
     is_text_file,
 )
@@ -581,7 +578,7 @@ router = APIRouter()
 # Schemas
 class ProjectCreate(BaseModel):
     name: str
-    source_type: Optional[str] = "repository"  # 'repository' 或 'zip'
+    source_type: Optional[str] = "zip"  # 仅支持 'zip'
     repository_url: Optional[str] = None
     repository_type: Optional[str] = "other"  # github, gitlab, other
     description: Optional[str] = None
@@ -613,7 +610,7 @@ class ProjectResponse(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    source_type: Optional[str] = "repository"  # 'repository' 或 'zip'
+    source_type: Optional[str] = "zip"  # 'repository' 或 'zip'
     repository_url: Optional[str] = None
     repository_type: Optional[str] = None  # github, gitlab, other
     default_branch: Optional[str] = None
@@ -662,6 +659,19 @@ class DashboardSnapshotResponse(BaseModel):
     total_scan_duration_ms: int
     scan_runs: List[DashboardScanRunsItem]
     vulns: List[DashboardVulnsItem]
+
+
+def _is_public_project(project: Project | None) -> bool:
+    return bool(project and getattr(project, "source_type", None) == "zip")
+
+
+def _filter_public_projects(projects: List[Project]) -> List[Project]:
+    return [project for project in projects if _is_public_project(project)]
+
+
+def _raise_if_project_hidden(project: Project | None) -> None:
+    if not _is_public_project(project):
+        raise HTTPException(status_code=404, detail="项目不存在")
 
 
 class StaticScanOverviewItem(BaseModel):
@@ -911,16 +921,15 @@ async def create_project(
     """
     import json
 
-    # 根据 source_type 设置默认值
-    source_type = project_in.source_type or "repository"
+    source_type = project_in.source_type or "zip"
+    if source_type != "zip" or project_in.repository_url:
+        raise HTTPException(status_code=400, detail="仅支持 ZIP 项目创建")
 
     project = Project(
         name=project_in.name,
         source_type=source_type,
-        repository_url=project_in.repository_url if source_type == "repository" else None,
-        repository_type=(
-            project_in.repository_type or "other" if source_type == "repository" else "other"
-        ),
+        repository_url=None,
+        repository_type="other",
         description=project_in.description,
         default_branch=project_in.default_branch or "main",
         programming_languages=json.dumps(project_in.programming_languages or []),
@@ -943,12 +952,16 @@ async def read_projects(
     """
     Retrieve projects.
     """
-    query = select(Project).options(selectinload(Project.owner))
+    query = (
+        select(Project)
+        .options(selectinload(Project.owner))
+        .where(Project.source_type == "zip")
+    )
     if not include_deleted:
         query = query.where(Project.is_active == True)
     query = query.order_by(Project.created_at.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    return _filter_public_projects(result.scalars().all())
 
 
 @router.get("/deleted", response_model=List[ProjectResponse])
@@ -963,9 +976,10 @@ async def read_deleted_projects(
         select(Project)
         .options(selectinload(Project.owner))
         .where(Project.is_active == False)
+        .where(Project.source_type == "zip")
         .order_by(Project.updated_at.desc())
     )
-    return result.scalars().all()
+    return _filter_public_projects(result.scalars().all())
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -1827,8 +1841,7 @@ async def read_project(
         select(Project).options(selectinload(Project.owner)).where(Project.id == id)
     )
     project = result.scalars().first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限：只有项目所有者可以查看
 
@@ -1847,8 +1860,7 @@ async def get_project_info(
     # 1. 获取项目基本信息
     result = await db.execute(select(Project).where(Project.id == id))
     project = result.scalars().first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 2. 检查权限
 
@@ -1859,22 +1871,6 @@ async def get_project_info(
         select(ProjectInfo).where(ProjectInfo.project_id == id)
     )
     existing_info = existing_info_result.scalars().first()
-
-    source_type = getattr(project, "source_type", None)
-
-    # 仓库项目暂不执行语言统计，统一返回 unsupported
-    if source_type == "repository":
-        project_info = existing_info or ProjectInfo(
-            project_id=id,
-            created_at=datetime.now(timezone.utc),
-        )
-        project_info.status = "unsupported"
-        project_info.language_info = project_info.language_info or empty_language_info
-        project_info.description = project_info.description or ""
-        db.add(project_info)
-        await db.commit()
-        await db.refresh(project_info)
-        return project_info
 
     if existing_info and existing_info.status == "completed" and existing_info.language_info:
         existing_info.description = existing_info.description or ""
@@ -1946,12 +1942,21 @@ async def update_project(
 
     result = await db.execute(select(Project).where(Project.id == id))
     project = result.scalars().first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限：只有项目所有者可以更新
 
     update_data = project_in.model_dump(exclude_unset=True)
+    if update_data.get("source_type") not in (None, "zip"):
+        raise HTTPException(status_code=400, detail="仅支持 ZIP 项目")
+    if update_data.get("repository_url"):
+        raise HTTPException(status_code=400, detail="仅支持 ZIP 项目")
+    if "source_type" in update_data:
+        update_data["source_type"] = "zip"
+    if "repository_url" in update_data:
+        update_data["repository_url"] = None
+    if "repository_type" in update_data:
+        update_data["repository_type"] = "other"
     if "programming_languages" in update_data and update_data["programming_languages"] is not None:
         update_data["programming_languages"] = json.dumps(update_data["programming_languages"])
 
@@ -1975,8 +1980,7 @@ async def delete_project(
     """
     result = await db.execute(select(Project).where(Project.id == id))
     project = result.scalars().first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限：只有项目所有者可以删除
 
@@ -1997,8 +2001,7 @@ async def restore_project(
     """
     result = await db.execute(select(Project).where(Project.id == id))
     project = result.scalars().first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限：只有项目所有者可以恢复
 
@@ -2019,8 +2022,7 @@ async def permanently_delete_project(
     """
     result = await db.execute(select(Project).where(Project.id == id))
     project = result.scalars().first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限：只有项目所有者可以永久删除
 
@@ -2052,8 +2054,7 @@ async def get_project_files(
     - exclude_patterns: JSON 格式的排除模式数组，如 ["node_modules/**", "*.log"]
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # Check permissions
 
@@ -2204,8 +2205,7 @@ async def get_project_files_tree(
     - children: 子节点列表（仅目录有值）
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # Check permissions
 
@@ -2360,8 +2360,7 @@ async def get_project_file_content(
     """
     # 1. 验证项目存在
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
     
     # 2. 检查是否为ZIP项目
     if project.source_type != "zip":
@@ -2546,8 +2545,7 @@ async def scan_project(
     Start a scan task.
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 获取分支和排除模式
     branch_name = scan_request.branch_name if scan_request else None
@@ -2638,8 +2636,7 @@ async def get_project_zip_info(
     获取项目ZIP文件信息
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查是否有ZIP文件
     has_file = await has_project_zip(id)
@@ -2682,8 +2679,7 @@ async def upload_project_zip(
     7. 清理临时文件
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限
 
@@ -2845,8 +2841,7 @@ async def preview_upload_file(
     返回压缩包内的文件列表和统计信息
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     if project.source_type != "zip":
         raise HTTPException(status_code=400, detail="仅ZIP类型项目支持")
@@ -2889,8 +2884,7 @@ async def upload_project_directory(
     - files: 多个文件，前端应该保持相对路径信息（通过 webkitRelativePath）
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限
 
@@ -3064,8 +3058,7 @@ async def delete_project_zip_file(
     删除项目ZIP文件
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
 
     # 检查权限
 
@@ -3093,85 +3086,8 @@ async def get_project_branches(
     获取项目仓库的分支列表
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
-
-    # 检查是否为仓库类型项目
-    if project.source_type != "repository":
-        raise HTTPException(status_code=400, detail="仅仓库类型项目支持获取分支")
-
-    if not project.repository_url:
-        raise HTTPException(status_code=400, detail="项目未配置仓库地址")
-
-    # 获取用户配置的 Token
-    from app.core.config import settings
-    from app.core.encryption import decrypt_sensitive_data
-
-    config = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
-    config = config.scalar_one_or_none()
-
-    github_token = settings.GITHUB_TOKEN
-    gitea_token = settings.GITEA_TOKEN
-    gitlab_token = settings.GITLAB_TOKEN
-
-    SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken", "giteaToken"]
-
-    if config and config.other_config:
-        import json
-
-        other_config = json.loads(config.other_config)
-        for field in SENSITIVE_OTHER_FIELDS:
-            if field in other_config and other_config[field]:
-                decrypted_val = decrypt_sensitive_data(other_config[field])
-                if field == "githubToken":
-                    github_token = decrypted_val
-                elif field == "gitlabToken":
-                    gitlab_token = decrypted_val
-                elif field == "giteaToken":
-                    gitea_token = decrypted_val
-
-    repo_type = project.repository_type or "other"
-
-    # 详细日志
-    print(f"[Branch] 项目: {project.name}, 类型: {repo_type}, URL: {project.repository_url}")
-
-    try:
-        if repo_type == "github":
-            if not github_token:
-                print("[Branch] 警告: GitHub Token 未配置，可能会遇到 API 限制")
-            branches = await get_github_branches(project.repository_url, github_token)
-        elif repo_type == "gitlab":
-            if not gitlab_token:
-                print("[Branch] 警告: GitLab Token 未配置，可能无法访问私有仓库")
-            branches = await get_gitlab_branches(project.repository_url, gitlab_token)
-        elif repo_type == "gitea":
-            if not gitea_token:
-                print("[Branch] 警告: Gitea Token 未配置，可能无法访问私有仓库")
-            branches = await get_gitea_branches(project.repository_url, gitea_token)
-        else:
-            # 对于其他类型，返回默认分支
-            print(f"[Branch] 仓库类型 '{repo_type}' 不支持获取分支，返回默认分支")
-            branches = [project.default_branch or "main"]
-
-        print(f"[Branch] 成功获取 {len(branches)} 个分支")
-
-        # 将默认分支放在第一位
-        default_branch = project.default_branch or "main"
-        if default_branch in branches:
-            branches.remove(default_branch)
-            branches.insert(0, default_branch)
-
-        return {"branches": branches, "default_branch": default_branch}
-
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[Branch] 获取分支列表失败: {error_msg}")
-        # 返回默认分支作为后备
-        return {
-            "branches": [project.default_branch or "main"],
-            "default_branch": project.default_branch or "main",
-            "error": str(e),
-        }
+    _raise_if_project_hidden(project)
+    raise HTTPException(status_code=404, detail="项目不存在")
 
 # ============ 缓存管理端点 ============
 
@@ -3225,8 +3141,7 @@ async def invalidate_project_cache(
         清除的缓存条目数
     """
     project = await db.get(Project, id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    _raise_if_project_hidden(project)
     
     zip_path = await load_project_zip(id)
     if not zip_path:

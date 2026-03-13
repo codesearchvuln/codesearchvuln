@@ -63,9 +63,9 @@ export function createEmptyProjectForm(): CreateProjectForm {
 	return {
 		name: "",
 		description: "",
-		source_type: "repository",
-		repository_url: "",
-		repository_type: "github",
+		source_type: "zip",
+		repository_url: undefined,
+		repository_type: "other",
 		default_branch: "main",
 		programming_languages: [],
 	};
