@@ -173,7 +173,7 @@ secrets/
 
 # Agent checkpoints and data
 agent_checkpoints/
-data/
+./data/
 *.checkpoint
 
 # CPG artifacts
