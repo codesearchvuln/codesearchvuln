@@ -1,11 +1,25 @@
 import {
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 	type ChangeEvent,
+	type DragEvent,
 } from "react";
-import { FileText, Package, Plus, Terminal, Upload, Globe } from "lucide-react";
+import {
+	AlertTriangle,
+	CheckCircle2,
+	FileText,
+	Globe,
+	Loader2,
+	Package,
+	Plus,
+	Terminal,
+	Trash2,
+	Upload,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
 	Dialog,
 	DialogContent,
@@ -24,31 +38,48 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { validateZipFile } from "@/features/projects/services";
+import { formatFileSize } from "@/shared/utils/zipStorage";
 import { REPOSITORY_PLATFORMS } from "@/shared/constants";
 import type { CreateProjectForm } from "@/shared/types";
 import { toast } from "sonner";
 import {
 	createEmptyProjectForm,
 	PROJECT_ACTION_BTN_SUBTLE,
-	stripArchiveSuffix,
 } from "../constants";
+import {
+	appendZipBatchFiles,
+	validateZipBatchItems,
+	type ZipBatchItem,
+	type ZipBatchItemStatus,
+} from "../lib/createProjectDialogBatch";
+import type {
+	BatchCreateZipProjectItem,
+	BatchCreateZipProjectsProgressEvent,
+	BatchCreateZipProjectsResult,
+} from "../data/projectsPageWorkflows";
 
 interface CreateProjectDialogProps {
 	open: boolean;
 	supportedLanguages: string[];
 	onOpenChange: (open: boolean) => void;
 	onCreateRepositoryProject: (input: CreateProjectForm) => Promise<void>;
-	onCreateZipProject: (input: CreateProjectForm, file: File) => Promise<void>;
+	onCreateZipProjects: (
+		items: BatchCreateZipProjectItem[],
+		sharedInput: Omit<CreateProjectForm, "name">,
+		onProgress?: (event: BatchCreateZipProjectsProgressEvent) => void,
+	) => Promise<BatchCreateZipProjectsResult>;
 }
 
 function LanguageSelector({
 	selectedLanguages,
 	supportedLanguages,
 	onToggleLanguage,
+	disabled = false,
 }: {
 	selectedLanguages: string[];
 	supportedLanguages: string[];
 	onToggleLanguage: (language: string, checked: boolean) => void;
+	disabled?: boolean;
 }) {
 	return (
 		<div className="space-y-2">
@@ -65,7 +96,7 @@ function LanguageSelector({
 								checked
 									? "border-primary bg-primary/10 text-primary"
 									: "border-border hover:border-border text-muted-foreground"
-							}`}
+							} ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
 						>
 							<input
 								type="checkbox"
@@ -74,6 +105,7 @@ function LanguageSelector({
 									onToggleLanguage(lang, event.target.checked)
 								}
 								className="rounded border border-border w-3.5 h-3.5 text-primary focus:ring-0 bg-transparent"
+								disabled={disabled}
 							/>
 							<span className="text-xs font-mono font-bold uppercase">
 								{lang}
@@ -86,26 +118,63 @@ function LanguageSelector({
 	);
 }
 
+function getStatusBadgeVariant(status: ZipBatchItemStatus) {
+	switch (status) {
+		case "success":
+			return "default";
+		case "failed":
+			return "destructive";
+		case "creating":
+			return "secondary";
+		default:
+			return "outline";
+	}
+}
+
+function getStatusLabel(status: ZipBatchItemStatus) {
+	switch (status) {
+		case "success":
+			return "已创建";
+		case "failed":
+			return "失败";
+		case "creating":
+			return "创建中";
+		default:
+			return "待创建";
+	}
+}
+
 export default function CreateProjectDialog({
 	open,
 	supportedLanguages,
 	onOpenChange,
 	onCreateRepositoryProject,
-	onCreateZipProject,
+	onCreateZipProjects,
 }: CreateProjectDialogProps) {
 	const [form, setForm] = useState<CreateProjectForm>(createEmptyProjectForm);
-	const [selectedFile, setSelectedFile] = useState<File | null>(null);
+	const [batchItems, setBatchItems] = useState<ZipBatchItem[]>([]);
 	const [activeTab, setActiveTab] = useState<"upload" | "repository">("upload");
 	const [uploading, setUploading] = useState(false);
-	const [uploadProgress, setUploadProgress] = useState(0);
+	const [dragActive, setDragActive] = useState(false);
+	const [invalidNameIds, setInvalidNameIds] = useState<string[]>([]);
+	const [uploadSummary, setUploadSummary] =
+		useState<BatchCreateZipProjectsResult | null>(null);
+	const [uploadProgress, setUploadProgress] = useState({
+		completed: 0,
+		total: 0,
+		currentProjectName: "",
+	});
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
 		if (!open) {
 			setActiveTab("upload");
-			setSelectedFile(null);
+			setBatchItems([]);
 			setUploading(false);
-			setUploadProgress(0);
+			setDragActive(false);
+			setInvalidNameIds([]);
+			setUploadSummary(null);
+			setUploadProgress({ completed: 0, total: 0, currentProjectName: "" });
 			setForm(createEmptyProjectForm());
 		}
 	}, [open]);
@@ -126,23 +195,50 @@ export default function CreateProjectDialog({
 		}));
 	}
 
+	function pushFiles(nextFiles: File[]) {
+		if (nextFiles.length === 0) return;
+		const result = appendZipBatchFiles({
+			existingItems: batchItems,
+			files: nextFiles,
+			validateFile: validateZipFile,
+		});
+		setBatchItems(result.items);
+		setInvalidNameIds([]);
+
+		for (const rejection of result.rejections) {
+			toast.error(`${rejection.fileName}: ${rejection.message}`);
+		}
+	}
+
 	function handleFileSelect(event: ChangeEvent<HTMLInputElement>) {
-		const inputElement = event.target;
-		const file = event.target.files?.[0];
-		if (!file) return;
+		pushFiles(Array.from(event.target.files || []));
+		event.target.value = "";
+	}
 
-		const validation = validateZipFile(file);
-		if (!validation.valid) {
-			toast.error(validation.error);
-			return;
-		}
+	function handleDrop(event: DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		setDragActive(false);
+		if (uploading || uploadSummary) return;
+		pushFiles(Array.from(event.dataTransfer.files || []));
+	}
 
-		const autoProjectName = stripArchiveSuffix(file.name).trim();
-		if (autoProjectName) {
-			updateForm({ name: autoProjectName });
-		}
-		setSelectedFile(file);
-		inputElement.value = "";
+	function handleUpdateBatchItemName(itemId: string, nextName: string) {
+		setBatchItems((previous) =>
+			previous.map((item) =>
+				item.id === itemId
+					? {
+							...item,
+							editableName: nextName,
+					  }
+					: item,
+			),
+		);
+		setInvalidNameIds((previous) => previous.filter((id) => id !== itemId));
+	}
+
+	function handleRemoveBatchItem(itemId: string) {
+		setBatchItems((previous) => previous.filter((item) => item.id !== itemId));
+		setInvalidNameIds((previous) => previous.filter((id) => id !== itemId));
 	}
 
 	async function handleCreateRepository() {
@@ -162,51 +258,109 @@ export default function CreateProjectDialog({
 		}
 	}
 
-	async function handleCreateZip() {
-		if (!selectedFile) {
-			toast.error("请先选择压缩包文件");
-			return;
-		}
-		if (!form.name.trim()) {
-			toast.error("请先输入项目名称");
+	async function handleCreateZipBatch() {
+		if (batchItems.length === 0) {
+			toast.error("请先选择至少一个压缩包文件");
 			return;
 		}
 
-		let progressTimer: ReturnType<typeof setInterval> | null = null;
+		const validation = validateZipBatchItems(batchItems);
+		if (!validation.valid) {
+			setInvalidNameIds(validation.invalidItemIds);
+			toast.error("请先填写所有项目名称");
+			return;
+		}
+
+		const submittedItems = batchItems.map((item) => ({
+			...item,
+			editableName: item.editableName.trim(),
+			status: "idle" as const,
+			errorMessage: undefined,
+		}));
+
+		setBatchItems(submittedItems);
+		setInvalidNameIds([]);
+		setUploadSummary(null);
+		setUploading(true);
+		setUploadProgress({
+			completed: 0,
+			total: submittedItems.length,
+			currentProjectName: submittedItems[0]?.editableName || "",
+		});
+
 		try {
-			setUploading(true);
-			setUploadProgress(0);
-			progressTimer = setInterval(() => {
-				setUploadProgress((previous) => {
-					if (previous >= 90) return previous;
-					return previous + 20;
-				});
-			}, 120);
-
-			await onCreateZipProject(
+			const result = await onCreateZipProjects(
+				submittedItems.map((item) => ({
+					file: item.file,
+					projectName: item.editableName,
+				})),
 				{
-					...form,
+					description: "",
 					source_type: "zip",
 					repository_type: "other",
 					repository_url: undefined,
+					default_branch: form.default_branch,
+					programming_languages: form.programming_languages,
 				},
-				selectedFile,
+				(event) => {
+					const targetId = submittedItems[event.index]?.id;
+					setBatchItems((previous) =>
+						previous.map((item) =>
+							item.id === targetId
+								? {
+										...item,
+										status:
+											event.status === "creating"
+												? "creating"
+												: event.status,
+										errorMessage:
+											event.status === "failed" ? event.message : undefined,
+								  }
+								: item,
+						),
+					);
+					setUploadProgress({
+						completed:
+							event.status === "creating"
+								? event.index
+								: Math.min(event.index + 1, submittedItems.length),
+						total: submittedItems.length,
+						currentProjectName: event.projectName,
+					});
+				},
 			);
-			setUploadProgress(100);
-			onOpenChange(false);
+			setUploadSummary(result);
+			setUploadProgress({
+				completed: result.total,
+				total: result.total,
+				currentProjectName: "",
+			});
 		} catch {
-			// keep dialog state for retry
+			toast.error("批量创建项目失败");
 		} finally {
-			if (progressTimer) {
-				clearInterval(progressTimer);
-			}
 			setUploading(false);
 		}
 	}
 
+	const progressValue = useMemo(() => {
+		if (uploadProgress.total === 0) return 0;
+		return Math.round((uploadProgress.completed / uploadProgress.total) * 100);
+	}, [uploadProgress.completed, uploadProgress.total]);
+
+	const isUploadComplete = Boolean(uploadSummary);
+
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="!w-[min(90vw,700px)] !max-w-none max-h-[85vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
+		<Dialog
+			open={open}
+			onOpenChange={(nextOpen) => {
+				if (uploading) return;
+				onOpenChange(nextOpen);
+			}}
+		>
+			<DialogContent
+				className="!w-[min(92vw,760px)] !max-w-none max-h-[88vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
+				showCloseButton={!uploading}
+			>
 				<DialogHeader className="px-6 pt-4 flex-shrink-0">
 					<DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
 						<Terminal className="w-5 h-5 text-primary" />
@@ -223,108 +377,206 @@ export default function CreateProjectDialog({
 						className="w-full"
 					>
 						<TabsList className="grid grid-cols-2 w-full">
-							<TabsTrigger value="upload">
+							<TabsTrigger value="upload" disabled={uploading}>
 								<Package className="w-4 h-4" />
 								上传项目
 							</TabsTrigger>
-							<TabsTrigger value="repository">
+							<TabsTrigger value="repository" disabled={uploading}>
 								<Globe className="w-4 h-4" />
 								远程仓库
 							</TabsTrigger>
 						</TabsList>
 
 						<TabsContent value="upload" className="flex flex-col gap-5 mt-5">
-							<div className="space-y-1.5">
-								<Label
-									htmlFor="upload-name"
-									className="font-mono font-bold uppercase text-base text-muted-foreground"
-								>
-									项目名称
-								</Label>
-								<Input
-									id="upload-name"
-									value={form.name}
-									onChange={(event) => updateForm({ name: event.target.value })}
-									placeholder="输入项目名称"
-									className="h-11 text-base border-0 border-b border-border rounded-none px-0 bg-transparent focus-visible:ring-0 focus-visible:border-primary"
-								/>
-							</div>
-
-							<div className="space-y-4">
-								<Label className="font-mono font-bold uppercase text-base text-muted-foreground">
-									源代码
-								</Label>
-
-								{!selectedFile ? (
-									<div
-										className="border border-dashed border-border bg-muted/50 rounded p-6 text-center hover:bg-muted hover:border-border transition-colors cursor-pointer group"
-										onClick={() => fileInputRef.current?.click()}
-									>
-										<Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3 group-hover:text-primary transition-colors" />
-										<h3 className="text-base font-bold text-foreground uppercase mb-1">
-											上传项目文件
-										</h3>
-										<p className="text-xs font-mono text-muted-foreground mb-3">
-											最大: 500MB // 格式: .zip .tar .tar.gz .tar.bz2
-											.7z .rar
+							<div className="space-y-3">
+								<div className="flex items-center justify-between gap-3">
+									<div>
+										<Label className="font-mono font-bold uppercase text-base text-muted-foreground">
+											源码压缩包
+										</Label>
+										<p className="mt-1 text-xs font-mono text-muted-foreground">
+											一次可导入多个压缩包，每个压缩包将创建一个独立项目
 										</p>
-										<input
-											ref={fileInputRef}
-											type="file"
-											accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
-											onChange={handleFileSelect}
-											className="hidden"
+									</div>
+									{batchItems.length > 0 && !isUploadComplete ? (
+										<Button
+											type="button"
+											variant="outline"
+											className="cyber-btn-outline h-9 text-xs"
 											disabled={uploading}
-										/>
+											onClick={() => fileInputRef.current?.click()}
+										>
+											<Plus className="w-3 h-3 mr-2" />
+											继续添加
+										</Button>
+									) : null}
+								</div>
+
+								<input
+									ref={fileInputRef}
+									type="file"
+									accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
+									onChange={handleFileSelect}
+									className="hidden"
+									disabled={uploading || isUploadComplete}
+									multiple
+								/>
+
+								{batchItems.length === 0 ? (
+									<div
+										className={`border rounded-lg border-dashed p-8 text-center transition-colors ${
+											dragActive
+												? "border-primary bg-primary/5"
+												: "border-border bg-muted/40 hover:bg-muted/70"
+										} ${uploading ? "pointer-events-none opacity-60" : "cursor-pointer"}`}
+										onClick={() => {
+											if (uploading || isUploadComplete) return;
+											fileInputRef.current?.click();
+										}}
+										onDragOver={(event) => {
+											event.preventDefault();
+											if (!uploading && !isUploadComplete) {
+												setDragActive(true);
+											}
+										}}
+										onDragLeave={() => setDragActive(false)}
+										onDrop={handleDrop}
+									>
+										<Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+										<h3 className="text-base font-bold text-foreground uppercase mb-1">
+											拖拽多个压缩包到这里
+										</h3>
+										<p className="text-xs font-mono text-muted-foreground mb-4">
+											最大: 500MB / 支持: .zip .tar .tar.gz .tar.bz2 .7z .rar
+										</p>
 										<Button
 											type="button"
 											variant="outline"
 											className="cyber-btn-outline h-8 text-xs"
-											disabled={uploading}
+											disabled={uploading || isUploadComplete}
 											onClick={(event) => {
 												event.stopPropagation();
 												fileInputRef.current?.click();
 											}}
 										>
 											<FileText className="w-3 h-3 mr-2" />
-											选择文件
+											选择压缩包
 										</Button>
 									</div>
 								) : (
-									<div className="border border-border bg-muted/50 p-4 flex items-center justify-between rounded">
-										<div className="flex items-center space-x-3 overflow-hidden">
-											<div className="w-10 h-10 bg-muted border border-border rounded flex items-center justify-center flex-shrink-0">
-												<FileText className="w-5 h-5 text-primary" />
-											</div>
-											<div className="min-w-0">
-												<p className="font-mono font-bold text-sm text-foreground truncate">
-													{selectedFile.name}
-												</p>
-												<p className="font-mono text-xs text-muted-foreground">
-													{(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-												</p>
-											</div>
+									<div className="space-y-3">
+										<div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
+											<span>导入队列 {batchItems.length} 项</span>
+											<span>
+												{uploading
+													? `处理中: ${uploadProgress.currentProjectName || "准备中"}`
+													: isUploadComplete
+														? `完成: 成功 ${uploadSummary?.successCount || 0} / 失败 ${uploadSummary?.failureCount || 0}`
+														: "提交前可逐项修改项目名"}
+											</span>
 										</div>
-										<Button
-											variant="ghost"
-											size="icon"
-											onClick={() => setSelectedFile(null)}
-											disabled={uploading}
-											className="hover:bg-rose-500/10 hover:text-rose-400"
-										>
-											<Plus className="w-4 h-4 rotate-45" />
-										</Button>
+										<div className="max-h-[300px] overflow-y-auto space-y-3 pr-1">
+											{batchItems.map((item) => {
+												const isInvalid = invalidNameIds.includes(item.id);
+												return (
+													<div
+														key={item.id}
+														className={`rounded-lg border p-4 bg-muted/30 ${
+															isInvalid
+																? "border-rose-500/70"
+																: "border-border"
+														}`}
+													>
+														<div className="flex items-start justify-between gap-3">
+															<div className="min-w-0 flex-1 space-y-3">
+																<div className="flex flex-wrap items-center gap-2">
+																	<p className="font-mono font-bold text-sm text-foreground truncate">
+																		{item.fileName}
+																	</p>
+																	<Badge
+																		variant={getStatusBadgeVariant(item.status)}
+																		className="text-[10px]"
+																	>
+																		{item.status === "creating" ? (
+																			<Loader2 className="w-3 h-3 animate-spin" />
+																		) : item.status === "success" ? (
+																			<CheckCircle2 className="w-3 h-3" />
+																		) : item.status === "failed" ? (
+																			<AlertTriangle className="w-3 h-3" />
+																		) : (
+																			<Package className="w-3 h-3" />
+																		)}
+																		{getStatusLabel(item.status)}
+																	</Badge>
+																	<span className="text-xs font-mono text-muted-foreground">
+																		{formatFileSize(item.size)}
+																	</span>
+																</div>
+																<div className="space-y-1.5">
+																	<Label
+																		htmlFor={`zip-project-name-${item.id}`}
+																		className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground"
+																	>
+																		项目名称
+																	</Label>
+																	<Input
+																		id={`zip-project-name-${item.id}`}
+																		value={item.editableName}
+																		onChange={(event) =>
+																			handleUpdateBatchItemName(
+																				item.id,
+																				event.target.value,
+																			)
+																		}
+																		disabled={uploading || isUploadComplete}
+																		className={`h-10 font-mono ${
+																			isInvalid
+																				? "border-rose-500 focus-visible:ring-rose-500/40"
+																				: "focus-visible:ring-primary/30"
+																		}`}
+																	/>
+																	{isInvalid ? (
+																		<p className="text-xs font-mono text-rose-400">
+																			项目名称不能为空
+																		</p>
+																	) : null}
+																	{item.errorMessage ? (
+																		<p className="text-xs font-mono text-rose-400">
+																			{item.errorMessage}
+																		</p>
+																	) : null}
+																</div>
+															</div>
+															<Button
+																type="button"
+																variant="ghost"
+																size="icon"
+																disabled={uploading || isUploadComplete}
+																onClick={() => handleRemoveBatchItem(item.id)}
+																className="hover:bg-rose-500/10 hover:text-rose-400 shrink-0"
+															>
+																<Trash2 className="w-4 h-4" />
+															</Button>
+														</div>
+													</div>
+												);
+											})}
+										</div>
 									</div>
 								)}
 
-								{uploading ? (
+								{(uploading || isUploadComplete) && uploadProgress.total > 0 ? (
 									<div className="space-y-1.5">
 										<div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
-											<span>上传并分析中...</span>
-											<span className="text-primary">{uploadProgress}%</span>
+											<span>
+												{uploading ? "批量创建进行中..." : "批量创建已完成"}
+											</span>
+											<span className="text-primary">
+												{uploadProgress.completed}/{uploadProgress.total}
+											</span>
 										</div>
 										<Progress
-											value={uploadProgress}
+											value={progressValue}
 											className="h-2 bg-muted [&>div]:bg-primary"
 										/>
 									</div>
@@ -335,7 +587,55 @@ export default function CreateProjectDialog({
 								selectedLanguages={form.programming_languages}
 								supportedLanguages={supportedLanguages}
 								onToggleLanguage={toggleLanguage}
+								disabled={uploading || isUploadComplete}
 							/>
+
+							{uploadSummary ? (
+								<div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+									<div className="flex flex-wrap items-center gap-2">
+										<Badge className="text-[10px]">
+											成功 {uploadSummary.successCount}
+										</Badge>
+										<Badge
+											variant={
+												uploadSummary.failureCount > 0 ? "destructive" : "outline"
+											}
+											className="text-[10px]"
+										>
+											失败 {uploadSummary.failureCount}
+										</Badge>
+									</div>
+									{uploadSummary.failureCount > 0 ? (
+										<div className="space-y-2">
+											<p className="text-xs font-mono uppercase tracking-wide text-muted-foreground">
+												失败明细
+											</p>
+											<div className="max-h-32 overflow-y-auto space-y-2">
+												{uploadSummary.failures.map((failure) => (
+													<div
+														key={`${failure.fileName}-${failure.projectName}`}
+														className="rounded border border-rose-500/30 bg-rose-500/5 p-3"
+													>
+														<p className="text-sm font-mono font-semibold text-foreground">
+															{failure.projectName}
+														</p>
+														<p className="text-xs font-mono text-muted-foreground">
+															{failure.fileName}
+														</p>
+														<p className="mt-1 text-xs font-mono text-rose-300">
+															{failure.message}
+														</p>
+													</div>
+												))}
+											</div>
+										</div>
+									) : (
+										<p className="text-xs font-mono text-muted-foreground">
+											全部压缩包均已创建为独立项目。
+										</p>
+									)}
+								</div>
+							) : null}
 
 							<div className="flex justify-end space-x-4 pt-4 border-t border-border mt-auto">
 								<Button
@@ -344,14 +644,22 @@ export default function CreateProjectDialog({
 									disabled={uploading}
 									className="cyber-btn-outline"
 								>
-									取消
+									{uploadSummary ? "关闭" : "取消"}
 								</Button>
 								<Button
-									onClick={handleCreateZip}
+									onClick={
+										uploadSummary
+											? () => onOpenChange(false)
+											: handleCreateZipBatch
+									}
 									className={PROJECT_ACTION_BTN_SUBTLE}
-									disabled={!selectedFile || uploading}
+									disabled={uploading || batchItems.length === 0}
 								>
-									{uploading ? "上传中..." : "执行创建"}
+									{uploading
+										? "创建中..."
+										: uploadSummary
+											? "完成"
+											: "执行创建"}
 								</Button>
 							</div>
 						</TabsContent>
