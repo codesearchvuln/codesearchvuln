@@ -41,6 +41,10 @@ import { validateZipFile } from "@/features/projects/services";
 import { formatFileSize } from "@/shared/utils/zipStorage";
 import { REPOSITORY_PLATFORMS } from "@/shared/constants";
 import type { CreateProjectForm } from "@/shared/types";
+import {
+	HTTPS_ONLY_REPOSITORY_ERROR,
+	isUnsupportedRepositoryUrl,
+} from "@/shared/utils/projectUtils";
 import { toast } from "sonner";
 import {
 	createEmptyProjectForm,
@@ -244,6 +248,10 @@ export default function CreateProjectDialog({
 	async function handleCreateRepository() {
 		if (!form.name.trim()) {
 			toast.error("请输入项目名称");
+			return;
+		}
+		if (isUnsupportedRepositoryUrl(form.repository_url)) {
+			toast.error(HTTPS_ONLY_REPOSITORY_ERROR);
 			return;
 		}
 
@@ -725,7 +733,7 @@ export default function CreateProjectDialog({
 										}
 										placeholder={
 											form.repository_type === "other"
-												? "git@github.com:user/repo.git"
+												? "https://example.com/org/repo.git"
 												: "https://github.com/user/repo"
 										}
 										className="cyber-input"

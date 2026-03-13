@@ -207,6 +207,7 @@ from app.services.upload.project_stats import (
 from app.services.opengrep_confidence import (
     count_high_confidence_findings_by_task_ids,
 )
+from app.services.git_mirror import HTTPS_ONLY_REPOSITORY_ERROR, is_ssh_git_url
 
 
 def calculate_file_sha256(file_path: str) -> str:
@@ -713,6 +714,11 @@ class FileContentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _ensure_supported_repository_url(repository_url: Optional[str]) -> None:
+    if is_ssh_git_url(str(repository_url or "")):
+        raise HTTPException(status_code=400, detail=HTTPS_ONLY_REPOSITORY_ERROR)
+
+
 def _build_static_scan_overview_item_from_row(
     row: dict[str, Any],
 ) -> Optional[StaticScanOverviewItem]:
@@ -913,6 +919,8 @@ async def create_project(
 
     # 根据 source_type 设置默认值
     source_type = project_in.source_type or "repository"
+    if source_type == "repository":
+        _ensure_supported_repository_url(project_in.repository_url)
 
     project = Project(
         name=project_in.name,
@@ -1952,6 +1960,10 @@ async def update_project(
     # 检查权限：只有项目所有者可以更新
 
     update_data = project_in.model_dump(exclude_unset=True)
+    next_source_type = update_data.get("source_type", project.source_type)
+    next_repository_url = update_data.get("repository_url", project.repository_url)
+    if next_source_type == "repository":
+        _ensure_supported_repository_url(next_repository_url)
     if "programming_languages" in update_data and update_data["programming_languages"] is not None:
         update_data["programming_languages"] = json.dumps(update_data["programming_languages"])
 
@@ -2095,22 +2107,20 @@ async def get_project_files(
         # Handle Repository project
         if not project.repository_url:
             return []
+        _ensure_supported_repository_url(project.repository_url)
 
         # Get tokens from user config
         from sqlalchemy.future import select
         from app.core.encryption import decrypt_sensitive_data
         from app.core.config import settings
-        from app.services.git_ssh_service import GitSSHOperations
 
-        SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken", "sshPrivateKey"]
+        SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken"]
 
         result = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
         config = result.scalar_one_or_none()
 
         github_token = settings.GITHUB_TOKEN
         gitlab_token = settings.GITLAB_TOKEN
-        ssh_private_key = None
-
         if config and config.other_config:
             other_config = json.loads(config.other_config)
             for field in SENSITIVE_OTHER_FIELDS:
@@ -2120,48 +2130,26 @@ async def get_project_files(
                         github_token = decrypted_val
                     elif field == "gitlabToken":
                         gitlab_token = decrypted_val
-                    elif field == "sshPrivateKey":
-                        ssh_private_key = decrypted_val
-
-        # 检查是否为SSH URL
-        is_ssh_url = GitSSHOperations.is_ssh_url(project.repository_url)
         target_branch = branch or project.default_branch or "main"
 
         try:
-            if is_ssh_url:
-                # 使用SSH方式获取文件列表
-                if not ssh_private_key:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="仓库使用SSH URL，但未配置SSH密钥。请先在设置中生成SSH密钥。",
-                    )
+            # 使用API方式获取文件列表
+            repo_type = project.repository_type or "other"
 
-                print(f"🔐 使用SSH方式获取文件列表: {project.repository_url}")
-                files_with_content = GitSSHOperations.get_repo_files_via_ssh(
-                    project.repository_url, ssh_private_key, target_branch, parsed_exclude_patterns
+            if repo_type == "github":
+                # 传入用户自定义排除模式
+                repo_files = await get_github_files(
+                    project.repository_url, target_branch, github_token, parsed_exclude_patterns
                 )
-                files = [
-                    {"path": f["path"], "size": len(f.get("content", ""))}
-                    for f in files_with_content
-                ]
+                files = [{"path": f["path"], "size": 0} for f in repo_files]
+            elif repo_type == "gitlab":
+                # 传入用户自定义排除模式
+                repo_files = await get_gitlab_files(
+                    project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns
+                )
+                files = [{"path": f["path"], "size": 0} for f in repo_files]
             else:
-                # 使用API方式获取文件列表
-                repo_type = project.repository_type or "other"
-
-                if repo_type == "github":
-                    # 传入用户自定义排除模式
-                    repo_files = await get_github_files(
-                        project.repository_url, target_branch, github_token, parsed_exclude_patterns
-                    )
-                    files = [{"path": f["path"], "size": 0} for f in repo_files]
-                elif repo_type == "gitlab":
-                    # 传入用户自定义排除模式
-                    repo_files = await get_gitlab_files(
-                        project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns
-                    )
-                    files = [{"path": f["path"], "size": 0} for f in repo_files]
-                else:
-                    raise HTTPException(status_code=400, detail="不支持的仓库类型")
+                raise HTTPException(status_code=400, detail="不支持的仓库类型")
         except HTTPException:
             raise
         except Exception as e:
@@ -2239,21 +2227,19 @@ async def get_project_files_tree(
         # 处理仓库项目 - 先获取文件列表再构建树
         if not project.repository_url:
             raise HTTPException(status_code=400, detail="仓库URL未配置")
+        _ensure_supported_repository_url(project.repository_url)
 
         from sqlalchemy.future import select
         from app.core.encryption import decrypt_sensitive_data
         from app.core.config import settings
-        from app.services.git_ssh_service import GitSSHOperations
 
-        SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken", "sshPrivateKey"]
+        SENSITIVE_OTHER_FIELDS = ["githubToken", "gitlabToken"]
 
         result = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
         config = result.scalar_one_or_none()
 
         github_token = settings.GITHUB_TOKEN
         gitlab_token = settings.GITLAB_TOKEN
-        ssh_private_key = None
-
         if config and config.other_config:
             other_config = json.loads(config.other_config)
             for field in SENSITIVE_OTHER_FIELDS:
@@ -2263,45 +2249,25 @@ async def get_project_files_tree(
                         github_token = decrypted_val
                     elif field == "gitlabToken":
                         gitlab_token = decrypted_val
-                    elif field == "sshPrivateKey":
-                        ssh_private_key = decrypted_val
-
-        is_ssh_url = GitSSHOperations.is_ssh_url(project.repository_url)
         target_branch = branch or project.default_branch or "main"
 
         try:
             files = []
-            
-            if is_ssh_url:
-                if not ssh_private_key:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="仓库使用SSH URL，但未配置SSH密钥。请先在设置中生成SSH密钥。",
-                    )
 
-                logger.info(f"通过SSH获取文件树: {project.repository_url}")
-                files_with_content = GitSSHOperations.get_repo_files_via_ssh(
-                    project.repository_url, ssh_private_key, target_branch, parsed_exclude_patterns
+            repo_type = project.repository_type or "other"
+
+            if repo_type == "github":
+                repo_files = await get_github_files(
+                    project.repository_url, target_branch, github_token, parsed_exclude_patterns
                 )
-                files = [
-                    {"path": f["path"], "size": len(f.get("content", ""))}
-                    for f in files_with_content
-                ]
+                files = [{"path": f["path"], "size": 0} for f in repo_files]
+            elif repo_type == "gitlab":
+                repo_files = await get_gitlab_files(
+                    project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns
+                )
+                files = [{"path": f["path"], "size": 0} for f in repo_files]
             else:
-                repo_type = project.repository_type or "other"
-
-                if repo_type == "github":
-                    repo_files = await get_github_files(
-                        project.repository_url, target_branch, github_token, parsed_exclude_patterns
-                    )
-                    files = [{"path": f["path"], "size": 0} for f in repo_files]
-                elif repo_type == "gitlab":
-                    repo_files = await get_gitlab_files(
-                        project.repository_url, target_branch, gitlab_token, parsed_exclude_patterns
-                    )
-                    files = [{"path": f["path"], "size": 0} for f in repo_files]
-                else:
-                    raise HTTPException(status_code=400, detail="不支持的仓库类型")
+                raise HTTPException(status_code=400, detail="不支持的仓库类型")
 
             # 构建文件树
             root_node = _build_file_tree_from_repo_files(files)
