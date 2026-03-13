@@ -1,4 +1,0 @@
-/etc/vulhunter/vulhunter.env
-/etc/vulhunter/docker-compose.prod.yml
-/etc/vulhunter/docker-compose.prod.cn.yml
-/etc/vulhunter/docker-compose.override.yml

@@ -207,15 +207,13 @@ skills/
 .claude/
 
 .playwright-cli/
-frontend/.playwright-cli/
-frontend/.playwright-cli/*.pyc
-frontend/.pnpm-store
-*.pyc
+frontend/.*/
+backend/.*/
 
 skills-lock.json
 CLAUDE.md
 
 docs/plans/
-.agents/
+.*/
 output/
 .mcp.json
