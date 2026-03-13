@@ -31,3 +31,15 @@ test("devTest group defaults to the agent test page", () => {
 	assert.ok(devTestGroup);
 	assert.equal(devTestGroup.defaultEntryPath, "/agent-test");
 });
+
+test("agent task detail route uses a different page component than the home route", () => {
+	const homeRoute = routes.find((route) => route.path === "/");
+	const agentTaskRoute = routes.find((route) => route.path === "/agent-audit/:taskId");
+
+	assert.ok(homeRoute);
+	assert.ok(agentTaskRoute);
+	assert.notEqual(
+		(homeRoute.element as any)?.type,
+		(agentTaskRoute.element as any)?.type,
+	);
+});

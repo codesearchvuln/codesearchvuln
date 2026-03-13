@@ -1,11 +1,6 @@
 /**
- * Agent Scan Page - Modular Implementation
- * Main entry point for the Agent Scan feature
- * Cassette Futurism / Terminal Retro aesthetic
- */
-
-/**
- * 原index页面，在此保留
+ * Agent task detail page.
+ * Keeps the existing detail experience on a dedicated route.
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -3291,7 +3286,7 @@ function AgentAuditPageContent() {
 }
 
 // Wrapped export with Error Boundary
-export default function AgentAuditPage() {
+export default function AgentAuditTaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
 
   return (

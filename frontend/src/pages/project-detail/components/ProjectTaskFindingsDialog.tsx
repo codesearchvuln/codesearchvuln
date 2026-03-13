@@ -378,10 +378,6 @@ export default function ProjectTaskFindingsDialog({
 
 	const paginationPage =
 		filteredRows.length === 0 ? 1 : Math.min(page, pagination.totalPages);
-	const sortHint =
-		taskCategory === "static"
-			? "排序：危害降序；同危害按置信度降序；其后按路径+行号升序"
-			: "排序：危害降序；同危害按置信度降序；其后按创建时间降序";
 
 	const renderBody = () => {
 		if (status === "loading") {
@@ -501,9 +497,6 @@ export default function ProjectTaskFindingsDialog({
 						    </span>
 						    <span className="inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
 						      漏洞共 {filteredRows.length.toLocaleString()} 条
-						    </span>
-						    <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/20 px-2.5 py-1">
-						      {sortHint}
 						    </span>
 						  </div>
 						</div>
