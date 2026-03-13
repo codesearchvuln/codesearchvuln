@@ -56,51 +56,45 @@ export const StatsPanel = memo(function StatsPanel({ summary, projectName }: Sta
           icon={<FolderOpen className="h-4 w-4" />}
           label="当前项目"
           value={String(projectName || "-")}
-          valueClassName="line-clamp-2 min-h-[3.5rem] break-all text-lg font-bold leading-snug text-foreground"
-          subtext="当前扫描项目"
+          // valueClassName="line-clamp-2 min-h-[3.5rem] break-all text-lg font-bold leading-snug text-foreground"
+          subtext=""
         />
         <MetricCard
           icon={<Activity className="h-4 w-4" />}
           label="进度比例"
           value={`${summary.progressPercent.toFixed(0)}%`}
-          progress={summary.progressPercent}
-          subtext="当前扫描进度"
+          // progress={summary.progressPercent}
+          subtext=""
         />
         <MetricCard
           icon={<Clock3 className="h-4 w-4" />}
           label="扫描时间"
           value={formatDurationMs(summary.durationMs)}
-          subtext="任务开始至当前/结束"
+          subtext=""
         />
         <MetricCard
           icon={<Bug className="h-4 w-4" />}
           label="漏洞数量"
           value={summary.totalFindings.toLocaleString()}
-          subtext={`有效 ${summary.effectiveFindings.toLocaleString()} · 误报 ${summary.falsePositiveFindings.toLocaleString()}`}
+          subtext=""
         />
         <MetricCard
           icon={<Repeat className="h-4 w-4" />}
           label="迭代次数"
           value={summary.iterations.toLocaleString()}
-          subtext="Agent 迭代轮次"
+          subtext=""
         />
         <MetricCard
           icon={<Wrench className="h-4 w-4" />}
           label="工具扫描"
           value={summary.toolCalls.toLocaleString()}
-          subtext="累计工具调用次数"
+          subtext=""
         />
         <MetricCard
           icon={<TrendingUp className="h-4 w-4" />}
           label="Token 消耗"
           value={formatTokenValue(summary.tokensTotal)}
-          subtext={
-            <div className="flex items-center justify-between gap-3 text-xs">
-              Token 消耗
-              {/* <span>输入 {summary.tokensInput === null ? "--" : formatTokenValue(summary.tokensInput)}</span>
-              <span>输出 {summary.tokensOutput === null ? "--" : formatTokenValue(summary.tokensOutput)}</span> */}
-            </div>
-          }
+          subtext=""
         />
       </div>
     </div>

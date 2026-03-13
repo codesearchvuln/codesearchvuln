@@ -673,7 +673,7 @@ export default function ProjectDetail() {
 								onChange={(event) =>
 									setRecentTaskTimeKeyword(event.target.value)
 								}
-								placeholder="按时间搜索，如 2026/03-05 14:"
+								placeholder="按时间搜索"
 								className="h-8 pl-8 text-xs"
 							/>
 						</div>

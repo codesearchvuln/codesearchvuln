@@ -257,9 +257,6 @@ export default function StaticAnalysis() {
           <p className="text-xl font-bold text-foreground">
             {formatStaticAnalysisDuration(totalScanDurationMs)}
           </p>
-          <p className="text-xs text-muted-foreground">
-            合计 {totalScanDurationMs.toLocaleString()} ms
-          </p>
         </div>
         <div className="cyber-card p-4 space-y-1">
           <p className="text-xs font-semibold uppercase text-muted-foreground">
@@ -268,7 +265,6 @@ export default function StaticAnalysis() {
           <p className="text-xl font-bold text-foreground">
             {totalFindings.toLocaleString()}
           </p>
-          <p className="text-xs text-muted-foreground">多引擎总计</p>
         </div>
         <div className="cyber-card p-4 space-y-1">
           <p className="text-xs font-semibold uppercase text-muted-foreground">
@@ -290,7 +286,6 @@ export default function StaticAnalysis() {
           <p className="text-xl font-bold text-foreground">
             {totalFilesScanned.toLocaleString()}
           </p>
-          <p className="text-xs text-muted-foreground">多引擎总计</p>
         </div>
       </div>
 
@@ -336,7 +331,7 @@ export default function StaticAnalysis() {
           </div>
           <div>
             <label className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
-              置信度筛选（仅 Opengrep）
+              置信度筛选
             </label>
             <Select
               value={confidenceFilter}
@@ -353,14 +348,6 @@ export default function StaticAnalysis() {
               </SelectContent>
             </Select>
           </div>
-        </div>
-
-        <div className="text-xs text-muted-foreground flex items-center justify-between gap-2 flex-wrap">
-          <span>
-            符合筛选 {listState.totalRows.toLocaleString()} 条，当前第{" "}
-            {listState.clampedPage} / {listState.totalPages.toLocaleString()} 页
-          </span>
-          <span>排序规则：危害降序；同危害按置信度降序；其后按路径+行号升序</span>
         </div>
 
         <StaticAnalysisFindingsTable

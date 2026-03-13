@@ -175,9 +175,6 @@ export default function DashboardChartsPanels({
 									项目数：{projectScanRunsData.length}
 								</span>
 							</div>
-							<p className="text-sm text-muted-foreground mt-1">
-								{translate("dashboard.projectScanRunsChartSubtitle")}（Top 10）
-							</p>
 						</div>
 					</div>
 
@@ -267,9 +264,6 @@ export default function DashboardChartsPanels({
 									项目数：{projectVulnsData.length}
 								</span>
 							</div>
-							<p className="text-sm text-muted-foreground mt-1">
-								{translate("dashboard.projectVulnsChartSubtitle")}（Top 10）
-							</p>
 						</div>
 					</div>
 
@@ -335,9 +329,6 @@ export default function DashboardChartsPanels({
 									语言数：{rulesByLanguageData.length}
 								</span>
 							</div>
-							<p className="text-sm text-muted-foreground mt-1">
-								仅统计严重且中/高置信度规则
-							</p>
 						</div>
 					</div>
 
@@ -416,9 +407,6 @@ export default function DashboardChartsPanels({
 									类型数：{rulesByCweData.length}
 								</span>
 							</div>
-							<p className="text-sm text-muted-foreground mt-1">
-								统计严重规则关联的 CWE 类型（Top 20）
-							</p>
 						</div>
 					</div>
 

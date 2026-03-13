@@ -77,17 +77,12 @@ export const dashboardDictionary: DomDictionary = {
   "规则分布横向条形统计图": "Rule Distribution Horizontal Bar Chart",
   "仅统计严重(ERROR)且中/高置信度规则": "Only severe (ERROR) rules with medium/high confidence are counted",
   "项目扫描次数横向统计图": "Project Scan Runs Bar Chart",
-  "按项目统计已完成扫描次数（静态/智能/混合）":
-    "Completed scan runs by project (Static/Intelligent/Hybrid)",
   "项目漏洞数量横向统计图": "Project Vulnerability Counts Bar Chart",
-  "按项目统计发现问题数（与项目卡片口径一致）":
-    "Issue counts by project (aligned with project-card metric)",
   "混合扫描已纳入统计": "Hybrid scan is included in statistics",
   "暂无项目扫描次数数据": "No project scan-run data",
   "暂无项目漏洞数量数据": "No project vulnerability-count data",
   "漏洞总数": "Total Vulnerabilities",
   "累计扫描用时": "Total Scan Duration",
-  "所有扫描任务耗时加和": "Sum of all scan task durations",
   "语言数：": "Languages:",
   "全部规则": "All Rules",
   "仅启用规则": "Enabled Only",
@@ -153,7 +148,7 @@ export const projectsDictionary: DomDictionary = {
     "Only intelligent_audit (Agent Scan) tasks are shown",
   "仅展示显式标记为 [INTELLIGENT] 的智能扫描任务":
     "Only intelligent scan tasks explicitly marked as [INTELLIGENT] are shown",
-  "创建前会自动校验 LLM 配置。":
+  "自动校验 LLM 配置":
     "LLM configuration is automatically validated before creation.",
   "配置测试": "Config Test",
   "收起配置": "Collapse Config",

@@ -489,14 +489,20 @@ export default function ProjectTaskFindingsDialog({
 			>
 				<DialogHeader className="px-6 py-4 border-b border-border flex-shrink-0">
 					<div className="flex items-center justify-between gap-3">
-						<div className="min-w-0 space-y-1 text-left">
-							<DialogTitle className="flex items-center gap-2 text-base">
-								<Bug className="w-4 h-4 text-amber-400" />
-								缺陷详情
-							</DialogTitle>
-							<p className="text-xs text-muted-foreground break-all">
-								{taskLabel} · 任务 ID：{taskId}
-							</p>
+						<div className="min-w-0 space-y-2 text-left">
+						  <DialogTitle className="flex items-center gap-2 text-base leading-none">
+						    <Bug className="h-4 w-4 shrink-0 text-amber-400" />
+						    <span className="truncate">缺陷详情</span>
+						  </DialogTitle>
+
+						  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+						    <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/40 px-2.5 py-1">
+						      任务 ID：{taskId}
+						    </span>
+						    <span className="inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+						      漏洞共 {filteredRows.length.toLocaleString()} 条
+						    </span>
+						  </div>
 						</div>
 						<Button
 							type="button"
@@ -558,15 +564,10 @@ export default function ProjectTaskFindingsDialog({
 								</SelectContent>
 							</Select>
 						</div>
+						
 					</div>
 
-					<div className="text-xs text-muted-foreground flex items-center justify-between gap-2 flex-wrap">
-						<span>
-							符合筛选 {filteredRows.length.toLocaleString()} 条，当前第{" "}
-							{paginationPage} /{pagination.totalPages.toLocaleString()} 页
-						</span>
-						<span>{sortHint}</span>
-					</div>
+					
 
 					<div className="flex-1 min-h-0 border border-border rounded-md overflow-auto">
 						<Table className="min-w-[980px] table-fixed">

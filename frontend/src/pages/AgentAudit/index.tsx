@@ -3206,7 +3206,7 @@ function AgentAuditPageContent() {
               <div className="hidden border-b border-border/60 px-5 py-2 md:block">
                 <div className="grid grid-cols-[72px_84px_minmax(0,1fr)_120px_110px_auto] items-center gap-3 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground/80">
                   <span>距开始时间</span>
-                  <span>类型标签</span>
+                  <span>类型</span>
                   <span>事件概况</span>
                   <span>归属智能体</span>
                   <span>完成状态</span>

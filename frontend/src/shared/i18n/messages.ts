@@ -29,11 +29,7 @@ export const I18N_MESSAGES = {
 		"projects.card.totalIssues": "发现问题",
 		"projects.language.unsupported": "仓库项目暂不支持自动统计",
 		"dashboard.projectScanRunsChartTitle": "项目扫描次数统计图",
-		"dashboard.projectScanRunsChartSubtitle":
-			"按项目统计已完成扫描次数（静态/智能/混合）",
 		"dashboard.projectVulnsChartTitle": "项目漏洞数量统计图",
-		"dashboard.projectVulnsChartSubtitle":
-			"按项目统计发现问题数（与项目卡片口径一致）",
 		"dashboard.hybridNotImplementedHint": "混合扫描已纳入统计",
 		"dashboard.noProjectScanRunsData": "暂无项目扫描次数数据",
 		"dashboard.noProjectVulnsData": "暂无项目漏洞数量数据",
@@ -42,7 +38,6 @@ export const I18N_MESSAGES = {
 		"dashboard.hybridScan": "混合扫描",
 		"dashboard.totalVulns": "漏洞总数",
 		"dashboard.totalScanDuration": "累计扫描用时",
-		"dashboard.totalScanDurationHint": "所有扫描任务耗时加和",
 		"dashboard.supportedModelProviders": "支持模型提供商",
 		"dashboard.supportedExternalToolCalls": "支持外部工具调用",
 		"dashboard.supportedVulnerabilityTypes": "支持漏洞类型",
@@ -52,7 +47,7 @@ export const I18N_MESSAGES = {
 		"task.hybridFull": "混合扫描",
 		"task.agentCreateFailed": "智能扫描创建失败",
 		"task.hybridPartialSuccess": "静态扫描已创建，智能扫描失败",
-		"task.llmPrecheckHint": "创建前会自动校验 LLM 配置。",
+		"task.llmPrecheckHint": "自动校验 LLM 配置",
 		"task.llmConfigTest": "配置测试",
 		"task.llmConfigCollapse": "收起配置",
 		"task.llmQuickFixTitle": "LLM 快速补配",
@@ -101,12 +96,8 @@ export const I18N_MESSAGES = {
 		"projects.language.unsupported":
 			"Repository projects do not support automatic language stats yet",
 		"dashboard.projectScanRunsChartTitle": "Project Scan Runs (Horizontal)",
-		"dashboard.projectScanRunsChartSubtitle":
-			"Completed scan runs by project (Static/Intelligent/Hybrid)",
 		"dashboard.projectVulnsChartTitle":
 			"Project Vulnerability Counts (Horizontal)",
-		"dashboard.projectVulnsChartSubtitle":
-			"Issue counts by project (aligned with project-card metric)",
 		"dashboard.hybridNotImplementedHint":
 			"Hybrid scan is included in statistics",
 		"dashboard.noProjectScanRunsData": "No project scan-run data",
@@ -116,7 +107,6 @@ export const I18N_MESSAGES = {
 		"dashboard.hybridScan": "Hybrid Scan",
 		"dashboard.totalVulns": "Total Vulnerabilities",
 		"dashboard.totalScanDuration": "Total Scan Duration",
-		"dashboard.totalScanDurationHint": "Sum of all scan task durations",
 		"dashboard.supportedModelProviders": "Supported Model Providers",
 		"dashboard.supportedExternalToolCalls": "Supported External Tool Calls",
 		"dashboard.supportedVulnerabilityTypes": "Supported Vulnerability Types",

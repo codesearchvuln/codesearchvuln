@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Activity, Bot, Plus, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import DeferredSection from "@/components/performance/DeferredSection";
@@ -90,33 +90,49 @@ export default function TaskManagementIntelligent() {
 
 			<div className="relative z-10 grid shrink-0 grid-cols-1 gap-4 sm:grid-cols-3">
 				<div className="cyber-card p-4">
-					<div className="flex items-center justify-between">
-						<div>
-							<p className="stat-label">智能扫描任务</p>
-							<p className="stat-value">{stats.total}</p>
-						</div>
-						<div className="stat-icon text-primary">
-							<Activity className="w-6 h-6" />
-						</div>
+					<div className="flex items-center justify-between gap-4">
+						<p
+							className="flex-1 text-left font-mono font-bold leading-none tracking-tight text-muted-foreground"
+							style={{ fontSize: "1.5rem" }}
+						>
+							智能扫描任务
+						</p>
+						<p className="stat-value shrink-0 text-right text-[clamp(1.25rem,2.6vw,2rem)] leading-none">
+							{stats.total}
+						</p>
 					</div>
 				</div>
 				<div className="cyber-card p-4">
-					<p className="stat-label">已完成</p>
-					<p className="stat-value text-emerald-400">{stats.completed}</p>
+					<div className="flex items-center justify-between gap-4">
+						<p
+							className="flex-1 text-left font-mono font-bold leading-none tracking-tight text-muted-foreground"
+							style={{ fontSize: "1.5rem" }}
+						>
+							已完成
+						</p>
+						<p className="stat-value shrink-0 text-right text-[clamp(1.25rem,2.6vw,2rem)] leading-none text-emerald-400">
+							{stats.completed}
+						</p>
+					</div>
 				</div>
 				<div className="cyber-card p-4">
-					<p className="stat-label">进行中</p>
-					<p className="stat-value text-sky-400">{stats.running}</p>
+					<div className="flex items-center justify-between gap-4">
+						<p
+							className="flex-1 text-left font-mono font-bold leading-none tracking-tight text-muted-foreground"
+							style={{ fontSize: "1.5rem" }}
+						>
+							进行中
+						</p>
+						<p className="stat-value shrink-0 text-right text-[clamp(1.25rem,2.6vw,2rem)] leading-none text-sky-400">
+							{stats.running}
+						</p>
+					</div>
 				</div>
 			</div>
 
 			<div className="cyber-card relative z-10 flex min-h-0 flex-1 flex-col p-4">
 				<div className="flex flex-wrap items-center justify-between gap-3">
 					<div className="flex min-w-0 flex-1 items-center gap-3">
-						<div className="section-header shrink-0">
-							<Bot className="w-5 h-5 text-primary" />
-							<h3 className="section-title">智能扫描</h3>
-						</div>
 						<div className="relative w-full max-w-sm">
 							<Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 							<Input
