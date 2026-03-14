@@ -158,30 +158,6 @@ function renderContent(props: Partial<ExternalToolDetailContentProps>) {
   );
 }
 
-test("ScanConfigExternalToolDetailContent 在 mcp 类型下保留占位说明", () => {
-  const markup = renderToStaticMarkup(
-    createElement(MemoryRouter, {}, createElement(ScanConfigExternalToolDetailContent, {
-      toolType: "mcp",
-      toolId: "legacy-mcp",
-      toolName: "Legacy MCP",
-      skillCatalogItem: null,
-      skillDetail: null,
-      prompt: "",
-      examplePrompts: [],
-      events: [],
-      result: null,
-      running: false,
-      onPromptChange: () => {},
-      onRun: () => {},
-      onStop: () => {},
-    })),
-  );
-
-  assert.match(markup, /MCP/);
-  assert.match(markup, /详情页待设计/);
-  assert.match(markup, /当前页面只保留详情页骨架/);
-});
-
 test("ScanConfigExternalToolDetailContent 对 disabled skill 展示禁用原因并隐藏运行按钮", () => {
   const markup = renderContent({
     toolId: "dataflow_analysis",

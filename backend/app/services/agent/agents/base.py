@@ -2072,10 +2072,6 @@ class BaseAgent(ABC):
         normalized_tool = str(tool_name or "").strip().lower()
         if not fallback_names:
             fallback_map: Dict[str, List[str]] = {
-                "qmd_query": ["search_code", "read_file"],
-                "qmd_get": ["read_file", "search_code"],
-                "qmd_multi_get": ["search_code", "read_file"],
-                "qmd_status": ["search_code"],
                 "query_security_knowledge": ["search_code"],
                 "get_vulnerability_knowledge": ["search_code", "read_file"],
             }
@@ -4280,7 +4276,7 @@ class BaseAgent(ABC):
             blocked_message = (
                 "⚠️ 工具名不可用（需标准名）\n\n"
                 f"**请求工具**: {requested_tool_name}\n"
-                "请改用标准 MCP 工具名（如 qmd_query、search_code、read_file、locate_enclosing_function）。"
+                "请改用当前支持的标准工具名（如 search_code、read_file、locate_enclosing_function）。"
             )
             await self.emit_tool_call(
                 requested_tool_name,
@@ -4425,7 +4421,6 @@ class BaseAgent(ABC):
             normalized_resolved_tool_name = str(resolved_tool_name or "").strip().lower()
             cached_output = self._tool_success_cache.get(tool_call_key)
             runtime_cache_priority = normalized_resolved_tool_name in {
-                "qmd_query",
                 "read_file",
                 "search_code",
             }
