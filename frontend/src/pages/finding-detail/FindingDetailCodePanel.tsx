@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from "react";
-import { AlertCircle, FileSearch, LoaderCircle, SearchCode } from "lucide-react";
+import { FileSearch, LoaderCircle, SearchCode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/shared/utils/utils";
 import type { FindingCodeWindowDisplayLine } from "@/pages/AgentAudit/components/FindingCodeWindow";
@@ -8,6 +8,7 @@ import type {
   FindingDetailFullFileRequest,
 } from "./viewModel";
 import { buildFullFileDisplayLines } from "./viewModel";
+import { classifyFullFileLoadError } from "./fullFileLoad";
 
 export type FindingDetailFullFileLoadResult = {
   content: string;
@@ -68,7 +69,6 @@ interface FindingDetailCodePanelProps {
 }
 
 const UNAVAILABLE_MESSAGE = "当前项目暂不支持查看完整文件，仅展示漏洞相关代码";
-const FAILED_MESSAGE = "完整文件加载失败，请稍后重试";
 
 function getDefaultState(section: FindingDetailCodeView): FullFileViewState {
   if (section.fullFileAvailable === false) {
@@ -87,7 +87,7 @@ function renderCodeLine(line: FindingCodeWindowDisplayLine, index: number) {
       key={`${line.lineNumber ?? `placeholder-${index}`}-${index}`}
       data-line-number={line.lineNumber ?? undefined}
       className={cn(
-        "grid grid-cols-[42px_minmax(0,1fr)] sm:grid-cols-[48px_minmax(0,1fr)]",
+        "grid grid-cols-[48px_minmax(0,1fr)]",
         isPlaceholder ? "bg-slate-900/45" : "bg-[#0f1720]",
         isHighlighted && "bg-red-950/55",
         isFocus && "bg-red-950/85",
@@ -95,7 +95,7 @@ function renderCodeLine(line: FindingCodeWindowDisplayLine, index: number) {
     >
       <div
         className={cn(
-          "select-none px-1.5 py-0.5 text-right font-mono text-[10px] text-slate-500 sm:px-2 sm:text-[11px]",
+          "select-none px-2 py-0.5 text-right font-mono text-[10px] text-slate-500 sm:text-[11px]",
           isPlaceholder && "text-slate-700",
           isHighlighted && "text-red-300",
           isFocus && "text-red-100",
@@ -105,7 +105,7 @@ function renderCodeLine(line: FindingCodeWindowDisplayLine, index: number) {
       </div>
       <pre
         className={cn(
-          "overflow-x-auto whitespace-pre px-2 py-0.5 font-mono text-[11px] leading-5 text-slate-100 sm:px-2.5 sm:text-[11.5px]",
+          "overflow-x-auto whitespace-pre px-2.5 py-0.5 font-mono text-[11px] leading-5 text-slate-100 sm:text-[11.5px]",
           isPlaceholder && "italic text-slate-500",
           isHighlighted && "border-l-2 border-red-500 bg-red-950/35 text-red-50",
           isFocus && "border-l-2 border-red-400 bg-red-950/60 font-semibold text-white",
@@ -205,13 +205,17 @@ export default function FindingDetailCodePanel({
           }),
         );
       });
-    } catch {
+    } catch (error) {
+      const failure = classifyFullFileLoadError(error);
       startTransition(() => {
         setPanelState((current) =>
           reduceFindingDetailPanelState(current, {
             type: "resolve",
             sectionId: section.id,
-            nextState: { status: "failed", message: FAILED_MESSAGE },
+            nextState:
+              failure.kind === "unavailable"
+                ? { status: "unavailable", message: failure.message }
+                : { status: "failed", message: failure.message },
           }),
         );
       });
@@ -220,12 +224,6 @@ export default function FindingDetailCodePanel({
 
   return (
     <section className="order-2 xl:order-1 cyber-card p-5 min-h-0 flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold uppercase tracking-[0.18em] text-foreground">
-          {title}
-        </h2>
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1">
         {sections.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-700/80 bg-slate-950/60 p-5 text-sm leading-7 text-slate-400">
@@ -236,107 +234,68 @@ export default function FindingDetailCodePanel({
         {sections.map((section) => {
           const fullFileState = fullFileStates[section.id] ?? getDefaultState(section);
           const isExpanded = expandedSectionId === section.id;
+          const helperMessage =
+            fullFileState.status === "unavailable" || fullFileState.status === "failed"
+              ? fullFileState.message
+              : null;
           const codeLines =
             isExpanded && fullFileState.status === "ready"
               ? fullFileState.lines
               : section.relatedLines ?? [];
 
           return (
-            <article
-              key={section.id}
-              className="overflow-hidden rounded-2xl border border-slate-800/90 bg-[linear-gradient(180deg,rgba(11,18,32,0.98),rgba(15,23,42,0.94))] shadow-[0_14px_32px_rgba(2,6,23,0.38)]"
-            >
-              <div className="border-b border-slate-800/90 px-4 py-4 sm:px-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 space-y-2">
-                    <p className="text-[11px] font-mono uppercase tracking-[0.2em] text-slate-500">
-                      文件路径
-                    </p>
-                    <p className="break-all font-mono text-[13px] leading-6 text-slate-100">
-                      {section.displayFilePath || section.filePath || "未定位文件"}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                      <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/90 px-2.5 py-1 font-mono text-slate-300">
-                        {section.locationLabel || "行号未提供"}
-                      </span>
-                      <span className="inline-flex items-center rounded-full border border-red-500/30 bg-red-950/60 px-2.5 py-1 font-mono text-red-200">
-                        核心漏洞代码
-                      </span>
-                    </div>
-                  </div>
+            <article key={section.id} className="rounded-xl border border-border/70 bg-card/35 p-4 space-y-3">
+              <p className="break-all font-mono text-[13px] leading-6 text-foreground">
+                {section.displayFilePath || section.filePath || "未定位文件"}
+              </p>
 
-                  <div className="flex flex-col items-start gap-2 sm:items-end">
-                    {isExpanded ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-slate-700 bg-slate-900/80 text-slate-100 hover:bg-slate-800"
-                        onClick={() =>
-                          setPanelState((current) =>
-                            reduceFindingDetailPanelState(current, { type: "collapse" }),
-                          )
-                        }
-                      >
-                        <SearchCode className="h-4 w-4" />
-                        仅看漏洞相关代码
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-slate-700 bg-slate-900/80 text-slate-100 hover:bg-slate-800"
-                        disabled={!section.fullFileAvailable}
-                        title={!section.fullFileAvailable ? UNAVAILABLE_MESSAGE : undefined}
-                        onClick={() => {
-                          void handleOpenFullFile(section);
-                        }}
-                      >
-                        {fullFileState.status === "loading" ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <FileSearch className="h-4 w-4" />
-                        )}
-                        查看文件全部内容
-                      </Button>
-                    )}
-
-                    {fullFileState.status === "unavailable" || fullFileState.status === "failed" ? (
-                      <p className="max-w-[320px] text-xs leading-5 text-slate-500">
-                        {fullFileState.message}
-                      </p>
-                    ) : null}
-                  </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center rounded-full border border-border/70 bg-background/55 px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
+                    {section.locationLabel || "行号未提供"}
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-red-500/30 bg-red-950/45 px-2.5 py-1 font-mono text-[11px] text-red-200">
+                    核心漏洞代码
+                  </span>
                 </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 self-start border-border/70 bg-background/60 text-foreground hover:bg-card/80"
+                  disabled={!isExpanded && !section.fullFileAvailable}
+                  title={!isExpanded && !section.fullFileAvailable ? UNAVAILABLE_MESSAGE : undefined}
+                  onClick={() => {
+                    if (isExpanded) {
+                      setPanelState((current) =>
+                        reduceFindingDetailPanelState(current, { type: "collapse" }),
+                      );
+                      return;
+                    }
+                    void handleOpenFullFile(section);
+                  }}
+                >
+                  {fullFileState.status === "loading" ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : isExpanded ? (
+                    <SearchCode className="h-4 w-4" />
+                  ) : (
+                    <FileSearch className="h-4 w-4" />
+                  )}
+                  {isExpanded ? "仅看漏洞代码" : "查看文件"}
+                </Button>
               </div>
 
-              {isExpanded && fullFileState.status === "loading" ? (
-                <div className="flex items-center gap-2 border-b border-slate-800/80 bg-slate-950/80 px-4 py-3 text-sm text-slate-400 sm:px-5">
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  正在加载完整文件内容...
-                </div>
-              ) : null}
-
-              {isExpanded && fullFileState.status === "ready" ? (
-                <div className="flex items-center gap-2 border-b border-slate-800/80 bg-slate-950/80 px-4 py-3 text-sm text-slate-400 sm:px-5">
-                  <FileSearch className="h-4 w-4" />
-                  已切换到完整文件视图，并定位到漏洞代码附近
-                </div>
-              ) : null}
-
-              {fullFileState.status === "failed" ? (
-                <div className="flex items-center gap-2 border-b border-red-500/20 bg-red-950/70 px-4 py-3 text-sm text-red-200 sm:px-5">
-                  <AlertCircle className="h-4 w-4" />
-                  {fullFileState.message}
-                </div>
+              {helperMessage ? (
+                <p className="text-xs leading-5 text-muted-foreground">{helperMessage}</p>
               ) : null}
 
               <div
                 ref={(node) => {
                   scrollRefs.current[section.id] = node;
                 }}
-                className="max-h-[52vh] overflow-auto bg-[#0b1120]"
+                className="max-h-[52vh] overflow-auto rounded-lg border border-border/60 bg-[#0b1120]"
               >
                 <div className="min-w-full">
                   {codeLines.map((line, index) => renderCodeLine(line, index))}

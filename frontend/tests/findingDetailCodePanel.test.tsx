@@ -96,7 +96,7 @@ test("reduceFindingDetailPanelState 收起当前全文视图但不清空缓存",
   assert.deepEqual(state.fullFileStates.a, ready);
 });
 
-test("FindingDetailCodePanel 使用深色紧凑代码卡片语义", () => {
+test("FindingDetailCodePanel 使用朴素三行分组布局语义", () => {
   const markup = renderToStaticMarkup(
     createElement(FindingDetailCodePanel, {
       title: "关联代码",
@@ -105,9 +105,12 @@ test("FindingDetailCodePanel 使用深色紧凑代码卡片语义", () => {
     }),
   );
 
-  assert.match(markup, /查看文件全部内容/);
+  assert.match(markup, /查看文件/);
+  assert.doesNotMatch(markup, /查看文件全部内容/);
   assert.match(markup, /核心漏洞代码/);
-  assert.match(markup, /bg-\[#0f1720\]|bg-\[#111827\]|bg-slate/);
-  assert.doesNotMatch(markup, /bg-\[#fffdfa\]/);
-  assert.doesNotMatch(markup, /border-b border-stone-200\/80/);
+  assert.match(markup, /src\/demo\.ts/);
+  assert.doesNotMatch(markup, /文件路径/);
+  assert.match(markup, /rounded-xl border border-border\/70 bg-card\/35/);
+  assert.match(markup, /grid-cols-\[48px_minmax\(0,1fr\)\]/);
+  assert.doesNotMatch(markup, /shadow-\[0_14px_32px_rgba\(2,6,23,0\.38\)\]/);
 });

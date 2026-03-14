@@ -68,6 +68,37 @@ export type FindingDetailPageModel = {
   codeSections: FindingDetailCodeView[];
 };
 
+export function isFindingDetailFullFilePathSupported(
+  filePath: string | null | undefined,
+): boolean {
+  let normalized = String(filePath || "").trim().replace(/\\/g, "/");
+  if (!normalized) return false;
+
+  while (normalized.startsWith("./")) {
+    normalized = normalized.slice(2);
+  }
+
+  if (!normalized) return false;
+  if (normalized.startsWith("/")) return false;
+  if (/^[a-z]:\//i.test(normalized)) return false;
+
+  const lowered = normalized.toLowerCase();
+  if (lowered.startsWith("tmp/deepaudit_")) return false;
+  return true;
+}
+
+function normalizeFindingDetailFullFilePath(
+  filePath: string | null | undefined,
+): string | null {
+  if (!isFindingDetailFullFilePathSupported(filePath)) return null;
+
+  let normalized = String(filePath || "").trim().replace(/\\/g, "/");
+  while (normalized.startsWith("./")) {
+    normalized = normalized.slice(2);
+  }
+  return normalized || null;
+}
+
 function normalizeToken(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
@@ -340,9 +371,9 @@ function finalizeCodeSectionView(
           highlightEndLine: view.highlightEndLine,
         });
   const projectId = String(params.projectId || "").trim();
-  const filePath = String(view.filePath || "").trim();
+  const filePath = normalizeFindingDetailFullFilePath(view.filePath);
   const fullFileAvailable =
-    params.projectSourceType === "zip" && projectId.length > 0 && filePath.length > 0;
+    params.projectSourceType === "zip" && projectId.length > 0 && filePath !== null;
 
   return {
     ...view,

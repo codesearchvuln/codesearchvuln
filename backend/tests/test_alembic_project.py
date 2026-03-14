@@ -70,6 +70,7 @@ def test_alembic_versions_directory_is_squashed_to_baseline_and_bridge():
     assert version_files == [
         "5b0f3c9a6d7e_squashed_baseline.py",
         "6c8d9e0f1a2b_finalize_projects_zip_file_hash.py",
+        "7f8e9d0c1b2a_normalize_static_finding_paths.py",
     ]
 
 
@@ -84,3 +85,19 @@ def test_bridge_downgrade_keeps_zip_file_hash_baseline_contract():
 
     assert "DROP COLUMN IF EXISTS zip_file_hash" not in bridge_source
     assert "DROP INDEX IF EXISTS ix_projects_zip_file_hash" not in bridge_source
+
+
+def test_static_finding_path_migration_downgrade_keeps_data_normalization_contract():
+    migration_file = (
+        BACKEND_ROOT
+        / "alembic"
+        / "versions"
+        / "7f8e9d0c1b2a_normalize_static_finding_paths.py"
+    )
+    migration_source = migration_file.read_text(encoding="utf-8")
+
+    assert "bandit_findings" in migration_source
+    assert "opengrep_findings" in migration_source
+    assert "downgrade" in migration_source
+    assert "UPDATE bandit_findings" not in migration_source.split("def downgrade", 1)[1]
+    assert "UPDATE opengrep_findings" not in migration_source.split("def downgrade", 1)[1]

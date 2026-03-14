@@ -370,9 +370,6 @@ export default function FindingDetail() {
 
   const handleLoadFullFile = async (request: { projectId: string; filePath: string }) => {
     const response = await databaseApi.getProjectFileContent(request.projectId, request.filePath);
-    if (!response) {
-      throw new Error("Failed to load full file");
-    }
     return {
       content: response.content,
       isText: response.is_text,

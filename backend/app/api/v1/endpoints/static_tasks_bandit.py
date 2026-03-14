@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.bandit import BanditFinding, BanditScanTask
+from app.db.static_finding_paths import normalize_static_scan_file_path
 from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
 from app.models.phpstan import PhpstanFinding, PhpstanScanTask
@@ -262,7 +263,10 @@ async def _execute_bandit_scan(
                     try:
                         severity = str(finding.get("issue_severity") or "LOW").strip().upper()
                         confidence = str(finding.get("issue_confidence") or "LOW").strip().upper()
-                        file_path = str(finding.get("filename") or "").strip()
+                        file_path = normalize_static_scan_file_path(
+                            str(finding.get("filename") or "").strip(),
+                            project_root,
+                        )
                         if file_path:
                             scanned_files.add(file_path)
 

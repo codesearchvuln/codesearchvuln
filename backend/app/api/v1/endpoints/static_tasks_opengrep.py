@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.bandit import BanditFinding, BanditScanTask
+from app.db.static_finding_paths import normalize_static_scan_file_path
 from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
 from app.models.phpstan import PhpstanFinding, PhpstanScanTask
@@ -990,7 +991,10 @@ async def _execute_opengrep_scan(
                     elif severity == "WARNING":
                         warning_count += 1
 
-                    file_path = finding.get("path", "")
+                    file_path = normalize_static_scan_file_path(
+                        str(finding.get("path", "") or ""),
+                        project_root,
+                    )
                     if file_path:
                         files_scanned.add(file_path)
 
@@ -1261,15 +1265,19 @@ def _build_finding_path_candidates(file_path: Optional[str]) -> List[str]:
         return []
 
     candidates: List[str] = [raw]
+    parts = [part for part in raw.split("/") if part]
+
+    if not raw.startswith("/") and len(parts) >= 2:
+        candidates.append("/".join(parts[1:]))
 
     tmp_index = raw.find("/tmp/")
     if tmp_index >= 0:
         trimmed = raw[tmp_index + 5 :]
-        parts = [part for part in trimmed.split("/") if part]
-        if len(parts) >= 2:
-            candidates.append("/".join(parts[1:]))
-        if len(parts) >= 3:
-            candidates.append("/".join(parts[2:]))
+        trimmed_parts = [part for part in trimmed.split("/") if part]
+        if len(trimmed_parts) >= 2:
+            candidates.append("/".join(trimmed_parts[1:]))
+        if len(trimmed_parts) >= 3:
+            candidates.append("/".join(trimmed_parts[2:]))
 
     if raw.startswith("/"):
         candidates.append(raw.lstrip("/"))

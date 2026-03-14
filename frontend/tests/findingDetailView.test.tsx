@@ -153,7 +153,7 @@ test("FindingDetailView 渲染 agent 漏洞详情的新信息层级", () => {
       projectName: "demo",
     }),
   );
-  const overviewMarkup = getSectionMarkup(markup, "概览信息", "根因说明");
+  const overviewMarkup = getSectionMarkup(markup, "概览信息", "追踪信息");
 
   assert.match(markup, /统一漏洞详情/);
   assert.match(markup, /sql injection/);
@@ -176,9 +176,10 @@ test("FindingDetailView 渲染 agent 漏洞详情的新信息层级", () => {
   assert.doesNotMatch(overviewMarkup, /VERIFIED/);
   assert.doesNotMatch(markup, /任务ID：/);
   assert.doesNotMatch(markup, /漏洞ID：/);
-  assert.ok(markup.indexOf("追踪信息") < markup.indexOf("概览信息"));
-  assert.ok(markup.indexOf("概览信息") < markup.indexOf("根因说明"));
-  assert.match(markup, /查看文件全部内容/);
+  assert.ok(markup.indexOf("概览信息") < markup.indexOf("追踪信息"));
+  assert.ok(markup.indexOf("追踪信息") < markup.indexOf("根因说明"));
+  assert.match(markup, /查看文件/);
+  assert.doesNotMatch(markup, /查看文件全部内容/);
   assert.match(markup, /src\/main\/java\/demo\/JdbcController\.java/);
   assert.match(markup, /第 69-83 行/);
   assert.doesNotMatch(markup, /1 个代码块/);

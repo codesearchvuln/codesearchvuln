@@ -75,9 +75,8 @@ export default function FindingDetailView({
 
       <div className="min-h-0 flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,0.98fr)_minmax(0,1.02fr)] gap-4">
         <div className="order-1 xl:order-2 cyber-card p-5 min-h-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
-          <InfoSection title="追踪信息" items={model.trackingItems} />
-
           <InfoSection title="概览信息" items={model.overviewItems} />
+          <InfoSection title="追踪信息" items={model.trackingItems} />
 
           <section className="rounded-xl border border-border/70 bg-card/50 p-4 space-y-3">
             <div>

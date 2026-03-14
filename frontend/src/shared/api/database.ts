@@ -161,21 +161,17 @@ export const api = {
       useCache?: boolean;
       stream?: boolean;
     },
-  ): Promise<ProjectFileContentResponse | null> {
-    try {
-      const res = await retryProjectReads(() =>
-        apiClient.get(`/projects/${id}/files/${encodeProjectFilePath(filePath)}`, {
-          params: {
-            encoding: options?.encoding ?? "utf-8",
-            use_cache: options?.useCache ?? true,
-            stream: options?.stream ?? false,
-          },
-        }),
-      );
-      return res.data;
-    } catch (_error) {
-      return null;
-    }
+  ): Promise<ProjectFileContentResponse> {
+    const res = await retryProjectReads(() =>
+      apiClient.get(`/projects/${id}/files/${encodeProjectFilePath(filePath)}`, {
+        params: {
+          encoding: options?.encoding ?? "utf-8",
+          use_cache: options?.useCache ?? true,
+          stream: options?.stream ?? false,
+        },
+      }),
+    );
+    return res.data;
   },
 
   async uploadProjectZip(id: string, file: File): Promise<{ message: string; original_filename: string; file_size: number }> {

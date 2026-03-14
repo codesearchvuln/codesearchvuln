@@ -115,8 +115,7 @@ export default function TaskActivitiesListTable({
 											{activity.projectName}
 										</TableCell>
 										<TableCell className="text-sm text-muted-foreground">
-											<div>{formatCreatedAt(activity.createdAt)}</div>
-											<div className="text-xs">{getRelativeTime(activity.createdAt, nowMs)}</div>
+											<div>{formatCreatedAt(activity.createdAt)} {getRelativeTime(activity.createdAt, nowMs)}</div>
 										</TableCell>
 										<TableCell className="font-mono text-foreground">{durationText}</TableCell>
 										<TableCell>

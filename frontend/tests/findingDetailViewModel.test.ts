@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import type { AgentFinding } from "../src/shared/api/agentTasks.ts";
+import type { BanditFinding } from "../src/shared/api/bandit.ts";
+import type { OpengrepFinding } from "../src/shared/api/opengrep.ts";
 import {
   buildAgentFindingDetailModel,
+  buildBanditFindingDetailModel,
   buildFullFileDisplayLines,
   buildFindingDetailCodeSections,
+  buildOpengrepFindingDetailModel,
+  isFindingDetailFullFilePathSupported,
 } from "../src/pages/finding-detail/viewModel.ts";
 import { buildFindingDetailPath } from "../src/shared/utils/findingRoute.ts";
 
@@ -59,6 +64,36 @@ const agentFinding: AgentFinding = {
   ai_confidence: 0.91,
   confidence: 0.91,
   created_at: "2026-03-12T00:00:00Z",
+};
+
+const opengrepFinding: OpengrepFinding = {
+  id: "og-1",
+  scan_task_id: "task-og",
+  rule: {},
+  rule_name: "python-sqli",
+  cwe: ["CWE-89"],
+  description: "Possible SQL injection",
+  file_path: "/tmp/deepaudit_project/archive-root/src/app/db.py",
+  start_line: 23,
+  code_snippet: "query = f\"SELECT * FROM users WHERE id = {user_id}\"",
+  severity: "ERROR",
+  status: "open",
+  confidence: "HIGH",
+};
+
+const banditFinding: BanditFinding = {
+  id: "bandit-1",
+  scan_task_id: "task-bandit",
+  test_id: "B602",
+  test_name: "subprocess_popen_with_shell_equals_true",
+  issue_text: "shell=True may trigger command injection",
+  file_path: "/tmp/deepaudit_project/archive-root/app/tasks/run_cmd.py",
+  line_number: 41,
+  issue_severity: "HIGH",
+  issue_confidence: "HIGH",
+  code_snippet: "subprocess.Popen(command, shell=True)",
+  more_info: "https://bandit.readthedocs.io/",
+  status: "open",
 };
 
 test("buildFindingDetailCodeSections 裁剪命中代码并插入省略占位", () => {
@@ -215,6 +250,42 @@ test("buildAgentFindingDetailModel 在非 ZIP 项目下禁用全文查看", () =
     projectId: "project-repo",
     projectSourceType: "repository",
     projectName: "demo",
+  });
+
+  assert.equal(model.codeSections[0]?.fullFileAvailable, false);
+  assert.equal(model.codeSections[0]?.fullFileRequest, null);
+});
+
+test("isFindingDetailFullFilePathSupported 仅接受 ZIP 内相对路径", () => {
+  assert.equal(isFindingDetailFullFilePathSupported("src/main.py"), true);
+  assert.equal(isFindingDetailFullFilePathSupported("./src/main.py"), true);
+  assert.equal(isFindingDetailFullFilePathSupported("/tmp/deepaudit_project/src/main.py"), false);
+  assert.equal(isFindingDetailFullFilePathSupported("/abs/path/src/main.py"), false);
+  assert.equal(isFindingDetailFullFilePathSupported(""), false);
+});
+
+test("buildBanditFindingDetailModel 在 ZIP 项目下遇到旧绝对路径时禁用全文查看", () => {
+  const model = buildBanditFindingDetailModel({
+    finding: banditFinding,
+    taskId: "task-bandit",
+    findingId: "finding-bandit",
+    taskName: "Bandit Scan",
+    projectId: "project-zip",
+    projectSourceType: "zip",
+  });
+
+  assert.equal(model.codeSections[0]?.fullFileAvailable, false);
+  assert.equal(model.codeSections[0]?.fullFileRequest, null);
+});
+
+test("buildOpengrepFindingDetailModel 在 ZIP 项目下遇到旧绝对路径时禁用全文查看", () => {
+  const model = buildOpengrepFindingDetailModel({
+    finding: opengrepFinding,
+    taskId: "task-og",
+    findingId: "finding-og",
+    taskName: "Opengrep Scan",
+    projectId: "project-zip",
+    projectSourceType: "zip",
   });
 
   assert.equal(model.codeSections[0]?.fullFileAvailable, false);
