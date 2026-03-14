@@ -242,7 +242,7 @@ def _known_tool_args(
     project_root: str,
     filesystem_probe_file: str,
     filesystem_media_probe_file: str,
-    qmd_probe_file: str,
+    qmd_probe_file: str = "",
     code_probe_file: str,
     code_probe_function: str,
     code_probe_line: int,
@@ -270,72 +270,6 @@ def _known_tool_args(
             "root": project_root,
         }
 
-    if normalized_mcp == "sequentialthinking":
-        if normalized_tool in {"sequentialthinking", "sequential_thinking", "reasoning_trace"}:
-            return {
-                "goal": "mcp_verify",
-                "thought": "mcp_verify",
-                "nextThoughtNeeded": False,
-                "thoughtNumber": 1,
-                "totalThoughts": 1,
-            }
-
-    if normalized_mcp == "qmd":
-        if normalized_tool == "status":
-            return {}
-        if normalized_tool in {"query", "search", "vector_search", "deep_search"}:
-            properties = input_schema.get("properties") if isinstance(input_schema, dict) else {}
-            if not isinstance(properties, dict):
-                properties = {}
-            payload: Dict[str, Any] = {}
-            if "query" in properties:
-                payload["query"] = "mcp_probe_sum"
-            elif "searches" in properties:
-                payload["searches"] = [{"type": "vec", "query": "mcp_probe_sum"}]
-            else:
-                payload["query"] = "mcp_probe_sum"
-
-            if "limit" in properties:
-                payload["limit"] = 1
-            elif "top_k" in properties:
-                payload["top_k"] = 1
-            elif "max_results" in properties:
-                payload["max_results"] = 1
-
-            if "collection" in properties:
-                payload.setdefault("collection", "project_default")
-            elif "collections" in properties:
-                payload.setdefault("collections", ["project_default"])
-            return payload
-        if normalized_tool == "get":
-            properties = input_schema.get("properties") if isinstance(input_schema, dict) else {}
-            if not isinstance(properties, dict):
-                properties = {}
-            if "file" in properties:
-                return {"file": qmd_probe_file}
-            if "path" in properties:
-                return {"path": qmd_probe_file}
-            if "id" in properties:
-                return {"id": "__mcp_verify__"}
-            if "doc_id" in properties:
-                return {"doc_id": "__mcp_verify__"}
-            return {"file": qmd_probe_file}
-        if normalized_tool == "multi_get":
-            properties = input_schema.get("properties") if isinstance(input_schema, dict) else {}
-            if not isinstance(properties, dict):
-                properties = {}
-            if "pattern" in properties:
-                return {"pattern": qmd_probe_file}
-            if "ids" in properties:
-                return {"ids": ["__mcp_verify__"]}
-            if "doc_ids" in properties:
-                return {"doc_ids": ["__mcp_verify__"]}
-            if "paths" in properties:
-                return {"paths": [qmd_probe_file]}
-            if "files" in properties:
-                return {"files": [qmd_probe_file]}
-            return {"pattern": qmd_probe_file}
-
     return None
 
 
@@ -347,7 +281,7 @@ def build_tool_args(
     project_root: str,
     filesystem_probe_file: str,
     filesystem_media_probe_file: str,
-    qmd_probe_file: str,
+    qmd_probe_file: str = "",
     code_probe_file: str,
     code_probe_function: str,
     code_probe_line: int,
@@ -467,11 +401,6 @@ async def run_protocol_verification(
         runtime_domains.add(list_runtime_domain)
     list_tools_ok = bool(list_result.get("success")) if isinstance(list_result, dict) else False
     discovered_tools = normalize_listed_tools(list_result.get("tools") if isinstance(list_result, dict) else None)
-    if normalized_mcp == "qmd":
-        discovered_tools = sorted(
-            discovered_tools,
-            key=lambda item: 0 if str(item.get("name") or "").strip().lower() == "status" else 1,
-        )
     if list_tools_ok and not discovered_tools:
         list_tools_ok = False
     list_error = None if list_tools_ok else str((list_result or {}).get("error") or "mcp_tools_list_empty")
@@ -492,8 +421,6 @@ async def run_protocol_verification(
     call_failed_count = 0
     arg_failed_count = 0
     skipped_unsupported_count = 0
-    qmd_has_vector_index: Optional[bool] = None
-
     if list_tools_ok:
         for item in discovered_tools:
             tool_name = str(item.get("name") or "").strip()
@@ -554,51 +481,6 @@ async def run_protocol_verification(
                 runtime_domains.add(call_runtime_domain)
             call_success = bool(call_result.handled and call_result.success)
             call_error = None if call_success else _error_from_execution(call_result)
-
-            if call_success and normalized_mcp == "qmd" and tool_name == "status":
-                status_payload: Any = None
-                if isinstance(call_result.data, str):
-                    try:
-                        status_payload = json.loads(call_result.data)
-                    except Exception:
-                        status_payload = None
-                elif isinstance(call_result.data, dict):
-                    status_payload = call_result.data
-                if isinstance(status_payload, dict) and isinstance(status_payload.get("hasVectorIndex"), bool):
-                    qmd_has_vector_index = bool(status_payload.get("hasVectorIndex"))
-
-            if not call_success and normalized_mcp == "qmd":
-                lowered_error = str(call_error or "").strip().lower()
-                vector_failure_tokens = (
-                    "vector index not found",
-                    "run 'qmd embed'",
-                    "node-llama-cpp",
-                    "compiler toolset",
-                    "failed to parse jsonrpc",
-                )
-                if tool_name == "vector_search" and (
-                    qmd_has_vector_index is False
-                    or any(token in lowered_error for token in vector_failure_tokens)
-                ):
-                    call_success = True
-                    call_error = None
-                elif tool_name == "deep_search" and (
-                    qmd_has_vector_index is False
-                    or any(token in lowered_error for token in vector_failure_tokens)
-                    or not lowered_error
-                ):
-                    call_success = True
-                    call_error = None
-                elif tool_name == "get" and "document not found" in lowered_error:
-                    call_success = True
-                    call_error = None
-                elif tool_name in {"search", "query", "multi_get"} and (
-                    "collection not found" in lowered_error
-                    or "no documents" in lowered_error
-                    or "document not found" in lowered_error
-                ):
-                    call_success = True
-                    call_error = None
 
             if call_success:
                 call_success_count += 1

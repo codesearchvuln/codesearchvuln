@@ -52,11 +52,9 @@ from app.services.agent.utils.vulnerability_naming import (
 from app.services.agent.bootstrap import OpenGrepBootstrapScanner, BanditBootstrapScanner
 from app.services.agent.mcp import (
     HARD_MAX_WRITABLE_FILES_PER_TASK,
-    FastMCPHttpAdapter,
     FastMCPStdioAdapter,
     MCPRuntime,
     TaskWriteScopeGuard,
-    build_mcp_catalog,
 )
 from app.services.agent.mcp.protocol_verify import (
     build_tool_args as build_mcp_probe_tool_args,
@@ -937,13 +935,8 @@ def _build_task_mcp_runtime(
 
     normalized_project_root = os.path.abspath(project_root)
 
-    user_other_config = (user_config or {}).get("otherConfig", {})
-    mcp_config = user_other_config.get("mcpConfig") if isinstance(user_other_config, dict) else {}
-    if not isinstance(mcp_config, dict):
-        mcp_config = {}
-    write_policy = mcp_config.get("writePolicy") if isinstance(mcp_config.get("writePolicy"), dict) else {}
-    if not isinstance(write_policy, dict):
-        write_policy = {}
+    _ = user_config
+    write_policy: Dict[str, Any] = {}
 
     hard_limit = max(1, int(getattr(settings, "MCP_WRITE_HARD_LIMIT", HARD_MAX_WRITABLE_FILES_PER_TASK)))
     configured_max = write_policy.get(
@@ -969,16 +962,7 @@ def _build_task_mcp_runtime(
     )
     write_guard.seed_from_task_inputs(target_files=target_files, findings=bootstrap_findings or [])
 
-    runtime_policy = mcp_config.get("runtimePolicy") if isinstance(mcp_config.get("runtimePolicy"), dict) else {}
-    if not isinstance(runtime_policy, dict):
-        runtime_policy = {}
-
     active_ids = {str(item).strip().lower() for item in (active_mcp_ids or []) if str(item).strip()}
-
-    def _is_active_mcp(name: str) -> bool:
-        if not active_ids:
-            return True
-        return str(name or "").strip().lower() in active_ids
 
     adapters: Dict[str, Any] = {}
     domain_adapters: Dict[str, Dict[str, Any]] = {}
@@ -986,12 +970,8 @@ def _build_task_mcp_runtime(
     required_mcps: List[str] = []
 
     return MCPRuntime(
-        enabled=bool(mcp_config.get("enabled", getattr(settings, "MCP_ENABLED", True))),
-        prefer_mcp=(
-            True
-            if enforce_mcp_only
-            else bool(mcp_config.get("preferMcp", getattr(settings, "MCP_PREFER", True)))
-        ),
+        enabled=bool(getattr(settings, "MCP_ENABLED", True)),
+        prefer_mcp=(True if enforce_mcp_only else bool(getattr(settings, "MCP_PREFER", True))),
         adapters=adapters,
         domain_adapters=domain_adapters,
         runtime_modes=runtime_modes,
@@ -999,11 +979,7 @@ def _build_task_mcp_runtime(
         write_scope_guard=write_guard,
         allow_filesystem_writes=False,
         default_runtime_mode="stdio_only",
-        strict_mode=(
-            True
-            if enforce_mcp_only
-            else bool(mcp_config.get("strictMode", getattr(settings, "MCP_STRICT_MODE", True)))
-        ),
+        strict_mode=(True if enforce_mcp_only else bool(getattr(settings, "MCP_STRICT_MODE", True))),
         project_root=normalized_project_root,
     )
 
@@ -1030,7 +1006,6 @@ async def _probe_required_mcp_runtime(
                 "project_root": "",
                 "filesystem_probe_file": "README.md",
                 "filesystem_media_probe_file": "tmp/.mcp_required_media_probe.png",
-                "qmd_probe_file": "tmp/.mcp_required_qmd_probe.md",
                 "code_probe_file": "tmp/.mcp_required_code_probe.c",
                 "code_probe_function": "mcp_required_probe_sum",
                 "code_probe_line": 2,
@@ -1040,7 +1015,6 @@ async def _probe_required_mcp_runtime(
         filesystem_probe_abs = os.path.join(probe_dir, ".mcp_required_filesystem_probe.txt")
         filesystem_media_abs = os.path.join(probe_dir, ".mcp_required_media_probe.png")
         code_probe_abs = os.path.join(probe_dir, ".mcp_required_code_probe.c")
-        qmd_probe_abs = os.path.join(probe_dir, ".mcp_required_qmd_probe.md")
         try:
             with open(filesystem_probe_abs, "w", encoding="utf-8") as handle:
                 handle.write("mcp required filesystem probe\n")
@@ -1061,16 +1035,10 @@ async def _probe_required_mcp_runtime(
                 )
         except Exception:
             pass
-        try:
-            with open(qmd_probe_abs, "w", encoding="utf-8") as handle:
-                handle.write("# mcp required qmd probe\n")
-        except Exception:
-            pass
         return {
             "project_root": project_root,
             "filesystem_probe_file": os.path.relpath(filesystem_probe_abs, project_root).replace("\\", "/"),
             "filesystem_media_probe_file": os.path.relpath(filesystem_media_abs, project_root).replace("\\", "/"),
-            "qmd_probe_file": os.path.relpath(qmd_probe_abs, project_root).replace("\\", "/"),
             "code_probe_file": os.path.relpath(code_probe_abs, project_root).replace("\\", "/"),
             "code_probe_function": "mcp_required_probe_sum",
             "code_probe_line": 2,
@@ -1286,7 +1254,6 @@ async def _probe_required_mcp_runtime(
             filesystem_media_probe_file=str(
                 probe_context.get("filesystem_media_probe_file") or "tmp/.mcp_required_media_probe.png"
             ),
-            qmd_probe_file=str(probe_context.get("qmd_probe_file") or "tmp/.mcp_required_qmd_probe.md"),
             code_probe_file=str(probe_context.get("code_probe_file") or "tmp/.mcp_required_code_probe.c"),
             code_probe_function=str(probe_context.get("code_probe_function") or "mcp_required_probe_sum"),
             code_probe_line=int(probe_context.get("code_probe_line") or 2),
@@ -2594,18 +2561,6 @@ async def _execute_agent_task(task_id: str):
         markdown_memory: Dict[str, str] = {}
         start_time = time.time()
 
-        async def _qmd_upsert_json(relative_path: str, payload: Any) -> bool:
-            del relative_path, payload
-            return False
-
-        async def _qmd_upsert_text(relative_path: str, text: str) -> bool:
-            del relative_path, text
-            return False
-
-        async def _qmd_update_index(force: bool = False) -> bool:
-            del force
-            return False
-
         async def _set_current_step(step: str) -> None:
             task.current_step = step
             await db.commit()
@@ -2817,38 +2772,18 @@ async def _execute_agent_task(task_id: str):
                 enforce_mcp_only=True,
             )
 
-            if mcp_runtime:
-                adapter_entries: List[str] = []
-                domain_adapters = getattr(mcp_runtime, "domain_adapters", {}) or {}
-                if isinstance(domain_adapters, dict):
-                    for mcp_name, domain_map in sorted(domain_adapters.items()):
-                        if not isinstance(domain_map, dict) or not domain_map:
-                            continue
-                        domains = ",".join(sorted(str(domain).strip() for domain in domain_map.keys() if str(domain).strip()))
-                        if domains:
-                            adapter_entries.append(f"{mcp_name}[{domains}]")
-                if not adapter_entries:
-                    flat_adapters = getattr(mcp_runtime, "adapters", {}) or {}
-                    if isinstance(flat_adapters, dict):
-                        adapter_entries = sorted(str(name).strip() for name in flat_adapters.keys() if str(name).strip())
-                adapters_text = ", ".join(adapter_entries) if adapter_entries else "(none)"
-                await event_emitter.emit_info(
-                    "🛰️ MCP Runtime 已就绪: "
-                    f"strict_mode={bool(getattr(mcp_runtime, 'strict_mode', False))}, "
-                    f"prefer_mcp={bool(getattr(mcp_runtime, 'prefer_mcp', True))}, "
-                    f"adapters={adapters_text}"
-                )
+            required_gate_mcps = [
+                str(item).strip()
+                for item in (getattr(mcp_runtime, "required_mcps", []) or [])
+                if str(item).strip()
+            ] if mcp_runtime else []
 
-            # MCP 启动门禁：默认可启动，仅 required MCP 明确未就绪时阻断。
+            # 已退役的 MCP 不再参与任务启动门禁；仅当仍存在 required MCP 时才执行兼容检查。
             if (
                 mcp_runtime
+                and required_gate_mcps
                 and bool(getattr(settings, "MCP_REQUIRE_ALL_READY_ON_STARTUP", True))
             ):
-                required_gate_mcps = [
-                    str(item).strip()
-                    for item in (getattr(mcp_runtime, "required_mcps", []) or [])
-                    if str(item).strip()
-                ]
                 required_domain = str(
                     getattr(settings, "MCP_REQUIRED_RUNTIME_DOMAIN", "all") or "all"
                 ).strip().lower()
@@ -2876,8 +2811,6 @@ async def _execute_agent_task(task_id: str):
                         },
                     )
                     raise RuntimeError(message)
-
-                await _set_current_step("正在绑定 MCP 根路径并构建索引")
 
                 async def _bootstrap_mcp_runtime_once():
                     return await _bootstrap_task_mcp_runtime(
@@ -3140,21 +3073,6 @@ async def _execute_agent_task(task_id: str):
                     f"entry_funcs={len(entry_function_names)}，seeds={len(seed_findings)}"
                 )
 
-            await _qmd_upsert_json("artifacts/project_info.json", project_info)
-            await _qmd_upsert_json(
-                "artifacts/bootstrap_seed.json",
-                {
-                    "bootstrap_source": bootstrap_source,
-                    "bootstrap_task_id": bootstrap_task_id,
-                    "bootstrap_findings_count": len(bootstrap_findings or []),
-                    "seed_findings_count": len(seed_findings or []),
-                    "entry_points_count": len(entry_points_payload or []),
-                    "entry_function_names_count": len(entry_function_names or []),
-                    "target_vulnerabilities": list(task.target_vulnerabilities or []),
-                },
-            )
-            await _qmd_update_index(force=False)
-
             if mcp_runtime:
                 seed_paths: List[str] = []
                 for item in seed_findings:
@@ -3197,10 +3115,6 @@ async def _execute_agent_task(task_id: str):
                 logger.warning("[MarkdownMemory] init/load failed: %s", exc)
                 markdown_memory = {}
 
-            if markdown_memory:
-                await _qmd_upsert_json("artifacts/markdown_memory_bundle.json", markdown_memory)
-                await _qmd_update_index(force=False)
-            
             # 更新任务文件统计
             task.total_files = project_info.get("file_count", 0)
             await db.commit()
@@ -3231,17 +3145,6 @@ async def _execute_agent_task(task_id: str):
                 "project_root": project_root,
                 "task_id": task_id,
             }
-
-            await _qmd_upsert_json(
-                "artifacts/task_input.json",
-                {
-                    "project_root": project_root,
-                    "task_id": task_id,
-                    "project_info": project_info,
-                    "config": input_data["config"],
-                },
-            )
-            await _qmd_update_index(force=False)
 
             # Provide deterministic persistence callback for Orchestrator TODO mode.
             # The callback is idempotent per task run to avoid double inserts on retries.
@@ -3578,35 +3481,6 @@ async def _execute_agent_task(task_id: str):
                 except Exception as exc:
                     logger.warning("[MarkdownMemory] append failed: %s", exc)
 
-                await _qmd_upsert_json(
-                    "artifacts/final_summary.json",
-                    {
-                        "task_id": task_id,
-                        "bootstrap_source": bootstrap_source,
-                        "seed_findings_count": len(seed_findings or []),
-                        "orchestrator_findings_count": len(findings or []),
-                        "persisted_effective_findings_count": len(effective_findings or []),
-                        "false_positive_count": false_positive_count,
-                        "filtered_reasons": filtered_reasons or {},
-                    },
-                )
-                await _qmd_upsert_json(
-                    "agents/orchestrator.json",
-                    {
-                        "result_keys": list(result.data.keys()) if isinstance(result.data, dict) else [],
-                        "findings_count": len(findings or []),
-                    },
-                )
-                for agent_key in ("recon", "analysis", "verification", "report"):
-                    payload = agent_payloads.get(agent_key)
-                    if not isinstance(payload, dict):
-                        continue
-                    await _qmd_upsert_json(f"agents/{agent_key}.json", payload)
-                    summary_text = str(payload.get("summary") or payload.get("note") or "").strip()
-                    if summary_text:
-                        await _qmd_upsert_text(f"agents/{agent_key}.md", summary_text + "\n")
-                await _qmd_update_index(force=False)
-
                 # 更新任务统计
                 # 🔥 CRITICAL FIX: 在设置完成前再次检查取消状态
                 # 避免 "取消后后端继续运行并最终标记为完成" 的问题
@@ -3840,15 +3714,6 @@ async def _execute_agent_task(task_id: str):
                         skip_drain_wait=True,
                         timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
                     )
-                    await _qmd_upsert_json(
-                        "artifacts/task_terminal_state.json",
-                        {
-                            "task_id": task_id,
-                            "status": terminal_result["status"],
-                            "error": result.error,
-                        },
-                    )
-                    await _qmd_update_index(force=False)
                     logger.info(f"🛑 Task {task_id} cancelled")
                 else:
                     _snapshot_runtime_stats_to_task(task, orchestrator)
@@ -3878,16 +3743,6 @@ async def _execute_agent_task(task_id: str):
                     )
                     failure_message = terminal_result["failure_message"] or failure_message
                     failure_metadata = terminal_result["failure_metadata"]
-                    await _qmd_upsert_json(
-                        "artifacts/task_terminal_state.json",
-                        {
-                            "task_id": task_id,
-                            "status": terminal_result["status"],
-                            "error": failure_message,
-                            "metadata": failure_metadata,
-                        },
-                    )
-                    await _qmd_update_index(force=False)
                     logger.error(f"❌ Task {task_id} failed: {result.error}")
             
         except asyncio.CancelledError:
@@ -3982,20 +3837,6 @@ async def _execute_agent_task(task_id: str):
                     )
             except Exception as emit_error:
                 logger.warning(f"Failed to emit terminal task error event: {emit_error}")
-            try:
-                await _qmd_upsert_json(
-                    "artifacts/task_terminal_state.json",
-                    {
-                        "task_id": task_id,
-                        "status": "failed",
-                        "error": failure_message,
-                        "metadata": failure_metadata,
-                    },
-                )
-                await _qmd_update_index(force=False)
-            except Exception as qmd_error:
-                logger.debug("[QMD TaskKB] failed to persist terminal state: %s", qmd_error)
-        
         finally:
             # 🔥 在清理之前保存 Agent 树到数据库
             try:
