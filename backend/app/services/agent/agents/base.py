@@ -26,6 +26,7 @@ import uuid
 import copy
 import ast
 import threading
+import tempfile
 from pathlib import Path
 
 from ..core.state import AgentState, AgentStatus
@@ -509,7 +510,13 @@ class BaseAgent(ABC):
                     has_handler = True
                     break
             if not has_handler:
-                file_handler = logging.FileHandler(target_file, encoding="utf-8")
+                try:
+                    file_handler = logging.FileHandler(target_file, encoding="utf-8")
+                except PermissionError:
+                    fallback_dir = Path(tempfile.gettempdir()) / "audittool-agent-runs" / safe_task
+                    fallback_dir.mkdir(parents=True, exist_ok=True)
+                    target_file = str(fallback_dir / f"{safe_identity}.log")
+                    file_handler = logging.FileHandler(target_file, encoding="utf-8")
                 file_handler.setLevel(logging.INFO)
                 file_handler.setFormatter(
                     logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")

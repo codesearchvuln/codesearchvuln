@@ -1824,18 +1824,6 @@ export function SystemConfig({
 										</div>
 									</div>
 
-									<div className="flex items-center justify-end">
-										<Button
-											variant="outline"
-											className="cyber-btn-ghost h-9"
-											onClick={() => setAdvancedOpen(true)}
-											type="button"
-										>
-											<Settings className="w-4 h-4 mr-2" />
-											高级配置
-										</Button>
-									</div>
-
 									<div className="pt-4 border-t border-border border-dashed flex items-center justify-between flex-wrap gap-4">
 										<div className="flex items-center gap-2">
 											<Button
@@ -1877,6 +1865,15 @@ export function SystemConfig({
 												<RotateCcw className="w-4 h-4 mr-2" />
 												重置
 											</Button>
+											<Button
+											variant="outline"
+											className="cyber-btn-ghost h-9"
+											onClick={() => setAdvancedOpen(true)}
+											type="button"
+										>
+											<Settings className="w-4 h-4 mr-2" />
+											高级配置
+										</Button>
 										</div>
 									</div>
 

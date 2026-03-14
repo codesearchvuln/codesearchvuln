@@ -63,6 +63,8 @@ export interface AgentAuditStatsSummary {
 }
 
 export const AGENT_AUDIT_FINDINGS_PAGE_SIZE = 3;
+export const AGENT_AUDIT_FINDINGS_TABLE_HEADER_HEIGHT = 88;
+export const AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT = 56;
 
 function normalizeReturnToMode(returnTo: string | null | undefined): "intelligent" | "hybrid" | null {
   const normalized = String(returnTo || "").trim().toLowerCase();
@@ -139,6 +141,20 @@ export interface FindingTableState {
   totalPages: number;
   page: number;
   pageStart: number;
+}
+
+export function calculateResponsiveFindingsPageSize(
+  availableHeight: number,
+): number {
+  const normalizedHeight = Math.max(toFiniteNumber(availableHeight), 0);
+  const rowsHeight = Math.max(
+    normalizedHeight - AGENT_AUDIT_FINDINGS_TABLE_HEADER_HEIGHT,
+    AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT,
+  );
+  return Math.max(
+    1,
+    Math.floor(rowsHeight / AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT),
+  );
 }
 
 function toFiniteNumber(value: unknown): number {
@@ -399,9 +415,10 @@ export function buildFindingTableState(input: {
     .filter((row) => {
       const matchedKeyword =
         !keyword ||
-        row.title.toLowerCase().includes(keyword) ||
         row.typeLabel.toLowerCase().includes(keyword) ||
-        row.filePath.toLowerCase().includes(keyword);
+        row.severityLabel.toLowerCase().includes(keyword) ||
+        row.verificationLabel.toLowerCase().includes(keyword) ||
+        String(row.confidenceLabel || "").toLowerCase().includes(keyword);
       const matchedSeverity = severityFilter === "all" || row.severity === severityFilter;
       const matchedVerification =
         verificationFilter === "all" || row.verification === verificationFilter;

@@ -1,14 +1,15 @@
 import ast
 import asyncio
 import json
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.agent.agents.base import AgentResult
+from app.services.agent.agents.base import AgentResult, BaseAgent
 from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
 from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
 from app.services.agent.workflow import (
@@ -289,15 +290,18 @@ def workflow_harness(instrumentation):
         "report": ParallelStubAgent(llm_service, {"_stub_ctx": report_ctx}, event_emitter),
     }
 
-    orchestrator = WorkflowOrchestratorAgent(
-        llm_service=llm_service,
-        tools={},
-        event_emitter=event_emitter,
-        sub_agents=sub_agents,
-        recon_queue_service=recon_queue,
-        vuln_queue_service=vuln_queue,
-        workflow_config=workflow_config,
-    )
+    trace_dir = Path(tempfile.mkdtemp(prefix="parallel-workflow-trace-"))
+    trace_path = trace_dir / "orchestrator.log"
+    with patch.object(BaseAgent, "_resolve_trace_log_path", return_value=str(trace_path)):
+        orchestrator = WorkflowOrchestratorAgent(
+            llm_service=llm_service,
+            tools={},
+            event_emitter=event_emitter,
+            sub_agents=sub_agents,
+            recon_queue_service=recon_queue,
+            vuln_queue_service=vuln_queue,
+            workflow_config=workflow_config,
+        )
     orchestrator.stream_llm_call = AsyncMock(return_value=("{\"duplicates\": []}", 0))
 
     yield {
@@ -396,16 +400,24 @@ async def test_report_phase_runs_in_parallel(workflow_harness, instrumentation):
     recon_queue = workflow_harness["recon_queue"]
     vuln_queue = workflow_harness["vuln_queue"]
     workflow_config = workflow_harness["workflow_config"]
+    risk_points = _load_vulnerable_points()
 
     orchestrator._all_findings = [
         {
-            "title": f"confirmed finding {idx}",
+            "title": f"{risk_point['function_name']} confirmed",
             "verdict": "confirmed",
-            "file_path": str(VULNERABLE_FILE),
-            "line_start": idx,
+            "file_path": risk_point["file_path"],
+            "line_start": risk_point["line_start"],
+            "function_name": risk_point["function_name"],
+            "vulnerability_type": risk_point["vulnerability_type"],
+            "severity": risk_point["severity"],
+            "description": risk_point["description"],
         }
-        for idx in range(1, 5)
+        for risk_point in risk_points
     ]
+    orchestrator.sub_agents["recon"]._run_impl = AsyncMock(
+        return_value=AgentResult(success=True, data={})
+    )
 
     engine = AuditWorkflowEngine(
         recon_queue_service=recon_queue,
@@ -423,9 +435,9 @@ async def test_report_phase_runs_in_parallel(workflow_harness, instrumentation):
     )
 
     assert state.phase == WorkflowPhase.COMPLETE
-    assert state.report_findings_total == 4
-    assert state.report_findings_processed == 4
-    assert len(state.finding_reports) == 4
+    assert state.report_findings_total >= 4
+    assert state.report_findings_processed == state.report_findings_total
+    assert len(state.finding_reports) == state.report_findings_total
     reportable_findings = [
         finding
         for finding in orchestrator._all_findings

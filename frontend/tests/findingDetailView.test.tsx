@@ -133,6 +133,15 @@ function renderMarkup(markupModel: Parameters<typeof FindingDetailView>[0]["mode
   );
 }
 
+function getSectionMarkup(markup: string, title: string, nextTitle: string) {
+  const start = markup.indexOf(title);
+  const end = markup.indexOf(nextTitle);
+  if (start < 0 || end < 0 || end <= start) {
+    return "";
+  }
+  return markup.slice(start, end);
+}
+
 test("FindingDetailView 渲染 agent 漏洞详情的新信息层级", () => {
   const markup = renderMarkup(
     buildAgentFindingDetailModel({
@@ -141,19 +150,31 @@ test("FindingDetailView 渲染 agent 漏洞详情的新信息层级", () => {
       findingId: "finding-agent",
     }),
   );
+  const overviewMarkup = getSectionMarkup(markup, "概览信息", "根因说明");
 
   assert.match(markup, /统一缺陷详情/);
   assert.match(markup, /sql injection/);
   assert.match(markup, /高危/);
   assert.match(markup, /高/);
+  assert.match(markup, /概览信息/);
+  assert.match(overviewMarkup, /状态/);
+  assert.match(overviewMarkup, /已验证/);
+  assert.match(overviewMarkup, /漏洞类型/);
+  assert.match(markup, /漏洞危害/);
+  assert.match(markup, /漏洞置信度/);
   assert.match(markup, /根因说明/);
   assert.match(markup, /追踪信息/);
   assert.match(markup, /任务 ID/);
   assert.match(markup, /缺陷 ID/);
+  assert.doesNotMatch(overviewMarkup, /来源/);
+  assert.doesNotMatch(overviewMarkup, /标题/);
+  assert.doesNotMatch(overviewMarkup, /补充说明/);
+  assert.doesNotMatch(overviewMarkup, /位置/);
+  assert.doesNotMatch(overviewMarkup, /VERIFIED/);
   assert.doesNotMatch(markup, /任务ID：/);
   assert.doesNotMatch(markup, /缺陷ID：/);
-  assert.ok(markup.indexOf("漏洞危害") < markup.indexOf("根因说明"));
-  assert.ok(markup.indexOf("根因说明") < markup.indexOf("追踪信息"));
+  assert.ok(markup.indexOf("追踪信息") < markup.indexOf("概览信息"));
+  assert.ok(markup.indexOf("概览信息") < markup.indexOf("根因说明"));
 });
 
 test("FindingDetailView 渲染 agent 误报场景并突出验证结论", () => {

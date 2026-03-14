@@ -147,31 +147,20 @@ export function buildFindingNarrativeMarkdown(input: FindingNarrativeInput): str
 
   const rootCause =
     asTrimmedText(input.description) || "当前证据不足，请补充上下文代码与可达性分析结果后复核。";
-  const codeSource =
-    asTrimmedText(input.code_context) ||
-    asTrimmedText(input.code_snippet) ||
-    "（暂无可展示代码片段，请结合原始文件复核。）";
-  const safeCode = codeSource.replace(/```/g, "``");
-  const flowSummary =
-    Array.isArray(input.function_trigger_flow) && input.function_trigger_flow.length > 0
-      ? input.function_trigger_flow.map((item) => String(item)).join(" -> ")
-      : "当前未提供完整触发路径，请结合 flow 证据继续验证。";
-  const language = inferCodeLanguageFromPath(input.file_path);
+  // const codeSource =
+  //   asTrimmedText(input.code_context) ||
+  //   asTrimmedText(input.code_snippet) ||
+  //   "（暂无可展示代码片段，请结合原始文件复核。）";
+  // const safeCode = codeSource.replace(/```/g, "``");
+  // const flowSummary =
+  //   Array.isArray(input.function_trigger_flow) && input.function_trigger_flow.length > 0
+  //     ? input.function_trigger_flow.map((item) => String(item)).join(" -> ")
+  //     : "当前未提供完整触发路径，请结合 flow 证据继续验证。";
+  // const language = inferCodeLanguageFromPath(input.file_path);
 
   return [
-    "### 定位与结论",
-    `定位到 \`${getLocationText(input)}\`，该问题需要结合上下文进行进一步复核。`,
-    "",
     "### 根因解释",
     rootCause,
-    "",
-    "### 代码说明",
-    `\`\`\`${language}`,
-    safeCode,
-    "\`\`\`",
-    "",
-    "### 触发路径",
-    flowSummary,
   ].join("\n");
 }
 

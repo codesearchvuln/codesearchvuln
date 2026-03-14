@@ -60,6 +60,7 @@ export type FindingDetailPageModel = {
   summaryStats: FindingDetailSummaryStat[];
   rootCause: FindingDetailRootCause;
   trackingItems: FindingDetailTrackingItem[];
+  overviewItems: FindingDetailTrackingItem[];
   codeSections: FindingDetailCodeView[];
 };
 
@@ -166,8 +167,44 @@ function resolveNumericConfidenceDisplay(value: number | null | undefined): {
 }
 
 function buildStatusLabel(value: unknown): string {
-  const normalized = normalizeUpper(value);
-  return normalized || MISSING_VALUE;
+  const raw = String(value || "").trim();
+  if (!raw) return MISSING_VALUE;
+
+  const normalized = normalizeToken(raw).replace(/[\s-]+/g, "_");
+  if (normalized === "verified") return "已验证";
+  if (normalized === "open") return "待处理";
+  if (normalized === "false_positive") return "误报";
+  if (normalized === "closed") return "已关闭";
+  if (normalized === "fixed") return "已修复";
+  if (normalized === "resolved") return "已处理";
+  if (normalized === "confirmed") return "已确认";
+  return raw;
+}
+
+function buildOverviewItems(params: {
+  statusLabel: string;
+  heroEyebrow: string;
+  heroTitle: string;
+  summaryStats: FindingDetailSummaryStat[];
+}): FindingDetailTrackingItem[] {
+  const items: FindingDetailTrackingItem[] = [{ label: "状态", value: params.statusLabel }];
+
+  const heroTitle = String(params.heroTitle || "").trim();
+  if (heroTitle) {
+    items.push({
+      label: String(params.heroEyebrow || "").trim() || "概览",
+      value: heroTitle,
+    });
+  }
+
+  items.push(
+    ...params.summaryStats.map((stat) => ({
+      label: stat.label,
+      value: stat.value,
+    })),
+  );
+
+  return items;
 }
 
 function resolveAgentConfidenceValue(finding: AgentFinding): number | null {
@@ -448,6 +485,12 @@ function buildBaseModel(params: {
     summaryStats: params.summaryStats,
     rootCause: params.rootCause,
     trackingItems: params.trackingItems,
+    overviewItems: buildOverviewItems({
+      statusLabel: params.statusLabel,
+      heroEyebrow: params.heroEyebrow,
+      heroTitle: params.heroTitle,
+      summaryStats: params.summaryStats,
+    }),
     codeSections: params.codeSections,
   };
 }

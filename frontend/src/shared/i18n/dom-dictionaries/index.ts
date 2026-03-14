@@ -305,7 +305,6 @@ export const systemConfigDictionary: DomDictionary = {
   "原生适配器": "Native Adapters",
   "留空使用官方地址，或填入中转站地址": "Leave blank to use the official endpoint, or provide a proxy endpoint",
   "测试连接": "Test Connection",
-  "验证配置是否正确": "Verify configuration",
   "显示调试信息": "Show Debug Info",
   "隐藏调试信息": "Hide Debug Info",
   "连接信息:": "Connection Info:",

@@ -4046,11 +4046,10 @@ async def _initialize_tools(
     llm_service,
     user_config: Optional[Dict[str, Any]],
     sandbox_manager: Any, # 传递预初始化的 SandboxManager
-    rag_enabled: bool = False,
     verification_level: str = "analysis_with_poc_plan",
     exclude_patterns: Optional[List[str]] = None,
     target_files: Optional[List[str]] = None,
-    project_id: Optional[str] = None,  # 🔥 用于 RAG collection_name
+    project_id: Optional[str] = None,
     event_emitter: Optional[Any] = None,  # 🔥 新增：用于发送实时日志
     task_id: Optional[str] = None,  # 🔥 新增：用于取消检查
     queue_service: Optional[Any] = None,  # 🔥 新增：漏洞队列服务
@@ -4100,7 +4099,6 @@ async def _initialize_tools(
         IsBLRiskPointInQueueTool,
     )
 
-    _ = rag_enabled
     _ = verification_level
     _ = project_id
     _ = user_config

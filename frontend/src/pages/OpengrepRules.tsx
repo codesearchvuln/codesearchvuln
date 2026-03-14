@@ -1651,12 +1651,6 @@ export default function OpengrepRules({
 															>
 																{rule.name}
 															</div>
-															<div
-																className="text-xs text-muted-foreground font-mono truncate mt-1"
-																title={rule.id}
-															>
-																{rule.id}
-															</div>
 														</div>
 													</TableCell>
 													<TableCell className="font-mono text-sm">
