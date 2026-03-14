@@ -914,6 +914,43 @@
 		background: var(--cyber-text-muted);
 	}
 
+	.custom-scrollbar-dark {
+		scrollbar-width: thin;
+		scrollbar-color: rgba(82, 97, 122, 0.92) var(--cyber-bg-elevated);
+	}
+
+	.custom-scrollbar-dark::-webkit-scrollbar {
+		width: 9px;
+		height: 9px;
+	}
+
+	.custom-scrollbar-dark::-webkit-scrollbar-track {
+		background: rgba(11, 15, 26, 0.96);
+		border-radius: 999px;
+	}
+
+	.custom-scrollbar-dark::-webkit-scrollbar-thumb {
+		background: linear-gradient(
+			180deg,
+			rgba(61, 72, 95, 0.96) 0%,
+			rgba(45, 55, 72, 0.96) 100%
+		);
+		border: 1px solid rgba(15, 23, 42, 0.95);
+		border-radius: 999px;
+	}
+
+	.custom-scrollbar-dark::-webkit-scrollbar-thumb:hover {
+		background: linear-gradient(
+			180deg,
+			rgba(89, 102, 128, 0.98) 0%,
+			rgba(64, 76, 97, 0.98) 100%
+		);
+	}
+
+	.custom-scrollbar-dark::-webkit-scrollbar-corner {
+		background: rgba(11, 15, 26, 0.96);
+	}
+
 	/* ============ Section Headers ============ */
 	.section-header {
 		display: flex;

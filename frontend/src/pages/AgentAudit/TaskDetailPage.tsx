@@ -3221,7 +3221,7 @@ function AgentAuditPageContent() {
               <div
                 ref={logsContainerRef}
                 onScroll={handleLogsScroll}
-                className="overflow-y-auto custom-scrollbar"
+                className="overflow-y-auto custom-scrollbar-dark"
                 style={{ height: LOG_VIEWPORT_HEIGHT_PX, maxHeight: "30vh" }}
               >
                 {filteredLogs.length === 0 ? (
