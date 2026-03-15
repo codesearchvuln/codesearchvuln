@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import uuid
 import re
 import shutil
 import subprocess
@@ -20,7 +21,7 @@ from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.bandit import BanditFinding, BanditScanTask
+from app.models.bandit import BanditFinding, BanditRuleState, BanditScanTask
 from app.db.static_finding_paths import normalize_static_scan_file_path
 from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
@@ -41,6 +42,7 @@ from app.schemas.opengrep import (
     OpengrepRuleUpdateRequest,
 )
 from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
+from app.services.bandit_rules_snapshot import load_bandit_builtin_snapshot
 from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
 from app.services.opengrep_confidence import (
     count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
@@ -126,6 +128,115 @@ class BanditFindingResponse(BaseModel):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# Bandit integration: 规则页响应与更新请求模型（仅用于前端展示/启停状态持久化）。
+class BanditRuleResponse(BaseModel):
+    id: str = Field(..., description="规则唯一键（Bandit test_id）")
+    test_id: str
+    name: str
+    description: str
+    description_summary: str
+    checks: List[str]
+    source: str
+    bandit_version: str
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class BanditRuleEnabledUpdateRequest(BaseModel):
+    is_active: bool
+
+
+class BanditRuleBatchEnabledUpdateRequest(BaseModel):
+    rule_ids: Optional[List[str]] = None
+    source: Optional[str] = None
+    keyword: Optional[str] = None
+    current_is_active: Optional[bool] = None
+    is_active: bool
+
+
+def _missing_bandit_rules_migration_message() -> str:
+    return "数据库缺少 bandit_rule_states 表，请先运行 alembic upgrade head"
+
+
+def _raise_bandit_rules_migration_http_error(exc: ProgrammingError) -> None:
+    if "bandit_rule_states" not in str(exc):
+        raise exc
+    raise HTTPException(status_code=500, detail=_missing_bandit_rules_migration_message()) from exc
+
+
+def _normalize_bandit_rule_id(raw_rule_id: Any) -> str:
+    return str(raw_rule_id or "").strip().upper()
+
+
+def _extract_bandit_snapshot_rules() -> List[Dict[str, Any]]:
+    try:
+        payload = load_bandit_builtin_snapshot()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=f"Bandit 内置规则快照不存在: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"Bandit 内置规则快照格式错误: {exc}") from exc
+    raw_rules = payload.get("rules")
+    if not isinstance(raw_rules, list):
+        return []
+    normalized_rules: List[Dict[str, Any]] = []
+    for raw in raw_rules:
+        if not isinstance(raw, dict):
+            continue
+        test_id = _normalize_bandit_rule_id(raw.get("test_id"))
+        if not test_id:
+            continue
+        checks = raw.get("checks")
+        normalized_checks = (
+            [str(item).strip() for item in checks if str(item).strip()]
+            if isinstance(checks, list)
+            else []
+        )
+        normalized_rules.append(
+            {
+                "id": test_id,
+                "test_id": test_id,
+                "name": str(raw.get("name") or "").strip() or test_id,
+                "description": str(raw.get("description") or "").strip(),
+                "description_summary": str(raw.get("description_summary") or "").strip(),
+                "checks": normalized_checks,
+                "source": str(raw.get("source") or "builtin").strip() or "builtin",
+                "bandit_version": str(raw.get("bandit_version") or "").strip(),
+            }
+        )
+    normalized_rules.sort(key=lambda item: item["test_id"])
+    return normalized_rules
+
+
+async def _load_bandit_rule_states(db: AsyncSession) -> Dict[str, BanditRuleState]:
+    try:
+        result = await db.execute(select(BanditRuleState))
+    except ProgrammingError as exc:
+        _raise_bandit_rules_migration_http_error(exc)
+    rows = result.scalars().all()
+    return {_normalize_bandit_rule_id(row.test_id): row for row in rows}
+
+
+def _merge_bandit_rule_payload(
+    *,
+    snapshot_rules: List[Dict[str, Any]],
+    states_by_test_id: Dict[str, BanditRuleState],
+) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = []
+    for item in snapshot_rules:
+        test_id = item["test_id"]
+        state = states_by_test_id.get(test_id)
+        merged.append(
+            {
+                **item,
+                "is_active": bool(state.is_active) if state is not None else True,
+                "created_at": state.created_at if state is not None else None,
+                "updated_at": state.updated_at if state is not None else None,
+            }
+        )
+    return merged
 def _normalize_bandit_level(value: Any, *, fallback: str = "medium") -> str:
     """规范化 bandit 等级参数，统一为 low/medium/high。"""
     normalized = str(value or "").strip().lower()
@@ -192,6 +303,7 @@ async def _execute_bandit_scan(
                 report_file = tf.name
 
             try:
+                # Bandit integration: 规则页 enabled 状态当前仅用于前端展示，不参与扫描命令构建。
                 cmd = [
                     "bandit",
                     "-r",
@@ -357,6 +469,186 @@ async def _execute_bandit_scan(
                 )
         finally:
             _clear_scan_task_cancel("bandit", task_id)
+
+
+@router.get("/bandit/rules", response_model=List[BanditRuleResponse])
+async def list_bandit_rules(
+    is_active: Optional[bool] = Query(None, description="按启用状态过滤"),
+    source: Optional[str] = Query(None, description="按来源过滤"),
+    keyword: Optional[str] = Query(None, description="按 test_id/name/description 关键词过滤"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(1000, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    # Bandit integration: 规则来源固定为 builtin snapshot，状态来自 bandit_rule_states。
+    snapshot_rules = _extract_bandit_snapshot_rules()
+    states_by_test_id = await _load_bandit_rule_states(db)
+    merged_rules = _merge_bandit_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_test_id=states_by_test_id,
+    )
+
+    filtered: List[Dict[str, Any]] = []
+    keyword_text = str(keyword or "").strip().lower()
+    source_text = str(source or "").strip()
+    for item in merged_rules:
+        if is_active is not None and bool(item["is_active"]) != is_active:
+            continue
+        if source_text and item["source"] != source_text:
+            continue
+        if keyword_text:
+            search_blob = " ".join(
+                [
+                    str(item["test_id"]),
+                    str(item["name"]),
+                    str(item["description"]),
+                    str(item["description_summary"]),
+                ]
+            ).lower()
+            if keyword_text not in search_blob:
+                continue
+        filtered.append(item)
+
+    return filtered[skip : skip + limit]
+
+
+@router.get("/bandit/rules/{rule_id}", response_model=BanditRuleResponse)
+async def get_bandit_rule(
+    rule_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    normalized_rule_id = _normalize_bandit_rule_id(rule_id)
+    snapshot_rules = _extract_bandit_snapshot_rules()
+    states_by_test_id = await _load_bandit_rule_states(db)
+    merged_rules = _merge_bandit_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_test_id=states_by_test_id,
+    )
+    for item in merged_rules:
+        if item["test_id"] == normalized_rule_id:
+            return item
+    raise HTTPException(status_code=404, detail="Bandit 规则不存在")
+
+
+@router.post("/bandit/rules/{rule_id}/enabled")
+async def update_bandit_rule_enabled(
+    rule_id: str,
+    request: BanditRuleEnabledUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    normalized_rule_id = _normalize_bandit_rule_id(rule_id)
+    known_rule_ids = {item["test_id"] for item in _extract_bandit_snapshot_rules()}
+    if normalized_rule_id not in known_rule_ids:
+        raise HTTPException(status_code=404, detail="Bandit 规则不存在")
+
+    try:
+        result = await db.execute(
+            select(BanditRuleState).where(BanditRuleState.test_id == normalized_rule_id)
+        )
+    except ProgrammingError as exc:
+        _raise_bandit_rules_migration_http_error(exc)
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = BanditRuleState(
+            id=str(uuid.uuid4()),
+            test_id=normalized_rule_id,
+            is_active=request.is_active,
+        )
+        db.add(state)
+    else:
+        state.is_active = request.is_active
+    await db.commit()
+    await db.refresh(state)
+
+    return {
+        "message": f"规则已{'启用' if state.is_active else '禁用'}",
+        "rule_id": normalized_rule_id,
+        "is_active": bool(state.is_active),
+    }
+
+
+@router.post("/bandit/rules/batch/enabled")
+async def batch_update_bandit_rules_enabled(
+    request: BanditRuleBatchEnabledUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    snapshot_rules = _extract_bandit_snapshot_rules()
+    states_by_test_id = await _load_bandit_rule_states(db)
+    merged_rules = _merge_bandit_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_test_id=states_by_test_id,
+    )
+
+    rule_ids_filter = (
+        {_normalize_bandit_rule_id(rule_id) for rule_id in (request.rule_ids or []) if rule_id}
+        if request.rule_ids
+        else None
+    )
+    keyword_text = str(request.keyword or "").strip().lower()
+    source_text = str(request.source or "").strip()
+    selected_rule_ids: List[str] = []
+
+    for item in merged_rules:
+        if rule_ids_filter is not None and item["test_id"] not in rule_ids_filter:
+            continue
+        if source_text and item["source"] != source_text:
+            continue
+        if request.current_is_active is not None and bool(item["is_active"]) != request.current_is_active:
+            continue
+        if keyword_text:
+            search_blob = " ".join(
+                [
+                    str(item["test_id"]),
+                    str(item["name"]),
+                    str(item["description"]),
+                    str(item["description_summary"]),
+                ]
+            ).lower()
+            if keyword_text not in search_blob:
+                continue
+        selected_rule_ids.append(item["test_id"])
+
+    if not selected_rule_ids:
+        return {
+            "message": "没有找到符合条件的规则",
+            "updated_count": 0,
+            "is_active": request.is_active,
+        }
+
+    try:
+        existing_result = await db.execute(
+            select(BanditRuleState).where(BanditRuleState.test_id.in_(selected_rule_ids))
+        )
+    except ProgrammingError as exc:
+        _raise_bandit_rules_migration_http_error(exc)
+    existing_rows = existing_result.scalars().all()
+    existing_by_rule_id = {_normalize_bandit_rule_id(row.test_id): row for row in existing_rows}
+
+    updated_count = 0
+    for rule_id in selected_rule_ids:
+        existing = existing_by_rule_id.get(rule_id)
+        if existing is None:
+            db.add(
+                BanditRuleState(
+                    id=str(uuid.uuid4()),
+                    test_id=rule_id,
+                    is_active=request.is_active,
+                )
+            )
+        else:
+            existing.is_active = request.is_active
+        updated_count += 1
+    await db.commit()
+
+    return {
+        "message": f"已{'启用' if request.is_active else '禁用'} {updated_count} 条规则",
+        "updated_count": updated_count,
+        "is_active": request.is_active,
+    }
 
 
 @router.post("/bandit/scan", response_model=BanditScanTaskResponse)

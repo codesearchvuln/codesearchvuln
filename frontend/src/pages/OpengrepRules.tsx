@@ -96,8 +96,8 @@ function formatRuleCweDisplayTitle(cwe?: string) {
 interface OpengrepRulesProps {
 	embedded?: boolean;
 	showEngineSelector?: boolean;
-	engineValue?: "opengrep" | "gitleaks";
-	onEngineChange?: (value: "opengrep" | "gitleaks") => void;
+	engineValue?: "opengrep" | "gitleaks" | "bandit";
+	onEngineChange?: (value: "opengrep" | "gitleaks" | "bandit") => void;
 }
 
 export default function OpengrepRules({
@@ -1289,21 +1289,26 @@ export default function OpengrepRules({
 											</Label>
 											<Select
 												value={engineValue}
-												onValueChange={(val) => {
-													if (val === "opengrep" || val === "gitleaks") {
-														onEngineChange?.(val);
-													}
-												}}
+											onValueChange={(val) => {
+												if (
+													val === "opengrep" ||
+													val === "gitleaks" ||
+													val === "bandit"
+												) {
+													onEngineChange?.(val);
+												}
+											}}
 											>
 												<SelectTrigger className="cyber-input mt-1.5 h-10">
 													<SelectValue placeholder="选择引擎" />
 												</SelectTrigger>
 												<SelectContent className="cyber-dialog border-border">
-													<SelectItem value="opengrep">opengrep</SelectItem>
-													<SelectItem value="gitleaks">gitleaks</SelectItem>
-												</SelectContent>
-											</Select>
-										</div>
+												<SelectItem value="opengrep">opengrep</SelectItem>
+												<SelectItem value="gitleaks">gitleaks</SelectItem>
+												<SelectItem value="bandit">bandit</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
 									) : null}
 
 									<div className="min-w-[150px] flex-1">
