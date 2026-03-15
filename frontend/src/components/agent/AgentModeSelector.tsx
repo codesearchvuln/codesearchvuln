@@ -9,12 +9,13 @@ import { cn } from "@/shared/utils/utils";
 
 export type ScanMode = "static" | "agent";
 
-export type StaticTool = "opengrep" | "gitleaks" | "bandit";
+export type StaticTool = "opengrep" | "gitleaks" | "bandit" | "phpstan";
 
 export interface StaticToolSelection {
   opengrep: boolean;
   gitleaks: boolean;
   bandit: boolean;
+  phpstan: boolean;
 }
 
 interface AgentModeSelectorProps {
@@ -38,6 +39,7 @@ export default function AgentModeSelector({
     opengrep: true,
     gitleaks: false,
     bandit: false,
+    phpstan: false,
   };
 
   const updateStaticTool = (tool: StaticTool, checked: boolean) => {
@@ -163,6 +165,18 @@ export default function AgentModeSelector({
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">Python 安全扫描</span>
+              </label>
+              {/* PHPStan integration: static tool selector entry */}
+              <label className="flex items-center gap-2 text-xs font-mono text-sky-700 dark:text-sky-300 cursor-pointer">
+                <Checkbox
+                  checked={resolvedTools.phpstan}
+                  onCheckedChange={(checked) =>
+                    updateStaticTool("phpstan", Boolean(checked))
+                  }
+                  disabled={disabled}
+                  className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
+                />
+                <span className="tracking-wider">PHP 规则扫描</span>
               </label>
             </div>
           )}

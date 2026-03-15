@@ -17,6 +17,7 @@ import {
 } from "@/shared/api/opengrep";
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { createBanditScanTask } from "@/shared/api/bandit";
+import { createPhpstanScanTask } from "@/shared/api/phpstan";
 import { getZipFileInfo, uploadZipFile } from "@/shared/utils/zipStorage";
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import {
@@ -109,6 +110,8 @@ export default function CreateProjectScanDialog({
 	const [opengrepEnabled, setOpengrepEnabled] = useState(true);
 	const [gitleaksEnabled, setGitleaksEnabled] = useState(false);
 	const [banditEnabled, setBanditEnabled] = useState(false);
+	// PHPStan integration: static/hybrid creation option state.
+	const [phpstanEnabled, setPhpstanEnabled] = useState(false);
 	const [activeRules, setActiveRules] = useState<OpengrepRule[]>([]);
 	const [loadingRules, setLoadingRules] = useState(false);
 
@@ -250,6 +253,7 @@ export default function CreateProjectScanDialog({
 		setOpengrepEnabled(true);
 		setGitleaksEnabled(false);
 		setBanditEnabled(false);
+		setPhpstanEnabled(false);
 		setShowLlmQuickFixPanel(false);
 		setLlmProviderOptions(
 			buildLlmProviderOptions({ backendProviders: [], currentProviderId: "openai" }),
@@ -373,16 +377,30 @@ export default function CreateProjectScanDialog({
 			if (mode === "agent") {
 				baseCanCreate = true;
 			} else if (mode === "hybrid") {
-				baseCanCreate = opengrepEnabled || gitleaksEnabled || banditEnabled;
+				baseCanCreate =
+					opengrepEnabled || gitleaksEnabled || banditEnabled || phpstanEnabled;
 			} else {
-				baseCanCreate = opengrepEnabled || gitleaksEnabled || banditEnabled;
+				baseCanCreate =
+					opengrepEnabled || gitleaksEnabled || banditEnabled || phpstanEnabled;
 			}
 		} else {
 			if (!selectedProject) return false;
 			if (mode === "hybrid") {
-				if (!opengrepEnabled && !gitleaksEnabled && !banditEnabled) return false;
+				if (
+					!opengrepEnabled &&
+					!gitleaksEnabled &&
+					!banditEnabled &&
+					!phpstanEnabled
+				) {
+					return false;
+				}
 			} else if (mode === "static") {
-				if (!opengrepEnabled && !gitleaksEnabled && !banditEnabled) {
+				if (
+					!opengrepEnabled &&
+					!gitleaksEnabled &&
+					!banditEnabled &&
+					!phpstanEnabled
+				) {
 					return false;
 				}
 			}
@@ -404,6 +422,7 @@ export default function CreateProjectScanDialog({
 		opengrepEnabled,
 		gitleaksEnabled,
 		banditEnabled,
+		phpstanEnabled,
 		isLlmMode,
 		llmQuickInitialized,
 		quickFixPanelOpening,
@@ -416,6 +435,7 @@ export default function CreateProjectScanDialog({
 		let opengrepTask: { id: string } | null = null;
 		let gitleaksTask: { id: string } | null = null;
 		let banditTask: { id: string } | null = null;
+		let phpstanTask: { id: string } | null = null;
 		const taskNamePrefix = "静态分析";
 		const staticBatchId = createStaticScanBatchId();
 
@@ -459,8 +479,20 @@ export default function CreateProjectScanDialog({
 				target_path: ".",
 			});
 		}
+		// PHPStan integration: create task in the same static batch.
+		if (phpstanEnabled) {
+			phpstanTask = await createPhpstanScanTask({
+				project_id: project.id,
+				name: appendStaticScanBatchMarker(
+					`${taskNamePrefix}-PHPStan-${project.name}`,
+					staticBatchId,
+				),
+				target_path: ".",
+			});
+		}
 
-		const primaryTaskId = opengrepTask?.id || gitleaksTask?.id || banditTask?.id;
+		const primaryTaskId =
+			opengrepTask?.id || gitleaksTask?.id || banditTask?.id || phpstanTask?.id;
 		if (!primaryTaskId) {
 			throw new Error("静态扫描任务创建失败");
 		}
@@ -475,11 +507,17 @@ export default function CreateProjectScanDialog({
 		if (banditTask) {
 			params.set("banditTaskId", banditTask.id);
 		}
-		if (!opengrepTask && !banditTask && gitleaksTask) {
+		if (phpstanTask) {
+			params.set("phpstanTaskId", phpstanTask.id);
+		}
+		if (!opengrepTask && !banditTask && !phpstanTask && gitleaksTask) {
 			params.set("tool", "gitleaks");
 		}
-		if (!opengrepTask && !gitleaksTask && banditTask) {
+		if (!opengrepTask && !gitleaksTask && !phpstanTask && banditTask) {
 			params.set("tool", "bandit");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && phpstanTask) {
+			params.set("tool", "phpstan");
 		}
 		return { primaryTaskId, params };
 	};
@@ -506,12 +544,14 @@ export default function CreateProjectScanDialog({
 							opengrep_enabled: opengrepEnabled,
 							bandit_enabled: banditEnabled,
 							gitleaks_enabled: gitleaksEnabled,
+							phpstan_enabled: phpstanEnabled,
 						}
 					: {
 							mode: "disabled" as const,
 							opengrep_enabled: false,
 							bandit_enabled: false,
 							gitleaks_enabled: false,
+							phpstan_enabled: false,
 						},
 		},
 		verification_level: "analysis_with_poc_plan" as const,
@@ -885,7 +925,12 @@ export default function CreateProjectScanDialog({
 					toast.error("该项目未上传源码压缩包");
 					return;
 				}
-				if (!opengrepEnabled && !gitleaksEnabled && !banditEnabled) {
+				if (
+					!opengrepEnabled &&
+					!gitleaksEnabled &&
+					!banditEnabled &&
+					!phpstanEnabled
+				) {
 					toast.error("请至少启用一个扫描引擎");
 					return;
 				}
@@ -977,6 +1022,8 @@ export default function CreateProjectScanDialog({
 			setGitleaksEnabled={setGitleaksEnabled}
 			banditEnabled={banditEnabled}
 			setBanditEnabled={setBanditEnabled}
+			phpstanEnabled={phpstanEnabled}
+			setPhpstanEnabled={setPhpstanEnabled}
 			showLlmQuickFixPanel={showLlmQuickFixPanel}
 			openLlmQuickFixPanelManual={openLlmQuickFixPanelManual}
 			quickFixSaving={quickFixSaving}

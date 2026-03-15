@@ -18,6 +18,7 @@ function createEmptyTaskPoolState(
 		opengrepTasks: [],
 		gitleaksTasks: [],
 		banditTasks: [],
+		phpstanTasks: [],
 	};
 }
 

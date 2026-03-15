@@ -76,6 +76,9 @@ test("fetchTaskActivities aggregates grouped static task severities by detail-pa
 				],
 			};
 		}
+		if (url.startsWith("/static-tasks/phpstan/tasks")) {
+			return { data: [] };
+		}
 		throw new Error(`Unexpected apiClient.get call: ${url}`);
 	}) as typeof apiClient.get;
 
@@ -128,7 +131,8 @@ test("fetchTaskActivities clamps opengrep low severity count at zero", async () 
 		}
 		if (
 			url.startsWith("/static-tasks/gitleaks/tasks") ||
-			url.startsWith("/static-tasks/bandit/tasks")
+			url.startsWith("/static-tasks/bandit/tasks") ||
+			url.startsWith("/static-tasks/phpstan/tasks")
 		) {
 			return { data: [] };
 		}

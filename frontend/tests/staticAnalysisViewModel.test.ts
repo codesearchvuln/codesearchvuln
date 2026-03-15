@@ -49,6 +49,8 @@ test("buildUnifiedFindingRows normalizes opengrep and gitleaks rows", () => {
     opengrepTaskId: "task-og",
     gitleaksTaskId: "task-gl",
     banditTaskId: "task-ba",
+    phpstanFindings: [],
+    phpstanTaskId: "",
   });
 
   assert.equal(rows[0]?.engine, "opengrep");
@@ -314,6 +316,7 @@ test("getStaticAnalysisTotalDisplayDurationMs sums completed and running engine 
       scan_duration_ms: 0,
     },
     banditTask: null,
+    phpstanTask: null,
     nowMs: Date.parse("2026-03-12T07:01:30.000Z"),
   });
 
@@ -337,6 +340,7 @@ test("buildStaticAnalysisProgressSummary matches the task management progress ru
       updated_at: "2026-03-12T07:05:00.000Z",
     },
     banditTask: null,
+    phpstanTask: null,
     nowMs: Date.parse("2026-03-12T07:12:00.000Z"),
   });
 
@@ -358,6 +362,7 @@ test("buildStaticAnalysisProgressSummary matches the task management progress ru
       updated_at: "2026-03-12T07:04:00.000Z",
     },
     banditTask: null,
+    phpstanTask: null,
     nowMs: Date.parse("2026-03-12T07:12:00.000Z"),
   });
 
@@ -375,6 +380,7 @@ test("buildStaticAnalysisProgressSummary falls back to the primary task status w
       updated_at: "2026-03-12T07:01:00.000Z",
     },
     banditTask: null,
+    phpstanTask: null,
     nowMs: Date.parse("2026-03-12T07:05:00.000Z"),
   });
 
@@ -398,6 +404,7 @@ test("buildStaticAnalysisProgressSummary keeps the management-page primary task 
       updated_at: "2026-03-12T07:12:00.000Z",
     },
     banditTask: null,
+    phpstanTask: null,
     nowMs: Date.parse("2026-03-12T07:12:00.000Z"),
   });
 

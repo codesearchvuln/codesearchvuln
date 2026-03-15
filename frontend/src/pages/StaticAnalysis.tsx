@@ -64,11 +64,15 @@ export default function StaticAnalysis() {
   const opengrepTaskId = useMemo(() => {
     const explicit = searchParams.get("opengrepTaskId");
     const hasOtherExplicitEngineTaskId = Boolean(
-      searchParams.get("gitleaksTaskId") || searchParams.get("banditTaskId"),
+      searchParams.get("gitleaksTaskId") ||
+        searchParams.get("banditTaskId") ||
+        searchParams.get("phpstanTaskId"),
     );
     if (explicit) return explicit;
     if (hasOtherExplicitEngineTaskId) return "";
-    if (toolParam === "gitleaks" || toolParam === "bandit") return "";
+    if (toolParam === "gitleaks" || toolParam === "bandit" || toolParam === "phpstan") {
+      return "";
+    }
     return taskId;
   }, [searchParams, taskId, toolParam]);
 
@@ -86,7 +90,17 @@ export default function StaticAnalysis() {
     return "";
   }, [searchParams, taskId, toolParam]);
 
-  const hasEnabledEngine = Boolean(opengrepTaskId || gitleaksTaskId || banditTaskId);
+  // PHPStan integration: parse phpstan task id and compatible tool fallback.
+  const phpstanTaskId = useMemo(() => {
+    const explicit = searchParams.get("phpstanTaskId");
+    if (explicit) return explicit;
+    if (toolParam === "phpstan") return taskId;
+    return "";
+  }, [searchParams, taskId, toolParam]);
+
+  const hasEnabledEngine = Boolean(
+    opengrepTaskId || gitleaksTaskId || banditTaskId || phpstanTaskId,
+  );
   const [engineFilter, setEngineFilter] = useState<EngineFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
@@ -98,9 +112,11 @@ export default function StaticAnalysis() {
     opengrepTask,
     gitleaksTask,
     banditTask,
+    phpstanTask,
     opengrepFindings,
     gitleaksFindings,
     banditFindings,
+    phpstanFindings,
     loadingInitial,
     loadingTask,
     loadingFindings,
@@ -114,11 +130,13 @@ export default function StaticAnalysis() {
     canInterruptOpengrep,
     canInterruptGitleaks,
     canInterruptBandit,
+    canInterruptPhpstan,
   } = useStaticAnalysisData({
     hasEnabledEngine,
     opengrepTaskId,
     gitleaksTaskId,
     banditTaskId,
+    phpstanTaskId,
   });
 
   const unifiedRows = useMemo(
@@ -127,9 +145,11 @@ export default function StaticAnalysis() {
         opengrepFindings,
         gitleaksFindings,
         banditFindings,
+        phpstanFindings,
         opengrepTaskId,
         gitleaksTaskId,
         banditTaskId,
+        phpstanTaskId,
       }),
     [
       banditFindings,
@@ -138,6 +158,8 @@ export default function StaticAnalysis() {
       gitleaksTaskId,
       opengrepFindings,
       opengrepTaskId,
+      phpstanFindings,
+      phpstanTaskId,
     ],
   );
 
@@ -159,8 +181,9 @@ export default function StaticAnalysis() {
     if (opengrepTaskId) engines.push("opengrep");
     if (gitleaksTaskId) engines.push("gitleaks");
     if (banditTaskId) engines.push("bandit");
+    if (phpstanTaskId) engines.push("phpstan");
     return engines;
-  }, [banditTaskId, gitleaksTaskId, opengrepTaskId]);
+  }, [banditTaskId, gitleaksTaskId, opengrepTaskId, phpstanTaskId]);
   const pageResetKey = `${engineFilter}:${statusFilter}:${severityFilter}:${confidenceFilter}`;
 
   useEffect(() => {
@@ -238,6 +261,16 @@ export default function StaticAnalysis() {
               中止 Bandit
             </Button>
           ) : null}
+          {canInterruptPhpstan ? (
+            <Button
+              variant="outline"
+              className="cyber-btn-outline h-8"
+              onClick={() => setInterruptTarget("phpstan")}
+            >
+              <Ban className="w-3.5 h-3.5 mr-1.5" />
+              中止 PHPStan
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             className="cyber-btn-outline h-8"
@@ -260,6 +293,7 @@ export default function StaticAnalysis() {
         opengrepTask={opengrepTask}
         gitleaksTask={gitleaksTask}
         banditTask={banditTask}
+        phpstanTask={phpstanTask}
         enabledEngines={enabledEngines}
       />
 
@@ -281,6 +315,7 @@ export default function StaticAnalysis() {
                 <SelectItem value="opengrep">Opengrep</SelectItem>
                 <SelectItem value="gitleaks">Gitleaks</SelectItem>
                 <SelectItem value="bandit">Bandit</SelectItem>
+                <SelectItem value="phpstan">PHPStan</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -374,7 +409,9 @@ export default function StaticAnalysis() {
                 ? " Opengrep "
                 : interruptTarget === "gitleaks"
                   ? " Gitleaks "
-                  : " Bandit "}
+                  : interruptTarget === "bandit"
+                    ? " Bandit "
+                    : " PHPStan "}
               扫描任务。中止后任务状态将更新为已中断。
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -35,6 +35,7 @@ import {
 } from "@/shared/api/opengrep";
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { createBanditScanTask } from "@/shared/api/bandit";
+import { createPhpstanScanTask } from "@/shared/api/phpstan";
 import {
 	getOpengrepActiveRules,
 	setOpengrepActiveRules,
@@ -117,6 +118,7 @@ export default function CreateScanTaskDialog({
 		opengrep: true,
 		gitleaks: false,
 		bandit: false,
+		phpstan: false,
 	});
 	const [staticRules, setStaticRules] = useState<OpengrepRule[]>([]);
 	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
@@ -178,7 +180,7 @@ export default function CreateScanTaskDialog({
 			setShowAdvanced(false);
 			setSelectedRuleIds([]);
 			setScanMode(initialScanMode || "agent");
-			setStaticTools({ opengrep: true, gitleaks: false, bandit: false });
+			setStaticTools({ opengrep: true, gitleaks: false, bandit: false, phpstan: false });
 			setSourceMode("existing");
 			setNewProjectName("");
 			setNewProjectFile(null);
@@ -254,13 +256,20 @@ export default function CreateScanTaskDialog({
 		projectId: string,
 		projectName: string,
 	) => {
-		if (!staticTools.opengrep && !staticTools.gitleaks && !staticTools.bandit) {
+		// PHPStan integration: enforce 4-engine minimum selection check.
+		if (
+			!staticTools.opengrep &&
+			!staticTools.gitleaks &&
+			!staticTools.bandit &&
+			!staticTools.phpstan
+		) {
 			throw new Error("请选择至少一个静态分析工具");
 		}
 
 		let opengrepTask: { id: string } | null = null;
 		let gitleaksTask: { id: string } | null = null;
 		let banditTask: { id: string } | null = null;
+		let phpstanTask: { id: string } | null = null;
 		const staticBatchId = createStaticScanBatchId();
 
 		if (staticTools.opengrep) {
@@ -338,8 +347,20 @@ export default function CreateScanTaskDialog({
 				target_path: ".",
 			});
 		}
+		// PHPStan integration: create static task in the same batch marker group.
+		if (staticTools.phpstan) {
+			phpstanTask = await createPhpstanScanTask({
+				project_id: projectId,
+				name: appendStaticScanBatchMarker(
+					`静态分析-PHPStan-${projectName}`,
+					staticBatchId,
+				),
+				target_path: ".",
+			});
+		}
 
-		const primaryTaskId = opengrepTask?.id || gitleaksTask?.id || banditTask?.id;
+		const primaryTaskId =
+			opengrepTask?.id || gitleaksTask?.id || banditTask?.id || phpstanTask?.id;
 		if (!primaryTaskId) {
 			throw new Error("静态分析任务创建失败");
 		}
@@ -354,11 +375,17 @@ export default function CreateScanTaskDialog({
 		if (banditTask) {
 			params.set("banditTaskId", banditTask.id);
 		}
-		if (!opengrepTask && !banditTask && gitleaksTask) {
+		if (phpstanTask) {
+			params.set("phpstanTaskId", phpstanTask.id);
+		}
+		if (!opengrepTask && !banditTask && !phpstanTask && gitleaksTask) {
 			params.set("tool", "gitleaks");
 		}
-		if (!opengrepTask && !gitleaksTask && banditTask) {
+		if (!opengrepTask && !gitleaksTask && !phpstanTask && banditTask) {
 			params.set("tool", "bandit");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && phpstanTask) {
+			params.set("tool", "phpstan");
 		}
 
 		return {
@@ -410,6 +437,7 @@ export default function CreateScanTaskDialog({
 									opengrep_enabled: false,
 									bandit_enabled: false,
 									gitleaks_enabled: false,
+									phpstan_enabled: false,
 								},
 							},
 							target_files:
@@ -475,6 +503,7 @@ export default function CreateScanTaskDialog({
 							opengrep_enabled: false,
 							bandit_enabled: false,
 							gitleaks_enabled: false,
+							phpstan_enabled: false,
 						},
 					},
 					exclude_patterns: excludePatterns,
@@ -531,7 +560,12 @@ export default function CreateScanTaskDialog({
 			if (sourceMode === "upload") {
 				if (!newProjectName.trim() || !newProjectFile) return false;
 				if (scanMode === "static") {
-					return staticTools.opengrep || staticTools.gitleaks || staticTools.bandit;
+					return (
+						staticTools.opengrep ||
+						staticTools.gitleaks ||
+						staticTools.bandit ||
+						staticTools.phpstan
+					);
 				}
 				return true;
 			}
@@ -540,7 +574,10 @@ export default function CreateScanTaskDialog({
 				return (
 					isZipProject(selectedProject) &&
 				!!zipState.storedZipInfo?.has_file &&
-				(staticTools.opengrep || staticTools.gitleaks || staticTools.bandit)
+				(staticTools.opengrep ||
+					staticTools.gitleaks ||
+					staticTools.bandit ||
+					staticTools.phpstan)
 			);
 		}
 			if (!isZipProject(selectedProject)) return false;
@@ -560,6 +597,7 @@ export default function CreateScanTaskDialog({
 			staticTools.opengrep,
 			staticTools.gitleaks,
 			staticTools.bandit,
+			staticTools.phpstan,
 		]);
 
 	return (

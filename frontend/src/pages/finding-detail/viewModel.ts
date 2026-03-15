@@ -3,6 +3,7 @@ import type { FindingCodeWindowDisplayLine } from "@/pages/AgentAudit/components
 import type { AgentFinding } from "@/shared/api/agentTasks";
 import type { BanditFinding } from "@/shared/api/bandit";
 import type { GitleaksFinding } from "@/shared/api/gitleaks";
+import type { PhpstanFinding } from "@/shared/api/phpstan";
 import type {
   OpengrepFinding,
   OpengrepFindingContext,
@@ -564,6 +565,12 @@ export function buildBanditFindingCodeViews(finding: BanditFinding): FindingDeta
   ];
 }
 
+export function buildPhpstanFindingCodeViews(
+  finding: PhpstanFinding,
+): FindingDetailCodeView[] {
+  return [];
+}
+
 export function buildAgentFindingCodeViews(finding: AgentFinding): FindingDetailCodeView[] {
   const contextCode = String(finding.code_context || "").trim();
   const snippetCode = String(finding.code_snippet || "").trim();
@@ -882,6 +889,59 @@ export function buildBanditFindingDetailModel(params: {
       summaryStats,
     }),
     codeSections: buildFindingDetailCodeSections(buildBanditFindingCodeViews(finding)),
+    projectId: params.projectId,
+    projectSourceType: params.projectSourceType,
+    projectName: params.projectName,
+  });
+}
+
+export function buildPhpstanFindingDetailModel(params: {
+  finding: PhpstanFinding;
+  taskId: string;
+  findingId: string;
+  taskName?: string | null;
+  projectId?: string | null;
+  projectSourceType?: ProjectSourceType | null;
+  projectName?: string | null;
+}): FindingDetailPageModel {
+  const { finding } = params;
+  const statusLabel = buildStatusLabel(finding.status);
+  const location = formatLocation({
+    filePath: finding.file_path,
+    lineStart: finding.line ?? null,
+    lineEnd: finding.line ?? null,
+  });
+  const summaryStats: FindingDetailSummaryStat[] = [
+    { label: "漏洞危害", value: "低危", tone: "success" },
+    { label: "漏洞置信度", value: "中", tone: "warning" },
+  ];
+  const headlineValue =
+    String(finding.identifier || "").trim() ||
+    String(finding.message || "").trim() ||
+    "phpstan-rule";
+
+  return buildBaseModel({
+    pageTitle: "统一漏洞详情",
+    codePanelTitle: "关联代码",
+    emptyCodeMessage: "当前来源未提供可展示的命中代码。",
+    rootCause: {
+      title: "扫描说明",
+      body: String(finding.message || "").trim() || String(finding.tip || "").trim() || MISSING_DESCRIPTION,
+    },
+    trackingItems: buildTrackingItems({
+      sourceLabel: "静态扫描 · PHPStan",
+      taskId: params.taskId,
+      findingId: params.findingId,
+      taskName: params.taskName,
+      location,
+    }),
+    overviewItems: buildOverviewItems({
+      statusLabel,
+      headlineLabel: "漏洞类型",
+      headlineValue,
+      summaryStats,
+    }),
+    codeSections: buildFindingDetailCodeSections(buildPhpstanFindingCodeViews(finding)),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,

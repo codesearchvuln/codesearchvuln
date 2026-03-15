@@ -95,7 +95,8 @@ test("fetchTaskActivities maps agent severity stats for intelligent and hybrid t
     if (
       url.startsWith("/static-tasks/tasks") ||
       url.startsWith("/static-tasks/gitleaks/tasks") ||
-      url.startsWith("/static-tasks/bandit/tasks")
+      url.startsWith("/static-tasks/bandit/tasks") ||
+      url.startsWith("/static-tasks/phpstan/tasks")
     ) {
       return { data: [] };
     }

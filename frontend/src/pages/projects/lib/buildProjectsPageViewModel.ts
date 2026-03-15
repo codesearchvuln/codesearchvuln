@@ -42,6 +42,7 @@ export function getProjectExecutionStats(
 		opengrepTasks: projectTaskPool?.opengrepTasks || [],
 		gitleaksTasks: projectTaskPool?.gitleaksTasks || [],
 		banditTasks: projectTaskPool?.banditTasks || [],
+		phpstanTasks: projectTaskPool?.phpstanTasks || [],
 	});
 	const staticStats = staticGroups.reduce(
 		(accumulator, group) => {
@@ -115,6 +116,7 @@ export function buildProjectsPageViewModel(
 				opengrepTasks: projectTaskPool?.opengrepTasks || [],
 				gitleaksTasks: projectTaskPool?.gitleaksTasks || [],
 				banditTasks: projectTaskPool?.banditTasks || [],
+				phpstanTasks: projectTaskPool?.phpstanTasks || [],
 			});
 			return {
 				id: project.id,

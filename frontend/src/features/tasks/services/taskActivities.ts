@@ -8,6 +8,10 @@ import {
 	getBanditScanTasks,
 } from "@/shared/api/bandit";
 import {
+	type PhpstanScanTask,
+	getPhpstanScanTasks,
+} from "@/shared/api/phpstan";
+import {
 	getOpengrepScanTasks,
 	type OpengrepScanTask,
 } from "@/shared/api/opengrep";
@@ -177,6 +181,18 @@ function buildBanditSeverityCounts(
 	};
 }
 
+function buildPhpstanSeverityCounts(
+	task?: PhpstanScanTask | null,
+): StaticSeverityCounts {
+	// PHPStan integration: dashboard/task活动口径将 phpstan 发现全部归入 low(hint)。
+	return {
+		critical: 0,
+		high: 0,
+		medium: 0,
+		low: toNonNegativeInt(task?.total_findings),
+	};
+}
+
 function mergeSeverityCounts(...counts: StaticSeverityCounts[]): StaticSeverityCounts {
 	return counts.reduce<StaticSeverityCounts>(
 		(acc, item) => ({
@@ -198,6 +214,7 @@ function toRuleScanActivities(
 	opengrepTasks: OpengrepScanTask[],
 	gitleaksTasks: GitleaksScanTask[],
 	banditTasks: BanditScanTask[],
+	phpstanTasks: PhpstanScanTask[],
 	resolveProjectName: (projectId: string) => string,
 ): TaskActivityItem[] {
 	// Multi-engine grouping: one activity item can contain any selected static engines.
@@ -208,6 +225,7 @@ function toRuleScanActivities(
 		opengrepTasks: visibleOpengrepTasks,
 		gitleaksTasks,
 		banditTasks,
+		phpstanTasks,
 	});
 
 	return groups
@@ -215,7 +233,8 @@ function toRuleScanActivities(
 		const opengrepTask = group.opengrepTask;
 		const gitleaksTask = group.gitleaksTask;
 		const banditTask = group.banditTask;
-		const primaryTask = opengrepTask || gitleaksTask || banditTask;
+		const phpstanTask = group.phpstanTask;
+		const primaryTask = opengrepTask || gitleaksTask || banditTask || phpstanTask;
 		if (!primaryTask) {
 			return null;
 		}
@@ -231,17 +250,24 @@ function toRuleScanActivities(
 		if (banditTask) {
 			params.set("banditTaskId", banditTask.id);
 		}
-		if (!opengrepTask && gitleaksTask && !banditTask) {
+		if (phpstanTask) {
+			params.set("phpstanTaskId", phpstanTask.id);
+		}
+		if (!opengrepTask && gitleaksTask && !banditTask && !phpstanTask) {
 			params.set("tool", "gitleaks");
 		}
-		if (!opengrepTask && !gitleaksTask && banditTask) {
+		if (!opengrepTask && !gitleaksTask && banditTask && !phpstanTask) {
 			params.set("tool", "bandit");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && phpstanTask) {
+			params.set("tool", "phpstan");
 		}
 
 		const durationCandidates = [
 			opengrepTask?.scan_duration_ms,
 			gitleaksTask?.scan_duration_ms,
 			banditTask?.scan_duration_ms,
+			phpstanTask?.scan_duration_ms,
 		];
 		const durationMs = durationCandidates.reduce<number | null>((total, value) => {
 			if (
@@ -258,15 +284,16 @@ function toRuleScanActivities(
 			buildOpengrepSeverityCounts(opengrepTask),
 			buildGitleaksSeverityCounts(gitleaksTask),
 			buildBanditSeverityCounts(banditTask),
+			buildPhpstanSeverityCounts(phpstanTask),
 		);
 
-		const candidateStatuses = [opengrepTask, gitleaksTask, banditTask]
+		const candidateStatuses = [opengrepTask, gitleaksTask, banditTask, phpstanTask]
 			.map((task) => normalizeStatus(task?.status))
 			.filter(Boolean);
 		const hasRunningStatus = candidateStatuses.some(
 			(status) => status === "running" || status === "pending",
 		);
-		const latestUpdatedAt = [opengrepTask, gitleaksTask, banditTask].reduce<
+		const latestUpdatedAt = [opengrepTask, gitleaksTask, banditTask, phpstanTask].reduce<
 			string | null
 		>((latest, task) => {
 			const current = task?.updated_at || null;
@@ -284,7 +311,10 @@ function toRuleScanActivities(
 			kind: "rule_scan",
 			sourceMode: resolveSourceModeFromTaskMeta(
 				"rule_scan",
-				opengrepTask?.name || gitleaksTask?.name || banditTask?.name,
+				opengrepTask?.name ||
+					gitleaksTask?.name ||
+					banditTask?.name ||
+					phpstanTask?.name,
 			),
 			status: resolveStaticScanGroupStatus(group),
 			gitleaksEnabled: Boolean(gitleaksTask),
@@ -332,11 +362,13 @@ export async function fetchTaskActivities(
 	projects: Project[],
 	limit = 100,
 ): Promise<TaskActivityItem[]> {
-	const [agentTasks, opengrepTasks, gitleaksTasks, banditTasks] = await Promise.all([
+	const [agentTasks, opengrepTasks, gitleaksTasks, banditTasks, phpstanTasks] =
+		await Promise.all([
 		getAgentTasks({ limit }),
 		getOpengrepScanTasks({ limit }),
 		getGitleaksScanTasks({ limit }),
 		getBanditScanTasks({ limit }),
+		getPhpstanScanTasks({ limit }),
 	]);
 
 	const projectNameMap = mapProjectNames(projects);
@@ -348,6 +380,7 @@ export async function fetchTaskActivities(
 			opengrepTasks,
 			gitleaksTasks,
 			banditTasks,
+			phpstanTasks,
 			resolveProjectName,
 		),
 		...toAgentActivities(agentTasks, resolveProjectName),

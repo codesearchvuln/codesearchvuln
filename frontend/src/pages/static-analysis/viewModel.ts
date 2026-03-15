@@ -4,7 +4,7 @@ import {
 	type NormalizedSeverity,
 } from "@/shared/utils/staticAnalysisSeverity";
 
-export type Engine = "opengrep" | "gitleaks" | "bandit";
+export type Engine = "opengrep" | "gitleaks" | "bandit" | "phpstan";
 export type EngineFilter = "all" | Engine;
 export type FindingStatus = "open" | "verified" | "false_positive" | "fixed";
 export type StatusFilter = "all" | FindingStatus;
@@ -76,6 +76,16 @@ type MinimalBanditFinding = {
   issue_confidence?: string | null;
   file_path?: string | null;
   line_number?: unknown;
+  status?: string | null;
+};
+
+type MinimalPhpstanFinding = {
+  id: string;
+  scan_task_id?: string | null;
+  file_path?: string | null;
+  line?: unknown;
+  message?: string | null;
+  identifier?: string | null;
   status?: string | null;
 };
 
@@ -255,12 +265,14 @@ export function getStaticAnalysisTotalDisplayDurationMs(input: {
   opengrepTask: StaticAnalysisSummaryTaskLike | null;
   gitleaksTask: StaticAnalysisSummaryTaskLike | null;
   banditTask: StaticAnalysisSummaryTaskLike | null;
+  phpstanTask: StaticAnalysisSummaryTaskLike | null;
   nowMs?: number;
 }): number {
   return (
     getStaticAnalysisTaskDisplayDurationMs(input.opengrepTask, input.nowMs) +
     getStaticAnalysisTaskDisplayDurationMs(input.gitleaksTask, input.nowMs) +
-    getStaticAnalysisTaskDisplayDurationMs(input.banditTask, input.nowMs)
+    getStaticAnalysisTaskDisplayDurationMs(input.banditTask, input.nowMs) +
+    getStaticAnalysisTaskDisplayDurationMs(input.phpstanTask, input.nowMs)
   );
 }
 
@@ -268,10 +280,15 @@ export function buildStaticAnalysisProgressSummary(input: {
   opengrepTask: StaticAnalysisProgressTaskLike | null;
   gitleaksTask: StaticAnalysisProgressTaskLike | null;
   banditTask: StaticAnalysisProgressTaskLike | null;
+  phpstanTask: StaticAnalysisProgressTaskLike | null;
   nowMs?: number;
 }): StaticAnalysisProgressSummary {
   const primaryTask =
-    input.opengrepTask || input.gitleaksTask || input.banditTask || null;
+    input.opengrepTask ||
+    input.gitleaksTask ||
+    input.banditTask ||
+    input.phpstanTask ||
+    null;
   if (!primaryTask) {
     return { progressPercent: 0 };
   }
@@ -303,9 +320,11 @@ export function buildUnifiedFindingRows(input: {
   opengrepFindings: MinimalOpengrepFinding[];
   gitleaksFindings: MinimalGitleaksFinding[];
   banditFindings: MinimalBanditFinding[];
+  phpstanFindings: MinimalPhpstanFinding[];
   opengrepTaskId: string;
   gitleaksTaskId: string;
   banditTaskId: string;
+  phpstanTaskId: string;
 }): UnifiedFindingRow[] {
   const opengrepRows = input.opengrepFindings.map((finding) => {
     const severity = normalizeStaticAnalysisSeverity(finding.severity);
@@ -362,8 +381,28 @@ export function buildUnifiedFindingRows(input: {
       status: String(finding.status || "open").trim().toLowerCase(),
     };
   });
+  // PHPStan integration: normalize phpstan rows into unified static finding table.
+  const phpstanRows = input.phpstanFindings.map((finding) => {
+    const identifier = String(finding.identifier || "").trim();
+    const message = String(finding.message || "").trim();
+    const rule = identifier || message || "-";
+    return {
+      key: `phpstan:${finding.id}`,
+      id: finding.id,
+      taskId: finding.scan_task_id || input.phpstanTaskId,
+      engine: "phpstan" as const,
+      rule,
+      filePath: normalizeStaticAnalysisPath(finding.file_path),
+      line: toStaticAnalysisPositiveLine(finding.line),
+      severity: "LOW" as const,
+      severityScore: SEVERITY_SCORE.LOW,
+      confidence: "MEDIUM" as const,
+      confidenceScore: CONFIDENCE_SCORE.MEDIUM,
+      status: String(finding.status || "open").trim().toLowerCase(),
+    };
+  });
 
-  return [...opengrepRows, ...gitleaksRows, ...banditRows];
+  return [...opengrepRows, ...gitleaksRows, ...banditRows, ...phpstanRows];
 }
 
 export function buildStaticAnalysisListState(input: {

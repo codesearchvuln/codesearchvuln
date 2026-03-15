@@ -3,6 +3,7 @@ import type { ScanCreateMode } from "@/components/scan/CreateProjectScanDialog";
 import type { AgentTask } from "@/shared/api/agentTasks";
 import type { BanditScanTask } from "@/shared/api/bandit";
 import type { GitleaksScanTask } from "@/shared/api/gitleaks";
+import type { PhpstanScanTask } from "@/shared/api/phpstan";
 import type { OpengrepScanTask } from "@/shared/api/opengrep";
 import type { Project, AuditTask } from "@/shared/types";
 import type { ProjectsPageDataSource } from "./data/projectsPageDataSource";
@@ -16,6 +17,7 @@ export interface ProjectTaskPool {
 	opengrepTasks: OpengrepScanTask[];
 	gitleaksTasks: GitleaksScanTask[];
 	banditTasks: BanditScanTask[];
+	phpstanTasks: PhpstanScanTask[];
 }
 
 export interface ProjectTaskPoolState extends ProjectTaskPool {

@@ -199,6 +199,7 @@ export interface AgentStaticBootstrapScope {
   opengrep_enabled?: boolean;
   bandit_enabled?: boolean;
   gitleaks_enabled?: boolean;
+  phpstan_enabled?: boolean;
 }
 
 export interface AgentAuditScope extends Record<string, unknown> {

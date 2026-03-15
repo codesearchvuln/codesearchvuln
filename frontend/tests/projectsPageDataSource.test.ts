@@ -39,6 +39,7 @@ test("api projects data source loads paginated projects and task pools", async (
 		getOpengrepScanTasks: async () => [{ id: "o1", project_id: "p1", status: "completed", created_at: "2024-01-01T00:00:00Z" }],
 		getGitleaksScanTasks: async () => [{ id: "g1", project_id: "p1", status: "completed", created_at: "2024-01-01T00:00:01Z" }],
 		getBanditScanTasks: async () => [{ id: "b1", project_id: "p1", status: "completed", created_at: "2024-01-01T00:00:02Z" }],
+		getPhpstanScanTasks: async () => [{ id: "p1", project_id: "p1", status: "completed", created_at: "2024-01-01T00:00:03Z" }],
 		getProjectInfo: async () => ({
 			status: "ready",
 			language_info: {
@@ -62,6 +63,7 @@ test("api projects data source loads paginated projects and task pools", async (
 	assert.equal(taskPool.opengrepTasks.length, 1);
 	assert.equal(taskPool.gitleaksTasks.length, 1);
 	assert.equal(taskPool.banditTasks.length, 1);
+	assert.equal(taskPool.phpstanTasks.length, 1);
 	assert.equal(languageStats.status, "ready");
 	assert.equal(languageStats.totalFiles, 10);
 });

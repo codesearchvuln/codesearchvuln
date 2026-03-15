@@ -49,6 +49,10 @@ import {
 	getBanditScanTasks,
 } from "@/shared/api/bandit";
 import {
+	type PhpstanScanTask,
+	getPhpstanScanTasks,
+} from "@/shared/api/phpstan";
+import {
 	getOpengrepScanFindings,
 	getOpengrepScanTasks,
 	type OpengrepFinding,
@@ -75,6 +79,7 @@ export default function ProjectDetail() {
 	const [staticTasks, setStaticTasks] = useState<OpengrepScanTask[]>([]);
 	const [gitleaksTasks, setGitleaksTasks] = useState<GitleaksScanTask[]>([]);
 	const [banditTasks, setBanditTasks] = useState<BanditScanTask[]>([]);
+	const [phpstanTasks, setPhpstanTasks] = useState<PhpstanScanTask[]>([]);
 	const [potentialVulnerabilities, setPotentialVulnerabilities] = useState<
 		ProjectCardPotentialVulnerability[]
 	>([]);
@@ -239,6 +244,7 @@ export default function ProjectDetail() {
 				staticTasksRes,
 				gitleaksTasksRes,
 				banditTasksRes,
+				phpstanTasksRes,
 			] = await Promise.allSettled([
 				api.getProjectById(id),
 				api.getAuditTasks(id),
@@ -246,6 +252,7 @@ export default function ProjectDetail() {
 				getOpengrepScanTasks({ projectId: id }),
 				getGitleaksScanTasks({ projectId: id }),
 				getBanditScanTasks({ projectId: id }),
+				getPhpstanScanTasks({ projectId: id }),
 			]);
 
 			const nextAuditTasks =
@@ -273,6 +280,11 @@ export default function ProjectDetail() {
 				Array.isArray(banditTasksRes.value)
 					? banditTasksRes.value
 					: [];
+			const nextPhpstanTasks =
+				phpstanTasksRes.status === "fulfilled" &&
+				Array.isArray(phpstanTasksRes.value)
+					? phpstanTasksRes.value
+					: [];
 
 			if (projectRes.status === "fulfilled") {
 				setProject(projectRes.value);
@@ -296,12 +308,16 @@ export default function ProjectDetail() {
 			if (banditTasksRes.status !== "fulfilled") {
 				console.warn("Failed to load bandit tasks:", banditTasksRes.reason);
 			}
+			if (phpstanTasksRes.status !== "fulfilled") {
+				console.warn("Failed to load phpstan tasks:", phpstanTasksRes.reason);
+			}
 
 			setAuditTasks(nextAuditTasks);
 			setAgentTasks(nextAgentTasks);
 			setStaticTasks(nextStaticTasks);
 			setGitleaksTasks(nextGitleaksTasks);
 			setBanditTasks(nextBanditTasks);
+			setPhpstanTasks(nextPhpstanTasks);
 
 			void fetchProjectPotentialVulnerabilities(
 				id,
@@ -332,9 +348,10 @@ export default function ProjectDetail() {
 			opengrepTasks: staticTasks,
 			gitleaksTasks,
 			banditTasks,
+			phpstanTasks,
 			limit: DETAIL_RECENT_TASK_LIMIT,
 		});
-	}, [id, auditTasks, agentTasks, staticTasks, gitleaksTasks, banditTasks]);
+	}, [id, auditTasks, agentTasks, staticTasks, gitleaksTasks, banditTasks, phpstanTasks]);
 
 	const handleRunScan = () => {
 		setShowCreateScanTaskDialog(true);
