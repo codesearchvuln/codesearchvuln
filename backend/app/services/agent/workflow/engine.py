@@ -69,7 +69,8 @@ class AuditWorkflowEngine:
         self.bl_queue = business_logic_queue_service
         self.task_id = task_id
         self.orchestrator = orchestrator
-        self.workflow_config = workflow_config or WorkflowConfig()
+        inherited_workflow_config = getattr(orchestrator, "_workflow_config", None)
+        self.workflow_config = workflow_config or inherited_workflow_config or WorkflowConfig()
 
         # 🔥 内存监控
         self.memory_monitor = MemoryMonitor()
@@ -1157,6 +1158,7 @@ class AuditWorkflowEngine:
 
         step_start = time.time()
         report_text = ""
+        updated_finding: Optional[Dict[str, Any]] = None
         success = False
         error_msg = None
 
@@ -1174,6 +1176,9 @@ class AuditWorkflowEngine:
             )
             if result.success and result.data:
                 report_text = result.data.get("vulnerability_report") or ""
+                payload_updated_finding = result.data.get("updated_finding")
+                if isinstance(payload_updated_finding, dict):
+                    updated_finding = payload_updated_finding
                 success = bool(report_text)
             else:
                 error_msg = result.error or "Report Agent 返回空结果"
@@ -1206,8 +1211,41 @@ class AuditWorkflowEngine:
         duration_ms = int((time.time() - step_start) * 1000)
 
         async def _update_state() -> None:
+            finding_identity = str(
+                (updated_finding or {}).get("finding_identity")
+                or finding.get("finding_identity")
+                or ""
+            ).strip()
+            if updated_finding:
+                merged_finding = dict(finding)
+                for key, value in updated_finding.items():
+                    if value is not None:
+                        if key == "verification_result" and isinstance(value, dict):
+                            verification_payload = dict(merged_finding.get("verification_result") or {})
+                            verification_payload.update(value)
+                            merged_finding["verification_result"] = verification_payload
+                        else:
+                            merged_finding[key] = value
+                finding.clear()
+                finding.update(merged_finding)
+                if finding_identity:
+                    for index, existing in enumerate(orc._all_findings):
+                        if not isinstance(existing, dict):
+                            continue
+                        if str(existing.get("finding_identity") or "").strip() == finding_identity:
+                            orc._all_findings[index] = dict(merged_finding)
+                            break
             if report_text:
                 finding["vulnerability_report"] = report_text
+                if finding_identity:
+                    for index, existing in enumerate(orc._all_findings):
+                        if not isinstance(existing, dict):
+                            continue
+                        if str(existing.get("finding_identity") or "").strip() == finding_identity:
+                            refreshed = dict(existing)
+                            refreshed["vulnerability_report"] = report_text
+                            orc._all_findings[index] = refreshed
+                            break
                 state.finding_reports[title] = report_text
                 state.report_findings_processed += 1
 

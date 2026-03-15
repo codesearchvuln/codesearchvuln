@@ -418,6 +418,7 @@ class AgentFinding(Base):
     tags = Column(JSON, nullable=True)
     
     # 去重标识
+    finding_identity = Column(String(128), nullable=True, index=True)  # Report/DB 修正时使用的稳定身份标识
     fingerprint = Column(String(64), nullable=True, index=True)  # 用于去重的指纹
     
     # 时间戳
@@ -482,6 +483,7 @@ class AgentFinding(Base):
             "ai_explanation": self.ai_explanation,
             "ai_confidence": self.ai_confidence,
             "report": self.report,
+            "finding_identity": self.finding_identity,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

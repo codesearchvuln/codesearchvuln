@@ -40,6 +40,7 @@ from ..utils.vulnerability_naming import (
     resolve_cwe_id,
     resolve_vulnerability_profile,
 )
+from ..tools.verification_result_tools import ensure_finding_identity
 
 logger = logging.getLogger(__name__)
 
@@ -2131,6 +2132,7 @@ class VerificationAgent(BaseAgent):
         task = input_data.get("task", "")
         task_context = input_data.get("task_context", "")
         project_root = input_data.get("project_root")
+        task_id = str(input_data.get("task_id") or getattr(self, "_task_id", "") or "").strip()
         if not isinstance(project_root, str) or not project_root.strip():
             project_root = None
         max_attempts_per_item = max(1, int(config.get("verification_max_attempts_per_item", 2)))
@@ -2792,12 +2794,14 @@ class VerificationAgent(BaseAgent):
 
                     if not verified.get("recommendation"):
                         verified["recommendation"] = self._get_recommendation(finding.get("vulnerability_type", ""))
+                    if task_id:
+                        ensure_finding_identity(task_id, verified)
 
                     verified_findings.append(verified)
             else:
                 for finding in findings_to_verify:
                     fallback_confidence = CONFIDENCE_DEFAULT_FALLBACK
-                    verified_findings.append({
+                    fallback_verified = {
                         **finding,
                         "verdict": "uncertain",
                         "confidence": fallback_confidence,
@@ -2812,7 +2816,10 @@ class VerificationAgent(BaseAgent):
                             ),
                         },
                         "is_verified": False,
-                    })
+                    }
+                    if task_id:
+                        ensure_finding_identity(task_id, fallback_verified)
+                    verified_findings.append(fallback_verified)
 
             for idx, todo_item in enumerate(todo_items):
                 current_todo_index = idx + 1

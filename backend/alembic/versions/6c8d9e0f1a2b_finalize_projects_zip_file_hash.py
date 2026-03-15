@@ -1,7 +1,7 @@
 """finalize projects zip_file_hash bridge
 
 Revision ID: 6c8d9e0f1a2b
-Revises: 5b0f3c9a6d7e
+Revises: 5b0f3c9a6d7e, c4b1a7e8d9f0
 Create Date: 2026-03-13 21:20:00.000000
 
 """
@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "6c8d9e0f1a2b"
-down_revision = "5b0f3c9a6d7e"
+down_revision = ("5b0f3c9a6d7e", "c4b1a7e8d9f0")
 branch_labels = None
 depends_on = None
 

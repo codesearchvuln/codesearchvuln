@@ -4544,6 +4544,16 @@ class BaseAgent(ABC):
                         "cwe_id": "<CWE编号，如 CWE-89，可选>",
                         "suggestion": "<修复建议，可选>",
                     }
+                elif str(resolved_tool_name or "").strip().lower() == "update_vulnerability_finding":
+                    example_dict = {
+                        "finding_identity": "<稳定身份标识，如 fid:...>",
+                        "fields_to_update": {
+                            "line_start": 123,
+                            "function_name": "target_func",
+                            "verification_result.localization_status": "success",
+                        },
+                        "update_reason": "<修正原因，如 Report阶段核对源码后修正定位>",
+                    }
                 elif local_tool_available and tool:
                     # 尝试从工具的 args_schema 获取字段类型和描述
                     args_schema = getattr(tool, "args_schema", None)
@@ -4905,7 +4915,7 @@ class BaseAgent(ABC):
                         )
                         
                         # 🔥 MCP 工具成功执行后追踪关键工具调用
-                        critical_tools = {"push_finding_to_queue", "save_verification_result"}
+                        critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                         if resolved_tool_name in critical_tools:
                             self._critical_tool_called = True
                             self._critical_tool_name = resolved_tool_name
@@ -4954,7 +4964,7 @@ class BaseAgent(ABC):
                         )
                         
                         # 🔥 MCP fallback 成功执行后追踪关键工具调用
-                        critical_tools = {"push_finding_to_queue", "save_verification_result"}
+                        critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                         if resolved_tool_name in critical_tools:
                             self._critical_tool_called = True
                             self._critical_tool_name = resolved_tool_name
@@ -5152,7 +5162,7 @@ class BaseAgent(ABC):
                 )
                 
                 # 🔥 仅在工具成功执行后才追踪关键工具调用（push/save）
-                critical_tools = {"push_finding_to_queue", "save_verification_result"}
+                critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                 if resolved_tool_name in critical_tools:
                     self._critical_tool_called = True
                     self._critical_tool_name = resolved_tool_name

@@ -56,6 +56,11 @@ class MCPToolRouter:
                 "save_verification_result",
                 False,
             ),
+            "update_vulnerability_finding": (
+                self._LOCAL_ROUTE_ADAPTER,
+                "update_vulnerability_finding",
+                True,
+            ),
             "push_finding_to_queue": (self._LOCAL_ROUTE_ADAPTER, "push_finding_to_queue", True),
             "is_finding_in_queue": (self._LOCAL_ROUTE_ADAPTER, "is_finding_in_queue", False),
             "get_queue_status": (self._LOCAL_ROUTE_ADAPTER, "get_queue_status", False),

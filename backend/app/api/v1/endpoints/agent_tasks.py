@@ -3219,11 +3219,19 @@ async def _execute_agent_task(task_id: str):
                 "saved_count": 0,
                 "seen_payload_digests": set(),
             }
+            from app.models.agent_task import AgentFinding
+            from app.services.agent.tools.verification_result_tools import (
+                ensure_finding_identity,
+                merge_finding_patch,
+            )
 
             async def _persist_findings_callback(findings_payload: Any) -> int:
                 findings_list = findings_payload if isinstance(findings_payload, list) else []
                 if not findings_list:
                     return 0
+                for finding_item in findings_list:
+                    if isinstance(finding_item, dict):
+                        ensure_finding_identity(task_id, finding_item)
 
                 try:
                     payload_digest_raw = json.dumps(
@@ -3258,6 +3266,73 @@ async def _execute_agent_task(task_id: str):
                 persist_state["saved_count"] = int(persist_state.get("saved_count") or 0) + int(saved)
                 return int(saved)
 
+            async def _update_finding_callback(
+                finding_identity: str,
+                fields_to_update: Dict[str, Any],
+                update_reason: str,
+            ) -> Dict[str, Any]:
+                async with async_session_factory() as update_db:
+                    finding_stmt = select(AgentFinding).where(
+                        AgentFinding.task_id == task_id,
+                        AgentFinding.finding_identity == finding_identity,
+                    )
+                    finding_row = (await update_db.execute(finding_stmt)).scalar_one_or_none()
+                    if finding_row is None:
+                        legacy_stmt = select(AgentFinding).where(
+                            AgentFinding.task_id == task_id,
+                            AgentFinding.finding_metadata["finding_identity"].as_string() == finding_identity,
+                        )
+                        finding_row = (await update_db.execute(legacy_stmt)).scalar_one_or_none()
+                    if finding_row is None:
+                        raise ValueError(f"未找到 finding_identity={finding_identity} 对应的漏洞记录")
+
+                    verification_patch = fields_to_update.get("verification_result")
+                    if isinstance(verification_patch, dict):
+                        verification_result = dict(finding_row.verification_result or {})
+                        verification_result.update(verification_patch)
+                        verification_result["finding_identity"] = finding_identity
+                        finding_row.verification_result = verification_result
+
+                    for field_name, field_value in fields_to_update.items():
+                        if field_name == "verification_result":
+                            continue
+                        setattr(finding_row, field_name, field_value)
+
+                    metadata_payload = dict(finding_row.finding_metadata or {})
+                    metadata_payload["finding_identity"] = finding_identity
+                    metadata_payload["report_update_reason"] = update_reason
+                    finding_row.finding_metadata = metadata_payload
+                    finding_row.finding_identity = finding_identity
+                    await update_db.commit()
+                    await update_db.refresh(finding_row)
+
+                    updated_finding = merge_finding_patch(
+                        {
+                            "id": finding_row.id,
+                            "finding_identity": finding_row.finding_identity,
+                            "title": finding_row.title,
+                            "file_path": finding_row.file_path,
+                            "line_start": finding_row.line_start,
+                            "line_end": finding_row.line_end,
+                            "function_name": finding_row.function_name,
+                            "vulnerability_type": finding_row.vulnerability_type,
+                            "severity": finding_row.severity,
+                            "description": finding_row.description,
+                            "code_snippet": finding_row.code_snippet,
+                            "source": finding_row.source,
+                            "sink": finding_row.sink,
+                            "suggestion": finding_row.suggestion,
+                            "verification_result": (
+                                dict(finding_row.verification_result)
+                                if isinstance(finding_row.verification_result, dict)
+                                else {}
+                            ),
+                        },
+                        fields_to_update,
+                    )
+                    updated_finding["finding_identity"] = finding_identity
+                    return updated_finding
+
             input_data["persist_findings"] = _persist_findings_callback
 
             # 🔥 将持久化回调注入到已初始化的 Verification 保存工具
@@ -3270,6 +3345,14 @@ async def _execute_agent_task(task_id: str):
             if _save_tool_instance is not None and hasattr(_save_tool_instance, "_save_callback"):
                 _save_tool_instance._save_callback = _persist_findings_callback
                 logger.info("[Task] Injected persist_findings_callback into save_verification_result tool")
+            _update_tool_instance = (
+                tools.get("report", {}).get("update_vulnerability_finding")
+                if isinstance(tools, dict)
+                else None
+            )
+            if _update_tool_instance is not None and hasattr(_update_tool_instance, "_update_callback"):
+                _update_tool_instance._update_callback = _update_finding_callback
+                logger.info("[Task] Injected update_finding_callback into update_vulnerability_finding tool")
 
             # 执行 Orchestrator
             await event_emitter.emit_phase_start("orchestration", "🎯 Orchestrator 开始编排审计流程")
@@ -3396,14 +3479,17 @@ async def _execute_agent_task(task_id: str):
                         len(findings),
                     )
 
+                final_findings_sync_required = False
                 if _tool_saved_count is not None:
                     saved_count = _tool_saved_count
+                    final_findings_sync_required = bool(findings)
                     logger.info(
                         "[AgentTask] 跳过重复持久化（工具已保存 %s 条）",
                         saved_count,
                     )
                 elif int(persist_state.get("saved_count") or 0) > 0:
                     saved_count = int(persist_state["saved_count"])
+                    final_findings_sync_required = bool(findings)
                     logger.info(
                         "[AgentTask] Findings were already persisted by Orchestrator TODO step: saved_count=%s",
                         saved_count,
@@ -3423,6 +3509,26 @@ async def _execute_agent_task(task_id: str):
                         task_id,
                         event_emitter,
                         _persist_findings_once,
+                    )
+
+                if final_findings_sync_required:
+                    async def _sync_final_findings_once():
+                        return await _save_findings(
+                            db,
+                            task_id,
+                            findings,
+                            project_root=normalized_project_root,
+                        )
+
+                    synced_count = await _run_with_retries(
+                        "SYNC_FINAL_FINDINGS",
+                        task_id,
+                        event_emitter,
+                        _sync_final_findings_once,
+                    )
+                    logger.info(
+                        "[AgentTask] Final findings synced back to database after report/update stage: %s",
+                        synced_count,
                     )
                 logger.info(f"[AgentTask] Saved {saved_count}/{len(findings)} findings (filtered {len(findings) - saved_count} hallucinations)")
 
@@ -4239,13 +4345,22 @@ async def _initialize_tools(
     }
 
     if task_id:
-        from app.services.agent.tools.verification_result_tools import SaveVerificationResultTool
+        from app.services.agent.tools.verification_result_tools import (
+            SaveVerificationResultTool,
+            UpdateVulnerabilityFindingTool,
+        )
 
         verification_tools["save_verification_result"] = SaveVerificationResultTool(
             task_id=task_id,
             save_callback=save_callback,
         )
         logger.info("[Tools] Added save_verification_result tool for task %s", task_id)
+        report_update_tool = UpdateVulnerabilityFindingTool(
+            task_id=task_id,
+            update_callback=None,
+        )
+    else:
+        report_update_tool = None
 
     orchestrator_tools = {**base_tools}
 
@@ -4338,6 +4453,11 @@ async def _initialize_tools(
             "search_code": FileSearchTool(project_root, exclude_patterns, target_files),
             "extract_function": ExtractFunctionTool(project_root=project_root),
             "dataflow_analysis": DataFlowAnalysisTool(llm_service, project_root=project_root),
+            **(
+                {"update_vulnerability_finding": report_update_tool}
+                if report_update_tool is not None
+                else {}
+            ),
         },
     }
 
@@ -5012,6 +5132,7 @@ async def _save_findings(
         int: 实际保存的发现数量
     """
     from app.models.agent_task import VulnerabilityType
+    from app.services.agent.tools.verification_result_tools import ensure_finding_identity
 
     logger.info(f"[SaveFindings] Starting to save {len(findings)} findings for task {task_id}")
 
@@ -5107,6 +5228,7 @@ async def _save_findings(
             continue
 
         try:
+            finding_identity = ensure_finding_identity(task_id, finding)
             # 1) normalize severity
             raw_severity = str(
                 finding.get("severity") or
@@ -5467,6 +5589,8 @@ async def _save_findings(
             reachability_value = reachability  # reachable|likely_reachable|unknown|unreachable
 
             verification_result_payload = dict(verification_result_payload_input)
+            if finding_identity:
+                verification_result_payload["finding_identity"] = finding_identity
             existing_reachability_target = (
                 verification_result_payload_input.get("reachability_target")
                 if isinstance(verification_result_payload_input, dict)
@@ -5522,6 +5646,8 @@ async def _save_findings(
                 finding_metadata_payload["verification_todo_id"] = verification_todo_id
             if verification_fingerprint:
                 finding_metadata_payload["verification_fingerprint"] = verification_fingerprint
+            if finding_identity:
+                finding_metadata_payload["finding_identity"] = finding_identity
             if raw_file_path:
                 finding_metadata_payload["raw_file_path"] = _normalize_relative_file_path(
                     str(raw_file_path),
@@ -5587,10 +5713,17 @@ async def _save_findings(
             # Find existing finding in current task
             existing_finding_stmt = select(AgentFinding).where(
                 AgentFinding.task_id == task_id,
-                AgentFinding.fingerprint == fingerprint
+                AgentFinding.finding_identity == finding_identity,
             )
             existing_finding_result = await db.execute(existing_finding_stmt)
             db_finding = existing_finding_result.scalar_one_or_none()
+            if db_finding is None:
+                existing_finding_stmt = select(AgentFinding).where(
+                    AgentFinding.task_id == task_id,
+                    AgentFinding.fingerprint == fingerprint
+                )
+                existing_finding_result = await db.execute(existing_finding_stmt)
+                db_finding = existing_finding_result.scalar_one_or_none()
 
             if db_finding:
                 logger.info(f"[SaveFindings] Updating existing finding {db_finding.id} (fingerprint: {fingerprint})")
@@ -5626,6 +5759,7 @@ async def _save_findings(
                 db_finding.verification_method = verification_method_text
                 db_finding.verification_result = verification_result_payload
                 db_finding.finding_metadata = finding_metadata_payload or None
+                db_finding.finding_identity = finding_identity
                 db_finding.cvss_score = cvss_score
                 db_finding.references = [{"cwe": cwe_id}] if cwe_id else None
                 db_finding.fingerprint = fingerprint
@@ -5665,6 +5799,7 @@ async def _save_findings(
                     verification_method=verification_method_text,
                     verification_result=verification_result_payload,
                     finding_metadata=finding_metadata_payload or None,
+                    finding_identity=finding_identity,
                     cvss_score=cvss_score,
                     references=[{"cwe": cwe_id}] if cwe_id else None,
                     fingerprint=fingerprint,
@@ -7581,6 +7716,7 @@ async def generate_audit_report(
             "findings": [
                 {
                     "id": f.id,
+                    "finding_identity": getattr(f, "finding_identity", None),
                     "title": f.title,
                     "severity": f.severity,
                     "vulnerability_type": f.vulnerability_type,
