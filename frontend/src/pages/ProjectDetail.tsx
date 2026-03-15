@@ -9,7 +9,6 @@ import {
 	ArrowLeft,
 	Bug,
 	Search,
-	Shield,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -352,10 +351,6 @@ export default function ProjectDetail() {
 			limit: DETAIL_RECENT_TASK_LIMIT,
 		});
 	}, [id, auditTasks, agentTasks, staticTasks, gitleaksTasks, banditTasks, phpstanTasks]);
-
-	const handleRunScan = () => {
-		setShowCreateScanTaskDialog(true);
-	};
 
 	const handleTaskCreated = () => {
 		toast.success("扫描任务已创建", {

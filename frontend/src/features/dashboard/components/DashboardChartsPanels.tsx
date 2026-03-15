@@ -4,22 +4,13 @@ import {
 	Bar,
 	BarChart,
 	CartesianGrid,
-	Cell,
 	Line,
 	LineChart,
-	PolarAngleAxis,
-	PolarGrid,
-	PolarRadiusAxis,
-	Radar,
-	RadarChart,
 	ResponsiveContainer,
-	Scatter,
-	ScatterChart,
 	Treemap,
 	Tooltip,
 	XAxis,
 	YAxis,
-	ZAxis,
 } from "recharts";
 import type {
 	DashboardCweDistributionItem,
@@ -73,10 +64,6 @@ const AXIS_TICK_STYLE = {
 const AXIS_LINE_STYLE = { stroke: "hsl(var(--border) / 0.65)" };
 const AXIS_TICK_LINE_STYLE = { stroke: "hsl(var(--border) / 0.55)" };
 const GRID_STROKE = "hsl(var(--border) / 0.35)";
-const LEGEND_STYLE = {
-	fontSize: 14,
-	color: "hsl(var(--muted-foreground))",
-};
 const TOOLTIP_STYLE = {
 	fontSize: 13,
 	color: "hsl(var(--foreground))",
@@ -278,11 +265,6 @@ export default function DashboardChartsPanels({
 		],
 		[translate],
 	);
-
-	const cweChartHeight = useMemo(() => {
-		const rowCount = Math.max(1, cweBarData.length);
-		return Math.min(520, Math.max(280, rowCount * 36));
-	}, [cweBarData.length]);
 
 	const projectScanRunsChartMax = useMemo(() => {
 		if (projectScanRunsData.length === 0) return 1;

@@ -79,7 +79,7 @@ function getPaneShellClasses(appearance: FindingCodeWindowAppearance) {
 }
 
 function getEmptyStateClasses() {
-	return "flex min-h-[360px] items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-6 py-10 text-center font-mono text-sm text-white/48";
+	return "flex h-full min-h-0 items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-6 py-10 text-center font-mono text-sm text-white/48";
 }
 
 function ProjectCodeBrowserTree({
@@ -209,6 +209,7 @@ function ProjectCodeBrowserPreview({
 				focusLine={previewDecoration?.focusLine ?? undefined}
 				variant="detail"
 				appearance={appearance}
+				displayPreset="project-browser"
 			/>
 		);
 	}
@@ -232,12 +233,12 @@ export function ProjectCodeBrowserWorkspace({
 	className,
 }: ProjectCodeBrowserWorkspaceProps) {
 	return (
-		<section
-			className={cn(
-				"grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]",
-				className,
-			)}
-		>
+			<section
+				className={cn(
+					"grid min-h-0 grid-cols-1 gap-4 overflow-hidden xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]",
+					className,
+				)}
+			>
 			<div
 				className={cn(
 					getPaneShellClasses(appearance),
@@ -245,11 +246,6 @@ export function ProjectCodeBrowserWorkspace({
 				)}
 			>
 				<div className="flex h-full min-h-0 flex-col">
-					<div className="border-b border-white/8 px-4 py-3">
-						<div className="text-xs uppercase tracking-[0.24em] text-white/34">
-							Files
-						</div>
-					</div>
 					<div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 custom-scrollbar-dark">
 						{tree.length > 0 ? (
 							<ProjectCodeBrowserTree
@@ -276,12 +272,7 @@ export function ProjectCodeBrowserWorkspace({
 				)}
 			>
 				<div className="flex h-full min-h-0 flex-col">
-					<div className="border-b border-white/8 px-4 py-3">
-						<div className="truncate text-xs uppercase tracking-[0.24em] text-white/34">
-							{selectedFilePath || "Preview"}
-						</div>
-					</div>
-					<div className="min-h-0 flex-1 p-3">
+					<div className="flex min-h-0 flex-1 flex-col p-3">
 						<ProjectCodeBrowserPreview
 							selectedFilePath={selectedFilePath}
 							selectedFileState={selectedFileState}
@@ -314,7 +305,7 @@ export function ProjectCodeBrowserContent({
 	const isZipProject = project?.source_type === "zip";
 
 	return (
-		<div className="relative flex min-h-screen flex-col gap-4 overflow-hidden bg-background p-6 font-mono">
+		<div className="relative flex h-[100dvh] max-h-[100dvh] min-h-0 flex-col gap-4 overflow-hidden bg-background p-6 font-mono">
 			<section className="rounded-2xl border border-white/10 bg-black/80 px-5 py-4">
 				<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
 					<div className="flex min-w-0 items-start gap-3">
@@ -371,7 +362,7 @@ export function ProjectCodeBrowserContent({
 					onSelectFile={onSelectFile}
 					appearance={appearance}
 					previewDecorations={previewDecorations}
-					className="flex-1"
+					className="flex-1 min-h-0 overflow-hidden"
 				/>
 			)}
 		</div>

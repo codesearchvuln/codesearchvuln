@@ -56,7 +56,6 @@ test("ProjectCodeBrowserContent renders repository unsupported state", async () 
 		}),
 	);
 
-	assert.match(markup, /代码浏览/);
 	assert.match(markup, /Audit Demo/);
 	assert.match(markup, /仅 ZIP 类型项目支持代码浏览/);
 	assert.match(markup, /返回/);
@@ -103,12 +102,45 @@ test("ProjectCodeBrowserContent renders selected text file in the preview pane",
 		}),
 	);
 
-	assert.match(markup, /代码浏览/);
 	assert.match(markup, /Audit Demo/);
 	assert.match(markup, /2 个文件/);
 	assert.match(markup, /src\/main\.ts/);
 	assert.match(markup, /export const answer = 42;/);
 	assert.match(markup, /custom-scrollbar-dark/);
 	assert.match(markup, /data-appearance="native-explorer"/);
+	assert.match(markup, /data-display-preset="project-browser"/);
+	assert.match(markup, /h-\[100dvh\] max-h-\[100dvh\]/);
+	assert.match(markup, /flex min-h-0 flex-1 flex-col p-3/);
+	assert.match(markup, /flex-1 min-h-0 overflow-hidden/);
+	assert.match(markup, /max-h-none/);
 	assert.doesNotMatch(markup, /(?:text|bg|border)-(?:sky|cyan|amber|rose|emerald)/);
+});
+
+test("ProjectCodeBrowserContent keeps preview pane full height for empty state", async () => {
+	const pageModule = await importOrFail<any>(
+		"../src/pages/ProjectCodeBrowser.tsx",
+	);
+
+	const markup = renderToStaticMarkup(
+		createElement(pageModule.ProjectCodeBrowserContent, {
+			project: createProject(),
+			loading: false,
+			error: null,
+			filesCount: 1,
+			tree: [],
+			expandedFolders: new Set<string>(),
+			selectedFilePath: null,
+			selectedFileState: { status: "idle" },
+			onBack: () => {},
+			onToggleFolder: () => {},
+			onSelectFile: () => {},
+		}),
+	);
+
+	assert.match(markup, /从左侧文件树选择一个文件开始浏览/);
+	assert.match(markup, /h-\[100dvh\] max-h-\[100dvh\]/);
+	assert.match(markup, /flex min-h-0 flex-1 flex-col p-3/);
+	assert.match(markup, /flex-1 min-h-0 overflow-hidden/);
+	assert.match(markup, /h-full min-h-0/);
+	assert.doesNotMatch(markup, /data-display-preset="project-browser"/);
 });

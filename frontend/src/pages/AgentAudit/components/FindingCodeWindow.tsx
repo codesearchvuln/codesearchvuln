@@ -14,6 +14,10 @@ export type FindingCodeWindowAppearance =
   | "terminal-flat"
   | "dense-ide";
 
+export type FindingCodeWindowDisplayPreset =
+  | "default"
+  | "project-browser";
+
 interface FindingCodeWindowProps {
   code: string;
   displayLines?: FindingCodeWindowDisplayLine[];
@@ -30,6 +34,7 @@ interface FindingCodeWindowProps {
   meta?: string[];
   variant?: "default" | "detail";
   appearance?: FindingCodeWindowAppearance;
+  displayPreset?: FindingCodeWindowDisplayPreset;
 }
 
 function formatHeader(
@@ -72,7 +77,18 @@ function getHeaderClasses(appearance: FindingCodeWindowAppearance, isDetail: boo
   );
 }
 
-function getViewportClasses(appearance: FindingCodeWindowAppearance, isDetail: boolean) {
+function getViewportClasses(
+  appearance: FindingCodeWindowAppearance,
+  isDetail: boolean,
+  displayPreset: FindingCodeWindowDisplayPreset,
+) {
+  if (displayPreset === "project-browser") {
+    return cn(
+      "min-h-0 flex-1 max-h-none overflow-auto overflow-x-auto custom-scrollbar-dark bg-black",
+      appearance === "dense-ide" && "bg-[#040404]",
+    );
+  }
+
   return cn(
     isDetail ? "max-h-[52vh]" : "max-h-[46vh]",
     "overflow-auto overflow-x-auto custom-scrollbar-dark bg-black",
@@ -80,7 +96,15 @@ function getViewportClasses(appearance: FindingCodeWindowAppearance, isDetail: b
   );
 }
 
-function getGridColumns(appearance: FindingCodeWindowAppearance, isDetail: boolean) {
+function getGridColumns(
+  appearance: FindingCodeWindowAppearance,
+  isDetail: boolean,
+  displayPreset: FindingCodeWindowDisplayPreset,
+) {
+  if (displayPreset === "project-browser") {
+    return "grid-cols-[minmax(56px,max-content)_minmax(0,1fr)]";
+  }
+
   if (appearance === "dense-ide") {
     return isDetail ? "grid-cols-[72px_minmax(0,1fr)]" : "grid-cols-[64px_minmax(0,1fr)]";
   }
@@ -88,6 +112,46 @@ function getGridColumns(appearance: FindingCodeWindowAppearance, isDetail: boole
     return isDetail ? "grid-cols-[60px_minmax(0,1fr)]" : "grid-cols-[52px_minmax(0,1fr)]";
   }
   return isDetail ? "grid-cols-[68px_minmax(0,1fr)]" : "grid-cols-[60px_minmax(0,1fr)]";
+}
+
+function getHeaderTextClasses(
+  isDetail: boolean,
+  displayPreset: FindingCodeWindowDisplayPreset,
+) {
+  if (displayPreset === "project-browser") {
+    return "text-[14px] leading-6";
+  }
+  return isDetail ? "text-[13px] leading-5" : "text-[12px] leading-5";
+}
+
+function getBodyTextClasses(
+  isDetail: boolean,
+  displayPreset: FindingCodeWindowDisplayPreset,
+) {
+  if (displayPreset === "project-browser") {
+    return "text-[14px] leading-7";
+  }
+  return isDetail ? "text-[12.5px] leading-6" : "text-[11.5px] leading-5";
+}
+
+function getLineNumberPaddingClasses(
+  isDetail: boolean,
+  displayPreset: FindingCodeWindowDisplayPreset,
+) {
+  if (displayPreset === "project-browser") {
+    return "px-2.5 py-0.5";
+  }
+  return isDetail ? "px-3 py-0.5" : "px-2 py-0.5";
+}
+
+function getCodePaddingClasses(
+  isDetail: boolean,
+  displayPreset: FindingCodeWindowDisplayPreset,
+) {
+  if (displayPreset === "project-browser") {
+    return "px-4 py-0.5";
+  }
+  return isDetail ? "px-4 py-0.5" : "px-3 py-0.5";
 }
 
 export default function FindingCodeWindow({
@@ -106,6 +170,7 @@ export default function FindingCodeWindow({
   meta = [],
   variant = "default",
   appearance = "native-explorer",
+  displayPreset = "default",
 }: FindingCodeWindowProps) {
   void title;
   void chrome;
@@ -134,7 +199,7 @@ export default function FindingCodeWindow({
       : null;
   const resolvedDensity = density ?? (variant === "detail" ? "detail" : "compact");
   const isDetail = resolvedDensity === "detail";
-  const gridColumns = getGridColumns(appearance, isDetail);
+  const gridColumns = getGridColumns(appearance, isDetail, displayPreset);
   const renderedLines = useMemo(() => {
     if (Array.isArray(displayLines) && displayLines.length > 0) {
       return displayLines;
@@ -176,16 +241,19 @@ export default function FindingCodeWindow({
   return (
     <section
       data-appearance={appearance}
+      data-display-preset={displayPreset}
       className={cn(
         "overflow-hidden bg-black text-white",
         getShellClasses(appearance),
+        displayPreset === "project-browser" && "flex h-full min-h-0 flex-col",
       )}
     >
       <div className={getHeaderClasses(appearance, isDetail)}>
         <div
+          title={header}
           className={cn(
             "truncate font-mono text-white/78",
-            isDetail ? "text-[13px] leading-5" : "text-[12px] leading-5",
+            getHeaderTextClasses(isDetail, displayPreset),
           )}
         >
           {header}
@@ -194,12 +262,12 @@ export default function FindingCodeWindow({
 
       <div
         ref={containerRef}
-        className={getViewportClasses(appearance, isDetail)}
+        className={getViewportClasses(appearance, isDetail, displayPreset)}
       >
         <div
           className={cn(
             "min-w-max font-mono",
-            isDetail ? "text-[12.5px] leading-6" : "text-[11.5px] leading-5",
+            getBodyTextClasses(isDetail, displayPreset),
           )}
         >
           {renderedLines.map((line, index) => {
@@ -221,7 +289,7 @@ export default function FindingCodeWindow({
               >
                 <div
                   className={cn(
-                    isDetail ? "px-3 py-0.5" : "px-2 py-0.5",
+                    getLineNumberPaddingClasses(isDetail, displayPreset),
                     "select-none text-right font-mono tabular-nums border-r border-white/8",
                     isPlaceholder && "bg-white/[0.02] text-white/20",
                     !isPlaceholder && !inHighlightRange && !isFocusLine && "bg-white/[0.02] text-white/34",
@@ -233,7 +301,7 @@ export default function FindingCodeWindow({
                 </div>
                 <pre
                   className={cn(
-                    isDetail ? "px-4 py-0.5" : "px-3 py-0.5",
+                    getCodePaddingClasses(isDetail, displayPreset),
                     "overflow-visible whitespace-pre bg-transparent",
                     isPlaceholder ? "italic text-white/35" : "text-white/92",
                     inHighlightRange && "text-white/96",

@@ -566,7 +566,7 @@ export function buildBanditFindingCodeViews(finding: BanditFinding): FindingDeta
 }
 
 export function buildPhpstanFindingCodeViews(
-  finding: PhpstanFinding,
+  _finding: PhpstanFinding,
 ): FindingDetailCodeView[] {
   return [];
 }

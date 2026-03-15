@@ -194,7 +194,7 @@ export default function CodeWindowDemo() {
 	);
 
 	return (
-		<div className="relative flex min-h-screen flex-col gap-4 overflow-hidden bg-background p-6 font-mono">
+		<div className="relative flex h-[100dvh] max-h-[100dvh] min-h-0 flex-col gap-4 overflow-hidden bg-background p-6 font-mono">
 			<section className="rounded-2xl border border-white/10 bg-black/80 px-5 py-4">
 				<div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
 					<div className="space-y-1">
@@ -248,7 +248,7 @@ export default function CodeWindowDemo() {
 				onSelectFile={setSelectedFilePath}
 				appearance={appearance}
 				previewDecorations={previewDecorations}
-				className="flex-1"
+				className="flex-1 min-h-0 overflow-hidden"
 			/>
 		</div>
 	);

@@ -31,5 +31,9 @@ test("CodeWindowDemo page renders monochrome variant switcher and mock browser c
 	assert.match(markup, /Dense IDE/);
 	assert.match(markup, /src\/pages\/AgentAudit\/components\/FindingCodeWindow\.tsx/);
 	assert.match(markup, /data-appearance="native-explorer"/);
+	assert.match(markup, /data-display-preset="project-browser"/);
+	assert.match(markup, /h-\[100dvh\] max-h-\[100dvh\]/);
+	assert.match(markup, /flex-1 min-h-0 overflow-hidden/);
+	assert.match(markup, /max-h-none/);
 	assert.match(markup, /custom-scrollbar-dark/);
 });
