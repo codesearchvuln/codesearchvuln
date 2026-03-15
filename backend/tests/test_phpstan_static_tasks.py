@@ -64,6 +64,32 @@ def test_parse_phpstan_output_payload_supports_empty_noise_and_json():
         static_tasks._parse_phpstan_output_payload("{invalid")
 
 
+def test_filter_phpstan_security_messages_keeps_security_findings_only():
+    messages = [
+        {
+            "message": "User input reaches eval() and may cause code execution.",
+            "line": 10,
+            "identifier": "security.eval",
+        },
+        {
+            "message": "Call to undefined method Foo::bar().",
+            "line": 20,
+            "identifier": "method.notFound",
+        },
+        {
+            "message": "Potential XSS injection sink.",
+            "line": 30,
+            "identifier": "framework.security",
+        },
+        None,
+        "bad",
+    ]
+    result = static_tasks._filter_phpstan_security_messages(messages)
+
+    assert len(result["kept"]) == 2
+    assert len(result["dropped"]) == 3
+
+
 @pytest.mark.asyncio
 async def test_update_phpstan_finding_status_validation_and_success():
     finding = SimpleNamespace(id="finding-1", status="open")
@@ -115,9 +141,9 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
                     "errors": 1,
                     "messages": [
                         {
-                            "message": "Call to undefined method Foo::bar().",
+                            "message": "Untrusted data may reach eval() causing code execution.",
                             "line": 21,
-                            "identifier": "method.notFound",
+                            "identifier": "security.eval",
                             "tip": "Did you mean baz()?",
                         }
                     ],
@@ -157,6 +183,63 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
 
     assert task.status == "completed"
     assert task.level == 6
-    assert task.total_findings == 2
+    assert task.total_findings == 1
     assert task.files_scanned == 2
-    assert len(fake_session.findings) == 2
+    assert len(fake_session.findings) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_phpstan_scan_completes_when_all_findings_filtered(monkeypatch):
+    task = PhpstanScanTask(
+        id="phpstan-task-2",
+        project_id="project-1",
+        name="phpstan",
+        status="pending",
+        target_path=".",
+        level=5,
+    )
+    fake_session = _FakeAsyncSession(task)
+    monkeypatch.setattr(static_tasks, "async_session_factory", lambda: fake_session)
+    monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+
+    def _fake_run_subprocess_with_tracking(_scan_type, _task_id, _cmd, _timeout):
+        payload = {
+            "totals": {"errors": 0, "file_errors": 1},
+            "files": {
+                "/workspace/app/C.php": {
+                    "errors": 1,
+                    "messages": [
+                        {
+                            "message": "Property $id does not exist.",
+                            "line": 6,
+                            "identifier": "property.notFound",
+                        }
+                    ],
+                },
+            },
+        }
+        return SimpleNamespace(returncode=1, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr(
+        static_tasks,
+        "_run_subprocess_with_tracking",
+        _fake_run_subprocess_with_tracking,
+    )
+
+    class _FakeLoop:
+        async def run_in_executor(self, _executor, fn):
+            return fn()
+
+    monkeypatch.setattr(static_tasks.asyncio, "get_event_loop", lambda: _FakeLoop())
+
+    await static_tasks._execute_phpstan_scan(
+        task_id="phpstan-task-2",
+        project_root="/tmp",
+        target_path=".",
+        level=5,
+    )
+
+    assert task.status == "completed"
+    assert task.total_findings == 0
+    assert len(fake_session.findings) == 0

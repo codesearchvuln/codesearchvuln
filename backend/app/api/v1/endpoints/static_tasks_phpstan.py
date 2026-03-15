@@ -81,7 +81,7 @@ class PhpstanScanTaskCreate(BaseModel):
     project_id: str = Field(..., description="项目ID")
     name: Optional[str] = Field(None, description="任务名称")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
-    level: int = Field(5, ge=0, le=9, description="PHPStan 分析级别（0-9）")
+    level: int = Field(8, ge=0, le=9, description="PHPStan 分析级别（0-9）")
 
 
 class PhpstanScanTaskResponse(BaseModel):
@@ -116,7 +116,7 @@ class PhpstanFindingResponse(BaseModel):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
-def _normalize_phpstan_level(value: Any, *, fallback: int = 5) -> int:
+def _normalize_phpstan_level(value: Any, *, fallback: int = 8) -> int:
     """规范化 PHPStan level 参数，统一为 0-9。"""
     try:
         parsed = int(value)
@@ -148,11 +148,107 @@ def _parse_phpstan_output_payload(payload_text: str) -> Dict[str, Any]:
         raise ValueError("Unexpected phpstan output type")
 
     raise ValueError(f"Invalid phpstan JSON output: {last_error}")
+
+
+# PHPStan security filter: 仅保留安全相关发现（五类核心 + 高危词兜底）。
+_PHPSTAN_SECURITY_CORE_KEYWORDS = (
+    # 代码执行 / 命令执行
+    "eval(",
+    "assert(",
+    "create_function",
+    "exec(",
+    "system(",
+    "passthru(",
+    "shell_exec(",
+    "popen(",
+    "proc_open(",
+    # SQL 操作
+    "sql",
+    "mysqli_query",
+    "mysql_query",
+    "pg_query",
+    "pdo::query",
+    "pdo::exec",
+    "select ",
+    "insert ",
+    "update ",
+    "delete ",
+    # 文件操作
+    "fopen(",
+    "fwrite(",
+    "file_get_contents(",
+    "file_put_contents(",
+    "unlink(",
+    "copy(",
+    "rename(",
+    "move_uploaded_file(",
+    "include(",
+    "require(",
+    "include_once(",
+    "require_once(",
+    "path traversal",
+    # 反序列化
+    "unserialize(",
+    "maybe_unserialize(",
+    "deserializ",
+)
+
+_PHPSTAN_SECURITY_FALLBACK_KEYWORDS = (
+    "security",
+    "unsafe",
+    "dangerous",
+    "injection",
+    "xss",
+    "rce",
+    "lfi",
+    "rfi",
+    "xxe",
+    "ssti",
+    "command execution",
+    "code execution",
+    "remote code execution",
+)
+
+
+def _is_phpstan_security_finding(message: Dict[str, Any]) -> bool:
+    """判断 PHPStan 单条消息是否属于安全相关发现。"""
+    text = " ".join(
+        [
+            str(message.get("message") or ""),
+            str(message.get("identifier") or ""),
+            str(message.get("tip") or ""),
+        ]
+    ).lower()
+    if not text:
+        return False
+    if any(keyword in text for keyword in _PHPSTAN_SECURITY_CORE_KEYWORDS):
+        return True
+    return any(keyword in text for keyword in _PHPSTAN_SECURITY_FALLBACK_KEYWORDS)
+
+
+def _filter_phpstan_security_messages(messages: Any) -> Dict[str, List[Dict[str, Any]]]:
+    """过滤 PHPStan 消息列表，仅返回安全相关项并保留被过滤项计数能力。"""
+    if not isinstance(messages, list):
+        return {"kept": [], "dropped": []}
+
+    kept: List[Dict[str, Any]] = []
+    dropped: List[Dict[str, Any]] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            dropped.append({})
+            continue
+        if _is_phpstan_security_finding(item):
+            kept.append(item)
+        else:
+            dropped.append(item)
+    return {"kept": kept, "dropped": dropped}
+
+
 async def _execute_phpstan_scan(
     task_id: str,
     project_root: str,
     target_path: str,
-    level: int = 5,
+    level: int = 8,
 ) -> None:
     async with async_session_factory() as db:
         try:
@@ -252,15 +348,20 @@ async def _execute_phpstan_scan(
             files_map: Dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
 
             finding_count = 0
+            raw_finding_count = 0
+            dropped_finding_count = 0
             for file_path, file_data in files_map.items():
                 if not isinstance(file_data, dict):
                     continue
                 messages = file_data.get("messages")
-                if not isinstance(messages, list):
+                filtered_result = _filter_phpstan_security_messages(messages)
+                kept_messages = filtered_result["kept"]
+                dropped_messages = filtered_result["dropped"]
+                raw_finding_count += len(kept_messages) + len(dropped_messages)
+                dropped_finding_count += len(dropped_messages)
+                if not kept_messages:
                     continue
-                for msg in messages:
-                    if not isinstance(msg, dict):
-                        continue
+                for msg in kept_messages:
                     finding = PhpstanFinding(
                         scan_task_id=task_id,
                         file_path=str(file_path or "")[:1000],
@@ -285,6 +386,13 @@ async def _execute_phpstan_scan(
             task.level = normalized_level
             task.total_findings = finding_count
             task.files_scanned = len(files_map)
+            logger.info(
+                "PHPStan task %s filter summary: raw_count=%s, kept_count=%s, dropped_count=%s",
+                task_id,
+                raw_finding_count,
+                finding_count,
+                dropped_finding_count,
+            )
             _sync_task_scan_duration(task)
             await db.commit()
         except asyncio.CancelledError:
