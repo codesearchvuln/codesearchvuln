@@ -235,6 +235,22 @@ def _strip_custom_toml_rules_sections(custom_toml: str) -> str:
     return "\n".join(output).strip()
 
 
+def _normalize_bool_flag(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"", "0", "false", "no", "off"}:
+            return False
+    return default
+
+
 def _normalize_gitleaks_runtime_config(runtime_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     candidate = dict(runtime_config) if isinstance(runtime_config, dict) else {}
     report_format = str(candidate.get("reportFormat") or "json").strip().lower()
@@ -243,7 +259,7 @@ def _normalize_gitleaks_runtime_config(runtime_config: Optional[Dict[str, Any]])
 
     return {
         "reportFormat": report_format,
-        "redact": bool(candidate.get("redact", True)),
+        "redact": _normalize_bool_flag(candidate.get("redact"), default=False),
         "customConfigToml": str(candidate.get("customConfigToml") or "").strip(),
     }
 
@@ -373,6 +389,45 @@ def _parse_gitleaks_report_payload(payload: Any) -> List[Dict[str, Any]]:
         return findings
 
     return []
+
+
+def _build_gitleaks_command(
+    *,
+    full_target_path: str,
+    report_file: str,
+    report_format: str,
+    no_git: bool,
+    redact: bool,
+    config_file: Optional[str],
+) -> List[str]:
+    cmd = [
+        "gitleaks",
+        "detect",
+        "--source",
+        full_target_path,
+        "--report-format",
+        report_format,
+        "--report-path",
+        report_file,
+        "--exit-code",
+        "0",
+    ]
+    if no_git:
+        cmd.append("--no-git")
+    if redact:
+        cmd.append("--redact")
+    if config_file:
+        cmd.extend(["--config", config_file])
+    return cmd
+
+
+def _mask_gitleaks_secret(secret: Any) -> str:
+    raw_secret = str(secret or "")
+    if len(raw_secret) > 8:
+        return raw_secret[:4] + "*" * (len(raw_secret) - 8) + raw_secret[-4:]
+    return "*" * len(raw_secret)
+
+
 @router.get("/gitleaks/rules", response_model=List[GitleaksRuleResponse])
 async def list_gitleaks_rules(
     is_active: Optional[bool] = Query(None, description="按启用状态过滤"),
@@ -676,27 +731,14 @@ async def _execute_gitleaks_scan(
                 )
 
             try:
-                # 构建 gitleaks 命令
-                cmd = [
-                    "gitleaks",
-                    "detect",
-                    "--source",
-                    full_target_path,
-                    "--report-format",
-                    str(gcfg.get("reportFormat") or "json"),
-                    "--report-path",
-                    report_file,
-                    "--exit-code",
-                    "0",  # 不要因为发现密钥而返回非零退出码
-                ]
-                if no_git:
-                    cmd.append("--no-git")
-
-                if bool(gcfg.get("redact", True)):
-                    cmd.append("--redact")
-
-                if config_file:
-                    cmd.extend(["--config", config_file])
+                cmd = _build_gitleaks_command(
+                    full_target_path=full_target_path,
+                    report_file=report_file,
+                    report_format=str(gcfg.get("reportFormat") or "json"),
+                    no_git=no_git,
+                    redact=bool(gcfg.get("redact")),
+                    config_file=config_file,
+                )
 
                 logger.info(
                     f"Executing gitleaks for task {task_id}: {' '.join(cmd)}"
@@ -772,15 +814,6 @@ async def _execute_gitleaks_scan(
                         if file_path:
                             files_scanned.add(file_path)
 
-                        # 脱敏密钥
-                        secret = finding.get("Secret", "")
-                        if len(secret) > 8:
-                            masked_secret = (
-                                secret[:4] + "*" * (len(secret) - 8) + secret[-4:]
-                            )
-                        else:
-                            masked_secret = "*" * len(secret)
-
                         gitleaks_finding = GitleaksFinding(
                             scan_task_id=task_id,
                             rule_id=finding.get("RuleID", "unknown"),
@@ -788,7 +821,7 @@ async def _execute_gitleaks_scan(
                             file_path=file_path,
                             start_line=finding.get("StartLine"),
                             end_line=finding.get("EndLine"),
-                            secret=masked_secret,
+                            secret=_mask_gitleaks_secret(finding.get("Secret", "")),
                             match=finding.get("Match", "")[:500],  # 限制长度
                             commit=finding.get("Commit"),
                             author=finding.get("Author"),
