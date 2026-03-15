@@ -32,6 +32,7 @@ const TaskManagementIntelligent = lazy(
 );
 const TaskManagementHybrid = lazy(() => import("@/pages/TaskManagementHybrid"));
 const AgentTestPage = lazy(() => import("@/pages/AgentTest"));
+const CodeWindowDemo = lazy(() => import("@/pages/CodeWindowDemo"));
 
 function LegacyOpengrepRulesRedirect() {
 	const location = useLocation();
@@ -237,6 +238,15 @@ const routes: RouteConfig[] = [
 		navVisible: true,
 		navGroup: "devTest",
 		navOrder: 35,
+	},
+	{
+		name: "代码窗 Demo",
+		path: "/agent-test/code-window-demo",
+		element: <CodeWindowDemo />,
+		visible: true,
+		navVisible: true,
+		navGroup: "devTest",
+		navOrder: 36,
 	},
 ];
 

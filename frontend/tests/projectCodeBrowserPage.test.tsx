@@ -108,4 +108,7 @@ test("ProjectCodeBrowserContent renders selected text file in the preview pane",
 	assert.match(markup, /2 个文件/);
 	assert.match(markup, /src\/main\.ts/);
 	assert.match(markup, /export const answer = 42;/);
+	assert.match(markup, /custom-scrollbar-dark/);
+	assert.match(markup, /data-appearance="native-explorer"/);
+	assert.doesNotMatch(markup, /(?:text|bg|border)-(?:sky|cyan|amber|rose|emerald)/);
 });

@@ -8,9 +8,10 @@ import {
 	FolderOpen,
 } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import FindingCodeWindow from "@/pages/AgentAudit/components/FindingCodeWindow";
+import FindingCodeWindow, {
+	type FindingCodeWindowAppearance,
+} from "@/pages/AgentAudit/components/FindingCodeWindow";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { api } from "@/shared/config/database";
 import type { Project } from "@/shared/types";
 import { cn } from "@/shared/utils/utils";
@@ -18,7 +19,6 @@ import {
 	buildProjectCodeBrowserTree,
 	PROJECT_CODE_BROWSER_EMPTY_MESSAGE,
 	PROJECT_CODE_BROWSER_FAILED_MESSAGE,
-	PROJECT_CODE_BROWSER_UNAVAILABLE_MESSAGE,
 	resolveProjectCodeBrowserBackTarget,
 	resolveProjectCodeBrowserFileFailure,
 	resolveProjectCodeBrowserFileSuccess,
@@ -27,18 +27,30 @@ import {
 	type ProjectCodeBrowserTreeNode,
 } from "@/pages/project-code-browser/model";
 
-interface ProjectCodeBrowserContentProps {
-	project: Project | null;
-	loading: boolean;
-	error: string | null;
-	filesCount: number;
+type ProjectCodeBrowserPreviewDecoration = {
+	focusLine?: number | null;
+	highlightStartLine?: number | null;
+	highlightEndLine?: number | null;
+};
+
+interface ProjectCodeBrowserWorkspaceProps {
 	tree: ProjectCodeBrowserTreeNode[];
 	expandedFolders: Set<string>;
 	selectedFilePath: string | null;
 	selectedFileState: ProjectCodeBrowserFileViewState;
-	onBack: () => void;
 	onToggleFolder: (folderPath: string) => void;
 	onSelectFile: (filePath: string) => void;
+	appearance?: FindingCodeWindowAppearance;
+	previewDecorations?: Record<string, ProjectCodeBrowserPreviewDecoration | undefined>;
+	className?: string;
+}
+
+interface ProjectCodeBrowserContentProps extends ProjectCodeBrowserWorkspaceProps {
+	project: Project | null;
+	loading: boolean;
+	error: string | null;
+	filesCount: number;
+	onBack: () => void;
 }
 
 interface ProjectCodeBrowserTreeProps {
@@ -47,6 +59,7 @@ interface ProjectCodeBrowserTreeProps {
 	selectedFilePath: string | null;
 	onToggleFolder: (folderPath: string) => void;
 	onSelectFile: (filePath: string) => void;
+	appearance: FindingCodeWindowAppearance;
 	depth?: number;
 }
 
@@ -55,16 +68,31 @@ function renderFileSize(size?: number) {
 	return `${size.toLocaleString()} B`;
 }
 
+function getPaneShellClasses(appearance: FindingCodeWindowAppearance) {
+	if (appearance === "terminal-flat") {
+		return "rounded-md border border-white/8 bg-black";
+	}
+	if (appearance === "dense-ide") {
+		return "rounded-lg border border-white/10 bg-[#030303]";
+	}
+	return "rounded-2xl border border-white/10 bg-[#020202]";
+}
+
+function getEmptyStateClasses() {
+	return "flex min-h-[360px] items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-6 py-10 text-center font-mono text-sm text-white/48";
+}
+
 function ProjectCodeBrowserTree({
 	nodes,
 	expandedFolders,
 	selectedFilePath,
 	onToggleFolder,
 	onSelectFile,
+	appearance,
 	depth = 0,
 }: ProjectCodeBrowserTreeProps) {
 	return (
-		<div className={cn("space-y-1", depth > 0 && "mt-1")}>
+		<div className={cn("space-y-1.5", depth > 0 && "mt-1.5")}>
 			{nodes.map((node) => {
 				if (node.kind === "directory") {
 					const isExpanded = expandedFolders.has(node.path);
@@ -73,18 +101,22 @@ function ProjectCodeBrowserTree({
 							<button
 								type="button"
 								onClick={() => onToggleFolder(node.path)}
-								className="flex w-full items-center gap-2 rounded-md border border-transparent px-3 py-2 text-left text-sm text-slate-100 transition-colors hover:border-sky-500/20 hover:bg-sky-500/10 cursor-pointer"
+								className={cn(
+									"flex w-full items-center gap-2 rounded-md border border-transparent px-3 py-2 text-left text-sm transition-colors cursor-pointer",
+									"text-white/82 hover:border-white/10 hover:bg-white/[0.04]",
+									appearance === "terminal-flat" && "rounded-sm",
+								)}
 								style={{ paddingLeft: `${depth * 16 + 12}px` }}
 							>
 								{isExpanded ? (
-									<ChevronDown className="h-4 w-4 text-sky-300" />
+									<ChevronDown className="h-4 w-4 text-white/56" />
 								) : (
-									<ChevronRight className="h-4 w-4 text-slate-400" />
+									<ChevronRight className="h-4 w-4 text-white/38" />
 								)}
 								{isExpanded ? (
-									<FolderOpen className="h-4 w-4 text-sky-300" />
+									<FolderOpen className="h-4 w-4 text-white/70" />
 								) : (
-									<Folder className="h-4 w-4 text-slate-300" />
+									<Folder className="h-4 w-4 text-white/56" />
 								)}
 								<span className="truncate font-mono">{node.name}</span>
 							</button>
@@ -95,6 +127,7 @@ function ProjectCodeBrowserTree({
 									selectedFilePath={selectedFilePath}
 									onToggleFolder={onToggleFolder}
 									onSelectFile={onSelectFile}
+									appearance={appearance}
 									depth={depth + 1}
 								/>
 							) : null}
@@ -109,19 +142,20 @@ function ProjectCodeBrowserTree({
 						type="button"
 						onClick={() => onSelectFile(node.path)}
 						className={cn(
-							"flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors cursor-pointer",
+							"flex w-full items-center justify-between gap-3 border px-3 py-2 text-left transition-colors cursor-pointer",
+							appearance === "terminal-flat" ? "rounded-sm" : "rounded-md",
 							isSelected
-								? "border-sky-400/40 bg-sky-500/12 text-white"
-								: "border-transparent text-slate-200 hover:border-sky-500/20 hover:bg-sky-500/8",
+								? "border-white/14 bg-white/[0.08] text-white"
+								: "border-transparent text-white/74 hover:border-white/10 hover:bg-white/[0.04]",
 						)}
 						style={{ paddingLeft: `${depth * 16 + 32}px` }}
 					>
 						<span className="flex min-w-0 items-center gap-2">
-							<FileCode2 className="h-4 w-4 shrink-0 text-sky-300" />
+							<FileCode2 className="h-4 w-4 shrink-0 text-white/62" />
 							<span className="truncate font-mono text-sm">{node.name}</span>
 						</span>
 						{node.size ? (
-							<span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-slate-400">
+							<span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.18em] text-white/34">
 								{renderFileSize(node.size)}
 							</span>
 						) : null}
@@ -135,32 +169,30 @@ function ProjectCodeBrowserTree({
 function ProjectCodeBrowserPreview({
 	selectedFilePath,
 	selectedFileState,
+	appearance,
+	previewDecorations,
 }: Pick<
-	ProjectCodeBrowserContentProps,
-	"selectedFilePath" | "selectedFileState"
+	ProjectCodeBrowserWorkspaceProps,
+	"selectedFilePath" | "selectedFileState" | "appearance" | "previewDecorations"
 >) {
+	const filePath =
+		selectedFileState.status === "ready" ? selectedFileState.filePath : selectedFilePath || "";
+	const previewDecoration = filePath ? previewDecorations?.[filePath] : undefined;
+
 	if (selectedFileState.status === "loading") {
 		return (
-			<div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-sky-500/20 bg-black/20 px-6 py-10 text-center font-mono text-sm text-slate-300">
+			<div className={getEmptyStateClasses()}>
 				正在加载文件内容...
 			</div>
 		);
 	}
 
 	if (selectedFileState.status === "failed") {
-		return (
-			<div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-rose-500/20 bg-rose-500/5 px-6 py-10 text-center font-mono text-sm text-rose-200">
-				{selectedFileState.message}
-			</div>
-		);
+		return <div className={getEmptyStateClasses()}>{selectedFileState.message}</div>;
 	}
 
 	if (selectedFileState.status === "unavailable") {
-		return (
-			<div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-amber-500/20 bg-amber-500/5 px-6 py-10 text-center font-mono text-sm text-amber-100">
-				{selectedFileState.message}
-			</div>
-		);
+		return <div className={getEmptyStateClasses()}>{selectedFileState.message}</div>;
 	}
 
 	if (selectedFileState.status === "ready") {
@@ -168,25 +200,98 @@ function ProjectCodeBrowserPreview({
 			.length;
 		return (
 			<FindingCodeWindow
-				title="代码浏览"
 				filePath={selectedFileState.filePath}
 				code={selectedFileState.content}
 				lineStart={1}
 				lineEnd={lineEnd}
-				chrome="editor"
+				highlightStartLine={previewDecoration?.highlightStartLine ?? undefined}
+				highlightEndLine={previewDecoration?.highlightEndLine ?? undefined}
+				focusLine={previewDecoration?.focusLine ?? undefined}
 				variant="detail"
-				meta={[
-					`${selectedFileState.size.toLocaleString()} B`,
-					`编码 ${selectedFileState.encoding}`,
-				]}
+				appearance={appearance}
 			/>
 		);
 	}
 
 	return (
-		<div className="flex min-h-[360px] items-center justify-center rounded-xl border border-dashed border-slate-700/70 bg-black/20 px-6 py-10 text-center font-mono text-sm text-slate-400">
+		<div className={getEmptyStateClasses()}>
 			{selectedFilePath ? PROJECT_CODE_BROWSER_FAILED_MESSAGE : PROJECT_CODE_BROWSER_EMPTY_MESSAGE}
 		</div>
+	);
+}
+
+export function ProjectCodeBrowserWorkspace({
+	tree,
+	expandedFolders,
+	selectedFilePath,
+	selectedFileState,
+	onToggleFolder,
+	onSelectFile,
+	appearance = "native-explorer",
+	previewDecorations,
+	className,
+}: ProjectCodeBrowserWorkspaceProps) {
+	return (
+		<section
+			className={cn(
+				"grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]",
+				className,
+			)}
+		>
+			<div
+				className={cn(
+					getPaneShellClasses(appearance),
+					"min-h-[360px] overflow-hidden xl:min-h-0",
+				)}
+			>
+				<div className="flex h-full min-h-0 flex-col">
+					<div className="border-b border-white/8 px-4 py-3">
+						<div className="text-xs uppercase tracking-[0.24em] text-white/34">
+							Files
+						</div>
+					</div>
+					<div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 custom-scrollbar-dark">
+						{tree.length > 0 ? (
+							<ProjectCodeBrowserTree
+								nodes={tree}
+								expandedFolders={expandedFolders}
+								selectedFilePath={selectedFilePath}
+								onToggleFolder={onToggleFolder}
+								onSelectFile={onSelectFile}
+								appearance={appearance}
+							/>
+						) : (
+							<div className="px-3 py-8 text-center text-sm text-white/42">
+								当前项目没有可浏览的文本文件
+							</div>
+						)}
+					</div>
+				</div>
+			</div>
+
+			<div
+				className={cn(
+					getPaneShellClasses(appearance),
+					"min-h-[360px] overflow-hidden xl:min-h-0",
+				)}
+			>
+				<div className="flex h-full min-h-0 flex-col">
+					<div className="border-b border-white/8 px-4 py-3">
+						<div className="truncate text-xs uppercase tracking-[0.24em] text-white/34">
+							{selectedFilePath || "Preview"}
+						</div>
+					</div>
+					<div className="min-h-0 flex-1 p-3">
+						<ProjectCodeBrowserPreview
+							selectedFilePath={selectedFilePath}
+							selectedFileState={selectedFileState}
+							appearance={appearance}
+							previewDecorations={previewDecorations}
+						/>
+					</div>
+				</div>
+			</div>
+		</section>
 	);
 }
 
@@ -202,115 +307,72 @@ export function ProjectCodeBrowserContent({
 	onBack,
 	onToggleFolder,
 	onSelectFile,
+	appearance = "native-explorer",
+	previewDecorations,
 }: ProjectCodeBrowserContentProps) {
-	const currentFileLabel = selectedFilePath || "未选择文件";
 	const filesCountLabel = `${filesCount} 个文件`;
 	const isZipProject = project?.source_type === "zip";
 
 	return (
-		<div className="p-6 bg-background min-h-screen font-mono relative flex flex-col gap-6">
-			<div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
-
-			<section className="cyber-card relative z-10 overflow-hidden p-5">
+		<div className="relative flex min-h-screen flex-col gap-4 overflow-hidden bg-background p-6 font-mono">
+			<section className="rounded-2xl border border-white/10 bg-black/80 px-5 py-4">
 				<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
 					<div className="flex min-w-0 items-start gap-3">
 						<Button
 							type="button"
 							size="sm"
 							variant="outline"
-							className="cyber-btn-ghost h-9 px-3"
+							className="h-9 border-white/10 bg-black px-3 text-white/80 hover:bg-white/[0.04] hover:text-white"
 							onClick={onBack}
 						>
 							<ArrowLeft className="h-4 w-4" />
 							返回
 						</Button>
-						<div className="min-w-0 space-y-2">
-							<div className="text-xs uppercase tracking-[0.28em] text-sky-300">
-								代码浏览
-							</div>
+						<div className="min-w-0 space-y-1">
 							<h1 className="truncate text-2xl font-bold text-white">
 								{project?.name || "项目代码浏览"}
 							</h1>
-							<p className="truncate text-xs text-slate-400">
-								当前文件: {currentFileLabel}
-							</p>
 						</div>
 					</div>
-					<div className="flex flex-wrap items-center gap-2">
-						<Badge className="bg-sky-500/12 text-sky-100 border-sky-500/25">
+					<div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-white/40">
+						<span className="rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-1">
 							{project?.source_type === "zip" ? "ZIP 项目" : "仓库项目"}
-						</Badge>
-						<Badge className="bg-white/5 text-slate-200 border-white/10">
+						</span>
+						<span className="rounded-md border border-white/10 bg-white/[0.03] px-2.5 py-1">
 							{filesCountLabel}
-						</Badge>
+						</span>
 					</div>
 				</div>
 			</section>
 
 			{loading ? (
-				<section className="cyber-card relative z-10 flex min-h-[240px] items-center justify-center p-6 text-sm text-slate-300">
+				<section className="flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-black/80 p-6 text-sm text-white/56">
 					正在加载项目代码浏览数据...
 				</section>
 			) : error ? (
-				<section className="cyber-card relative z-10 flex min-h-[240px] items-center justify-center p-6 text-sm text-rose-300">
+				<section className="flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-black/80 p-6 text-sm text-white/56">
 					{error}
 				</section>
 			) : !project ? (
-				<section className="cyber-card relative z-10 flex min-h-[240px] items-center justify-center p-6 text-sm text-slate-300">
+				<section className="flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-black/80 p-6 text-sm text-white/56">
 					项目不存在或已被删除
 				</section>
 			) : !isZipProject ? (
-				<section className="cyber-card relative z-10 flex min-h-[240px] items-center justify-center p-6 text-sm text-slate-300">
+				<section className="flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-black/80 p-6 text-sm text-white/56">
 					仅 ZIP 类型项目支持代码浏览
 				</section>
 			) : (
-				<section className="relative z-10 grid min-h-[65vh] grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-					<div className="cyber-card min-h-[320px] p-4">
-						<div className="mb-4 flex items-center justify-between gap-3">
-							<div>
-								<div className="text-xs uppercase tracking-[0.24em] text-sky-300">
-									文件树
-								</div>
-								<p className="mt-1 text-xs text-slate-400">
-									默认全部折叠，点击目录展开
-								</p>
-							</div>
-							<Badge className="bg-white/5 text-slate-200 border-white/10">
-								{filesCountLabel}
-							</Badge>
-						</div>
-						<div className="max-h-[70vh] overflow-y-auto pr-1 custom-scrollbar-dark">
-							{tree.length > 0 ? (
-								<ProjectCodeBrowserTree
-									nodes={tree}
-									expandedFolders={expandedFolders}
-									selectedFilePath={selectedFilePath}
-									onToggleFolder={onToggleFolder}
-									onSelectFile={onSelectFile}
-								/>
-							) : (
-								<div className="rounded-xl border border-dashed border-slate-700/70 bg-black/20 px-4 py-8 text-center text-sm text-slate-400">
-									当前项目没有可浏览的文本文件
-								</div>
-							)}
-						</div>
-					</div>
-
-					<div className="cyber-card min-h-[320px] p-4">
-						<div className="mb-4">
-							<div className="text-xs uppercase tracking-[0.24em] text-sky-300">
-								预览窗口
-							</div>
-							<p className="mt-1 truncate text-xs text-slate-400">
-								{selectedFilePath || PROJECT_CODE_BROWSER_EMPTY_MESSAGE}
-							</p>
-						</div>
-						<ProjectCodeBrowserPreview
-							selectedFilePath={selectedFilePath}
-							selectedFileState={selectedFileState}
-						/>
-					</div>
-				</section>
+				<ProjectCodeBrowserWorkspace
+					tree={tree}
+					expandedFolders={expandedFolders}
+					selectedFilePath={selectedFilePath}
+					selectedFileState={selectedFileState}
+					onToggleFolder={onToggleFolder}
+					onSelectFile={onSelectFile}
+					appearance={appearance}
+					previewDecorations={previewDecorations}
+					className="flex-1"
+				/>
 			)}
 		</div>
 	);

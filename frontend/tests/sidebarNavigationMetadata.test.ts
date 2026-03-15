@@ -16,6 +16,19 @@ test("agent test route is grouped under devTest navigation", () => {
 	assert.equal(agentTestRoute.navGroup, "devTest");
 });
 
+test("code window demo route is visible under devTest navigation", () => {
+	const demoRoute = routes.find(
+		(route) => route.path === "/agent-test/code-window-demo",
+	);
+
+	assert.ok(demoRoute);
+	assert.equal(demoRoute.name, "代码窗 Demo");
+	assert.equal(demoRoute.visible, true);
+	assert.equal(demoRoute.navVisible, true);
+	assert.equal(demoRoute.navGroup, "devTest");
+	assert.equal(demoRoute.navOrder, 36);
+});
+
 test("sidebar navigation groups keep the expected parent order", () => {
 	assert.deepEqual(
 		SIDEBAR_NAV_GROUPS.map((group) => group.id),
