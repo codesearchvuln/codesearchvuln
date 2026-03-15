@@ -857,7 +857,9 @@ export default function ProjectDetail() {
 									<TableRow key={`${item.taskId}:${item.id}`}>
 										<TableCell
 											className="text-left text-sm text-foreground whitespace-nowrap overflow-hidden text-ellipsis"
-											title={`${item.cweLabel} ${item.title}`}
+											title={[item.cweLabel, item.cweTooltip, item.title]
+												.filter(Boolean)
+												.join("\n")}
 										>
 											{item.cweLabel}
 										</TableCell>

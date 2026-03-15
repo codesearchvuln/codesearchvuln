@@ -44,6 +44,7 @@ function InfoSection({ title, items }: InfoSectionProps) {
               className={`text-sm text-foreground break-all ${
                 item.mono ? "font-mono text-[13px]" : ""
               }`}
+              title={item.title || undefined}
             >
               {item.value || "-"}
             </div>

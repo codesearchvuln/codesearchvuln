@@ -358,7 +358,7 @@ export default function RealtimeFindingsPanel(props: {
 												<TableCell className="py-3 align-top">
 													<div
 														className="truncate text-sm font-medium text-foreground"
-														title={row.typeLabel}
+														title={row.typeTooltip || row.typeLabel}
 													>
 														{row.typeLabel}
 													</div>

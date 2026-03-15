@@ -51,7 +51,6 @@ const routeIcons: Record<string, React.ReactNode> = {
 	"/scan-config/intelligent-engine": <Bot className="w-[18px] h-[18px]" />,
 	"/scan-config/external-tools": <Wrench className="w-[18px] h-[18px]" />,
 	"/agent-test": <Bot className="w-[18px] h-[18px]" />,
-	"/agent-test/code-window-demo": <Code className="w-[18px] h-[18px]" />,
 	// "/prompts": <MessageSquare className="w-[18px] h-[18px]" />,
 	// "/recycle-bin": <Trash2 className="w-[18px] h-[18px]" />,
 };

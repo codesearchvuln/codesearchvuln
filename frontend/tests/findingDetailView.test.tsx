@@ -142,7 +142,7 @@ function getSectionMarkup(markup: string, title: string, nextTitle: string) {
   return markup.slice(start, end);
 }
 
-test("FindingDetailView 渲染 agent 漏洞详情的新信息层级", () => {
+test("FindingDetailView 渲染 agent 漏洞详情的新信息层级并隐藏完整文件入口", () => {
   const markup = renderMarkup(
     buildAgentFindingDetailModel({
       finding: agentFinding,
@@ -156,7 +156,8 @@ test("FindingDetailView 渲染 agent 漏洞详情的新信息层级", () => {
   const overviewMarkup = getSectionMarkup(markup, "概览信息", "追踪信息");
 
   assert.match(markup, /统一漏洞详情/);
-  assert.match(markup, /sql injection/);
+  assert.match(markup, /CWE-89 SQL注入/);
+  assert.match(markup, /SQL Injection/);
   assert.match(markup, /高危/);
   assert.match(markup, /高/);
   assert.match(markup, /概览信息/);
@@ -178,7 +179,7 @@ test("FindingDetailView 渲染 agent 漏洞详情的新信息层级", () => {
   assert.doesNotMatch(markup, /漏洞ID：/);
   assert.ok(markup.indexOf("概览信息") < markup.indexOf("追踪信息"));
   assert.ok(markup.indexOf("追踪信息") < markup.indexOf("根因说明"));
-  assert.match(markup, /查看文件/);
+  assert.doesNotMatch(markup, /查看文件/);
   assert.doesNotMatch(markup, /查看文件全部内容/);
   assert.match(markup, /src\/main\/java\/demo\/JdbcController\.java/);
   assert.match(markup, /第 69-83 行/);
@@ -198,7 +199,7 @@ test("FindingDetailView 渲染 agent 误报场景并突出验证结论", () => {
   assert.match(markup, /验证结论/);
   assert.match(markup, /判定依据/);
   assert.match(markup, /误报/);
-  assert.match(markup, /sql injection/);
+  assert.match(markup, /CWE-89 SQL注入/);
 });
 
 test("FindingDetailView 渲染 opengrep 场景并将描述降级为扫描说明", () => {
@@ -211,7 +212,8 @@ test("FindingDetailView 渲染 opengrep 场景并将描述降级为扫描说明"
     }),
   );
 
-  assert.match(markup, /java-sql-injection/);
+  assert.match(markup, /CWE-89 SQL注入/);
+  assert.match(markup, /SQL Injection/);
   assert.match(markup, /严重/);
   assert.match(markup, /高/);
   assert.match(markup, /扫描说明/);

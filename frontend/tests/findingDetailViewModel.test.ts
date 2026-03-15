@@ -219,18 +219,19 @@ test("buildAgentFindingDetailModel 将概览信息直接收敛为 overviewItems"
     projectName: "demo",
   });
 
-  assert.equal(Object.prototype.hasOwnProperty.call(model, "sourceLabel"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(model, "statusLabel"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(model, "heroEyebrow"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(model, "heroTitle"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(model, "heroSubtitle"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(model, "helperLocation"), false);
+  assert.equal("sourceLabel" in model, false);
+  assert.equal("statusLabel" in model, false);
+  assert.equal("heroEyebrow" in model, false);
+  assert.equal("heroTitle" in model, false);
+  assert.equal("heroSubtitle" in model, false);
+  assert.equal("helperLocation" in model, false);
   assert.equal(model.overviewItems[0]?.label, "状态");
   assert.equal(model.overviewItems[0]?.value, "已验证");
   assert.deepEqual(
     model.overviewItems.map((item) => item.label),
     ["状态", "漏洞类型", "漏洞危害", "漏洞置信度"],
   );
+  assert.equal(model.overviewItems[1]?.value, "CWE-89 SQL注入");
   assert.equal(model.codeSections[0]?.displayFilePath, "src/main/java/demo/JdbcController.java");
   assert.equal(model.codeSections[0]?.locationLabel, "第 69-83 行");
   assert.equal(model.codeSections[0]?.fullFileAvailable, true);
@@ -290,6 +291,7 @@ test("buildOpengrepFindingDetailModel 在 ZIP 项目下遇到旧绝对路径时�
 
   assert.equal(model.codeSections[0]?.fullFileAvailable, false);
   assert.equal(model.codeSections[0]?.fullFileRequest, null);
+  assert.equal(model.overviewItems[1]?.value, "CWE-89 SQL注入");
 });
 
 test("buildFullFileDisplayLines 生成全文视图并保持焦点与高亮区间", () => {

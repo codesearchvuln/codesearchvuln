@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import DeferredSection from "@/components/performance/DeferredSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, isDemoMode } from "@/shared/config/database";
+import { resolveCweDisplay } from "@/shared/security/cweCatalog";
 import type {
 	DashboardCweDistributionItem,
 	DashboardRuleConfidenceItem,
@@ -158,16 +159,22 @@ export default function Dashboard() {
 				high_count: Math.max(Number(item.high_count || 0), 0),
 				medium_count: Math.max(Number(item.medium_count || 0), 0),
 			}));
-				const snapshotCweDistribution = (snapshot.data.cwe_distribution || []).map(
-					(item) => ({
-						cwe_id: item.cwe_id || "CWE-UNKNOWN",
-						cwe_name: item.cwe_name || item.cwe_id || "CWE-UNKNOWN",
+			const snapshotCweDistribution = (snapshot.data.cwe_distribution || []).map(
+				(item) => {
+					const cweDisplay = resolveCweDisplay({
+						cwe: item.cwe_id,
+						fallbackLabel: item.cwe_name || item.cwe_id || "CWE-UNKNOWN",
+					});
+					return {
+						cwe_id: item.cwe_id || cweDisplay.cweId || "CWE-UNKNOWN",
+						cwe_name: cweDisplay.label,
 						total_findings: Math.max(Number(item.total_findings || 0), 0),
 						opengrep_findings: Math.max(Number(item.opengrep_findings || 0), 0),
 						agent_findings: Math.max(Number(item.agent_findings || 0), 0),
 						bandit_findings: Math.max(Number(item.bandit_findings || 0), 0),
-					}),
-				);
+					};
+				},
+			);
 
 			setTotalScanDurationMs(
 				Math.max(Number(snapshot.data.total_scan_duration_ms || 0), 0),

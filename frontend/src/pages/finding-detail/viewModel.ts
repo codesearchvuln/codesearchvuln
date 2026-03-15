@@ -8,6 +8,7 @@ import type {
   OpengrepFinding,
   OpengrepFindingContext,
 } from "@/shared/api/opengrep";
+import { resolveCweDisplay } from "@/shared/security/cweCatalog";
 import type { ProjectSourceType } from "@/shared/types";
 
 const CODE_CONTEXT_PADDING = 3;
@@ -51,6 +52,7 @@ export type FindingDetailTrackingItem = {
   label: string;
   value: string;
   mono?: boolean;
+  title?: string | null;
 };
 
 export type FindingDetailRootCause = {
@@ -262,6 +264,7 @@ function buildOverviewItems(params: {
   statusLabel: string;
   headlineLabel: string;
   headlineValue: string;
+  headlineTitle?: string | null;
   summaryStats: FindingDetailSummaryStat[];
 }): FindingDetailTrackingItem[] {
   const items: FindingDetailTrackingItem[] = [{ label: "状态", value: params.statusLabel }];
@@ -271,6 +274,7 @@ function buildOverviewItems(params: {
     items.push({
       label: String(params.headlineLabel || "").trim() || "概览",
       value: headlineValue,
+      title: String(params.headlineTitle || "").trim() || null,
     });
   }
 
@@ -663,7 +667,10 @@ export function buildAgentFindingDetailModel(params: {
     lineStart: finding.line_start,
     lineEnd: finding.line_end,
   });
-  const typeLabel = String(finding.vulnerability_type || "").trim() || MISSING_VALUE;
+  const typeDisplay = resolveCweDisplay({
+    cwe: finding.cwe_id,
+    fallbackLabel: String(finding.vulnerability_type || "").trim() || MISSING_VALUE,
+  });
   const trackingItems = buildTrackingItems({
     sourceLabel: "智能扫描",
     taskId: params.taskId,
@@ -675,7 +682,7 @@ export function buildAgentFindingDetailModel(params: {
   if (isFalsePositive) {
     const statusLabel = buildStatusLabel(finding.status || "false_positive");
     const summaryStats: FindingDetailSummaryStat[] = [
-      { label: "漏洞类型", value: typeLabel, tone: "info" },
+      { label: "漏洞类型", value: typeDisplay.label, tone: "info" },
       { label: "漏洞危害", value: severity.label, tone: severity.tone },
       { label: "漏洞置信度", value: confidence.label, tone: confidence.tone },
     ];
@@ -690,11 +697,11 @@ export function buildAgentFindingDetailModel(params: {
       },
       trackingItems,
       overviewItems: buildOverviewItems({
-        statusLabel,
-        headlineLabel: "验证结论",
-        headlineValue: "该问题已在验证阶段判定为误报",
-        summaryStats,
-      }),
+      statusLabel,
+      headlineLabel: "验证结论",
+      headlineValue: "该问题已在验证阶段判定为误报",
+      summaryStats,
+    }),
       codeSections,
       projectId: params.projectId,
       projectSourceType: params.projectSourceType,
@@ -720,7 +727,8 @@ export function buildAgentFindingDetailModel(params: {
     overviewItems: buildOverviewItems({
       statusLabel,
       headlineLabel: "漏洞类型",
-      headlineValue: typeLabel,
+      headlineValue: typeDisplay.label,
+      headlineTitle: typeDisplay.tooltip,
       summaryStats,
     }),
     codeSections,
@@ -749,11 +757,25 @@ export function buildOpengrepFindingDetailModel(params: {
     lineStart: finding.start_line,
     lineEnd: parseStaticEndLine(finding),
   });
-  const typeLabel = String(finding.rule_name || "").trim() || "unknown-rule";
+  const typeDisplay = resolveCweDisplay({
+    cwe: finding.cwe,
+    fallbackLabel: String(finding.rule_name || "").trim() || "unknown-rule",
+  });
   const summaryStats: FindingDetailSummaryStat[] = [
     { label: "漏洞危害", value: severity.label, tone: severity.tone },
     { label: "漏洞置信度", value: confidence.label, tone: confidence.tone },
   ];
+  const trackingItems = buildTrackingItems({
+    sourceLabel: "静态扫描 · Opengrep",
+    taskId: params.taskId,
+    findingId: params.findingId,
+    taskName: params.taskName,
+    location,
+  });
+  const ruleName = String(finding.rule_name || "").trim();
+  if (ruleName) {
+    trackingItems.push({ label: "规则标识", value: ruleName, mono: true });
+  }
 
   return buildBaseModel({
     pageTitle: "统一漏洞详情",
@@ -763,17 +785,12 @@ export function buildOpengrepFindingDetailModel(params: {
       title: "扫描说明",
       body: String(finding.description || "").trim() || MISSING_DESCRIPTION,
     },
-    trackingItems: buildTrackingItems({
-      sourceLabel: "静态扫描 · Opengrep",
-      taskId: params.taskId,
-      findingId: params.findingId,
-      taskName: params.taskName,
-      location,
-    }),
+    trackingItems,
     overviewItems: buildOverviewItems({
       statusLabel,
       headlineLabel: "漏洞类型",
-      headlineValue: typeLabel,
+      headlineValue: typeDisplay.label,
+      headlineTitle: typeDisplay.tooltip,
       summaryStats,
     }),
     codeSections: buildFindingDetailCodeSections(

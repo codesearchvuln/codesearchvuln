@@ -114,7 +114,7 @@ test("reduceFindingDetailPanelState 收起当前全文视图但不清空缓存",
 	assert.deepEqual(state.fullFileStates.a, ready);
 });
 
-test("FindingDetailCodePanel 使用朴素三行分组布局语义", () => {
+test("FindingDetailCodePanel 隐藏完整文件入口并保留朴素三行分组布局语义", () => {
 	const markup = renderToStaticMarkup(
 		createElement(FindingDetailCodePanel, {
 			title: "关联代码",
@@ -123,7 +123,7 @@ test("FindingDetailCodePanel 使用朴素三行分组布局语义", () => {
 		}),
 	);
 
-	assert.match(markup, /查看文件/);
+	assert.doesNotMatch(markup, /查看文件/);
 	assert.doesNotMatch(markup, /查看文件全部内容/);
 	assert.match(markup, /核心漏洞代码/);
 	assert.match(markup, /src\/demo\.ts/);

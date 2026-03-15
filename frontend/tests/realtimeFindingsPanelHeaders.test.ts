@@ -25,6 +25,7 @@ const items: RealtimeMergedFindingItem[] = [
 		display_severity: "high",
 		verification_progress: "pending",
 		vulnerability_type: "SQL Injection",
+		cwe_id: "CWE-89",
 		file_path: "src/api/user.ts",
 		line_start: 18,
 		line_end: 18,
@@ -138,7 +139,7 @@ test("RealtimeFindingsPanel 仅在列表中显示漏洞类型，不再渲染原�
 		}),
 	);
 
-	assert.match(markup, />SQL Injection</);
+	assert.match(markup, />CWE-89 SQL注入</);
 	assert.doesNotMatch(markup, />SQL 注入</);
 });
 

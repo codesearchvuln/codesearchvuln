@@ -76,8 +76,22 @@ import {
 	type OpengrepRule,
 	type OpengrepRuleDetail,
 } from "@/shared/api/opengrep";
+import {
+	formatCweDisplayLabel,
+	normalizeCweId,
+	resolveCweDisplay,
+} from "@/shared/security/cweCatalog";
 import { setOpengrepActiveRules } from "@/shared/stores/opengrepRulesStore";
 import { useI18n } from "@/shared/i18n";
+
+export function formatRuleCweDisplayLabel(cwe?: string) {
+	return formatCweDisplayLabel(cwe);
+}
+
+function formatRuleCweDisplayTitle(cwe?: string) {
+	const display = resolveCweDisplay({ cwe });
+	return display.tooltip || display.label;
+}
 
 interface OpengrepRulesProps {
 	embedded?: boolean;
@@ -375,7 +389,7 @@ export default function OpengrepRules({
 
 				if (Array.isArray(rule.cwe)) {
 					for (const cwe of rule.cwe) {
-						const normalizedCwe = normalizeCweCode(cwe);
+						const normalizedCwe = normalizeCweId(cwe);
 						if (normalizedCwe) {
 							vulnerabilityTypeSet.add(normalizedCwe);
 						}
@@ -1119,19 +1133,6 @@ export default function OpengrepRules({
 		(currentPage - 1) * pageSize,
 		currentPage * pageSize,
 	);
-	function normalizeCweCode(cwe?: string) {
-		const raw = cwe?.trim();
-		if (!raw) return "";
-		const upper = raw.toUpperCase().replace(/_/g, "-");
-		const digits = upper.match(/(\d+)/)?.[1];
-		if (digits) return `CWE-${digits}`;
-		if (upper.startsWith("CWE-")) return upper;
-		if (upper.startsWith("CWE")) {
-			return upper.replace(/^CWE[-:]?/, "CWE-");
-		}
-		return `CWE-${upper}`;
-	}
-
 	function normalizeConfidence(confidence?: string | null) {
 		const normalized = confidence?.trim().toUpperCase();
 		if (!normalized) return "";
@@ -1951,8 +1952,9 @@ export default function OpengrepRules({
 																<Badge
 																	key={idx}
 																	className="cyber-badge bg-violet-500/20 text-violet-300 border-violet-500/30"
+																	title={formatRuleCweDisplayTitle(cwe)}
 																>
-																	{normalizeCweCode(cwe)}
+																	{formatRuleCweDisplayLabel(cwe)}
 																</Badge>
 															))
 														) : (

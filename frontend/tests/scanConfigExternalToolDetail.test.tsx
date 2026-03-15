@@ -187,8 +187,10 @@ test("ScanConfigExternalToolDetailContent 渲染 skill 概览、事件流、结�
   assert.match(markup, /示例提问/);
   assert.match(markup, /运行测试/);
   assert.match(markup, /思考（已折叠）/);
-  assert.match(markup, /read_file -&gt; sed/);
+  assert.match(markup, /Action: read_file/);
+  assert.match(markup, /文件: src\/main\.c/);
   assert.match(markup, /src\/main\.c:1-3/);
+  assert.match(markup, /return 0;/);
   assert.match(markup, /最终结果/);
   assert.match(markup, /主解析入口位于/);
   assert.match(markup, /临时目录已清理/);

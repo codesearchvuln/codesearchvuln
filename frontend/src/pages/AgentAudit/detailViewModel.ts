@@ -1,5 +1,6 @@
 import { normalizeReturnToPath } from "../../shared/utils/findingRoute";
 import { getEstimatedTaskProgressPercent } from "../../features/tasks/services/taskProgress";
+import { resolveCweDisplay } from "../../shared/security/cweCatalog";
 export type FindingVerificationFilter = "all" | "verified" | "pending";
 
 export interface AgentAuditFindingFilters {
@@ -117,6 +118,7 @@ export interface FindingTableRow {
   id: string;
   title: string;
   typeLabel: string;
+  typeTooltip?: string | null;
   severity: string;
   severityLabel: string;
   severityScore: number;
@@ -350,15 +352,32 @@ function getConfidenceLabel(
   return "低";
 }
 
-function getTypeLabel(item: RealtimeFindingLike): string {
-  const cwe = String(item.cwe_id || "").trim();
-  if (cwe) {
-    const normalized = cwe.match(/CWE[\s:_-]*(\d{1,6})/i)?.[1] || cwe.match(/^(\d{1,6})$/)?.[1];
-    return normalized ? `CWE-${normalized}` : cwe;
+function getTypeDisplay(item: RealtimeFindingLike): {
+  label: string;
+  tooltip: string | null;
+} {
+  const cweDisplay = resolveCweDisplay({
+    cwe: item.cwe_id,
+    fallbackLabel: String(item.vulnerability_type || "").trim(),
+  });
+  if (cweDisplay.label && cweDisplay.label !== "-") {
+    return {
+      label: cweDisplay.label,
+      tooltip: cweDisplay.tooltip,
+    };
   }
+
   const vulnerabilityType = String(item.vulnerability_type || "").trim();
-  if (vulnerabilityType) return vulnerabilityType;
-  return String(item.display_title || item.title || "未命名漏洞").trim();
+  if (vulnerabilityType) {
+    return {
+      label: vulnerabilityType,
+      tooltip: null,
+    };
+  }
+  return {
+    label: String(item.display_title || item.title || "未命名漏洞").trim(),
+    tooltip: null,
+  };
 }
 
 function getLocation(item: RealtimeFindingLike): string {
@@ -379,10 +398,12 @@ function buildFindingRow(item: RealtimeFindingLike): FindingTableRow {
   const filePath = String(item.file_path || "").trim() || "-";
   const line = toPositiveNumberOrNull(item.line_start);
   const title = String(item.display_title || item.title || "未命名漏洞").trim() || "未命名漏洞";
+  const typeDisplay = getTypeDisplay(item);
   return {
     id: item.id,
     title,
-    typeLabel: getTypeLabel(item),
+    typeLabel: typeDisplay.label,
+    typeTooltip: typeDisplay.tooltip,
     severity,
     severityLabel: getSeverityLabel(severity),
     severityScore: SEVERITY_SCORE[severity] ?? 0,
@@ -416,6 +437,9 @@ export function buildFindingTableState(input: {
       const matchedKeyword =
         !keyword ||
         row.typeLabel.toLowerCase().includes(keyword) ||
+        String(row.typeTooltip || "").toLowerCase().includes(keyword) ||
+        String(row.raw.cwe_id || "").toLowerCase().includes(keyword) ||
+        String(row.raw.vulnerability_type || "").toLowerCase().includes(keyword) ||
         row.severityLabel.toLowerCase().includes(keyword) ||
         row.verificationLabel.toLowerCase().includes(keyword) ||
         String(row.confidenceLabel || "").toLowerCase().includes(keyword);

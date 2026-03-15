@@ -29,6 +29,7 @@ import {
 	getOpengrepScanFindings,
 	type OpengrepFinding,
 } from "@/shared/api/opengrep";
+import { resolveCweDisplay } from "@/shared/security/cweCatalog";
 import {
 	appendReturnTo,
 	buildFindingDetailPath,
@@ -229,47 +230,69 @@ function normalizeAgentFindings(
 	taskId: string,
 	findings: AgentFinding[],
 ): TaskFindingRow[] {
-	return findings.map((finding) => ({
-		id: finding.id,
-		taskId,
-		taskCategory: "intelligent",
-		title: resolveAgentFindingTitle(finding),
-		filePath: String(finding.file_path || "").trim() || "-",
-		line: toPositiveLine(finding.line_start),
-		severity: normalizeTaskFindingSeverity(finding.severity),
-		confidence: normalizeTaskFindingConfidence(
-			finding.ai_confidence ?? finding.confidence ?? null,
-		),
-		route: buildFindingDetailPath({
-			source: "agent",
+	return findings.map((finding) => {
+		const typeDisplay = resolveCweDisplay({
+			cwe: finding.cwe_id,
+			fallbackLabel:
+				String(finding.vulnerability_type || "").trim() ||
+				resolveAgentFindingTitle(finding),
+		});
+
+		return {
+			id: finding.id,
 			taskId,
-			findingId: finding.id,
-		}),
-		createdAt: finding.created_at ?? null,
-	}));
+			taskCategory: "intelligent",
+			title: resolveAgentFindingTitle(finding),
+			typeLabel: typeDisplay.label,
+			typeTooltip: typeDisplay.tooltip,
+			filePath: String(finding.file_path || "").trim() || "-",
+			line: toPositiveLine(finding.line_start),
+			severity: normalizeTaskFindingSeverity(finding.severity),
+			confidence: normalizeTaskFindingConfidence(
+				finding.ai_confidence ?? finding.confidence ?? null,
+			),
+			route: buildFindingDetailPath({
+				source: "agent",
+				taskId,
+				findingId: finding.id,
+			}),
+			createdAt: finding.created_at ?? null,
+		};
+	});
 }
 
 function normalizeStaticFindings(
 	taskId: string,
 	findings: OpengrepFinding[],
 ): TaskFindingRow[] {
-	return findings.map((finding) => ({
-		id: finding.id,
-		taskId,
-		taskCategory: "static",
-		title: resolveStaticFindingTitle(finding),
-		filePath: String(finding.file_path || "").trim() || "-",
-		line: toPositiveLine(finding.start_line),
-		severity: normalizeTaskFindingSeverity(finding.severity),
-		confidence: normalizeTaskFindingConfidence(finding.confidence),
-		route: buildFindingDetailPath({
-			source: "static",
+	return findings.map((finding) => {
+		const typeDisplay = resolveCweDisplay({
+			cwe: finding.cwe,
+			fallbackLabel:
+				String(finding.rule_name || "").trim() ||
+				resolveStaticFindingTitle(finding),
+		});
+
+		return {
+			id: finding.id,
 			taskId,
-			findingId: finding.id,
-			engine: "opengrep",
-		}),
-		createdAt: null,
-	}));
+			taskCategory: "static",
+			title: resolveStaticFindingTitle(finding),
+			typeLabel: typeDisplay.label,
+			typeTooltip: typeDisplay.tooltip,
+			filePath: String(finding.file_path || "").trim() || "-",
+			line: toPositiveLine(finding.start_line),
+			severity: normalizeTaskFindingSeverity(finding.severity),
+			confidence: normalizeTaskFindingConfidence(finding.confidence),
+			route: buildFindingDetailPath({
+				source: "static",
+				taskId,
+				findingId: finding.id,
+				engine: "opengrep",
+			}),
+			createdAt: null,
+		};
+	});
 }
 
 export default function ProjectTaskFindingsDialog({
@@ -362,10 +385,6 @@ export default function ProjectTaskFindingsDialog({
 		};
 	}, [cacheKey, open, taskCategory, taskId]);
 
-	useEffect(() => {
-		setPage(1);
-	}, [confidenceFilter, severityFilter]);
-
 	const filteredRows = useMemo(
 		() => filterTaskFindings(allRows, severityFilter, confidenceFilter),
 		[allRows, confidenceFilter, severityFilter],
@@ -442,9 +461,9 @@ export default function ProjectTaskFindingsDialog({
 					</TableCell>
 					<TableCell
 						className="min-w-[280px] text-sm text-foreground break-words"
-						title={item.title}
+						title={item.typeTooltip || item.title}
 					>
-						{item.title}
+						{item.typeLabel}
 					</TableCell>
 					<TableCell
 						className="min-w-[260px] text-xs text-muted-foreground break-all"
@@ -516,14 +535,15 @@ export default function ProjectTaskFindingsDialog({
 				<div className="flex-1 min-h-0 overflow-hidden px-6 py-4 space-y-4">
 					<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
 						<div>
-							<label className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
+							<p className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
 								危害
-							</label>
+							</p>
 							<Select
 								value={severityFilter}
-								onValueChange={(value) =>
-									setSeverityFilter(value as TaskFindingSeverityFilter)
-								}
+								onValueChange={(value) => {
+									setSeverityFilter(value as TaskFindingSeverityFilter);
+									setPage(1);
+								}}
 							>
 								<SelectTrigger className="h-9 text-sm">
 									<SelectValue />
@@ -539,14 +559,15 @@ export default function ProjectTaskFindingsDialog({
 							</Select>
 						</div>
 						<div>
-							<label className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
+							<p className="block text-xs font-semibold uppercase text-muted-foreground mb-1">
 								置信度
-							</label>
+							</p>
 							<Select
 								value={confidenceFilter}
-								onValueChange={(value) =>
-									setConfidenceFilter(value as TaskFindingConfidenceFilter)
-								}
+								onValueChange={(value) => {
+									setConfidenceFilter(value as TaskFindingConfidenceFilter);
+									setPage(1);
+								}}
 							>
 								<SelectTrigger className="h-9 text-sm">
 									<SelectValue />
