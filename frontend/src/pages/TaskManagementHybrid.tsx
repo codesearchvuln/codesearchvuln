@@ -129,7 +129,7 @@ export default function TaskManagementHybrid() {
 				</div>
 			</div>
 
-			<div className="cyber-card relative z-10 flex min-h-0 flex-1 flex-col p-4">
+			{/* <div className="cyber-card relative z-10 flex min-h-0 flex-1 flex-col p-4"> */}
 				<div className="flex flex-wrap items-center justify-between gap-3">
 					<div className="flex min-w-0 flex-1 items-center gap-3">
 						<div className="relative w-full max-w-sm">
@@ -157,7 +157,7 @@ export default function TaskManagementHybrid() {
 					</div>
 				</div>
 
-				<DeferredSection className="mt-3 min-h-0 flex-1" minHeight={0} priority>
+				<DeferredSection className="-mt-3 min-h-0 flex-1" minHeight={0} priority>
 					<TaskActivitiesListTable
 						activities={filteredActivities}
 						loading={loading}
@@ -165,7 +165,7 @@ export default function TaskManagementHybrid() {
 						emptyText="暂无混合扫描任务"
 					/>
 				</DeferredSection>
-			</div>
+			{/* </div> */}
 
 			{showCreateHybridDialog ? (
 				<Suspense fallback={null}>
