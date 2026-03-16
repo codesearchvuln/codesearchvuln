@@ -294,6 +294,9 @@ export const UI_CONFIG = {
 	SCROLL_BEHAVIOR: "smooth" as const,
 };
 
+export const EVENT_LOG_GRID_TEMPLATE =
+	"72px 84px minmax(0,1fr) 120px 110px 104px";
+
 // ============ Color Palette ============
 
 export const COLORS = {

@@ -297,7 +297,7 @@ export default function StaticAnalysis() {
         enabledEngines={enabledEngines}
       />
 
-      <div className="cyber-card p-4 space-y-3">
+      {/* <div className="cyber-card p-4 space-y-3"> */}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           <div>
             <div className="mb-1 block text-xs font-semibold uppercase text-muted-foreground">
@@ -392,7 +392,7 @@ export default function StaticAnalysis() {
           onToggleStatus={handleToggleStatus}
           onPageChange={setPage}
         />
-      </div>
+      {/* </div> */}
 
       <AlertDialog
         open={Boolean(interruptTarget)}

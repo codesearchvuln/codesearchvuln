@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import React, { createElement } from "react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
+import { fileURLToPath } from "node:url";
 
 import RealtimeFindingsPanel, {
 	type RealtimeMergedFindingItem,
@@ -9,6 +12,15 @@ import RealtimeFindingsPanel, {
 import type { FindingsViewFilters } from "../src/pages/AgentAudit/types.ts";
 
 globalThis.React = React;
+
+const frontendDir = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"..",
+);
+const realtimeFindingsPanelPath = path.join(
+	frontendDir,
+	"src/pages/AgentAudit/components/RealtimeFindingsPanel.tsx",
+);
 
 const filters: FindingsViewFilters = {
 	keyword: "",
@@ -176,4 +188,13 @@ test("RealtimeFindingsPanel 在全部为入库空置信度时隐藏置信度列�
 	assert.doesNotMatch(markup, />置信度<\/th>/);
 	assert.doesNotMatch(markup, />-<\/span>/);
 	assert.doesNotMatch(markup, /同危害按置信度降序/);
+});
+
+test("RealtimeFindingsPanel 搜索框容器向右补齐列表首列内边距，保持左对齐", () => {
+	const source = readFileSync(realtimeFindingsPanelPath, "utf8");
+
+	assert.match(
+		source,
+		/className="relative min-w-0 flex-1 basis-\[320px\] pl-4"/,
+	);
 });

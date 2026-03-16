@@ -1,7 +1,11 @@
 import { memo } from "react";
 import { CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { LOG_TYPE_CONFIG, SEVERITY_COLORS } from "../constants";
+import {
+  EVENT_LOG_GRID_TEMPLATE,
+  LOG_TYPE_CONFIG,
+  SEVERITY_COLORS,
+} from "../constants";
 import type { LogEntryProps, ToolStatus } from "../types";
 import { sanitizeAuditText } from "../utils";
 import {
@@ -158,7 +162,10 @@ export const LogEntry = memo(function LogEntry({
       }
     >
       <div className="px-2 py-2.5 hover:bg-muted/35">
-        <div className="flex flex-col gap-2 md:grid md:grid-cols-[72px_84px_minmax(0,1fr)_120px_110px_auto] md:items-center md:gap-3">
+        <div
+          className="flex flex-col gap-2 md:grid md:items-center md:gap-3"
+          style={{ gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE }}
+        >
           <div className="text-xs font-mono text-muted-foreground tabular-nums">
             {item.time}
           </div>

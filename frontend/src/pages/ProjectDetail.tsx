@@ -687,7 +687,7 @@ export default function ProjectDetail() {
 			</div>
 
 			<div className="relative z-10 space-y-4 mt-6">
-				<div className="cyber-card p-5">
+				{/* <div className="cyber-card p-5"> */}
 					<div className="flex flex-wrap items-center justify-between gap-3 mb-3">
 						<div className="flex items-center gap-2">
 							<Activity className="w-4 h-4 text-sky-400" />
@@ -809,9 +809,9 @@ export default function ProjectDetail() {
 							)}
 						</TableBody>
 					</Table>
-				</div>
+				{/* </div> */}
 
-				<div className="cyber-card p-5">
+				{/* <div className="cyber-card p-5"> */}
 					<div className="flex items-center gap-2 mb-3">
 						<Bug className="w-4 h-4 text-amber-400" />
 						<h3 className="text-sm font-semibold uppercase tracking-wider">
@@ -923,7 +923,7 @@ export default function ProjectDetail() {
 							)}
 						</TableBody>
 					</Table>
-				</div>
+				{/* </div> */}
 			</div>
 
 			<CreateScanTaskDialog

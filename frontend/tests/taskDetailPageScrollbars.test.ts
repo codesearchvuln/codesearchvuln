@@ -12,6 +12,14 @@ const taskDetailPagePath = path.join(
 	frontendDir,
 	"src/pages/AgentAudit/TaskDetailPage.tsx",
 );
+const taskDetailConstantsPath = path.join(
+	frontendDir,
+	"src/pages/AgentAudit/constants.tsx",
+);
+const logEntryPath = path.join(
+	frontendDir,
+	"src/pages/AgentAudit/components/LogEntry.tsx",
+);
 
 test("TaskDetailPage 仅将事件日志滚动区切换为暗色滚动条类", () => {
 	const source = readFileSync(taskDetailPagePath, "utf8");
@@ -21,5 +29,26 @@ test("TaskDetailPage 仅将事件日志滚动区切换为暗色滚动条类", ()
 	assert.doesNotMatch(
 		source,
 		/className="overflow-x-auto custom-scrollbar-dark"/,
+	);
+});
+
+test("TaskDetailPage 事件日志表头和内容共用固定列模板，避免后半列错位", () => {
+	const taskDetailSource = readFileSync(taskDetailPagePath, "utf8");
+	const constantsSource = readFileSync(taskDetailConstantsPath, "utf8");
+	const logEntrySource = readFileSync(logEntryPath, "utf8");
+
+	assert.match(
+		constantsSource,
+		/export const EVENT_LOG_GRID_TEMPLATE\s*=\s*"72px 84px minmax\(0,1fr\) 120px 110px 104px";/,
+	);
+	assert.match(taskDetailSource, /gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE/);
+	assert.match(logEntrySource, /gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE/);
+	assert.doesNotMatch(
+		taskDetailSource,
+		/grid-cols-\[72px_84px_minmax\(0,1fr\)_120px_110px_auto\]/,
+	);
+	assert.doesNotMatch(
+		logEntrySource,
+		/grid-cols-\[72px_84px_minmax\(0,1fr\)_120px_110px_auto\]/,
 	);
 });

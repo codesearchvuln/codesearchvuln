@@ -51,7 +51,11 @@ import {
 } from "./components";
 import ReportExportDialog from "./components/ReportExportDialog";
 import { useAgentAuditState } from "./hooks";
-import { POLLING_INTERVALS, TASK_PHASE_LABELS } from "./constants";
+import {
+  EVENT_LOG_GRID_TEMPLATE,
+  POLLING_INTERVALS,
+  TASK_PHASE_LABELS,
+} from "./constants";
 import {
   cleanThinkingContent,
   computeContainerAnchorScrollTop,
@@ -3209,7 +3213,10 @@ function AgentAuditPageContent() {
 
             <div className="pt-2">
               <div className="hidden border-b border-border/60 px-5 py-2 md:block">
-                <div className="grid grid-cols-[72px_84px_minmax(0,1fr)_120px_110px_auto] items-center gap-3 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground/80">
+                <div
+                  className="grid items-center gap-3 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground/80"
+                  style={{ gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE }}
+                >
                   <span>距开始时间</span>
                   <span>类型标签</span>
                   <span>事件概况</span>
