@@ -73,7 +73,7 @@ const opengrepFinding: OpengrepFinding = {
   rule_name: "python-sqli",
   cwe: ["CWE-89"],
   description: "Possible SQL injection",
-  file_path: "/tmp/deepaudit_project/archive-root/src/app/db.py",
+  file_path: "/tmp/VulHunter_project/archive-root/src/app/db.py",
   start_line: 23,
   code_snippet: "query = f\"SELECT * FROM users WHERE id = {user_id}\"",
   severity: "ERROR",
@@ -87,7 +87,7 @@ const banditFinding: BanditFinding = {
   test_id: "B602",
   test_name: "subprocess_popen_with_shell_equals_true",
   issue_text: "shell=True may trigger command injection",
-  file_path: "/tmp/deepaudit_project/archive-root/app/tasks/run_cmd.py",
+  file_path: "/tmp/VulHunter_project/archive-root/app/tasks/run_cmd.py",
   line_number: 41,
   issue_severity: "HIGH",
   issue_confidence: "HIGH",
@@ -260,7 +260,7 @@ test("buildAgentFindingDetailModel 在非 ZIP 项目下禁用全文查看", () =
 test("isFindingDetailFullFilePathSupported 仅接受 ZIP 内相对路径", () => {
   assert.equal(isFindingDetailFullFilePathSupported("src/main.py"), true);
   assert.equal(isFindingDetailFullFilePathSupported("./src/main.py"), true);
-  assert.equal(isFindingDetailFullFilePathSupported("/tmp/deepaudit_project/src/main.py"), false);
+  assert.equal(isFindingDetailFullFilePathSupported("/tmp/VulHunter_project/src/main.py"), false);
   assert.equal(isFindingDetailFullFilePathSupported("/abs/path/src/main.py"), false);
   assert.equal(isFindingDetailFullFilePathSupported(""), false);
 });

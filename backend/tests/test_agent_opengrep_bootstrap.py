@@ -297,7 +297,7 @@ async def test_prepare_embedded_bootstrap_gitleaks_missing_binary_abort(monkeypa
         )
 
     assert "Gitleaks 预处理失败：未安装 gitleaks" in str(exc_info.value)
-    event_emitter.emit_error.assert_awaited_once_with("❌ Gitleaks 预处理失败：未安装 gitleaks")
+    event_emitter.emit_error.assert_awaited_once_with("Gitleaks 预处理失败：未安装 gitleaks")
 
 
 def test_filter_bootstrap_findings_only_error_and_high_medium_confidence():

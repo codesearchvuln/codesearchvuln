@@ -14,7 +14,7 @@ VulHunter 是一个面向仓库级项目的智能审计平台，基于 **Multi-A
 并可在 Docker 沙箱中执行 PoC 验证（可选）。
 
 
-## ✨ 核心能力
+## 核心能力
 
 - **智能审计（Agent 审计）**：Multi-Agent 协作，自主编排审计策略
 - **潜在漏洞**：统一展示漏洞列表，严重度使用中文分级：严重 / 高危 / 中危 / 低危
@@ -23,7 +23,7 @@ VulHunter 是一个面向仓库级项目的智能审计平台，基于 **Multi-A
 - **静态规则审计**：规则扫描与结果聚合（如 Opengrep、Gitleaks）
 - **报告导出**：PDF / Markdown / JSON 一键导出
 
-## 🏗️ 系统架构（简述）
+## 系统架构（简述）
 
 ```text
 React + TypeScript (frontend)
@@ -38,7 +38,7 @@ PostgreSQL + Redis + Docker Sandbox(optional)
 
 更多细节见：`docs/ARCHITECTURE.md`。
 
-## 🚀 快速开始（Docker Compose，推荐）
+## 快速开始（Docker Compose，推荐）
 
 ### 1) 克隆仓库
 
@@ -244,11 +244,11 @@ docker volume rm audittool_postgres_data
 ./scripts/compose-up-with-fallback.sh
 ```
 
-⚠️ 以上会删除本地数据库数据；请先备份重要数据。
+以上会删除本地数据库数据；请先备份重要数据。
 
 如果必须保留压缩前的旧数据库，请先进行人工 Alembic `stamp` 或手动迁移恢复，再启动后端；系统已不再自动兼容这些历史 revision。
 
-## 🧑‍💻 源码开发
+## 源码开发
 
 ### 前端（Vite）
 
@@ -273,26 +273,26 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - 开发模式通常由 `docker compose` 负责构建/使用沙箱镜像，镜像定义见 `docker/sandbox/`。
 
-## 📚 文档索引
+## 文档索引
 
 - `docs/ARCHITECTURE.md`：架构与关键链路说明
 - `docs/CONFIGURATION.md`：配置项与运行时配置
 - `docs/DEPLOYMENT.md`：部署建议
 - `docs/AGENT_AUDIT.md`：智能审计（Agent 审计）说明
 
-> 说明：`docs/` 内可能仍出现 `AuditTool` / `deepaudit` 等历史命名，它们属于代码层/部署层命名遗留，不代表产品品牌名称。
+> 说明：`docs/` 内可能仍出现 `AuditTool` / `VulHunter` 等历史命名，它们属于代码层/部署层命名遗留，不代表产品品牌名称。
 
-## 🤝 贡献
+## 贡献
 
 - `CONTRIBUTING.md`：贡献指南
 - `SECURITY.md`：安全政策与漏洞报告
 - Issues：`https://github.com/unbengable12/AuditTool/issues`
 
-## 📄 许可证
+## 许可证
 
 本项目采用 [AGPL-3.0 License](LICENSE) 开源。
 
-## ⚠️ 安全与合规提示
+## 安全与合规提示
 
 - 禁止在未授权目标上进行漏洞测试/渗透测试。
 - 详细安全声明与免责声明见：`DISCLAIMER.md`、`SECURITY.md`。
@@ -303,4 +303,4 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## 命名历史
 
-本仓库文档与代码中可能存在历史命名（例如 `deepaudit`），属于演进过程中的遗留。仅用于背景说明，不影响当前 VulHunter 的功能与使用。
+本仓库文档与代码中可能存在历史命名（例如 `VulHunter`），属于演进过程中的遗留。仅用于背景说明，不影响当前 VulHunter 的功能与使用。

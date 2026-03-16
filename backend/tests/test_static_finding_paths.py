@@ -29,11 +29,11 @@ def test_normalize_static_scan_file_path_cleans_relative_path():
 
 def test_build_legacy_static_finding_path_candidates_strips_temp_prefix_and_archive_root():
     candidates = build_legacy_static_finding_path_candidates(
-        "/tmp/deepaudit_proj_123/archive-root/./src/app/main.py",
+        "/tmp/VulHunter_proj_123/archive-root/./src/app/main.py",
     )
 
     assert candidates[:3] == [
-        "tmp/deepaudit_proj_123/archive-root/src/app/main.py",
+        "tmp/VulHunter_proj_123/archive-root/src/app/main.py",
         "archive-root/src/app/main.py",
         "src/app/main.py",
     ]
@@ -41,7 +41,7 @@ def test_build_legacy_static_finding_path_candidates_strips_temp_prefix_and_arch
 
 def test_resolve_legacy_static_finding_path_uses_first_known_zip_match():
     resolved = resolve_legacy_static_finding_path(
-        "/tmp/deepaudit_proj_123/archive-root/./src/app/main.py",
+        "/tmp/VulHunter_proj_123/archive-root/./src/app/main.py",
         {
             "archive-root/src/app/main.py",
             "src/app/main.py",
@@ -54,7 +54,7 @@ def test_resolve_legacy_static_finding_path_uses_first_known_zip_match():
 def test_resolve_legacy_static_finding_path_returns_none_when_zip_has_no_match():
     assert (
         resolve_legacy_static_finding_path(
-            "/tmp/deepaudit_proj_123/archive-root/./src/app/missing.py",
+            "/tmp/VulHunter_proj_123/archive-root/./src/app/missing.py",
             {"src/app/main.py"},
         )
         is None

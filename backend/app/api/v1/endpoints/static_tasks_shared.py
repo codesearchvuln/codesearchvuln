@@ -92,7 +92,7 @@ async def _get_project_root(project_id: str) -> Optional[str]:
         logger.info(f"Found zip file for project {project_id}: {zip_file}")
 
         # 创建临时目录
-        temp_dir = tempfile.mkdtemp(prefix=f"deepaudit_{project_id}_")
+        temp_dir = tempfile.mkdtemp(prefix=f"VulHunter_{project_id}_")
 
         # 解压 zip 文件
         try:

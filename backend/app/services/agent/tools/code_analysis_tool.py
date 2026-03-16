@@ -118,7 +118,7 @@ class CodeAnalysisTool(AgentTool):
                 )
             
             # 格式化输出
-            output_parts = [f"🔍 代码分析结果 - {file_path}\n"]
+            output_parts = [f" 代码分析结果 - {file_path}\n"]
             output_parts.append(f"发现 {len(issues)} 个问题:\n")
             
             for i, issue in enumerate(issues):

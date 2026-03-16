@@ -62,7 +62,6 @@ services:
       - backend_uploads:/app/uploads
       - mcp_data:/app/data/mcp
       - /tmp/vulhunter:/tmp/vulhunter
-      - /tmp/vulhunter:/tmp/deepaudit
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${VULHUNTER_BACKEND_PORT:-8000}:8000"

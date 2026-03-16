@@ -76,7 +76,7 @@ VERIFICATION_SYSTEM_PROMPT = """你是 VulHunter 的漏洞验证 Agent，一个*
 
 ═══════════════════════════════════════════════════════════════
 
-## 📥 输入格式
+## 输入格式
 
 接收单个漏洞对象（`context` 字段，JSON 字符串），包含：
 ```json
@@ -106,7 +106,7 @@ VERIFICATION_SYSTEM_PROMPT = """你是 VulHunter 的漏洞验证 Agent，一个*
 
 ═══════════════════════════════════════════════════════════════
 
-## 🛠️ 工具使用指南
+## 工具使用指南
 
 ### 核心验证工具（按优先级使用）
 
@@ -131,7 +131,7 @@ VERIFICATION_SYSTEM_PROMPT = """你是 VulHunter 的漏洞验证 Agent，一个*
 
 ═══════════════════════════════════════════════════════════════
 
-## 🛠️ 工具调用失败处理（关键）
+## 工具调用失败处理（关键）
 
 ### 失败响应原则
 **遇到工具调用失败时，你必须：**
@@ -313,7 +313,7 @@ if ({}.polluted === true) {
 
 ═══════════════════════════════════════════════════════════════
 
-## ⚠️ 强制约束
+## 强制约束
 
 1. **禁止幻觉**：所有判定必须基于工具返回的实际代码/输出
 2. **动态优先**：能用 fuzzing 就不用纯静态分析
@@ -363,7 +363,7 @@ if ({}.polluted === true) {
 
 ═══════════════════════════════════════════════════════════════
 
-## 📋 完整示例交互
+## 完整示例交互
 
 **输入**：
 ```json
@@ -2343,7 +2343,7 @@ class VerificationAgent(BaseAgent):
 **发现描述**:
 {finding.get('description', 'N/A')[:400]}
 
-## ⚠️ 验证指南
+## 验证指南
 1. **直接使用上述文件路径** - 使用精确路径: `{file_path}`
 2. **先读取完整文件内容** - 使用 `read_file` 工具了解上下文
 3. **深入分析代码逻辑** - 确认漏洞是否真实存在
@@ -2400,7 +2400,7 @@ class VerificationAgent(BaseAgent):
 ## 待验证发现
 {''.join(findings_summary)}
 
-## ⚠️ 重要验证指南
+## 重要验证指南
 1. **直接使用上面列出的文件路径** - 不要猜测或搜索其他路径
 2. **如果文件路径包含冒号和行号** (如 "app.py:36"), 请提取文件名 "app.py" 并使用 read_file 读取
 3. **先读取文件内容，再判断漏洞是否存在**
@@ -2489,7 +2489,7 @@ class VerificationAgent(BaseAgent):
                 if step.is_final:
                     if self._tool_calls == 0:
                         logger.warning(f"[{self.name}] LLM tried to finish without any tool calls! Forcing tool usage.")
-                        await self.emit_thinking("⚠️ 拒绝过早完成：必须先使用工具验证漏洞")
+                        await self.emit_thinking("拒绝过早完成：必须先使用工具验证漏洞")
                         if findings_to_verify:
                             forced_target = findings_to_verify[0]
                             forced_file = str(forced_target.get("file_path") or "").strip()
@@ -2511,7 +2511,7 @@ class VerificationAgent(BaseAgent):
                             {
                                 "role": "user",
                                 "content": (
-                                    "⚠️ **系统拒绝**: 你必须先使用工具验证漏洞！\n\n"
+                                    "**系统拒绝**: 你必须先使用工具验证漏洞！\n\n"
                                     "不允许在没有调用任何工具的情况下直接输出 Final Answer。\n\n"
                                     "请立即使用以下工具之一进行验证：\n"
                                     "1. `read_file` - 读取漏洞所在文件的代码\n"
@@ -2560,7 +2560,7 @@ class VerificationAgent(BaseAgent):
                         if last_error_excerpt:
                             last_error_excerpt = last_error_excerpt[:600]
                         observation = (
-                            f"⚠️ **系统干预**: 你已经使用完全相同的参数调用了工具 '{step.action}' 超过3次。\n"
+                            f"**系统干预**: 你已经使用完全相同的参数调用了工具 '{step.action}' 超过3次。\n"
                             "请不要重复相同调用。你必须根据错误信息调整参数或更换验证路径，然后继续验证。\n"
                             "请优先执行：\n"
                             "1. 基于最近一次错误信息，修改 Action Input 后重试同一工具\n"
@@ -2612,7 +2612,7 @@ class VerificationAgent(BaseAgent):
                         )
                         if fail_count >= 3:
                             logger.warning(f"[{self.name}] Tool call failed {fail_count} times: {tool_call_key}")
-                            observation += f"\n\n⚠️ **系统提示**: 此工具调用已连续失败 {fail_count} 次。请：\n"
+                            observation += f"\n\n**系统提示**: 此工具调用已连续失败 {fail_count} 次。请：\n"
                             observation += "1. 尝试使用不同的参数（如指定较小的行范围）\n"
                             observation += "2. 使用 search_code 工具定位关键代码片段\n"
                             observation += "3. 切换其他可用工具进行等价验证（例如 extract_function/run_code/read_file）\n"
@@ -2978,7 +2978,7 @@ class VerificationAgent(BaseAgent):
             
             if fallback_result:
                 logger.warning(
-                    f"[{self.name}] 🔧 兜底机制执行完成: 补救保存了 "
+                    f"[{self.name}] 兜底机制执行完成: 补救保存了 "
                     f"{fallback_result.get('saved_count', 0)} 个验证结果"
                 )
                 await self.emit_event(

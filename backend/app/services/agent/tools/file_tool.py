@@ -1516,7 +1516,7 @@ class ListFilesTool(AgentTool):
             
             # 🔥 如果设置了 target_files，显示提示信息
             if self.target_files:
-                output_parts.append(f"⚠️ 注意: 审计范围限定为 {len(self.target_files)} 个指定文件\n")
+                output_parts.append(f"注意: 审计范围限定为 {len(self.target_files)} 个指定文件\n")
             
             if dirs:
                 output_parts.append("目录:")
@@ -1528,12 +1528,12 @@ class ListFilesTool(AgentTool):
             if files:
                 output_parts.append(f"\n文件 ({len(files)}):")
                 for f in sorted(files):
-                    output_parts.append(f"  📄 {f}")
+                    output_parts.append(f"  {f}")
             elif self.target_files:
                 # 如果没有文件但设置了 target_files，显示目标文件列表
                 output_parts.append(f"\n指定的目标文件 ({len(self.target_files)}):")
                 for f in sorted(self.target_files)[:20]:
-                    output_parts.append(f"  📄 {f}")
+                    output_parts.append(f"  {f}")
                 if len(self.target_files) > 20:
                     output_parts.append(f"  ... 还有 {len(self.target_files) - 20} 个文件")
             

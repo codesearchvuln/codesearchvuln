@@ -188,7 +188,7 @@ async def lifespan(app: FastAPI):
     应用生命周期管理
     启动时初始化数据库（创建默认账户等）和全局缓存管理
     """
-    logger.info("DeepAudit 后端服务启动中...")
+    logger.info("VulHunter 后端服务启动中...")
 
     # 初始化全局 Git 项目缓存管理器
     try:
@@ -303,7 +303,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"清理过期缓存失败: {e}")
 
-    logger.info("DeepAudit 后端服务已关闭")
+    logger.info("VulHunter 后端服务已关闭")
 
 
 app = FastAPI(
@@ -332,7 +332,7 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to DeepAudit API",
+        "message": "Welcome to VulHunter API",
         "docs": "/docs",
         # "demo_account": {"email": "demo@example.com", "password": "demo123"},
     }

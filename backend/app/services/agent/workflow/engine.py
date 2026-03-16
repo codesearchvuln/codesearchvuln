@@ -249,7 +249,7 @@ class AuditWorkflowEngine:
             if has_bl_analysis:
                 await orc.emit_event(
                     "info",
-                    f"🔍 [Workflow] 开始 Analysis + BusinessLogicAnalysis 并行阶段，"
+                    f" [Workflow] 开始 Analysis + BusinessLogicAnalysis 并行阶段，"
                     f"Recon 队列 {recon_queue_size} 条，BL 队列 {bl_queue_size} 条",
                 )
                 gather_results = await asyncio.gather(
@@ -261,11 +261,11 @@ class AuditWorkflowEngine:
                     if isinstance(result, Exception):
                         phase_name = ["Analysis", "BusinessLogicAnalysis"][i]
                         logger.error("[WorkflowEngine] %s phase raised exception: %s", phase_name, result, exc_info=result)
-                        await orc.emit_event("warning", f"⚠️ [Workflow] {phase_name} 阶段异常（非关键）：{str(result)[:100]}")
+                        await orc.emit_event("warning", f"[Workflow] {phase_name} 阶段异常（非关键）：{str(result)[:100]}")
             else:
                 await orc.emit_event(
                     "info",
-                    f"🔍 [Workflow] 开始 Analysis 阶段，Recon 队列共 {recon_queue_size} 条风险点",
+                    f" [Workflow] 开始 Analysis 阶段，Recon 队列共 {recon_queue_size} 条风险点",
                 )
                 await self._run_analysis_phase(state, task_id)
             
@@ -308,7 +308,7 @@ class AuditWorkflowEngine:
                     await orc.emit_event(
                         "warning",
                         (
-                            "⚠️ [Workflow] Verification 队列为空但已存在 Analysis 发现，"
+                            "[Workflow] Verification 队列为空但已存在 Analysis 发现，"
                             f"已自动回填 {vuln_queue_size} 条并继续验证"
                         ),
                     )
@@ -334,7 +334,7 @@ class AuditWorkflowEngine:
 
             # ── 阶段 4: REPORT（为每条 confirmed/likely 漏洞生成详情报告）──
             state.phase = WorkflowPhase.REPORT
-            await orc.emit_event("info", "📝 [Workflow] 开始 Report 阶段，生成漏洞详情报告")
+            await orc.emit_event("info", "[Workflow] 开始 Report 阶段，生成漏洞详情报告")
             await self._run_report_phase(state, project_info, config)
 
             # 🔥 记录 Report 完成后的内存
@@ -350,7 +350,7 @@ class AuditWorkflowEngine:
             state.all_findings = list(orc._all_findings)  # 同步最终发现
             await orc.emit_event(
                 "info",
-                f"✅ [Workflow] 所有阶段完成，共收集 {len(state.all_findings)} 个发现",
+                f"[Workflow] 所有阶段完成，共收集 {len(state.all_findings)} 个发现",
             )
             
             # 🔥 记录最终内存
@@ -398,7 +398,7 @@ class AuditWorkflowEngine:
             queue_size = self.recon_queue.size(task_id)
             await orc.emit_event(
                 "info",
-                f"🤖 [Workflow] 开始 Recon 风险点 LLM 去重：队列共 {queue_size} 条",
+                f"[Workflow] 开始 Recon 风险点 LLM 去重：队列共 {queue_size} 条",
             )
             
             # 构建 prompt 让 LLM 分析可能重复的风险点
@@ -455,7 +455,7 @@ class AuditWorkflowEngine:
             
             if not dedup_result or not dedup_result.get("duplicates"):
                 logger.info("[WorkflowEngine] No duplicates identified by LLM")
-                await orc.emit_event("info", "✅ [Workflow] Recon 风险点 LLM 去重：无重复项")
+                await orc.emit_event("info", "[Workflow] Recon 风险点 LLM 去重：无重复项")
                 return
             
             # 根据 LLM 分析结果删除重复的风险点
@@ -466,7 +466,7 @@ class AuditWorkflowEngine:
             if removed_count > 0:
                 await orc.emit_event(
                     "info",
-                    f"✅ [Workflow] Recon 风险点 LLM 去重完成：移除 {removed_count} 条重复项",
+                    f"[Workflow] Recon 风险点 LLM 去重完成：移除 {removed_count} 条重复项",
                 )
                 logger.info("[WorkflowEngine] Removed %s duplicate recon risk points", removed_count)
             
@@ -474,7 +474,7 @@ class AuditWorkflowEngine:
             logger.warning("[WorkflowEngine] Recon queue LLM dedup failed: %s", exc)
             await orc.emit_event(
                 "warning",
-                f"⚠️ [Workflow] Recon 风险点 LLM 去重失败（非关键）：{str(exc)[:100]}",
+                f"[Workflow] Recon 风险点 LLM 去重失败（非关键）：{str(exc)[:100]}",
             )
 
     async def _dedup_bl_risk_queue(self, task_id: str) -> None:
@@ -494,7 +494,7 @@ class AuditWorkflowEngine:
             queue_size = self.bl_queue.size(task_id)
             await orc.emit_event(
                 "info",
-                f"🤖 [Workflow] 开始 BL 风险点 LLM 去重：队列共 {queue_size} 条",
+                f"[Workflow] 开始 BL 风险点 LLM 去重：队列共 {queue_size} 条",
             )
 
             risk_points_json = json.dumps(
@@ -539,7 +539,7 @@ class AuditWorkflowEngine:
             dedup_result = self._parse_llm_dedup_response(llm_response)
 
             if not dedup_result or not dedup_result.get("duplicates"):
-                await orc.emit_event("info", "✅ [Workflow] BL 风险点 LLM 去重：无重复项")
+                await orc.emit_event("info", "[Workflow] BL 风险点 LLM 去重：无重复项")
                 return
 
             removed_count = await self._remove_duplicate_recon_risk_points(
@@ -549,7 +549,7 @@ class AuditWorkflowEngine:
             if removed_count > 0:
                 await orc.emit_event(
                     "info",
-                    f"✅ [Workflow] BL 风险点 LLM 去重完成：移除 {removed_count} 条重复项",
+                    f"[Workflow] BL 风险点 LLM 去重完成：移除 {removed_count} 条重复项",
                 )
 
         except Exception as exc:
@@ -577,7 +577,7 @@ class AuditWorkflowEngine:
             queue_size = self.vuln_queue.get_queue_size(task_id)
             await orc.emit_event(
                 "info",
-                f"🤖 [Workflow] 开始漏洞队列 LLM 去重：队列共 {queue_size} 条",
+                f"[Workflow] 开始漏洞队列 LLM 去重：队列共 {queue_size} 条",
             )
             
             # 构建 prompt 让 LLM 分析可能重复的漏洞
@@ -636,7 +636,7 @@ class AuditWorkflowEngine:
             
             if not dedup_result or not dedup_result.get("duplicates"):
                 logger.info("[WorkflowEngine] No duplicates identified by LLM")
-                await orc.emit_event("info", "✅ [Workflow] 漏洞队列 LLM 去重：无重复项")
+                await orc.emit_event("info", "[Workflow] 漏洞队列 LLM 去重：无重复项")
                 return
             
             # 根据 LLM 分析结果删除重复的漏洞
@@ -648,7 +648,7 @@ class AuditWorkflowEngine:
                 current_size = int(self.vuln_queue.get_queue_size(task_id))
                 await orc.emit_event(
                     "info",
-                    f"✅ [Workflow] 漏洞队列 LLM 去重完成：移除 {removed_count} 条重复项，剩余 {current_size} 条",
+                    f"[Workflow] 漏洞队列 LLM 去重完成：移除 {removed_count} 条重复项，剩余 {current_size} 条",
                 )
                 logger.info(
                     "[WorkflowEngine] Removed %s duplicate findings, queue_size_after_dedup=%s",
@@ -660,7 +660,7 @@ class AuditWorkflowEngine:
             logger.warning("[WorkflowEngine] Vuln queue LLM dedup failed: %s", exc)
             await orc.emit_event(
                 "warning",
-                f"⚠️ [Workflow] 漏洞队列 LLM 去重失败（非关键）：{str(exc)[:100]}",
+                f"[Workflow] 漏洞队列 LLM 去重失败（非关键）：{str(exc)[:100]}",
             )
 
     @staticmethod
@@ -988,7 +988,7 @@ class AuditWorkflowEngine:
         state.report_findings_total = len(reportable)
         await orc.emit_event(
             "info",
-            f"📝 [Workflow] Report 阶段：共 {len(reportable)} 条漏洞需要生成报告",
+            f"[Workflow] Report 阶段：共 {len(reportable)} 条漏洞需要生成报告",
         )
 
         if self.workflow_config.should_parallelize_report:
@@ -1008,7 +1008,7 @@ class AuditWorkflowEngine:
 
         await orc.emit_event(
             "info",
-            f"✅ [Workflow] Report 阶段完成：{state.report_findings_processed}/{state.report_findings_total} 条报告已生成",
+            f"[Workflow] Report 阶段完成：{state.report_findings_processed}/{state.report_findings_total} 条报告已生成",
         )
         logger.info(
             "[WorkflowEngine] Report phase done: %s/%s reports generated",
@@ -1153,7 +1153,7 @@ class AuditWorkflowEngine:
 
         await orc.emit_event(
             "info",
-            f"📝 [Workflow] {worker_prefix}Report [{index}/{total}]：{title}",
+            f"[Workflow] {worker_prefix}Report [{index}/{total}]：{title}",
         )
 
         step_start = time.time()

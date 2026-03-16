@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-console.log('🔍 检查项目设置...');
+console.log('检查项目设置...');
 
 // 检查必要文件
 const requiredFiles = [
@@ -43,26 +43,26 @@ for (const file of requiredFiles) {
 }
 
 if (missingFiles.length > 0) {
-  console.log('❌ 缺少以下文件:');
+  console.log('缺少以下文件:');
   missingFiles.forEach(file => console.log(`   - ${file}`));
   process.exit(1);
 } else {
-  console.log('✅ 所有必要文件都存在');
+  console.log('所有必要文件都存在');
 }
 
 // 检查环境变量文件
 if (!fs.existsSync('.env') && !fs.existsSync('.env.example')) {
-  console.log('⚠️  缺少环境变量文件');
+  console.log('缺少环境变量文件');
 } else {
-  console.log('✅ 环境变量文件存在');
+  console.log('环境变量文件存在');
 }
 
 // 检查node_modules
 if (!fs.existsSync('node_modules')) {
-  console.log('❌ 缺少 node_modules，请运行 pnpm install');
+  console.log('缺少 node_modules，请运行 pnpm install');
   process.exit(1);
 } else {
-  console.log('✅ 依赖已安装');
+  console.log('依赖已安装');
 }
 
 // 检查关键依赖
@@ -86,17 +86,17 @@ for (const dep of requiredDeps) {
 }
 
 if (missingDeps.length > 0) {
-  console.log('❌ 缺少以下依赖:');
+  console.log('缺少以下依赖:');
   missingDeps.forEach(dep => console.log(`   - ${dep}`));
   process.exit(1);
 } else {
-  console.log('✅ 所有关键依赖都存在');
+  console.log('所有关键依赖都存在');
 }
 
 console.log('');
-console.log('🎉 项目设置检查完成！');
+console.log('项目设置检查完成！');
 console.log('');
-console.log('📝 下一步:');
+console.log('下一步:');
 console.log('   1. 确保 .env 文件中配置了 VITE_GEMINI_API_KEY');
 console.log('   2. 运行 pnpm dev 启动开发服务器');
-console.log('   3. 在浏览器中访问 http://localhost:5173');
+console.log('   3. 在浏览器中访问 http://localhost:3000');

@@ -819,7 +819,7 @@ class SaveVerificationResultTool(AgentTool):
                 data={
                     "saved": saved > 0,
                     "total_saved": self._saved_count,
-                    "message": f"✅ 验证结果已保存：{title}（verdict={verdict}, confidence={confidence:.2f}），累计 {self._saved_count} 条",
+                    "message": f"验证结果已保存：{title}（verdict={verdict}, confidence={confidence:.2f}），累计 {self._saved_count} 条",
                 },
             )
         except Exception as exc:
@@ -835,7 +835,7 @@ class SaveVerificationResultTool(AgentTool):
                 data={
                     "saved": False,
                     "total_saved": self._saved_count or 0,
-                    "message": f"❌ 持久化失败: {exc}",
+                    "message": f"持久化失败: {exc}",
                 },
             )
 

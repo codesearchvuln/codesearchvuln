@@ -167,7 +167,7 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
                 task.status = "failed"
                 task.completed_at = datetime.now(timezone.utc)
                 await db.commit()
-                print(f"❌ ZIP任务 {task_id} 失败: LLM配置错误 - {cfg_exc}")
+                print(f"ZIP任务 {task_id} 失败: LLM配置错误 - {cfg_exc}")
                 task_control.cleanup_task(task_id)
                 return
 
@@ -288,7 +288,7 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
 
                     await asyncio.sleep(llm_gap_ms / 1000)
                 except Exception as file_error:
-                    print(f"❌ ZIP任务分析文件失败 ({file_info['path']}): {file_error}")
+                    print(f"ZIP任务分析文件失败 ({file_info['path']}): {file_error}")
                     await asyncio.sleep(llm_gap_ms / 1000)
 
             avg_quality_score = sum(quality_scores) / len(quality_scores) if quality_scores else 100.0
@@ -301,7 +301,7 @@ async def scan_repo_task(task_id: str, db_session_factory, user_config: dict = N
             await db.commit()
             task_control.cleanup_task(task_id)
         except Exception as exc:
-            print(f"❌ ZIP扫描失败: {exc}")
+            print(f"ZIP扫描失败: {exc}")
             task.status = "failed"
             task.completed_at = datetime.now(timezone.utc)
             await db.commit()

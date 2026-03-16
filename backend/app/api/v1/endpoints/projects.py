@@ -2180,7 +2180,7 @@ async def generate_project_description_preview(
             detail=f"不支持的文件格式: {file_ext}。支持的格式: {', '.join(sorted(supported_formats))}",
         )
 
-    with tempfile.TemporaryDirectory(prefix="deepaudit_", suffix="_desc_generate") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="VulHunter_", suffix="_desc_generate") as temp_dir:
         try:
             temp_upload_path = os.path.join(temp_dir, file.filename)
             with open(temp_upload_path, "wb") as buffer:
@@ -2461,9 +2461,9 @@ async def get_project_files(
     if project.source_type == "zip":
         # Handle ZIP project
         zip_path = await load_project_zip(id)
-        print(f"📦 ZIP项目 {id} 文件路径: {zip_path}")
+        print(f"ZIP项目 {id} 文件路径: {zip_path}")
         if not zip_path or not os.path.exists(zip_path):
-            print(f"⚠️ ZIP文件不存在: {zip_path}")
+            print(f"ZIP文件不存在: {zip_path}")
             return []
 
         try:
@@ -2941,7 +2941,7 @@ async def upload_project_zip(
         )
 
     # 使用 tempfile 创建临时目录
-    with tempfile.TemporaryDirectory(prefix="deepaudit_", suffix="_zip_upload") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="VulHunter_", suffix="_zip_upload") as temp_dir:
         try:
             # 保存上传的原始文件到临时位置
             temp_upload_path = os.path.join(temp_dir, file.filename)
@@ -3130,7 +3130,7 @@ async def upload_project_directory(
         raise HTTPException(status_code=400, detail="至少需要上传一个文件")
 
     # 使用 tempfile 创建临时目录（自动清理）
-    with tempfile.TemporaryDirectory(prefix="deepaudit_", suffix="_upload") as temp_base_dir:
+    with tempfile.TemporaryDirectory(prefix="VulHunter_", suffix="_upload") as temp_base_dir:
         try:
             total_size = 0
             file_count = 0
@@ -3183,7 +3183,7 @@ async def upload_project_directory(
 
             # 使用 tempfile 创建临时 ZIP 文件
             with tempfile.NamedTemporaryFile(
-                suffix=".zip", prefix="deepaudit_", delete=False
+                suffix=".zip", prefix="VulHunter_", delete=False
             ) as temp_zip_file:
                 temp_zip_path = temp_zip_file.name
 

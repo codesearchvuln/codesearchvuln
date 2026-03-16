@@ -69,7 +69,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 task.status = "failed"
                 task.completed_at = datetime.now(timezone.utc)
                 await db.commit()
-                print(f"❌ ZIP任务 {task_id} 失败: LLM配置错误 - {cfg_exc}")
+                print(f"ZIP任务 {task_id} 失败: LLM配置错误 - {cfg_exc}")
                 task_control.cleanup_task(task_id)
                 return
 
@@ -201,7 +201,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
 
                 except Exception as file_error:
                     failed_files += 1
-                    print(f"❌ ZIP任务分析文件失败 ({file_info['path']}): {file_error}")
+                    print(f"ZIP任务分析文件失败 ({file_info['path']}): {file_error}")
                     await asyncio.sleep(llm_gap_ms / 1000)
 
             # 完成任务
@@ -216,7 +216,7 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 task.issues_count = 0
                 task.quality_score = 0
                 await db.commit()
-                print(f"❌ ZIP任务 {task_id} 失败: 所有 {len(files_to_scan)} 个文件分析均失败，请检查 LLM API 配置")
+                print(f"ZIP任务 {task_id} 失败: 所有 {len(files_to_scan)} 个文件分析均失败，请检查 LLM API 配置")
             else:
                 task.status = "completed"
                 task.completed_at = datetime.now(timezone.utc)
@@ -225,11 +225,11 @@ async def process_zip_task(task_id: str, file_path: str, db_session_factory, use
                 task.issues_count = total_issues
                 task.quality_score = avg_quality_score
                 await db.commit()
-                print(f"✅ ZIP任务 {task_id} 完成: 扫描 {scanned_files} 个文件, 发现 {total_issues} 个问题")
+                print(f"ZIP任务 {task_id} 完成: 扫描 {scanned_files} 个文件, 发现 {total_issues} 个问题")
             task_control.cleanup_task(task_id)
             
         except Exception as e:
-            print(f"❌ ZIP扫描失败: {e}")
+            print(f"ZIP扫描失败: {e}")
             task.status = "failed"
             task.completed_at = datetime.now(timezone.utc)
             await db.commit()
@@ -262,7 +262,7 @@ async def scan_zip(
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
     # 支持多种压缩格式，统一转换为 zip 保存
-    with tempfile.TemporaryDirectory(prefix="deepaudit_scan_", suffix="_upload") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="VulHunter_scan_", suffix="_upload") as temp_dir:
         upload_path = os.path.join(temp_dir, file.filename)
         with open(upload_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -449,7 +449,7 @@ async def instant_analysis(
     except Exception as e:
         # 分析失败，返回错误信息
         error_msg = str(e)
-        print(f"❌ 即时分析失败: {error_msg}")
+        print(f"即时分析失败: {error_msg}")
         raise HTTPException(
             status_code=500, 
             detail=f"代码分析失败: {error_msg}"

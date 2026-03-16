@@ -475,7 +475,7 @@ class ParallelPhaseExecutor:
                 fp_repr = f"{risk_point.get('file_path', '')}:{risk_point.get('line_start', '')}"
                 await self.orchestrator.emit_event(
                     "info",
-                    f"🔍 [Worker-{worker_id}] Analysis 第 {iteration} 轮：{fp_repr}",
+                    f" [Worker-{worker_id}] Analysis 第 {iteration} 轮：{fp_repr}",
                 )
 
                 step_start = time.time()
@@ -845,7 +845,7 @@ class ParallelPhaseExecutor:
             state.total_iterations += 1
 
             fp_repr = f"{risk_point.get('file_path', '')}:{risk_point.get('line_start', '')}"
-            await orc.emit_event("info", f"🔍 [Workflow] Analysis 第 {iteration} 轮：风险点 {fp_repr}")
+            await orc.emit_event("info", f" [Workflow] Analysis 第 {iteration} 轮：风险点 {fp_repr}")
 
             step_start = time.time()
             params = {
@@ -1072,7 +1072,7 @@ class ParallelPhaseExecutor:
                 fp_repr = f"{risk_point.get('file_path', '')}:{risk_point.get('line_start', '')}"
                 await self.orchestrator.emit_event(
                     "info",
-                    f"🔍 [BLWorker-{worker_id}] BLAnalysis 第 {iteration} 轮：{fp_repr}",
+                    f" [BLWorker-{worker_id}] BLAnalysis 第 {iteration} 轮：{fp_repr}",
                 )
 
                 step_start = time.time()
@@ -1169,7 +1169,7 @@ class ParallelPhaseExecutor:
             state.total_iterations += 1
 
             fp_repr = f"{risk_point.get('file_path', '')}:{risk_point.get('line_start', '')}"
-            await orc.emit_event("info", f"🔍 [Workflow] BLAnalysis 第 {iteration} 轮：{fp_repr}")
+            await orc.emit_event("info", f" [Workflow] BLAnalysis 第 {iteration} 轮：{fp_repr}")
 
             step_start = time.time()
             params = {

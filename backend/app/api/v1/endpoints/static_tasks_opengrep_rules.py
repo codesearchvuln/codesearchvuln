@@ -677,11 +677,11 @@ async def create_opengrep_rule(
     if user_config:
         llm_config = user_config.get("llmConfig", {})
         logger.info(
-            f"✅ 从数据库获取用户 {current_user.id} 的 LLM 配置: "
+            f"从数据库获取用户 {current_user.id} 的 LLM 配置: "
             f"provider={llm_config.get('llmProvider')}, model={llm_config.get('llmModel')}"
         )
     else:
-        logger.info(f"⚠️ 未找到用户 {current_user.id} 的 LLM 配置，将使用默认配置")
+        logger.info(f"未找到用户 {current_user.id} 的 LLM 配置，将使用默认配置")
     try:
         _validate_user_llm_config(user_config)
     except Exception as exc:
@@ -1163,11 +1163,11 @@ async def _create_rules_and_generate_background(
         if user_config:
             llm_config = user_config.get("llmConfig", {})
             logger.info(
-                f"✅ 从数据库获取用户 {user_id} 的 LLM 配置: "
+                f"从数据库获取用户 {user_id} 的 LLM 配置: "
                 f"provider={llm_config.get('llmProvider')}, model={llm_config.get('llmModel')}"
             )
         else:
-            logger.info(f"⚠️ 未找到用户 {user_id} 的 LLM 配置，将使用默认配置")
+            logger.info(f"未找到用户 {user_id} 的 LLM 配置，将使用默认配置")
 
         llm_config_error_message: Optional[str] = None
         try:
@@ -1548,7 +1548,7 @@ async def upload_opengrep_rules(
         )
 
     # 使用 tempfile 创建临时目录
-    with tempfile.TemporaryDirectory(prefix="deepaudit_rules_", suffix="_upload") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="VulHunter_rules_", suffix="_upload") as temp_dir:
         try:
             # 保存上传的原始文件到临时位置
             temp_upload_path = os.path.join(temp_dir, file.filename)
@@ -1729,7 +1729,7 @@ async def upload_opengrep_rules_directory(
         raise HTTPException(status_code=400, detail="至少需要上传一个文件")
 
     # 使用 tempfile 创建临时目录（自动清理）
-    with tempfile.TemporaryDirectory(prefix="deepaudit_rules_", suffix="_directory") as temp_base_dir:
+    with tempfile.TemporaryDirectory(prefix="VulHunter_rules_", suffix="_directory") as temp_base_dir:
         try:
             total_uploaded_files = 0
             yaml_files_paths = []

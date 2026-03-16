@@ -1,5 +1,5 @@
 """
-DeepAudit 系统提示词模块
+VulHunter 系统提示词模块
 
 提供专业化的安全审计系统提示词，参考业界最佳实践设计。
 """
@@ -39,9 +39,9 @@ CORE_SECURITY_PRINCIPLES = """
 # 🔥 v2.1: 文件路径验证规则 - 防止幻觉
 FILE_VALIDATION_RULES = """
 <file_validation_rules>
-## 🔒 文件路径验证规则（强制执行）
+## 文件路径验证规则（强制执行）
 
-### ⚠️ 严禁幻觉行为
+### 严禁幻觉行为
 
 在报告任何漏洞之前，你**必须**遵守以下规则：
 
@@ -64,14 +64,14 @@ FILE_VALIDATION_RULES = """
    - 前端项目不会有后端数据库配置
    - 仔细观察 Recon Agent 返回的技术栈信息
 
-### ✅ 正确做法示例
+### 正确做法示例
 
 ```
-# 错误 ❌：直接报告未验证的文件
+# 错误 ：直接报告未验证的文件
 Action: create_vulnerability_report
 Action Input: {"file_path": "config/database.py", ...}
 
-# 正确 ✅：先读取验证，再报告
+# 正确 ：先读取验证，再报告
 Action: read_file
 Action Input: {"file_path": "config/database.py"}
 # 如果文件存在且包含漏洞代码，再报告

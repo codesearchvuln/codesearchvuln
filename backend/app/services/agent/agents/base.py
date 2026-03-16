@@ -341,7 +341,7 @@ class TaskHandoff:
             lines.append("")
         
         if self.attention_points:
-            lines.append("### ⚠️ 需要特别关注")
+            lines.append("### 需要特别关注")
             for point in self.attention_points:
                 lines.append(f"- {point}")
             lines.append("")
@@ -1790,9 +1790,9 @@ class BaseAgent(ABC):
             logger.info(f"[{self.name}] Cancelled before LLM call")
             return "", 0
 
-        logger.info(f"[{self.name}] 🚀 Starting stream_llm_call, emitting thinking_start...")
+        logger.info(f"[{self.name}] Starting stream_llm_call, emitting thinking_start...")
         await self.emit_thinking_start()
-        logger.info(f"[{self.name}] ✅ thinking_start emitted, starting LLM stream...")
+        logger.info(f"[{self.name}] thinking_start emitted, starting LLM stream...")
 
         try:
             # 获取流式迭代器（传入 None 时使用用户配置）
@@ -2020,7 +2020,7 @@ class BaseAgent(ABC):
         if not text:
             return True
         lowered = text.lower()
-        if lowered.startswith(("⚠️", "❌", "错误:", "error:", "failed:", "失败")):
+        if lowered.startswith(("", "", "错误:", "error:", "failed:", "失败")):
             return True
         failure_hints = (
             "工具执行失败",
@@ -3200,7 +3200,7 @@ class BaseAgent(ABC):
 
         if blocked_reason:
             output_lines = [
-                "⚠️ verify_reachability 执行错误",
+                "verify_reachability 执行错误",
                 f"blocked_reason: {blocked_reason}",
                 f"location: {file_path or 'unknown'}:{line_start or 'unknown'}",
                 "verify_pipeline_json:",
@@ -4216,11 +4216,11 @@ class BaseAgent(ABC):
         """
         # 🔥 在执行工具前检查取消
         if self.is_cancelled:
-            return "⚠️ 任务已取消"
+            return "任务已取消"
 
         requested_tool_name = str(tool_name or "").strip()
         if requested_tool_name in DOWNLINED_TOOL_MESSAGES and requested_tool_name not in self.tools:
-            return f"⚠️ {DOWNLINED_TOOL_MESSAGES[requested_tool_name]}"
+            return f"{DOWNLINED_TOOL_MESSAGES[requested_tool_name]}"
         raw_tool_input = tool_input if isinstance(tool_input, dict) else {}
         raw_input_text = self._extract_raw_input_text(raw_tool_input, raw_tool_input)
 
@@ -4281,7 +4281,7 @@ class BaseAgent(ABC):
         if alias_blocked:
             tool_call_id = str(uuid.uuid4())
             blocked_message = (
-                "⚠️ 工具名不可用（需标准名）\n\n"
+                "工具名不可用（需标准名）\n\n"
                 f"**请求工具**: {requested_tool_name}\n"
                 "请改用当前支持的标准工具名（如 search_code、read_file、locate_enclosing_function）。"
             )
@@ -4306,7 +4306,7 @@ class BaseAgent(ABC):
 
         if not local_tool_available and not mcp_can_handle:
             if requested_tool_name in DOWNLINED_TOOL_MESSAGES:
-                return f"⚠️ {DOWNLINED_TOOL_MESSAGES[requested_tool_name]}"
+                return f"{DOWNLINED_TOOL_MESSAGES[requested_tool_name]}"
             return (
                 f"错误: 工具 '{requested_tool_name}' 不存在。"
                 f"可用工具: {list(self.tools.keys())}"
@@ -4417,7 +4417,7 @@ class BaseAgent(ABC):
                     extra_metadata=write_scope_metadata or None,
                 )
                 failure_output = (
-                    "⚠️ 写入策略校验失败\n\n"
+                    "写入策略校验失败\n\n"
                     f"**请求工具**: {requested_tool_name}\n"
                     f"**实际工具**: {resolved_tool_name}\n"
                     f"**原因**: {write_scope_error}\n"
@@ -4484,7 +4484,7 @@ class BaseAgent(ABC):
                     extra_metadata=short_circuit_metadata or None,
                 )
                 return (
-                    "⚠️ 工具调用已短路\n\n"
+                    "工具调用已短路\n\n"
                     f"**请求工具**: {requested_tool_name}\n"
                     f"**实际工具**: {resolved_tool_name}\n"
                     f"**原因**: {short_circuit_msg}\n"
@@ -4516,7 +4516,7 @@ class BaseAgent(ABC):
                 )
                 if strict_read_error and not missing_required:
                     failure_output = (
-                        "⚠️ 工具参数校验失败\n\n"
+                        "工具参数校验失败\n\n"
                         f"**请求工具**: {requested_tool_name}\n"
                         f"**实际执行工具**: {resolved_tool_name}\n"
                         f"**错误**: {validation_error}\n"
@@ -4618,7 +4618,7 @@ class BaseAgent(ABC):
                     example_str = f"{{{example_fields}}}"
                 
                 failure_output = (
-                    "⚠️ 工具参数校验失败\n\n"
+                    "工具参数校验失败\n\n"
                     f"**请求工具**: {requested_tool_name}\n"
                     f"**实际执行工具**: {resolved_tool_name}\n"
                     f"**缺失必填字段**: {', '.join(missing_required)}\n"
@@ -4863,7 +4863,7 @@ class BaseAgent(ABC):
                     or None,
                 )
                 return (
-                    "⚠️ 工具不可用\n\n"
+                    "工具不可用\n\n"
                     f"**请求工具**: {requested_tool_name}\n"
                     f"**实际工具**: {resolved_tool_name}\n"
                     "MCP 运行时未就绪，且未命中本地回退。"
@@ -4926,7 +4926,7 @@ class BaseAgent(ABC):
                                 "success": True,
                                 "via": "mcp",
                             })
-                            logger.info(f"[{self.name}] ✅ 关键工具成功执行 (MCP): {resolved_tool_name}")
+                            logger.info(f"[{self.name}] 关键工具成功执行 (MCP): {resolved_tool_name}")
                         
                         if not is_write_tool and not cache_bypass:
                             self._tool_success_cache[tool_call_key] = mcp_output
@@ -4975,7 +4975,7 @@ class BaseAgent(ABC):
                                 "success": True,
                                 "via": "mcp_fallback",
                             })
-                            logger.info(f"[{self.name}] ✅ 关键工具成功执行 (MCP fallback): {resolved_tool_name}")
+                            logger.info(f"[{self.name}] 关键工具成功执行 (MCP fallback): {resolved_tool_name}")
                         
                         if not is_write_tool and not cache_bypass:
                             self._tool_success_cache[tool_call_key] = fallback_output
@@ -5004,7 +5004,7 @@ class BaseAgent(ABC):
                             extra_metadata=merged_meta or None,
                         )
                         failure_output = (
-                            "⚠️ MCP 工具执行失败\n\n"
+                            "MCP 工具执行失败\n\n"
                             f"**请求工具**: {requested_tool_name}\n"
                             f"**实际工具**: {resolved_tool_name}\n"
                             f"**错误**: {mcp_result.error or 'unknown'}\n"
@@ -5024,7 +5024,7 @@ class BaseAgent(ABC):
                             extra_metadata=merged_meta or None,
                         )
                         failure_output = (
-                            "⚠️ MCP 工具执行失败且无本地回退\n\n"
+                            "MCP 工具执行失败且无本地回退\n\n"
                             f"**请求工具**: {requested_tool_name}\n"
                             f"**实际工具**: {resolved_tool_name}\n"
                             f"**错误**: {mcp_result.error or 'unknown'}"
@@ -5033,7 +5033,7 @@ class BaseAgent(ABC):
 
             if not local_tool_available:
                 return (
-                    "⚠️ 工具不可用\n\n"
+                    "工具不可用\n\n"
                     f"**请求工具**: {requested_tool_name}\n"
                     f"**实际工具**: {resolved_tool_name}\n"
                     "MCP 未处理且本地工具不可用。"
@@ -5099,7 +5099,7 @@ class BaseAgent(ABC):
                     ),
                 )
                 failure_output = (
-                    f"⚠️ 工具 '{resolved_tool_name}' 执行超时 ({timeout}秒)，"
+                    f"工具 '{resolved_tool_name}' 执行超时 ({timeout}秒)，"
                     "请尝试其他方法或减小操作范围。"
                 )
                 return failure_output
@@ -5119,7 +5119,7 @@ class BaseAgent(ABC):
                         else None
                     ),
                 )
-                return "⚠️ 任务已取消"
+                return "任务已取消"
 
             duration_ms = int((time.time() - start) * 1000)
             # 🔥 修复：确保传递有意义的结果字符串，避免 "None"
@@ -5151,7 +5151,7 @@ class BaseAgent(ABC):
 
             # 🔥 工具执行后再次检查取消
             if self.is_cancelled:
-                return "⚠️ 任务已取消"
+                return "任务已取消"
 
             if result.success:
                 metadata_dict = dict(result.metadata) if isinstance(result.metadata, dict) else {}
@@ -5172,7 +5172,7 @@ class BaseAgent(ABC):
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                         "success": True,
                     })
-                    logger.info(f"[{self.name}] ✅ 关键工具成功执行: {resolved_tool_name}")
+                    logger.info(f"[{self.name}] 关键工具成功执行: {resolved_tool_name}")
                 
                 output = str(result.data)
 
@@ -5216,7 +5216,7 @@ class BaseAgent(ABC):
                 
                 error_output = "\n".join(error_details) if error_details else "未知错误"
                 
-                error_msg = f"""⚠️ 工具执行失败
+                error_msg = f"""工具执行失败
 
 **请求工具**: {requested_tool_name}
 **实际工具**: {resolved_tool_name}
@@ -5228,7 +5228,7 @@ class BaseAgent(ABC):
 
         except asyncio.CancelledError:
             logger.info(f"[{self.name}] Tool '{resolved_tool_name}' execution cancelled")
-            return "⚠️ 任务已取消"
+            return "任务已取消"
         except Exception as e:
             import traceback
             logger.error(f"Tool execution error: {e}")
@@ -5249,7 +5249,7 @@ class BaseAgent(ABC):
                     ),
                 )
             # 🔥 输出完整的原始错误信息，包括堆栈跟踪
-            error_msg = f"""❌ 工具执行异常
+            error_msg = f"""工具执行异常
 
 **请求工具**: {requested_tool_name}
 **实际工具**: {resolved_tool_name}
@@ -5295,10 +5295,10 @@ class BaseAgent(ABC):
             如果补救成功返回结果，否则返回 None
         """
         if self._critical_tool_called:
-            logger.info(f"[{self.name}] ✅ 已调用关键工具 {self._critical_tool_name}，无需兜底")
+            logger.info(f"[{self.name}] 已调用关键工具 {self._critical_tool_name}，无需兜底")
             return None
         
-        logger.warning(f"[{self.name}] ⚠️ 未检测到 {expected_tool} 成功调用，启动兜底分析...")
+        logger.warning(f"[{self.name}] 未检测到 {expected_tool} 成功调用，启动兜底分析...")
         
         # 根据 agent_type 构建不同的输出格式示例
         if agent_type == "analysis":
@@ -5391,7 +5391,7 @@ class BaseAgent(ABC):
 ### 第二步：检查是否成功调用了保存工具
 
 查找对话中是否有以下模式之一：
-- `Action: {expected_tool}` 后面紧跟 `Observation: ✅` 或 `成功` 或 `已入队` 或 `已保存`
+- `Action: {expected_tool}` 后面紧跟 `Observation: ` 或 `成功` 或 `已入队` 或 `已保存`
 - `Action: {expected_tool}` 后面的 Observation 没有包含错误信息（如"失败"、"错误"、"Error"）
 
 **如果只看到 `Action: {expected_tool}` 但 Observation 显示失败，则视为未成功调用。**
@@ -5413,31 +5413,31 @@ class BaseAgent(ABC):
 
 ## 示例场景
 
-### ✅ 需要兜底的情况（{agent_type}）
+### 需要兜底的情况（{agent_type}）
 ```
 assistant: {"分析发现以下漏洞：" if agent_type == "analysis" else "验证完成，结果："}
 {{"findings": [{{"file_path": "src/auth.py", "vulnerability_type": "sql_injection"}}]}}
 ```
 → `needs_fallback = true`（有数据但未调用工具）
 
-### ❌ 不需要兜底的情况
+### 不需要兜底的情况
 ```
 assistant: 正在分析代码...
 assistant: 继续深入查看...
 ```
 → `needs_fallback = false`（无结构化数据）
 
-### ❌ 不需要兜底的情况（已成功调用）
+### 不需要兜底的情况（已成功调用）
 ```
 assistant: Action: {expected_tool}
-user: Observation: ✅ {"漏洞已成功入队" if agent_type == "analysis" else "验证结果已保存"}
+user: Observation: {"漏洞已成功入队" if agent_type == "analysis" else "验证结果已保存"}
 ```
 → `needs_fallback = false`（已成功调用工具）
 
-### ✅ 需要兜底的情况（调用失败）
+### 需要兜底的情况（调用失败）
 ```
 assistant: Action: {expected_tool}
-user: Observation: ❌ 数据库连接失败
+user: Observation: 数据库连接失败
 ```
 → `needs_fallback = true`（调用失败，需要补救）
 
@@ -5468,7 +5468,7 @@ user: Observation: ❌ 数据库连接失败
                 logger.info(f"[{self.name}] LLM 判断不需要兜底: {analysis_result.get('reason', '未提供理由')}")
                 return None
             
-            logger.warning(f"[{self.name}] 🔧 LLM 判断需要兜底保存: {analysis_result.get('reason')}")
+            logger.warning(f"[{self.name}] LLM 判断需要兜底保存: {analysis_result.get('reason')}")
             
             # 执行补救操作
             fallback_result = await self._execute_fallback_save(
@@ -5546,7 +5546,7 @@ user: Observation: ❌ 数据库连接失败
                 logger.info(f"[{self.name}] 开始补救推送 {len(findings)} 个 findings")
                 await self.emit_event(
                     "info",
-                    f"🔧 兜底机制启动：开始补救推送 {len(findings)} 个漏洞到队列",
+                    f"兜底机制启动：开始补救推送 {len(findings)} 个漏洞到队列",
                     metadata={"agent_type": agent_type, "total_findings": len(findings)},
                 )
                 pushed_count = 0
@@ -5562,7 +5562,7 @@ user: Observation: ❌ 数据库连接失败
                 
                 await self.emit_event(
                     "success" if pushed_count > 0 else "warning",
-                    f"✅ 兜底机制完成：成功补救推送 {pushed_count}/{len(findings)} 个漏洞",
+                    f"兜底机制完成：成功补救推送 {pushed_count}/{len(findings)} 个漏洞",
                     metadata={
                         "agent_type": agent_type,
                         "tool": expected_tool,
@@ -5590,7 +5590,7 @@ user: Observation: ❌ 数据库连接失败
                 logger.info(f"[{self.name}] 开始补救保存验证结果（共 {len(findings)} 条）")
                 await self.emit_event(
                     "info",
-                    f"🔧 兜底机制启动：开始补救保存 {len(findings)} 个验证结果",
+                    f"兜底机制启动：开始补救保存 {len(findings)} 个验证结果",
                     metadata={"agent_type": agent_type, "total_findings": len(findings)},
                 )
                 
@@ -5622,8 +5622,8 @@ user: Observation: ❌ 数据库连接失败
                         # 成功判断：工具未返回错误，且有"已保存"/"成功"/"buffered"等成功标志
                         tool_succeeded = (
                             result
-                            and not result_str.startswith("⚠️")
-                            and not result_str.startswith("❌")
+                            and not result_str.startswith("")
+                            and not result_str.startswith("")
                             and not result_str.startswith("Error:")
                             and (
                                 "已保存" in result_str
@@ -5644,7 +5644,7 @@ user: Observation: ❌ 数据库连接失败
                     logger.info(f"[{self.name}] 补救保存完成：{saved_count}/{len(findings)} 条成功")
                     await self.emit_event(
                         "success",
-                        f"✅ 兜底机制完成：成功补救保存 {saved_count}/{len(findings)} 个验证结果",
+                        f"兜底机制完成：成功补救保存 {saved_count}/{len(findings)} 个验证结果",
                         metadata={
                             "agent_type": agent_type,
                             "tool": expected_tool,
@@ -5662,7 +5662,7 @@ user: Observation: ❌ 数据库连接失败
                 else:
                     await self.emit_event(
                         "error",
-                        f"❌ 兜底机制失败：未能补救保存任何验证结果（共 {len(findings)} 条）",
+                        f"兜底机制失败：未能补救保存任何验证结果（共 {len(findings)} 条）",
                         metadata={"agent_type": agent_type, "total_findings": len(findings)},
                     )
                     return None
@@ -5671,7 +5671,7 @@ user: Observation: ❌ 数据库连接失败
                 logger.warning(f"[{self.name}] 不支持的兜底类型: {agent_type}/{expected_tool}")
                 await self.emit_event(
                     "warning",
-                    f"⚠️ 兜底机制：不支持的类型 {agent_type}/{expected_tool}",
+                    f"兜底机制：不支持的类型 {agent_type}/{expected_tool}",
                     metadata={"agent_type": agent_type, "expected_tool": expected_tool},
                 )
                 return None
@@ -5680,7 +5680,7 @@ user: Observation: ❌ 数据库连接失败
             logger.error(f"[{self.name}] 执行补救保存失败: {e}", exc_info=True)
             await self.emit_event(
                 "error",
-                f"❌ 兜底机制异常：{str(e)[:100]}",
+                f"兜底机制异常：{str(e)[:100]}",
                 metadata={"agent_type": agent_type, "error": str(e)},
             )
             return None

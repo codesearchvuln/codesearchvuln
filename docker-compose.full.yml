@@ -38,7 +38,6 @@ services:
       - backend_uploads:/app/uploads
       - mcp_data:/app/data/mcp
       - /tmp/vulhunter:/tmp/vulhunter
-      - /tmp/vulhunter:/tmp/deepaudit
       - /var/run/docker.sock:/var/run/docker.sock
     environment: !override
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}

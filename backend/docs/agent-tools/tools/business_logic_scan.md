@@ -2,7 +2,7 @@
 
 ## 概述
 
-**BusinessLogicScanTool** 是 DeepAudit 针对 **Web 应用**的业务逻辑漏洞发现工具。它通过 **5 步内部 LLM 协调分析**流程，自动识别常见的业务逻辑漏洞，包括：
+**BusinessLogicScanTool** 是 VulHunter 针对 **Web 应用**的业务逻辑漏洞发现工具。它通过 **5 步内部 LLM 协调分析**流程，自动识别常见的业务逻辑漏洞，包括：
 
 - 🔓 **身份识别与授权 (IDOR/权限提升)**
   - 缺少或不完整的授权检查
@@ -55,11 +55,11 @@
 
 ### 特点
 
-✅ **内部 LLM 协调** - 5 个步骤无需 Analysis Agent 手动管理  
-✅ **自动重试机制** - 每个阶段失败时最多重试 3 次  
-✅ **上下文累积** - 每个阶段的输出成为后续阶段的输入  
-✅ **Demo 模式** - 开发/测试时可生成示例漏洞而不需要真实的 LLM 调用  
-✅ **框架无关** - 支持 Django、FastAPI、Express、Spring 等常见 Web 框架  
+**内部 LLM 协调** - 5 个步骤无需 Analysis Agent 手动管理  
+**自动重试机制** - 每个阶段失败时最多重试 3 次  
+**上下文累积** - 每个阶段的输出成为后续阶段的输入  
+**Demo 模式** - 开发/测试时可生成示例漏洞而不需要真实的 LLM 调用  
+**框架无关** - 支持 Django、FastAPI、Express、Spring 等常见 Web 框架  
 
 ## 使用方法
 
@@ -156,7 +156,7 @@ Action Input: {
 ```javascript
 // 项目中的 Express 路由代码
 app.get('/api/orders/:orderId', (req, res) => {
-  // ❌ 缺少权限检查：任何认证用户都可以查看任何订单
+  // 缺少权限检查：任何认证用户都可以查看任何订单
   const order = db.getOrder(req.params.orderId);
   res.json(order);
 });
@@ -177,7 +177,7 @@ app.get('/api/orders/:orderId', (req, res) => {
 def process_payment(request):
     amount = request.POST.get('amount')
     
-    # ❌ 缺少金额验证：用户可以输入任意金额
+    # 缺少金额验证：用户可以输入任意金额
     if amount > 0:  # 只检查大于 0，没有上限
         charge_card(request.user, amount)
         return "Payment successful"

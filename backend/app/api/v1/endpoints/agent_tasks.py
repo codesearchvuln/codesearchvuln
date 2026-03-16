@@ -1,5 +1,5 @@
 """
-DeepAudit Agent 审计任务 API
+VulHunter Agent 审计任务 API
 基于 LangGraph 的 Agent 审计
 """
 
@@ -434,12 +434,12 @@ async def _finalize_task_terminal_state(
             extra_metadata=extra_metadata,
         )
     elif final_status == AgentTaskStatus.CANCELLED:
-        await event_emitter.emit_task_cancelled(cancel_message or "⚠️ 任务已取消")
+        await event_emitter.emit_task_cancelled(cancel_message or "任务已取消")
     else:
         emit_message = task.error_message or "Unknown error"
         await event_emitter.emit_task_error(
             emit_message,
-            message=f"❌ 任务失败: {emit_message}",
+            message=f"任务失败: {emit_message}",
             metadata=final_failure_metadata,
         )
         await event_emitter.emit_error(
@@ -905,7 +905,7 @@ async def _run_task_llm_connection_test(
     usage = dict(response.get("usage") or {}) if isinstance(response, dict) else {}
     if event_emitter:
         await event_emitter.emit_info(
-            f"✅ LLM 连接测试通过 ({elapsed_ms}ms)",
+            f"LLM 连接测试通过 ({elapsed_ms}ms)",
             metadata={
                 "step_name": "LLM_CONNECTION_TEST",
                 "status": "completed",
@@ -1891,7 +1891,7 @@ async def _prepare_embedded_bootstrap_findings(
         if not active_rules:
             if event_emitter:
                 await event_emitter.emit_error(
-                    "❌ OpenGrep 预处理失败：当前没有启用规则，无法继续智能审计"
+                    "OpenGrep 预处理失败：当前没有启用规则，无法继续智能审计"
                 )
             raise RuntimeError("OpenGrep 预处理失败：当前没有启用规则")
 
@@ -1911,11 +1911,11 @@ async def _prepare_embedded_bootstrap_findings(
             scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
             if event_emitter:
-                await event_emitter.emit_error("❌ OpenGrep 预处理失败：未安装 opengrep")
+                await event_emitter.emit_error("OpenGrep 预处理失败：未安装 opengrep")
             raise RuntimeError("OpenGrep 预处理失败：未安装 opengrep") from exc
         except Exception as exc:
             if event_emitter:
-                await event_emitter.emit_error(f"❌ OpenGrep 预处理失败：{str(exc)[:160]}")
+                await event_emitter.emit_error(f"OpenGrep 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"OpenGrep 预处理失败：{str(exc)[:200]}") from exc
 
         opengrep_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
@@ -1950,11 +1950,11 @@ async def _prepare_embedded_bootstrap_findings(
             scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
             if event_emitter:
-                await event_emitter.emit_error("❌ Bandit 预处理失败：未安装 bandit")
+                await event_emitter.emit_error("Bandit 预处理失败：未安装 bandit")
             raise RuntimeError("Bandit 预处理失败：未安装 bandit") from exc
         except Exception as exc:
             if event_emitter:
-                await event_emitter.emit_error(f"❌ Bandit 预处理失败：{str(exc)[:160]}")
+                await event_emitter.emit_error(f"Bandit 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"Bandit 预处理失败：{str(exc)[:200]}") from exc
 
         bandit_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
@@ -1988,11 +1988,11 @@ async def _prepare_embedded_bootstrap_findings(
             parsed_gitleaks_findings = await _run_bootstrap_gitleaks_scan(project_root)
         except FileNotFoundError as exc:
             if event_emitter:
-                await event_emitter.emit_error("❌ Gitleaks 预处理失败：未安装 gitleaks")
+                await event_emitter.emit_error("Gitleaks 预处理失败：未安装 gitleaks")
             raise RuntimeError("Gitleaks 预处理失败：未安装 gitleaks") from exc
         except Exception as exc:
             if event_emitter:
-                await event_emitter.emit_error(f"❌ Gitleaks 预处理失败：{str(exc)[:160]}")
+                await event_emitter.emit_error(f"Gitleaks 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"Gitleaks 预处理失败：{str(exc)[:200]}") from exc
 
         gitleaks_total_findings = len(parsed_gitleaks_findings)
@@ -2023,11 +2023,11 @@ async def _prepare_embedded_bootstrap_findings(
             scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
             if event_emitter:
-                await event_emitter.emit_error("❌ PHPStan 预处理失败：未安装 phpstan")
+                await event_emitter.emit_error("PHPStan 预处理失败：未安装 phpstan")
             raise RuntimeError("PHPStan 预处理失败：未安装 phpstan") from exc
         except Exception as exc:
             if event_emitter:
-                await event_emitter.emit_error(f"❌ PHPStan 预处理失败：{str(exc)[:160]}")
+                await event_emitter.emit_error(f"PHPStan 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"PHPStan 预处理失败：{str(exc)[:200]}") from exc
 
         phpstan_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
@@ -2068,7 +2068,7 @@ async def _prepare_embedded_bootstrap_findings(
 
     if event_emitter:
         await event_emitter.emit_info(
-            "✅ 内嵌静态预扫完成",
+            "内嵌静态预扫完成",
             metadata={
                 "bootstrap": True,
                 "bootstrap_task_id": None,
@@ -2605,7 +2605,7 @@ async def _execute_agent_task(task_id: str):
     
     # 🔥 在任务最开始就初始化 Docker 沙箱管理器
     # 这样可以确保整个任务生命周期内使用同一个管理器，并且尽早发现 Docker 问题
-    logger.info(f"🚀 Starting execution for task {task_id}")
+    logger.info(f"Starting execution for task {task_id}")
     sandbox_manager = SandboxManager()
     await sandbox_manager.initialize()
     logger.info(f"🐳 Global Sandbox Manager initialized (Available: {sandbox_manager.is_available})")
@@ -2642,7 +2642,7 @@ async def _execute_agent_task(task_id: str):
                 return
 
             # 🔥 发送任务开始事件 - 使用 phase_start 让前端知道进入准备阶段
-            await event_emitter.emit_phase_start("preparation", f"🚀 任务开始执行: {project.name}")
+            await event_emitter.emit_phase_start("preparation", f"任务开始执行: {project.name}")
 
             # 更新任务阶段为准备中
             task.status = AgentTaskStatus.RUNNING
@@ -2712,8 +2712,8 @@ async def _execute_agent_task(task_id: str):
                                 new_target_files.append(tf)
                     
                     if fixed_count > 0:
-                        logger.info(f"🔧 Auto-fixed {fixed_count} target file paths")
-                        await event_emitter.emit_info(f"🔧 自动修正了 {fixed_count} 个目标文件的路径")
+                        logger.info(f"Auto-fixed {fixed_count} target file paths")
+                        await event_emitter.emit_info(f"自动修正了 {fixed_count} 个目标文件的路径")
                         task.target_files = new_target_files
                         
             # 🔥 重新验证修正后的文件
@@ -2723,24 +2723,24 @@ async def _execute_agent_task(task_id: str):
                     if os.path.exists(os.path.join(project_root, tf)):
                         valid_target_files.append(tf)
                     else:
-                        logger.warning(f"⚠️ Target file not found: {tf}")
+                        logger.warning(f"Target file not found: {tf}")
                 
                 if not valid_target_files:
-                    logger.warning("❌ No valid target files found after adjustment!")
-                    await event_emitter.emit_warning("⚠️ 警告：无法找到指定的目标文件，将扫描所有文件")
+                    logger.warning("No valid target files found after adjustment!")
+                    await event_emitter.emit_warning("警告：无法找到指定的目标文件，将扫描所有文件")
                     task.target_files = None  # 回退到全量扫描
                 elif len(valid_target_files) < len(task.target_files):
-                    logger.warning(f"⚠️ Partial target files missing. Found {len(valid_target_files)}/{len(task.target_files)}")
+                    logger.warning(f"Partial target files missing. Found {len(valid_target_files)}/{len(task.target_files)}")
                     task.target_files = valid_target_files
 
-            logger.info(f"🚀 Task {task_id} started with Dynamic Agent Tree architecture")
+            logger.info(f"Task {task_id} started with Dynamic Agent Tree architecture")
 
             # 🔥 获取项目根目录后检查取消
             if is_task_cancelled(task_id):
                 logger.info(f"[Cancel] Task {task_id} cancelled after project preparation")
                 raise asyncio.CancelledError("任务已取消")
 
-            # await event_emitter.emit_info("🧠 QMD 任务知识库已移除，跳过任务内知识库初始化")
+            # await event_emitter.emit_info("QMD 任务知识库已移除，跳过任务内知识库初始化")
 
             # 创建 LLM 服务
             await _set_current_step("正在校验 LLM 配置")
@@ -2748,7 +2748,7 @@ async def _execute_agent_task(task_id: str):
             try:
                 _ = llm_service.config
                 await event_emitter.emit_info(
-                    "✅ LLM 配置校验通过",
+                    "LLM 配置校验通过",
                     metadata={"step_name": "LLM_CONFIG_VALIDATION", "status": "completed"},
                 )
             except LLMConfigError as cfg_exc:
@@ -2915,7 +2915,7 @@ async def _execute_agent_task(task_id: str):
                         },
                     )
                     raise RuntimeError(probe_message)
-                await event_emitter.emit_info("✅ MCP 启动检查与运行时自检通过")
+                await event_emitter.emit_info("MCP 启动检查与运行时自检通过")
 
             # 🔥 初始化工具后检查取消
             if is_task_cancelled(task_id):
@@ -3033,7 +3033,7 @@ async def _execute_agent_task(task_id: str):
             # 注册 Orchestrator 到 Agent Registry（使用其内置方法）
             orchestrator._register_to_registry(task="Root orchestrator for security audit")
             
-            await event_emitter.emit_info("🧠 动态 Agent 树架构启动")
+            await event_emitter.emit_info("动态 Agent 树架构启动")
             await event_emitter.emit_info(f"📁 项目路径: {project_root}")
             
             # 收集项目信息 - 传递排除模式和目标文件
@@ -3085,7 +3085,7 @@ async def _execute_agent_task(task_id: str):
                 )
             else:
                 await event_emitter.emit_info(
-                    "ℹ️ 当前任务未启用静态预扫，直接进入入口点回退流程",
+                    "当前任务未启用静态预扫，直接进入入口点回退流程",
                     metadata={
                         "bootstrap": True,
                         "bootstrap_task_id": None,
@@ -3108,11 +3108,11 @@ async def _execute_agent_task(task_id: str):
             else:
                 if bootstrap_source == "disabled":
                     await event_emitter.emit_info(
-                        "ℹ️ 静态预扫未启用，启动入口点回退流程"
+                        "静态预扫未启用，启动入口点回退流程"
                     )
                 else:
                     await event_emitter.emit_warning(
-                        "⚠️ 静态预扫未筛选出 ERROR + HIGH/MEDIUM 候选，启动入口点回退流程"
+                        "静态预扫未筛选出 ERROR + HIGH/MEDIUM 候选，启动入口点回退流程"
                     )
                 entry = _discover_entry_points_deterministic(
                     project_root=normalized_project_root,
@@ -3805,7 +3805,7 @@ async def _execute_agent_task(task_id: str):
                         "findings_count": persisted_findings_count,
                         "duration_ms": duration_ms,
                         "message": (
-                            f"✅ 审计完成：编排发现 {orchestrator_findings_count}，"
+                            f"审计完成：编排发现 {orchestrator_findings_count}，"
                             f"入库 {persisted_findings_count}，过滤 {filtered_findings_count}，"
                             f"耗时 {duration_ms/1000:.1f} 秒"
                         ),
@@ -3822,7 +3822,7 @@ async def _execute_agent_task(task_id: str):
                         else None
                     ),
                     verification_gate_metadata=verification_pending_gate_metadata,
-                    cancel_message="⚠️ 任务已取消",
+                    cancel_message="任务已取消",
                     skip_drain_wait=bool(desired_terminal_status == AgentTaskStatus.CANCELLED),
                     timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
                 )
@@ -3832,7 +3832,7 @@ async def _execute_agent_task(task_id: str):
                 if orchestrator_findings_count > 0 and persisted_findings_count == 0:
                     # 分析为什么全部被过滤
                     await event_emitter.emit_warning(
-                        "⚠️ 编排阶段识别到漏洞，但入库结果为 0，疑似参数验证或质量门限制",
+                        "编排阶段识别到漏洞，但入库结果为 0，疑似参数验证或质量门限制",
                         metadata={
                             "orchestrator_findings_count": orchestrator_findings_count,
                             "persisted_findings_count": persisted_findings_count,
@@ -3866,7 +3866,7 @@ async def _execute_agent_task(task_id: str):
                     logger.info("🛑 Task %s cancelled during terminal finalization", task_id)
                 else:
                     logger.info(
-                        f"✅ Task {task_id} completed: "
+                        f"Task {task_id} completed: "
                         f"effective={len(effective_findings)}, false_positive={false_positive_count}, "
                         f"saved={saved_count}, duration={duration_ms}ms"
                     )
@@ -3882,7 +3882,7 @@ async def _execute_agent_task(task_id: str):
                         event_emitter=event_emitter,
                         event_manager=event_manager,
                         desired_status=AgentTaskStatus.CANCELLED,
-                        cancel_message="⚠️ 任务已取消",
+                        cancel_message="任务已取消",
                         skip_drain_wait=True,
                         timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
                     )
@@ -3915,7 +3915,7 @@ async def _execute_agent_task(task_id: str):
                     )
                     failure_message = terminal_result["failure_message"] or failure_message
                     failure_metadata = terminal_result["failure_metadata"]
-                    logger.error(f"❌ Task {task_id} failed: {result.error}")
+                    logger.error(f"Task {task_id} failed: {result.error}")
             
         except asyncio.CancelledError:
             logger.info(f"Task {task_id} cancelled")
@@ -3930,7 +3930,7 @@ async def _execute_agent_task(task_id: str):
                         event_emitter=event_emitter,
                         event_manager=event_manager,
                         desired_status=AgentTaskStatus.CANCELLED,
-                        cancel_message="⚠️ 任务已取消",
+                        cancel_message="任务已取消",
                         skip_drain_wait=True,
                         timeout_seconds=TOOL_DRAIN_TIMEOUT_SECONDS,
                     )
@@ -4000,7 +4000,7 @@ async def _execute_agent_task(task_id: str):
                 else:
                     await event_emitter.emit_task_error(
                         failure_message,
-                        message=f"❌ 任务失败: {failure_message}",
+                        message=f"任务失败: {failure_message}",
                         metadata=failure_metadata,
                     )
                     await event_emitter.emit_error(
@@ -7122,7 +7122,7 @@ async def _get_project_root(
         if is_task_cancelled(task_id):
             raise asyncio.CancelledError("任务已取消")
 
-    base_path = f"/tmp/deepaudit/{task_id}"
+    base_path = f"/tmp/VulHunter/{task_id}"
 
     # 确保目录存在且为空
     if os.path.exists(base_path):
@@ -7133,11 +7133,11 @@ async def _get_project_root(
     check_cancelled()
 
     if project.source_type != "zip":
-        await emit("❌ 仅支持 ZIP 项目", "error")
+        await emit("仅支持 ZIP 项目", "error")
         raise RuntimeError("仅支持 ZIP 项目")
 
     check_cancelled()
-    await emit("📦 正在解压项目文件...")
+    await emit("正在解压项目文件...")
     from app.services.zip_storage import load_project_zip
 
     zip_path = await load_project_zip(project.id)
@@ -7151,25 +7151,25 @@ async def _get_project_root(
                     if i % 50 == 0:
                         check_cancelled()
                     zip_ref.extract(file_name, base_path)
-            logger.info("✅ Extracted ZIP project %s to %s", project.id, base_path)
-            await emit("✅ ZIP 文件解压完成")
+            logger.info("Extracted ZIP project %s to %s", project.id, base_path)
+            await emit("ZIP 文件解压完成")
         except Exception as exc:
             logger.error("Failed to extract ZIP %s: %s", zip_path, exc)
-            await emit(f"❌ 解压失败: {exc}", "error")
+            await emit(f"解压失败: {exc}", "error")
             raise RuntimeError(f"无法解压项目文件: {exc}")
     else:
-        logger.warning("⚠️ ZIP file not found for project %s", project.id)
-        await emit("❌ ZIP 文件不存在", "error")
+        logger.warning("ZIP file not found for project %s", project.id)
+        await emit("ZIP 文件不存在", "error")
         raise RuntimeError(f"项目 ZIP 文件不存在: {project.id}")
 
     # 验证目录不为空
     if not os.listdir(base_path):
-        await emit(f"❌ 项目目录为空", "error")
+        await emit(f"项目目录为空", "error")
         raise RuntimeError(f"项目目录为空，可能是克隆/解压失败: {base_path}")
 
     # 🔥 智能检测：如果解压后只有一个子目录（常见于 ZIP 文件），
     # 则使用那个子目录作为真正的项目根目录
-    # 例如：/tmp/deepaudit/UUID/PHP-Project/ -> 返回 /tmp/deepaudit/UUID/PHP-Project
+    # 例如：/tmp/VulHunter/UUID/PHP-Project/ -> 返回 /tmp/VulHunter/UUID/PHP-Project
     items = os.listdir(base_path)
     # 过滤掉 macOS 产生的 __MACOSX 目录和隐藏文件
     real_items = [item for item in items if not item.startswith('__') and not item.startswith('.')]
@@ -7177,8 +7177,8 @@ async def _get_project_root(
     if len(real_items) == 1:
         single_item_path = os.path.join(base_path, real_items[0])
         if os.path.isdir(single_item_path):
-            logger.info(f"🔍 检测到单层嵌套目录，自动调整项目根目录: {base_path} -> {single_item_path}")
-            await emit(f"🔍 检测到嵌套目录，自动调整为: {real_items[0]}")
+            logger.info(f" 检测到单层嵌套目录，自动调整项目根目录: {base_path} -> {single_item_path}")
+            await emit(f" 检测到嵌套目录，自动调整为: {real_items[0]}")
             base_path = single_item_path
 
     await emit(f"📁 项目准备完成: {base_path}")

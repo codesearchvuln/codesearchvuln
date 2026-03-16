@@ -86,7 +86,7 @@ export function isFindingDetailFullFilePathSupported(
   if (/^[a-z]:\//i.test(normalized)) return false;
 
   const lowered = normalized.toLowerCase();
-  if (lowered.startsWith("tmp/deepaudit_")) return false;
+  if (lowered.startsWith("tmp/VulHunter_")) return false;
   return true;
 }
 

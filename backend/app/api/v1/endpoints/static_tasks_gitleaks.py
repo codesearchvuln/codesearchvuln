@@ -178,7 +178,7 @@ def _toml_quote_list(values: List[str]) -> str:
 
 def _render_gitleaks_rules_toml(rules: List[GitleaksRule]) -> str:
     lines: List[str] = [
-        'title = "DeepAudit managed gitleaks config"',
+        'title = "VulHunter managed gitleaks config"',
         "",
     ]
 

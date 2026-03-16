@@ -62,12 +62,12 @@ ORCHESTRATOR_SYSTEM_PROMPT = """你是安全审计编排 Agent，负责**自主*
 4. **禁止批量传递**：不要将多个漏洞一次性传给 verification Agent，必须逐个处理
 5. **强制分析顺序**：只有在 `analysis` Agent 针对所有 `recon` 风险点完成分析后，才允许调度 `verification` Agent；我不得提早直接调度 `verification`。
 
-### ⚠️ 关键约束
-- ✅ 每次 dequeue_finding 只取出**一条**漏洞
-- ✅ 每次 dispatch_agent(verification) 只验证**一条**漏洞
-- ✅ 验证完成后，立即检查队列并取出下一条（如有）
-- ❌ 禁止跳过队列中的漏洞（除非明确标记为误报）
-- ❌ 禁止批量取出所有漏洞传给 verification
+### 关键约束
+- 每次 dequeue_finding 只取出**一条**漏洞
+- 每次 dispatch_agent(verification) 只验证**一条**漏洞
+- 验证完成后，立即检查队列并取出下一条（如有）
+- 禁止跳过队列中的漏洞（除非明确标记为误报）
+- 禁止批量取出所有漏洞传给 verification
 
 ## Recon 风险点队列（逐条分析）
 
@@ -554,7 +554,7 @@ class OrchestratorAgent(BaseAgent):
         last_dequeued_finding: Optional[Dict[str, Any]] = None
         last_dequeued_fingerprint: Optional[str] = None
 
-        await self.emit_thinking("🧠 Orchestrator Agent 启动，LLM 开始自主编排决策...")
+        await self.emit_thinking("Orchestrator Agent 启动，LLM 开始自主编排决策...")
 
         try:
             for iteration in range(self.config.max_iterations):
@@ -890,7 +890,7 @@ Action Input: {{}}
                 )
 
             if error_message:
-                await self.emit_event("error", f"❌ Orchestrator 失败: {error_message}")
+                await self.emit_event("error", f"Orchestrator 失败: {error_message}")
                 return AgentResult(
                     success=False,
                     error=error_message,
@@ -947,7 +947,7 @@ Action Input: {{}}
             logger.info("[Orchestrator] Final result: %s findings collected", len(self._all_findings))
             if len(self._all_findings) == 0:
                 logger.warning(
-                    "[Orchestrator] ⚠️ No findings collected! Dispatched agents: %s, Iterations: %s",
+                    "[Orchestrator] No findings collected! Dispatched agents: %s, Iterations: %s",
                     list(self._dispatched_tasks.keys()),
                     self._iteration,
                 )
@@ -1008,7 +1008,7 @@ Action Input: {{}}
             skills_mem = str(markdown_memory.get("skills") or "").strip()
             if shared_mem or agent_mem or skills_mem:
                 msg += f"""
-## 🧠 项目长期记忆（Markdown，无 RAG）
+## 项目长期记忆（Markdown，无 RAG）
 ### shared.md（节选）
 {shared_mem or "(空)"}
 
@@ -1022,7 +1022,7 @@ Action Input: {{}}
         # 🔥 根据是否限定范围显示不同的结构信息
         if scope_limited:
             msg += f"""
-## ⚠️ 审计范围限定
+## 审计范围限定
 **{scope_message}**
 
 ### 目标文件列表
@@ -1045,7 +1045,7 @@ Action Input: {{}}
         target_files = config.get('target_files', [])
         if target_files:
             msg += f"""
-## ⚠️ 重要提示
+## 重要提示
 用户指定了 **{len(target_files)}** 个目标文件进行审计。
 请确保你的分析集中在这些指定的文件上，不要浪费时间分析其他文件。
 """
@@ -1078,7 +1078,7 @@ Action Input: {{}}
 """
         elif bootstrap_source and str(bootstrap_source).startswith("degraded"):
             msg += f"""
-## ⚠️ OpenGrep 预处理降级提示
+## OpenGrep 预处理降级提示
 预处理状态: {bootstrap_source}
 没有可用候选，请按常规流程执行审计。
 """
@@ -1744,7 +1744,7 @@ Action Input: {{}}
                 
                 await self.emit_event(
                     "dispatch_complete",
-                    f"✅ {agent_name} Agent 完成",
+                    f"{agent_name} Agent 完成",
                     agent=agent_name,
                     findings_count=len(self._all_findings),  # 🔥 Use total findings count
                 )

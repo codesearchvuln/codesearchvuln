@@ -203,7 +203,7 @@ docker volume rm audittool_postgres_data
 ./scripts/compose-up-with-fallback.sh
 ```
 
-⚠️ This removes local DB data. Back up important data first.
+This removes local DB data. Back up important data first.
 
 If you must keep an older pre-squash database, use a manual Alembic `stamp` / migration recovery workflow before starting the backend. Automatic compatibility for those legacy revisions has been removed.
 
@@ -239,7 +239,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `docs/DEPLOYMENT.md`
 - `docs/AGENT_AUDIT.md`
 
-Note: `docs/` may still contain historical names like `AuditTool` / `deepaudit` (deployment/code-level legacy naming), which do not represent the product brand.
+Note: `docs/` may still contain historical names like `AuditTool` / `VulHunter` (deployment/code-level legacy naming), which do not represent the product brand.
 
 ## Contributing
 
@@ -262,4 +262,4 @@ This project is licensed under the [AGPL-3.0 License](LICENSE).
 
 ## Naming History
 
-Some internal identifiers may keep historical naming (e.g., `deepaudit`). This is legacy naming and does not affect VulHunter usage.
+Some internal identifiers may keep historical naming (e.g., `VulHunter`). This is legacy naming and does not affect VulHunter usage.
