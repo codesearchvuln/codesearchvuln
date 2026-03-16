@@ -4286,8 +4286,8 @@ async def _initialize_tools(
         else:
             logger.warning(f"[EMIT-TOOLS] No event_emitter, skipping: {message[:60]}...")
 
-    logger.info("RAG 模块已禁用，跳过向量索引初始化")
-    await emit("⏭️ RAG 模块已禁用，跳过向量索引初始化")
+    # logger.info("RAG 模块已禁用，跳过向量索引初始化")
+    # await emit("⏭️ RAG 模块已禁用，跳过向量索引初始化")
 
     base_tools = {
         "read_file": FileReadTool(project_root, exclude_patterns, target_files),

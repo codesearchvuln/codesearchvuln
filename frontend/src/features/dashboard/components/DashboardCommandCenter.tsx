@@ -30,6 +30,12 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 } from "@/components/ui/chart";
+import {
+	buildCweTreemapNodes,
+	type CweTreemapNode,
+	getCweTreemapColor,
+	getCweTreemapLabelMode,
+} from "@/features/dashboard/components/dashboardCweTreemap";
 import type {
 	DashboardCweDistributionItem,
 	DashboardDailyActivityItem,
@@ -406,12 +412,106 @@ function RiskHeatmap({ items }: { items: DashboardLanguageRiskItem[] }) {
 	);
 }
 
+type AttackSurfaceTreemapContentProps = {
+	x?: number;
+	y?: number;
+	width?: number;
+	height?: number;
+	fill?: string;
+	payload?: CweTreemapNode;
+};
+
+function truncateTreemapLabel(value: string, maxChars: number) {
+	if (value.length <= maxChars) return value;
+	return `${value.slice(0, Math.max(maxChars - 1, 1))}…`;
+}
+
+function getTreemapLabelCharLimit(width: number) {
+	if (width >= 150) return 14;
+	if (width >= 112) return 10;
+	return 8;
+}
+
+function AttackSurfaceTreemapContent({
+	x = 0,
+	y = 0,
+	width = 0,
+	height = 0,
+	fill,
+	payload,
+}: AttackSurfaceTreemapContentProps) {
+	if (!payload || width <= 0 || height <= 0) return null;
+
+	const labelMode = getCweTreemapLabelMode({ width, height });
+	const tileFill = payload.fill || fill || getCweTreemapColor(payload.cweId);
+
+	return (
+		<g>
+			<rect
+				x={x}
+				y={y}
+				width={width}
+				height={height}
+				rx={8}
+				ry={8}
+				fill={tileFill}
+				fillOpacity={0.94}
+				stroke="rgba(255,255,255,0.14)"
+				strokeWidth={1}
+			/>
+			{labelMode === "detailed" ? (
+				<>
+					<text
+						x={x + 10}
+						y={y + 18}
+						fill="rgba(226,232,240,0.82)"
+						fontSize={10}
+						fontWeight={700}
+					>
+						{payload.cweId}
+					</text>
+					<text
+						x={x + 10}
+						y={y + 36}
+						fill="#f8fafc"
+						fontSize={12}
+						fontWeight={700}
+					>
+						{truncateTreemapLabel(
+							payload.cweName,
+							getTreemapLabelCharLimit(width),
+						)}
+					</text>
+					{height >= 62 ? (
+						<text
+							x={x + 10}
+							y={y + height - 10}
+							fill="rgba(241,245,249,0.88)"
+							fontSize={10}
+							fontWeight={600}
+						>
+							{formatNumber(payload.totalFindings)} 条发现
+						</text>
+					) : null}
+				</>
+			) : null}
+			{labelMode === "compact" ? (
+				<text
+					x={x + 10}
+					y={y + height / 2 + 4}
+					fill="#f8fafc"
+					fontSize={11}
+					fontWeight={700}
+				>
+					{payload.cweId}
+				</text>
+			) : null}
+		</g>
+	);
+}
+
 function AttackSurfaceTreemap({ items }: { items: DashboardCweDistributionItem[] }) {
-	const data = items.map((item) => ({
-		name: item.cwe_id,
-		label: item.cwe_name,
-		size: item.total_findings,
-	}));
+	const data = useMemo(() => buildCweTreemapNodes(items), [items]);
 
 	if (data.length === 0) {
 		return <p className="text-sm text-slate-400">暂无 CWE 攻击面数据</p>;
@@ -422,28 +522,50 @@ function AttackSurfaceTreemap({ items }: { items: DashboardCweDistributionItem[]
 			<ChartContainer
 				className="h-72 w-full"
 				config={{
-					total: { label: "发现总数", color: "#8b5cf6" },
+					cwe: { label: "CWE 攻击面", color: "#38bdf8" },
 				}}
 			>
 				<Treemap
 					data={data}
 					dataKey="size"
-					stroke="rgba(15,23,42,0.35)"
-					fill="#8b5cf6"
-				/>
+					stroke="rgba(15,23,42,0.45)"
+					isAnimationActive={false}
+					content={<AttackSurfaceTreemapContent />}
+				>
+					<Tooltip
+						cursor={false}
+						content={({ active, payload }) => {
+							if (!active || !payload?.length) return null;
+							const item = payload[0]?.payload as CweTreemapNode | undefined;
+							if (!item) return null;
+							return (
+								<div className="rounded-2xl border border-border/70 bg-slate-950/95 px-3 py-2 text-xs text-slate-100 shadow-xl">
+									<p className="font-semibold text-cyan-100">{item.cweName}</p>
+									<p className="mt-1 text-slate-300">{item.cweId}</p>
+									<p className="mt-2">发现总数：{formatNumber(item.totalFindings)}</p>
+									<div className="mt-2 space-y-1 text-slate-300">
+										<p>Opengrep：{formatNumber(item.opengrepFindings)}</p>
+										<p>Agent：{formatNumber(item.agentFindings)}</p>
+										<p>Bandit：{formatNumber(item.banditFindings)}</p>
+									</div>
+								</div>
+							);
+						}}
+					/>
+				</Treemap>
 			</ChartContainer>
 			<div className="grid gap-2 text-sm text-slate-300">
-				{items.map((item) => (
+				{data.slice(0, 6).map((item) => (
 					<div
-						key={item.cwe_id}
-						className="flex items-center justify-between rounded-2xl border border-border/60 bg-slate-900/60 px-3 py-2"
+						key={item.cweId}
+						className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-slate-900/60 px-3 py-2"
 					>
-						<div>
-							<p className="font-medium text-white">{item.cwe_id}</p>
-							<p className="text-xs text-slate-400">{item.cwe_name}</p>
+						<div className="min-w-0">
+							<p className="font-medium text-white">{item.cweId}</p>
+							<p className="truncate text-xs text-slate-400">{item.cweName}</p>
 						</div>
-						<p className="text-base font-semibold text-violet-100">
-							{formatNumber(item.total_findings)}
+						<p className="shrink-0 text-right text-sm font-semibold text-cyan-100">
+							{formatNumber(item.totalFindings)} 条发现
 						</p>
 					</div>
 				))}
@@ -690,25 +812,25 @@ export default function DashboardCommandCenter({
 				</DashboardSection>
 				<DashboardSection
 					className="lg:col-span-5"
-					panel="language-risk"
-					title="语言风险热力"
-					description="按语言聚合有效风险密度、已验证结果和误报质量。"
-					icon={<ShieldAlert className="h-5 w-5" />}
+					panel="cwe"
+					title="CWE 攻击面"
+					description="具备 CWE 语义的攻击面聚集视图，面积表示发现规模，颜色区分漏洞类型。"
+					icon={<Target className="h-5 w-5" />}
 				>
-					<RiskHeatmap items={snapshot.language_risk || []} />
+					<AttackSurfaceTreemap items={snapshot.cwe_distribution || []} />
 				</DashboardSection>
 			</div>
 
 			<DashboardSection
-				panel="cwe"
-				title="CWE 攻击面"
-				description="具备 CWE 语义的引擎发现分布，用于观察攻击面聚集。"
-				icon={<Target className="h-5 w-5" />}
+				panel="language-risk"
+				title="语言风险热力"
+				description="按语言聚合有效风险密度、已验证结果和误报质量。"
+				icon={<ShieldAlert className="h-5 w-5" />}
 			>
-				<AttackSurfaceTreemap items={snapshot.cwe_distribution || []} />
+				<RiskHeatmap items={snapshot.language_risk || []} />
 			</DashboardSection>
 
-			<DashboardSection
+			{/* <DashboardSection
 				panel="actions"
 				title="行动清单"
 				description=""
@@ -775,7 +897,7 @@ export default function DashboardCommandCenter({
 				) : (
 					<p className="text-sm text-slate-400">暂无热点项目</p>
 				)}
-			</DashboardSection>
+			</DashboardSection> */}
 		</div>
 	);
 }

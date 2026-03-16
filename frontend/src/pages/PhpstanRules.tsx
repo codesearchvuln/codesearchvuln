@@ -427,12 +427,12 @@ export default function PhpstanRules({
                       <TableCell>
                         <div className="space-y-0.5">
                           <div className="font-semibold text-foreground break-all">{rule.name}</div>
-                          <div className="font-mono text-xs text-muted-foreground break-all">{rule.rule_class}</div>
-                          {rule.description_summary ? (
+                          {/* <div className="font-mono text-xs text-muted-foreground break-all">{rule.rule_class}</div> */}
+                          {/* {rule.description_summary ? (
                             <div className="text-xs text-muted-foreground break-all line-clamp-2">
                               {rule.description_summary}
                             </div>
-                          ) : null}
+                          ) : null} */}
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground break-all">

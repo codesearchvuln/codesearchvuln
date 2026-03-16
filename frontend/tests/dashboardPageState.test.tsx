@@ -146,3 +146,31 @@ test("dashboard page state clears the error UI after a successful load", async (
 
 	assert.equal(state.variant, "idle");
 });
+
+test("dashboard page state ignores cwe buckets that only contain zero findings", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardPageState.tsx",
+	);
+
+	const snapshot = createEmptySnapshot();
+	snapshot.cwe_distribution = [
+		{
+			cwe_id: "CWE-79",
+			cwe_name: "跨站脚本",
+			total_findings: 0,
+			opengrep_findings: 0,
+			agent_findings: 0,
+			bandit_findings: 0,
+		},
+	];
+
+	assert.equal(module.hasDashboardSnapshotContent(snapshot), false);
+
+	const state = module.resolveDashboardPageState({
+		loading: false,
+		error: "加载仪表盘快照失败",
+		snapshot,
+	});
+
+	assert.equal(state.variant, "blocking-error");
+});

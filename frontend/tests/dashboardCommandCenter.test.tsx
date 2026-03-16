@@ -37,6 +37,14 @@ function createSnapshotFixture() {
 				agent_findings: 1,
 				bandit_findings: 0,
 			},
+			{
+				cwe_id: "CWE-89",
+				cwe_name: "SQL 注入",
+				total_findings: 2,
+				opengrep_findings: 1,
+				agent_findings: 1,
+				bandit_findings: 0,
+			},
 		],
 		summary: {
 			total_projects: 2,
@@ -179,16 +187,19 @@ test("DashboardCommandCenter renders the control-center sections and hotspot dat
 	assert.match(markup, /风险热点项目/);
 	assert.match(markup, /语言风险热力/);
 	assert.match(markup, /CWE 攻击面/);
-	assert.match(markup, /Alpha/);
-	assert.match(markup, /Beta/);
 	assert.match(markup, /TypeScript/);
 	assert.match(markup, /CWE-79/);
+	assert.match(markup, /跨站脚本/);
+	assert.match(markup, /CWE-89/);
+	assert.match(markup, /SQL 注入/);
+	assert.match(markup, /3 条发现/);
+	assert.match(markup, /2 条发现/);
 	assert.match(markup, />7 天</);
 	assert.match(markup, />14 天</);
 	assert.match(markup, />30 天</);
 });
 
-test("DashboardCommandCenter uses the planned main-grid pairing on large screens", async () => {
+test("DashboardCommandCenter places cwe in the third primary row and moves language risk below the grid", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
@@ -210,23 +221,24 @@ test("DashboardCommandCenter uses the planned main-grid pairing on large screens
 	assert.match(markup, /data-panel="hotspots"[^>]*class="[^"]*lg:col-span-7/);
 	assert.match(markup, /data-panel="status"[^>]*class="[^"]*lg:col-span-5/);
 	assert.match(markup, /data-panel="engines"[^>]*class="[^"]*lg:col-span-7/);
-	assert.match(markup, /data-panel="language-risk"[^>]*class="[^"]*lg:col-span-5/);
+	assert.match(markup, /data-panel="cwe"[^>]*class="[^"]*lg:col-span-5/);
+	assert.match(markup, /data-panel="language-risk"/);
 
 	const trendIndex = markup.indexOf('data-panel="trend"');
 	const funnelIndex = markup.indexOf('data-panel="funnel"');
 	const hotspotsIndex = markup.indexOf('data-panel="hotspots"');
 	const statusIndex = markup.indexOf('data-panel="status"');
 	const enginesIndex = markup.indexOf('data-panel="engines"');
-	const languageRiskIndex = markup.indexOf('data-panel="language-risk"');
 	const cweIndex = markup.indexOf('data-panel="cwe"');
+	const languageRiskIndex = markup.indexOf('data-panel="language-risk"');
 
 	assert.notEqual(trendIndex, -1);
 	assert.ok(trendIndex < funnelIndex);
 	assert.ok(funnelIndex < hotspotsIndex);
 	assert.ok(hotspotsIndex < statusIndex);
 	assert.ok(statusIndex < enginesIndex);
-	assert.ok(enginesIndex < languageRiskIndex);
-	assert.ok(languageRiskIndex < cweIndex);
+	assert.ok(enginesIndex < cweIndex);
+	assert.ok(cweIndex < languageRiskIndex);
 });
 
 test("DashboardCommandCenter shows empty-state copy when snapshot panels are empty", async () => {
@@ -252,4 +264,41 @@ test("DashboardCommandCenter shows empty-state copy when snapshot panels are emp
 	assert.match(markup, /暂无热点项目/);
 	assert.match(markup, /暂无语言风险数据/);
 	assert.match(markup, /暂无 CWE 攻击面数据/);
+});
+
+test("DashboardCommandCenter hides zero-value cwe rows and keeps the empty-state copy", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+	const snapshot = createSnapshotFixture();
+	snapshot.cwe_distribution = [
+		{
+			cwe_id: "CWE-79",
+			cwe_name: "跨站脚本",
+			total_findings: 0,
+			opengrep_findings: 0,
+			agent_findings: 0,
+			bandit_findings: 0,
+		},
+		{
+			cwe_id: "CWE-89",
+			cwe_name: "SQL 注入",
+			total_findings: -1,
+			opengrep_findings: 0,
+			agent_findings: 0,
+			bandit_findings: 0,
+		},
+	];
+
+	const markup = renderToStaticMarkup(
+		createElement(module.default, {
+			snapshot,
+			rangeDays: 14,
+			onRangeDaysChange: () => {},
+		}),
+	);
+
+	assert.match(markup, /暂无 CWE 攻击面数据/);
+	assert.doesNotMatch(markup, /CWE-79/);
+	assert.doesNotMatch(markup, /CWE-89/);
 });

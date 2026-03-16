@@ -28,12 +28,15 @@ export interface DashboardPageFeedbackProps {
 }
 
 export function hasDashboardSnapshotContent(snapshot: DashboardSnapshotResponse) {
+	const hasCweContent = snapshot.cwe_distribution.some(
+		(item) => Math.max(Number(item.total_findings || 0), 0) > 0,
+	);
 	return (
 		snapshot.summary.total_projects > 0 ||
 		snapshot.daily_activity.length > 0 ||
 		snapshot.project_hotspots.length > 0 ||
 		snapshot.language_risk.length > 0 ||
-		snapshot.cwe_distribution.length > 0
+		hasCweContent
 	);
 }
 

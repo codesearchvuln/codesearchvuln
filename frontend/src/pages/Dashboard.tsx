@@ -83,21 +83,16 @@ function DashboardFallback() {
 					</div>
 				))}
 			</div>
-			<div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-				<Skeleton className="h-[22rem] rounded-3xl xl:col-span-8" />
-				<div className="grid gap-4 xl:col-span-4">
-					<Skeleton className="h-[16rem] rounded-3xl" />
-					<Skeleton className="h-[18rem] rounded-3xl" />
-				</div>
+			<div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+				<Skeleton className="h-[22rem] rounded-3xl lg:col-span-7" />
+				<Skeleton className="h-[18rem] rounded-3xl lg:col-span-5" />
+				<Skeleton className="h-[24rem] rounded-3xl lg:col-span-7" />
+				<Skeleton className="h-[22rem] rounded-3xl lg:col-span-5" />
+				<Skeleton className="h-[24rem] rounded-3xl lg:col-span-7" />
+				<Skeleton className="h-[22rem] rounded-3xl lg:col-span-5" />
 			</div>
-			<div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-				<Skeleton className="h-[24rem] rounded-3xl xl:col-span-7" />
-				<Skeleton className="h-[24rem] rounded-3xl xl:col-span-5" />
-			</div>
-			<div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-				<Skeleton className="h-[24rem] rounded-3xl xl:col-span-5" />
-				<Skeleton className="h-[24rem] rounded-3xl xl:col-span-7" />
-			</div>
+			<Skeleton className="h-[24rem] rounded-3xl" />
+			<Skeleton className="h-[24rem] rounded-3xl" />
 		</div>
 	);
 }
