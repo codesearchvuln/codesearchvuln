@@ -7,8 +7,8 @@
     {
       "test_id": "B101",
       "name": "assert_used",
-      "description": "",
-      "description_summary": "",
+      "description": "**B101: Test for use of assert**\n\n    The assert statement is removed when Python runs with optimization flags.\n    Security checks implemented with assert may therefore be skipped in\n    production. Use explicit condition checks and raise exceptions for security-\n    relevant validation.",
+      "description_summary": "**B101: Test for use of assert**",
       "checks": [
         "Assert"
       ],
@@ -18,8 +18,8 @@
     {
       "test_id": "B102",
       "name": "exec_used",
-      "description": "",
-      "description_summary": "",
+      "description": "**B102: Test for use of exec**\n\n    The exec function executes dynamically generated Python code and can lead to\n    arbitrary code execution when inputs are not strictly controlled. Avoid\n    evaluating untrusted strings as code. Prefer explicit dispatch tables or\n    vetted parsers.",
+      "description_summary": "**B102: Test for use of exec**",
       "checks": [
         "Call"
       ],
@@ -29,8 +29,8 @@
     {
       "test_id": "B103",
       "name": "set_bad_file_permissions",
-      "description": "",
-      "description_summary": "",
+      "description": "**B103: Test for setting bad file permissions**\n\n    Overly permissive file modes can expose sensitive data or allow unauthorized\n    modification. This rule flags chmod usage that weakens file protection.\n    Apply least-privilege permissions and restrict write or execute access to\n    trusted principals only.",
+      "description_summary": "**B103: Test for setting bad file permissions**",
       "checks": [
         "Call"
       ],
@@ -40,8 +40,8 @@
     {
       "test_id": "B104",
       "name": "hardcoded_bind_all_interfaces",
-      "description": "",
-      "description_summary": "",
+      "description": "**B104: Test for binding to all interfaces**\n\n    Binding to 0.0.0.0 exposes a service on all network interfaces, including\n    untrusted networks. This can unintentionally increase attack surface. Bind\n    to localhost or a specific trusted interface unless external exposure is\n    explicitly required.",
+      "description_summary": "**B104: Test for binding to all interfaces**",
       "checks": [
         "Str"
       ],
@@ -84,8 +84,8 @@
     {
       "test_id": "B108",
       "name": "hardcoded_tmp_directory",
-      "description": "",
-      "description_summary": "",
+      "description": "**B108: Test for insecure usage of temporary file or directory**\n\n    Hardcoded temporary paths may create predictable file locations and increase\n    race-condition risk in shared environments. Use tempfile APIs to create\n    secure temporary files and directories with randomized names and appropriate\n    permissions.",
+      "description_summary": "**B108: Test for insecure usage of temporary file or directory**",
       "checks": [
         "Str"
       ],
@@ -95,8 +95,8 @@
     {
       "test_id": "B110",
       "name": "try_except_pass",
-      "description": "",
-      "description_summary": "",
+      "description": "**B110: Test for try-except-pass**\n\n    Using pass in exception handlers suppresses errors and can hide security-\n    relevant failures. Silent failure makes detection and troubleshooting\n    harder. Catch specific exceptions, log relevant context, and fail safely\n    when validation or authorization errors occur.",
+      "description_summary": "**B110: Test for try-except-pass**",
       "checks": [
         "ExceptHandler"
       ],
@@ -106,8 +106,8 @@
     {
       "test_id": "B112",
       "name": "try_except_continue",
-      "description": "",
-      "description_summary": "",
+      "description": "**B112: Test for try-except-continue**\n\n    Using continue in exception handlers can silently skip failing operations\n    and process subsequent data in an unsafe state. This pattern may mask\n    repeated malicious input. Handle exceptions explicitly and enforce clear\n    error-handling decisions.",
+      "description_summary": "**B112: Test for try-except-continue**",
       "checks": [
         "ExceptHandler"
       ],
@@ -117,8 +117,8 @@
     {
       "test_id": "B113",
       "name": "request_without_timeout",
-      "description": "",
-      "description_summary": "",
+      "description": "**B113: Test for requests call without timeout**\n\n    HTTP requests without explicit timeout can block indefinitely and contribute\n    to denial-of-service conditions. Always set connect and read timeouts that\n    match your reliability and security requirements.",
+      "description_summary": "**B113: Test for requests call without timeout**",
       "checks": [
         "Call"
       ],
@@ -128,8 +128,8 @@
     {
       "test_id": "B201",
       "name": "flask_debug_true",
-      "description": "",
-      "description_summary": "",
+      "description": "**B201: Test for Flask app with debug set to true**\n\n    Flask debug mode can expose sensitive internals and unsafe interactive\n    debugging features in production. Ensure debug mode is disabled outside\n    development and control runtime flags with environment-specific\n    configuration.",
+      "description_summary": "**B201: Test for Flask app with debug set to true**",
       "checks": [
         "Call"
       ],
@@ -139,8 +139,8 @@
     {
       "test_id": "B202",
       "name": "tarfile_unsafe_members",
-      "description": "",
-      "description_summary": "",
+      "description": "**B202: Test for tarfile extraction without validation**\n\n    Unsafe tar extraction may allow path traversal and file overwrite outside\n    the intended destination. Validate archive members before extraction and\n    reject absolute paths or parent-directory traversal entries.",
+      "description_summary": "**B202: Test for tarfile extraction without validation**",
       "checks": [
         "Call"
       ],
@@ -150,8 +150,8 @@
     {
       "test_id": "B324",
       "name": "hashlib",
-      "description": "",
-      "description_summary": "",
+      "description": "**B324: Test for insecure hashlib usage**\n\n    Weak hash algorithms such as MD4, MD5, and SHA1 are not suitable for modern\n    security-sensitive integrity controls. Use stronger algorithms such as\n    SHA-256 or SHA-512, and use dedicated password-hashing functions for\n    credentials.",
+      "description_summary": "**B324: Test for insecure hashlib usage**",
       "checks": [
         "Call"
       ],
@@ -161,8 +161,8 @@
     {
       "test_id": "B501",
       "name": "request_with_no_cert_validation",
-      "description": "",
-      "description_summary": "",
+      "description": "**B501: Test for request_with_no_cert_validation**\n\n    Disabling TLS certificate verification removes protection against man-in-\n    the-middle attacks. This rule detects requests that bypass certificate\n    checks. Keep verification enabled and configure trusted CA chains correctly.",
+      "description_summary": "**B501: Test for request_with_no_cert_validation**",
       "checks": [
         "Call"
       ],
@@ -205,8 +205,8 @@
     {
       "test_id": "B505",
       "name": "weak_cryptographic_key",
-      "description": "",
-      "description_summary": "",
+      "description": "**B505: Test for weak cryptographic key generation**\n\n    Cryptographic keys with insufficient strength reduce resistance to brute-\n    force attacks and may violate policy requirements. Use modern key sizes and\n    enforce minimum strength checks in cryptographic configuration.",
+      "description_summary": "**B505: Test for weak cryptographic key generation**",
       "checks": [
         "Call"
       ],
@@ -216,8 +216,8 @@
     {
       "test_id": "B506",
       "name": "yaml_load",
-      "description": "",
-      "description_summary": "",
+      "description": "**B506: Test for unsafe yaml load**\n\n    Using yaml.load with unsafe loaders may deserialize arbitrary objects from\n    untrusted input and can enable code execution. Use yaml.safe_load for\n    untrusted data and restrict deserialization behavior to expected types.",
+      "description_summary": "**B506: Test for unsafe yaml load**",
       "checks": [
         "Call"
       ],
@@ -227,8 +227,8 @@
     {
       "test_id": "B507",
       "name": "ssh_no_host_key_verification",
-      "description": "",
-      "description_summary": "",
+      "description": "**B507: Test for SSH host key verification disabled**\n\n    Disabling SSH host key verification allows man-in-the-middle interception of\n    SSH sessions. Use strict host key policies and manage known host\n    fingerprints through secure provisioning workflows.",
+      "description_summary": "**B507: Test for SSH host key verification disabled**",
       "checks": [
         "Call"
       ],
@@ -260,8 +260,8 @@
     {
       "test_id": "B601",
       "name": "paramiko_calls",
-      "description": "",
-      "description_summary": "",
+      "description": "**B601: Test for paramiko calls**\n\n    Paramiko command execution flows can become dangerous when command strings\n    are built from untrusted input. Validate and constrain command construction,\n    and avoid shell-style concatenation of attacker-controlled data.",
+      "description_summary": "**B601: Test for paramiko calls**",
       "checks": [
         "Call"
       ],
@@ -337,8 +337,8 @@
     {
       "test_id": "B608",
       "name": "hardcoded_sql_expressions",
-      "description": "",
-      "description_summary": "",
+      "description": "**B608: Test for hardcoded SQL expressions**\n\n    Building SQL queries through string formatting or concatenation can\n    introduce SQL injection risk when untrusted values are included. Use\n    parameterized queries or ORM parameter binding to separate code from data.",
+      "description_summary": "**B608: Test for hardcoded SQL expressions**",
       "checks": [
         "Str"
       ],
@@ -348,8 +348,8 @@
     {
       "test_id": "B609",
       "name": "linux_commands_wildcard_injection",
-      "description": "",
-      "description_summary": "",
+      "description": "**B609: Test for linux command wildcard injection**\n\n    Wildcard expansion in shell command execution may be influenced by attacker-\n    controlled filenames and alter command behavior. Avoid unsafe shell\n    expansion and pass explicit argument lists where possible.",
+      "description_summary": "**B609: Test for linux command wildcard injection**",
       "checks": [
         "Call"
       ],
@@ -381,8 +381,8 @@
     {
       "test_id": "B612",
       "name": "logging_config_insecure_listen",
-      "description": "",
-      "description_summary": "",
+      "description": "**B612: Test for logging configuration listening on sockets**\n\n    Insecure logging configuration listeners may accept untrusted payloads and\n    alter runtime behavior. Restrict or disable remote logging reconfiguration\n    channels in production environments.",
+      "description_summary": "**B612: Test for logging configuration listening on sockets**",
       "checks": [
         "Call"
       ],
@@ -392,8 +392,8 @@
     {
       "test_id": "B613",
       "name": "trojansource",
-      "description": "",
-      "description_summary": "",
+      "description": "**B613: Test for trojansource attack**\n\n    Unicode bidirectional control characters can make source code appear\n    different from execution order, potentially hiding malicious logic. Enforce\n    repository checks that detect and block suspicious control characters.",
+      "description_summary": "**B613: Test for trojansource attack**",
       "checks": [
         "File"
       ],
@@ -425,8 +425,8 @@
     {
       "test_id": "B701",
       "name": "jinja2_autoescape_false",
-      "description": "",
-      "description_summary": "",
+      "description": "**B701: Test for jinja2 autoescape disabled**\n\n    Disabling Jinja2 autoescape can expose web applications to cross-site\n    scripting when rendering untrusted content. Keep autoescape enabled for HTML\n    templates and escape user-influenced output by context.",
+      "description_summary": "**B701: Test for jinja2 autoescape disabled**",
       "checks": [
         "Call"
       ],
@@ -436,8 +436,8 @@
     {
       "test_id": "B702",
       "name": "use_of_mako_templates",
-      "description": "",
-      "description_summary": "",
+      "description": "**B702: Test for use of mako templates**\n\n    Mako templates permit powerful code evaluation features and require strict\n    trust boundaries. Treat untrusted template content as dangerous and prefer\n    safer rendering models for untrusted input paths.",
+      "description_summary": "**B702: Test for use of mako templates**",
       "checks": [
         "Call"
       ],
@@ -458,8 +458,8 @@
     {
       "test_id": "B704",
       "name": "markupsafe_markup_xss",
-      "description": "",
-      "description_summary": "",
+      "description": "**B704: Test for potentially unsafe markupsafe Markup usage**\n\n    Marking content as safe can bypass escaping and allow untrusted HTML or\n    script content to reach output sinks. Use Markup only for strictly trusted\n    content and rely on automatic escaping by default.",
+      "description_summary": "**B704: Test for potentially unsafe markupsafe Markup usage**",
       "checks": [
         "Call"
       ],
