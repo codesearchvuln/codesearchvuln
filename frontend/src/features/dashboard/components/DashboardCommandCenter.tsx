@@ -103,6 +103,27 @@ function formatDurationShort(durationMs: number | null | undefined) {
 	return `${minutes}m ${seconds}s`;
 }
 
+export function formatCumulativeDuration(durationMs: number | null | undefined) {
+	const totalSeconds = Math.max(Math.floor(Number(durationMs || 0) / 1000), 0);
+	if (totalSeconds <= 0) return "0秒";
+
+	const days = Math.floor(totalSeconds / 86400);
+	const hours = Math.floor((totalSeconds % 86400) / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+
+	if (days > 0) {
+		return `${days}天 ${hours}时 ${minutes}分 ${seconds}秒`;
+	}
+	if (hours > 0) {
+		return `${hours}时 ${minutes}分 ${seconds}秒`;
+	}
+	if (minutes > 0) {
+		return `${minutes}分 ${seconds}秒`;
+	}
+	return `${seconds}秒`;
+}
+
 function formatDateTime(value: string | null | undefined) {
 	if (!value) return "暂无";
 	const date = new Date(value);
@@ -175,9 +196,12 @@ function SummaryStrip({
 	snapshot: DashboardSnapshotResponse;
 }) {
 	const summary = snapshot.summary;
+	const cweTypeCount = (snapshot.cwe_distribution || []).filter(
+		(item) => Math.max(Number(item.total_findings || 0), 0) > 0,
+	).length;
 	const cards = [
 		{
-			label: "项目总数",
+			label: "扫描项目总数",
 			value: formatNumber(summary.total_projects),
 			// subtitle: `窗口内已扫描 ${formatNumber(summary.window_scanned_projects)} 个项目`,
 			accent: "text-cyan-200",
@@ -206,25 +230,22 @@ function SummaryStrip({
 			values: computeMiniTrendValues(snapshot.daily_activity, "agent_findings"),
 		},
 		{
-			label: "误报率",
-			value: formatPercent(summary.false_positive_rate),
-			// subtitle: `窗口误报率 ${formatPercent(summary.window_false_positive_rate)}`,
-			accent: "text-rose-200",
-			values: computeMiniTrendValues(snapshot.daily_activity, "opengrep_findings"),
+			label: "累计扫描时长",
+			value: formatCumulativeDuration(snapshot.total_scan_duration_ms),
+			accent: "text-violet-200",
+			values: computeMiniTrendValues(snapshot.daily_activity, "phpstan_findings"),
 		},
 		{
-			label: "扫描成功率",
-			value: formatPercent(summary.scan_success_rate),
-			// subtitle: `窗口成功率 ${formatPercent(summary.window_scan_success_rate)}`,
+			label: "累计执行扫描",
+			value: formatNumber(snapshot.task_status_breakdown.completed),
 			accent: "text-sky-200",
 			values: computeMiniTrendValues(snapshot.daily_activity, "gitleaks_findings"),
 		},
 		{
-			label: "平均扫描耗时",
-			value: formatDurationShort(summary.avg_scan_duration_ms),
-			// subtitle: `窗口平均 ${formatDurationShort(summary.window_avg_scan_duration_ms)}`,
-			accent: "text-violet-200",
-			values: computeMiniTrendValues(snapshot.daily_activity, "phpstan_findings"),
+			label: "可挖掘漏洞类型",
+			value: formatNumber(cweTypeCount),
+			accent: "text-rose-200",
+			values: computeMiniTrendValues(snapshot.daily_activity, "opengrep_findings"),
 		},
 	];
 
@@ -235,7 +256,7 @@ function SummaryStrip({
 					key={card.label}
 					className="rounded-3xl border border-border/60 bg-slate-950/80 p-4 shadow-lg shadow-cyan-950/10"
 				>
-					<p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
+					<p className="text-[13px] uppercase tracking-[0.28em] text-slate-400">
 						{card.label}
 					</p>
 					<p className={`mt-3 text-3xl font-semibold ${card.accent}`}>
@@ -284,9 +305,6 @@ function VerificationFunnel({
 					</div>
 				</div>
 			))}
-			<div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-				误报数：{formatNumber(falsePositive)}
-			</div>
 		</div>
 	);
 }
@@ -377,7 +395,7 @@ function RiskHeatmap({ items }: { items: DashboardLanguageRiskItem[] }) {
 							<div>
 								<p className="text-base font-semibold">{item.language}</p>
 								<p className="mt-1 text-xs opacity-80">
-									{formatNumber(item.project_count)} 个项目 · {formatNumber(item.loc_number)} LOC
+									{formatNumber(item.project_count)} 个项目 · {formatNumber(item.loc_number)} 行
 								</p>
 							</div>
 							<div className="text-right">
@@ -387,22 +405,12 @@ function RiskHeatmap({ items }: { items: DashboardLanguageRiskItem[] }) {
 						</div>
 						<div className="mt-4 grid grid-cols-2 gap-2 text-xs">
 							<div className="rounded-2xl bg-black/15 px-3 py-2">
-								<p className="opacity-80">有效风险</p>
+								<p className="opacity-80">获取漏洞</p>
 								<p className="mt-1 text-lg font-semibold">{formatNumber(item.effective_findings)}</p>
 							</div>
 							<div className="rounded-2xl bg-black/15 px-3 py-2">
-								<p className="opacity-80">已验证</p>
+								<p className="opacity-80">模型挖掘漏洞</p>
 								<p className="mt-1 text-lg font-semibold">{formatNumber(item.verified_findings)}</p>
-							</div>
-							<div className="rounded-2xl bg-black/15 px-3 py-2">
-								<p className="opacity-80">误报</p>
-								<p className="mt-1 text-lg font-semibold">{formatNumber(item.false_positive_count)}</p>
-							</div>
-							<div className="rounded-2xl bg-black/15 px-3 py-2">
-								<p className="opacity-80">高/中置信规则</p>
-								<p className="mt-1 text-lg font-semibold">
-									{formatNumber(item.rules_high)} / {formatNumber(item.rules_medium)}
-								</p>
 							</div>
 						</div>
 					</div>
@@ -418,6 +426,14 @@ type AttackSurfaceTreemapContentProps = {
 	width?: number;
 	height?: number;
 	fill?: string;
+	cweId?: string;
+	cweName?: string;
+	totalFindings?: number;
+	opengrepFindings?: number;
+	agentFindings?: number;
+	banditFindings?: number;
+	name?: string;
+	size?: number;
 	payload?: CweTreemapNode;
 };
 
@@ -432,18 +448,43 @@ function getTreemapLabelCharLimit(width: number) {
 	return 8;
 }
 
-function AttackSurfaceTreemapContent({
+export function AttackSurfaceTreemapContent({
 	x = 0,
 	y = 0,
 	width = 0,
 	height = 0,
 	fill,
+	cweId,
+	cweName,
+	totalFindings,
+	opengrepFindings,
+	agentFindings,
+	banditFindings,
+	name,
+	size,
 	payload,
 }: AttackSurfaceTreemapContentProps) {
-	if (!payload || width <= 0 || height <= 0) return null;
+	if (width <= 0 || height <= 0) return null;
+
+	const node =
+		payload ??
+		(cweId
+			? {
+					cweId,
+					cweName: cweName || name || cweId,
+					totalFindings: Math.max(Number(totalFindings || size || 0), 0),
+					opengrepFindings: Math.max(Number(opengrepFindings || 0), 0),
+					agentFindings: Math.max(Number(agentFindings || 0), 0),
+					banditFindings: Math.max(Number(banditFindings || 0), 0),
+					name: name || cweId,
+					size: Math.max(Number(size || totalFindings || 0), 0),
+					fill: fill || getCweTreemapColor(cweId),
+				}
+			: null);
+	if (!node) return null;
 
 	const labelMode = getCweTreemapLabelMode({ width, height });
-	const tileFill = payload.fill || fill || getCweTreemapColor(payload.cweId);
+	const tileFill = node.fill || fill || getCweTreemapColor(node.cweId);
 
 	return (
 		<g>
@@ -456,29 +497,20 @@ function AttackSurfaceTreemapContent({
 				ry={8}
 				fill={tileFill}
 				fillOpacity={0.94}
-				stroke="rgba(255,255,255,0.14)"
+				stroke="rgba(241,245,249,0.22)"
 				strokeWidth={1}
 			/>
 			{labelMode === "detailed" ? (
 				<>
 					<text
-						x={x + 10}
-						y={y + 18}
-						fill="rgba(226,232,240,0.82)"
-						fontSize={10}
-						fontWeight={700}
-					>
-						{payload.cweId}
-					</text>
-					<text
-						x={x + 10}
-						y={y + 36}
+						x={x + 8}
+						y={y + 30}
 						fill="#f8fafc"
-						fontSize={12}
+						fontSize={15}
 						fontWeight={700}
 					>
 						{truncateTreemapLabel(
-							payload.cweName,
+							node.cweName,
 							getTreemapLabelCharLimit(width),
 						)}
 					</text>
@@ -487,10 +519,10 @@ function AttackSurfaceTreemapContent({
 							x={x + 10}
 							y={y + height - 10}
 							fill="rgba(241,245,249,0.88)"
-							fontSize={10}
+							fontSize={12}
 							fontWeight={600}
 						>
-							{formatNumber(payload.totalFindings)} 条发现
+							{formatNumber(node.totalFindings)} 条发现
 						</text>
 					) : null}
 				</>
@@ -503,7 +535,7 @@ function AttackSurfaceTreemapContent({
 					fontSize={11}
 					fontWeight={700}
 				>
-					{payload.cweId}
+					{node.cweId}
 				</text>
 			) : null}
 		</g>
@@ -518,59 +550,42 @@ function AttackSurfaceTreemap({ items }: { items: DashboardCweDistributionItem[]
 	}
 
 	return (
-		<div className="space-y-4">
-			<ChartContainer
-				className="h-72 w-full"
-				config={{
-					cwe: { label: "CWE 攻击面", color: "#38bdf8" },
-				}}
+		<ChartContainer
+			className="flex-1 h-full min-h-[31rem] w-full"
+			config={{
+				cwe: { label: "CWE 攻击面", color: "#6CC4E1" },
+			}}
+		>
+			<Treemap
+				data={data}
+				dataKey="size"
+				aspectRatio={4 / 3}
+				stroke="rgba(226,232,240,0.16)"
+				isAnimationActive={false}
+				content={<AttackSurfaceTreemapContent />}
 			>
-				<Treemap
-					data={data}
-					dataKey="size"
-					stroke="rgba(15,23,42,0.45)"
-					isAnimationActive={false}
-					content={<AttackSurfaceTreemapContent />}
-				>
-					<Tooltip
-						cursor={false}
-						content={({ active, payload }) => {
-							if (!active || !payload?.length) return null;
-							const item = payload[0]?.payload as CweTreemapNode | undefined;
-							if (!item) return null;
-							return (
-								<div className="rounded-2xl border border-border/70 bg-slate-950/95 px-3 py-2 text-xs text-slate-100 shadow-xl">
-									<p className="font-semibold text-cyan-100">{item.cweName}</p>
-									<p className="mt-1 text-slate-300">{item.cweId}</p>
-									<p className="mt-2">发现总数：{formatNumber(item.totalFindings)}</p>
-									<div className="mt-2 space-y-1 text-slate-300">
-										<p>Opengrep：{formatNumber(item.opengrepFindings)}</p>
-										<p>Agent：{formatNumber(item.agentFindings)}</p>
-										<p>Bandit：{formatNumber(item.banditFindings)}</p>
-									</div>
+				<Tooltip
+					cursor={false}
+					content={({ active, payload }) => {
+						if (!active || !payload?.length) return null;
+						const item = payload[0]?.payload as CweTreemapNode | undefined;
+						if (!item) return null;
+						return (
+							<div className="rounded-2xl border border-border/70 bg-slate-950/95 px-3 py-2 text-xs text-slate-100 shadow-xl">
+								<p className="font-semibold text-slate-100">{item.cweName}</p>
+								{/* <p className="mt-1 text-slate-400">{item.cweId}</p> */}
+								<p className="mt-2">发现总数：{formatNumber(item.totalFindings)}</p>
+								<div className="mt-2 space-y-1 text-slate-300">
+									<p>Opengrep：{formatNumber(item.opengrepFindings)}</p>
+									<p>Agent：{formatNumber(item.agentFindings)}</p>
+									<p>Bandit：{formatNumber(item.banditFindings)}</p>
 								</div>
-							);
-						}}
-					/>
-				</Treemap>
-			</ChartContainer>
-			<div className="grid gap-2 text-sm text-slate-300">
-				{data.slice(0, 6).map((item) => (
-					<div
-						key={item.cweId}
-						className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-slate-900/60 px-3 py-2"
-					>
-						<div className="min-w-0">
-							<p className="font-medium text-white">{item.cweId}</p>
-							<p className="truncate text-xs text-slate-400">{item.cweName}</p>
-						</div>
-						<p className="shrink-0 text-right text-sm font-semibold text-cyan-100">
-							{formatNumber(item.totalFindings)} 条发现
-						</p>
-					</div>
-				))}
-			</div>
-		</div>
+							</div>
+						);
+					}}
+				/>
+			</Treemap>
+		</ChartContainer>
 	);
 }
 
@@ -789,18 +804,12 @@ export default function DashboardCommandCenter({
 													{ENGINE_LABELS[item.engine] || item.engine}
 												</p>
 											</div>
-											<p className="text-sm text-slate-400">
-												成功率 {formatPercent(item.success_rate)}
-											</p>
 										</div>
-										<div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+										<div className="mt-3 grid grid-cols-4 gap-1 text-sm text-slate-300">
 											<div>完成扫描：{formatNumber(item.completed_scans)}</div>
 											<div>有效风险：{formatNumber(item.effective_findings)}</div>
-											<div>已验证：{formatNumber(item.verified_findings)}</div>
-											<div>误报：{formatNumber(item.false_positive_count)}</div>
-											<div className="col-span-2">
-												平均耗时：{formatDurationShort(item.avg_scan_duration_ms)}
-											</div>
+											<div>模型验证：{formatNumber(item.verified_findings)}</div>
+											<div>平均耗时：{formatDurationShort(item.avg_scan_duration_ms)}</div>
 										</div>
 									</div>
 								))}
@@ -811,7 +820,7 @@ export default function DashboardCommandCenter({
 					)}
 				</DashboardSection>
 				<DashboardSection
-					className="lg:col-span-5"
+					className="lg:col-span-5 flex flex-col"
 					panel="cwe"
 					title="CWE 攻击面"
 					description="具备 CWE 语义的攻击面聚集视图，面积表示发现规模，颜色区分漏洞类型。"

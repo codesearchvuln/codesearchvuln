@@ -20,7 +20,7 @@ async function importOrFail<TModule = Record<string, unknown>>(
 function createSnapshotFixture() {
 	return {
 		generated_at: "2026-03-16T03:00:00.000Z",
-		total_scan_duration_ms: 7050,
+		total_scan_duration_ms: 90061000,
 		scan_runs: [],
 		vulns: [],
 		rule_confidence: [],
@@ -182,21 +182,39 @@ test("DashboardCommandCenter renders the control-center sections and hotspot dat
 
 	assert.match(markup, /漏洞扫描统计/);
 	assert.match(markup, /当前有效风险/);
+	assert.match(markup, /累计扫描时长/);
+	assert.match(markup, /累计执行扫描/);
+	assert.match(markup, /可挖掘漏洞类型/);
 	assert.match(markup, /验证漏斗/);
 	assert.match(markup, /任务状态/);
 	assert.match(markup, /风险热点项目/);
 	assert.match(markup, /语言风险热力/);
 	assert.match(markup, /CWE 攻击面/);
 	assert.match(markup, /TypeScript/);
-	assert.match(markup, /CWE-79/);
-	assert.match(markup, /跨站脚本/);
-	assert.match(markup, /CWE-89/);
-	assert.match(markup, /SQL 注入/);
-	assert.match(markup, /3 条发现/);
-	assert.match(markup, /2 条发现/);
+	assert.match(markup, /--color-cwe: #6CC4E1;/);
+	assert.match(markup, /1天 1时 1分 1秒/);
+	assert.match(markup, />8</);
+	assert.match(markup, />2</);
+	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">误报率<\/p>/);
+	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">扫描成功率<\/p>/);
+	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">平均扫描耗时<\/p>/);
+	assert.doesNotMatch(markup, /3 条发现/);
+	assert.doesNotMatch(markup, /2 条发现/);
 	assert.match(markup, />7 天</);
 	assert.match(markup, />14 天</);
 	assert.match(markup, />30 天</);
+});
+
+test("formatCumulativeDuration formats dashboard scan duration with zh units down to seconds", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+
+	assert.equal(module.formatCumulativeDuration(0), "0秒");
+	assert.equal(module.formatCumulativeDuration(7050), "7秒");
+	assert.equal(module.formatCumulativeDuration(61000), "1分 1秒");
+	assert.equal(module.formatCumulativeDuration(3605000), "1时 0分 5秒");
+	assert.equal(module.formatCumulativeDuration(90061000), "1天 1时 1分 1秒");
 });
 
 test("DashboardCommandCenter places cwe in the third primary row and moves language risk below the grid", async () => {
@@ -221,8 +239,9 @@ test("DashboardCommandCenter places cwe in the third primary row and moves langu
 	assert.match(markup, /data-panel="hotspots"[^>]*class="[^"]*lg:col-span-7/);
 	assert.match(markup, /data-panel="status"[^>]*class="[^"]*lg:col-span-5/);
 	assert.match(markup, /data-panel="engines"[^>]*class="[^"]*lg:col-span-7/);
-	assert.match(markup, /data-panel="cwe"[^>]*class="[^"]*lg:col-span-5/);
+	assert.match(markup, /data-panel="cwe"[^>]*class="[^"]*lg:col-span-5[^"]*flex[^"]*flex-col/);
 	assert.match(markup, /data-panel="language-risk"/);
+	assert.match(markup, /min-h-\[31rem\]/);
 
 	const trendIndex = markup.indexOf('data-panel="trend"');
 	const funnelIndex = markup.indexOf('data-panel="funnel"');
@@ -301,4 +320,36 @@ test("DashboardCommandCenter hides zero-value cwe rows and keeps the empty-state
 	assert.match(markup, /暂无 CWE 攻击面数据/);
 	assert.doesNotMatch(markup, /CWE-79/);
 	assert.doesNotMatch(markup, /CWE-89/);
+});
+
+test("AttackSurfaceTreemapContent renders tile text from flat treemap node props", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+
+	const markup = renderToStaticMarkup(
+		createElement(
+			"svg",
+			null,
+			createElement(module.AttackSurfaceTreemapContent, {
+				x: 0,
+				y: 0,
+				width: 124,
+				height: 72,
+				fill: "#155e75",
+				cweId: "CWE-79",
+				cweName: "跨站脚本",
+				totalFindings: 3,
+				opengrepFindings: 2,
+				agentFindings: 1,
+				banditFindings: 0,
+				name: "CWE-79",
+				size: 3,
+			}),
+		),
+	);
+
+	assert.match(markup, /CWE-79/);
+	assert.match(markup, /跨站脚本/);
+	assert.match(markup, /3 条发现/);
 });

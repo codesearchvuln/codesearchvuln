@@ -79,7 +79,7 @@ function getPaneShellClasses(appearance: FindingCodeWindowAppearance) {
 }
 
 function getEmptyStateClasses() {
-	return "flex h-full min-h-0 items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-6 py-10 text-center font-mono text-sm text-white/48";
+	return "flex h-full min-h-0 items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-6 py-10 text-center font-mono text-base text-white/48";
 }
 
 function ProjectCodeBrowserTree({

@@ -16,6 +16,23 @@ test("getCweTreemapColor returns a stable palette color for the same cwe id", ()
 	assert.ok(CWE_TREEMAP_COLORS.includes(first));
 });
 
+test("CWE_TREEMAP_COLORS uses the approved higher-contrast cool palette", () => {
+	assert.deepEqual(CWE_TREEMAP_COLORS, [
+		"#1E3A8A",
+		"#2456B3",
+		"#2C6CC9",
+		"#0F5F99",
+		"#1576B5",
+		"#1A7082",
+		"#0F766E",
+		"#15928A",
+		"#3A4EA1",
+		"#2B6788",
+		"#116A74",
+		"#2E5C9A",
+	]);
+});
+
 test("getCweTreemapLabelMode separates detailed, compact, and hidden tiles", () => {
 	assert.equal(getCweTreemapLabelMode({ width: 124, height: 72 }), "detailed");
 	assert.equal(getCweTreemapLabelMode({ width: 68, height: 40 }), "compact");
