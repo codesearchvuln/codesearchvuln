@@ -113,7 +113,7 @@ export function HomeScanCards() {
 
       {/* ───────────────── iframe 背景 ───────────────── */}
 
-      <div className="absolute inset-0 flex items-center justify-center z-0">
+      <div className="absolute inset-0 flex items-center justify-center z-10">
 
         <iframe
           src="http://localhost:5174"
@@ -208,7 +208,7 @@ export function HomeScanCards() {
 
         {/* 扫描模式卡片 */}
 
-        {/* <div className="mt-40 grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+        <div className="mt-40 grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
 
           {homeScanCards.map((card) => {
 
@@ -250,7 +250,7 @@ export function HomeScanCards() {
 
           })}
 
-        </div> */}
+        </div>
 
       </div>
 
