@@ -108,7 +108,7 @@ ProjectMember, User, UserConfig, ProjectInfo, PromptTemplate, AuditRuleSet/Audit
 目录：`frontend/src/shared/api/`
 
 - `serverClient.ts`：axios 实例
-- `database.ts`：兼容层（保留旧 VulHunter 的调用习惯）
+- `database.ts`：项目级 API 聚合封装
 - `agentTasks.ts` / `agentStream.ts`
 - `opengrep.ts` / `gitleaks.ts`
 - `rules.ts` / `prompts.ts`
@@ -117,7 +117,7 @@ ProjectMember, User, UserConfig, ProjectInfo, PromptTemplate, AuditRuleSet/Audit
 
 - `components/`：通用 UI 与业务组件
 - `shared/stores/opengrepRulesStore.ts`：本地规则缓存
-- `shared/config/database.ts`：把 `api` 兼容导出到旧调用点
+- `shared/api/database.ts`：统一的前端数据库/API 访问入口
 
 ---
 

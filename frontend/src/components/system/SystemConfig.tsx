@@ -64,6 +64,7 @@ import {
 	buildLlmProviderOptions,
 	getDefaultBaseUrlForProvider as resolveDefaultBaseUrlForProvider,
 	getDefaultModelForProvider as resolveDefaultModelForProvider,
+	getLlmCustomHeadersParseErrorMessage,
 	getLlmProviderInfo,
 	normalizeLlmProviderId,
 	parseLlmCustomHeadersInput,
@@ -965,8 +966,11 @@ export function SystemConfig({
 			config.llmCustomHeaders,
 		);
 		if (!parsedCustomHeaders.ok) {
+			const parseErrorMessage = getLlmCustomHeadersParseErrorMessage(
+				parsedCustomHeaders,
+			);
 			toast.error(
-				`无法${source === "save" ? "保存" : "测试"}：${parsedCustomHeaders.message}`,
+				`无法${source === "save" ? "保存" : "测试"}：${parseErrorMessage || "自定义请求头格式不正确"}`,
 			);
 			return {
 				ok: false,
@@ -1082,12 +1086,15 @@ export function SystemConfig({
 
 		if (!providerId || !baseUrl) return;
 		if (!parsedCustomHeaders.ok) {
+			const parseErrorMessage = getLlmCustomHeadersParseErrorMessage(
+				parsedCustomHeaders,
+			);
 			setModelStatsFetchStateBySignature((prev) => ({
 				...prev,
 				[signature]: "failed",
 			}));
 			if (!silent) {
-				toast.error(parsedCustomHeaders.message);
+				toast.error(parseErrorMessage || "自定义请求头格式不正确");
 			}
 			return;
 		}

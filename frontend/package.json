@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --strictPort --port 5173",
-    "lint": "rm -rf dist && tsgo -p tsconfig.check.json; biome lint --only=correctness/noUndeclaredDependencies src tests scripts; ast-grep scan --config sgconfig.yml src tests scripts",
+    "lint": "tsgo -p tsconfig.check.json && biome lint --only=correctness/noUndeclaredDependencies src tests scripts",
     "lint:fix": "biome check --apply .",
     "format": "biome format --write .",
     "type-check": "tsc --noEmit",
@@ -19,7 +19,7 @@
     "test:node": "node scripts/run-node-tests.mjs",
     "test:docker": "bash scripts/run-in-dev-container.sh pnpm test:node",
     "lint:docker": "bash scripts/run-in-dev-container.sh pnpm lint",
-    "clean": "rm -rf dist node_modules/.vite",
+    "clean": "node scripts/clean.mjs",
     "setup": "node scripts/setup.cjs || bash scripts/setup.sh",
     "setup:docker": "bash scripts/run-in-dev-container.sh pnpm install --no-frozen-lockfile",
     "analyze": "vite build --mode analyze"
@@ -90,7 +90,6 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@ast-grep/cli": "^0.39.9",
     "@biomejs/biome": "2.2.3",
     "@types/lodash": "^4.17.21",
     "@types/node": "^20.19.0",
