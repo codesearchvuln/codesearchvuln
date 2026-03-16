@@ -8,7 +8,7 @@ import { getGitleaksScanTasks } from "@/shared/api/gitleaks";
 import { getPhpstanScanTasks } from "@/shared/api/phpstan";
 import { getOpengrepScanTasks } from "@/shared/api/opengrep";
 import { apiClient } from "@/shared/api/serverClient";
-import { api } from "@/shared/config/database";
+import { api } from "@/shared/api/database";
 import { uploadZipFile } from "@/shared/utils/zipStorage";
 import type { CreateProjectForm, Project } from "@/shared/types";
 import {

@@ -15,7 +15,7 @@ import {
 	getOpengrepScanTasks,
 	type OpengrepScanTask,
 } from "@/shared/api/opengrep";
-import { api } from "@/shared/config/database";
+import { api } from "@/shared/api/database";
 import type { Project } from "@/shared/types";
 import { getProjectFoundIssuesBreakdown } from "@/features/projects/services/projectCardPreview";
 import {

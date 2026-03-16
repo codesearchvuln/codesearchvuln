@@ -8,7 +8,7 @@ import type {
 	FindingDetailCodeView,
 	FindingDetailFullFileRequest,
 } from "./viewModel";
-// import { buildFullFileDisplayLines } from "./viewModel";
+import { buildFullFileDisplayLines } from "./viewModel";
 
 export type FindingDetailFullFileLoadResult = {
 	content: string;

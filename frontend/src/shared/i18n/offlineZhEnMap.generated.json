@@ -55,8 +55,6 @@
   "PDF 报告已导出": "PDF report exported",
   "PDF 格式": "PDF format",
   "Recon 侦察智能体": "Recon reconnaissance agent",
-  "Supabase 云端": "Supabase cloud",
-  "Supabase 云端模式（已废弃）": "Supabase cloud mode (deprecated)",
   "Verification 验证智能体": "Verification verification agent",
   "[API] getUserConfig 失败:": "[API] getUserConfig failed:",
   "[API] getUserConfig 成功:": "[API] getUserConfig succeeded:",

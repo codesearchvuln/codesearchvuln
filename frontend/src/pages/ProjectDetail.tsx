@@ -57,7 +57,7 @@ import {
 	type OpengrepFinding,
 	type OpengrepScanTask,
 } from "@/shared/api/opengrep";
-import { api } from "@/shared/config/database";
+import { api } from "@/shared/api/database";
 import type { AuditTask, Project } from "@/shared/types";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 

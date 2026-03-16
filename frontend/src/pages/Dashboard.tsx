@@ -13,11 +13,10 @@ import {
 	ShieldAlert,
 	Wrench,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import DeferredSection from "@/components/performance/DeferredSection";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, isDemoMode } from "@/shared/config/database";
+import { api } from "@/shared/api/database";
 import { resolveCweDisplay } from "@/shared/security/cweCatalog";
 import type {
 	DashboardCweDistributionItem,
@@ -254,24 +253,6 @@ export default function Dashboard() {
 			{loading && (
 				<div className="relative z-10 text-xs text-muted-foreground">
 					同步最新数据中...
-				</div>
-			)}
-
-			{isDemoMode && (
-				<div className="relative z-10 cyber-card p-4 border-amber-500/30 bg-amber-500/5">
-					<div className="flex items-start gap-3">
-						<AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5" />
-						<div className="text-sm text-foreground/80">
-							当前使用<span className="text-amber-400 font-bold">演示模式</span>
-							，显示的是模拟数据。
-							<Link
-								to="/scan-config/engines"
-								className="ml-2 text-primary font-bold hover:underline"
-							>
-								前往扫描引擎 →
-							</Link>
-						</div>
-					</div>
 				</div>
 			)}
 

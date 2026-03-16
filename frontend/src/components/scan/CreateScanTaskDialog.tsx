@@ -26,7 +26,7 @@ import {
 	Bot,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/shared/config/database";
+import { api } from "@/shared/api/database";
 import { createAgentTask } from "@/shared/api/agentTasks";
 import {
 	createOpengrepScanTask,

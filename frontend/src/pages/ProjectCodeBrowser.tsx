@@ -12,7 +12,7 @@ import FindingCodeWindow, {
 	type FindingCodeWindowAppearance,
 } from "@/pages/AgentAudit/components/FindingCodeWindow";
 import { Button } from "@/components/ui/button";
-import { api } from "@/shared/config/database";
+import { api } from "@/shared/api/database";
 import type { Project } from "@/shared/types";
 import { cn } from "@/shared/utils/utils";
 import {
