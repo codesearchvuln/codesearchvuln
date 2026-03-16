@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import uuid
 import re
 import shutil
 import subprocess
@@ -23,7 +24,7 @@ from sqlalchemy.future import select
 from app.models.bandit import BanditFinding, BanditScanTask
 from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
-from app.models.phpstan import PhpstanFinding, PhpstanScanTask
+from app.models.phpstan import PhpstanFinding, PhpstanRuleState, PhpstanScanTask
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.gitleaks_rules import (
@@ -116,6 +117,33 @@ class PhpstanFindingResponse(BaseModel):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# PHPStan rules integration: 规则页响应与更新请求模型（仅用于前端展示/启停状态持久化）。
+class PhpstanRuleResponse(BaseModel):
+    id: str
+    package: str
+    repo: str
+    rule_class: str
+    name: str
+    description_summary: str
+    source_file: str
+    source: str
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PhpstanRuleEnabledUpdateRequest(BaseModel):
+    is_active: bool
+
+
+class PhpstanRuleBatchEnabledUpdateRequest(BaseModel):
+    rule_ids: Optional[List[str]] = None
+    source: Optional[str] = None
+    keyword: Optional[str] = None
+    current_is_active: Optional[bool] = None
+    is_active: bool
 def _normalize_phpstan_level(value: Any, *, fallback: int = 8) -> int:
     """规范化 PHPStan level 参数，统一为 0-9。"""
     try:
@@ -148,6 +176,91 @@ def _parse_phpstan_output_payload(payload_text: str) -> Dict[str, Any]:
         raise ValueError("Unexpected phpstan output type")
 
     raise ValueError(f"Invalid phpstan JSON output: {last_error}")
+
+
+def _missing_phpstan_rules_migration_message() -> str:
+    return "数据库缺少 phpstan_rule_states 表，请先运行 alembic upgrade head"
+
+
+def _raise_phpstan_rules_migration_http_error(exc: ProgrammingError) -> None:
+    if "phpstan_rule_states" not in str(exc):
+        raise exc
+    raise HTTPException(status_code=500, detail=_missing_phpstan_rules_migration_message()) from exc
+
+
+def _phpstan_rules_snapshot_path() -> Path:
+    return Path(__file__).resolve().parents[3] / "db" / "rules_phpstan" / "phpstan_rules_combined.json"
+
+
+def _load_phpstan_rules_snapshot() -> Dict[str, Any]:
+    snapshot_path = _phpstan_rules_snapshot_path()
+    if not snapshot_path.exists():
+        raise HTTPException(status_code=500, detail=f"PHPStan 规则快照不存在: {snapshot_path}")
+    try:
+        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"PHPStan 规则快照解析失败: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=500, detail="PHPStan 规则快照格式错误")
+    return payload
+
+
+def _extract_phpstan_snapshot_rules() -> List[Dict[str, Any]]:
+    payload = _load_phpstan_rules_snapshot()
+    raw_rules = payload.get("rules")
+    if not isinstance(raw_rules, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for raw in raw_rules:
+        if not isinstance(raw, dict):
+            continue
+        rule_id = str(raw.get("id") or "").strip()
+        if not rule_id:
+            continue
+        normalized.append(
+            {
+                "id": rule_id,
+                "package": str(raw.get("package") or "").strip(),
+                "repo": str(raw.get("repo") or "").strip(),
+                "rule_class": str(raw.get("rule_class") or "").strip(),
+                "name": str(raw.get("name") or "").strip() or rule_id,
+                "description_summary": str(raw.get("description_summary") or "").strip(),
+                "source_file": str(raw.get("source_file") or "").strip(),
+                "source": str(raw.get("source") or "official_extension").strip() or "official_extension",
+            }
+        )
+    normalized.sort(key=lambda item: (item["package"], item["rule_class"], item["id"]))
+    return normalized
+
+
+async def _load_phpstan_rule_states(db: AsyncSession) -> Dict[str, PhpstanRuleState]:
+    try:
+        result = await db.execute(select(PhpstanRuleState))
+    except ProgrammingError as exc:
+        _raise_phpstan_rules_migration_http_error(exc)
+    rows = result.scalars().all()
+    return {str(row.rule_id): row for row in rows}
+
+
+def _merge_phpstan_rule_payload(
+    *,
+    snapshot_rules: List[Dict[str, Any]],
+    states_by_rule_id: Dict[str, PhpstanRuleState],
+) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = []
+    for item in snapshot_rules:
+        rule_id = item["id"]
+        state = states_by_rule_id.get(rule_id)
+        merged.append(
+            {
+                **item,
+                "is_active": bool(state.is_active) if state is not None else True,
+                "created_at": state.created_at if state is not None else None,
+                "updated_at": state.updated_at if state is not None else None,
+            }
+        )
+    return merged
 
 
 # PHPStan security filter: 仅保留安全相关发现（五类核心 + 高危词兜底）。
@@ -281,6 +394,7 @@ async def _execute_phpstan_scan(
                 return
 
             normalized_level = _normalize_phpstan_level(level)
+            # PHPStan rules integration: 规则页 enabled 状态当前仅用于前端展示，不参与扫描命令构建。
             cmd = [
                 "phpstan",
                 "analyse",
@@ -432,6 +546,179 @@ async def _execute_phpstan_scan(
                 )
         finally:
             _clear_scan_task_cancel("phpstan", task_id)
+
+
+@router.get("/phpstan/rules", response_model=List[PhpstanRuleResponse])
+async def list_phpstan_rules(
+    is_active: Optional[bool] = Query(None, description="按启用状态过滤"),
+    source: Optional[str] = Query(None, description="按来源过滤"),
+    keyword: Optional[str] = Query(None, description="按名称/类名/描述/包关键词过滤"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(1000, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    # PHPStan rules integration: 规则来源固定为快照文件，状态来自 phpstan_rule_states。
+    snapshot_rules = _extract_phpstan_snapshot_rules()
+    states_by_rule_id = await _load_phpstan_rule_states(db)
+    merged_rules = _merge_phpstan_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_rule_id=states_by_rule_id,
+    )
+
+    keyword_text = str(keyword or "").strip().lower()
+    source_text = str(source or "").strip()
+    filtered: List[Dict[str, Any]] = []
+    for item in merged_rules:
+        if is_active is not None and bool(item["is_active"]) != is_active:
+            continue
+        if source_text and item["source"] != source_text:
+            continue
+        if keyword_text:
+            search_blob = " ".join(
+                [
+                    str(item["name"]),
+                    str(item["rule_class"]),
+                    str(item["description_summary"]),
+                    str(item["package"]),
+                ]
+            ).lower()
+            if keyword_text not in search_blob:
+                continue
+        filtered.append(item)
+
+    return filtered[skip : skip + limit]
+
+
+@router.get("/phpstan/rules/{rule_id}", response_model=PhpstanRuleResponse)
+async def get_phpstan_rule(
+    rule_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    snapshot_rules = _extract_phpstan_snapshot_rules()
+    states_by_rule_id = await _load_phpstan_rule_states(db)
+    merged_rules = _merge_phpstan_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_rule_id=states_by_rule_id,
+    )
+    for item in merged_rules:
+        if item["id"] == rule_id:
+            return item
+    raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
+
+
+@router.post("/phpstan/rules/{rule_id}/enabled")
+async def update_phpstan_rule_enabled(
+    rule_id: str,
+    request: PhpstanRuleEnabledUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    known_rule_ids = {item["id"] for item in _extract_phpstan_snapshot_rules()}
+    if rule_id not in known_rule_ids:
+        raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
+
+    try:
+        result = await db.execute(
+            select(PhpstanRuleState).where(PhpstanRuleState.rule_id == rule_id)
+        )
+    except ProgrammingError as exc:
+        _raise_phpstan_rules_migration_http_error(exc)
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = PhpstanRuleState(
+            id=str(uuid.uuid4()),
+            rule_id=rule_id,
+            is_active=request.is_active,
+        )
+        db.add(state)
+    else:
+        state.is_active = request.is_active
+    await db.commit()
+    await db.refresh(state)
+    return {
+        "message": f"规则已{'启用' if state.is_active else '禁用'}",
+        "rule_id": rule_id,
+        "is_active": bool(state.is_active),
+    }
+
+
+@router.post("/phpstan/rules/batch/enabled")
+async def batch_update_phpstan_rules_enabled(
+    request: PhpstanRuleBatchEnabledUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    snapshot_rules = _extract_phpstan_snapshot_rules()
+    states_by_rule_id = await _load_phpstan_rule_states(db)
+    merged_rules = _merge_phpstan_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_rule_id=states_by_rule_id,
+    )
+
+    rule_ids_filter = set(request.rule_ids or []) if request.rule_ids else None
+    source_text = str(request.source or "").strip()
+    keyword_text = str(request.keyword or "").strip().lower()
+    selected_rule_ids: List[str] = []
+
+    for item in merged_rules:
+        if rule_ids_filter is not None and item["id"] not in rule_ids_filter:
+            continue
+        if source_text and item["source"] != source_text:
+            continue
+        if request.current_is_active is not None and bool(item["is_active"]) != request.current_is_active:
+            continue
+        if keyword_text:
+            search_blob = " ".join(
+                [
+                    str(item["name"]),
+                    str(item["rule_class"]),
+                    str(item["description_summary"]),
+                    str(item["package"]),
+                ]
+            ).lower()
+            if keyword_text not in search_blob:
+                continue
+        selected_rule_ids.append(item["id"])
+
+    if not selected_rule_ids:
+        return {
+            "message": "没有找到符合条件的规则",
+            "updated_count": 0,
+            "is_active": request.is_active,
+        }
+
+    try:
+        existing_result = await db.execute(
+            select(PhpstanRuleState).where(PhpstanRuleState.rule_id.in_(selected_rule_ids))
+        )
+    except ProgrammingError as exc:
+        _raise_phpstan_rules_migration_http_error(exc)
+    existing_rows = existing_result.scalars().all()
+    existing_by_rule_id = {str(row.rule_id): row for row in existing_rows}
+
+    updated_count = 0
+    for selected_rule_id in selected_rule_ids:
+        existing = existing_by_rule_id.get(selected_rule_id)
+        if existing is None:
+            db.add(
+                PhpstanRuleState(
+                    id=str(uuid.uuid4()),
+                    rule_id=selected_rule_id,
+                    is_active=request.is_active,
+                )
+            )
+        else:
+            existing.is_active = request.is_active
+        updated_count += 1
+    await db.commit()
+
+    return {
+        "message": f"已{'启用' if request.is_active else '禁用'} {updated_count} 条规则",
+        "updated_count": updated_count,
+        "is_active": request.is_active,
+    }
 
 
 @router.post("/phpstan/scan", response_model=PhpstanScanTaskResponse)

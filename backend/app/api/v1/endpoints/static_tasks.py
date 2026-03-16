@@ -158,6 +158,10 @@ delete_phpstan_task = _phpstan.delete_phpstan_task
 get_phpstan_findings = _phpstan.get_phpstan_findings
 get_phpstan_finding = _phpstan.get_phpstan_finding
 update_phpstan_finding_status = _phpstan.update_phpstan_finding_status
+list_phpstan_rules = _phpstan.list_phpstan_rules
+get_phpstan_rule = _phpstan.get_phpstan_rule
+update_phpstan_rule_enabled = _phpstan.update_phpstan_rule_enabled
+batch_update_phpstan_rules_enabled = _phpstan.batch_update_phpstan_rules_enabled
 
 list_gitleaks_rules = _gitleaks.list_gitleaks_rules
 get_gitleaks_rule = _gitleaks.get_gitleaks_rule

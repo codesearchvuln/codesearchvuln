@@ -1,8 +1,8 @@
 /**
- * Bandit Rules Management Page
+ * PHPStan Rules Management Page
  *
- * 用途：在不改变现有页面布局的前提下，展示 Bandit 内置规则并提供启停状态管理。
- * 说明：此处启停仅影响规则页展示状态，不影响 Bandit 扫描执行命令。
+ * 用途：在不改变现有页面布局的前提下，展示 PHPStan 规则并提供启停状态管理。
+ * 说明：此处启停仅影响规则页展示状态，不影响 PHPStan 扫描执行命令。
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -37,22 +37,22 @@ import {
   Shield,
 } from "lucide-react";
 import {
-  batchUpdateBanditRulesEnabled,
-  getBanditRules,
-  updateBanditRuleEnabled,
-  type BanditRule,
-} from "@/shared/api/bandit";
+  batchUpdatePhpstanRulesEnabled,
+  getPhpstanRules,
+  updatePhpstanRuleEnabled,
+  type PhpstanRule,
+} from "@/shared/api/phpstan";
 
 type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan";
 
-interface BanditRulesProps {
+interface PhpstanRulesProps {
   showEngineSelector?: boolean;
   engineValue?: EngineTab;
   onEngineChange?: (value: EngineTab) => void;
 }
 
 const SOURCE_LABEL_MAP: Record<string, string> = {
-  builtin: "内置规则",
+  official_extension: "官方扩展",
 };
 
 const getSourceLabel = (source?: string) => {
@@ -60,12 +60,12 @@ const getSourceLabel = (source?: string) => {
   return SOURCE_LABEL_MAP[source] ?? source;
 };
 
-export default function BanditRules({
+export default function PhpstanRules({
   showEngineSelector = false,
-  engineValue = "bandit",
+  engineValue = "phpstan",
   onEngineChange,
-}: BanditRulesProps) {
-  const [rules, setRules] = useState<BanditRule[]>([]);
+}: PhpstanRulesProps) {
+  const [rules, setRules] = useState<PhpstanRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSource, setSelectedSource] = useState("");
@@ -78,11 +78,11 @@ export default function BanditRules({
   const loadRules = async () => {
     try {
       setLoading(true);
-      const data = await getBanditRules({ limit: 2000 });
+      const data = await getPhpstanRules({ limit: 2000 });
       setRules(data);
     } catch (error) {
-      console.error("Failed to load bandit rules:", error);
-      toast.error("加载 bandit 规则失败");
+      console.error("Failed to load phpstan rules:", error);
+      toast.error("加载 PHPStan 规则失败");
     } finally {
       setLoading(false);
     }
@@ -95,13 +95,13 @@ export default function BanditRules({
   const stats = useMemo(() => {
     const active = rules.filter((rule) => rule.is_active).length;
     const sources = new Set(rules.map((rule) => rule.source).filter(Boolean));
-    const withChecks = rules.filter((rule) => (rule.checks || []).length > 0).length;
+    const packages = new Set(rules.map((rule) => rule.package).filter(Boolean));
     return {
       total: rules.length,
       active,
       inactive: Math.max(rules.length - active, 0),
       sourceCount: sources.size,
-      withChecks,
+      packageCount: packages.size,
     };
   }, [rules]);
 
@@ -117,8 +117,9 @@ export default function BanditRules({
         const matchSearch =
           !keyword ||
           rule.name.toLowerCase().includes(keyword) ||
-          rule.test_id.toLowerCase().includes(keyword) ||
-          rule.description.toLowerCase().includes(keyword) ||
+          rule.rule_class.toLowerCase().includes(keyword) ||
+          rule.description_summary.toLowerCase().includes(keyword) ||
+          rule.package.toLowerCase().includes(keyword) ||
           rule.id.toLowerCase().includes(keyword);
 
         const matchSource = !selectedSource || rule.source === selectedSource;
@@ -138,10 +139,10 @@ export default function BanditRules({
     currentPage * pageSize,
   );
 
-  const handleToggleRule = async (rule: BanditRule) => {
+  const handleToggleRule = async (rule: PhpstanRule) => {
     try {
-      await updateBanditRuleEnabled({
-        ruleId: rule.test_id,
+      await updatePhpstanRuleEnabled({
+        ruleId: rule.id,
         is_active: !rule.is_active,
       });
       await loadRules();
@@ -184,7 +185,7 @@ export default function BanditRules({
                   : selectedActiveStatus === "true",
               is_active: isActive,
             };
-      const result = await batchUpdateBanditRulesEnabled(payload);
+      const result = await batchUpdatePhpstanRulesEnabled(payload);
       toast.success(result.message);
       setSelectedRuleIds(new Set());
       await loadRules();
@@ -231,8 +232,8 @@ export default function BanditRules({
         <div className="cyber-card p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="stat-label">含检查节点规则数</p>
-              <p className="stat-value">{stats.withChecks}</p>
+              <p className="stat-label">扩展包数量</p>
+              <p className="stat-value">{stats.packageCount}</p>
             </div>
             <div className="stat-icon text-cyan-400">
               <Shield className="w-6 h-6" />
@@ -253,7 +254,7 @@ export default function BanditRules({
                 <Input
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="搜索名称/ID/描述..."
+                  placeholder="搜索名称/类名/包名..."
                   className="cyber-input !pl-10 h-10"
                 />
               </div>
@@ -386,7 +387,7 @@ export default function BanditRules({
               <p className="text-muted-foreground font-mono text-sm">
                 {searchTerm || selectedSource || selectedActiveStatus
                   ? "调整筛选条件尝试"
-                  : "暂无规则数据（请先生成并导入 bandit 内置规则快照）"}
+                  : "暂无规则数据（请先生成并导入 phpstan 规则快照）"}
               </p>
             </div>
           ) : (
@@ -402,8 +403,8 @@ export default function BanditRules({
                       />
                     </TableHead>
                     <TableHead className="w-[72px] text-center">序号</TableHead>
-                    <TableHead className="min-w-[300px]">规则名称</TableHead>
-                    <TableHead className="min-w-[180px]">检查节点</TableHead>
+                    <TableHead className="min-w-[320px]">规则</TableHead>
+                    <TableHead className="min-w-[180px]">扩展包</TableHead>
                     <TableHead className="w-[120px]">来源</TableHead>
                     <TableHead className="w-[110px]">启用状态</TableHead>
                     <TableHead className="w-[160px]">更新时间</TableHead>
@@ -426,7 +427,7 @@ export default function BanditRules({
                       <TableCell>
                         <div className="space-y-0.5">
                           <div className="font-semibold text-foreground break-all">{rule.name}</div>
-                          <div className="font-mono text-xs text-muted-foreground break-all">{rule.test_id}</div>
+                          <div className="font-mono text-xs text-muted-foreground break-all">{rule.rule_class}</div>
                           {rule.description_summary ? (
                             <div className="text-xs text-muted-foreground break-all line-clamp-2">
                               {rule.description_summary}
@@ -434,8 +435,8 @@ export default function BanditRules({
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {(rule.checks || []).join(", ") || "-"}
+                      <TableCell className="text-sm text-muted-foreground break-all">
+                        {rule.package || "-"}
                       </TableCell>
                       <TableCell>
                         <Badge className="cyber-badge cyber-badge-info">

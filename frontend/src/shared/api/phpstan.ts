@@ -30,6 +30,20 @@ export interface PhpstanFinding {
   status: string;
 }
 
+export interface PhpstanRule {
+  id: string;
+  package: string;
+  repo: string;
+  rule_class: string;
+  name: string;
+  description_summary: string;
+  source_file: string;
+  source: string;
+  is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export async function createPhpstanScanTask(params: {
   project_id: string;
   name?: string;
@@ -113,5 +127,50 @@ export async function updatePhpstanFindingStatus(params: {
     undefined,
     { params: { status: params.status } },
   );
+  return response.data;
+}
+
+export async function getPhpstanRules(params?: {
+  is_active?: boolean;
+  source?: string;
+  keyword?: string;
+  skip?: number;
+  limit?: number;
+}): Promise<PhpstanRule[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.is_active !== undefined) searchParams.set("is_active", String(params.is_active));
+  if (params?.source) searchParams.set("source", params.source);
+  if (params?.keyword) searchParams.set("keyword", params.keyword);
+  if (params?.skip !== undefined) searchParams.set("skip", String(params.skip));
+  searchParams.set("limit", String(params?.limit ?? 1000));
+  const query = searchParams.toString();
+  const response = await apiClient.get(`/static-tasks/phpstan/rules${query ? `?${query}` : ""}`);
+  return response.data;
+}
+
+export async function getPhpstanRule(ruleId: string): Promise<PhpstanRule> {
+  const response = await apiClient.get(`/static-tasks/phpstan/rules/${encodeURIComponent(ruleId)}`);
+  return response.data;
+}
+
+export async function updatePhpstanRuleEnabled(params: {
+  ruleId: string;
+  is_active: boolean;
+}): Promise<{ message: string; rule_id: string; is_active: boolean }> {
+  const response = await apiClient.post(
+    `/static-tasks/phpstan/rules/${encodeURIComponent(params.ruleId)}/enabled`,
+    { is_active: params.is_active },
+  );
+  return response.data;
+}
+
+export async function batchUpdatePhpstanRulesEnabled(params: {
+  rule_ids?: string[];
+  source?: string;
+  keyword?: string;
+  current_is_active?: boolean;
+  is_active: boolean;
+}): Promise<{ message: string; updated_count: number; is_active: boolean }> {
+  const response = await apiClient.post(`/static-tasks/phpstan/rules/batch/enabled`, params);
   return response.data;
 }

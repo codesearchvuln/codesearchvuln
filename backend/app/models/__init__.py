@@ -14,4 +14,4 @@ from .agent_task import (
 from .gitleaks import GitleaksScanTask, GitleaksFinding, GitleaksRule
 from .opengrep import OpengrepScanTask, OpengrepFinding, OpengrepRule
 from .bandit import BanditScanTask, BanditFinding, BanditRuleState
-from .phpstan import PhpstanScanTask, PhpstanFinding
+from .phpstan import PhpstanScanTask, PhpstanFinding, PhpstanRuleState
