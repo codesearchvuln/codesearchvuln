@@ -38,6 +38,7 @@ def test_merge_phpstan_rule_payload_defaults_active_true():
     )
 
     assert merged[0]["is_active"] is True
+    assert merged[0]["is_deleted"] is False
     assert merged[0]["updated_at"] is None
 
 
@@ -53,7 +54,9 @@ async def test_update_phpstan_rule_enabled_creates_state_when_missing(monkeypatc
     db.execute = AsyncMock(return_value=_ScalarOneOrNoneResult(None))
     db.add = AsyncMock()
     db.commit = AsyncMock()
-    db.refresh = AsyncMock(side_effect=lambda obj: setattr(obj, "is_active", True))
+    db.refresh = AsyncMock(
+        side_effect=lambda obj: (setattr(obj, "is_active", True), setattr(obj, "is_deleted", False))
+    )
 
     response = await static_tasks.update_phpstan_rule_enabled(
         rule_id="pkg:RuleClass",
@@ -132,7 +135,13 @@ async def test_list_phpstan_rules_filters_keyword_and_status(monkeypatch):
         ],
     )
 
-    state_row = SimpleNamespace(rule_id="pkg:A", is_active=False, created_at=None, updated_at=None)
+    state_row = SimpleNamespace(
+        rule_id="pkg:A",
+        is_active=False,
+        is_deleted=False,
+        created_at=None,
+        updated_at=None,
+    )
     monkeypatch.setattr(
         static_tasks._phpstan,
         "_load_phpstan_rule_states",
@@ -152,3 +161,163 @@ async def test_list_phpstan_rules_filters_keyword_and_status(monkeypatch):
 
     assert len(rows) == 1
     assert rows[0]["id"] == "pkg:A"
+
+
+@pytest.mark.asyncio
+async def test_list_phpstan_rules_default_hides_deleted(monkeypatch):
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_extract_phpstan_snapshot_rules",
+        lambda: [
+            {
+                "id": "pkg:A",
+                "package": "phpstan/phpstan-doctrine",
+                "repo": "phpstan-doctrine",
+                "rule_class": "A",
+                "name": "A",
+                "description_summary": "doctrine rule",
+                "source_file": "src/A.php",
+                "source": "official_extension",
+            }
+        ],
+    )
+    state_row = SimpleNamespace(
+        rule_id="pkg:A",
+        is_active=False,
+        is_deleted=True,
+        created_at=None,
+        updated_at=None,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_load_phpstan_rule_states",
+        AsyncMock(return_value={"pkg:A": state_row}),
+    )
+    rows = await static_tasks.list_phpstan_rules(
+        deleted="false",
+        db=AsyncMock(),
+        current_user=_mock_user(),
+    )
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_delete_and_restore_phpstan_rule(monkeypatch):
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_extract_phpstan_snapshot_rules",
+        lambda: [{"id": "pkg:A"}],
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarOneOrNoneResult(None))
+    db.add = AsyncMock()
+    db.commit = AsyncMock()
+
+    deleted = await static_tasks._phpstan.delete_phpstan_rule(
+        rule_id="pkg:A",
+        db=db,
+        current_user=_mock_user(),
+    )
+    assert deleted["is_deleted"] is True
+
+    restored = await static_tasks._phpstan.restore_phpstan_rule(
+        rule_id="pkg:A",
+        db=db,
+        current_user=_mock_user(),
+    )
+    assert restored["is_deleted"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_phpstan_rule_enabled_rejects_deleted_rule(monkeypatch):
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_extract_phpstan_snapshot_rules",
+        lambda: [{"id": "pkg:A"}],
+    )
+    deleted_state = SimpleNamespace(rule_id="pkg:A", is_active=False, is_deleted=True)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarOneOrNoneResult(deleted_state))
+
+    with pytest.raises(static_tasks._phpstan.HTTPException) as exc_info:
+        await static_tasks.update_phpstan_rule_enabled(
+            rule_id="pkg:A",
+            request=static_tasks._phpstan.PhpstanRuleEnabledUpdateRequest(is_active=True),
+            db=db,
+            current_user=_mock_user(),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_phpstan_rule_updates_snapshot_and_returns_merged_rule(monkeypatch):
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_extract_phpstan_snapshot_rules",
+        lambda: [
+            {
+                "id": "pkg:A",
+                "package": "phpstan/phpstan-doctrine",
+                "repo": "phpstan-doctrine",
+                "rule_class": "A",
+                "name": "A",
+                "description_summary": "old",
+                "source_file": "src/A.php",
+                "source": "official_extension",
+            }
+        ],
+    )
+    monkeypatch.setattr(static_tasks._phpstan, "_load_phpstan_rule_states", AsyncMock(return_value={}))
+
+    captured = {}
+
+    def _fake_update_snapshot_rule(rule_id, updates):
+        captured["rule_id"] = rule_id
+        captured["updates"] = updates
+        return {}
+
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_update_phpstan_snapshot_rule",
+        _fake_update_snapshot_rule,
+    )
+
+    db = AsyncMock()
+    response = await static_tasks._phpstan.update_phpstan_rule(
+        rule_id="pkg:A",
+        request=static_tasks._phpstan.PhpstanRuleUpdateRequest(
+            package="pkg-x",
+            repo="repo-x",
+            name="RuleX",
+            description_summary="summary-x",
+            source_file="src/X.php",
+            source="official_extension",
+        ),
+        db=db,
+        current_user=_mock_user(),
+    )
+
+    assert response["message"] == "规则更新成功"
+    assert response["rule"]["id"] == "pkg:A"
+    assert captured["rule_id"] == "pkg:A"
+    assert captured["updates"]["name"] == "RuleX"
+
+
+@pytest.mark.asyncio
+async def test_update_phpstan_rule_rejects_empty_updates(monkeypatch):
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_extract_phpstan_snapshot_rules",
+        lambda: [{"id": "pkg:A"}],
+    )
+
+    with pytest.raises(static_tasks._phpstan.HTTPException) as exc_info:
+        await static_tasks._phpstan.update_phpstan_rule(
+            rule_id="pkg:A",
+            request=static_tasks._phpstan.PhpstanRuleUpdateRequest(),
+            db=AsyncMock(),
+            current_user=_mock_user(),
+        )
+
+    assert exc_info.value.status_code == 400

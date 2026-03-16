@@ -101,6 +101,7 @@ class PhpstanRuleState(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     rule_id = Column(String, nullable=False, unique=True, comment="规则唯一键")
     is_active = Column(Boolean, nullable=False, default=True, comment="规则是否启用")
+    is_deleted = Column(Boolean, nullable=False, default=False, comment="规则是否软删除")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -109,4 +110,5 @@ class PhpstanRuleState(Base):
     __table_args__ = (
         Index("ix_phpstan_rule_states_rule_id", "rule_id"),
         Index("ix_phpstan_rule_states_is_active", "is_active"),
+        Index("ix_phpstan_rule_states_is_deleted", "is_deleted"),
     )

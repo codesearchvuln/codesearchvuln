@@ -40,8 +40,19 @@ export interface PhpstanRule {
   source_file: string;
   source: string;
   is_active: boolean;
+  is_deleted: boolean;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+export interface PhpstanRuleUpdateRequest {
+  ruleId: string;
+  package?: string;
+  repo?: string;
+  name?: string;
+  description_summary?: string;
+  source_file?: string;
+  source?: string;
 }
 
 export async function createPhpstanScanTask(params: {
@@ -134,6 +145,7 @@ export async function getPhpstanRules(params?: {
   is_active?: boolean;
   source?: string;
   keyword?: string;
+  deleted?: "false" | "true" | "all";
   skip?: number;
   limit?: number;
 }): Promise<PhpstanRule[]> {
@@ -141,6 +153,7 @@ export async function getPhpstanRules(params?: {
   if (params?.is_active !== undefined) searchParams.set("is_active", String(params.is_active));
   if (params?.source) searchParams.set("source", params.source);
   if (params?.keyword) searchParams.set("keyword", params.keyword);
+  if (params?.deleted) searchParams.set("deleted", params.deleted);
   if (params?.skip !== undefined) searchParams.set("skip", String(params.skip));
   searchParams.set("limit", String(params?.limit ?? 1000));
   const query = searchParams.toString();
@@ -150,6 +163,23 @@ export async function getPhpstanRules(params?: {
 
 export async function getPhpstanRule(ruleId: string): Promise<PhpstanRule> {
   const response = await apiClient.get(`/static-tasks/phpstan/rules/${encodeURIComponent(ruleId)}`);
+  return response.data;
+}
+
+export async function updatePhpstanRule(
+  params: PhpstanRuleUpdateRequest,
+): Promise<{ message: string; rule: PhpstanRule }> {
+  const response = await apiClient.patch(
+    `/static-tasks/phpstan/rules/${encodeURIComponent(params.ruleId)}`,
+    {
+      package: params.package,
+      repo: params.repo,
+      name: params.name,
+      description_summary: params.description_summary,
+      source_file: params.source_file,
+      source: params.source,
+    },
+  );
   return response.data;
 }
 
@@ -172,5 +202,47 @@ export async function batchUpdatePhpstanRulesEnabled(params: {
   is_active: boolean;
 }): Promise<{ message: string; updated_count: number; is_active: boolean }> {
   const response = await apiClient.post(`/static-tasks/phpstan/rules/batch/enabled`, params);
+  return response.data;
+}
+
+export async function deletePhpstanRule(ruleId: string): Promise<{
+  message: string;
+  rule_id: string;
+  is_deleted: boolean;
+}> {
+  const response = await apiClient.post(
+    `/static-tasks/phpstan/rules/${encodeURIComponent(ruleId)}/delete`,
+  );
+  return response.data;
+}
+
+export async function restorePhpstanRule(ruleId: string): Promise<{
+  message: string;
+  rule_id: string;
+  is_deleted: boolean;
+}> {
+  const response = await apiClient.post(
+    `/static-tasks/phpstan/rules/${encodeURIComponent(ruleId)}/restore`,
+  );
+  return response.data;
+}
+
+export async function batchDeletePhpstanRules(params: {
+  rule_ids?: string[];
+  source?: string;
+  keyword?: string;
+  current_is_deleted?: boolean;
+}): Promise<{ message: string; updated_count: number; is_deleted: boolean }> {
+  const response = await apiClient.post(`/static-tasks/phpstan/rules/batch/delete`, params);
+  return response.data;
+}
+
+export async function batchRestorePhpstanRules(params: {
+  rule_ids?: string[];
+  source?: string;
+  keyword?: string;
+  current_is_deleted?: boolean;
+}): Promise<{ message: string; updated_count: number; is_deleted: boolean }> {
+  const response = await apiClient.post(`/static-tasks/phpstan/rules/batch/restore`, params);
   return response.data;
 }

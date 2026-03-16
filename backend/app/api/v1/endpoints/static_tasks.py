@@ -164,8 +164,13 @@ get_phpstan_finding = _phpstan.get_phpstan_finding
 update_phpstan_finding_status = _phpstan.update_phpstan_finding_status
 list_phpstan_rules = _phpstan.list_phpstan_rules
 get_phpstan_rule = _phpstan.get_phpstan_rule
+update_phpstan_rule = _phpstan.update_phpstan_rule
 update_phpstan_rule_enabled = _phpstan.update_phpstan_rule_enabled
 batch_update_phpstan_rules_enabled = _phpstan.batch_update_phpstan_rules_enabled
+delete_phpstan_rule = _phpstan.delete_phpstan_rule
+restore_phpstan_rule = _phpstan.restore_phpstan_rule
+batch_delete_phpstan_rules = _phpstan.batch_delete_phpstan_rules
+batch_restore_phpstan_rules = _phpstan.batch_restore_phpstan_rules
 
 list_gitleaks_rules = _gitleaks.list_gitleaks_rules
 get_gitleaks_rule = _gitleaks.get_gitleaks_rule

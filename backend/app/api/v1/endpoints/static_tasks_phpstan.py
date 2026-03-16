@@ -130,6 +130,7 @@ class PhpstanRuleResponse(BaseModel):
     source_file: str
     source: str
     is_active: bool
+    is_deleted: bool
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -144,6 +145,34 @@ class PhpstanRuleBatchEnabledUpdateRequest(BaseModel):
     keyword: Optional[str] = None
     current_is_active: Optional[bool] = None
     is_active: bool
+
+
+class PhpstanRuleDeletedUpdateRequest(BaseModel):
+    is_deleted: bool
+
+
+class PhpstanRuleBatchDeletedUpdateRequest(BaseModel):
+    rule_ids: Optional[List[str]] = None
+    source: Optional[str] = None
+    keyword: Optional[str] = None
+    current_is_deleted: Optional[bool] = None
+    is_deleted: bool
+
+
+class PhpstanRuleUpdateRequest(BaseModel):
+    """PHPStan 规则编辑请求（仅用于规则页展示字段）。"""
+
+    package: Optional[str] = None
+    repo: Optional[str] = None
+    name: Optional[str] = None
+    description_summary: Optional[str] = None
+    source_file: Optional[str] = None
+    source: Optional[str] = None
+
+
+class PhpstanRuleUpdateResponse(BaseModel):
+    message: str
+    rule: PhpstanRuleResponse
 def _normalize_phpstan_level(value: Any, *, fallback: int = 8) -> int:
     """规范化 PHPStan level 参数，统一为 0-9。"""
     try:
@@ -205,6 +234,60 @@ def _load_phpstan_rules_snapshot() -> Dict[str, Any]:
     return payload
 
 
+def _write_phpstan_rules_snapshot(payload: Dict[str, Any]) -> None:
+    """原子写回 PHPStan 规则快照，避免并发写导致脏文件。"""
+    snapshot_path = _phpstan_rules_snapshot_path()
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        prefix="phpstan_rules_combined.",
+        dir=snapshot_path.parent,
+        delete=False,
+        encoding="utf-8",
+    ) as tmp_file:
+        tmp_file.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        tmp_path = Path(tmp_file.name)
+
+    try:
+        os.replace(tmp_path, snapshot_path)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        raise
+
+
+def _update_phpstan_snapshot_rule(rule_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """更新指定规则展示字段并写回快照。"""
+    if not updates:
+        raise ValueError("至少需要提供一个可更新字段")
+
+    payload = _load_phpstan_rules_snapshot()
+    rules = payload.get("rules")
+    if not isinstance(rules, list):
+        raise ValueError("PHPStan 规则快照格式错误")
+
+    target_rule: Optional[Dict[str, Any]] = None
+    for item in rules:
+        if isinstance(item, dict) and str(item.get("id") or "") == rule_id:
+            target_rule = item
+            break
+
+    if target_rule is None:
+        raise KeyError(f"PHPStan 规则不存在: {rule_id}")
+
+    for field, value in updates.items():
+        target_rule[field] = value
+
+    payload["count"] = len([item for item in rules if isinstance(item, dict)])
+    payload["generated_at"] = _utc_now_iso()
+    _write_phpstan_rules_snapshot(payload)
+    return target_rule
+
+
 def _extract_phpstan_snapshot_rules() -> List[Dict[str, Any]]:
     payload = _load_phpstan_rules_snapshot()
     raw_rules = payload.get("rules")
@@ -256,6 +339,7 @@ def _merge_phpstan_rule_payload(
             {
                 **item,
                 "is_active": bool(state.is_active) if state is not None else True,
+                "is_deleted": bool(state.is_deleted) if state is not None else False,
                 "created_at": state.created_at if state is not None else None,
                 "updated_at": state.updated_at if state is not None else None,
             }
@@ -394,7 +478,7 @@ async def _execute_phpstan_scan(
                 return
 
             normalized_level = _normalize_phpstan_level(level)
-            # PHPStan rules integration: 规则页 enabled 状态当前仅用于前端展示，不参与扫描命令构建。
+            # PHPStan rules integration: 规则页 enabled/deleted/edited 状态当前仅用于前端展示，不参与扫描命令构建。
             cmd = [
                 "phpstan",
                 "analyse",
@@ -553,6 +637,7 @@ async def list_phpstan_rules(
     is_active: Optional[bool] = Query(None, description="按启用状态过滤"),
     source: Optional[str] = Query(None, description="按来源过滤"),
     keyword: Optional[str] = Query(None, description="按名称/类名/描述/包关键词过滤"),
+    deleted: str = Query("false", description="软删除筛选：false(默认)/true/all"),
     skip: int = Query(0, ge=0),
     limit: int = Query(1000, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
@@ -568,8 +653,15 @@ async def list_phpstan_rules(
 
     keyword_text = str(keyword or "").strip().lower()
     source_text = str(source or "").strip()
+    deleted_text = str(deleted or "false").strip().lower()
+    if deleted_text not in {"false", "true", "all"}:
+        raise HTTPException(status_code=400, detail="deleted 必须为 false/true/all")
     filtered: List[Dict[str, Any]] = []
     for item in merged_rules:
+        if deleted_text != "all":
+            target_deleted = deleted_text == "true"
+            if bool(item["is_deleted"]) != target_deleted:
+                continue
         if is_active is not None and bool(item["is_active"]) != is_active:
             continue
         if source_text and item["source"] != source_text:
@@ -590,7 +682,7 @@ async def list_phpstan_rules(
     return filtered[skip : skip + limit]
 
 
-@router.get("/phpstan/rules/{rule_id}", response_model=PhpstanRuleResponse)
+@router.get("/phpstan/rules/{rule_id:path}", response_model=PhpstanRuleResponse)
 async def get_phpstan_rule(
     rule_id: str,
     db: AsyncSession = Depends(get_db),
@@ -608,7 +700,59 @@ async def get_phpstan_rule(
     raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
 
 
-@router.post("/phpstan/rules/{rule_id}/enabled")
+@router.patch("/phpstan/rules/{rule_id:path}", response_model=PhpstanRuleUpdateResponse)
+async def update_phpstan_rule(
+    rule_id: str,
+    request: PhpstanRuleUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    # PHPStan rules integration: 规则编辑仅影响规则页展示，不参与 phpstan analyse 参数构建。
+    known_rule_ids = {item["id"] for item in _extract_phpstan_snapshot_rules()}
+    if rule_id not in known_rule_ids:
+        raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
+
+    updates: Dict[str, Any] = {}
+    if request.package is not None:
+        updates["package"] = str(request.package).strip()
+    if request.repo is not None:
+        updates["repo"] = str(request.repo).strip()
+    if request.name is not None:
+        name = str(request.name).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name 不能为空")
+        updates["name"] = name
+    if request.description_summary is not None:
+        updates["description_summary"] = str(request.description_summary).strip()
+    if request.source_file is not None:
+        updates["source_file"] = str(request.source_file).strip()
+    if request.source is not None:
+        updates["source"] = str(request.source).strip() or "official_extension"
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="至少需要提供一个可更新字段")
+
+    try:
+        _update_phpstan_snapshot_rule(rule_id, updates)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="PHPStan 规则不存在") from exc
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail=f"更新 PHPStan 规则快照失败: {exc}") from exc
+
+    snapshot_rules = _extract_phpstan_snapshot_rules()
+    states_by_rule_id = await _load_phpstan_rule_states(db)
+    merged_rules = _merge_phpstan_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_rule_id=states_by_rule_id,
+    )
+    for item in merged_rules:
+        if item["id"] == rule_id:
+            return {"message": "规则更新成功", "rule": item}
+
+    raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
+
+
+@router.post("/phpstan/rules/{rule_id:path}/enabled")
 async def update_phpstan_rule_enabled(
     rule_id: str,
     request: PhpstanRuleEnabledUpdateRequest,
@@ -631,9 +775,12 @@ async def update_phpstan_rule_enabled(
             id=str(uuid.uuid4()),
             rule_id=rule_id,
             is_active=request.is_active,
+            is_deleted=False,
         )
         db.add(state)
     else:
+        if bool(state.is_deleted):
+            raise HTTPException(status_code=409, detail="规则已删除，请先恢复后再启用/禁用")
         state.is_active = request.is_active
     await db.commit()
     await db.refresh(state)
@@ -663,6 +810,8 @@ async def batch_update_phpstan_rules_enabled(
     selected_rule_ids: List[str] = []
 
     for item in merged_rules:
+        if bool(item["is_deleted"]):
+            continue
         if rule_ids_filter is not None and item["id"] not in rule_ids_filter:
             continue
         if source_text and item["source"] != source_text:
@@ -718,6 +867,181 @@ async def batch_update_phpstan_rules_enabled(
         "message": f"已{'启用' if request.is_active else '禁用'} {updated_count} 条规则",
         "updated_count": updated_count,
         "is_active": request.is_active,
+    }
+
+
+@router.post("/phpstan/rules/{rule_id:path}/delete")
+async def delete_phpstan_rule(
+    rule_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    known_rule_ids = {item["id"] for item in _extract_phpstan_snapshot_rules()}
+    if rule_id not in known_rule_ids:
+        raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
+
+    try:
+        result = await db.execute(
+            select(PhpstanRuleState).where(PhpstanRuleState.rule_id == rule_id)
+        )
+    except ProgrammingError as exc:
+        _raise_phpstan_rules_migration_http_error(exc)
+
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = PhpstanRuleState(
+            id=str(uuid.uuid4()),
+            rule_id=rule_id,
+            is_active=False,
+            is_deleted=True,
+        )
+        db.add(state)
+    else:
+        state.is_active = False
+        state.is_deleted = True
+    await db.commit()
+    return {"message": "规则已删除", "rule_id": rule_id, "is_deleted": True}
+
+
+@router.post("/phpstan/rules/{rule_id:path}/restore")
+async def restore_phpstan_rule(
+    rule_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    known_rule_ids = {item["id"] for item in _extract_phpstan_snapshot_rules()}
+    if rule_id not in known_rule_ids:
+        raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
+
+    try:
+        result = await db.execute(
+            select(PhpstanRuleState).where(PhpstanRuleState.rule_id == rule_id)
+        )
+    except ProgrammingError as exc:
+        _raise_phpstan_rules_migration_http_error(exc)
+
+    state = result.scalar_one_or_none()
+    if state is None:
+        state = PhpstanRuleState(
+            id=str(uuid.uuid4()),
+            rule_id=rule_id,
+            is_active=True,
+            is_deleted=False,
+        )
+        db.add(state)
+    else:
+        state.is_deleted = False
+    await db.commit()
+    return {"message": "规则已恢复", "rule_id": rule_id, "is_deleted": False}
+
+
+@router.post("/phpstan/rules/batch/delete")
+async def batch_delete_phpstan_rules(
+    request: PhpstanRuleBatchDeletedUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    payload = PhpstanRuleBatchDeletedUpdateRequest(
+        rule_ids=request.rule_ids,
+        source=request.source,
+        keyword=request.keyword,
+        current_is_deleted=request.current_is_deleted,
+        is_deleted=True,
+    )
+    return await _batch_update_phpstan_rules_deleted(payload, db)
+
+
+@router.post("/phpstan/rules/batch/restore")
+async def batch_restore_phpstan_rules(
+    request: PhpstanRuleBatchDeletedUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    payload = PhpstanRuleBatchDeletedUpdateRequest(
+        rule_ids=request.rule_ids,
+        source=request.source,
+        keyword=request.keyword,
+        current_is_deleted=request.current_is_deleted,
+        is_deleted=False,
+    )
+    return await _batch_update_phpstan_rules_deleted(payload, db)
+
+
+async def _batch_update_phpstan_rules_deleted(
+    request: PhpstanRuleBatchDeletedUpdateRequest,
+    db: AsyncSession,
+):
+    snapshot_rules = _extract_phpstan_snapshot_rules()
+    states_by_rule_id = await _load_phpstan_rule_states(db)
+    merged_rules = _merge_phpstan_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_rule_id=states_by_rule_id,
+    )
+
+    rule_ids_filter = set(request.rule_ids or []) if request.rule_ids else None
+    source_text = str(request.source or "").strip()
+    keyword_text = str(request.keyword or "").strip().lower()
+    selected_rule_ids: List[str] = []
+
+    for item in merged_rules:
+        if rule_ids_filter is not None and item["id"] not in rule_ids_filter:
+            continue
+        if source_text and item["source"] != source_text:
+            continue
+        if request.current_is_deleted is not None and bool(item["is_deleted"]) != request.current_is_deleted:
+            continue
+        if keyword_text:
+            search_blob = " ".join(
+                [
+                    str(item["name"]),
+                    str(item["rule_class"]),
+                    str(item["description_summary"]),
+                    str(item["package"]),
+                ]
+            ).lower()
+            if keyword_text not in search_blob:
+                continue
+        selected_rule_ids.append(item["id"])
+
+    if not selected_rule_ids:
+        return {
+            "message": "没有找到符合条件的规则",
+            "updated_count": 0,
+            "is_deleted": request.is_deleted,
+        }
+
+    try:
+        existing_result = await db.execute(
+            select(PhpstanRuleState).where(PhpstanRuleState.rule_id.in_(selected_rule_ids))
+        )
+    except ProgrammingError as exc:
+        _raise_phpstan_rules_migration_http_error(exc)
+    existing_rows = existing_result.scalars().all()
+    existing_by_rule_id = {str(row.rule_id): row for row in existing_rows}
+
+    updated_count = 0
+    for selected_rule_id in selected_rule_ids:
+        existing = existing_by_rule_id.get(selected_rule_id)
+        if existing is None:
+            db.add(
+                PhpstanRuleState(
+                    id=str(uuid.uuid4()),
+                    rule_id=selected_rule_id,
+                    is_active=not request.is_deleted,
+                    is_deleted=request.is_deleted,
+                )
+            )
+        else:
+            existing.is_deleted = request.is_deleted
+            if request.is_deleted:
+                existing.is_active = False
+        updated_count += 1
+
+    await db.commit()
+    return {
+        "message": f"已{'删除' if request.is_deleted else '恢复'} {updated_count} 条规则",
+        "updated_count": updated_count,
+        "is_deleted": request.is_deleted,
     }
 
 
