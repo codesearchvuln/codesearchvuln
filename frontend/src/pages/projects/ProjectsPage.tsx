@@ -1,9 +1,16 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/shared/i18n";
 import { useLocation } from "react-router-dom";
-import { PROJECT_PAGE_SIZE, MODULE_SCROLL_DELAY_MS, SUPPORTED_PROJECT_LANGUAGES } from "./constants";
+import {
+	MODULE_SCROLL_DELAY_MS,
+	PROJECT_PAGE_SIZE,
+	PROJECTS_TABLE_HEADER_HEIGHT,
+	PROJECTS_TABLE_PAGINATION_HEIGHT,
+	PROJECTS_TABLE_ROW_HEIGHT,
+	SUPPORTED_PROJECT_LANGUAGES,
+} from "./constants";
 import type { ProjectsPageProps } from "./types";
 import { useProjectsBrowserState } from "./hooks/useProjectsBrowserState";
 import { useProjectsPageData } from "./hooks/useProjectsPageData";
@@ -11,6 +18,7 @@ import {
 	buildProjectsPageViewModel,
 } from "./lib/buildProjectsPageViewModel";
 import {
+	calculateResponsiveProjectsPageSize,
 	filterProjects,
 	paginateItems,
 } from "./lib/projectsPageSelectors";
@@ -49,6 +57,32 @@ async function logUserAction(action: string, payload: Record<string, unknown>) {
 	loggerModule.logger.logUserAction(action, payload);
 }
 
+function resolveResponsiveProjectPageSize(
+	viewportNode: HTMLDivElement,
+	paginationNode: HTMLDivElement | null,
+) {
+	const tableHeaderHeight =
+		viewportNode
+			.querySelector<HTMLElement>('[data-slot="table-header"]')
+			?.getBoundingClientRect().height ?? PROJECTS_TABLE_HEADER_HEIGHT;
+	const rowHeight =
+		viewportNode
+			.querySelector<HTMLElement>(
+				'[data-slot="table-body"] [data-slot="table-row"]',
+			)
+			?.getBoundingClientRect().height ?? PROJECTS_TABLE_ROW_HEIGHT;
+	const paginationHeight =
+		paginationNode?.getBoundingClientRect().height ??
+		PROJECTS_TABLE_PAGINATION_HEIGHT;
+
+	return calculateResponsiveProjectsPageSize({
+		containerHeight: viewportNode.clientHeight,
+		tableHeaderHeight,
+		paginationHeight,
+		rowHeight,
+	});
+}
+
 function getBatchZipCreationToast(
 	successCount: number,
 	failureCount: number,
@@ -85,6 +119,9 @@ export default function ProjectsPage({
 	const { t } = useI18n();
 	const browser = useProjectsBrowserState();
 	const data = useProjectsPageData(dataSource);
+	const tableViewportRef = useRef<HTMLDivElement | null>(null);
+	const paginationRef = useRef<HTMLDivElement | null>(null);
+	const [projectPageSize, setProjectPageSize] = useState(PROJECT_PAGE_SIZE);
 
 	const filteredProjects = useMemo(
 		() => filterProjects(data.projects, browser.searchTerm),
@@ -92,12 +129,12 @@ export default function ProjectsPage({
 	);
 	const totalProjectPages = Math.max(
 		1,
-		Math.ceil(filteredProjects.length / PROJECT_PAGE_SIZE),
+		Math.ceil(filteredProjects.length / projectPageSize),
 	);
 	const pagedProjects = useMemo(
 		() =>
-			paginateItems(filteredProjects, browser.projectPage, PROJECT_PAGE_SIZE),
-		[filteredProjects, browser.projectPage],
+			paginateItems(filteredProjects, browser.projectPage, projectPageSize),
+		[filteredProjects, browser.projectPage, projectPageSize],
 	);
 	const currentPageProjectIds = useMemo(
 		() => pagedProjects.map((project) => project.id),
@@ -110,6 +147,33 @@ export default function ProjectsPage({
 			browser.setProjectPage(totalProjectPages);
 		}
 	}, [browser, totalProjectPages]);
+
+	useEffect(() => {
+		if (typeof ResizeObserver === "undefined" || !tableViewportRef.current) {
+			return;
+		}
+
+		const viewportNode = tableViewportRef.current;
+		const updatePageSize = () => {
+			const nextPageSize = resolveResponsiveProjectPageSize(
+				viewportNode,
+				paginationRef.current,
+			);
+			setProjectPageSize((current) =>
+				current === nextPageSize ? current : nextPageSize,
+			);
+		};
+
+		updatePageSize();
+		const observer = new ResizeObserver(() => {
+			updatePageSize();
+		});
+		observer.observe(viewportNode);
+		if (paginationRef.current) {
+			observer.observe(paginationRef.current);
+		}
+		return () => observer.disconnect();
+	}, [filteredProjects.length, totalProjectPages]);
 
 	useEffect(() => {
 		data.ensureProjectData(currentPageProjectIds);
@@ -272,7 +336,10 @@ export default function ProjectsPage({
 						<Skeleton className="h-48 w-full" />
 					</div>
 				) : viewModel.rows.length > 0 ? (
-					<div className="flex-1 flex flex-col">
+					<div
+						ref={tableViewportRef}
+						className="flex min-h-0 flex-1 flex-col"
+					>
 						<ProjectsTable
 							rows={viewModel.rows}
 							onCreateScan={(projectId) => {
@@ -282,13 +349,15 @@ export default function ProjectsPage({
 								});
 							}}
 						/>
-						<ProjectsPagination
-							currentPage={viewModel.pagination.currentPage}
-							totalPages={viewModel.pagination.totalPages}
-							totalCount={viewModel.pagination.totalCount}
-							items={viewModel.pagination.items}
-							onPageChange={browser.setProjectPage}
-						/>
+						<div ref={paginationRef}>
+							<ProjectsPagination
+								currentPage={viewModel.pagination.currentPage}
+								totalPages={viewModel.pagination.totalPages}
+								totalCount={viewModel.pagination.totalCount}
+								items={viewModel.pagination.items}
+								onPageChange={browser.setProjectPage}
+							/>
+						</div>
 					</div>
 				) : (
 					<ProjectsEmptyState

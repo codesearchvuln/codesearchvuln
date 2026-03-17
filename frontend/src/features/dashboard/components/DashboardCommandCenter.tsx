@@ -246,10 +246,10 @@ function SummaryStrip({
 					key={card.label}
 					className="rounded-3xl border border-border/60 bg-slate-950/80 p-4 shadow-lg shadow-cyan-950/10"
 				>
-					<p className="text-[13px] uppercase tracking-[0.28em] text-slate-400">
+					<p className="text-[14px] uppercase tracking-[0.28em] text-slate-400">
 						{card.label}
 					</p>
-					<p className={`mt-3 text-3xl font-semibold ${card.accent}`}>
+					<p className={`mt-3 text-2xl font-semibold ${card.accent}`}>
 						{card.value}
 					</p>
 					{/* <SummaryMiniTrend values={card.values} /> */}

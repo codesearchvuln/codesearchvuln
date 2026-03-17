@@ -1,18 +1,20 @@
-import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import FindingNarrativeMarkdown from "@/pages/AgentAudit/components/FindingNarrativeMarkdown";
 import FindingDetailCodePanel, {
   type FindingDetailFullFileLoadResult,
 } from "./FindingDetailCodePanel";
+import FindingDetailHeaderActions, {
+  type FindingDetailCodeBrowserAction,
+} from "./FindingDetailHeaderActions";
 import type {
   FindingDetailFullFileRequest,
   FindingDetailPageModel,
   FindingDetailTrackingItem,
 } from "./viewModel";
 
-interface FindingDetailViewProps {
+export interface FindingDetailViewProps {
   model: FindingDetailPageModel;
   onBack: () => void;
+  codeBrowserAction?: FindingDetailCodeBrowserAction | null;
   onLoadFullFile?: (
     request: FindingDetailFullFileRequest,
   ) => Promise<FindingDetailFullFileLoadResult>;
@@ -58,20 +60,18 @@ function InfoSection({ title, items }: InfoSectionProps) {
 export default function FindingDetailView({
   model,
   onBack,
+  codeBrowserAction,
   onLoadFullFile,
 }: FindingDetailViewProps) {
   return (
     <div className="min-h-screen bg-background p-4 sm:p-6 flex flex-col gap-4 sm:gap-5">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-[0.08em] text-foreground">
             {model.pageTitle}
           </h1>
         </div>
-        <Button variant="outline" className="cyber-btn-outline" onClick={onBack}>
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          返回
-        </Button>
+        <FindingDetailHeaderActions codeBrowserAction={codeBrowserAction} onBack={onBack} />
       </div>
 
       <div className="min-h-0 flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,0.98fr)_minmax(0,1.02fr)] gap-4">

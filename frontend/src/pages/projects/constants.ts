@@ -2,6 +2,9 @@ import type { CreateProjectForm } from "@/shared/types";
 import { SUPPORTED_LANGUAGES } from "@/shared/constants";
 
 export const PROJECT_PAGE_SIZE = 10;
+export const PROJECTS_TABLE_HEADER_HEIGHT = 48;
+export const PROJECTS_TABLE_PAGINATION_HEIGHT = 64;
+export const PROJECTS_TABLE_ROW_HEIGHT = 84;
 export const PROJECT_FETCH_BATCH_SIZE = 200;
 export const MODULE_SCROLL_DELAY_MS = 80;
 export const TASK_POOL_MAX_TOTAL = 800;

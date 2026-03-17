@@ -53,6 +53,40 @@ test("projects selectors build compact pagination items with ellipsis", async ()
 	assert.deepEqual(selectors.buildPaginationItems(5, 10), [1, "ellipsis", 4, 5, 6, "ellipsis", 10]);
 });
 
+test("projects selectors calculate responsive project page size from container metrics", async () => {
+	const selectors = await importOrFail<any>(
+		"../src/pages/projects/lib/projectsPageSelectors.ts",
+	);
+
+	assert.equal(
+		selectors.calculateResponsiveProjectsPageSize({
+			containerHeight: 960,
+			tableHeaderHeight: 48,
+			paginationHeight: 64,
+			rowHeight: 84,
+		}),
+		10,
+	);
+	assert.equal(
+		selectors.calculateResponsiveProjectsPageSize({
+			containerHeight: 620,
+			tableHeaderHeight: 48,
+			paginationHeight: 64,
+			rowHeight: 84,
+		}),
+		6,
+	);
+	assert.equal(
+		selectors.calculateResponsiveProjectsPageSize({
+			containerHeight: 120,
+			tableHeaderHeight: 48,
+			paginationHeight: 64,
+			rowHeight: 84,
+		}),
+		1,
+	);
+});
+
 test("projects view model utilities build project size text and execution stats", async () => {
 	const builder = await importOrFail<any>(
 		"../src/pages/projects/lib/buildProjectsPageViewModel.ts",

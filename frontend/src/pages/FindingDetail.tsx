@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { Button } from "@/components/ui/button";
+import FindingDetailHeaderActions, {
+  type FindingDetailCodeBrowserAction,
+} from "@/pages/finding-detail/FindingDetailHeaderActions";
 import FindingDetailView from "@/pages/finding-detail/FindingDetailView";
 import {
   buildAgentFindingDetailModel,
@@ -102,19 +103,18 @@ function FindingDetailShell({
   title,
   onBack,
   children,
+  codeBrowserAction,
 }: {
   title: string;
   onBack: () => void;
   children: ReactNode;
+  codeBrowserAction?: FindingDetailCodeBrowserAction | null;
 }) {
   return (
     <div className="min-h-screen bg-background p-4 sm:p-6 flex flex-col gap-4 sm:gap-5">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-[0.08em] text-foreground">{title}</h1>
-        <Button variant="outline" className="cyber-btn-outline" onClick={onBack}>
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          返回
-        </Button>
+        <FindingDetailHeaderActions codeBrowserAction={codeBrowserAction} onBack={onBack} />
       </div>
       {children}
     </div>
@@ -163,6 +163,29 @@ export default function FindingDetail() {
   const [phpstanFinding, setPhpstanFinding] = useState<PhpstanFinding | null>(null);
   const [agentFinding, setAgentFinding] = useState<AgentFinding | null>(null);
   const [project, setProject] = useState<Project | null>(null);
+
+  const codeBrowserAction = useMemo<FindingDetailCodeBrowserAction>(() => {
+    const label = "代码浏览";
+    if (loading) {
+      return { label, disabledReason: "正在加载项目数据..." };
+    }
+    if (!project) {
+      return { label, disabledReason: "当前漏洞未关联项目" };
+    }
+    if (!project.id) {
+      return { label, disabledReason: "项目信息缺失，暂无法跳转" };
+    }
+    if (project.source_type !== "zip") {
+      return { label, disabledReason: "仅 ZIP 类型项目支持代码浏览" };
+    }
+    return {
+      label,
+      to: `/projects/${project.id}/code-browser`,
+      state: {
+        from: `${location.pathname}${location.search}`,
+      },
+    };
+  }, [loading, project, location.pathname, location.search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -421,7 +444,11 @@ export default function FindingDetail() {
 
   if (loading) {
     return (
-      <FindingDetailShell title={fallbackTitle} onBack={handleBack}>
+      <FindingDetailShell
+        title={fallbackTitle}
+        onBack={handleBack}
+        codeBrowserAction={codeBrowserAction}
+      >
         <div className="cyber-card p-8 text-base text-muted-foreground">漏洞详情加载中...</div>
       </FindingDetailShell>
     );
@@ -429,7 +456,11 @@ export default function FindingDetail() {
 
   if (error) {
     return (
-      <FindingDetailShell title={fallbackTitle} onBack={handleBack}>
+      <FindingDetailShell
+        title={fallbackTitle}
+        onBack={handleBack}
+        codeBrowserAction={codeBrowserAction}
+      >
         <div className="cyber-card p-8 text-base text-rose-400">{error}</div>
       </FindingDetailShell>
     );
@@ -437,7 +468,11 @@ export default function FindingDetail() {
 
   if (!model) {
     return (
-      <FindingDetailShell title={fallbackTitle} onBack={handleBack}>
+      <FindingDetailShell
+        title={fallbackTitle}
+        onBack={handleBack}
+        codeBrowserAction={codeBrowserAction}
+      >
         <div className="cyber-card p-8 text-base text-muted-foreground">
           {source === "agent" && isAgentFalsePositiveFinding(agentFindingSnapshot)
             ? getAgentFalsePositiveEvidence(agentFindingSnapshot)
@@ -451,6 +486,7 @@ export default function FindingDetail() {
     <FindingDetailView
       model={model}
       onBack={handleBack}
+      codeBrowserAction={codeBrowserAction}
       onLoadFullFile={handleLoadFullFile}
     />
   );

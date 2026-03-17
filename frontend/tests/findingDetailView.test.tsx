@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 
 import type { AgentFinding } from "../src/shared/api/agentTasks.ts";
 import type { BanditFinding } from "../src/shared/api/bandit.ts";
@@ -14,6 +15,7 @@ import {
   buildOpengrepFindingDetailModel,
 } from "../src/pages/finding-detail/viewModel.ts";
 import FindingDetailView from "../src/pages/finding-detail/FindingDetailView.tsx";
+import type { FindingDetailCodeBrowserAction } from "../src/pages/finding-detail/FindingDetailHeaderActions.tsx";
 
 globalThis.React = React;
 
@@ -124,12 +126,20 @@ const banditFinding: BanditFinding = {
   status: "open",
 };
 
-function renderMarkup(markupModel: Parameters<typeof FindingDetailView>[0]["model"]) {
+function renderMarkup(
+  markupModel: Parameters<typeof FindingDetailView>[0]["model"],
+  extraProps?: Partial<{ codeBrowserAction: FindingDetailCodeBrowserAction | null }>,
+) {
   return renderToStaticMarkup(
-    createElement(FindingDetailView, {
-      model: markupModel,
-      onBack: () => {},
-    }),
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(FindingDetailView, {
+        model: markupModel,
+        onBack: () => {},
+        ...extraProps,
+      }),
+    ),
   );
 }
 
@@ -256,4 +266,45 @@ test("FindingDetailView 渲染 bandit 场景并保留核心漏洞信息", () => 
   assert.match(markup, /扫描说明/);
   assert.match(markup, /静态扫描 . Bandit/);
   assert.match(markup, /当前项目暂不支持查看完整文件，仅展示漏洞相关代码/);
+});
+
+test("FindingDetailView 渲染可用的代码浏览按钮", () => {
+  const markup = renderMarkup(
+    buildAgentFindingDetailModel({
+      finding: agentFinding,
+      taskId: "task-agent",
+      findingId: "finding-agent",
+    }),
+    {
+      codeBrowserAction: {
+        label: "代码浏览",
+        to: "/projects/p-demo/code-browser",
+        state: { from: "/finding-detail/agent/task-agent/finding-agent" },
+      },
+    },
+  );
+
+  assert.match(markup, /代码浏览/);
+  assert.match(markup, /href="\/projects\/p-demo\/code-browser"/);
+});
+
+test("FindingDetailView 提示代码浏览不可用原因", () => {
+  const reason = "仅 ZIP 类型项目支持代码浏览";
+  const markup = renderMarkup(
+    buildAgentFindingDetailModel({
+      finding: agentFinding,
+      taskId: "task-agent",
+      findingId: "finding-agent",
+    }),
+    {
+      codeBrowserAction: {
+        label: "代码浏览",
+        disabledReason: reason,
+      },
+    },
+  );
+
+  assert.match(markup, new RegExp(reason));
+  assert.match(markup, /代码浏览/);
+  assert.match(markup, /disabled/);
 });

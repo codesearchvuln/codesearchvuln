@@ -22,3 +22,14 @@ test("ProjectsPage 的项目浏览外层容器不再渲染 cyber-card 外框", (
 		/id="project-browser"[\s\S]*className="cyber-card p-4 relative z-10 flex flex-col flex-1 min-h-\[65vh\]"/,
 	);
 });
+
+test("ProjectsPage 使用响应式分页容量而不是固定项目数量", () => {
+	const source = readFileSync(projectsPagePath, "utf8");
+
+	assert.match(source, /ResizeObserver/);
+	assert.match(source, /calculateResponsiveProjectsPageSize/);
+	assert.doesNotMatch(
+		source,
+		/paginateItems\(filteredProjects,\s*browser\.projectPage,\s*PROJECT_PAGE_SIZE\)/,
+	);
+});
