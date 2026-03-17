@@ -126,14 +126,10 @@ export const api = {
   // ==================== Project 相关方法 ====================
 
   async getProjects(options?: {
-    includeDeleted?: boolean;
     skip?: number;
     limit?: number;
   }): Promise<Project[]> {
     const params: Record<string, unknown> = {};
-    if (typeof options?.includeDeleted === "boolean") {
-      params.include_deleted = options.includeDeleted;
-    }
     if (typeof options?.skip === "number") {
       params.skip = options.skip;
     }
@@ -230,26 +226,32 @@ export const api = {
     return res.data;
   },
 
+  async createProjectWithZip(
+    project: CreateProjectForm & { owner_id?: string },
+    file: File,
+  ): Promise<Project> {
+    const formData = new FormData();
+    formData.append("name", project.name);
+    formData.append("file", file);
+    if (project.description?.trim()) {
+      formData.append("description", project.description.trim());
+    }
+    if (project.default_branch?.trim()) {
+      formData.append("default_branch", project.default_branch.trim());
+    }
+    for (const language of project.programming_languages || []) {
+      formData.append("programming_languages", language);
+    }
+
+    const res = await apiClient.post("/projects/create-with-zip", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data;
+  },
+
   async updateProject(id: string, updates: Partial<CreateProjectForm>): Promise<Project> {
     const res = await apiClient.put(`/projects/${id}`, updates);
     return res.data;
-  },
-
-  async deleteProject(id: string): Promise<void> {
-    await apiClient.delete(`/projects/${id}`);
-  },
-
-  async getDeletedProjects(): Promise<Project[]> {
-    const res = await apiClient.get('/projects/deleted');
-    return res.data;
-  },
-
-  async restoreProject(id: string): Promise<void> {
-    await apiClient.post(`/projects/${id}/restore`);
-  },
-
-  async permanentlyDeleteProject(id: string): Promise<void> {
-    await apiClient.delete(`/projects/${id}/permanent`);
   },
 
   async exportProjectBundle(params?: {

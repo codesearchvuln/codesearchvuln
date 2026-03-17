@@ -216,7 +216,7 @@ async def _resolve_export_projects(
     )
     member_project_ids = [row[0] for row in member_result.all()]
 
-    query = select(Project).options(selectinload(Project.owner)).where(Project.is_active == True)
+    query = select(Project).options(selectinload(Project.owner))
     query = query.where(
         or_(Project.owner_id == current_user.id, Project.id.in_(member_project_ids or ["__none__"]))
     )

@@ -226,12 +226,6 @@ class SearchService:
                 ),
             )
         
-        # 确保只搜索活跃项目
-        search_filters = and_(
-            search_filters,
-            Project.is_active == True,
-        )
-        
         # 构建查询
         query = select(Project).where(search_filters)
         

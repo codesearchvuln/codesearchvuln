@@ -662,11 +662,7 @@ export default function ProjectDetail() {
 					<h1 className="text-2xl font-bold text-foreground uppercase tracking-wider">
 						{project.name}
 					</h1>
-					<Badge
-						className={`${project.is_active ? "cyber-badge-success" : "cyber-badge-muted"}`}
-					>
-						{project.is_active ? "活跃" : "暂停"}
-					</Badge>
+					<Badge className="cyber-badge-success">可用</Badge>
 				</div>
 
 				<div className="flex items-center space-x-3">

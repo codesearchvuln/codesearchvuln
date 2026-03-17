@@ -13,7 +13,7 @@ async function importOrFail<TModule = Record<string, unknown>>(
 	}
 }
 
-test("createZipProjectWorkflow creates project then uploads zip file", async () => {
+test("createZipProjectWorkflow uses atomic zip project creation", async () => {
 	const workflows = await importOrFail<any>(
 		"../src/pages/projects/data/projectsPageWorkflows.ts",
 	);
@@ -25,24 +25,17 @@ test("createZipProjectWorkflow creates project then uploads zip file", async () 
 	const result = await workflows.createZipProjectWorkflow({
 		input: { name: "demo", programming_languages: [] },
 		file,
-		createProject: async () => {
-			calls.push("create");
+		createProjectWithZip: async () => {
+			calls.push("create-with-zip");
 			return createdProject;
-		},
-		deleteProject: async () => {
-			calls.push("delete");
-		},
-		uploadZipFile: async () => {
-			calls.push("upload");
-			return { success: true };
 		},
 	});
 
 	assert.equal(result.id, "project-1");
-	assert.deepEqual(calls, ["create", "upload"]);
+	assert.deepEqual(calls, ["create-with-zip"]);
 });
 
-test("createZipProjectWorkflow rolls back project when zip upload fails", async () => {
+test("createZipProjectWorkflow surfaces atomic create failures", async () => {
 	const workflows = await importOrFail<any>(
 		"../src/pages/projects/data/projectsPageWorkflows.ts",
 	);
@@ -54,21 +47,14 @@ test("createZipProjectWorkflow rolls back project when zip upload fails", async 
 		await workflows.createZipProjectWorkflow({
 			input: { name: "demo", programming_languages: [] },
 			file,
-			createProject: async () => {
-				calls.push("create");
-				return { id: "project-1", name: "demo" };
-			},
-			deleteProject: async () => {
-				calls.push("delete");
-			},
-			uploadZipFile: async () => {
-				calls.push("upload");
-				return { success: false, message: "zip failed" };
+			createProjectWithZip: async () => {
+				calls.push("create-with-zip");
+				throw new Error("zip failed");
 			},
 		});
 	}, /zip failed/);
 
-	assert.deepEqual(calls, ["create", "upload", "delete"]);
+	assert.deepEqual(calls, ["create-with-zip"]);
 });
 
 test("updateProjectWorkflow updates project and only uploads zip when provided", async () => {

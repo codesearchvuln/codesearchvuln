@@ -113,7 +113,7 @@ export function useProjects() {
     try {
       setLoading(true);
       const data = await api.getProjects();
-      setProjects(data.filter((p) => p.is_active));
+      setProjects(data);
     } catch (error) {
       console.error("Failed to load projects:", error);
       toast.error("加载项目失败");

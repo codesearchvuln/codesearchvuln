@@ -3,7 +3,6 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/shared/i18n";
 import { useLocation } from "react-router-dom";
-import type { Project } from "@/shared/types";
 import { PROJECT_PAGE_SIZE, MODULE_SCROLL_DELAY_MS, SUPPORTED_PROJECT_LANGUAGES } from "./constants";
 import type { ProjectsPageProps } from "./types";
 import { useProjectsBrowserState } from "./hooks/useProjectsBrowserState";
@@ -21,7 +20,6 @@ import ProjectsPagination from "./components/ProjectsPagination";
 import ProjectsEmptyState from "./components/ProjectsEmptyState";
 import CreateProjectDialog from "./components/CreateProjectDialog";
 import EditProjectDialog from "./components/EditProjectDialog";
-import DisableProjectDialog from "./components/DisableProjectDialog";
 import {
 	createZipProjectsWorkflow,
 	type BatchCreateZipProjectItem,
@@ -158,12 +156,6 @@ export default function ProjectsPage({
 		],
 	);
 
-	const projectMap = useMemo(
-		() =>
-			new Map<string, Project>(data.projects.map((project) => [project.id, project])),
-		[data.projects],
-	);
-
 	async function handleCreateZipProjects(
 		items: BatchCreateZipProjectItem[],
 		sharedInput: Omit<Parameters<typeof data.createProject>[0], "name">,
@@ -227,51 +219,6 @@ export default function ProjectsPage({
 			console.error("Failed to update project:", error);
 			toast.error("更新项目失败");
 			throw error;
-		}
-	}
-
-	async function handleConfirmDisableProject() {
-		const project = browser.disableProjectState.project;
-		if (!project) return;
-
-		try {
-			await data.disableProject(project.id);
-			void logUserAction("禁用项目", {
-				projectId: project.id,
-				projectName: project.name,
-			});
-			toast.success(`项目 "${project.name}" 已禁用`, {
-				description: "可通过“启用”按钮恢复该项目",
-				duration: 4000,
-			});
-			browser.setDisableProjectState({ open: false, project: null });
-		} catch (error) {
-			console.error("Failed to disable project:", error);
-			void handleErrorMessage(error, "禁用项目失败");
-			const errorMessage = error instanceof Error ? error.message : "未知错误";
-			toast.error(`禁用项目失败: ${errorMessage}`);
-		}
-	}
-
-	async function handleEnableProject(projectId: string) {
-		const project = projectMap.get(projectId);
-		if (!project) return;
-
-		try {
-			await data.enableProject(project.id);
-			void logUserAction("启用项目", {
-				projectId: project.id,
-				projectName: project.name,
-			});
-			toast.success(`项目 "${project.name}" 已启用`, {
-				description: "项目恢复为可执行状态",
-				duration: 3000,
-			});
-		} catch (error) {
-			console.error("Failed to enable project:", error);
-			void handleErrorMessage(error, "启用项目失败");
-			const errorMessage = error instanceof Error ? error.message : "未知错误";
-			toast.error(`启用项目失败: ${errorMessage}`);
 		}
 	}
 
@@ -339,18 +286,6 @@ export default function ProjectsPage({
 									navigateOnSuccess: true,
 								});
 							}}
-							onToggleProjectStatus={(projectId, action) => {
-								if (action === "disable") {
-									const project = projectMap.get(projectId) || null;
-									browser.setDisableProjectState({
-										open: true,
-										project,
-									});
-									return;
-								}
-
-								void handleEnableProject(projectId);
-							}}
 						/>
 						<ProjectsPagination
 							currentPage={viewModel.pagination.currentPage}
@@ -404,18 +339,6 @@ export default function ProjectsPage({
 					}))
 				}
 				onSubmit={handleUpdateProject}
-			/>
-
-			<DisableProjectDialog
-				open={browser.disableProjectState.open}
-				project={browser.disableProjectState.project}
-				onOpenChange={(open) =>
-					browser.setDisableProjectState((previous) => ({
-						open,
-						project: open ? previous.project : null,
-					}))
-				}
-				onConfirm={handleConfirmDisableProject}
 			/>
 		</div>
 	);

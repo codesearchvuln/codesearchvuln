@@ -7,7 +7,6 @@ import {
 	resolveStaticScanGroupStatus,
 } from "@/features/tasks/services/taskActivities";
 import type { Project } from "@/shared/types";
-import { getProjectStatusToggleAction } from "../viewModel";
 import type {
 	ProjectTaskPoolState,
 	ProjectsPageViewModel,
@@ -116,21 +115,12 @@ export function buildProjectsPageViewModel(
 				detailPath: `/projects/${project.id}`,
 				detailState: { from: projectDetailFrom },
 				sizeText: getProjectSizeText(projectLanguageStatsMap[project.id]),
-				statusLabel: project.is_active ? "启用" : "禁用",
-				statusClassName: project.is_active
-					? "cyber-badge-success"
-					: "cyber-badge-warning",
-				statusToggle: {
-					...getProjectStatusToggleAction({
-						is_active: project.is_active,
-					}),
-					disabled: false,
-				},
-				isActive: project.is_active,
+				statusLabel: "可用",
+				statusClassName: "cyber-badge-success",
 				totalIssues: summaryStats.totalIssues ?? 0,
 				executionStats: getProjectExecutionStats(projectTaskPool),
 				actions: {
-					canCreateScan: project.is_active,
+					canCreateScan: true,
 					canBrowseCode: project.source_type === "zip",
 					browseCodePath: `/projects/${project.id}/code-browser`,
 					browseCodeState: { from: projectDetailFrom },

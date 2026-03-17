@@ -18,7 +18,7 @@ import {
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { createBanditScanTask } from "@/shared/api/bandit";
 import { createPhpstanScanTask } from "@/shared/api/phpstan";
-import { getZipFileInfo, uploadZipFile } from "@/shared/utils/zipStorage";
+import { getZipFileInfo } from "@/shared/utils/zipStorage";
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import {
 	HYBRID_TASK_NAME_MARKER,
@@ -142,7 +142,7 @@ export default function CreateProjectScanDialog({
 	const previousSearchTermRef = useRef("");
 
 	const activeProjects = useMemo(
-		() => projects.filter((project) => project.is_active && isZipProject(project)),
+		() => projects.filter((project) => isZipProject(project)),
 		[projects],
 	);
 
@@ -849,21 +849,15 @@ export default function CreateProjectScanDialog({
 					return;
 				}
 
-				let createdProject: Project | null = null;
 				try {
-					createdProject = await api.createProject({
+					const createdProject = await api.createProjectWithZip({
 						name: newProjectName.trim(),
 						source_type: "zip",
 						repository_type: "other",
 						repository_url: undefined,
 						default_branch: "main",
 						programming_languages: [],
-					} as any);
-
-					const uploadResult = await uploadZipFile(createdProject.id, newProjectFile);
-					if (!uploadResult.success) {
-						throw new Error(uploadResult.message || "压缩包上传失败");
-					}
+					} as any, newProjectFile);
 
 					if (mode === "static") {
 						const result = await createStaticTasksForProject(createdProject);
@@ -895,13 +889,6 @@ export default function CreateProjectScanDialog({
 					await handleCreateHybridLiteAgentForProject(createdProject, action);
 					return;
 				} catch (error) {
-					if (createdProject) {
-						try {
-							await api.deleteProject(createdProject.id);
-						} catch (rollbackError) {
-							console.error("回滚失败项目失败:", rollbackError);
-						}
-					}
 					throw error;
 				}
 			}

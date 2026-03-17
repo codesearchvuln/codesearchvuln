@@ -41,12 +41,11 @@ export function createMockProjectsPageDataSource(): ProjectsPageDataSource {
 		}),
 		createMockProject({
 			id: "mock-project-2",
-			name: "Disabled Legacy Worker",
-			description: "Legacy worker kept for regression verification",
+			name: "Mock Zip Worker",
+			description: "Zip project kept for regression verification",
 			source_type: "zip",
 			repository_url: undefined,
 			repository_type: "other",
-			is_active: false,
 			created_at: "2026-03-09T09:00:00.000Z",
 		}),
 	];
@@ -194,26 +193,5 @@ export function createMockProjectsPageDataSource(): ProjectsPageDataSource {
 			return updated;
 		},
 
-		async disableProject(projectId) {
-			await wait();
-			const projectIndex = getProjectIndex(projectId);
-			if (projectIndex >= 0) {
-				projects[projectIndex] = {
-					...projects[projectIndex],
-					is_active: false,
-				};
-			}
-		},
-
-		async enableProject(projectId) {
-			await wait();
-			const projectIndex = getProjectIndex(projectId);
-			if (projectIndex >= 0) {
-				projects[projectIndex] = {
-					...projects[projectIndex],
-					is_active: true,
-				};
-			}
-		},
 	};
 }

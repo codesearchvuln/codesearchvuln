@@ -15,16 +15,11 @@ import { PROJECT_ACTION_BTN_SUBTLE } from "../constants";
 interface ProjectsTableProps {
 	rows: ProjectsPageRowViewModel[];
 	onCreateScan: (projectId: string) => void;
-	onToggleProjectStatus: (
-		projectId: string,
-		action: ProjectsPageRowViewModel["statusToggle"]["action"],
-	) => void;
 }
 
 export default function ProjectsTable({
 	rows,
 	onCreateScan,
-	onToggleProjectStatus,
 }: ProjectsTableProps) {
 	return (
 		<Table>
@@ -40,10 +35,7 @@ export default function ProjectsTable({
 			</TableHeader>
 			<TableBody>
 				{rows.map((row) => (
-					<TableRow
-						key={row.id}
-						className={row.isActive ? undefined : "opacity-80"}
-					>
+					<TableRow key={row.id}>
 						<TableCell>
 							<Link
 								to={row.detailPath}
@@ -122,22 +114,6 @@ export default function ProjectsTable({
 									disabled={!row.actions.canCreateScan}
 								>
 									创建扫描
-								</Button>
-								<Button
-									size="sm"
-									variant="outline"
-									aria-label={`切换项目状态 ${row.name}`}
-									className={
-										row.statusToggle.action === "disable"
-											? "cyber-btn-ghost h-8 px-3 hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30"
-											: "cyber-btn-ghost h-8 px-3 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/30"
-									}
-									onClick={() =>
-										onToggleProjectStatus(row.id, row.statusToggle.action)
-									}
-									disabled={row.statusToggle.disabled}
-								>
-									{row.statusToggle.label}
 								</Button>
 							</div>
 						</TableCell>

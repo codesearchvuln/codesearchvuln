@@ -589,7 +589,6 @@ async def _resolve_verify_project(
         select(Project)
         .where(
             Project.owner_id == current_user.id,
-            Project.is_active == True,
             Project.source_type == "zip",
             Project.name == _VERIFY_DEFAULT_PROJECT_NAME,
         )
@@ -623,7 +622,6 @@ async def _resolve_verify_project(
             select(Project)
             .where(
                 Project.owner_id == current_user.id,
-                Project.is_active == True,
                 Project.source_type == "zip",
             )
             .order_by(Project.created_at.desc())

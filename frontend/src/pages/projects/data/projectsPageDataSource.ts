@@ -3,7 +3,7 @@ import type { CreateProjectForm, Project } from "@/shared/types";
 import type { ProjectTaskPool } from "../types";
 
 export interface ProjectsPageDataSource {
-	listProjects(params?: { includeDeleted?: boolean }): Promise<Project[]>;
+	listProjects(): Promise<Project[]>;
 	getProjectTaskPool(projectId: string): Promise<ProjectTaskPool>;
 	getProjectLanguageStats(projectId: string): Promise<ProjectCardLanguageStats>;
 	createProject(input: CreateProjectForm): Promise<Project>;
@@ -13,6 +13,4 @@ export interface ProjectsPageDataSource {
 		input: Partial<CreateProjectForm>,
 		zipFile?: File | null,
 	): Promise<Project>;
-	disableProject(projectId: string): Promise<void>;
-	enableProject(projectId: string): Promise<void>;
 }

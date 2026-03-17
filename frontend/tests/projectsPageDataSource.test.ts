@@ -31,9 +31,8 @@ test("api projects data source loads paginated projects and task pools", async (
 			},
 			getAuditTasks: async () => [{ id: "a1", status: "completed" }],
 			createProject: async () => ({ id: "new-project" }),
+			createProjectWithZip: async () => ({ id: "new-zip-project" }),
 			updateProject: async () => ({ id: "updated-project" }),
-			deleteProject: async () => {},
-			restoreProject: async () => {},
 		},
 		getAgentTasks: async () => [{ id: "agt-1", status: "running" }],
 		getOpengrepScanTasks: async () => [{ id: "o1", project_id: "p1", status: "completed", created_at: "2024-01-01T00:00:00Z" }],
@@ -53,7 +52,7 @@ test("api projects data source loads paginated projects and task pools", async (
 		uploadZipFile: async () => ({ success: true }),
 	});
 
-	const projects = await source.listProjects({ includeDeleted: true });
+	const projects = await source.listProjects();
 	const taskPool = await source.getProjectTaskPool("p1");
 	const languageStats = await source.getProjectLanguageStats("p1");
 
@@ -74,7 +73,7 @@ test("mock projects data source exposes the same data source surface", async () 
 	);
 
 	const source = mockFactory.createMockProjectsPageDataSource();
-	const projects = await source.listProjects({ includeDeleted: true });
+	const projects = await source.listProjects();
 	const taskPool = await source.getProjectTaskPool(projects[0].id);
 	const stats = await source.getProjectLanguageStats(projects[0].id);
 
@@ -84,7 +83,7 @@ test("mock projects data source exposes the same data source surface", async () 
 	assert.match(stats.status, /loading|pending|ready|failed|unsupported|empty/);
 });
 
-test("legacy projects data source toggles project status via delete and restore endpoints", async () => {
+test("legacy projects data source creates zip projects via atomic api", async () => {
 	const legacyFactory = await importOrFail<any>(
 		"../src/pages/projects/datasource/createApiProjectsPageDataSource.ts",
 	);
@@ -93,39 +92,27 @@ test("legacy projects data source toggles project status via delete and restore 
 	);
 
 	const originalApi = {
-		updateProject: databaseModule.api.updateProject,
-		deleteProject: databaseModule.api.deleteProject,
-		restoreProject: databaseModule.api.restoreProject,
+		createProjectWithZip: databaseModule.api.createProjectWithZip,
 	};
 	const calls = {
-		updateProject: 0,
-		deleteProject: 0,
-		restoreProject: 0,
+		createProjectWithZip: 0,
 	};
 
-	databaseModule.api.updateProject = async () => {
-		calls.updateProject += 1;
-		return { id: "updated-project" };
-	};
-	databaseModule.api.deleteProject = async () => {
-		calls.deleteProject += 1;
-	};
-	databaseModule.api.restoreProject = async () => {
-		calls.restoreProject += 1;
+	databaseModule.api.createProjectWithZip = async () => {
+		calls.createProjectWithZip += 1;
+		return { id: "zip-project" };
 	};
 
 	try {
 		const source = legacyFactory.createApiProjectsPageDataSource();
 
-		await source.disableProject("project-1");
-		await source.enableProject("project-1");
+		await source.createZipProject(
+			{ name: "project-1", programming_languages: [] },
+			{ name: "project-1.zip" } as File,
+		);
 
-		assert.equal(calls.updateProject, 0);
-		assert.equal(calls.deleteProject, 1);
-		assert.equal(calls.restoreProject, 1);
+		assert.equal(calls.createProjectWithZip, 1);
 	} finally {
-		databaseModule.api.updateProject = originalApi.updateProject;
-		databaseModule.api.deleteProject = originalApi.deleteProject;
-		databaseModule.api.restoreProject = originalApi.restoreProject;
+		databaseModule.api.createProjectWithZip = originalApi.createProjectWithZip;
 	}
 });

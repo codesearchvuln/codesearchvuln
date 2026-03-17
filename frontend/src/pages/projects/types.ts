@@ -7,7 +7,6 @@ import type { PhpstanScanTask } from "@/shared/api/phpstan";
 import type { OpengrepScanTask } from "@/shared/api/opengrep";
 import type { Project, AuditTask } from "@/shared/types";
 import type { ProjectsPageDataSource } from "./data/projectsPageDataSource";
-import type { ProjectStatusToggleAction } from "./viewModel";
 
 export type ProjectTaskPoolStatus = "idle" | "loading" | "ready" | "failed";
 
@@ -30,12 +29,8 @@ export interface ProjectsPageRowViewModel {
 	detailPath: string;
 	detailState: { from: string };
 	sizeText: string;
-	statusLabel: "启用" | "禁用";
+	statusLabel: string;
 	statusClassName: string;
-	statusToggle: ProjectStatusToggleAction & {
-		disabled: boolean;
-	};
-	isActive: boolean;
 	totalIssues: number;
 	executionStats: {
 		completed: number;
@@ -72,10 +67,6 @@ export interface ProjectsDialogControllerState {
 		navigateOnSuccess: boolean;
 	};
 	editProject: {
-		open: boolean;
-		project: Project | null;
-	};
-	disableProject: {
 		open: boolean;
 		project: Project | null;
 	};

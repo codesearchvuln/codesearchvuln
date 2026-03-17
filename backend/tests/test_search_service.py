@@ -295,8 +295,8 @@ async def test_search_empty_result(db: AsyncSession, test_user: User):
 
 
 @pytest.mark.asyncio
-async def test_search_only_active_projects(db: AsyncSession, test_user: User):
-    """测试只搜索活跃项目"""
+async def test_search_includes_inactive_projects(db: AsyncSession, test_user: User):
+    """测试搜索结果不再过滤 inactive 项目"""
     # 创建活跃项目
     active_project = Project(
         name="活跃项目",
@@ -326,7 +326,5 @@ async def test_search_only_active_projects(db: AsyncSession, test_user: User):
         user_id=test_user.id,
     )
     
-    # 只应该找到活跃项目
-    assert total == 1
-    assert projects[0].name == "活跃项目"
-    assert projects[0].is_active == True
+    assert total == 2
+    assert {project.name for project in projects} == {"活跃项目", "已删除项目"}

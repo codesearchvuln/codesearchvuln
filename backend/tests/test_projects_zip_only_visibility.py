@@ -9,7 +9,6 @@ from app.api.v1.endpoints.projects import (
     create_project,
     get_project_files,
     get_project_files_tree,
-    read_deleted_projects,
     read_project,
     read_projects,
 )
@@ -96,7 +95,7 @@ async def test_read_projects_hides_repository_projects():
 
 
 @pytest.mark.asyncio
-async def test_read_deleted_projects_hides_repository_projects():
+async def test_read_projects_still_returns_inactive_zip_projects():
     zip_project = Project(
         id="zip-1",
         name="zip project",
@@ -115,10 +114,7 @@ async def test_read_deleted_projects_hides_repository_projects():
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_ScalarResult([zip_project, repo_project]))
 
-    projects = await read_deleted_projects(
-        db=db,
-        current_user=SimpleNamespace(id="user-1"),
-    )
+    projects = await read_projects(db=db, current_user=SimpleNamespace(id="user-1"))
 
     assert [project.id for project in projects] == ["zip-1"]
 

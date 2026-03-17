@@ -64,7 +64,7 @@ async def test_project_description_analyzer_uses_single_llm_summary_call(tmp_pat
 
 @pytest.mark.asyncio
 async def test_upload_project_zip_generates_and_persists_project_description(monkeypatch):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_shared as shared_endpoint
 
     project = SimpleNamespace(
         id="project-1",
@@ -84,28 +84,28 @@ async def test_upload_project_zip_generates_and_persists_project_description(mon
     db.rollback = AsyncMock()
 
     monkeypatch.setattr(
-        projects_endpoint.CompressionStrategyFactory,
+        shared_endpoint.CompressionStrategyFactory,
         "get_supported_formats",
         lambda: {".zip"},
     )
     monkeypatch.setattr(
-        projects_endpoint.UploadManager,
+        shared_endpoint.UploadManager,
         "validate_file",
         lambda _path: (True, None),
     )
     monkeypatch.setattr(
-        projects_endpoint.UploadManager,
+        shared_endpoint.UploadManager,
         "extract_file",
         AsyncMock(return_value=(True, ["src/main.ts", "package.json"], None)),
     )
     monkeypatch.setattr(
-        projects_endpoint.UploadManager,
+        shared_endpoint.UploadManager,
         "get_file_list_preview",
         lambda _path, limit=100: (True, ["src/main.ts", "package.json"], None),
     )
-    monkeypatch.setattr(projects_endpoint, "create_zip_with_exclusions", lambda _src, _dst: None)
+    monkeypatch.setattr(shared_endpoint, "create_zip_with_exclusions", lambda _src, _dst: None)
     monkeypatch.setattr(
-        projects_endpoint,
+        shared_endpoint,
         "save_project_zip",
         AsyncMock(
             return_value={
@@ -115,36 +115,36 @@ async def test_upload_project_zip_generates_and_persists_project_description(mon
             }
         ),
     )
-    monkeypatch.setattr(projects_endpoint, "calculate_file_sha256", lambda _path: "hash-1")
+    monkeypatch.setattr(shared_endpoint, "calculate_file_sha256", lambda _path: "hash-1")
     monkeypatch.setattr(
-        projects_endpoint,
+        shared_endpoint,
         "find_duplicate_zip_project",
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        shared_endpoint,
         "detect_languages_from_paths",
         lambda _paths: ["TypeScript"],
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        shared_endpoint,
         "get_cloc_stats_from_extracted_dir",
         AsyncMock(
             return_value='{"total": 42, "total_files": 2, "languages": {"TypeScript": {"loc_number": 42, "files_count": 2, "proportion": 1.0}}}'
         ),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        shared_endpoint,
         "build_static_project_description",
         lambda _language_info, _project_name: "static-desc",
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        shared_endpoint,
         "_get_user_config",
         AsyncMock(return_value={"llmConfig": {"provider": "mock"}}),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        shared_endpoint,
         "generate_project_description_from_extracted_dir",
         AsyncMock(return_value={"project_description": "智能简介"}),
     )
@@ -170,42 +170,42 @@ async def test_upload_project_zip_generates_and_persists_project_description(mon
 
 @pytest.mark.asyncio
 async def test_generate_project_description_preview_llm_success(monkeypatch):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
 
     monkeypatch.setattr(
-        projects_endpoint.CompressionStrategyFactory,
+        uploads_endpoint.CompressionStrategyFactory,
         "get_supported_formats",
         lambda: {".zip"},
     )
     monkeypatch.setattr(
-        projects_endpoint.UploadManager,
+        uploads_endpoint.UploadManager,
         "validate_file",
         lambda _path: (True, None),
     )
     monkeypatch.setattr(
-        projects_endpoint.UploadManager,
+        uploads_endpoint.UploadManager,
         "extract_file",
         AsyncMock(return_value=(True, ["src/main.py"], None)),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "get_cloc_stats_from_extracted_dir",
         AsyncMock(
             return_value='{"total": 10, "total_files": 1, "languages": {"Python": {"loc_number": 10, "files_count": 1, "proportion": 1.0}}}'
         ),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "build_static_project_description",
         lambda _language_info, _project_name: "static-desc",
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "_get_user_config",
         AsyncMock(return_value={"llmConfig": {"provider": "mock"}}),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "generate_project_description_from_extracted_dir",
         AsyncMock(return_value={"project_description": "llm-desc"}),
     )
@@ -224,40 +224,40 @@ async def test_generate_project_description_preview_llm_success(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_project_description_preview_fallback_static(monkeypatch):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
 
     monkeypatch.setattr(
-        projects_endpoint.CompressionStrategyFactory,
+        uploads_endpoint.CompressionStrategyFactory,
         "get_supported_formats",
         lambda: {".zip"},
     )
     monkeypatch.setattr(
-        projects_endpoint.UploadManager,
+        uploads_endpoint.UploadManager,
         "validate_file",
         lambda _path: (True, None),
     )
     monkeypatch.setattr(
-        projects_endpoint.UploadManager,
+        uploads_endpoint.UploadManager,
         "extract_file",
         AsyncMock(return_value=(True, ["src/main.py"], None)),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "get_cloc_stats_from_extracted_dir",
         AsyncMock(return_value='{"total": 2, "total_files": 1, "languages": {}}'),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "build_static_project_description",
         lambda _language_info, _project_name: "static-desc",
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "_get_user_config",
         AsyncMock(return_value={"llmConfig": {"provider": "mock"}}),
     )
     monkeypatch.setattr(
-        projects_endpoint,
+        uploads_endpoint,
         "generate_project_description_from_extracted_dir",
         AsyncMock(return_value={"project_description": ""}),
     )
@@ -275,10 +275,10 @@ async def test_generate_project_description_preview_fallback_static(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_generate_project_description_preview_invalid_format(monkeypatch):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
 
     monkeypatch.setattr(
-        projects_endpoint.CompressionStrategyFactory,
+        uploads_endpoint.CompressionStrategyFactory,
         "get_supported_formats",
         lambda: {".zip"},
     )
@@ -296,7 +296,7 @@ async def test_generate_project_description_preview_invalid_format(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_project_info_does_not_generate_description(monkeypatch):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_crud as crud_endpoint
 
     project = SimpleNamespace(id="project-1", name="demo", source_type="zip")
 
@@ -312,7 +312,7 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
     db.refresh = AsyncMock()
 
     monkeypatch.setattr(
-        projects_endpoint,
+        crud_endpoint,
         "get_cloc_stats",
         AsyncMock(return_value='{"total": 1, "total_files": 1, "languages": {}}'),
     )
@@ -321,7 +321,7 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
         raise AssertionError("build_static_project_description should not be called")
 
     monkeypatch.setattr(
-        projects_endpoint,
+        crud_endpoint,
         "build_static_project_description",
         _fail_if_called,
     )
@@ -340,7 +340,7 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_project_info_repository_is_hidden(monkeypatch):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_crud as crud_endpoint
 
     project = SimpleNamespace(
         id="project-1",
@@ -362,7 +362,7 @@ async def test_get_project_info_repository_is_hidden(monkeypatch):
     def _fail_if_called(*_args, **_kwargs):
         raise AssertionError("get_cloc_stats should not be called for repository projects")
 
-    monkeypatch.setattr(projects_endpoint, "get_cloc_stats", _fail_if_called)
+    monkeypatch.setattr(crud_endpoint, "get_cloc_stats", _fail_if_called)
 
     with pytest.raises(HTTPException) as exc_info:
         await get_project_info(

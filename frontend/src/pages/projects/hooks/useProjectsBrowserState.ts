@@ -19,13 +19,6 @@ export function useProjectsBrowserState() {
 		open: false,
 		project: null,
 	});
-	const [disableProjectState, setDisableProjectState] = useState<{
-		open: boolean;
-		project: Project | null;
-	}>({
-		open: false,
-		project: null,
-	});
 
 	useEffect(() => {
 		setProjectPage(1);
@@ -63,8 +56,6 @@ export function useProjectsBrowserState() {
 		createScanState,
 		editProjectState,
 		setEditProjectState,
-		disableProjectState,
-		setDisableProjectState,
 		openCreateScanDialog,
 		closeCreateScanDialog,
 	};

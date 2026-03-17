@@ -59,7 +59,6 @@ import {
 } from "./create-scan-task/utils";
 
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
-import { uploadZipFile } from "@/shared/utils/zipStorage";
 import { isZipProject } from "@/shared/utils/projectUtils";
 import type { Project } from "@/shared/types";
 import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
@@ -407,24 +406,15 @@ export default function CreateScanTaskDialog({
 					return;
 				}
 
-				let createdProject: Project | null = null;
 				try {
-					createdProject = await api.createProject({
+					const createdProject = await api.createProjectWithZip({
 						name: newProjectName.trim(),
 						source_type: "zip",
 						repository_type: "other",
 						repository_url: undefined,
 						default_branch: "main",
 						programming_languages: [],
-					} as any);
-
-					const uploadResult = await uploadZipFile(
-						createdProject.id,
-						newProjectFile,
-					);
-					if (!uploadResult.success) {
-						throw new Error(uploadResult.message || "压缩包上传失败");
-					}
+					} as any, newProjectFile);
 
 					if (scanMode === "agent") {
 						const agentTask = await createAgentTask({
@@ -476,13 +466,6 @@ export default function CreateScanTaskDialog({
 					loadProjects();
 					return;
 				} catch (error) {
-					if (createdProject) {
-						try {
-							await api.deleteProject(createdProject.id);
-						} catch (rollbackError) {
-							console.error("回滚失败项目失败:", rollbackError);
-						}
-					}
 					throw error;
 				}
 			}

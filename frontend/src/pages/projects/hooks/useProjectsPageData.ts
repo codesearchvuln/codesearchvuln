@@ -55,7 +55,7 @@ export function useProjectsPageData(dataSource: ProjectsPageDataSource) {
 	const loadProjects = useCallback(async () => {
 		try {
 			setLoading(true);
-			const nextProjects = await dataSource.listProjects({ includeDeleted: true });
+			const nextProjects = await dataSource.listProjects();
 			setProjects(nextProjects);
 			setProjectTaskPoolsMap({});
 			setProjectLanguageStatsMap({});
@@ -253,14 +253,6 @@ export function useProjectsPageData(dataSource: ProjectsPageDataSource) {
 			const updatedProject = await dataSource.updateProject(projectId, input, zipFile);
 			await loadProjects();
 			return updatedProject;
-		},
-		async disableProject(projectId: string) {
-			await dataSource.disableProject(projectId);
-			await loadProjects();
-		},
-		async enableProject(projectId: string) {
-			await dataSource.enableProject(projectId);
-			await loadProjects();
 		},
 	};
 }

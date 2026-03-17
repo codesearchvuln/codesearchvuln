@@ -124,6 +124,7 @@ async def test_export_projects_bundle_excludes_seed_projects_and_warns_missing_z
             repository_type="other",
             default_branch="main",
             programming_languages='["Python"]',
+            is_active=False,
         )
         missing_zip_project = Project(
             name="Missing Zip Project",

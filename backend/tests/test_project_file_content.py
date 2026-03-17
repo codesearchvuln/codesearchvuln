@@ -25,7 +25,7 @@ def _build_zip(zip_path: Path, files: dict[str, str]) -> None:
 
 @pytest.mark.asyncio
 async def test_get_project_file_content_reads_exact_zip_member(monkeypatch, tmp_path):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_files as projects_endpoint
 
     zip_path = tmp_path / "demo.zip"
     _build_zip(zip_path, {"src/discord/voice-message.ts": "console.log('ok');\n"})
@@ -53,7 +53,7 @@ async def test_get_project_file_content_reads_exact_zip_member(monkeypatch, tmp_
 
 @pytest.mark.asyncio
 async def test_get_project_file_content_resolves_archive_root_prefixed_path(monkeypatch, tmp_path):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_files as projects_endpoint
 
     zip_path = tmp_path / "demo.zip"
     _build_zip(zip_path, {"src/discord/voice-message.ts": "console.log('ok');\n"})
@@ -84,7 +84,7 @@ async def test_get_project_file_content_returns_404_when_zip_has_no_matching_mem
     monkeypatch,
     tmp_path,
 ):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_files as projects_endpoint
 
     zip_path = tmp_path / "demo.zip"
     _build_zip(zip_path, {"src/discord/voice-message.ts": "console.log('ok');\n"})
@@ -111,7 +111,7 @@ async def test_get_project_file_content_returns_404_when_zip_has_no_matching_mem
 
 @pytest.mark.asyncio
 async def test_get_project_file_content_rejects_dangerous_path(monkeypatch):
-    from app.api.v1.endpoints import projects as projects_endpoint
+    from app.api.v1.endpoints import projects_files as projects_endpoint
 
     db = AsyncMock()
     db.get = AsyncMock(return_value=SimpleNamespace(id="project-1", source_type="zip"))

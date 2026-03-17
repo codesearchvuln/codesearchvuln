@@ -75,9 +75,8 @@ type ApiSurface = Pick<
 	| "getProjects"
 	| "getAuditTasks"
 	| "createProject"
+	| "createProjectWithZip"
 	| "updateProject"
-	| "deleteProject"
-	| "restoreProject"
 >;
 
 interface CreateApiProjectsPageDataSourceOptions {
@@ -128,13 +127,12 @@ export function createApiProjectsPageDataSource(
 	const uploadProjectZip = options.uploadZipFile ?? uploadZipFile;
 
 	return {
-		async listProjects(params) {
+		async listProjects() {
 			const mergedProjects: Project[] = [];
 			let skip = 0;
 
 			while (true) {
 				const batch = await apiSurface.getProjects({
-					includeDeleted: params?.includeDeleted,
 					skip,
 					limit: fetchBatchSize,
 				});
@@ -277,9 +275,8 @@ export function createApiProjectsPageDataSource(
 			return createZipProjectWorkflow({
 				input,
 				file,
-				createProject: (nextInput) => apiSurface.createProject(nextInput),
-				deleteProject: (projectId) => apiSurface.deleteProject(projectId),
-				uploadZipFile: uploadProjectZip,
+				createProjectWithZip: (nextInput, nextFile) =>
+					apiSurface.createProjectWithZip(nextInput, nextFile),
 			});
 		},
 
@@ -292,14 +289,6 @@ export function createApiProjectsPageDataSource(
 					apiSurface.updateProject(nextProjectId, nextInput),
 				uploadZipFile: uploadProjectZip,
 			});
-		},
-
-		async disableProject(projectId) {
-			await apiSurface.deleteProject(projectId);
-		},
-
-		async enableProject(projectId) {
-			await apiSurface.restoreProject(projectId);
 		},
 	};
 }

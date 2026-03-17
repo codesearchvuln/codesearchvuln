@@ -2,11 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 type StatusToggleModule = {
-  getProjectStatusToggleAction: (input: { is_active: boolean }) => {
-    action: "enable" | "disable";
-    label: "启用" | "禁用";
-    requiresConfirmation: boolean;
-  };
+  getProjectStatusToggleAction?: unknown;
+  PROJECT_STATUS_LABEL?: string;
 };
 
 async function loadStatusToggleModule(): Promise<StatusToggleModule | null> {
@@ -17,32 +14,10 @@ async function loadStatusToggleModule(): Promise<StatusToggleModule | null> {
   }
 }
 
-test("getProjectStatusToggleAction 为启用项目返回禁用动作", async () => {
+test("projects view model no longer exports status toggle actions", async () => {
   const module = await loadStatusToggleModule();
 
-  assert.ok(
-    module?.getProjectStatusToggleAction,
-    "expected projects status toggle view model to exist",
-  );
-
-  assert.deepEqual(module.getProjectStatusToggleAction({ is_active: true }), {
-    action: "disable",
-    label: "禁用",
-    requiresConfirmation: true,
-  });
-});
-
-test("getProjectStatusToggleAction 为禁用项目返回启用动作", async () => {
-  const module = await loadStatusToggleModule();
-
-  assert.ok(
-    module?.getProjectStatusToggleAction,
-    "expected projects status toggle view model to exist",
-  );
-
-  assert.deepEqual(module.getProjectStatusToggleAction({ is_active: false }), {
-    action: "enable",
-    label: "启用",
-    requiresConfirmation: false,
-  });
+  assert.ok(module, "expected projects view model module to exist");
+  assert.equal(module?.getProjectStatusToggleAction, undefined);
+  assert.equal(module?.PROJECT_STATUS_LABEL, "可用");
 });

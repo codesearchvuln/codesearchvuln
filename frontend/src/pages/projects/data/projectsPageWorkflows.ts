@@ -8,12 +8,10 @@ type UploadZipFileResult = {
 interface CreateZipProjectWorkflowParams {
 	input: CreateProjectForm;
 	file: File;
-	createProject: (input: CreateProjectForm) => Promise<Project>;
-	deleteProject: (projectId: string) => Promise<void>;
-	uploadZipFile: (
-		projectId: string,
+	createProjectWithZip: (
+		input: CreateProjectForm,
 		file: File,
-	) => Promise<UploadZipFileResult>;
+	) => Promise<Project>;
 }
 
 interface UpdateProjectWorkflowParams {
@@ -69,24 +67,16 @@ interface CreateZipProjectsWorkflowParams {
 export async function createZipProjectWorkflow(
 	params: CreateZipProjectWorkflowParams,
 ) {
-	const { input, file, createProject, deleteProject, uploadZipFile } = params;
-	const createdProject = await createProject({
-		...input,
-		source_type: "zip",
-		repository_type: "other",
-		repository_url: undefined,
-	});
-
-	try {
-		const uploadResult = await uploadZipFile(createdProject.id, file);
-		if (!uploadResult.success) {
-			throw new Error(uploadResult.message || "压缩包上传失败");
-		}
-		return createdProject;
-	} catch (error) {
-		await deleteProject(createdProject.id);
-		throw error;
-	}
+	const { input, file, createProjectWithZip } = params;
+	return createProjectWithZip(
+		{
+			...input,
+			source_type: "zip",
+			repository_type: "other",
+			repository_url: undefined,
+		},
+		file,
+	);
 }
 
 export async function updateProjectWorkflow(

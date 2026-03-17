@@ -91,7 +91,7 @@ test("projects view model utilities build project size text and execution stats"
 	assert.deepEqual(stats, { completed: 3, running: 2 });
 });
 
-test("projects view model derives status toggle metadata from project active state", async () => {
+test("projects view model exposes constant availability status and browse guards", async () => {
 	const builder = await importOrFail<any>(
 		"../src/pages/projects/lib/buildProjectsPageViewModel.ts",
 	);
@@ -145,8 +145,6 @@ test("projects view model derives status toggle metadata from project active sta
 		viewModel.rows.map((row: any) => ({
 			id: row.id,
 			statusLabel: row.statusLabel,
-			statusToggleLabel: row.statusToggle.label,
-			statusToggleAction: row.statusToggle.action,
 			rowNumber: row.rowNumber,
 			canCreateScan: row.actions.canCreateScan,
 			canBrowseCode: row.actions.canBrowseCode,
@@ -156,9 +154,7 @@ test("projects view model derives status toggle metadata from project active sta
 		[
 			{
 				id: "p1",
-				statusLabel: "启用",
-				statusToggleLabel: "禁用",
-				statusToggleAction: "disable",
+				statusLabel: "可用",
 				rowNumber: undefined,
 				canCreateScan: true,
 				canBrowseCode: true,
@@ -167,11 +163,9 @@ test("projects view model derives status toggle metadata from project active sta
 			},
 			{
 				id: "p2",
-				statusLabel: "禁用",
-				statusToggleLabel: "启用",
-				statusToggleAction: "enable",
+				statusLabel: "可用",
 				rowNumber: undefined,
-				canCreateScan: false,
+				canCreateScan: true,
 				canBrowseCode: false,
 				browseCodePath: "/projects/p2/code-browser",
 				browseCodeDisabledReason: "仅 ZIP 类型项目支持代码浏览",

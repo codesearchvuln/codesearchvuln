@@ -83,7 +83,7 @@ function TransferPanel() {
   async function loadProjects() {
     setLoadingProjects(true);
     try {
-      const data = await api.getProjects({ includeDeleted: false, limit: 500 });
+      const data = await api.getProjects({ limit: 500 });
       setProjects(data);
       setSelectedProjectIds((current) =>
         current.filter((projectId) => data.some((project) => project.id === projectId)),
