@@ -1,0 +1,15 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN corepack enable
+
+RUN apk add --no-cache git
+
+RUN git clone --depth=1 https://github.com/happytraveller-alone/nexus-web.git .
+
+RUN pnpm install
+
+EXPOSE 5174
+
+CMD ["pnpm", "dev", "--host", "0.0.0.0"]

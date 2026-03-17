@@ -205,6 +205,11 @@ services:
         condition: service_healthy
     networks:
       - vulhunter-network
+  
+  nexus-web:
+    build: ./nexus-web
+    ports:
+      - "5174:5174"
 
 networks:
   vulhunter-network:
