@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import * as viewModel from "../src/pages/static-analysis/viewModel.ts";
 import {
   buildStaticAnalysisProgressSummary,
+  buildStaticAnalysisTaskStatusSummary,
   buildStaticAnalysisListState,
   buildUnifiedFindingRows,
   formatStaticAnalysisDuration,
@@ -408,5 +409,111 @@ test("buildStaticAnalysisProgressSummary keeps the management-page primary task 
     nowMs: Date.parse("2026-03-12T07:12:00.000Z"),
   });
 
-  assert.equal(summary.progressPercent, 100);
+  assert.equal(summary.progressPercent, 83);
+});
+
+test("buildStaticAnalysisTaskStatusSummary marks mixed completed and failed engines as failed", () => {
+  const summary = buildStaticAnalysisTaskStatusSummary({
+    opengrepTask: null,
+    gitleaksTask: {
+      id: "gl-1",
+      project_id: "project-5",
+      status: "completed",
+      created_at: "2026-03-12T07:00:10.000Z",
+      updated_at: "2026-03-12T07:02:00.000Z",
+      total_findings: 0,
+      scan_duration_ms: 0,
+      files_scanned: 0,
+    },
+    banditTask: null,
+    phpstanTask: null,
+    yasaTask: {
+      id: "ya-1",
+      project_id: "project-5",
+      status: "failed",
+      created_at: "2026-03-12T07:00:00.000Z",
+      updated_at: "2026-03-12T07:01:00.000Z",
+      error_message: "YASA process failed",
+      total_findings: 0,
+      scan_duration_ms: 0,
+      files_scanned: 0,
+      language: "go",
+      name: "YASA",
+      target_path: ".",
+    },
+  });
+
+  assert.equal(summary.aggregateStatus, "failed");
+  assert.equal(summary.aggregateLabel, "任务失败");
+  assert.equal(summary.progressHint, "扫描已结束，至少一个引擎失败");
+  assert.deepEqual(summary.failureReasons, [
+    {
+      engine: "yasa",
+      engineLabel: "YASA",
+      message: "YASA process failed",
+    },
+  ]);
+});
+
+test("buildStaticAnalysisTaskStatusSummary falls back to diagnostics summary for YASA failures", () => {
+  const summary = buildStaticAnalysisTaskStatusSummary({
+    opengrepTask: null,
+    gitleaksTask: null,
+    banditTask: null,
+    phpstanTask: null,
+    yasaTask: {
+      id: "ya-2",
+      project_id: "project-6",
+      status: "failed",
+      created_at: "2026-03-12T07:00:00.000Z",
+      updated_at: "2026-03-12T07:01:00.000Z",
+      diagnostics_summary: "rule-config parse failed at line 3",
+      total_findings: 0,
+      scan_duration_ms: 0,
+      files_scanned: 0,
+      language: "go",
+      name: "YASA",
+      target_path: ".",
+    },
+  });
+
+  assert.deepEqual(summary.failureReasons, [
+    {
+      engine: "yasa",
+      engineLabel: "YASA",
+      message: "rule-config parse failed at line 3",
+    },
+  ]);
+});
+
+test("buildStaticAnalysisTaskStatusSummary uses a generic fallback when a failed engine exposes no reason", () => {
+  const summary = buildStaticAnalysisTaskStatusSummary({
+    opengrepTask: {
+      id: "og-1",
+      project_id: "project-7",
+      status: "failed",
+      created_at: "2026-03-12T07:00:00.000Z",
+      updated_at: "2026-03-12T07:01:00.000Z",
+      total_findings: 0,
+      error_count: 0,
+      warning_count: 0,
+      scan_duration_ms: 0,
+      files_scanned: 0,
+      lines_scanned: 0,
+      name: "Opengrep",
+      target_path: ".",
+    } as any,
+    gitleaksTask: null,
+    banditTask: null,
+    phpstanTask: null,
+    yasaTask: null,
+  });
+
+  assert.deepEqual(summary.failureReasons, [
+    {
+      engine: "opengrep",
+      engineLabel: "Opengrep",
+      message: "任务已失败，请查看后端日志获取更多信息。",
+    },
+  ]);
 });

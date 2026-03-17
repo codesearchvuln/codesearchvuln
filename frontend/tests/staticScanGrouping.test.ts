@@ -122,4 +122,22 @@ test("resolveStaticScanGroupStatus returns failed/interrupted/pending without OT
     }),
     "running",
   );
+
+  assert.equal(
+    resolveStaticScanGroupStatus({
+      gitleaksTask: {
+        id: "gl-2",
+        project_id: "p1",
+        status: "completed",
+        created_at: "2026-03-17T00:00:00.000Z",
+      } as any,
+      yasaTask: {
+        id: "ya-2",
+        project_id: "p1",
+        status: "failed",
+        created_at: "2026-03-17T00:00:02.000Z",
+      } as any,
+    }),
+    "failed",
+  );
 });

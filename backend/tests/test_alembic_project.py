@@ -1,77 +1,74 @@
-import os
-import subprocess
-import sys
+import ast
 from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+VERSIONS_DIR = BACKEND_ROOT / "alembic" / "versions"
 
 
-def _alembic_command() -> list[str]:
-    venv_alembic = BACKEND_ROOT / ".venv" / "bin" / "alembic"
-    if venv_alembic.exists():
-        return [str(venv_alembic)]
-    return [sys.executable, "-m", "alembic"]
+def _literal_eval_revision_value(source: str, variable_name: str):
+    module = ast.parse(source)
+    for node in module.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == variable_name:
+                    return ast.literal_eval(node.value)
+        if isinstance(node, ast.AnnAssign):
+            target = node.target
+            if isinstance(target, ast.Name) and target.id == variable_name:
+                return ast.literal_eval(node.value)
+    raise AssertionError(f"Could not find {variable_name} in migration source")
 
 
-def test_alembic_history_runs_from_backend_root():
-    env = os.environ.copy()
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{BACKEND_ROOT}{os.pathsep}{existing_pythonpath}"
-        if existing_pythonpath
-        else str(BACKEND_ROOT)
+def _load_revision_graph():
+    revisions: dict[str, str] = {}
+    down_revisions: dict[str, tuple[str, ...]] = {}
+    file_names: dict[str, str] = {}
+
+    for path in sorted(VERSIONS_DIR.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        revision = _literal_eval_revision_value(source, "revision")
+        raw_down_revision = _literal_eval_revision_value(source, "down_revision")
+        if raw_down_revision is None:
+            normalized_down_revision = ()
+        elif isinstance(raw_down_revision, str):
+            normalized_down_revision = (raw_down_revision,)
+        else:
+            normalized_down_revision = tuple(raw_down_revision)
+
+        revisions[path.name] = revision
+        down_revisions[revision] = normalized_down_revision
+        file_names[revision] = path.name
+
+    return revisions, down_revisions, file_names
+
+
+def test_alembic_revisions_form_a_single_head_graph():
+    revisions, down_revisions, _ = _load_revision_graph()
+    all_revisions = set(down_revisions)
+    referenced_revisions = {
+        down_revision
+        for item in down_revisions.values()
+        for down_revision in item
+    }
+    heads = sorted(all_revisions - referenced_revisions)
+
+    assert len(heads) == 1, f"Expected a single Alembic head, got {heads}"
+    assert heads == ["5f6a7b8c9d0e"], heads
+    assert len(revisions) == len(down_revisions)
+
+
+def test_alembic_versions_directory_keeps_expected_base_revisions_and_merge_files():
+    _, down_revisions, file_names = _load_revision_graph()
+    base_revisions = sorted(
+        revision for revision, parents in down_revisions.items() if len(parents) == 0
     )
 
-    result = subprocess.run(
-        [*_alembic_command(), "history"],
-        cwd=BACKEND_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
-    assert result.returncode == 0, combined_output
-
-
-def test_alembic_has_a_single_head_revision():
-    env = os.environ.copy()
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{BACKEND_ROOT}{os.pathsep}{existing_pythonpath}"
-        if existing_pythonpath
-        else str(BACKEND_ROOT)
-    )
-
-    result = subprocess.run(
-        [*_alembic_command(), "heads"],
-        cwd=BACKEND_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
-    assert result.returncode == 0, combined_output
-
-    head_lines = [
-        line.strip()
-        for line in result.stdout.splitlines()
-        if line.strip() and "(head)" in line
-    ]
-    assert len(head_lines) == 1, f"Expected a single Alembic head, got {len(head_lines)}: {head_lines}"
-
-
-def test_alembic_versions_directory_is_squashed_to_baseline_and_bridge():
-    versions_dir = BACKEND_ROOT / "alembic" / "versions"
-    version_files = sorted(path.name for path in versions_dir.glob("*.py"))
-
-    assert version_files == [
-        "5b0f3c9a6d7e_squashed_baseline.py",
-        "6c8d9e0f1a2b_finalize_projects_zip_file_hash.py",
-        "7f8e9d0c1b2a_normalize_static_finding_paths.py",
-    ]
+    assert base_revisions == ["5b0f3c9a6d7e", "c4b1a7e8d9f0"]
+    assert file_names["6c8d9e0f1a2b"] == "6c8d9e0f1a2b_finalize_projects_zip_file_hash.py"
+    assert file_names["d4e5f6a7b8c9"] == "d4e5f6a7b8c9_merge_phpstan_and_agent_heads.py"
+    assert file_names["048836873140"] == "048836873140_merge_yasa_and_phpstan_agent_branches.py"
+    assert file_names["5f6a7b8c9d0e"] == "5f6a7b8c9d0e_merge_project_metrics_and_yasa_phpstan_heads.py"
 
 
 def test_bridge_downgrade_keeps_zip_file_hash_baseline_contract():

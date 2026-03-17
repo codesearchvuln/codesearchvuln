@@ -1,4 +1,5 @@
 import { getEstimatedTaskProgressPercent } from "@/features/tasks/services/taskProgress";
+import { resolveStaticScanGroupStatus } from "@/features/tasks/services/staticScanGrouping";
 import {
 	normalizeStaticAnalysisSeverity,
 	type NormalizedSeverity,
@@ -25,10 +26,40 @@ export interface StaticAnalysisSummaryTaskLike
   scan_duration_ms?: number | null;
   total_findings?: number | null;
   files_scanned?: number | null;
+  error_message?: string | null;
+  diagnostics_summary?: string | null;
 }
 
 export interface StaticAnalysisProgressSummary {
   progressPercent: number;
+}
+
+export type StaticAnalysisAggregateStatus =
+  | "completed"
+  | "running"
+  | "pending"
+  | "failed"
+  | "interrupted";
+
+export interface StaticAnalysisFailureReason {
+  engine: Engine;
+  engineLabel: string;
+  message: string;
+}
+
+export interface StaticAnalysisEngineStatus {
+  engine: Engine;
+  engineLabel: string;
+  status: string;
+  statusLabel: string;
+}
+
+export interface StaticAnalysisTaskStatusSummary {
+  aggregateStatus: StaticAnalysisAggregateStatus;
+  aggregateLabel: string;
+  progressHint: string;
+  engineStatuses: StaticAnalysisEngineStatus[];
+  failureReasons: StaticAnalysisFailureReason[];
 }
 
 export type UnifiedFindingRow = {
@@ -235,6 +266,98 @@ function normalizeStaticAnalysisStatus(status?: string | null): string {
   return String(status || "").trim().toLowerCase();
 }
 
+function getEngineLabel(engine: Engine): string {
+  if (engine === "opengrep") return "Opengrep";
+  if (engine === "gitleaks") return "Gitleaks";
+  if (engine === "bandit") return "Bandit";
+  if (engine === "phpstan") return "PHPStan";
+  return "YASA";
+}
+
+function getStaticAnalysisStatusLabel(status: string): string {
+  const normalized = normalizeStaticAnalysisStatus(status);
+  if (normalized === "completed") return "任务完成";
+  if (normalized === "running") return "任务运行中";
+  if (normalized === "failed") return "任务失败";
+  if (normalized === "pending") return "任务待处理";
+  if (
+    normalized === "cancelled" ||
+    normalized === "interrupted" ||
+    normalized === "aborted"
+  ) {
+    return "任务中止";
+  }
+  return normalized || "未知状态";
+}
+
+export function getStaticAnalysisStatusBadgeClassName(status: string): string {
+  const normalized = normalizeStaticAnalysisStatus(status);
+  if (normalized === "completed") return "cyber-badge-success";
+  if (normalized === "running" || normalized === "pending") return "cyber-badge-info";
+  if (normalized === "failed") return "cyber-badge-danger";
+  if (
+    normalized === "cancelled" ||
+    normalized === "interrupted" ||
+    normalized === "aborted"
+  ) {
+    return "cyber-badge-warning";
+  }
+  return "cyber-badge-muted";
+}
+
+export function getStaticAnalysisProgressAccentClassName(status: string): string {
+  const normalized = normalizeStaticAnalysisStatus(status);
+  if (normalized === "completed") return "[&>div]:bg-emerald-500";
+  if (normalized === "running" || normalized === "pending") {
+    return "[&>div]:bg-sky-500";
+  }
+  if (normalized === "failed") return "[&>div]:bg-rose-500";
+  if (
+    normalized === "cancelled" ||
+    normalized === "interrupted" ||
+    normalized === "aborted"
+  ) {
+    return "[&>div]:bg-amber-500";
+  }
+  return "[&>div]:bg-muted-foreground";
+}
+
+function buildStaticAnalysisProgressHint(
+  status: StaticAnalysisAggregateStatus,
+): string {
+  if (status === "completed") return "扫描已结束，全部引擎已完成";
+  if (status === "running") return "扫描进行中，仍有引擎正在执行";
+  if (status === "pending") return "扫描排队中，等待引擎启动";
+  if (status === "failed") return "扫描已结束，至少一个引擎失败";
+  return "扫描已结束，任务已中断";
+}
+
+function getStaticAnalysisFailureFallbackMessage(status: string): string {
+  return normalizeStaticAnalysisStatus(status) === "failed"
+    ? "任务已失败，请查看后端日志获取更多信息。"
+    : "任务已中断。";
+}
+
+function normalizeReasonText(value?: string | null): string | null {
+  const text = String(value || "").trim();
+  return text || null;
+}
+
+function resolveTaskFailureReason(
+  engine: Engine,
+  task: StaticAnalysisSummaryTaskLike,
+): string {
+  const errorMessage = normalizeReasonText(task.error_message);
+  if (errorMessage) return errorMessage;
+
+  if (engine === "yasa") {
+    const diagnosticsSummary = normalizeReasonText(task.diagnostics_summary);
+    if (diagnosticsSummary) return diagnosticsSummary;
+  }
+
+  return getStaticAnalysisFailureFallbackMessage(task.status);
+}
+
 function toStaticAnalysisTimestampMs(value?: string | null): number | null {
   const timestamp = new Date(String(value || "")).getTime();
   return Number.isFinite(timestamp) ? timestamp : null;
@@ -292,6 +415,68 @@ export function getStaticAnalysisTotalDisplayDurationMs(input: {
   );
 }
 
+export function buildStaticAnalysisTaskStatusSummary(input: {
+  opengrepTask: StaticAnalysisSummaryTaskLike | null;
+  gitleaksTask: StaticAnalysisSummaryTaskLike | null;
+  banditTask: StaticAnalysisSummaryTaskLike | null;
+  phpstanTask: StaticAnalysisSummaryTaskLike | null;
+  yasaTask?: StaticAnalysisSummaryTaskLike | null;
+}): StaticAnalysisTaskStatusSummary {
+  const yasaTask = input.yasaTask ?? null;
+  const engineEntries = [
+    { engine: "opengrep" as const, task: input.opengrepTask },
+    { engine: "gitleaks" as const, task: input.gitleaksTask },
+    { engine: "bandit" as const, task: input.banditTask },
+    { engine: "phpstan" as const, task: input.phpstanTask },
+    { engine: "yasa" as const, task: yasaTask },
+  ].filter(
+    (entry): entry is { engine: Engine; task: StaticAnalysisSummaryTaskLike } =>
+      Boolean(entry.task),
+  );
+
+  const aggregateStatus =
+    engineEntries.length > 0
+      ? resolveStaticScanGroupStatus({
+          opengrepTask: input.opengrepTask ?? undefined,
+          gitleaksTask: input.gitleaksTask ?? undefined,
+          banditTask: input.banditTask ?? undefined,
+          phpstanTask: input.phpstanTask ?? undefined,
+          yasaTask: yasaTask ?? undefined,
+        })
+      : "failed";
+
+  const engineStatuses = engineEntries.map(({ engine, task }) => ({
+    engine,
+    engineLabel: getEngineLabel(engine),
+    status: normalizeStaticAnalysisStatus(task.status),
+    statusLabel: getStaticAnalysisStatusLabel(task.status),
+  }));
+
+  const failureReasons = engineEntries
+    .filter(({ task }) => {
+      const normalized = normalizeStaticAnalysisStatus(task.status);
+      return (
+        normalized === "failed" ||
+        normalized === "cancelled" ||
+        normalized === "interrupted" ||
+        normalized === "aborted"
+      );
+    })
+    .map(({ engine, task }) => ({
+      engine,
+      engineLabel: getEngineLabel(engine),
+      message: resolveTaskFailureReason(engine, task),
+    }));
+
+  return {
+    aggregateStatus,
+    aggregateLabel: getStaticAnalysisStatusLabel(aggregateStatus),
+    progressHint: buildStaticAnalysisProgressHint(aggregateStatus),
+    engineStatuses,
+    failureReasons,
+  };
+}
+
 export function buildStaticAnalysisProgressSummary(input: {
   opengrepTask: StaticAnalysisProgressTaskLike | null;
   gitleaksTask: StaticAnalysisProgressTaskLike | null;
@@ -301,23 +486,38 @@ export function buildStaticAnalysisProgressSummary(input: {
   nowMs?: number;
 }): StaticAnalysisProgressSummary {
   const yasaTask = input.yasaTask ?? null;
-  const primaryTask =
-    input.opengrepTask ||
-    input.gitleaksTask ||
-    input.banditTask ||
-    input.phpstanTask ||
-    yasaTask ||
-    null;
-  if (!primaryTask) {
+  const tasks = [
+    input.opengrepTask,
+    input.gitleaksTask,
+    input.banditTask,
+    input.phpstanTask,
+    yasaTask,
+  ].filter(Boolean) as StaticAnalysisProgressTaskLike[];
+  if (tasks.length === 0) {
     return { progressPercent: 0 };
   }
+
+  const createdAt = [...tasks]
+    .map((task) => task.created_at)
+    .sort((a, b) => {
+      const left = toStaticAnalysisTimestampMs(a) ?? 0;
+      const right = toStaticAnalysisTimestampMs(b) ?? 0;
+      return left - right;
+    })[0];
+  const statusSummary = buildStaticAnalysisTaskStatusSummary({
+    opengrepTask: input.opengrepTask,
+    gitleaksTask: input.gitleaksTask,
+    banditTask: input.banditTask,
+    phpstanTask: input.phpstanTask,
+    yasaTask,
+  });
 
   return {
     progressPercent: getEstimatedTaskProgressPercent(
       {
-        status: primaryTask.status,
-        createdAt: primaryTask.created_at,
-        startedAt: primaryTask.created_at,
+        status: statusSummary.aggregateStatus,
+        createdAt,
+        startedAt: createdAt,
       },
       input.nowMs,
     ),
