@@ -28,6 +28,7 @@ from app.api.v1.endpoints.static_tasks_shared import (
 from app.models.project import Project
 from app.models.user import User
 from app.models.yasa import YasaFinding, YasaScanTask
+from app.services.yasa_runtime import build_yasa_scan_command
 from app.services.yasa_language import (
     YASA_SUPPORTED_LANGUAGES,
     resolve_yasa_language_from_programming_languages,
@@ -451,22 +452,16 @@ async def _execute_yasa_scan(
                     resolved_rule_config = default_rule_config
 
             report_dir = tempfile.mkdtemp(prefix=f"yasa_report_{task_id}_")
-            cmd = [
-                resolved_bin,
-                "--sourcePath",
-                full_target_path,
-                "--language",
-                normalized_language,
-                "--report",
-                report_dir,
-                "--checkerPackIds",
-                ",".join(packs),
-            ]
             checker_values = _split_csv(checker_ids)
-            if checker_values:
-                cmd.extend(["--checkerIds", ",".join(checker_values)])
-            if resolved_rule_config:
-                cmd.extend(["--ruleConfigFile", resolved_rule_config])
+            cmd = build_yasa_scan_command(
+                binary=resolved_bin,
+                source_path=full_target_path,
+                language=normalized_language,
+                report_dir=report_dir,
+                checker_pack_ids=packs,
+                checker_ids=checker_values,
+                rule_config_file=resolved_rule_config or None,
+            )
 
             timeout_seconds = int(getattr(settings, "YASA_TIMEOUT_SECONDS", 600) or 600)
             loop = asyncio.get_event_loop()

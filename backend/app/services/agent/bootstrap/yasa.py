@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
+from app.services.yasa_runtime import build_yasa_scan_command
 from app.services.yasa_language import resolve_yasa_language_profile
 
 from .base import StaticBootstrapFinding, StaticBootstrapScanResult, StaticBootstrapScanner
@@ -171,19 +172,14 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         binary = _resolve_yasa_binary()
         rule_config_file = self._build_rule_config()
         report_dir = tempfile.mkdtemp(prefix="yasa_bootstrap_")
-        cmd = [
-            binary,
-            "--sourcePath",
-            project_root,
-            "--language",
-            self.profile["language"],
-            "--report",
-            report_dir,
-            "--checkerPackIds",
-            self.profile["checker_pack"],
-        ]
-        if rule_config_file:
-            cmd.extend(["--ruleConfigFile", rule_config_file])
+        cmd = build_yasa_scan_command(
+            binary=binary,
+            source_path=project_root,
+            language=self.profile["language"],
+            report_dir=report_dir,
+            checker_pack_ids=[self.profile["checker_pack"]],
+            rule_config_file=rule_config_file,
+        )
 
         try:
             process_result = await asyncio.to_thread(
