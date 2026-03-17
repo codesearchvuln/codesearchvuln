@@ -137,7 +137,7 @@ sync_python_env_if_needed
 wait_for_db
 
 echo "Running database migrations..."
-"${VENV_DIR}/bin/alembic" upgrade head
+"${VENV_DIR}/bin/alembic" upgrade heads
 
 run_optional_resets
 

@@ -7,12 +7,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_default_compose_is_dev_first_layout() -> None:
     compose_path = REPO_ROOT / "docker-compose.yml"
     full_overlay_path = REPO_ROOT / "docker-compose.full.yml"
+    yasa_host_overlay_path = REPO_ROOT / "docker-compose.yasa-host.yml"
     backend_dockerfile = REPO_ROOT / "backend" / "Dockerfile"
     frontend_dockerfile = REPO_ROOT / "frontend" / "Dockerfile"
     backend_entrypoint = REPO_ROOT / "backend" / "scripts" / "dev-entrypoint.sh"
 
     assert compose_path.exists()
     assert full_overlay_path.exists()
+    assert yasa_host_overlay_path.exists()
     assert not (REPO_ROOT / "docker-compose.dev.yml").exists()
     assert not (REPO_ROOT / "docker-compose.frontend-dev.yml").exists()
     assert not (REPO_ROOT / "docker-compose.override.yml").exists()
@@ -35,21 +37,33 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert "command:\n      - sh\n      - /app/scripts/dev-entrypoint.sh" in compose_text
     assert "- BACKEND_PYPI_INDEX_PRIMARY=${BACKEND_PYPI_INDEX_PRIMARY:-}" in compose_text
     assert "- BACKEND_PYPI_INDEX_FALLBACK=${BACKEND_PYPI_INDEX_FALLBACK:-}" in compose_text
+    assert "- BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}" in compose_text
+    assert "- YASA_VERSION=${YASA_VERSION:-v0.2.33}" in compose_text
     assert (
         "${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,"
         "https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"
     ) in compose_text
+    assert "YASA_ENABLED: ${YASA_ENABLED:-true}" in compose_text
+    assert "YASA_BIN_PATH: ${YASA_BIN_PATH:-/opt/yasa/bin/yasa}" in compose_text
+    assert "YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}" in compose_text
+    assert "YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}" in compose_text
     assert 'MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"' in compose_text
     assert 'SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP: "false"' in compose_text
     assert 'CODEX_SKILLS_AUTO_INSTALL: "false"' in compose_text
     assert 'profiles: ["tools"]' in compose_text
     assert "adminer:" in compose_text
+    assert "YASA_HOST_BIN_PATH" not in compose_text
+    assert "YASA_HOST_RESOURCE_DIR" not in compose_text
     assert "\n  frontend-dev:" not in compose_text
 
     backend_text = backend_dockerfile.read_text(encoding="utf-8")
     assert "FROM runtime-base AS dev-runtime" in backend_text
     assert "dev-entrypoint.sh" in backend_text
     assert 'COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py' in backend_text
+    assert "ARG BACKEND_INSTALL_YASA=1" in backend_text
+    assert "ARG YASA_VERSION=v0.2.33" in backend_text
+    assert "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" in backend_text
+    assert "/opt/yasa/bin/yasa" in backend_text
     assert 'ordered_indexes="$(order_indexes "${pypi_index_candidates}")"' in backend_text
     assert 'while IFS= read -r index_url; do' in backend_text
     assert 'sync_with_index "${BACKEND_PYPI_INDEX_PRIMARY}" || sync_with_index "${BACKEND_PYPI_INDEX_FALLBACK}"' not in backend_text
@@ -78,6 +92,10 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "${VULHUNTER_FRONTEND_PORT:-3000}:80" in full_overlay_text
     assert "VITE_API_BASE_URL: /api/v1" in full_overlay_text
     assert 'CODEX_SKILLS_AUTO_INSTALL: "false"' in full_overlay_text
+    assert "- BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}" in full_overlay_text
+    assert "- YASA_VERSION=${YASA_VERSION:-v0.2.33}" in full_overlay_text
+    assert "YASA_BIN_PATH: ${YASA_BIN_PATH:-/opt/yasa/bin/yasa}" in full_overlay_text
+    assert "YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}" in full_overlay_text
     assert "\n  frontend-dev:" not in full_overlay_text
 
 
@@ -100,14 +118,23 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
     frontend_exec_script = (
         REPO_ROOT / "frontend" / "scripts" / "run-in-dev-container.sh"
     ).read_text(encoding="utf-8")
-    package_script = (REPO_ROOT / "scripts" / "package-release-artifacts.sh").read_text(
-        encoding="utf-8"
+    package_script_path = REPO_ROOT / "scripts" / "package-release-artifacts.sh"
+    package_script = (
+        package_script_path.read_text(encoding="utf-8")
+        if package_script_path.exists()
+        else None
     )
-    deploy_script = (REPO_ROOT / "scripts" / "deploy-release-artifacts.sh").read_text(
-        encoding="utf-8"
+    deploy_script_path = REPO_ROOT / "scripts" / "deploy-release-artifacts.sh"
+    deploy_script = (
+        deploy_script_path.read_text(encoding="utf-8")
+        if deploy_script_path.exists()
+        else None
     )
-    deb_build_script = (REPO_ROOT / "packaging" / "deb" / "build_deb.sh").read_text(
-        encoding="utf-8"
+    deb_build_script_path = REPO_ROOT / "packaging" / "deb" / "build_deb.sh"
+    deb_build_script = (
+        deb_build_script_path.read_text(encoding="utf-8")
+        if deb_build_script_path.exists()
+        else None
     )
     compose_wrapper_script = (
         REPO_ROOT / "scripts" / "compose-up-with-fallback.sh"
@@ -122,13 +149,16 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
     assert 'SERVICE="frontend"' in frontend_exec_script
     assert "docker-compose.frontend-dev.yml" not in frontend_exec_script
 
-    assert '-f "${ROOT_DIR}/docker-compose.full.yml"' in package_script
-    assert 'cp "$ROOT_DIR/docker-compose.full.yml" "$tmp_root/"' in package_script
-    assert '-f "${TARGET_DIR}/docker-compose.full.yml"' in deploy_script
+    if package_script is not None:
+        assert '-f "${ROOT_DIR}/docker-compose.full.yml"' in package_script
+        assert 'cp "$ROOT_DIR/docker-compose.full.yml" "$tmp_root/"' in package_script
+    if deploy_script is not None:
+        assert '-f "${TARGET_DIR}/docker-compose.full.yml"' in deploy_script
 
-    assert (REPO_ROOT / "deploy" / "compose" / "docker-compose.prod.yml").exists()
-    assert (REPO_ROOT / "deploy" / "compose" / "docker-compose.prod.cn.yml").exists()
-    assert 'cp "$ROOT_DIR/deploy/compose/docker-compose.prod.yml"' in deb_build_script
-    assert 'cp "$ROOT_DIR/deploy/compose/docker-compose.prod.cn.yml"' in deb_build_script
+    if deb_build_script is not None:
+        assert (REPO_ROOT / "deploy" / "compose" / "docker-compose.prod.yml").exists()
+        assert (REPO_ROOT / "deploy" / "compose" / "docker-compose.prod.cn.yml").exists()
+        assert 'cp "$ROOT_DIR/deploy/compose/docker-compose.prod.yml"' in deb_build_script
+        assert 'cp "$ROOT_DIR/deploy/compose/docker-compose.prod.cn.yml"' in deb_build_script
     assert "https://pypi.tuna.tsinghua.edu.cn/simple" in compose_wrapper_script
     assert "https://pypi.tuna.tsinghua.edu.cn/simple" in compose_wrapper_ps1

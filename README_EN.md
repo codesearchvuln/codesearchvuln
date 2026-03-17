@@ -139,6 +139,8 @@ docker compose -f deploy/compose/docker-compose.prod.cn.yml up -d
 - Backend Node/pnpm build now supports mirror-first + official fallback; override with `BACKEND_NPM_REGISTRY_PRIMARY`, `BACKEND_NPM_REGISTRY_FALLBACK`, and `BACKEND_PNPM_VERSION`.
 - Local Compose now disables pnpm optional dependencies by default (`BACKEND_PNPM_INSTALL_OPTIONAL=0`) to avoid long `node-llama-cpp` retry loops; set it to `1` if you require full optional dependencies.
 - Local Compose now skips CJK font installation by default (`BACKEND_INSTALL_CJK_FONTS=0`) to speed up builds; set it to `1` if you need Chinese font rendering.
+- Backend Docker now installs YASA by default (`BACKEND_INSTALL_YASA=1`, version controlled by `YASA_VERSION`). Default in-container paths are `YASA_BIN_PATH=/opt/yasa/bin/yasa` and `YASA_RESOURCE_DIR=/opt/yasa/resource`.
+- To override with a host-installed YASA, explicitly add `docker-compose.yasa-host.yml`: `docker compose -f docker-compose.yml -f docker-compose.yasa-host.yml up -d --build` (override paths via `YASA_HOST_BIN_PATH` / `YASA_HOST_RESOURCE_DIR`).
 - Running `docker compose up -d --build` directly does not include automatic mirror fallback logic.
 - GitHub source sync and task repo download/clone now use a two-step proxy chain by default: `https://gh-proxy.org` -> `https://v6.gh-proxy.org`.
 - Fallback to origin GitHub is disabled by default (`GIT_MIRROR_FALLBACK_TO_ORIGIN=false`); enable it only for troubleshooting.
@@ -167,6 +169,14 @@ BACKEND_PNPM_VERSION=9.15.4 \
 BACKEND_PNPM_INSTALL_OPTIONAL=0 \
 BACKEND_INSTALL_CJK_FONTS=0 \
 ./scripts/compose-up-with-fallback.sh
+```
+
+Optional host YASA override example:
+
+```bash
+YASA_HOST_BIN_PATH=/home/jy/.local/bin/yasa \
+YASA_HOST_RESOURCE_DIR=/home/jy/.local/share/yasa-engine/resource \
+docker compose -f docker-compose.yml -f docker-compose.yasa-host.yml up -d --build
 ```
 
 GitHub proxy chain example:

@@ -95,17 +95,17 @@ async def assert_database_schema_is_latest() -> None:
             }
         except Exception as exc:
             raise RuntimeError(
-                "数据库缺少迁移版本元数据（alembic_version），请先运行 alembic upgrade head"
+                "数据库缺少迁移版本元数据（alembic_version），请先运行 alembic upgrade heads"
             ) from exc
 
     if not current_versions:
-        raise RuntimeError("数据库未记录迁移版本，请先运行 alembic upgrade head")
+        raise RuntimeError("数据库未记录迁移版本，请先运行 alembic upgrade heads")
 
     if expected_heads and current_versions != expected_heads:
         raise RuntimeError(
             "数据库迁移版本与代码不一致："
             f"current={sorted(current_versions)} heads={sorted(expected_heads)}。"
-            "请运行 alembic upgrade head"
+            "请运行 alembic upgrade heads"
         )
 
 async def _run_daily_cache_cleanup(stop_event: asyncio.Event) -> None:

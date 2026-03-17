@@ -17,6 +17,8 @@ ARG BACKEND_PNPM_VERSION=9.15.4
 ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS=420
 ARG BACKEND_PNPM_INSTALL_OPTIONAL=0
 ARG BACKEND_INSTALL_CJK_FONTS=0
+ARG BACKEND_INSTALL_YASA=1
+ARG YASA_VERSION=v0.2.33
 FROM ${UV_IMAGE} AS uvbin
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS nodebase
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS builder
@@ -223,6 +225,8 @@ ENV OPENGREP_WRAPPER_BIN=/opt/opengrep/opengrep
 
 # 只安装运行时依赖（不需要 gcc）；CJK 字体可通过 BACKEND_INSTALL_CJK_FONTS 控制
 ARG BACKEND_INSTALL_CJK_FONTS
+ARG BACKEND_INSTALL_YASA
+ARG YASA_VERSION
 RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-backend-runtime-apt-cache,target=/var/cache/apt,sharing=locked \
     set -eux; \
@@ -316,6 +320,105 @@ RUN --mount=type=cache,id=vulhunter-backend-npm,target=/root/.npm \
     pnpm --version; \
     node --version; \
     npm --version
+
+# 默认内置安装 YASA（可通过 BACKEND_INSTALL_YASA=0 关闭）
+RUN --mount=type=cache,id=vulhunter-backend-yasa-src,target=/var/cache/vulhunter-yasa \
+    --mount=type=cache,id=vulhunter-backend-yasa-uast,target=/var/cache/vulhunter-yasa-uast \
+    --mount=type=cache,id=vulhunter-backend-yasa-npm,target=/root/.npm \
+    set -eux; \
+    if [ "${BACKEND_INSTALL_YASA}" != "1" ]; then \
+      echo "BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA}, skip built-in YASA install."; \
+      exit 0; \
+    fi; \
+    YASA_ROOT=/opt/yasa; \
+    YASA_ENGINE_DIR="${YASA_ROOT}/engine"; \
+    YASA_BIN_DIR="${YASA_ROOT}/bin"; \
+    mkdir -p "${YASA_ENGINE_DIR}" "${YASA_BIN_DIR}" /var/cache/vulhunter-yasa /var/cache/vulhunter-yasa-uast; \
+    YASA_TARBALL="/var/cache/vulhunter-yasa/yasa-engine-${YASA_VERSION}.tar.gz"; \
+    if [ ! -s "${YASA_TARBALL}" ]; then \
+      curl -fL \
+        --connect-timeout 8 \
+        --max-time 120 \
+        --retry 2 \
+        --retry-delay 2 \
+        "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" \
+        -o "${YASA_TARBALL}.tmp"; \
+      mv "${YASA_TARBALL}.tmp" "${YASA_TARBALL}"; \
+    fi; \
+    tar -xzf "${YASA_TARBALL}" -C /tmp; \
+    rm -rf "${YASA_ENGINE_DIR}"; \
+    mv "/tmp/YASA-Engine-${YASA_VERSION#v}" "${YASA_ENGINE_DIR}"; \
+    ARCH="$(uname -m)"; \
+    case "${ARCH}" in \
+      x86_64|amd64) \
+        YASA_RELEASE_ASSET="yasa-linux-x64.zip"; \
+        YASA_RELEASE_BIN="yasa-engine-linux-x64"; \
+        UAST_PLATFORM="linux-amd64" ;; \
+      aarch64|arm64) \
+        echo "YASA prebuilt release is unavailable for ${ARCH}; set BACKEND_INSTALL_YASA=0 or provide host override." >&2; \
+        exit 1 ;; \
+      *) echo "unsupported arch for YASA UAST binaries: ${ARCH}" >&2; exit 1 ;; \
+    esac; \
+    YASA_RELEASE_ZIP="/var/cache/vulhunter-yasa/${YASA_RELEASE_ASSET}"; \
+    if [ ! -s "${YASA_RELEASE_ZIP}" ]; then \
+      curl -fL \
+        --connect-timeout 8 \
+        --max-time 240 \
+        --retry 2 \
+        --retry-delay 2 \
+        "https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
+        -o "${YASA_RELEASE_ZIP}.tmp"; \
+      mv "${YASA_RELEASE_ZIP}.tmp" "${YASA_RELEASE_ZIP}"; \
+    fi; \
+    unzip -oq "${YASA_RELEASE_ZIP}" "${YASA_RELEASE_BIN}" -d /tmp/yasa-release; \
+    cp "/tmp/yasa-release/${YASA_RELEASE_BIN}" "${YASA_BIN_DIR}/yasa-engine.real"; \
+    chmod +x "${YASA_BIN_DIR}/yasa-engine.real"; \
+    mkdir -p "${YASA_ENGINE_DIR}/deps/uast4go" "${YASA_ENGINE_DIR}/deps/uast4py"; \
+    download_uast_bin() { \
+      bin_name="$1"; \
+      target="$2"; \
+      cache_file="/var/cache/vulhunter-yasa-uast/${bin_name}"; \
+      if [ ! -s "${cache_file}" ]; then \
+        curl -fL \
+          --connect-timeout 8 \
+          --max-time 120 \
+          --retry 2 \
+          --retry-delay 2 \
+          "https://github.com/antgroup/YASA-UAST/releases/latest/download/${bin_name}" \
+          -o "${cache_file}.tmp"; \
+        mv "${cache_file}.tmp" "${cache_file}"; \
+      fi; \
+      cp "${cache_file}" "${target}"; \
+      chmod +x "${target}"; \
+    }; \
+    download_uast_bin "uast4go-${UAST_PLATFORM}" "${YASA_ENGINE_DIR}/deps/uast4go/uast4go"; \
+    download_uast_bin "uast4py-${UAST_PLATFORM}" "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \
+    ln -sfn "${YASA_ENGINE_DIR}/resource" "${YASA_ROOT}/resource"; \
+    printf '%s\n' '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'ENGINE_BIN="/opt/yasa/bin/yasa-engine.real"' \
+      'if [[ ! -x "$ENGINE_BIN" ]]; then' \
+      '  echo "yasa-engine binary not found: $ENGINE_BIN" >&2' \
+      '  exit 127' \
+      'fi' \
+      'exec "$ENGINE_BIN" "$@"' \
+      > "${YASA_BIN_DIR}/yasa-engine"; \
+    chmod +x "${YASA_BIN_DIR}/yasa-engine"; \
+    printf '%s\n' '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'ENGINE_ROOT="/opt/yasa/engine"' \
+      'ENGINE="/opt/yasa/bin/yasa-engine"' \
+      'if [[ ! -x "$ENGINE" ]]; then' \
+      '  echo "YASA engine wrapper not found: $ENGINE" >&2' \
+      '  exit 127' \
+      'fi' \
+      '(cd "$ENGINE_ROOT" && "$ENGINE" "$@")' \
+      > "${YASA_BIN_DIR}/yasa"; \
+    chmod +x "${YASA_BIN_DIR}/yasa"; \
+    ln -sfn "${YASA_BIN_DIR}/yasa" /usr/local/bin/yasa; \
+    ln -sfn "${YASA_BIN_DIR}/yasa-engine" /usr/local/bin/yasa-engine; \
+    /usr/local/bin/yasa --version; \
+    test -d /opt/yasa/resource
 
 # ============================================
 # 多阶段构建 - MCP 运行时构建阶段

@@ -26,6 +26,8 @@ services:
         - BACKEND_PNPM_CMD_TIMEOUT_SECONDS=${BACKEND_PNPM_CMD_TIMEOUT_SECONDS:-420}
         - BACKEND_PNPM_INSTALL_OPTIONAL=${BACKEND_PNPM_INSTALL_OPTIONAL:-0}
         - BACKEND_INSTALL_CJK_FONTS=${BACKEND_INSTALL_CJK_FONTS:-0}
+        - BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}
+        - YASA_VERSION=${YASA_VERSION:-v0.2.33}
         - http_proxy=
         - https_proxy=
         - HTTP_PROXY=
@@ -47,6 +49,10 @@ services:
       AGENT_ENABLED: "true"
       SANDBOX_ENABLED: "true"
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-vulhunter/sandbox:latest}
+      YASA_ENABLED: ${YASA_ENABLED:-true}
+      YASA_BIN_PATH: ${YASA_BIN_PATH:-/opt/yasa/bin/yasa}
+      YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}
+      YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}
       MCP_ENABLED: "true"
       MCP_REQUIRE_ALL_READY_ON_STARTUP: "true"
       MCP_REQUIRED_RUNTIME_DOMAIN: stdio

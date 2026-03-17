@@ -170,6 +170,8 @@ powershell -ExecutionPolicy Bypass -File scripts\compose-up-with-fallback.ps1
 - 后端 Node/pnpm 构建支持镜像优先+官方回退，可覆盖：`BACKEND_NPM_REGISTRY_PRIMARY`、`BACKEND_NPM_REGISTRY_FALLBACK`、`BACKEND_PNPM_VERSION`。
 - 本地 Compose 默认关闭 pnpm optional 依赖安装（`BACKEND_PNPM_INSTALL_OPTIONAL=0`），可显著减少 `node-llama-cpp` 相关下载重试；如需完整 optional 依赖可设为 `1`。
 - 本地 Compose 默认跳过 CJK 字体安装（`BACKEND_INSTALL_CJK_FONTS=0`）以加快构建；如需中文字体渲染可设置为 `1`。
+- Backend Docker 现已默认内置安装 YASA（默认 `BACKEND_INSTALL_YASA=1`，版本由 `YASA_VERSION` 控制），容器内默认路径为 `YASA_BIN_PATH=/opt/yasa/bin/yasa`、`YASA_RESOURCE_DIR=/opt/yasa/resource`。
+- 如需覆盖为宿主机本地 YASA，可显式叠加：`docker compose -f docker-compose.yml -f docker-compose.yasa-host.yml up -d --build`（路径可用 `YASA_HOST_BIN_PATH` / `YASA_HOST_RESOURCE_DIR` 覆盖）。
 - 直接执行 `docker compose up -d --build` 不包含自动切换镜像源逻辑。
 - GitHub 源码同步与任务仓库下载/克隆默认走双代理：`https://gh-proxy.org` -> `https://v6.gh-proxy.org`。
 - 默认不回源 GitHub（`GIT_MIRROR_FALLBACK_TO_ORIGIN=false`）；仅在排障时建议临时开启回源。
@@ -201,6 +203,14 @@ BACKEND_PNPM_VERSION=9.15.4 \
 BACKEND_PNPM_INSTALL_OPTIONAL=0 \
 BACKEND_INSTALL_CJK_FONTS=0 \
 ./scripts/compose-up-with-fallback.sh
+```
+
+YASA 宿主机覆盖示例（可选）：
+
+```bash
+YASA_HOST_BIN_PATH=/home/jy/.local/bin/yasa \
+YASA_HOST_RESOURCE_DIR=/home/jy/.local/share/yasa-engine/resource \
+docker compose -f docker-compose.yml -f docker-compose.yasa-host.yml up -d --build
 ```
 
 GitHub 代理链路示例：
