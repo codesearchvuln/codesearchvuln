@@ -30,9 +30,7 @@ export interface ProjectsPageRowViewModel {
 	detailPath: string;
 	detailState: { from: string };
 	sizeText: string;
-	statusLabel: string;
-	statusClassName: string;
-	totalIssues: number;
+	vulnerabilityStats: ProjectSeverityBreakdown;
 	executionStats: {
 		completed: number;
 		running: number;

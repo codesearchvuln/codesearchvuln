@@ -117,10 +117,11 @@ export function buildProjectsPageViewModel(
 				name: project.name,
 				detailPath: `/projects/${project.id}`,
 				detailState: { from: projectDetailFrom },
-				sizeText: getProjectSizeText(projectLanguageStatsMap[project.id]),
-				statusLabel: "可用",
-				statusClassName: "cyber-badge-success",
-				totalIssues: summaryStats.totalIssues ?? 0,
+				sizeText: getProjectSizeText(
+					project.source_type,
+					projectZipMetaMap[project.id],
+				),
+				vulnerabilityStats: summaryStats.severityBreakdown,
 				executionStats: getProjectExecutionStats(projectTaskPool),
 				actions: {
 					canCreateScan: true,

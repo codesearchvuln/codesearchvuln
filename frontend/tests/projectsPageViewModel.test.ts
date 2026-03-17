@@ -107,7 +107,7 @@ test("projects view model utilities build project size text and execution stats"
 	assert.deepEqual(stats, { completed: 3, running: 2 });
 });
 
-test("projects view model exposes constant availability status and browse guards", async () => {
+test("projects view model exposes vulnerability stats and browse guards", async () => {
 	const builder = await importOrFail<any>(
 		"../src/pages/projects/lib/buildProjectsPageViewModel.ts",
 	);
@@ -219,8 +219,11 @@ test("projects view model exposes constant availability status and browse guards
 		],
 		projectPage: 1,
 		totalProjectPages: 1,
-		projectTaskPoolsMap: {},
-		projectLanguageStatsMap: {},
+		projectTaskPoolsMap,
+		projectZipMetaMap: {
+			p1: { has_file: true, file_size: 2_621_440 },
+			p2: { has_file: false },
+		},
 		projectDetailFrom: "/projects",
 		searchTerm: "",
 		searchPlaceholder: "搜索项目",
@@ -229,8 +232,8 @@ test("projects view model exposes constant availability status and browse guards
 	assert.deepEqual(
 		viewModel.rows.map((row: any) => ({
 			id: row.id,
-			statusLabel: row.statusLabel,
-			rowNumber: row.rowNumber,
+			sizeText: row.sizeText,
+			vulnerabilityStats: row.vulnerabilityStats,
 			canCreateScan: row.actions.canCreateScan,
 			canBrowseCode: row.actions.canBrowseCode,
 			browseCodePath: row.actions.browseCodePath,
@@ -239,8 +242,14 @@ test("projects view model exposes constant availability status and browse guards
 		[
 			{
 				id: "p1",
-				statusLabel: "可用",
-				rowNumber: undefined,
+				sizeText: "2.50 Mb",
+				vulnerabilityStats: {
+					critical: 1,
+					high: 4,
+					medium: 10,
+					low: 28,
+					total: 43,
+				},
 				canCreateScan: true,
 				canBrowseCode: true,
 				browseCodePath: "/projects/p1/code-browser",
@@ -248,8 +257,14 @@ test("projects view model exposes constant availability status and browse guards
 			},
 			{
 				id: "p2",
-				statusLabel: "可用",
-				rowNumber: undefined,
+				sizeText: "-",
+				vulnerabilityStats: {
+					critical: 0,
+					high: 0,
+					medium: 0,
+					low: 0,
+					total: 0,
+				},
 				canCreateScan: true,
 				canBrowseCode: false,
 				browseCodePath: "/projects/p2/code-browser",

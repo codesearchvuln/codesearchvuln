@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
 	Table,
 	TableBody,
@@ -21,26 +20,26 @@ const VULNERABILITY_COLUMNS = [
 	{
 		key: "critical",
 		label: "严重",
-		headClassName: "text-left text-rose-300",
-		cellClassName: "text-left font-semibold tabular-nums text-rose-300",
+		headClassName: "text-center text-rose-300",
+		cellClassName: "text-center font-semibold tabular-nums text-rose-300",
 	},
 	{
 		key: "high",
 		label: "高危",
-		headClassName: "text-left text-amber-300",
-		cellClassName: "text-left font-semibold tabular-nums text-amber-300",
+		headClassName: "text-center text-amber-300",
+		cellClassName: "text-center font-semibold tabular-nums text-amber-300",
 	},
 	{
 		key: "medium",
 		label: "中危",
-		headClassName: "text-left text-sky-300",
-		cellClassName: "text-left font-semibold tabular-nums text-sky-300",
+		headClassName: "text-center text-sky-300",
+		cellClassName: "text-center font-semibold tabular-nums text-sky-300",
 	},
 	{
 		key: "low",
 		label: "低危",
-		headClassName: "text-left text-emerald-300",
-		cellClassName: "text-left font-semibold tabular-nums text-emerald-300",
+		headClassName: "text-center text-emerald-300",
+		cellClassName: "text-center font-semibold tabular-nums text-emerald-300",
 	},
 ] as const;
 
@@ -52,12 +51,21 @@ export default function ProjectsTable({
 		<Table>
 			<TableHeader>
 				<TableRow>
-					<TableHead className="min-w-[180px]">项目名称</TableHead>
-					<TableHead className="min-w-[150px]">项目大小</TableHead>
-					<TableHead className="w-[120px]">状态</TableHead>
-					<TableHead className="w-[220px]">执行任务</TableHead>
-					<TableHead className="w-[120px]">发现漏洞</TableHead>
-					<TableHead className="min-w-[360px]">操作</TableHead>
+					<TableHead className="min-w-[180px]" rowSpan={2}>
+						项目名称
+					</TableHead>
+					<TableHead className="min-w-[150px]" rowSpan={2}>
+						项目大小
+					</TableHead>
+					<TableHead className="w-[220px]" rowSpan={2}>
+						执行任务
+					</TableHead>
+					<TableHead className="text-center" colSpan={4}>
+						发现漏洞
+					</TableHead>
+					<TableHead className="min-w-[360px]" rowSpan={2}>
+						操作
+					</TableHead>
 				</TableRow>
 			</TableHeader>
 			<TableBody>
