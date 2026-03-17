@@ -96,8 +96,8 @@ function formatRuleCweDisplayTitle(cwe?: string) {
 interface OpengrepRulesProps {
 	embedded?: boolean;
 	showEngineSelector?: boolean;
-	engineValue?: "opengrep" | "gitleaks" | "bandit" | "phpstan";
-	onEngineChange?: (value: "opengrep" | "gitleaks" | "bandit" | "phpstan") => void;
+	engineValue?: "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
+	onEngineChange?: (value: "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa") => void;
 }
 
 export default function OpengrepRules({
@@ -1294,7 +1294,8 @@ export default function OpengrepRules({
 													val === "opengrep" ||
 													val === "gitleaks" ||
 													val === "bandit" ||
-													val === "phpstan"
+													val === "phpstan" ||
+											val === "yasa"
 												) {
 													onEngineChange?.(val);
 												}
@@ -1308,6 +1309,7 @@ export default function OpengrepRules({
 												<SelectItem value="gitleaks">gitleaks</SelectItem>
 												<SelectItem value="bandit">bandit</SelectItem>
 												<SelectItem value="phpstan">phpstan</SelectItem>
+											<SelectItem value="yasa">yasa</SelectItem>
 											</SelectContent>
 										</Select>
 									</div>

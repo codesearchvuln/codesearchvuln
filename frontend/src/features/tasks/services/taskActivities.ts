@@ -12,6 +12,10 @@ import {
 	getPhpstanScanTasks,
 } from "@/shared/api/phpstan";
 import {
+	type YasaScanTask,
+	getYasaScanTasks,
+} from "@/shared/api/yasa";
+import {
 	getOpengrepScanTasks,
 	type OpengrepScanTask,
 } from "@/shared/api/opengrep";
@@ -226,6 +230,18 @@ export function mergeSeverityCounts(...counts: SeverityCounts[]): SeverityCounts
 	);
 }
 
+function buildYasaSeverityCounts(
+	task?: YasaScanTask | null,
+): SeverityCounts {
+	// YASA integration: dashboard/task活动口径将 yasa 发现全部归入 low(hint)。
+	return {
+		critical: 0,
+		high: 0,
+		medium: 0,
+		low: toNonNegativeInt(task?.total_findings),
+	};
+}
+
 export function getSeverityCountTotal(counts: SeverityCounts): number {
 	return counts.critical + counts.high + counts.medium + counts.low;
 }
@@ -235,6 +251,7 @@ function toRuleScanActivities(
 	gitleaksTasks: GitleaksScanTask[],
 	banditTasks: BanditScanTask[],
 	phpstanTasks: PhpstanScanTask[],
+	yasaTasks: YasaScanTask[],
 	resolveProjectName: (projectId: string) => string,
 ): TaskActivityItem[] {
 	// Multi-engine grouping: one activity item can contain any selected static engines.
@@ -246,6 +263,7 @@ function toRuleScanActivities(
 		gitleaksTasks,
 		banditTasks,
 		phpstanTasks,
+		yasaTasks,
 	});
 
 	return groups
@@ -254,7 +272,9 @@ function toRuleScanActivities(
 		const gitleaksTask = group.gitleaksTask;
 		const banditTask = group.banditTask;
 		const phpstanTask = group.phpstanTask;
-		const primaryTask = opengrepTask || gitleaksTask || banditTask || phpstanTask;
+		const yasaTask = group.yasaTask;
+		const primaryTask =
+			opengrepTask || gitleaksTask || banditTask || phpstanTask || yasaTask;
 		if (!primaryTask) {
 			return null;
 		}
@@ -273,14 +293,20 @@ function toRuleScanActivities(
 		if (phpstanTask) {
 			params.set("phpstanTaskId", phpstanTask.id);
 		}
-		if (!opengrepTask && gitleaksTask && !banditTask && !phpstanTask) {
+		if (yasaTask) {
+			params.set("yasaTaskId", yasaTask.id);
+		}
+		if (!opengrepTask && gitleaksTask && !banditTask && !phpstanTask && !yasaTask) {
 			params.set("tool", "gitleaks");
 		}
-		if (!opengrepTask && !gitleaksTask && banditTask && !phpstanTask) {
+		if (!opengrepTask && !gitleaksTask && banditTask && !phpstanTask && !yasaTask) {
 			params.set("tool", "bandit");
 		}
-		if (!opengrepTask && !gitleaksTask && !banditTask && phpstanTask) {
+		if (!opengrepTask && !gitleaksTask && !banditTask && phpstanTask && !yasaTask) {
 			params.set("tool", "phpstan");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && !phpstanTask && yasaTask) {
+			params.set("tool", "yasa");
 		}
 
 		const durationCandidates = [
@@ -288,6 +314,7 @@ function toRuleScanActivities(
 			gitleaksTask?.scan_duration_ms,
 			banditTask?.scan_duration_ms,
 			phpstanTask?.scan_duration_ms,
+			yasaTask?.scan_duration_ms,
 		];
 		const durationMs = durationCandidates.reduce<number | null>((total, value) => {
 			if (
@@ -305,17 +332,28 @@ function toRuleScanActivities(
 			buildGitleaksSeverityCounts(gitleaksTask),
 			buildBanditSeverityCounts(banditTask),
 			buildPhpstanSeverityCounts(phpstanTask),
+			buildYasaSeverityCounts(yasaTask),
 		);
 
-		const candidateStatuses = [opengrepTask, gitleaksTask, banditTask, phpstanTask]
+		const candidateStatuses = [
+			opengrepTask,
+			gitleaksTask,
+			banditTask,
+			phpstanTask,
+			yasaTask,
+		]
 			.map((task) => normalizeStatus(task?.status))
 			.filter(Boolean);
 		const hasRunningStatus = candidateStatuses.some(
 			(status) => status === "running" || status === "pending",
 		);
-		const latestUpdatedAt = [opengrepTask, gitleaksTask, banditTask, phpstanTask].reduce<
-			string | null
-		>((latest, task) => {
+		const latestUpdatedAt = [
+			opengrepTask,
+			gitleaksTask,
+			banditTask,
+			phpstanTask,
+			yasaTask,
+		].reduce<string | null>((latest, task) => {
 			const current = task?.updated_at || null;
 			if (!current) return latest;
 			if (!latest) return current;
@@ -334,7 +372,8 @@ function toRuleScanActivities(
 				opengrepTask?.name ||
 					gitleaksTask?.name ||
 					banditTask?.name ||
-					phpstanTask?.name,
+					phpstanTask?.name ||
+					yasaTask?.name,
 			),
 			status: resolveStaticScanGroupStatus(group),
 			gitleaksEnabled: Boolean(gitleaksTask),
@@ -382,13 +421,14 @@ export async function fetchTaskActivities(
 	projects: Project[],
 	limit = 100,
 ): Promise<TaskActivityItem[]> {
-	const [agentTasks, opengrepTasks, gitleaksTasks, banditTasks, phpstanTasks] =
+	const [agentTasks, opengrepTasks, gitleaksTasks, banditTasks, phpstanTasks, yasaTasks] =
 		await Promise.all([
 		getAgentTasks({ limit }),
 		getOpengrepScanTasks({ limit }),
 		getGitleaksScanTasks({ limit }),
 		getBanditScanTasks({ limit }),
 		getPhpstanScanTasks({ limit }),
+		getYasaScanTasks({ limit }),
 	]);
 
 	const projectNameMap = mapProjectNames(projects);
@@ -401,6 +441,7 @@ export async function fetchTaskActivities(
 			gitleaksTasks,
 			banditTasks,
 			phpstanTasks,
+			yasaTasks,
 			resolveProjectName,
 		),
 		...toAgentActivities(agentTasks, resolveProjectName),
@@ -508,7 +549,7 @@ export function getTaskStatusClassName(status: string): string {
 	if (status === "completed") {
 		return "bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40";
 	}
-	if (status === "running") {
+	if (status === "running" || status === "pending") {
 		return "bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40";
 	}
 	if (status === "failed") {
@@ -522,7 +563,7 @@ export function getTaskStatusClassName(status: string): string {
 
 export function getTaskStatusBadgeClassName(status: string): string {
 	if (status === "completed") return "cyber-badge-success";
-	if (status === "running") return "cyber-badge-info";
+	if (status === "running" || status === "pending") return "cyber-badge-info";
 	if (status === "failed") return "cyber-badge-danger";
 	if (INTERRUPTED_STATUSES.has(status)) return "cyber-badge-warning";
 	return "cyber-badge-muted";
@@ -530,7 +571,7 @@ export function getTaskStatusBadgeClassName(status: string): string {
 
 export function getTaskProgressBarClassName(status: string): string {
 	if (status === "completed") return "bg-emerald-400";
-	if (status === "running") return "bg-sky-400";
+	if (status === "running" || status === "pending") return "bg-sky-400";
 	if (status === "failed") return "bg-rose-400";
 	if (INTERRUPTED_STATUSES.has(status)) return "bg-orange-400";
 	return "bg-muted-foreground";
@@ -671,7 +712,7 @@ export function summarizeTaskActivities(
 				acc.hybridTotal += 1;
 			}
 
-			if (activity.status === "running") acc.running += 1;
+			if (activity.status === "running" || activity.status === "pending") acc.running += 1;
 			else if (activity.status === "completed") acc.completed += 1;
 			else if (activity.status === "failed") acc.failed += 1;
 			else if (INTERRUPTED_STATUSES.has(activity.status)) acc.interrupted += 1;
@@ -698,7 +739,7 @@ export function summarizeTaskStatus(
 			acc.total += 1;
 			if (activity.status === "completed") {
 				acc.completed += 1;
-			} else if (activity.status === "running") {
+			} else if (activity.status === "running" || activity.status === "pending") {
 				acc.running += 1;
 			}
 			return acc;

@@ -213,6 +213,12 @@ class Settings(BaseSettings):
     POC_TRIGGER_CHAIN_MAX_NODES: int = 80
     POC_TRIGGER_CHAIN_LLM_FALLBACK: bool = True
 
+    # YASA static engine
+    YASA_ENABLED: bool = True
+    YASA_BIN_PATH: str = "yasa"
+    YASA_RESOURCE_DIR: Optional[str] = None
+    YASA_TIMEOUT_SECONDS: int = 600
+
     model_config = SettingsConfigDict(
         case_sensitive=True,
         env_file=".env",

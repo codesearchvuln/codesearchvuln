@@ -4,10 +4,11 @@ import OpengrepRules from "@/pages/OpengrepRules";
 import GitleaksRules from "@/pages/GitleaksRules";
 import BanditRules from "@/pages/BanditRules";
 import PhpstanRules from "@/pages/PhpstanRules";
+import YasaRules from "@/pages/YasaRules";
 
-type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan";
+type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
 
-const ENGINE_TABS: EngineTab[] = ["opengrep", "gitleaks", "bandit", "phpstan"];
+const ENGINE_TABS: EngineTab[] = ["opengrep", "gitleaks", "bandit", "phpstan", "yasa"];
 
 export default function ScanConfigEngines() {
 	const [searchParams, setSearchParams] = useSearchParams();
@@ -55,8 +56,14 @@ export default function ScanConfigEngines() {
 							engineValue={currentTab}
 							onEngineChange={handleEngineChange}
 						/>
-					) : (
+					) : currentTab === "phpstan" ? (
 						<PhpstanRules
+							showEngineSelector
+							engineValue={currentTab}
+							onEngineChange={handleEngineChange}
+						/>
+					) : (
+						<YasaRules
 							showEngineSelector
 							engineValue={currentTab}
 							onEngineChange={handleEngineChange}

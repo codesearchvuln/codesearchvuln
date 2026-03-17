@@ -17,6 +17,13 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
 	Search,
 	Upload,
 	Package,
@@ -36,6 +43,7 @@ import {
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { createBanditScanTask } from "@/shared/api/bandit";
 import { createPhpstanScanTask } from "@/shared/api/phpstan";
+import { createYasaScanTask } from "@/shared/api/yasa";
 import {
 	getOpengrepActiveRules,
 	setOpengrepActiveRules,
@@ -57,6 +65,12 @@ import {
 	extractCreateScanTaskApiErrorMessage,
 	stripScanArchiveSuffix,
 } from "./create-scan-task/utils";
+import {
+	getYasaUnsupportedLanguageMessage,
+	parseYasaLanguageOption,
+	resolveYasaLanguageFromProgrammingLanguages,
+	type YasaLanguageOption,
+} from "@/shared/utils/yasaLanguage";
 
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import { isZipProject } from "@/shared/utils/projectUtils";
@@ -118,7 +132,9 @@ export default function CreateScanTaskDialog({
 		gitleaks: false,
 		bandit: false,
 		phpstan: false,
+		yasa: false,
 	});
+	const [yasaLanguage, setYasaLanguage] = useState<YasaLanguageOption>("auto");
 	const [staticRules, setStaticRules] = useState<OpengrepRule[]>([]);
 	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
 
@@ -179,7 +195,8 @@ export default function CreateScanTaskDialog({
 			setShowAdvanced(false);
 			setSelectedRuleIds([]);
 			setScanMode(initialScanMode || "agent");
-			setStaticTools({ opengrep: true, gitleaks: false, bandit: false, phpstan: false });
+			setStaticTools({ opengrep: true, gitleaks: false, bandit: false, phpstan: false, yasa: false });
+			setYasaLanguage("auto");
 			setSourceMode("existing");
 			setNewProjectName("");
 			setNewProjectFile(null);
@@ -254,13 +271,15 @@ export default function CreateScanTaskDialog({
 	const createStaticScanTasksForProject = async (
 		projectId: string,
 		projectName: string,
+		programmingLanguages?: unknown,
 	) => {
 		// PHPStan integration: enforce 4-engine minimum selection check.
 		if (
 			!staticTools.opengrep &&
 			!staticTools.gitleaks &&
 			!staticTools.bandit &&
-			!staticTools.phpstan
+			!staticTools.phpstan &&
+			!staticTools.yasa
 		) {
 			throw new Error("请选择至少一个静态分析工具");
 		}
@@ -269,6 +288,32 @@ export default function CreateScanTaskDialog({
 		let gitleaksTask: { id: string } | null = null;
 		let banditTask: { id: string } | null = null;
 		let phpstanTask: { id: string } | null = null;
+		let yasaTask: { id: string } | null = null;
+		const autoResolvedYasaLanguage = resolveYasaLanguageFromProgrammingLanguages(
+			programmingLanguages,
+		);
+		const requestedYasaLanguage =
+			yasaLanguage !== "auto" ? yasaLanguage : autoResolvedYasaLanguage;
+		let shouldRunYasa = staticTools.yasa;
+		if (shouldRunYasa && !requestedYasaLanguage) {
+			shouldRunYasa = false;
+			toast.info(
+				"YASA 已跳过：未检测到可支持语言（支持 python/javascript/typescript/golang/java）",
+			);
+		}
+		if (
+			!staticTools.opengrep &&
+			!staticTools.gitleaks &&
+			!staticTools.bandit &&
+			!staticTools.phpstan &&
+			!shouldRunYasa
+		) {
+			throw new Error(
+				`${getYasaUnsupportedLanguageMessage(
+					typeof programmingLanguages === "string" ? programmingLanguages : undefined,
+				)}，请至少启用一个其他扫描引擎`,
+			);
+		}
 		const staticBatchId = createStaticScanBatchId();
 
 		if (staticTools.opengrep) {
@@ -357,9 +402,24 @@ export default function CreateScanTaskDialog({
 				target_path: ".",
 			});
 		}
+		if (shouldRunYasa) {
+			yasaTask = await createYasaScanTask({
+				project_id: projectId,
+				name: appendStaticScanBatchMarker(
+					`静态分析-YASA-${projectName}`,
+					staticBatchId,
+				),
+				target_path: ".",
+				language: requestedYasaLanguage || undefined,
+			});
+		}
 
 		const primaryTaskId =
-			opengrepTask?.id || gitleaksTask?.id || banditTask?.id || phpstanTask?.id;
+			opengrepTask?.id ||
+			gitleaksTask?.id ||
+			banditTask?.id ||
+			phpstanTask?.id ||
+			yasaTask?.id;
 		if (!primaryTaskId) {
 			throw new Error("静态分析任务创建失败");
 		}
@@ -377,14 +437,20 @@ export default function CreateScanTaskDialog({
 		if (phpstanTask) {
 			params.set("phpstanTaskId", phpstanTask.id);
 		}
-		if (!opengrepTask && !banditTask && !phpstanTask && gitleaksTask) {
+		if (yasaTask) {
+			params.set("yasaTaskId", yasaTask.id);
+		}
+		if (!opengrepTask && !banditTask && !phpstanTask && !yasaTask && gitleaksTask) {
 			params.set("tool", "gitleaks");
 		}
-		if (!opengrepTask && !gitleaksTask && !phpstanTask && banditTask) {
+		if (!opengrepTask && !gitleaksTask && !phpstanTask && !yasaTask && banditTask) {
 			params.set("tool", "bandit");
 		}
-		if (!opengrepTask && !gitleaksTask && !banditTask && phpstanTask) {
+		if (!opengrepTask && !gitleaksTask && !banditTask && !yasaTask && phpstanTask) {
 			params.set("tool", "phpstan");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && !phpstanTask && yasaTask) {
+			params.set("tool", "yasa");
 		}
 
 		return {
@@ -428,6 +494,8 @@ export default function CreateScanTaskDialog({
 									bandit_enabled: false,
 									gitleaks_enabled: false,
 									phpstan_enabled: false,
+									yasa_enabled: false,
+									yasa_language: "auto",
 								},
 							},
 							target_files:
@@ -450,6 +518,7 @@ export default function CreateScanTaskDialog({
 					const staticResult = await createStaticScanTasksForProject(
 						createdProject.id,
 						createdProject.name,
+						createdProject.programming_languages,
 					);
 					onOpenChange(false);
 					onTaskCreated();
@@ -487,6 +556,8 @@ export default function CreateScanTaskDialog({
 							bandit_enabled: false,
 							gitleaks_enabled: false,
 							phpstan_enabled: false,
+							yasa_enabled: false,
+							yasa_language: "auto",
 						},
 					},
 					exclude_patterns: excludePatterns,
@@ -516,6 +587,7 @@ export default function CreateScanTaskDialog({
 			const staticResult = await createStaticScanTasksForProject(
 				selectedProject.id,
 				selectedProject.name,
+				selectedProject.programming_languages,
 			);
 			onOpenChange(false);
 			onTaskCreated();
@@ -540,48 +612,51 @@ export default function CreateScanTaskDialog({
 	};
 
 		const canStart = useMemo(() => {
-			if (sourceMode === "upload") {
-				if (!newProjectName.trim() || !newProjectFile) return false;
-				if (scanMode === "static") {
-					return (
-						staticTools.opengrep ||
-						staticTools.gitleaks ||
-						staticTools.bandit ||
-						staticTools.phpstan
-					);
-				}
-				return true;
-			}
-			if (!selectedProject) return false;
+		if (sourceMode === "upload") {
+			if (!newProjectName.trim() || !newProjectFile) return false;
 			if (scanMode === "static") {
 				return (
-					isZipProject(selectedProject) &&
+					staticTools.opengrep ||
+					staticTools.gitleaks ||
+					staticTools.bandit ||
+					staticTools.phpstan ||
+					staticTools.yasa
+				);
+			}
+			return true;
+		}
+		if (!selectedProject) return false;
+		if (scanMode === "static") {
+			return (
+				isZipProject(selectedProject) &&
 				!!zipState.storedZipInfo?.has_file &&
 				(staticTools.opengrep ||
 					staticTools.gitleaks ||
 					staticTools.bandit ||
-					staticTools.phpstan)
+					staticTools.phpstan ||
+					staticTools.yasa)
 			);
 		}
-			if (!isZipProject(selectedProject)) return false;
-			const ready =
-				(zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
-				!!zipState.zipFile;
-			if (!ready) return false;
-			return true;
-		}, [
-			sourceMode,
-			newProjectName,
-			newProjectFile,
-			selectedProject,
-			zipState,
-			scanMode,
-			effectiveTargetFiles,
-			staticTools.opengrep,
-			staticTools.gitleaks,
-			staticTools.bandit,
-			staticTools.phpstan,
-		]);
+		if (!isZipProject(selectedProject)) return false;
+		const ready =
+			(zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
+			!!zipState.zipFile;
+		if (!ready) return false;
+		return true;
+	}, [
+		sourceMode,
+		newProjectName,
+		newProjectFile,
+		selectedProject,
+		zipState,
+		scanMode,
+		effectiveTargetFiles,
+		staticTools.opengrep,
+		staticTools.gitleaks,
+		staticTools.bandit,
+		staticTools.phpstan,
+		staticTools.yasa,
+	]);
 
 	return (
 		<>
@@ -739,17 +814,52 @@ export default function CreateScanTaskDialog({
 						)}
 
 						{/* 扫描模式选择 */}
-							{(sourceMode === "upload" || selectedProject) && (
-								<AgentModeSelector
-									value={scanMode}
-									onChange={setScanMode}
+						{(sourceMode === "upload" || selectedProject) && (
+							<AgentModeSelector
+								value={scanMode}
+								onChange={setScanMode}
 								disabled={creating}
 								staticTools={staticTools}
 								onStaticToolsChange={setStaticTools}
-								/>
-							)}
+							/>
+						)}
+						{scanMode === "static" && staticTools.yasa && (
+							<div className="space-y-2 border border-border rounded p-3 bg-muted/30">
+								<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+									YASA 语言
+								</Label>
+								<Select
+									value={yasaLanguage}
+									onValueChange={(value) =>
+										setYasaLanguage(parseYasaLanguageOption(value))
+									}
+								>
+									<SelectTrigger className="h-9 cyber-input max-w-[240px]">
+										<SelectValue placeholder="选择语言" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="auto">自动识别</SelectItem>
+										<SelectItem value="python">python</SelectItem>
+										<SelectItem value="javascript">javascript</SelectItem>
+										<SelectItem value="typescript">typescript</SelectItem>
+										<SelectItem value="golang">golang</SelectItem>
+										<SelectItem value="java">java</SelectItem>
+									</SelectContent>
+								</Select>
+								{yasaLanguage === "auto" &&
+									!resolveYasaLanguageFromProgrammingLanguages(
+										sourceMode === "existing"
+											? selectedProject?.programming_languages
+											: undefined,
+									) && (
+										<p className="text-xs text-amber-300">
+											YASA 将自动跳过（不影响其它引擎）：未检测到可支持语言
+										</p>
+									)}
+							</div>
+						)}
 
-							{/* 配置区域 */}
+						{/* 配置区域 */}
 						{sourceMode === "existing" && selectedProject && (
 							<div className="space-y-4">
 								<span className="text-sm font-mono font-bold uppercase text-muted-foreground">

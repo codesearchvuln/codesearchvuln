@@ -1,7 +1,7 @@
 import type { AgentFinding } from "@/shared/api/agentTasks";
 
 export type FindingSource = "static" | "agent";
-export type StaticFindingEngine = "opengrep" | "gitleaks" | "bandit" | "phpstan";
+export type StaticFindingEngine = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
 
 export type FindingDetailLocationState = {
 	fromTaskDetail: true;
@@ -29,7 +29,8 @@ export function buildFindingDetailPath(params: {
 		engine !== "opengrep" &&
 		engine !== "gitleaks" &&
 		engine !== "bandit" &&
-		engine !== "phpstan"
+		engine !== "phpstan" &&
+		engine !== "yasa"
 	) {
 		return basePath;
 	}

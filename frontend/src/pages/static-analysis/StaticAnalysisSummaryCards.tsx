@@ -6,6 +6,7 @@ import type { GitleaksScanTask } from "@/shared/api/gitleaks";
 import type { OpengrepScanTask } from "@/shared/api/opengrep";
 import type { BanditScanTask } from "@/shared/api/bandit";
 import type { PhpstanScanTask } from "@/shared/api/phpstan";
+import type { YasaScanTask } from "@/shared/api/yasa";
 
 import type { Engine } from "./viewModel";
 import {
@@ -21,6 +22,7 @@ interface StaticAnalysisSummaryCardsProps {
   gitleaksTask: GitleaksScanTask | null;
   banditTask: BanditScanTask | null;
   phpstanTask: PhpstanScanTask | null;
+  yasaTask: YasaScanTask | null;
   enabledEngines: Engine[];
 }
 
@@ -29,14 +31,15 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
   gitleaksTask,
   banditTask,
   phpstanTask,
+  yasaTask,
   enabledEngines,
 }: StaticAnalysisSummaryCardsProps) {
   const shouldTickClock = useMemo(
     () =>
-      [opengrepTask, gitleaksTask, banditTask, phpstanTask].some((task) =>
+      [opengrepTask, gitleaksTask, banditTask, phpstanTask, yasaTask].some((task) =>
         isStaticAnalysisPollableStatus(task?.status),
       ),
-    [banditTask, gitleaksTask, opengrepTask, phpstanTask],
+    [banditTask, gitleaksTask, opengrepTask, phpstanTask, yasaTask],
   );
   const nowMs = useTaskClock({ enabled: shouldTickClock, intervalMs: 1000 });
 
@@ -47,9 +50,10 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
         gitleaksTask,
         banditTask,
         phpstanTask,
+        yasaTask,
         nowMs,
       }).progressPercent,
-    [banditTask, gitleaksTask, nowMs, opengrepTask, phpstanTask],
+    [banditTask, gitleaksTask, nowMs, opengrepTask, phpstanTask, yasaTask],
   );
 
   const totalScanDurationMs = useMemo(
@@ -59,9 +63,10 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
         gitleaksTask,
         banditTask,
         phpstanTask,
+        yasaTask,
         nowMs,
       }),
-    [banditTask, gitleaksTask, nowMs, opengrepTask, phpstanTask],
+    [banditTask, gitleaksTask, nowMs, opengrepTask, phpstanTask, yasaTask],
   );
 
   const totalFindings = useMemo(
@@ -69,12 +74,14 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
       toStaticAnalysisSafeMetric(opengrepTask?.total_findings) +
       toStaticAnalysisSafeMetric(gitleaksTask?.total_findings) +
       toStaticAnalysisSafeMetric(banditTask?.total_findings) +
-      toStaticAnalysisSafeMetric(phpstanTask?.total_findings),
+      toStaticAnalysisSafeMetric(phpstanTask?.total_findings) +
+      toStaticAnalysisSafeMetric(yasaTask?.total_findings),
     [
       banditTask?.total_findings,
       gitleaksTask?.total_findings,
       opengrepTask?.total_findings,
       phpstanTask?.total_findings,
+      yasaTask?.total_findings,
     ],
   );
 
@@ -83,12 +90,14 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
       toStaticAnalysisSafeMetric(opengrepTask?.files_scanned) +
       toStaticAnalysisSafeMetric(gitleaksTask?.files_scanned) +
       toStaticAnalysisSafeMetric(banditTask?.files_scanned) +
-      toStaticAnalysisSafeMetric(phpstanTask?.files_scanned),
+      toStaticAnalysisSafeMetric(phpstanTask?.files_scanned) +
+      toStaticAnalysisSafeMetric(yasaTask?.files_scanned),
     [
       banditTask?.files_scanned,
       gitleaksTask?.files_scanned,
       opengrepTask?.files_scanned,
       phpstanTask?.files_scanned,
+      yasaTask?.files_scanned,
     ],
   );
 
@@ -136,7 +145,9 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
                   ? "Gitleaks"
                   : engine === "bandit"
                     ? "Bandit"
-                    : "PHPStan",
+                    : engine === "phpstan"
+                      ? "PHPStan"
+                      : "YASA",
             )
             .join(" / ") || "-"}
         </p>

@@ -200,6 +200,8 @@ export interface AgentStaticBootstrapScope {
   bandit_enabled?: boolean;
   gitleaks_enabled?: boolean;
   phpstan_enabled?: boolean;
+  yasa_enabled?: boolean;
+  yasa_language?: "python" | "javascript" | "typescript" | "golang" | "java" | "auto";
 }
 
 export interface AgentAuditScope extends Record<string, unknown> {

@@ -64,6 +64,10 @@ class Project(Base):
     phpstan_scan_tasks = relationship(
         "PhpstanScanTask", back_populates="project", cascade="all, delete-orphan"
     )
+    # YASA 静态扫描任务关系（新增）
+    yasa_scan_tasks = relationship(
+        "YasaScanTask", back_populates="project", cascade="all, delete-orphan"
+    )
 
 class ProjectMember(Base):
     __tablename__ = "project_members"

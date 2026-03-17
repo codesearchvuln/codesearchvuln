@@ -66,11 +66,12 @@ export default function StaticAnalysis() {
     const hasOtherExplicitEngineTaskId = Boolean(
       searchParams.get("gitleaksTaskId") ||
         searchParams.get("banditTaskId") ||
-        searchParams.get("phpstanTaskId"),
+        searchParams.get("phpstanTaskId") ||
+        searchParams.get("yasaTaskId"),
     );
     if (explicit) return explicit;
     if (hasOtherExplicitEngineTaskId) return "";
-    if (toolParam === "gitleaks" || toolParam === "bandit" || toolParam === "phpstan") {
+    if (toolParam === "gitleaks" || toolParam === "bandit" || toolParam === "phpstan" || toolParam === "yasa") {
       return "";
     }
     return taskId;
@@ -98,8 +99,15 @@ export default function StaticAnalysis() {
     return "";
   }, [searchParams, taskId, toolParam]);
 
+  const yasaTaskId = useMemo(() => {
+    const explicit = searchParams.get("yasaTaskId");
+    if (explicit) return explicit;
+    if (toolParam === "yasa") return taskId;
+    return "";
+  }, [searchParams, taskId, toolParam]);
+
   const hasEnabledEngine = Boolean(
-    opengrepTaskId || gitleaksTaskId || banditTaskId || phpstanTaskId,
+    opengrepTaskId || gitleaksTaskId || banditTaskId || phpstanTaskId || yasaTaskId,
   );
   const [engineFilter, setEngineFilter] = useState<EngineFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -113,10 +121,12 @@ export default function StaticAnalysis() {
     gitleaksTask,
     banditTask,
     phpstanTask,
+    yasaTask,
     opengrepFindings,
     gitleaksFindings,
     banditFindings,
     phpstanFindings,
+    yasaFindings,
     loadingInitial,
     loadingTask,
     loadingFindings,
@@ -131,12 +141,14 @@ export default function StaticAnalysis() {
     canInterruptGitleaks,
     canInterruptBandit,
     canInterruptPhpstan,
+    canInterruptYasa,
   } = useStaticAnalysisData({
     hasEnabledEngine,
     opengrepTaskId,
     gitleaksTaskId,
     banditTaskId,
     phpstanTaskId,
+    yasaTaskId,
   });
 
   const unifiedRows = useMemo(
@@ -146,10 +158,12 @@ export default function StaticAnalysis() {
         gitleaksFindings,
         banditFindings,
         phpstanFindings,
+        yasaFindings,
         opengrepTaskId,
         gitleaksTaskId,
         banditTaskId,
         phpstanTaskId,
+        yasaTaskId,
       }),
     [
       banditFindings,
@@ -159,6 +173,7 @@ export default function StaticAnalysis() {
       opengrepFindings,
       opengrepTaskId,
       phpstanFindings,
+      yasaFindings,
       phpstanTaskId,
     ],
   );
@@ -182,8 +197,9 @@ export default function StaticAnalysis() {
     if (gitleaksTaskId) engines.push("gitleaks");
     if (banditTaskId) engines.push("bandit");
     if (phpstanTaskId) engines.push("phpstan");
+    if (yasaTaskId) engines.push("yasa");
     return engines;
-  }, [banditTaskId, gitleaksTaskId, opengrepTaskId, phpstanTaskId]);
+  }, [banditTaskId, gitleaksTaskId, opengrepTaskId, phpstanTaskId, yasaTaskId]);
   const pageResetKey = `${engineFilter}:${statusFilter}:${severityFilter}:${confidenceFilter}`;
 
   useEffect(() => {
@@ -271,6 +287,16 @@ export default function StaticAnalysis() {
               中止 PHPStan
             </Button>
           ) : null}
+          {canInterruptYasa ? (
+            <Button
+              variant="outline"
+              className="cyber-btn-outline h-8"
+              onClick={() => setInterruptTarget("yasa")}
+            >
+              <Ban className="w-3.5 h-3.5 mr-1.5" />
+              中止 YASA
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             className="cyber-btn-outline h-8"
@@ -294,6 +320,7 @@ export default function StaticAnalysis() {
         gitleaksTask={gitleaksTask}
         banditTask={banditTask}
         phpstanTask={phpstanTask}
+        yasaTask={yasaTask}
         enabledEngines={enabledEngines}
       />
 
@@ -316,6 +343,7 @@ export default function StaticAnalysis() {
                 <SelectItem value="gitleaks">Gitleaks</SelectItem>
                 <SelectItem value="bandit">Bandit</SelectItem>
                 <SelectItem value="phpstan">PHPStan</SelectItem>
+                <SelectItem value="yasa">YASA</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -411,7 +439,9 @@ export default function StaticAnalysis() {
                   ? " Gitleaks "
                   : interruptTarget === "bandit"
                     ? " Bandit "
-                    : " PHPStan "}
+                    : interruptTarget === "yasa"
+                      ? " YASA "
+                      : " PHPStan "}
               扫描任务。中止后任务状态将更新为已中断。
             </AlertDialogDescription>
           </AlertDialogHeader>

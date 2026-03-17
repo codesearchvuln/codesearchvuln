@@ -19,7 +19,11 @@ from app.models.gitleaks import GitleaksScanTask
 from app.models.opengrep import OpengrepScanTask
 from app.models.bandit import BanditScanTask
 from app.models.phpstan import PhpstanScanTask
+from app.models.yasa import YasaScanTask
 from sqlalchemy.future import select
+from sqlalchemy import text
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -74,6 +78,36 @@ async def check_agent_services():
     return issues
 
 
+
+
+async def assert_database_schema_is_latest() -> None:
+    """Fail fast when DB migration version does not match Alembic head."""
+    backend_root = Path(__file__).resolve().parents[1]
+    alembic_cfg = AlembicConfig(str(backend_root / "alembic.ini"))
+    script = ScriptDirectory.from_config(alembic_cfg)
+    expected_heads = {str(item) for item in script.get_heads() if str(item).strip()}
+
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(text("SELECT version_num FROM alembic_version"))
+            current_versions = {
+                str(item).strip() for item in result.scalars().all() if str(item).strip()
+            }
+        except Exception as exc:
+            raise RuntimeError(
+                "数据库缺少迁移版本元数据（alembic_version），请先运行 alembic upgrade head"
+            ) from exc
+
+    if not current_versions:
+        raise RuntimeError("数据库未记录迁移版本，请先运行 alembic upgrade head")
+
+    if expected_heads and current_versions != expected_heads:
+        raise RuntimeError(
+            "数据库迁移版本与代码不一致："
+            f"current={sorted(current_versions)} heads={sorted(expected_heads)}。"
+            "请运行 alembic upgrade head"
+        )
+
 async def _run_daily_cache_cleanup(stop_event: asyncio.Event) -> None:
     """每日清理一次缓存，直到收到停止信号。"""
     while not stop_event.is_set():
@@ -111,6 +145,8 @@ RECOVERABLE_GITLEAKS_TASK_STATUSES = {"pending", "running"}
 RECOVERABLE_BANDIT_TASK_STATUSES = {"pending", "running"}
 # PHPStan interrupted recovery support
 RECOVERABLE_PHPSTAN_TASK_STATUSES = {"pending", "running"}
+# YASA interrupted recovery support
+RECOVERABLE_YASA_TASK_STATUSES = {"pending", "running"}
 
 
 def _mark_task_interrupted(task) -> bool:
@@ -143,6 +179,7 @@ async def recover_interrupted_tasks() -> dict[str, int]:
             "gitleaks": 0,
             "bandit": 0,
             "phpstan": 0,
+            "yasa": 0,
         }
 
         recovery_specs = [
@@ -154,6 +191,8 @@ async def recover_interrupted_tasks() -> dict[str, int]:
             (BanditScanTask, RECOVERABLE_BANDIT_TASK_STATUSES, "bandit"),
             # PHPStan interrupted recovery support
             (PhpstanScanTask, RECOVERABLE_PHPSTAN_TASK_STATUSES, "phpstan"),
+            # YASA interrupted recovery support
+            (YasaScanTask, RECOVERABLE_YASA_TASK_STATUSES, "yasa"),
         ]
 
         for model, recoverable_statuses, counter_key in recovery_specs:
@@ -167,13 +206,14 @@ async def recover_interrupted_tasks() -> dict[str, int]:
         if any(counts.values()):
             await db.commit()
             logger.warning(
-                "检测到上次中断遗留任务，已自动标记 interrupted：agent=%s, audit=%s, opengrep=%s, gitleaks=%s, bandit=%s, phpstan=%s",
+                "检测到上次中断遗留任务，已自动标记 interrupted：agent=%s, audit=%s, opengrep=%s, gitleaks=%s, bandit=%s, phpstan=%s, yasa=%s",
                 counts["agent"],
                 counts["audit"],
                 counts["opengrep"],
                 counts["gitleaks"],
                 counts["bandit"],
                 counts["phpstan"],
+                counts["yasa"],
             )
         else:
             await db.rollback()
@@ -211,19 +251,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"tiktoken 启动预热初始化失败: {e}")
 
+    # 迁移版本检查：不一致时拒绝启动，避免运行时因缺表导致 500。
+    await assert_database_schema_is_latest()
+    logger.info("  - 数据库迁移版本检查通过")
+
     # 初始化数据库（创建默认账户）
-    # 注意：需要先运行 alembic upgrade head 创建表结构
     try:
         async with AsyncSessionLocal() as db:
             await init_db(db)
         logger.info("  - 数据库初始化完成")
     except Exception as e:
-        # 表不存在时静默跳过，等待用户运行数据库迁移
-        error_msg = str(e)
-        if "does not exist" in error_msg or "UndefinedTableError" in error_msg:
-            logger.info("数据库表未创建，请先运行: alembic upgrade head")
-        else:
-            logger.warning(f"数据库初始化跳过: {e}")
+        logger.error(f"数据库初始化失败: {e}")
+        raise
 
     try:
         await recover_interrupted_tasks()

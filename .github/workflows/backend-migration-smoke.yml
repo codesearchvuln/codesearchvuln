@@ -1,0 +1,85 @@
+name: Backend Migration Smoke
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-migration-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-migration-smoke.yml"
+
+jobs:
+  migration-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vulhunter
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vulhunter"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Alembic upgrade head
+        working-directory: backend
+        env:
+          POSTGRES_SERVER: 127.0.0.1
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vulhunter
+        run: |
+          alembic upgrade head
+
+      - name: Verify Alembic current equals heads
+        working-directory: backend
+        env:
+          POSTGRES_SERVER: 127.0.0.1
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vulhunter
+        run: |
+          python - <<'PY'
+          import subprocess
+
+          current = subprocess.check_output(["alembic", "current"], text=True)
+          heads = subprocess.check_output(["alembic", "heads"], text=True)
+
+          current_revs = {
+              line.split()[0]
+              for line in current.splitlines()
+              if line and line[0].isalnum()
+          }
+          head_revs = {
+              line.split()[0]
+              for line in heads.splitlines()
+              if line and line[0].isalnum()
+          }
+
+          print("current:", sorted(current_revs))
+          print("heads:", sorted(head_revs))
+          if current_revs != head_revs:
+              raise SystemExit("Alembic current does not match heads")
+          PY

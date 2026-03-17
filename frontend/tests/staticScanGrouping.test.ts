@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildStaticScanGroups } from "../src/features/tasks/services/staticScanGrouping.ts";
+import {
+  buildStaticScanGroups,
+  resolveStaticScanGroupStatus,
+} from "../src/features/tasks/services/staticScanGrouping.ts";
 import { appendStaticScanBatchMarker } from "../src/shared/utils/staticScanBatch.ts";
 
 test("groups engines with same static batch id", () => {
@@ -59,3 +62,64 @@ test("does not merge different static batches even within pairing window", () =>
   assert.equal(groups.length, 2);
 });
 
+test("resolveStaticScanGroupStatus returns failed/interrupted/pending without OTHER", () => {
+  assert.equal(
+    resolveStaticScanGroupStatus({
+      opengrepTask: {
+        id: "og-1",
+        project_id: "p1",
+        status: "failed",
+        created_at: "2026-03-17T00:00:00.000Z",
+      } as any,
+    }),
+    "failed",
+  );
+
+  assert.equal(
+    resolveStaticScanGroupStatus({
+      gitleaksTask: {
+        id: "gl-1",
+        project_id: "p1",
+        status: "interrupted",
+        created_at: "2026-03-17T00:00:00.000Z",
+      } as any,
+    }),
+    "interrupted",
+  );
+
+  assert.equal(
+    resolveStaticScanGroupStatus({
+      banditTask: {
+        id: "ba-1",
+        project_id: "p1",
+        status: "pending",
+        created_at: "2026-03-17T00:00:00.000Z",
+      } as any,
+      phpstanTask: {
+        id: "ps-1",
+        project_id: "p1",
+        status: "pending",
+        created_at: "2026-03-17T00:00:01.000Z",
+      } as any,
+    }),
+    "pending",
+  );
+
+  assert.equal(
+    resolveStaticScanGroupStatus({
+      opengrepTask: {
+        id: "og-2",
+        project_id: "p1",
+        status: "pending",
+        created_at: "2026-03-17T00:00:00.000Z",
+      } as any,
+      yasaTask: {
+        id: "ya-1",
+        project_id: "p1",
+        status: "completed",
+        created_at: "2026-03-17T00:00:02.000Z",
+      } as any,
+    }),
+    "running",
+  );
+});

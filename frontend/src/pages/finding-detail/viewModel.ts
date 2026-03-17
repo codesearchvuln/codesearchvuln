@@ -4,6 +4,7 @@ import type { AgentFinding } from "@/shared/api/agentTasks";
 import type { BanditFinding } from "@/shared/api/bandit";
 import type { GitleaksFinding } from "@/shared/api/gitleaks";
 import type { PhpstanFinding } from "@/shared/api/phpstan";
+import type { YasaFinding } from "@/shared/api/yasa";
 import type {
   OpengrepFinding,
   OpengrepFindingContext,
@@ -959,6 +960,63 @@ export function buildPhpstanFindingDetailModel(params: {
       summaryStats,
     }),
     codeSections: buildFindingDetailCodeSections(buildPhpstanFindingCodeViews(finding)),
+    projectId: params.projectId,
+    projectSourceType: params.projectSourceType,
+    projectName: params.projectName,
+  });
+}
+
+
+export function buildYasaFindingDetailModel(params: {
+  finding: YasaFinding;
+  taskId: string;
+  findingId: string;
+  taskName?: string | null;
+  projectId?: string | null;
+  projectSourceType?: ProjectSourceType | null;
+  projectName?: string | null;
+}): FindingDetailPageModel {
+  const { finding } = params;
+  const statusLabel = buildStatusLabel(finding.status);
+  const location = formatLocation({
+    filePath: finding.file_path,
+    lineStart: finding.start_line ?? null,
+    lineEnd: finding.end_line ?? finding.start_line ?? null,
+  });
+  const normalizedLevel = String(finding.level || "warning").trim().toLowerCase();
+  const severityLabel = normalizedLevel === "error" ? "中危" : "低危";
+  const severityTone: FindingDetailTone = normalizedLevel === "error" ? "warning" : "success";
+  const headlineValue =
+    String(finding.rule_id || "").trim() ||
+    String(finding.rule_name || "").trim() ||
+    String(finding.message || "").trim() ||
+    "yasa-rule";
+
+  return buildBaseModel({
+    pageTitle: "统一漏洞详情",
+    codePanelTitle: "关联代码",
+    emptyCodeMessage: "当前来源未提供可展示的命中代码。",
+    rootCause: {
+      title: "扫描说明",
+      body: String(finding.message || "").trim() || MISSING_DESCRIPTION,
+    },
+    trackingItems: buildTrackingItems({
+      sourceLabel: "静态扫描 · YASA",
+      taskId: params.taskId,
+      findingId: params.findingId,
+      taskName: params.taskName,
+      location,
+    }),
+    overviewItems: buildOverviewItems({
+      statusLabel,
+      headlineLabel: "漏洞类型",
+      headlineValue,
+      summaryStats: [
+        { label: "漏洞危害", value: severityLabel, tone: severityTone },
+        { label: "漏洞置信度", value: "中", tone: "warning" },
+      ],
+    }),
+    codeSections: buildFindingDetailCodeSections(buildYasaFindingCodeViews(finding)),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,

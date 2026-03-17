@@ -6,6 +6,7 @@ from .base import (
 from .bandit import BanditBootstrapScanner
 from .opengrep import OpenGrepBootstrapScanner
 from .phpstan import PhpstanBootstrapScanner
+from .yasa import YasaBootstrapScanner
 
 __all__ = [
     "StaticBootstrapFinding",
@@ -14,4 +15,5 @@ __all__ = [
     "BanditBootstrapScanner",
     "OpenGrepBootstrapScanner",
     "PhpstanBootstrapScanner",
+    "YasaBootstrapScanner",
 ]

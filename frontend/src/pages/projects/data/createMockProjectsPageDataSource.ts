@@ -76,6 +76,7 @@ export function createMockProjectsPageDataSource(): ProjectsPageDataSource {
 				gitleaksTasks: [],
 				banditTasks: [],
 				phpstanTasks: [],
+				yasaTasks: [],
 			},
 		],
 		[
@@ -87,6 +88,7 @@ export function createMockProjectsPageDataSource(): ProjectsPageDataSource {
 				gitleaksTasks: [],
 				banditTasks: [],
 				phpstanTasks: [],
+				yasaTasks: [],
 			},
 		],
 	]);
@@ -113,6 +115,7 @@ export function createMockProjectsPageDataSource(): ProjectsPageDataSource {
 					gitleaksTasks: [],
 					banditTasks: [],
 					phpstanTasks: [],
+					yasaTasks: [],
 				}
 			);
 		},
@@ -175,6 +178,7 @@ export function createMockProjectsPageDataSource(): ProjectsPageDataSource {
 				gitleaksTasks: [],
 				banditTasks: [],
 				phpstanTasks: [],
+				yasaTasks: [],
 			});
 			return created;
 		},

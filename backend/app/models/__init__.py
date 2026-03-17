@@ -15,3 +15,4 @@ from .gitleaks import GitleaksScanTask, GitleaksFinding, GitleaksRule
 from .opengrep import OpengrepScanTask, OpengrepFinding, OpengrepRule
 from .bandit import BanditScanTask, BanditFinding, BanditRuleState
 from .phpstan import PhpstanScanTask, PhpstanFinding, PhpstanRuleState
+from .yasa import YasaScanTask, YasaFinding

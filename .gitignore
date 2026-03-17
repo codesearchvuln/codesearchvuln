@@ -208,6 +208,10 @@ skills/
 
 .playwright-cli/
 frontend/.*/
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.github/workflows/*.yaml
 backend/.*/
 
 skills-lock.json
@@ -215,6 +219,10 @@ CLAUDE.md
 
 docs/plans/
 .*/
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.github/workflows/*.yaml
 output/
 .mcp.json
 backend/data/

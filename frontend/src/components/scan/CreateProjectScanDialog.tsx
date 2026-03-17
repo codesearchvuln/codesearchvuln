@@ -18,7 +18,8 @@ import {
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { createBanditScanTask } from "@/shared/api/bandit";
 import { createPhpstanScanTask } from "@/shared/api/phpstan";
-import { getZipFileInfo } from "@/shared/utils/zipStorage";
+import { createYasaScanTask } from "@/shared/api/yasa";
+import { getZipFileInfo, uploadZipFile } from "@/shared/utils/zipStorage";
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import {
 	HYBRID_TASK_NAME_MARKER,
@@ -34,6 +35,12 @@ import {
 	buildLlmProviderOptions,
 	type LLMProviderItem,
 } from "@/shared/llm/providerCatalog";
+import {
+	getYasaUnsupportedLanguageMessage,
+	parseYasaLanguageOption,
+	resolveYasaLanguageFromProgrammingLanguages,
+	type YasaLanguageOption,
+} from "@/shared/utils/yasaLanguage";
 import {
 	getLlmQuickGateStatus,
 	invalidateSuccessfulManualTest,
@@ -112,6 +119,8 @@ export default function CreateProjectScanDialog({
 	const [banditEnabled, setBanditEnabled] = useState(false);
 	// PHPStan integration: static/hybrid creation option state.
 	const [phpstanEnabled, setPhpstanEnabled] = useState(false);
+	const [yasaEnabled, setYasaEnabled] = useState(false);
+	const [yasaLanguage, setYasaLanguage] = useState<YasaLanguageOption>("auto");
 	const [activeRules, setActiveRules] = useState<OpengrepRule[]>([]);
 	const [loadingRules, setLoadingRules] = useState(false);
 
@@ -142,7 +151,7 @@ export default function CreateProjectScanDialog({
 	const previousSearchTermRef = useRef("");
 
 	const activeProjects = useMemo(
-		() => projects.filter((project) => isZipProject(project)),
+		() => projects.filter((project) => project.is_active && isZipProject(project)),
 		[projects],
 	);
 
@@ -254,6 +263,8 @@ export default function CreateProjectScanDialog({
 		setGitleaksEnabled(false);
 		setBanditEnabled(false);
 		setPhpstanEnabled(false);
+		setYasaEnabled(false);
+		setYasaLanguage("auto");
 		setShowLlmQuickFixPanel(false);
 		setLlmProviderOptions(
 			buildLlmProviderOptions({ backendProviders: [], currentProviderId: "openai" }),
@@ -378,10 +389,10 @@ export default function CreateProjectScanDialog({
 				baseCanCreate = true;
 			} else if (mode === "hybrid") {
 				baseCanCreate =
-					opengrepEnabled || gitleaksEnabled || banditEnabled || phpstanEnabled;
+					opengrepEnabled || gitleaksEnabled || banditEnabled || phpstanEnabled || yasaEnabled;
 			} else {
 				baseCanCreate =
-					opengrepEnabled || gitleaksEnabled || banditEnabled || phpstanEnabled;
+					opengrepEnabled || gitleaksEnabled || banditEnabled || phpstanEnabled || yasaEnabled;
 			}
 		} else {
 			if (!selectedProject) return false;
@@ -390,7 +401,8 @@ export default function CreateProjectScanDialog({
 					!opengrepEnabled &&
 					!gitleaksEnabled &&
 					!banditEnabled &&
-					!phpstanEnabled
+					!phpstanEnabled &&
+					!yasaEnabled
 				) {
 					return false;
 				}
@@ -399,7 +411,8 @@ export default function CreateProjectScanDialog({
 					!opengrepEnabled &&
 					!gitleaksEnabled &&
 					!banditEnabled &&
-					!phpstanEnabled
+					!phpstanEnabled &&
+					!yasaEnabled
 				) {
 					return false;
 				}
@@ -423,11 +436,35 @@ export default function CreateProjectScanDialog({
 		gitleaksEnabled,
 		banditEnabled,
 		phpstanEnabled,
+		yasaEnabled,
 		isLlmMode,
 		llmQuickInitialized,
 		quickFixPanelOpening,
 		llmGateStatus.canCreate,
 	]);
+
+	const selectedOrUploadedProjectLanguages = useMemo(() => {
+		if (sourceMode === "existing") {
+			return selectedProject?.programming_languages;
+		}
+		return undefined;
+	}, [sourceMode, selectedProject?.programming_languages]);
+
+	const resolvedAutoYasaLanguage = useMemo(
+		() =>
+			resolveYasaLanguageFromProgrammingLanguages(
+				selectedOrUploadedProjectLanguages,
+			),
+		[selectedOrUploadedProjectLanguages],
+	);
+
+	const resolvedRequestedYasaLanguage = useMemo(() => {
+		if (yasaLanguage !== "auto") return yasaLanguage;
+		return resolvedAutoYasaLanguage;
+	}, [yasaLanguage, resolvedAutoYasaLanguage]);
+
+	const showYasaAutoSkipHint =
+		Boolean(yasaEnabled) && yasaLanguage === "auto" && !resolvedRequestedYasaLanguage;
 
 	const createStaticTasksForProject = async (
 		project: Project,
@@ -436,6 +473,34 @@ export default function CreateProjectScanDialog({
 		let gitleaksTask: { id: string } | null = null;
 		let banditTask: { id: string } | null = null;
 		let phpstanTask: { id: string } | null = null;
+		let yasaTask: { id: string } | null = null;
+		const autoResolvedYasaLanguage = resolveYasaLanguageFromProgrammingLanguages(
+			project.programming_languages,
+		);
+		const requestedYasaLanguage =
+			yasaLanguage !== "auto" ? yasaLanguage : autoResolvedYasaLanguage;
+		let shouldRunYasa = yasaEnabled;
+		if (shouldRunYasa && !requestedYasaLanguage) {
+			shouldRunYasa = false;
+			toast.info(
+				`YASA 已跳过：未检测到可支持语言（支持 python/javascript/typescript/golang/java）`,
+			);
+		}
+		if (
+			!opengrepEnabled &&
+			!gitleaksEnabled &&
+			!banditEnabled &&
+			!phpstanEnabled &&
+			!shouldRunYasa
+		) {
+			throw new Error(
+				`${getYasaUnsupportedLanguageMessage(
+					typeof project.programming_languages === "string"
+						? project.programming_languages
+						: undefined,
+				)}，请至少启用一个其他扫描引擎`,
+			);
+		}
 		const taskNamePrefix = "静态分析";
 		const staticBatchId = createStaticScanBatchId();
 
@@ -491,8 +556,23 @@ export default function CreateProjectScanDialog({
 			});
 		}
 
+		if (shouldRunYasa) {
+			yasaTask = await createYasaScanTask({
+				project_id: project.id,
+				name: appendStaticScanBatchMarker(
+					`${taskNamePrefix}-YASA-${project.name}`,
+					staticBatchId,
+				),
+				target_path: ".",
+				language: requestedYasaLanguage || undefined,
+			});
+		}
 		const primaryTaskId =
-			opengrepTask?.id || gitleaksTask?.id || banditTask?.id || phpstanTask?.id;
+			opengrepTask?.id ||
+			gitleaksTask?.id ||
+			banditTask?.id ||
+			phpstanTask?.id ||
+			yasaTask?.id;
 		if (!primaryTaskId) {
 			throw new Error("静态扫描任务创建失败");
 		}
@@ -510,14 +590,20 @@ export default function CreateProjectScanDialog({
 		if (phpstanTask) {
 			params.set("phpstanTaskId", phpstanTask.id);
 		}
-		if (!opengrepTask && !banditTask && !phpstanTask && gitleaksTask) {
+		if (yasaTask) {
+			params.set("yasaTaskId", yasaTask.id);
+		}
+		if (!opengrepTask && !banditTask && !phpstanTask && !yasaTask && gitleaksTask) {
 			params.set("tool", "gitleaks");
 		}
-		if (!opengrepTask && !gitleaksTask && !phpstanTask && banditTask) {
+		if (!opengrepTask && !gitleaksTask && !phpstanTask && !yasaTask && banditTask) {
 			params.set("tool", "bandit");
 		}
-		if (!opengrepTask && !gitleaksTask && !banditTask && phpstanTask) {
+		if (!opengrepTask && !gitleaksTask && !banditTask && !yasaTask && phpstanTask) {
 			params.set("tool", "phpstan");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && !phpstanTask && yasaTask) {
+			params.set("tool", "yasa");
 		}
 		return { primaryTaskId, params };
 	};
@@ -545,6 +631,8 @@ export default function CreateProjectScanDialog({
 							bandit_enabled: banditEnabled,
 							gitleaks_enabled: gitleaksEnabled,
 							phpstan_enabled: phpstanEnabled,
+							yasa_enabled: yasaEnabled,
+							yasa_language: yasaEnabled ? yasaLanguage : "auto",
 						}
 					: {
 							mode: "disabled" as const,
@@ -552,6 +640,8 @@ export default function CreateProjectScanDialog({
 							bandit_enabled: false,
 							gitleaks_enabled: false,
 							phpstan_enabled: false,
+							yasa_enabled: false,
+							yasa_language: "auto",
 						},
 		},
 		verification_level: "analysis_with_poc_plan" as const,
@@ -849,15 +939,21 @@ export default function CreateProjectScanDialog({
 					return;
 				}
 
+				let createdProject: Project | null = null;
 				try {
-					const createdProject = await api.createProjectWithZip({
+					createdProject = await api.createProject({
 						name: newProjectName.trim(),
 						source_type: "zip",
 						repository_type: "other",
 						repository_url: undefined,
 						default_branch: "main",
 						programming_languages: [],
-					} as any, newProjectFile);
+					} as any);
+
+					const uploadResult = await uploadZipFile(createdProject.id, newProjectFile);
+					if (!uploadResult.success) {
+						throw new Error(uploadResult.message || "压缩包上传失败");
+					}
 
 					if (mode === "static") {
 						const result = await createStaticTasksForProject(createdProject);
@@ -889,6 +985,13 @@ export default function CreateProjectScanDialog({
 					await handleCreateHybridLiteAgentForProject(createdProject, action);
 					return;
 				} catch (error) {
+					if (createdProject) {
+						try {
+							await api.deleteProject(createdProject.id);
+						} catch (rollbackError) {
+							console.error("回滚失败项目失败:", rollbackError);
+						}
+					}
 					throw error;
 				}
 			}
@@ -916,7 +1019,8 @@ export default function CreateProjectScanDialog({
 					!opengrepEnabled &&
 					!gitleaksEnabled &&
 					!banditEnabled &&
-					!phpstanEnabled
+					!phpstanEnabled &&
+					!yasaEnabled
 				) {
 					toast.error("请至少启用一个扫描引擎");
 					return;
@@ -1011,6 +1115,11 @@ export default function CreateProjectScanDialog({
 			setBanditEnabled={setBanditEnabled}
 			phpstanEnabled={phpstanEnabled}
 			setPhpstanEnabled={setPhpstanEnabled}
+			yasaEnabled={yasaEnabled}
+			setYasaEnabled={setYasaEnabled}
+			yasaLanguage={yasaLanguage}
+			setYasaLanguage={(value) => setYasaLanguage(parseYasaLanguageOption(value))}
+			showYasaAutoSkipHint={showYasaAutoSkipHint}
 			showLlmQuickFixPanel={showLlmQuickFixPanel}
 			openLlmQuickFixPanelManual={openLlmQuickFixPanelManual}
 			quickFixSaving={quickFixSaving}

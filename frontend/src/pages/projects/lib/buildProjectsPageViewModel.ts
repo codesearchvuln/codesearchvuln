@@ -45,13 +45,14 @@ export function getProjectExecutionStats(
 		gitleaksTasks: projectTaskPool?.gitleaksTasks || [],
 		banditTasks: projectTaskPool?.banditTasks || [],
 		phpstanTasks: projectTaskPool?.phpstanTasks || [],
+		yasaTasks: projectTaskPool?.yasaTasks || [],
 	});
 	const staticStats = staticGroups.reduce(
 		(accumulator, group) => {
 			const status = resolveStaticScanGroupStatus(group);
 			if (status === "completed") {
 				accumulator.completed += 1;
-			} else if (status === "running") {
+			} else if (status === "running" || status === "pending") {
 				accumulator.running += 1;
 			}
 			return accumulator;
@@ -111,6 +112,7 @@ export function buildProjectsPageViewModel(
 				gitleaksTasks: projectTaskPool?.gitleaksTasks || [],
 				banditTasks: projectTaskPool?.banditTasks || [],
 				phpstanTasks: projectTaskPool?.phpstanTasks || [],
+				yasaTasks: projectTaskPool?.yasaTasks || [],
 			});
 			return {
 				id: project.id,

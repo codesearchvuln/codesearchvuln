@@ -4,7 +4,7 @@ import {
 	type NormalizedSeverity,
 } from "@/shared/utils/staticAnalysisSeverity";
 
-export type Engine = "opengrep" | "gitleaks" | "bandit" | "phpstan";
+export type Engine = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
 export type EngineFilter = "all" | Engine;
 export type FindingStatus = "open" | "verified" | "false_positive" | "fixed";
 export type StatusFilter = "all" | FindingStatus;
@@ -86,6 +86,19 @@ type MinimalPhpstanFinding = {
   line?: unknown;
   message?: string | null;
   identifier?: string | null;
+  status?: string | null;
+};
+
+type MinimalYasaFinding = {
+  id: string;
+  scan_task_id?: string | null;
+  file_path?: string | null;
+  start_line?: unknown;
+  end_line?: unknown;
+  message?: string | null;
+  rule_id?: string | null;
+  rule_name?: string | null;
+  level?: string | null;
   status?: string | null;
 };
 
@@ -266,13 +279,15 @@ export function getStaticAnalysisTotalDisplayDurationMs(input: {
   gitleaksTask: StaticAnalysisSummaryTaskLike | null;
   banditTask: StaticAnalysisSummaryTaskLike | null;
   phpstanTask: StaticAnalysisSummaryTaskLike | null;
+  yasaTask: StaticAnalysisSummaryTaskLike | null;
   nowMs?: number;
 }): number {
   return (
     getStaticAnalysisTaskDisplayDurationMs(input.opengrepTask, input.nowMs) +
     getStaticAnalysisTaskDisplayDurationMs(input.gitleaksTask, input.nowMs) +
     getStaticAnalysisTaskDisplayDurationMs(input.banditTask, input.nowMs) +
-    getStaticAnalysisTaskDisplayDurationMs(input.phpstanTask, input.nowMs)
+    getStaticAnalysisTaskDisplayDurationMs(input.phpstanTask, input.nowMs) +
+    getStaticAnalysisTaskDisplayDurationMs(input.yasaTask, input.nowMs)
   );
 }
 
@@ -281,6 +296,7 @@ export function buildStaticAnalysisProgressSummary(input: {
   gitleaksTask: StaticAnalysisProgressTaskLike | null;
   banditTask: StaticAnalysisProgressTaskLike | null;
   phpstanTask: StaticAnalysisProgressTaskLike | null;
+  yasaTask: StaticAnalysisProgressTaskLike | null;
   nowMs?: number;
 }): StaticAnalysisProgressSummary {
   const primaryTask =
@@ -288,6 +304,7 @@ export function buildStaticAnalysisProgressSummary(input: {
     input.gitleaksTask ||
     input.banditTask ||
     input.phpstanTask ||
+    input.yasaTask ||
     null;
   if (!primaryTask) {
     return { progressPercent: 0 };
@@ -321,10 +338,12 @@ export function buildUnifiedFindingRows(input: {
   gitleaksFindings: MinimalGitleaksFinding[];
   banditFindings: MinimalBanditFinding[];
   phpstanFindings: MinimalPhpstanFinding[];
+  yasaFindings: MinimalYasaFinding[];
   opengrepTaskId: string;
   gitleaksTaskId: string;
   banditTaskId: string;
   phpstanTaskId: string;
+  yasaTaskId: string;
 }): UnifiedFindingRow[] {
   const opengrepRows = input.opengrepFindings.map((finding) => {
     const severity = normalizeStaticAnalysisSeverity(finding.severity);
@@ -402,7 +421,29 @@ export function buildUnifiedFindingRows(input: {
     };
   });
 
-  return [...opengrepRows, ...gitleaksRows, ...banditRows, ...phpstanRows];
+  const yasaRows = input.yasaFindings.map((finding) => {
+    const ruleId = String(finding.rule_id || "").trim();
+    const ruleName = String(finding.rule_name || "").trim();
+    const message = String(finding.message || "").trim();
+    const level = String(finding.level || "warning").trim().toLowerCase();
+    const severity = level === "error" ? ("MEDIUM" as const) : ("LOW" as const);
+    return {
+      key: `yasa:${finding.id}`,
+      id: finding.id,
+      taskId: finding.scan_task_id || input.yasaTaskId,
+      engine: "yasa" as const,
+      rule: ruleId || ruleName || message || "-",
+      filePath: normalizeStaticAnalysisPath(finding.file_path),
+      line: toStaticAnalysisPositiveLine(finding.start_line),
+      severity,
+      severityScore: SEVERITY_SCORE[severity],
+      confidence: "MEDIUM" as const,
+      confidenceScore: CONFIDENCE_SCORE.MEDIUM,
+      status: String(finding.status || "open").trim().toLowerCase(),
+    };
+  });
+
+  return [...opengrepRows, ...gitleaksRows, ...banditRows, ...phpstanRows, ...yasaRows];
 }
 
 export function buildStaticAnalysisListState(input: {

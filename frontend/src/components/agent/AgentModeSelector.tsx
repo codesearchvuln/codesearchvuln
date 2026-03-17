@@ -9,13 +9,14 @@ import { cn } from "@/shared/utils/utils";
 
 export type ScanMode = "static" | "agent";
 
-export type StaticTool = "opengrep" | "gitleaks" | "bandit" | "phpstan";
+export type StaticTool = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
 
 export interface StaticToolSelection {
   opengrep: boolean;
   gitleaks: boolean;
   bandit: boolean;
   phpstan: boolean;
+  yasa: boolean;
 }
 
 interface AgentModeSelectorProps {
@@ -40,6 +41,7 @@ export default function AgentModeSelector({
     gitleaks: false,
     bandit: false,
     phpstan: false,
+    yasa: false,
   };
 
   const updateStaticTool = (tool: StaticTool, checked: boolean) => {
@@ -177,6 +179,17 @@ export default function AgentModeSelector({
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">PHP 规则扫描</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs font-mono text-sky-700 dark:text-sky-300 cursor-pointer">
+                <Checkbox
+                  checked={resolvedTools.yasa}
+                  onCheckedChange={(checked) =>
+                    updateStaticTool("yasa", Boolean(checked))
+                  }
+                  disabled={disabled}
+                  className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
+                />
+                <span className="tracking-wider">YASA 扫描</span>
               </label>
             </div>
           )}

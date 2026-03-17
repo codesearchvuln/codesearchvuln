@@ -128,7 +128,9 @@ export default function StaticAnalysisFindingsTable({
                             ? "Gitleaks"
                             : row.engine === "bandit"
                               ? "Bandit"
-                              : "PHPStan"}
+                              : row.engine === "phpstan"
+                                ? "PHPStan"
+                                : "YASA"}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm break-all">

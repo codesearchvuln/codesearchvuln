@@ -58,7 +58,7 @@ import {
   type PhpstanRule,
 } from "@/shared/api/phpstan";
 
-type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan";
+type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
 
 interface PhpstanRulesProps {
   showEngineSelector?: boolean;
@@ -444,7 +444,8 @@ export default function PhpstanRules({
                         val === "opengrep" ||
                         val === "gitleaks" ||
                         val === "bandit" ||
-                        val === "phpstan"
+                        val === "phpstan" ||
+											val === "yasa"
                       ) {
                         onEngineChange?.(val);
                       }
@@ -458,6 +459,7 @@ export default function PhpstanRules({
                       <SelectItem value="gitleaks">gitleaks</SelectItem>
                       <SelectItem value="bandit">bandit</SelectItem>
                       <SelectItem value="phpstan">phpstan</SelectItem>
+											<SelectItem value="yasa">yasa</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from app.api.v1.endpoints.agent_tasks import (
     _filter_bootstrap_findings,
@@ -615,6 +616,8 @@ def test_resolve_static_bootstrap_config_supports_phpstan():
         "bandit_enabled": True,
         "gitleaks_enabled": True,
         "phpstan_enabled": True,
+        "yasa_enabled": False,
+        "yasa_language": "auto",
     }
 
     disabled_task = SimpleNamespace(
@@ -635,4 +638,35 @@ def test_resolve_static_bootstrap_config_supports_phpstan():
         "bandit_enabled": False,
         "gitleaks_enabled": False,
         "phpstan_enabled": False,
+        "yasa_enabled": False,
+        "yasa_language": "auto",
     }
+
+
+def test_resolve_static_bootstrap_config_accepts_manual_yasa_language():
+    task = SimpleNamespace(
+        audit_scope={
+            "static_bootstrap": {
+                "mode": "embedded",
+                "yasa_enabled": True,
+                "yasa_language": "javascript",
+            }
+        }
+    )
+    config = _resolve_static_bootstrap_config(task, source_mode="hybrid")
+    assert config["yasa_enabled"] is True
+    assert config["yasa_language"] == "javascript"
+
+
+def test_resolve_static_bootstrap_config_rejects_invalid_yasa_language():
+    task = SimpleNamespace(
+        audit_scope={
+            "static_bootstrap": {
+                "mode": "embedded",
+                "yasa_enabled": True,
+                "yasa_language": "php",
+            }
+        }
+    )
+    with pytest.raises(HTTPException, match="不支持语言: php"):
+        _resolve_static_bootstrap_config(task, source_mode="hybrid")

@@ -15,6 +15,7 @@ function createEmptyTaskPoolState(
 		gitleaksTasks: [],
 		banditTasks: [],
 		phpstanTasks: [],
+		yasaTasks: [],
 	};
 }
 

@@ -6,6 +6,7 @@ import { getAgentTasks } from "@/shared/api/agentTasks";
 import { getBanditScanTasks } from "@/shared/api/bandit";
 import { getGitleaksScanTasks } from "@/shared/api/gitleaks";
 import { getPhpstanScanTasks } from "@/shared/api/phpstan";
+import { getYasaScanTasks } from "@/shared/api/yasa";
 import { getOpengrepScanTasks } from "@/shared/api/opengrep";
 import { apiClient } from "@/shared/api/serverClient";
 import { api } from "@/shared/api/database";
@@ -19,6 +20,7 @@ import {
 	PHPSTAN_TASK_PAGE_LIMIT,
 	PROJECT_FETCH_BATCH_SIZE,
 	TASK_POOL_MAX_TOTAL,
+	YASA_TASK_PAGE_LIMIT,
 } from "../constants";
 import type { ProjectTaskPool } from "../types";
 import type { ProjectsPageDataSource } from "./projectsPageDataSource";
@@ -88,11 +90,13 @@ interface CreateApiProjectsPageDataSourceOptions {
 	gitleaksTaskPageLimit?: number;
 	banditTaskPageLimit?: number;
 	phpstanTaskPageLimit?: number;
+	yasaTaskPageLimit?: number;
 	getAgentTasks?: typeof getAgentTasks;
 	getOpengrepScanTasks?: typeof getOpengrepScanTasks;
 	getGitleaksScanTasks?: typeof getGitleaksScanTasks;
 	getBanditScanTasks?: typeof getBanditScanTasks;
 	getPhpstanScanTasks?: typeof getPhpstanScanTasks;
+	getYasaScanTasks?: typeof getYasaScanTasks;
 	getProjectInfo?: (projectId: string) => Promise<unknown>;
 	getZipFileInfo?: typeof getZipFileInfo;
 	uploadZipFile?: typeof uploadZipFile;
@@ -113,12 +117,15 @@ export function createApiProjectsPageDataSource(
 		options.banditTaskPageLimit ?? BANDIT_TASK_PAGE_LIMIT;
 	const phpstanTaskPageLimit =
 		options.phpstanTaskPageLimit ?? PHPSTAN_TASK_PAGE_LIMIT;
+	const yasaTaskPageLimit =
+		options.yasaTaskPageLimit ?? YASA_TASK_PAGE_LIMIT;
 	const fetchAgentTasks = options.getAgentTasks ?? getAgentTasks;
 	const fetchOpengrepTasks = options.getOpengrepScanTasks ?? getOpengrepScanTasks;
 	const fetchGitleaksTasks =
 		options.getGitleaksScanTasks ?? getGitleaksScanTasks;
 	const fetchBanditTasks = options.getBanditScanTasks ?? getBanditScanTasks;
 	const fetchPhpstanTasks = options.getPhpstanScanTasks ?? getPhpstanScanTasks;
+	const fetchYasaTasks = options.getYasaScanTasks ?? getYasaScanTasks;
 	const fetchProjectInfo =
 		options.getProjectInfo ??
 		(async (projectId: string) => {
@@ -157,6 +164,7 @@ export function createApiProjectsPageDataSource(
 				gitleaksResult,
 				banditResult,
 				phpstanResult,
+				yasaResult,
 			] =
 				await Promise.allSettled([
 					apiSurface.getAuditTasks(projectId),
@@ -210,6 +218,16 @@ export function createApiProjectsPageDataSource(
 						pageLimit: phpstanTaskPageLimit,
 						maxTotal: taskPoolMaxTotal,
 					}),
+					collectPagedItems({
+						fetchPage: (skip, limit) =>
+							fetchYasaTasks({
+								projectId,
+								skip,
+								limit,
+							}),
+						pageLimit: yasaTaskPageLimit,
+						maxTotal: taskPoolMaxTotal,
+					}),
 				]);
 
 			const taskPool: ProjectTaskPool = {
@@ -240,6 +258,11 @@ export function createApiProjectsPageDataSource(
 					phpstanResult.status === "fulfilled" &&
 					Array.isArray(phpstanResult.value)
 						? phpstanResult.value
+						: [],
+				yasaTasks:
+					yasaResult.status === "fulfilled" &&
+					Array.isArray(yasaResult.value)
+						? yasaResult.value
 						: [],
 			};
 

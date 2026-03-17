@@ -330,7 +330,7 @@ export interface DashboardSnapshotResponse {
 export interface StaticScanOverviewItem {
   project_id: string;
   project_name: string;
-  last_scan_tool: "opengrep" | "gitleaks" | "bandit" | "phpstan";
+  last_scan_tool: "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
   last_scan_task_id: string;
   paired_gitleaks_task_id?: string | null;
   last_scan_at: string;

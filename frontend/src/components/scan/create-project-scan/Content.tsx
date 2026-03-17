@@ -82,6 +82,11 @@ export default function CreateProjectScanDialogContent({
   setBanditEnabled,
   phpstanEnabled,
   setPhpstanEnabled,
+  yasaEnabled,
+  setYasaEnabled,
+  yasaLanguage,
+  setYasaLanguage,
+  showYasaAutoSkipHint,
   showLlmQuickFixPanel,
   openLlmQuickFixPanelManual,
   quickFixSaving,
@@ -142,6 +147,11 @@ export default function CreateProjectScanDialogContent({
   setBanditEnabled: (enabled: boolean) => void;
   phpstanEnabled: boolean;
   setPhpstanEnabled: (enabled: boolean) => void;
+  yasaEnabled: boolean;
+  setYasaEnabled: (enabled: boolean) => void;
+  yasaLanguage: "auto" | "python" | "javascript" | "typescript" | "golang" | "java";
+  setYasaLanguage: (language: string) => void;
+  showYasaAutoSkipHint: boolean;
   showLlmQuickFixPanel: boolean;
   openLlmQuickFixPanelManual: () => void | Promise<void>;
   quickFixSaving: boolean;
@@ -504,7 +514,44 @@ export default function CreateProjectScanDialogContent({
                     <p className="text-xs text-muted-foreground">PHP 规则扫描</p>
                   </div>
                 </label>
+                <label className="border border-border rounded p-3 flex items-center gap-3 cursor-pointer hover:border-sky-500/30">
+                  <Checkbox
+                    checked={yasaEnabled}
+                    onCheckedChange={(checked) => setYasaEnabled(Boolean(checked))}
+                    disabled={creating}
+                    className="data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
+                  />
+                  <div>
+                    <p className="text-sm text-foreground font-semibold">YASA</p>
+                    <p className="text-xs text-muted-foreground">多语言静态分析</p>
+                  </div>
+                </label>
               </div>
+              {yasaEnabled && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-muted-foreground">YASA 语言</p>
+                    <Select value={yasaLanguage} onValueChange={setYasaLanguage}>
+                      <SelectTrigger className="h-8 w-[220px] cyber-input">
+                        <SelectValue placeholder="选择语言" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">自动识别</SelectItem>
+                        <SelectItem value="python">python</SelectItem>
+                        <SelectItem value="javascript">javascript</SelectItem>
+                        <SelectItem value="typescript">typescript</SelectItem>
+                        <SelectItem value="golang">golang</SelectItem>
+                        <SelectItem value="java">java</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {showYasaAutoSkipHint && (
+                    <p className="text-xs text-amber-300">
+                      YASA 将自动跳过（不影响其它引擎）：未检测到可支持语言
+                    </p>
+                  )}
+                </div>
+              )}
               {mode === "hybrid" && selectedProject && !isZipProject(selectedProject) && (
                 <p className="text-xs text-rose-300">
                   混合扫描当前仅支持源码压缩包项目（静态 + 智能）。
