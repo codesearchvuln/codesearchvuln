@@ -172,7 +172,7 @@ class ProjectMetricsService:
     ) -> None:
         stmt = select(
             OpengrepScanTask.status,
-            OpengrepScanTask.completed_at,
+            OpengrepScanTask.updated_at.label("completed_at"),
             OpengrepScanTask.total_findings,
             OpengrepScanTask.error_count,
             OpengrepScanTask.warning_count,
@@ -197,7 +197,7 @@ class ProjectMetricsService:
     ) -> None:
         stmt = select(
             GitleaksScanTask.status,
-            GitleaksScanTask.completed_at,
+            GitleaksScanTask.updated_at.label("completed_at"),
             GitleaksScanTask.total_findings,
         ).where(GitleaksScanTask.project_id == project_id)
         rows = (await db.execute(stmt)).all()
@@ -215,7 +215,7 @@ class ProjectMetricsService:
     ) -> None:
         stmt = select(
             BanditScanTask.status,
-            BanditScanTask.completed_at,
+            BanditScanTask.updated_at.label("completed_at"),
             BanditScanTask.high_count,
             BanditScanTask.medium_count,
             BanditScanTask.low_count,
@@ -241,7 +241,7 @@ class ProjectMetricsService:
     ) -> None:
         stmt = select(
             PhpstanScanTask.status,
-            PhpstanScanTask.completed_at,
+            PhpstanScanTask.updated_at.label("completed_at"),
             PhpstanScanTask.total_findings,
         ).where(PhpstanScanTask.project_id == project_id)
         rows = (await db.execute(stmt)).all()
