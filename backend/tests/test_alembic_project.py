@@ -4,6 +4,7 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 VERSIONS_DIR = BACKEND_ROOT / "alembic" / "versions"
+SNAPSHOTS_DIR = BACKEND_ROOT / "app" / "db" / "schema_snapshots"
 
 
 def _literal_eval_revision_value(source: str, variable_name: str):
@@ -67,8 +68,9 @@ def test_alembic_versions_directory_keeps_expected_base_revisions_and_merge_file
     assert base_revisions == ["5b0f3c9a6d7e", "c4b1a7e8d9f0"]
     assert file_names["6c8d9e0f1a2b"] == "6c8d9e0f1a2b_finalize_projects_zip_file_hash.py"
     assert file_names["d4e5f6a7b8c9"] == "d4e5f6a7b8c9_merge_phpstan_and_agent_heads.py"
-    assert file_names["048836873140"] == "048836873140_merge_yasa_and_phpstan_agent_branches.py"
     assert file_names["5f6a7b8c9d0e"] == "5f6a7b8c9d0e_merge_project_metrics_and_yasa_phpstan_heads.py"
+    assert "048836873140" not in file_names
+    assert down_revisions["5f6a7b8c9d0e"] == ("b7e8f9a0b1c2", "e5f6a7b8c9d0")
 
 
 def test_bridge_downgrade_keeps_zip_file_hash_baseline_contract():
@@ -98,3 +100,70 @@ def test_static_finding_path_migration_downgrade_keeps_data_normalization_contra
     assert "downgrade" in migration_source
     assert "UPDATE bandit_findings" not in migration_source.split("def downgrade", 1)[1]
     assert "UPDATE opengrep_findings" not in migration_source.split("def downgrade", 1)[1]
+
+
+def test_squashed_baseline_migration_uses_frozen_schema_snapshot():
+    baseline_file = (
+        BACKEND_ROOT
+        / "alembic"
+        / "versions"
+        / "5b0f3c9a6d7e_squashed_baseline.py"
+    )
+    baseline_source = baseline_file.read_text(encoding="utf-8")
+
+    assert "from app.models import *" not in baseline_source
+    assert "Base.metadata.create_all" not in baseline_source
+    assert "app.db.schema_snapshots.baseline_5b0f3c9a6d7e" in baseline_source
+
+
+def test_squashed_baseline_snapshot_keeps_only_pre_squash_tables():
+    snapshot_file = SNAPSHOTS_DIR / "baseline_5b0f3c9a6d7e.py"
+    snapshot_source = snapshot_file.read_text(encoding="utf-8")
+    module = ast.parse(snapshot_source)
+
+    expected_tables = {
+        "agent_checkpoints",
+        "agent_events",
+        "agent_findings",
+        "agent_tasks",
+        "agent_tree_nodes",
+        "audit_issues",
+        "audit_rule_sets",
+        "audit_rules",
+        "audit_tasks",
+        "bandit_findings",
+        "bandit_scan_tasks",
+        "gitleaks_findings",
+        "gitleaks_rules",
+        "gitleaks_scan_tasks",
+        "instant_analyses",
+        "opengrep_findings",
+        "opengrep_rules",
+        "opengrep_scan_tasks",
+        "phpstan_findings",
+        "phpstan_scan_tasks",
+        "project_info",
+        "project_members",
+        "projects",
+        "prompt_templates",
+        "user_configs",
+        "users",
+    }
+
+    found_tables = set()
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not isinstance(target, ast.Name) or target.id != "__tablename__":
+                continue
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                found_tables.add(node.value.value)
+
+    assert found_tables == expected_tables
+    assert "project_management_metrics" not in found_tables
+    assert "bandit_rule_states" not in found_tables
+    assert "phpstan_rule_states" not in found_tables
+    assert "yasa_scan_tasks" not in found_tables
+    assert "yasa_findings" not in found_tables
+    assert "zip_file_hash" not in snapshot_source
