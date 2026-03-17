@@ -49,11 +49,6 @@ async function logUserAction(action: string, payload: Record<string, unknown>) {
 	loggerModule.logger.logUserAction(action, payload);
 }
 
-async function handleErrorMessage(error: unknown, fallbackMessage: string) {
-	const errorHandlerModule = await import("@/shared/utils/errorHandler");
-	errorHandlerModule.handleError(error, fallbackMessage);
-}
-
 function getBatchZipCreationToast(
 	successCount: number,
 	failureCount: number,

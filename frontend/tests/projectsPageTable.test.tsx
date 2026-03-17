@@ -55,7 +55,7 @@ test("ProjectsTable renders rows and browse-state actions", async () => {
 					totalIssues: 0,
 					executionStats: { completed: 0, running: 0 },
 					actions: {
-						canCreateScan: false,
+						canCreateScan: true,
 						canBrowseCode: false,
 						browseCodePath: "/projects/p2/code-browser",
 						browseCodeState: { from: "/projects#project-browser" },
@@ -69,6 +69,11 @@ test("ProjectsTable renders rows and browse-state actions", async () => {
 
 	assert.match(markup, /Demo Project/);
 	assert.match(markup, /Disabled Project/);
+	assert.match(markup, /发现漏洞/);
+	assert.match(markup, /严重/);
+	assert.match(markup, /高危/);
+	assert.match(markup, /中危/);
+	assert.match(markup, /低危/);
 	assert.match(markup, /查看详情/);
 	assert.match(markup, /代码浏览/);
 	assert.match(markup, /创建扫描/);

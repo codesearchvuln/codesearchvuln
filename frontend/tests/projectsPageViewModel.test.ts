@@ -112,6 +112,75 @@ test("projects view model exposes constant availability status and browse guards
 		...overrides,
 	});
 
+	const projectTaskPoolsMap = {
+		p1: {
+			status: "ready",
+			auditTasks: [],
+			agentTasks: [
+				{
+					project_id: "p1",
+					status: "completed",
+					critical_count: 1,
+					high_count: 2,
+					medium_count: 3,
+					low_count: 4,
+					verified_count: 6,
+					name: "[INTELLIGENT] Enabled Project",
+					description: "",
+				},
+			],
+			opengrepTasks: [
+				{
+					id: "op-1",
+					project_id: "p1",
+					status: "completed",
+					created_at: "2024-01-01T00:00:00Z",
+					total_findings: 9,
+					error_count: 2,
+					warning_count: 1,
+				},
+			],
+			gitleaksTasks: [
+				{
+					id: "gl-1",
+					project_id: "p1",
+					status: "completed",
+					created_at: "2024-01-01T00:00:01Z",
+					total_findings: 5,
+				},
+			],
+			banditTasks: [
+				{
+					id: "bd-1",
+					project_id: "p1",
+					status: "completed",
+					created_at: "2024-01-01T00:00:02Z",
+					high_count: 2,
+					medium_count: 4,
+					low_count: 6,
+				},
+			],
+			phpstanTasks: [
+				{
+					id: "ps-1",
+					project_id: "p1",
+					status: "completed",
+					created_at: "2024-01-01T00:00:03Z",
+					total_findings: 7,
+				},
+			],
+		},
+		p2: {
+			status: "ready",
+			auditTasks: [],
+			agentTasks: [],
+			opengrepTasks: [],
+			gitleaksTasks: [],
+			banditTasks: [],
+			phpstanTasks: [],
+		},
+	};
+
 	const viewModel = builder.buildProjectsPageViewModel({
 		loading: false,
 		filteredProjects: [

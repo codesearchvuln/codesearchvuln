@@ -5,7 +5,17 @@ import type { GitleaksScanTask } from "@/shared/api/gitleaks";
 import type { PhpstanScanTask } from "@/shared/api/phpstan";
 import type { OpengrepFinding, OpengrepScanTask } from "@/shared/api/opengrep";
 import type { AuditTask } from "@/shared/types";
-import { resolveSourceModeFromTaskMeta } from "@/features/tasks/services/taskActivities";
+import {
+  buildBanditSeverityCounts,
+  buildGitleaksSeverityCounts,
+  buildOpengrepSeverityCounts,
+  buildPhpstanSeverityCounts,
+  getAgentSeverityCounts,
+  getSeverityCountTotal,
+  mergeSeverityCounts,
+  resolveSourceModeFromTaskMeta,
+  type SeverityCounts,
+} from "@/features/tasks/services/taskActivities";
 import {
   buildStaticScanGroups,
   resolveStaticScanGroupStatus,
@@ -56,6 +66,7 @@ export interface ProjectCardSummaryStats {
   completedTasks: number;
   runningTasks: number;
   totalIssues: number;
+  severityBreakdown: ProjectSeverityBreakdown;
 }
 
 export interface ProjectFoundIssuesBreakdown {
@@ -63,6 +74,10 @@ export interface ProjectFoundIssuesBreakdown {
   intelligentIssues: number;
   hybridIssues: number;
   totalIssues: number;
+}
+
+export interface ProjectSeverityBreakdown extends SeverityCounts {
+  total: number;
 }
 
 export type ProjectCardVulnerabilitySeverity =
@@ -306,7 +321,7 @@ export function getProjectCardSummaryStats(params: {
     projectBanditTasks.filter((task) => isRunningStatus(task.status)).length +
     projectPhpstanTasks.filter((task) => isRunningStatus(task.status)).length;
 
-  const issueBreakdown = getProjectFoundIssuesBreakdown({
+  const severityBreakdown = getProjectSeverityBreakdown({
     projectId,
     agentTasks,
     opengrepTasks,
@@ -319,8 +334,57 @@ export function getProjectCardSummaryStats(params: {
     totalTasks,
     completedTasks,
     runningTasks,
-    totalIssues: issueBreakdown.totalIssues,
+    totalIssues: severityBreakdown.total,
+    severityBreakdown,
   };
+}
+
+function toProjectSeverityBreakdown(
+  counts: SeverityCounts,
+): ProjectSeverityBreakdown {
+  return {
+    ...counts,
+    total: getSeverityCountTotal(counts),
+  };
+}
+
+export function getProjectSeverityBreakdown(params: {
+  projectId: string;
+  agentTasks: AgentTask[];
+  opengrepTasks: OpengrepScanTask[];
+  gitleaksTasks?: GitleaksScanTask[];
+  banditTasks?: BanditScanTask[];
+  phpstanTasks?: PhpstanScanTask[];
+}): ProjectSeverityBreakdown {
+  const { projectId, agentTasks, opengrepTasks } = params;
+  const gitleaksTasks = params.gitleaksTasks || [];
+  const banditTasks = params.banditTasks || [];
+  const phpstanTasks = params.phpstanTasks || [];
+
+  const staticCounts = mergeSeverityCounts(
+    ...opengrepTasks
+      .filter((task) => task.project_id === projectId)
+      .map((task) => buildOpengrepSeverityCounts(task)),
+    ...gitleaksTasks
+      .filter((task) => task.project_id === projectId)
+      .map((task) => buildGitleaksSeverityCounts(task)),
+    ...banditTasks
+      .filter((task) => task.project_id === projectId)
+      .map((task) => buildBanditSeverityCounts(task)),
+    ...phpstanTasks
+      .filter((task) => task.project_id === projectId)
+      .map((task) => buildPhpstanSeverityCounts(task)),
+  );
+
+  const agentCounts = mergeSeverityCounts(
+    ...agentTasks
+      .filter((task) => task.project_id === projectId)
+      .map((task) => getAgentSeverityCounts(task)),
+  );
+
+  return toProjectSeverityBreakdown(
+    mergeSeverityCounts(staticCounts, agentCounts),
+  );
 }
 
 export function getProjectFoundIssuesBreakdown(params: {
@@ -336,47 +400,38 @@ export function getProjectFoundIssuesBreakdown(params: {
   const banditTasks = params.banditTasks || [];
   const phpstanTasks = params.phpstanTasks || [];
 
-  const opengrepIssues = opengrepTasks
-    .filter((task) => task.project_id === projectId)
-    .reduce(
-      (sum, task) =>
-        sum + Math.max(Number(task.high_confidence_count ?? 0), 0),
-      0,
-    );
-  const banditIssues = banditTasks
-    .filter((task) => task.project_id === projectId)
-    .reduce(
-      (sum, task) =>
-        sum +
-        Math.max(Number(task.high_count || 0), 0) +
-        Math.max(Number(task.medium_count || 0), 0) +
-        Math.max(Number(task.low_count || 0), 0),
-      0,
-    );
-  const gitleaksIssues = gitleaksTasks
-    .filter((task) => task.project_id === projectId)
-    .reduce((sum, task) => sum + Math.max(Number(task.total_findings || 0), 0), 0);
-  const phpstanIssues = phpstanTasks
-    .filter((task) => task.project_id === projectId)
-    .reduce((sum, task) => sum + Math.max(Number(task.total_findings || 0), 0), 0);
-  // PHPStan integration: static issues 统计中将 phpstan 发现按提示类全量计入。
-  const staticIssues = opengrepIssues + gitleaksIssues + banditIssues + phpstanIssues;
+  const staticIssues = getSeverityCountTotal(
+    mergeSeverityCounts(
+      ...opengrepTasks
+        .filter((task) => task.project_id === projectId)
+        .map((task) => buildOpengrepSeverityCounts(task)),
+      ...gitleaksTasks
+        .filter((task) => task.project_id === projectId)
+        .map((task) => buildGitleaksSeverityCounts(task)),
+      ...banditTasks
+        .filter((task) => task.project_id === projectId)
+        .map((task) => buildBanditSeverityCounts(task)),
+      ...phpstanTasks
+        .filter((task) => task.project_id === projectId)
+        .map((task) => buildPhpstanSeverityCounts(task)),
+    ),
+  );
 
   const projectAgentTasks = agentTasks.filter((task) => task.project_id === projectId);
 
   let intelligentIssues = 0;
   let hybridIssues = 0;
   for (const task of projectAgentTasks) {
-    const verified = Math.max(Number(task.verified_count ?? 0), 0);
+    const total = getSeverityCountTotal(getAgentSeverityCounts(task));
     const sourceMode = resolveSourceModeFromTaskMeta(
       "intelligent_audit",
       task.name,
       task.description,
     );
     if (sourceMode === "intelligent") {
-      intelligentIssues += verified;
+      intelligentIssues += total;
     } else {
-      hybridIssues += verified;
+      hybridIssues += total;
     }
   }
 

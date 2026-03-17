@@ -42,7 +42,7 @@ export type TaskActivitySourceMode =
 export const HYBRID_TASK_NAME_MARKER = "[HYBRID]";
 export const INTELLIGENT_TASK_NAME_MARKER = "[INTELLIGENT]";
 
-type StaticSeverityCounts = {
+export type SeverityCounts = {
 	critical: number;
 	high: number;
 	medium: number;
@@ -56,7 +56,7 @@ export interface TaskActivityItem {
 	sourceMode: TaskActivitySourceMode;
 	status: string;
 	gitleaksEnabled?: boolean;
-	staticFindingStats?: StaticSeverityCounts;
+	staticFindingStats?: SeverityCounts;
 	agentFindingStats?: {
 		critical: number;
 		high: number;
@@ -145,9 +145,9 @@ function toNonNegativeInt(value: unknown): number {
 	return Math.floor(parsed);
 }
 
-function buildOpengrepSeverityCounts(
+export function buildOpengrepSeverityCounts(
 	task?: OpengrepScanTask | null,
-): StaticSeverityCounts {
+): SeverityCounts {
 	const total = toNonNegativeInt(task?.total_findings);
 	const error = toNonNegativeInt(task?.error_count);
 	const warning = toNonNegativeInt(task?.warning_count);
@@ -159,9 +159,9 @@ function buildOpengrepSeverityCounts(
 	};
 }
 
-function buildGitleaksSeverityCounts(
+export function buildGitleaksSeverityCounts(
 	task?: GitleaksScanTask | null,
-): StaticSeverityCounts {
+): SeverityCounts {
 	return {
 		critical: 0,
 		high: 0,
@@ -170,9 +170,9 @@ function buildGitleaksSeverityCounts(
 	};
 }
 
-function buildBanditSeverityCounts(
+export function buildBanditSeverityCounts(
 	task?: BanditScanTask | null,
-): StaticSeverityCounts {
+): SeverityCounts {
 	return {
 		critical: 0,
 		high: toNonNegativeInt(task?.high_count),
@@ -181,9 +181,9 @@ function buildBanditSeverityCounts(
 	};
 }
 
-function buildPhpstanSeverityCounts(
+export function buildPhpstanSeverityCounts(
 	task?: PhpstanScanTask | null,
-): StaticSeverityCounts {
+): SeverityCounts {
 	// PHPStan integration: dashboard/task活动口径将 phpstan 发现全部归入 low(hint)。
 	return {
 		critical: 0,
@@ -193,8 +193,24 @@ function buildPhpstanSeverityCounts(
 	};
 }
 
-function mergeSeverityCounts(...counts: StaticSeverityCounts[]): StaticSeverityCounts {
-	return counts.reduce<StaticSeverityCounts>(
+export function getAgentSeverityCounts(
+	task?:
+		| Pick<
+				AgentTask,
+				"critical_count" | "high_count" | "medium_count" | "low_count"
+		  >
+		| null,
+): SeverityCounts {
+	return {
+		critical: toNonNegativeInt(task?.critical_count),
+		high: toNonNegativeInt(task?.high_count),
+		medium: toNonNegativeInt(task?.medium_count),
+		low: toNonNegativeInt(task?.low_count),
+	};
+}
+
+export function mergeSeverityCounts(...counts: SeverityCounts[]): SeverityCounts {
+	return counts.reduce<SeverityCounts>(
 		(acc, item) => ({
 			critical: acc.critical + item.critical,
 			high: acc.high + item.high,
@@ -208,6 +224,10 @@ function mergeSeverityCounts(...counts: StaticSeverityCounts[]): StaticSeverityC
 			low: 0,
 		},
 	);
+}
+
+export function getSeverityCountTotal(counts: SeverityCounts): number {
+	return counts.critical + counts.high + counts.medium + counts.low;
 }
 
 function toRuleScanActivities(

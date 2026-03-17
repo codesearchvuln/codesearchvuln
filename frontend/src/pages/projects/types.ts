@@ -5,6 +5,7 @@ import type { BanditScanTask } from "@/shared/api/bandit";
 import type { GitleaksScanTask } from "@/shared/api/gitleaks";
 import type { PhpstanScanTask } from "@/shared/api/phpstan";
 import type { OpengrepScanTask } from "@/shared/api/opengrep";
+import type { ProjectSeverityBreakdown } from "@/features/projects/services/projectCardPreview";
 import type { Project, AuditTask } from "@/shared/types";
 import type { ProjectsPageDataSource } from "./data/projectsPageDataSource";
 

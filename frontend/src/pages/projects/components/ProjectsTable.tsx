@@ -17,6 +17,33 @@ interface ProjectsTableProps {
 	onCreateScan: (projectId: string) => void;
 }
 
+const VULNERABILITY_COLUMNS = [
+	{
+		key: "critical",
+		label: "严重",
+		headClassName: "text-center text-rose-300",
+		cellClassName: "text-center font-semibold tabular-nums text-rose-300",
+	},
+	{
+		key: "high",
+		label: "高危",
+		headClassName: "text-center text-amber-300",
+		cellClassName: "text-center font-semibold tabular-nums text-amber-300",
+	},
+	{
+		key: "medium",
+		label: "中危",
+		headClassName: "text-center text-sky-300",
+		cellClassName: "text-center font-semibold tabular-nums text-sky-300",
+	},
+	{
+		key: "low",
+		label: "低危",
+		headClassName: "text-center text-emerald-300",
+		cellClassName: "text-center font-semibold tabular-nums text-emerald-300",
+	},
+] as const;
+
 export default function ProjectsTable({
 	rows,
 	onCreateScan,
@@ -50,9 +77,6 @@ export default function ProjectsTable({
 							{row.sizeText}
 						</TableCell>
 						<TableCell>
-							<Badge className={row.statusClassName}>{row.statusLabel}</Badge>
-						</TableCell>
-						<TableCell>
 							<div className="grid grid-cols-2 gap-2 min-w-[180px]">
 								<div className="rounded border border-emerald-500/25 bg-emerald-500/10 px-2 py-1">
 									<p className="text-sm leading-5 font-semibold text-emerald-300">
@@ -66,9 +90,14 @@ export default function ProjectsTable({
 								</div>
 							</div>
 						</TableCell>
-						<TableCell className="text-amber-300 font-semibold">
-							{row.totalIssues}
-						</TableCell>
+						{VULNERABILITY_COLUMNS.map((column) => (
+							<TableCell
+								key={`${row.id}-${column.key}`}
+								className={column.cellClassName}
+							>
+								{row.vulnerabilityStats[column.key]}
+							</TableCell>
+						))}
 						<TableCell>
 							<div className="flex items-center gap-2 whitespace-nowrap">
 								<Button
