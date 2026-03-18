@@ -534,7 +534,6 @@ def _sanitize_mcp_config(raw_mcp_config: Any) -> dict:
         "enabled": bool(getattr(settings, "MCP_ENABLED", True)),
         "preferMcp": bool(getattr(settings, "MCP_PREFER", True)),
         "writePolicy": _sanitize_mcp_write_policy({}),
-        "runtimePolicy": {"default_mode": "stdio_only"},
         "catalog": [],
         "skillAvailability": skill_availability,
         "deprecatedConfigs": (

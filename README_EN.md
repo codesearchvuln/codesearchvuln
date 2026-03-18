@@ -136,8 +136,7 @@ docker compose -f deploy/compose/docker-compose.prod.cn.yml up -d
 - You can override mirror endpoints with `DOCKERHUB_LIBRARY_MIRROR` and `SANDBOX_IMAGE`.
 - DockerHub/GHCR candidate priority is: `*_CANDIDATES` > plural `CN_*` vars (`CN_DOCKERHUB_LIBRARY_MIRRORS` / `CN_GHCR_REGISTRIES`) > legacy singular vars (`CN_DOCKERHUB_LIBRARY_MIRROR` / `CN_GHCR_REGISTRY`) > built-in defaults.
 - You can extend probe pools via comma-separated `*_CANDIDATES`, or explicitly set `*_PRIMARY` / `*_FALLBACK` to skip probing for that category.
-- Backend Node/pnpm build now supports mirror-first + official fallback; override with `BACKEND_NPM_REGISTRY_PRIMARY`, `BACKEND_NPM_REGISTRY_FALLBACK`, and `BACKEND_PNPM_VERSION`.
-- Local Compose now disables pnpm optional dependencies by default (`BACKEND_PNPM_INSTALL_OPTIONAL=0`) to avoid long `node-llama-cpp` retry loops; set it to `1` if you require full optional dependencies.
+- Frontend and sandbox still support NPM mirror overrides; backend Docker builds no longer depend on Node/pnpm/npx/QMD runtimes.
 - Local Compose now skips CJK font installation by default (`BACKEND_INSTALL_CJK_FONTS=0`) to speed up builds; set it to `1` if you need Chinese font rendering.
 - Backend Docker now installs YASA by default (`BACKEND_INSTALL_YASA=1`, version controlled by `YASA_VERSION`). Default in-container paths are `YASA_BIN_PATH=/opt/yasa/bin/yasa` and `YASA_RESOURCE_DIR=/opt/yasa/resource`.
 - To override with a host-installed YASA, explicitly add `docker-compose.yasa-host.yml`: `docker compose -f docker-compose.yml -f docker-compose.yasa-host.yml up -d --build` (override paths via `YASA_HOST_BIN_PATH` / `YASA_HOST_RESOURCE_DIR`).
@@ -157,17 +156,6 @@ Custom DockerHub/GHCR CN candidate pools:
 ```bash
 CN_DOCKERHUB_LIBRARY_MIRRORS=docker.m.daocloud.io/library,docker.1ms.run/library \
 CN_GHCR_REGISTRIES=ghcr.nju.edu.cn,ghcr.m.daocloud.io \
-./scripts/compose-up-with-fallback.sh
-```
-
-Backend Node/pnpm mirror fallback example:
-
-```bash
-BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com \
-BACKEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org \
-BACKEND_PNPM_VERSION=9.15.4 \
-BACKEND_PNPM_INSTALL_OPTIONAL=0 \
-BACKEND_INSTALL_CJK_FONTS=0 \
 ./scripts/compose-up-with-fallback.sh
 ```
 

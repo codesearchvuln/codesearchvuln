@@ -14,7 +14,14 @@
 - end_line: 可选，结束行号
 - max_lines: 最大返回行数（默认500）
 
-注意: 为避免输出过长，建议指定行范围或使用 RAG 搜索定位代码。
+输出格式: 每行代码前带有文件中的原始行号，格式为 `行号| 代码`，例如：
+```
+   4| def world():
+   5|     return 42
+```
+可直接引用行号定位代码位置。
+
+注意: 为避免输出过长，建议指定行范围搜索定位代码。
 
 ## Goal
 定位目标代码、函数上下文与证据位置。
@@ -30,10 +37,7 @@
 - `start_line` (any, optional): 起始行号（从1开始）
 - `end_line` (any, optional): 结束行号
 - `max_lines` (integer, optional): 最大返回行数
-- `reason_paths` (any, optional): 可选，基于上文推断的优先路径
-- `project_scope` (boolean, optional): 可选，启用全项目路径补全
-- `strict_anchor` (boolean, optional): 严格锚点模式：仅允许窗口化读取
-- `allow_file_header_fallback` (boolean, optional): 严格锚点模式下允许回退读取文件头部窗口（防御性兜底）。
+- `project_scope` (boolean, optional): 允许基于项目范围补全 basename 路径
 
 
 ### Example Input
@@ -54,7 +58,7 @@
 
 ## Typical Triggers
 - 当 Agent 需要完成“定位目标代码、函数上下文与证据位置。”时触发。
-- 常见阶段: `analysis, recon, verification`。
+- 常见阶段: `analysis, business_logic_analysis, business_logic_recon, orchestrator, recon, report, verification`。
 - 分类: `代码读取与定位`。
 - 可选工具: `否`。
 

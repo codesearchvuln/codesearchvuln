@@ -10,8 +10,6 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "compose-up-with-fallback.sh"
 _EXPLICIT_MIRROR_ENV = {
     "DOCKERHUB_LIBRARY_MIRROR": "docker.m.daocloud.io/library",
     "GHCR_REGISTRY": "ghcr.nju.edu.cn",
-    "BACKEND_NPM_REGISTRY_PRIMARY": "https://registry.npmmirror.com",
-    "BACKEND_NPM_REGISTRY_FALLBACK": "https://registry.npmjs.org",
     "FRONTEND_NPM_REGISTRY": "https://registry.npmmirror.com",
     "FRONTEND_NPM_REGISTRY_FALLBACK": "https://registry.npmjs.org",
     "SANDBOX_NPM_REGISTRY_PRIMARY": "https://registry.npmmirror.com",

@@ -14,7 +14,7 @@
 - category: 思考类别 (analysis/planning/evaluation/decision)
 
 ## Goal
-在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
+在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
 
 ## Task List
 - 协助 Agent 制定下一步行动。
@@ -43,8 +43,8 @@
 - `metadata` (object): 补充上下文信息。
 
 ## Typical Triggers
-- 当 Agent 需要完成“在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。”时触发。
-- 常见阶段: `analysis, orchestrator, recon, verification`。
+- 当 Agent 需要完成“在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。”时触发。
+- 常见阶段: `analysis, business_logic_analysis, business_logic_recon, orchestrator, recon, verification`。
 - 分类: `报告与协作编排`。
 - 可选工具: `否`。
 

@@ -36,7 +36,7 @@
 
 ## Typical Triggers
 - 当 Agent 需要完成“判断漏洞是否可达、是否受逻辑/授权路径约束。”时触发。
-- 常见阶段: `analysis, verification`。
+- 常见阶段: `analysis`。
 - 分类: `可达性与逻辑分析`。
 - 可选工具: `否`。
 

@@ -38,12 +38,10 @@ def test_sanitize_mcp_config_ignores_client_runtime_overrides(monkeypatch):
 
     assert sanitized["enabled"] is True
     assert sanitized["preferMcp"] is True
-    assert sanitized["runtimePolicy"] == {
-        "default_mode": "stdio_only",
-    }
     assert sanitized["catalog"] == []
     assert sanitized["deprecatedConfigs"]["filesystem"]["ignored"] is True
     assert sanitized["deprecatedConfigs"]["filesystem"]["deprecated"] is True
+    assert "runtimePolicy" not in sanitized
 
 
 def test_sanitize_mcp_config_skill_availability_only_contains_scan_core(monkeypatch):

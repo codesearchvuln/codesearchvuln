@@ -1,151 +1,105 @@
 # Tool: `run_code`
 
 ## Tool Purpose
-在沙箱中执行自定义测试代码（Fuzzing Harness / PoC 脚本），用于动态验证漏洞。
+🔥 通用代码执行工具 - 在沙箱中运行你编写的测试代码
 
-## Inputs
-- `code` (string, required): 可执行代码
-- `language` (string, optional): `python|php|javascript|ruby|go|java|bash`，默认 `python`
-- `timeout` (integer, optional): 超时秒数，默认 `60`
-- `description` (string, optional): 本次执行目的
+这是你进行漏洞验证的核心工具。你可以：
+1. 编写 Fuzzing Harness 隔离测试单个函数
+2. 构造 mock 对象模拟数据库、HTTP 请求等依赖
+3. 设计各种 payload 进行漏洞测试
+4. 编写完整的 PoC 验证脚本
 
-### Example Input
-```json
-{
-  "code": "print('hello')",
-  "language": "python",
-  "timeout": 60,
-  "description": "sanity check"
-}
-```
+输入：
+- code: 你编写的测试代码（完整可执行）
+- language: python, php, javascript, ruby, go, java, bash
+- timeout: 超时秒数（默认60，复杂测试可设更长）
+- description: 简短描述代码目的
 
-## Outputs
-- `success` / `error`
-- `data`: stdout/stderr 摘要
-- `metadata`: `language`, `exit_code`, 输出长度
+支持的语言和执行方式：
+- python: python3 -c 'code'
+- php: php -r 'code'  (注意：不需要 <?php 标签)
+- javascript: node -e 'code'
+- ruby: ruby -e 'code'
+- go: go run (需写完整 package main)
+- java: javac + java (需写完整 class)
+- bash: bash -c 'code'
 
-## Typical Triggers
-- 构建并执行漏洞验证 Harness
-- 需要动态验证而项目无法整体运行时
-
-## Pitfalls And Forbidden Use
-- 不要在未读取目标代码前直接执行无关脚本
-- 不要把一次失败直接当作“漏洞不存在”
-- PoC 建议保持非武器化、可审计
-
-### 命令注入 Fuzzing Harness 示例 (Python)
+示例 - 命令注入 Fuzzing Harness:
 ```python
+# 提取目标函数并构造测试
 import os
-import subprocess
 
-# === Mock 危险函数来检测调用 ===
+# Mock os.system 来检测是否被调用
 executed_commands = []
 original_system = os.system
-
 def mock_system(cmd):
     print(f"[DETECTED] os.system called: {cmd}")
     executed_commands.append(cmd)
     return 0
-
 os.system = mock_system
 
-# === 目标函数（从项目代码复制） ===
+# 目标函数（从项目代码复制）
 def vulnerable_function(user_input):
     os.system(f"echo {user_input}")
 
-# === Fuzzing 测试 ===
-payloads = [
-    "test",           # 正常输入
-    "; id",           # 命令连接符
-    "| whoami",       # 管道
-    "$(cat /etc/passwd)",  # 命令替换
-    "`id`",           # 反引号
-    "&& ls -la",      # AND 连接
-]
-
-print("=== Fuzzing Start ===")
+# Fuzzing 测试
+payloads = ["; id", "| whoami", "$(cat /etc/passwd)", "`id`"]
 for payload in payloads:
-    print(f"\\nPayload: {payload}")
+    print(f"\nTesting payload: {payload}")
     executed_commands.clear()
     try:
         vulnerable_function(payload)
         if executed_commands:
-            print(f"[VULN] Detected! Commands: {executed_commands}")
+            print(f"[VULN] Command injection detected!")
     except Exception as e:
-        print(f"[ERROR] {e}")
+        print(f"Error: {e}")
 ```
 
-### SQL 注入 Fuzzing Harness 示例 (Python)
-```python
-# === Mock 数据库 ===
-class MockCursor:
-    def __init__(self):
-        self.queries = []
+重要提示：
+- 代码在 Docker 沙箱中执行，与真实环境隔离
+- 你需要自己 mock 依赖（数据库、HTTP、文件系统等）
+- 你需要自己设计 payload 和检测逻辑
+- 你需要自己分析输出判断漏洞是否存在
 
-    def execute(self, query, params=None):
-        print(f"[SQL] Query: {query}")
-        print(f"[SQL] Params: {params}")
-        self.queries.append((query, params))
+## Goal
+在 verification 阶段支撑审计编排和结果产出。
 
-        # 检测 SQL 注入特征
-        if params is None and ("'" in query or "OR" in query.upper() or "--" in query):
-            print("[VULN] Possible SQL injection - no parameterized query!")
+## Task List
+- 协助 Agent 制定下一步行动。
+- 沉淀中间结论与可追溯信息。
+- 保障任务收敛与结果可交付性。
 
-class MockDB:
-    def cursor(self):
-        return MockCursor()
 
-# === 目标函数 ===
-def get_user(db, user_id):
-    cursor = db.cursor()
-    cursor.execute(f"SELECT * FROM users WHERE id = '{user_id}'")  # 漏洞！
+## Inputs
+- `code` (string, required): 要执行的代码
+- `language` (string, optional): 编程语言: python, php, javascript, ruby, go, java, bash
+- `timeout` (integer, optional): 超时时间（秒），复杂测试可设置更长
+- `description` (string, optional): 简短描述这段代码的目的（用于日志）
 
-# === Fuzzing ===
-db = MockDB()
-payloads = ["1", "1'", "1' OR '1'='1", "1'; DROP TABLE users--", "1 UNION SELECT * FROM admin"]
 
-for p in payloads:
-    print(f"\\n=== Testing: {p} ===")
-    get_user(db, p)
-```
-
-### PHP 命令注入 Fuzzing Harness 示例
-```php
-// 注意：php -r 不需要 <?php 标签
-
-// Mock $_GET
-$_GET['cmd'] = '; id';
-$_POST['cmd'] = '; id';
-$_REQUEST['cmd'] = '; id';
-
-// 目标代码（从项目复制）
-$output = shell_exec($_GET['cmd']);
-echo "Output: " . $output;
-
-// 如果有输出，说明命令被执行
-if ($output) {
-    echo "\\n[VULN] Command executed!";
+### Example Input
+```json
+{
+  "code": "<text>",
+  "language": "python",
+  "timeout": 60
 }
 ```
 
-### XSS 检测 Harness 示例 (Python)
-```python
-def vulnerable_render(user_input):
-    # 模拟模板渲染
-    return f"<div>Hello, {user_input}!</div>"
+## Outputs
+- `success` (bool): 执行是否成功。
+- `data` (any): 工具主结果载荷。
+- `error` (string|null): 失败时错误信息。
+- `duration_ms` (int): 执行耗时（毫秒）。
+- `metadata` (object): 补充上下文信息。
 
-payloads = [
-    "test",
-    "<script>alert(1)</script>",
-    "<img src=x onerror=alert(1)>",
-    "{{7*7}}",  # SSTI
-]
+## Typical Triggers
+- 当 Agent 需要完成“在 verification 阶段支撑审计编排和结果产出。”时触发。
+- 常见阶段: `verification`。
+- 分类: `报告与协作编排`。
+- 可选工具: `否`。
 
-for p in payloads:
-    output = vulnerable_render(p)
-    print(f"Input: {p}")
-    print(f"Output: {output}")
-    # 检测：payload 是否原样出现在输出中
-    if p in output and ("<" in p or "{{" in p):
-        print("[VULN] XSS - input not escaped!")
-```
+## Pitfalls And Forbidden Use
+- 不要在输入缺失关键参数时盲目调用。
+- 不要将该工具输出直接当作最终结论，必须结合上下文复核。
+- 不要在权限不足或路径不合法时重复重试同一输入。

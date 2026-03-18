@@ -129,7 +129,6 @@ async def _collect_runtime_tools_async() -> Dict[str, Dict[str, Any]]:
             llm_service=SimpleNamespace(),
             user_config=None,
             sandbox_manager=SimpleNamespace(),
-            rag_enabled=False,
             verification_level="analysis_with_poc_plan",
             exclude_patterns=[],
             target_files=None,
@@ -277,6 +276,8 @@ def _build_tool_doc(runtime_key: str, tool: Any, phases: Iterable[str], optional
 
     phases_text = ", ".join(sorted({str(p) for p in phases})) or "unknown"
     optional_text = "是" if optional else "否"
+    task_lines = "".join(f"- {item}\n" for item in tasks)
+    rendered_inputs = "".join(f"{line}\n" for line in input_lines)
 
     doc = f"""# Tool: `{runtime_key}`
 
@@ -287,10 +288,10 @@ def _build_tool_doc(runtime_key: str, tool: Any, phases: Iterable[str], optional
 {goal}
 
 ## Task List
-{"".join(f"- {item}\n" for item in tasks)}
+{task_lines}
 
 ## Inputs
-{"".join(f"{line}\n" for line in input_lines)}
+{rendered_inputs}
 
 ### Example Input
 ```json
@@ -437,15 +438,10 @@ def _build_mcp_tool_playbook() -> str:
 | 标准工具名 | MCP Server | MCP Tool | 必填参数 | 典型输出 |
 | --- | --- | --- | --- | --- |
 | `search_code` | `local` | `FileSearchTool` | 公开输入 `keyword`；优先补充 `directory/file_pattern` 缩小范围 | 命中位置（含 file_path 与 line） |
-| `read_file` | `filesystem` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |
+| `read_file` | `local` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |
 | `list_files` | `local` | `ListFilesTool` | `directory/path` | 文件列表 |
 | `locate_enclosing_function` | `local` | `LocateEnclosingFunctionTool` | `file_path/path` + `line_start/line`（或 `file_path:line`） | 所属函数、范围与诊断 |
 | `extract_function` | `local` | `ExtractFunctionTool` | `path`, `symbol_name` | 函数代码 |
-| `qmd_query` | `qmd` | `deep_search` | `query/searches` | 语义检索结果 |
-| `qmd_get` | `qmd` | `get` | `doc_id/id` | 文档详情 |
-| `qmd_multi_get` | `qmd` | `multi_get` | `ids` | 批量文档结果 |
-| `qmd_status` | `qmd` | `status` | 无 | 集合与索引状态 |
-| `sequential_thinking` / `reasoning_trace` | `sequentialthinking` | `sequentialthinking` | `thought` | 分步推理轨迹 |
 
 ## 2) 文件读取链路（强约束）
 
@@ -453,26 +449,16 @@ def _build_mcp_tool_playbook() -> str:
 2. 再 `read_file` 窗口读取：优先 `line-60 ~ line+99`（最多 200 行）。
 3. 需要函数级证据时：调用 `locate_enclosing_function`，再按需 `extract_function`。
 
-## 3) QMD / SequentialThinking 最小调用模板
+## 3) 最小调用模板
 
 ```json
 {
-  "tool": "qmd_query",
+  "tool": "search_code",
   "input": {
-    "query": "查找与认证绕过相关的入口函数",
-    "top_k": 5
-  }
-}
-```
-
-```json
-{
-  "tool": "sequential_thinking",
-  "input": {
-    "thought": "先定位入口，再验证可达性，再评估影响",
-    "thoughtNumber": 1,
-    "totalThoughts": 3,
-    "nextThoughtNeeded": true
+    "keyword": "auth bypass",
+    "directory": "src",
+    "file_pattern": "*.py",
+    "max_results": 5
   }
 }
 ```
@@ -484,7 +470,7 @@ def _build_mcp_tool_playbook() -> str:
 - 误用：`search_code` 用泛化关键词（如 `function`, `user`）。
   - 纠偏：优先用符号名/常量名，并补 `directory` 与 `file_pattern` 缩小范围。
 - 误用：使用虚拟工具名（如 `code_search`、`rag_query`）直接执行。
-  - 纠偏：改用标准工具名（`search_code`, `read_file`, `qmd_query` 等）。
+  - 纠偏：改用标准工具名（`search_code`, `read_file`, `list_files` 等）。
 
 ## 5) 可复制 Action Input 示例
 

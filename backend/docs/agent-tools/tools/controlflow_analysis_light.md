@@ -1,7 +1,7 @@
 # Tool: `controlflow_analysis_light`
 
 ## Tool Purpose
-轻量控制流/数据流分析：基于 tree-sitter 和 code2flow 推断从入口到漏洞位置的调用链、控制条件和可达性分值。适用于不完整代码和不可编译项目。
+轻量控制流/数据流分析：基于 tree-sitter 和 code2flow 推断从入口到漏洞位置的调用链、控制条件和可达性分值。适用于不完整代码和不可编译项目。优先输入 file_path:line 或显式 line_start 以确保可定位。
 
 ## Goal
 判断漏洞是否可达、是否受逻辑/授权路径约束。
@@ -44,7 +44,7 @@
 
 ## Typical Triggers
 - 当 Agent 需要完成“判断漏洞是否可达、是否受逻辑/授权路径约束。”时触发。
-- 常见阶段: `analysis, verification`。
+- 常见阶段: `analysis`。
 - 分类: `可达性与逻辑分析`。
 - 可选工具: `否`。
 

@@ -186,8 +186,6 @@ class Settings(BaseSettings):
     MCP_STRICT_MODE: bool = True
     MCP_TIMEOUT_SECONDS: int = 150
     MCP_REQUIRE_ALL_READY_ON_STARTUP: bool = True
-    MCP_REQUIRED_RUNTIME_DOMAIN: str = "stdio"
-    MCP_RUNTIME_MODE_DEFAULT: str = "stdio_only"
 
     # Write policy hard constraints (applies to every task)
     MCP_WRITE_HARD_LIMIT: int = 50

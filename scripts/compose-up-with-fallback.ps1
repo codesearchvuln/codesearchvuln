@@ -209,20 +209,15 @@ if (-not $env:GHCR_REGISTRY) {
     Log-Info "Using explicit GHCR_REGISTRY=$env:GHCR_REGISTRY"
 }
 
-if (-not $env:BACKEND_NPM_REGISTRY_PRIMARY) {
-    $npmRanked = Rank-Candidates -Kind "npm" -Label "npm" -Candidates $npmCandidates
-    $env:BACKEND_NPM_REGISTRY_PRIMARY = $npmRanked[0]
-    $env:BACKEND_NPM_REGISTRY_FALLBACK = if ($npmRanked.Count -gt 1) { $npmRanked[1] } else { $npmRanked[0] }
-}
-
 if (-not $env:FRONTEND_NPM_REGISTRY) {
-    $env:FRONTEND_NPM_REGISTRY = $env:BACKEND_NPM_REGISTRY_PRIMARY
-    $env:FRONTEND_NPM_REGISTRY_FALLBACK = $env:BACKEND_NPM_REGISTRY_FALLBACK
+    $npmRanked = Rank-Candidates -Kind "npm" -Label "frontend-npm" -Candidates $npmCandidates
+    $env:FRONTEND_NPM_REGISTRY = $npmRanked[0]
+    $env:FRONTEND_NPM_REGISTRY_FALLBACK = if ($npmRanked.Count -gt 1) { $npmRanked[1] } else { $npmRanked[0] }
 }
 
 if (-not $env:SANDBOX_NPM_REGISTRY_PRIMARY) {
-    $env:SANDBOX_NPM_REGISTRY_PRIMARY = $env:BACKEND_NPM_REGISTRY_PRIMARY
-    $env:SANDBOX_NPM_REGISTRY_FALLBACK = $env:BACKEND_NPM_REGISTRY_FALLBACK
+    $env:SANDBOX_NPM_REGISTRY_PRIMARY = $env:FRONTEND_NPM_REGISTRY
+    $env:SANDBOX_NPM_REGISTRY_FALLBACK = $env:FRONTEND_NPM_REGISTRY_FALLBACK
 }
 
 if (-not $env:BACKEND_PYPI_INDEX_PRIMARY) {
@@ -276,7 +271,6 @@ Log-Info "  GHCR_REGISTRY=$env:GHCR_REGISTRY"
 Log-Info "  UV_IMAGE=$env:UV_IMAGE"
 Log-Info "  SANDBOX_BASE_IMAGE=$env:SANDBOX_BASE_IMAGE"
 Log-Info "  SANDBOX_IMAGE=$env:SANDBOX_IMAGE"
-Log-Info "  BACKEND_NPM_REGISTRY_PRIMARY=$env:BACKEND_NPM_REGISTRY_PRIMARY"
 Log-Info "  FRONTEND_NPM_REGISTRY=$env:FRONTEND_NPM_REGISTRY"
 
 # Execute docker compose

@@ -49,91 +49,53 @@
   - 反例/误用: 在无有效输入或无证据时直接下结论。
 
 ## 漏洞验证与 PoC 规划
-- 工具: `test_command_injection`
-  - 目标: 执行非武器化验证步骤并收集可复现实验信号。
-  - 推荐任务: 构造安全可控的测试输入。；观察返回、日志与行为差异。；输出验证结果与证据摘要。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `test_deserialization`
-  - 目标: 执行非武器化验证步骤并收集可复现实验信号。
-  - 推荐任务: 构造安全可控的测试输入。；观察返回、日志与行为差异。；输出验证结果与证据摘要。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `test_path_traversal`
-  - 目标: 执行非武器化验证步骤并收集可复现实验信号。
-  - 推荐任务: 构造安全可控的测试输入。；观察返回、日志与行为差异。；输出验证结果与证据摘要。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `test_sql_injection`
-  - 目标: 执行非武器化验证步骤并收集可复现实验信号。
-  - 推荐任务: 构造安全可控的测试输入。；观察返回、日志与行为差异。；输出验证结果与证据摘要。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `test_ssti`
-  - 目标: 执行非武器化验证步骤并收集可复现实验信号。
-  - 推荐任务: 构造安全可控的测试输入。；观察返回、日志与行为差异。；输出验证结果与证据摘要。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `test_xss`
-  - 目标: 执行非武器化验证步骤并收集可复现实验信号。
-  - 推荐任务: 构造安全可控的测试输入。；观察返回、日志与行为差异。；输出验证结果与证据摘要。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `universal_vuln_test`
-  - 目标: 执行非武器化验证步骤并收集可复现实验信号。
-  - 推荐任务: 构造安全可控的测试输入。；观察返回、日志与行为差异。；输出验证结果与证据摘要。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
+- 暂无工具映射。
 
 ## 报告与协作编排
 - 工具: `create_vulnerability_report`
   - 目标: 在 verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `reasoning_trace`
-  - 目标: 在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
+- 工具: `locate_enclosing_function`
+  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
 - 工具: `reflect`
-  - 目标: 在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
+  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `sequential_thinking`
-  - 目标: 在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
+- 工具: `run_code`
+  - 目标: 在 verification 阶段支撑审计编排和结果产出。
+  - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
+  - 反例/误用: 在无有效输入或无证据时直接下结论。
+- 工具: `sandbox_exec`
+  - 目标: 在 verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
 - 工具: `think`
-  - 目标: 在 analysis/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
+  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
+  - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
+  - 反例/误用: 在无有效输入或无证据时直接下结论。
+- 工具: `verify_vulnerability`
+  - 目标: 在 verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
 
 ## 工具全量索引
-- `business_logic_scan`
 - `controlflow_analysis_light`
 - `create_vulnerability_report`
 - `dataflow_analysis`
 - `extract_function`
-- `go_test`
-- `java_test`
-- `javascript_test`
 - `list_files`
+- `locate_enclosing_function`
 - `logic_authz_analysis`
 - `pattern_match`
-- `php_test`
-- `python_test`
 - `quick_audit`
 - `read_file`
-- `reasoning_trace`
 - `reflect`
-- `ruby_test`
 - `run_code`
 - `sandbox_exec`
-- `sandbox_http`
 - `search_code`
-- `sequential_thinking`
-- `shell_test`
-- `skill_lookup`
 - `smart_scan`
-- `test_command_injection`
-- `test_deserialization`
-- `test_path_traversal`
-- `test_sql_injection`
-- `test_ssti`
-- `test_xss`
 - `think`
-- `universal_code_test`
-- `universal_vuln_test`
 - `verify_vulnerability`

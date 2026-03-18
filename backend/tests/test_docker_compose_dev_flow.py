@@ -48,6 +48,14 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert "YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}" in compose_text
     assert "YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}" in compose_text
     assert 'MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"' in compose_text
+    assert "BACKEND_NPM_REGISTRY_PRIMARY" not in compose_text
+    assert "BACKEND_NPM_REGISTRY_FALLBACK" not in compose_text
+    assert "BACKEND_NPM_REGISTRY_CANDIDATES" not in compose_text
+    assert "BACKEND_PNPM_VERSION" not in compose_text
+    assert "BACKEND_PNPM_CMD_TIMEOUT_SECONDS" not in compose_text
+    assert "BACKEND_PNPM_INSTALL_OPTIONAL" not in compose_text
+    assert "MCP_REQUIRED_RUNTIME_DOMAIN" not in compose_text
+    assert "MCP_CODE_INDEX_ENABLED" not in compose_text
     assert 'SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP: "false"' in compose_text
     assert 'CODEX_SKILLS_AUTO_INSTALL: "false"' in compose_text
     assert 'profiles: ["tools"]' in compose_text
@@ -67,6 +75,18 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert 'ordered_indexes="$(order_indexes "${pypi_index_candidates}")"' in backend_text
     assert 'while IFS= read -r index_url; do' in backend_text
     assert 'sync_with_index "${BACKEND_PYPI_INDEX_PRIMARY}" || sync_with_index "${BACKEND_PYPI_INDEX_FALLBACK}"' not in backend_text
+    assert "nodebase" not in backend_text
+    assert "mcp-builder" not in backend_text
+    assert "run_npx_from_candidates.sh" not in backend_text
+    assert "/app/data/mcp/code-index" not in backend_text
+    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim" not in backend_text
+    assert "BACKEND_NPM_REGISTRY_PRIMARY" not in backend_text
+    assert "BACKEND_NPM_REGISTRY_FALLBACK" not in backend_text
+    assert "BACKEND_NPM_REGISTRY_CANDIDATES" not in backend_text
+    assert "BACKEND_PNPM_VERSION" not in backend_text
+    assert "BACKEND_PNPM_INSTALL_OPTIONAL" not in backend_text
+    assert "PNPM_HOME" not in backend_text
+    assert "/pnpm" not in backend_text
 
     frontend_text = frontend_dockerfile.read_text(encoding="utf-8")
     assert " AS dev" in frontend_text
@@ -96,6 +116,13 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "- YASA_VERSION=${YASA_VERSION:-v0.2.33}" in full_overlay_text
     assert "YASA_BIN_PATH: ${YASA_BIN_PATH:-/opt/yasa/bin/yasa}" in full_overlay_text
     assert "YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}" in full_overlay_text
+    assert "BACKEND_NPM_REGISTRY_PRIMARY" not in full_overlay_text
+    assert "BACKEND_NPM_REGISTRY_FALLBACK" not in full_overlay_text
+    assert "BACKEND_NPM_REGISTRY_CANDIDATES" not in full_overlay_text
+    assert "BACKEND_PNPM_VERSION" not in full_overlay_text
+    assert "BACKEND_PNPM_CMD_TIMEOUT_SECONDS" not in full_overlay_text
+    assert "BACKEND_PNPM_INSTALL_OPTIONAL" not in full_overlay_text
+    assert "MCP_REQUIRED_RUNTIME_DOMAIN" not in full_overlay_text
     assert "\n  frontend-dev:" not in full_overlay_text
 
 

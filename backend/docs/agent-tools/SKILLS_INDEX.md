@@ -2,16 +2,9 @@
 
 - Skill 文档目录: `docs/agent-tools/skills`
 
-## 重点维护项
-
-- `search_code` -> `docs/agent-tools/skills/search_code.skill.md`（MCP 精确调用：`is_regex=true` 优先，避免 `pattern` 缺失）
-
-- `get_recon_risk_queue_status` -> `docs/agent-tools/skills/get_recon_risk_queue_status.skill.md`
 - `extract_function` -> `docs/agent-tools/skills/extract_function.skill.md`
 - `function_context` -> `docs/agent-tools/skills/function_context.skill.md`
 - `list_files` -> `docs/agent-tools/skills/list_files.skill.md`
 - `locate_enclosing_function` -> `docs/agent-tools/skills/locate_enclosing_function.skill.md`
-- `mcp_reliability_workflow` -> `docs/agent-tools/skills/mcp_reliability_workflow.skill.md`
-- `push_finding_to_queue` -> `docs/agent-tools/skills/push_finding_to_queue.skill.md`
 - `read_file` -> `docs/agent-tools/skills/read_file.skill.md`
 - `search_code` -> `docs/agent-tools/skills/search_code.skill.md`

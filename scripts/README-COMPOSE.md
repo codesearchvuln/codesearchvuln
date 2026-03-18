@@ -54,14 +54,12 @@ set DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
 set GHCR_REGISTRY=ghcr.nju.edu.cn
 ```
 
-### NPM 镜像源
+### 前端 / Sandbox NPM 镜像源
 ```bash
 # Linux/Mac/WSL
-export BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com
 export FRONTEND_NPM_REGISTRY=https://registry.npmmirror.com
 
 # Windows PowerShell
-$env:BACKEND_NPM_REGISTRY_PRIMARY="https://registry.npmmirror.com"
 $env:FRONTEND_NPM_REGISTRY="https://registry.npmmirror.com"
 ```
 
@@ -160,13 +158,11 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 # Linux/Mac/WSL
 export DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
 export GHCR_REGISTRY=ghcr.nju.edu.cn
-export BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmmirror.com
 export BACKEND_PYPI_INDEX_PRIMARY=https://mirrors.aliyun.com/pypi/simple/
 
 # Windows PowerShell
 $env:DOCKERHUB_LIBRARY_MIRROR="docker.m.daocloud.io/library"
 $env:GHCR_REGISTRY="ghcr.nju.edu.cn"
-$env:BACKEND_NPM_REGISTRY_PRIMARY="https://registry.npmmirror.com"
 $env:BACKEND_PYPI_INDEX_PRIMARY="https://mirrors.aliyun.com/pypi/simple/"
 ```
 
@@ -175,13 +171,11 @@ $env:BACKEND_PYPI_INDEX_PRIMARY="https://mirrors.aliyun.com/pypi/simple/"
 # Linux/Mac/WSL
 export DOCKERHUB_LIBRARY_MIRROR=docker.io/library
 export GHCR_REGISTRY=ghcr.io
-export BACKEND_NPM_REGISTRY_PRIMARY=https://registry.npmjs.org
 export BACKEND_PYPI_INDEX_PRIMARY=https://pypi.org/simple
 
 # Windows PowerShell
 $env:DOCKERHUB_LIBRARY_MIRROR="docker.io/library"
 $env:GHCR_REGISTRY="ghcr.io"
-$env:BACKEND_NPM_REGISTRY_PRIMARY="https://registry.npmjs.org"
 $env:BACKEND_PYPI_INDEX_PRIMARY="https://pypi.org/simple"
 ```
 

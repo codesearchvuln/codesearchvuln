@@ -47,3 +47,7 @@ def test_legacy_mcp_and_skill_exports_removed():
     assert not hasattr(config_module, "call_mcp_tool_runtime")
     assert not hasattr(runtime_module.MCPRuntime, "register_local_tool")
     assert not hasattr(runtime_module.MCPRuntime, "register_local_tools")
+    settings_model = type(config_module.settings)
+    assert "MCP_REQUIRED_RUNTIME_DOMAIN" not in settings_model.model_fields
+    assert "MCP_RUNTIME_MODE_DEFAULT" not in settings_model.model_fields
+    assert not hasattr(runtime_module.FastMCPStdioAdapter, "_NPX_PACKAGE_BINARIES")

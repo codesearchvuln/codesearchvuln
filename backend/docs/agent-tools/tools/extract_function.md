@@ -6,7 +6,7 @@
 用于构建 Fuzzing Harness 时获取目标函数代码。
 
 输入：
-- path: 源文件路径 (相对于项目根目录)
+- path: 源文件路径
 - symbol_name: 要提取的符号名
 - include_imports: 是否包含文件开头的 import 语句（默认 true）
 
@@ -51,7 +51,7 @@
 
 ## Typical Triggers
 - 当 Agent 需要完成“定位目标代码、函数上下文与证据位置。”时触发。
-- 常见阶段: `verification`。
+- 常见阶段: `analysis, report, verification`。
 - 分类: `代码读取与定位`。
 - 可选工具: `否`。
 

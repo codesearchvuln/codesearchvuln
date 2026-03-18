@@ -48,7 +48,7 @@
 
 ## Typical Triggers
 - 当 Agent 需要完成“定位目标代码、函数上下文与证据位置。”时触发。
-- 常见阶段: `analysis, recon, verification`。
+- 常见阶段: `analysis, business_logic_analysis, business_logic_recon, orchestrator, recon, report, verification`。
 - 分类: `代码读取与定位`。
 - 可选工具: `否`。
 

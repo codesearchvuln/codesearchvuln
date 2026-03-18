@@ -1253,7 +1253,7 @@ export default function OpengrepRules({
 						<div className="cyber-card p-4">
 							<div className="flex items-center justify-between">
 								<div>
-									<p className="stat-label">智能/混合扫描支持漏洞类型数量</p>
+									<p className="stat-label">支持漏洞类型数量</p>
 									<p className="stat-value">
 										{ruleStats.vulnerabilityTypeCount}
 									</p>

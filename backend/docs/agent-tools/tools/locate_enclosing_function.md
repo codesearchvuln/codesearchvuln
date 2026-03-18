@@ -1,17 +1,7 @@
-# Tool: `reflect`
+# Tool: `locate_enclosing_function`
 
 ## Tool Purpose
-反思工具。用于回顾当前的分析进展：
-1. 总结已经发现的问题
-2. 评估当前分析的覆盖度
-3. 识别可能遗漏的方向
-4. 决定是否需要调整策略
-
-参数:
-- summary: 当前进展总结
-- findings_so_far: 目前发现的问题数量
-- coverage: 分析覆盖度评估 (low/medium/high)
-- next_steps: 建议的下一步行动
+根据 file_path + line_start 定位包含该行的函数/方法，用于提取函数级上下文。
 
 ## Goal
 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
@@ -23,12 +13,19 @@
 
 
 ## Inputs
-- 无显式参数（工具内部处理）。
+- `file_path` (any, optional): 文件路径（相对于项目根目录）
+- `path` (any, optional): 兼容字段：文件路径（相对于项目根目录）
+- `line_start` (any, optional): 目标行号（从1开始）
+- `line` (any, optional): 兼容字段：目标行号（从1开始）
 
 
 ### Example Input
 ```json
-{}
+{
+  "file_path": null,
+  "path": null,
+  "line_start": null
+}
 ```
 
 ## Outputs

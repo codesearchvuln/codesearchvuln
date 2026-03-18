@@ -139,12 +139,6 @@ class MCPExecutionResult:
 class FastMCPStdioAdapter:
     """Minimal stdio MCP adapter backed by fastmcp.Client."""
     _PROJECT_PATH_BOOTSTRAP_TOOLS: set[str] = set()
-    _NPX_PACKAGE_BINARIES = {
-        "@modelcontextprotocol/server-sequential-thinking": "mcp-server-sequential-thinking",
-    }
-    _NPX_ONLY_FLAGS = {"-y", "--yes"}
-    _NPX_PACKAGE_FLAGS = {"-p", "--package"}
-    _PNPM_EXEC_MODES = {"dlx", "exec"}
 
     def __init__(
         self,
@@ -156,12 +150,8 @@ class FastMCPStdioAdapter:
         timeout: int = 30,
         runtime_domain: str = "backend",
     ) -> None:
-        normalized_command, normalized_args = self._normalize_stdio_command(
-            command=str(command or "").strip(),
-            args=[str(item) for item in (args or [])],
-        )
-        self.command = normalized_command
-        self.args = normalized_args
+        self.command = str(command or "").strip()
+        self.args = [str(item) for item in (args or [])]
         self.cwd = cwd
         self.env = dict(env or {})
         self.timeout = max(5, int(timeout))
@@ -169,67 +159,6 @@ class FastMCPStdioAdapter:
         self._availability_checked = False
         self._available = False
         self._availability_reason: Optional[str] = None
-
-    @classmethod
-    def _normalize_stdio_command(
-        cls,
-        *,
-        command: str,
-        args: List[str],
-    ) -> Tuple[str, List[str]]:
-        normalized_command = str(command or "").strip()
-        normalized_args = [str(item) for item in (args or [])]
-        if not normalized_command:
-            return normalized_command, normalized_args
-
-        command_basename = os.path.basename(normalized_command).strip().lower()
-        if command_basename not in {"npx", "npm", "pnpm"}:
-            return normalized_command, normalized_args
-
-        matched_package = ""
-        for item in normalized_args:
-            token = str(item or "").strip()
-            if token in cls._NPX_PACKAGE_BINARIES:
-                matched_package = token
-                break
-        if not matched_package:
-            return normalized_command, normalized_args
-
-        binary_name = cls._NPX_PACKAGE_BINARIES.get(matched_package)
-        if not binary_name:
-            return normalized_command, normalized_args
-        resolved_binary = shutil.which(binary_name)
-        if not resolved_binary:
-            return normalized_command, normalized_args
-
-        filtered_args: List[str] = []
-        skip_next = False
-        npm_exec_mode = command_basename == "npm"
-        for item in normalized_args:
-            token = str(item or "").strip()
-            if not token:
-                continue
-            lowered = token.lower()
-            if skip_next:
-                skip_next = False
-                continue
-            if token == matched_package:
-                continue
-            if lowered in cls._NPX_ONLY_FLAGS:
-                continue
-            if lowered in cls._NPX_PACKAGE_FLAGS:
-                skip_next = True
-                continue
-            if npm_exec_mode and lowered in {"exec", "x"}:
-                continue
-            if command_basename == "pnpm" and lowered in cls._PNPM_EXEC_MODES:
-                continue
-            if token == "--":
-                continue
-            if token == binary_name or token == resolved_binary:
-                continue
-            filtered_args.append(token)
-        return resolved_binary, filtered_args
 
     def is_available(self) -> bool:
         if self._availability_checked:
@@ -828,7 +757,7 @@ class MCPRuntime:
         required_mcps: Optional[List[str]] = None,
         write_scope_guard: Optional[TaskWriteScopeGuard] = None,
         adapter_failure_threshold: int = 2,
-        default_runtime_mode: str = "backend_then_sandbox",
+        default_runtime_mode: str = "stdio_only",
         strict_mode: bool = False,
         allow_filesystem_writes: bool = True,
         project_root: Optional[str] = None,
@@ -944,7 +873,7 @@ class MCPRuntime:
         mode = str(value or "").strip().lower()
         if mode in cls._VALID_RUNTIME_MODES:
             return mode
-        return "backend_then_sandbox"
+        return "stdio_only"
 
     def _get_runtime_mode(self, mcp_name: str) -> str:
         normalized = str(mcp_name or "").strip()
@@ -959,6 +888,8 @@ class MCPRuntime:
             return ["backend"]
         if mode_value == "sandbox_only":
             return ["sandbox"]
+        if mode_value == "stdio_only":
+            return ["backend"]
         if mode_value in {"prefer_backend", "backend_then_sandbox"}:
             return ["backend", "sandbox"]
         if mode_value in {"prefer_sandbox", "sandbox_then_backend"}:

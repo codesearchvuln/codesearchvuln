@@ -1183,8 +1183,8 @@ async def _probe_required_mcp_runtime(
             required_mcps=list(getattr(runtime, "required_mcps", []) or []),
             write_scope_guard=getattr(runtime, "write_scope_guard", None),
             default_runtime_mode=str(
-                getattr(runtime, "default_runtime_mode", "backend_then_sandbox")
-                or "backend_then_sandbox"
+                getattr(runtime, "default_runtime_mode", "stdio_only")
+                or "stdio_only"
             ),
             strict_mode=bool(getattr(runtime, "strict_mode", True)),
             adapter_failure_threshold=adapter_failure_threshold,
@@ -2952,9 +2952,7 @@ async def _execute_agent_task(task_id: str):
                 and required_gate_mcps
                 and bool(getattr(settings, "MCP_REQUIRE_ALL_READY_ON_STARTUP", True))
             ):
-                required_domain = str(
-                    getattr(settings, "MCP_REQUIRED_RUNTIME_DOMAIN", "all") or "all"
-                ).strip().lower()
+                required_domain = "backend"
                 readiness = mcp_runtime.ensure_all_mcp_ready(required_domain)
                 if not bool(readiness.get("ready")):
                     not_ready = readiness.get("not_ready") or []
