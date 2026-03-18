@@ -3378,6 +3378,7 @@ async def _execute_agent_task(task_id: str):
                 fields_to_update: Dict[str, Any],
                 update_reason: str,
             ) -> Dict[str, Any]:
+                verified_confidence_threshold = 0.7
                 async with async_session_factory() as update_db:
                     finding_stmt = select(AgentFinding).where(
                         AgentFinding.task_id == task_id,
@@ -3398,6 +3399,67 @@ async def _execute_agent_task(task_id: str):
                         verification_result = dict(finding_row.verification_result or {})
                         verification_result.update(verification_patch)
                         verification_result["finding_identity"] = finding_identity
+
+                        normalized_verdict = str(
+                            verification_result.get("authenticity")
+                            or verification_result.get("verdict")
+                            or finding_row.verdict
+                            or ""
+                        ).strip().lower()
+                        if normalized_verdict in {"confirmed", "likely", "uncertain", "false_positive"}:
+                            finding_row.verdict = normalized_verdict
+                            verification_result["verdict"] = normalized_verdict
+                            verification_result["authenticity"] = normalized_verdict
+
+                        normalized_reachability = str(
+                            verification_result.get("reachability")
+                            or finding_row.reachability
+                            or ""
+                        ).strip().lower()
+                        if normalized_reachability in {"reachable", "likely_reachable", "unknown", "unreachable"}:
+                            finding_row.reachability = normalized_reachability
+                            verification_result["reachability"] = normalized_reachability
+
+                        confidence_value = verification_result.get("confidence", finding_row.confidence)
+                        normalized_confidence: Optional[float] = None
+                        if confidence_value is not None:
+                            try:
+                                normalized_confidence = max(0.0, min(float(confidence_value), 1.0))
+                            except Exception:
+                                normalized_confidence = None
+                        if normalized_confidence is not None:
+                            finding_row.confidence = normalized_confidence
+                            verification_result["confidence"] = normalized_confidence
+
+                        normalized_evidence = (
+                            verification_result.get("verification_evidence")
+                            or verification_result.get("verification_details")
+                            or verification_result.get("evidence")
+                        )
+                        if normalized_evidence is not None:
+                            finding_row.verification_evidence = str(normalized_evidence)
+                            verification_result["verification_evidence"] = str(normalized_evidence)
+
+                        verdict_for_state = str(finding_row.verdict or "").strip().lower()
+                        confidence_for_state = finding_row.confidence
+                        try:
+                            confidence_for_state = float(confidence_for_state)
+                        except Exception:
+                            confidence_for_state = 0.0
+                        finding_row.is_verified = (
+                            verdict_for_state == "confirmed"
+                            or (
+                                verdict_for_state == "likely"
+                                and confidence_for_state >= verified_confidence_threshold
+                            )
+                        )
+                        if verdict_for_state == "false_positive":
+                            finding_row.status = FindingStatus.FALSE_POSITIVE
+                        elif verdict_for_state == "uncertain":
+                            finding_row.status = FindingStatus.UNCERTAIN
+                        elif verdict_for_state in {"confirmed", "likely"}:
+                            finding_row.status = FindingStatus.VERIFIED
+
                         finding_row.verification_result = verification_result
 
                     for field_name, field_value in fields_to_update.items():
@@ -3429,6 +3491,13 @@ async def _execute_agent_task(task_id: str):
                             "source": finding_row.source,
                             "sink": finding_row.sink,
                             "suggestion": finding_row.suggestion,
+                            "status": finding_row.status,
+                            "is_verified": finding_row.is_verified,
+                            "verdict": finding_row.verdict,
+                            "authenticity": finding_row.verdict,
+                            "confidence": finding_row.confidence,
+                            "reachability": finding_row.reachability,
+                            "verification_evidence": finding_row.verification_evidence,
                             "verification_result": (
                                 dict(finding_row.verification_result)
                                 if isinstance(finding_row.verification_result, dict)
@@ -5684,7 +5753,9 @@ async def _save_findings(
                     fix_description_text = "基于漏洞类型自动补全修复建议，请结合业务逻辑复核。"
 
             # 9) verification metadata
-            is_verified = authenticity in {"confirmed", "likely"}
+            is_verified = authenticity == "confirmed" or (
+                authenticity == "likely" and confidence >= 0.7
+            )
             verification_method_text = _normalize_optional_text(finding.get("verification_method"))
             if not verification_method_text:
                 verification_method_text = "agent_verification"

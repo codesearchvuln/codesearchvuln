@@ -42,6 +42,12 @@ _UPDATE_ALLOWED_VERIFICATION_FIELDS = {
     "localization_status",
     "function_trigger_flow",
     "verification_evidence",
+    "verification_details",
+    "evidence",
+    "verdict",
+    "authenticity",
+    "confidence",
+    "reachability",
 }
 _UPDATE_FORBIDDEN_FIELDS = {
     "finding_identity",
@@ -535,7 +541,13 @@ class UpdateVulnerabilityFindingInput(BaseModel):
             "severity,description,code_snippet,source,sink,suggestion；"
             "允许嵌套字段：verification_result.localization_status,"
             "verification_result.function_trigger_flow,"
-            "verification_result.verification_evidence"
+            "verification_result.verification_evidence,"
+            "verification_result.verification_details,"
+            "verification_result.evidence,"
+            "verification_result.verdict,"
+            "verification_result.authenticity,"
+            "verification_result.confidence,"
+            "verification_result.reachability"
         ),
     )
     update_reason: str = Field(
