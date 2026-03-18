@@ -29,6 +29,21 @@ class ProjectMetricsService:
 
     COMPLETED_STATUSES = {"completed"}
     RUNNING_STATUSES = {"pending", "running"}
+    ZERO_VALUE_FIELDS = (
+        "total_tasks",
+        "completed_tasks",
+        "running_tasks",
+        "audit_tasks",
+        "agent_tasks",
+        "opengrep_tasks",
+        "gitleaks_tasks",
+        "bandit_tasks",
+        "phpstan_tasks",
+        "critical",
+        "high",
+        "medium",
+        "low",
+    )
 
     @classmethod
     async def recalc_project(
@@ -61,8 +76,7 @@ class ProjectMetricsService:
             await db.refresh(metrics)
             raise
 
-        for field, value in payload.items():
-            setattr(metrics, field, value)
+        cls._apply_payload(metrics, payload)
         metrics.status = cls.STATUS_READY
         metrics.error_message = None
         metrics.updated_at = datetime.now(timezone.utc)
@@ -72,32 +86,90 @@ class ProjectMetricsService:
         return metrics
 
     @classmethod
+    async def build_pending_metrics(
+        cls,
+        project_id: str,
+        *,
+        metrics: ProjectManagementMetrics | None = None,
+    ) -> ProjectManagementMetrics:
+        pending_metrics = metrics or ProjectManagementMetrics(project_id=project_id)
+        payload = await cls._build_base_payload(project_id)
+        cls._apply_payload(pending_metrics, payload)
+
+        now = datetime.now(timezone.utc)
+        pending_metrics.status = cls.STATUS_PENDING
+        pending_metrics.error_message = None
+        pending_metrics.created_at = pending_metrics.created_at or now
+        pending_metrics.updated_at = now
+        return pending_metrics
+
+    @classmethod
+    async def ensure_base_metrics(
+        cls,
+        db: AsyncSession,
+        project_id: str,
+    ) -> ProjectManagementMetrics:
+        metrics = await db.get(ProjectManagementMetrics, project_id)
+        pending_metrics = await cls.build_pending_metrics(
+            project_id,
+            metrics=metrics,
+        )
+        db.add(pending_metrics)
+        await db.flush()
+        return pending_metrics
+
+    @classmethod
+    async def has_task_history(
+        cls,
+        db: AsyncSession,
+        project_id: str,
+    ) -> bool:
+        task_models = (
+            AuditTask,
+            AgentTask,
+            OpengrepScanTask,
+            GitleaksScanTask,
+            BanditScanTask,
+            PhpstanScanTask,
+        )
+        for task_model in task_models:
+            stmt = select(task_model.id).where(task_model.project_id == project_id).limit(1)
+            if (await db.execute(stmt)).first() is not None:
+                return True
+        return False
+
+    @classmethod
+    def _apply_payload(
+        cls,
+        metrics: ProjectManagementMetrics,
+        payload: Dict[str, Optional[object]],
+    ) -> None:
+        for field, value in payload.items():
+            setattr(metrics, field, value)
+
+    @classmethod
+    async def _build_base_payload(
+        cls,
+        project_id: str,
+    ) -> Dict[str, Optional[object]]:
+        payload: Dict[str, Optional[object]] = {
+            "archive_size_bytes": 0,
+            "archive_original_filename": None,
+            "archive_uploaded_at": None,
+            "last_completed_task_at": None,
+        }
+        for field in cls.ZERO_VALUE_FIELDS:
+            payload[field] = 0
+        await cls._apply_archive_meta(payload, project_id)
+        return payload
+
+    @classmethod
     async def _build_payload(
         cls,
         db: AsyncSession,
         project_id: str,
     ) -> Dict[str, Optional[int]]:
-        payload: Dict[str, Optional[object]] = {
-            "archive_size_bytes": 0,
-            "archive_original_filename": None,
-            "archive_uploaded_at": None,
-            "total_tasks": 0,
-            "completed_tasks": 0,
-            "running_tasks": 0,
-            "audit_tasks": 0,
-            "agent_tasks": 0,
-            "opengrep_tasks": 0,
-            "gitleaks_tasks": 0,
-            "bandit_tasks": 0,
-            "phpstan_tasks": 0,
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "last_completed_task_at": None,
-        }
-
-        await cls._apply_archive_meta(payload, project_id)
+        payload = await cls._build_base_payload(project_id)
         await cls._apply_audit_tasks(db, payload, project_id)
         await cls._apply_agent_tasks(db, payload, project_id)
         await cls._apply_opengrep_tasks(db, payload, project_id)

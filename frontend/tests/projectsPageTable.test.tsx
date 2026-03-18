@@ -40,6 +40,8 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 						total: 29,
 					},
 					executionStats: { completed: 2, running: 1 },
+					metricsStatus: "ready",
+					metricsStatusMessage: null,
 					actions: {
 						canCreateScan: true,
 						canBrowseCode: true,
@@ -62,6 +64,8 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 						total: 6,
 					},
 					executionStats: { completed: 0, running: 0 },
+					metricsStatus: "pending",
+					metricsStatusMessage: "指标同步中...",
 					actions: {
 						canCreateScan: true,
 						canBrowseCode: false,
@@ -95,6 +99,7 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 	assert.match(markup, />2</);
 	assert.match(markup, />1</);
 	assert.match(markup, /仅 ZIP 类型项目支持代码浏览/);
+	assert.match(markup, /指标同步中\.\.\./);
 	assert.doesNotMatch(markup, /序号/);
 	assert.doesNotMatch(markup, /全选当前页/);
 	assert.doesNotMatch(markup, /选择项目/);
@@ -110,12 +115,14 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 	assert.match(markup, /data-project-metric-chip="high"/);
 	assert.match(markup, /data-project-metric-chip="medium"/);
 	assert.match(markup, /data-project-metric-chip="low"/);
-	assert.match(markup, /inline-grid grid-cols-\[2ch_auto\] items-center gap-1\.5 rounded-md border px-2\.5 py-1/);
-	assert.match(markup, /text-right font-semibold tabular-nums text-\[16px\]/);
+	assert.match(markup, /inline-grid grid-cols-\[2ch_auto\] items-center gap-1 rounded-md border px-2\.5 py-1/);
+	assert.match(markup, /text-left font-semibold tabular-nums text-\[16px\] gap-2/);
 	assert.match(markup, /whitespace-nowrap text-left text-\[16px\] font-medium/);
 	assert.match(markup, />2<\/span><span class="whitespace-nowrap text-left text-\[16px\] font-medium tracking-\[0\.02em\]">已完成<\/span>/);
 	assert.match(markup, />1<\/span><span class="whitespace-nowrap text-left text-\[16px\] font-medium tracking-\[0\.02em\]">进行中<\/span>/);
 	assert.match(markup, />3<\/span><span class="whitespace-nowrap text-left text-\[16px\] font-medium tracking-\[0\.02em\]">严重<\/span>/);
+	assert.match(markup, />0<\/span><span class="whitespace-nowrap text-left text-\[16px\] font-medium tracking-\[0\.02em\]">已完成<\/span>/);
+	assert.match(markup, />0<\/span><span class="whitespace-nowrap text-left text-\[16px\] font-medium tracking-\[0\.02em\]">严重<\/span>/);
 	assert.doesNotMatch(markup, /text-left font-semibold tabular-nums text-rose-300">3<\/td>/);
 	assert.doesNotMatch(markup, /colSpan="2"[^>]*text-center/);
 	assert.doesNotMatch(markup, /colSpan="4"[^>]*text-center/);

@@ -54,7 +54,10 @@ async def read_projects(
     )
     query = query.order_by(Project.created_at.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
-    return _filter_public_projects(result.scalars().all())
+    projects = _filter_public_projects(result.scalars().all())
+    if include_metrics:
+        await _hydrate_projects_management_metrics(db, projects)
+    return projects
 
 @router.get("/{id}", response_model=ProjectResponse)
 async def read_project(

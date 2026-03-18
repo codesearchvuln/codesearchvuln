@@ -1,5 +1,5 @@
 from app.api.v1.endpoints.projects_shared import *
-from app.services.project_metrics import project_metrics_refresher
+from app.services.project_metrics import ProjectMetricsService, project_metrics_refresher
 
 router = APIRouter()
 
@@ -365,6 +365,7 @@ async def upload_project_directory(
             detected_languages = detect_languages_from_paths(uploaded_paths)
             project.programming_languages = json.dumps(detected_languages, ensure_ascii=False)
             project.zip_file_hash = zip_hash
+            await ProjectMetricsService.ensure_base_metrics(db, project.id)
             try:
                 await db.commit()
                 await db.refresh(project)

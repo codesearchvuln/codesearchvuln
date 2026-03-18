@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -15,6 +16,7 @@ from app.api.v1.endpoints import projects, projects_crud, projects_uploads
 from app.core.security import get_password_hash
 from app.db.base import Base
 from app.db.session import get_db
+from app.models.audit import AuditTask
 from app.models.project import Project
 from app.models.project_management_metrics import ProjectManagementMetrics
 from app.models.user import User
@@ -96,6 +98,25 @@ async def _create_ready_metrics(
         await session.commit()
         await session.refresh(metrics)
         return metrics
+
+
+async def _create_completed_audit_task(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    project_id: str,
+    created_by: str,
+) -> AuditTask:
+    async with session_factory() as session:
+        task = AuditTask(
+            project_id=project_id,
+            created_by=created_by,
+            task_type="repository",
+            status="completed",
+        )
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+        return task
 
 
 @pytest_asyncio.fixture
@@ -207,6 +228,84 @@ async def test_read_projects_with_metrics_includes_loaded_metrics(project_api_en
 
 
 @pytest.mark.asyncio
+async def test_read_projects_with_metrics_builds_pending_fallback_for_legacy_project(
+    monkeypatch,
+    project_api_env,
+):
+    project = await _create_project(
+        project_api_env.session_factory,
+        owner_id=project_api_env.user.id,
+        name="Legacy Zip Project",
+    )
+    monkeypatch.setattr(
+        "app.services.project_metrics.get_project_zip_meta",
+        AsyncMock(
+            return_value={
+                "file_size": 4096,
+                "original_filename": "legacy.zip",
+                "uploaded_at": "2026-03-18T10:00:00+00:00",
+            }
+        ),
+    )
+
+    response = await project_api_env.client.get(
+        "/api/v1/projects/",
+        params={"include_metrics": "true"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload[0]["id"] == project.id
+    assert payload[0]["management_metrics"]["status"] == "pending"
+    assert payload[0]["management_metrics"]["archive_size_bytes"] == 4096
+    assert payload[0]["management_metrics"]["completed_tasks"] == 0
+    assert payload[0]["management_metrics"]["running_tasks"] == 0
+    assert payload[0]["management_metrics"]["critical"] == 0
+    assert payload[0]["management_metrics"]["low"] == 0
+
+
+@pytest.mark.asyncio
+async def test_read_projects_with_metrics_recalculates_legacy_metrics_when_tasks_exist(
+    monkeypatch,
+    project_api_env,
+):
+    project = await _create_project(
+        project_api_env.session_factory,
+        owner_id=project_api_env.user.id,
+        name="Legacy Project With Tasks",
+    )
+    await _create_completed_audit_task(
+        project_api_env.session_factory,
+        project_id=project.id,
+        created_by=project_api_env.user.id,
+    )
+    monkeypatch.setattr(
+        "app.services.project_metrics.get_project_zip_meta",
+        AsyncMock(
+            return_value={
+                "file_size": 5120,
+                "original_filename": "legacy-with-history.zip",
+                "uploaded_at": "2026-03-18T10:30:00+00:00",
+            }
+        ),
+    )
+
+    response = await project_api_env.client.get(
+        "/api/v1/projects/",
+        params={"include_metrics": "true"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload[0]["id"] == project.id
+    assert payload[0]["management_metrics"]["status"] == "ready"
+    assert payload[0]["management_metrics"]["archive_size_bytes"] == 5120
+    assert payload[0]["management_metrics"]["total_tasks"] == 1
+    assert payload[0]["management_metrics"]["completed_tasks"] == 1
+    assert payload[0]["management_metrics"]["running_tasks"] == 0
+
+
+@pytest.mark.asyncio
 async def test_read_project_detail_includes_metrics(project_api_env):
     project = await _create_project(
         project_api_env.session_factory,
@@ -224,6 +323,74 @@ async def test_read_project_detail_includes_metrics(project_api_env):
     payload = response.json()
     assert payload["id"] == project.id
     assert payload["management_metrics"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_read_project_detail_builds_pending_fallback_when_metrics_missing(
+    monkeypatch,
+    project_api_env,
+):
+    project = await _create_project(
+        project_api_env.session_factory,
+        owner_id=project_api_env.user.id,
+        name="Detail Legacy Project",
+    )
+    monkeypatch.setattr(
+        "app.services.project_metrics.get_project_zip_meta",
+        AsyncMock(
+            return_value={
+                "file_size": 1024,
+                "original_filename": "detail-legacy.zip",
+                "uploaded_at": "2026-03-18T11:00:00+00:00",
+            }
+        ),
+    )
+
+    response = await project_api_env.client.get(f"/api/v1/projects/{project.id}")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["management_metrics"]["status"] == "pending"
+    assert payload["management_metrics"]["archive_size_bytes"] == 1024
+    assert payload["management_metrics"]["total_tasks"] == 0
+    assert payload["management_metrics"]["high"] == 0
+
+
+@pytest.mark.asyncio
+async def test_read_project_detail_recalculates_legacy_metrics_when_tasks_exist(
+    monkeypatch,
+    project_api_env,
+):
+    project = await _create_project(
+        project_api_env.session_factory,
+        owner_id=project_api_env.user.id,
+        name="Detail Legacy Project With Tasks",
+    )
+    await _create_completed_audit_task(
+        project_api_env.session_factory,
+        project_id=project.id,
+        created_by=project_api_env.user.id,
+    )
+    monkeypatch.setattr(
+        "app.services.project_metrics.get_project_zip_meta",
+        AsyncMock(
+            return_value={
+                "file_size": 1536,
+                "original_filename": "detail-legacy-with-history.zip",
+                "uploaded_at": "2026-03-18T11:15:00+00:00",
+            }
+        ),
+    )
+
+    response = await project_api_env.client.get(f"/api/v1/projects/{project.id}")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["management_metrics"]["status"] == "ready"
+    assert payload["management_metrics"]["archive_size_bytes"] == 1536
+    assert payload["management_metrics"]["total_tasks"] == 1
+    assert payload["management_metrics"]["completed_tasks"] == 1
+    assert payload["management_metrics"]["running_tasks"] == 0
 
 
 @pytest.mark.asyncio
@@ -289,3 +456,14 @@ async def test_create_project_with_zip_serializes_without_loading_metrics(
     payload = response.json()
     assert payload["name"] == "Zip Upload Project"
     assert payload["management_metrics"] is None
+
+    list_response = await project_api_env.client.get(
+        "/api/v1/projects/",
+        params={"include_metrics": "true"},
+    )
+
+    assert list_response.status_code == 200, list_response.text
+    list_payload = list_response.json()
+    assert list_payload[0]["management_metrics"]["status"] == "pending"
+    assert list_payload[0]["management_metrics"]["archive_size_bytes"] == 0
+    assert list_payload[0]["management_metrics"]["total_tasks"] == 0

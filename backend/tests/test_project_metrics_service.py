@@ -63,6 +63,60 @@ async def session_factory():
 
 
 @pytest.mark.asyncio
+async def test_ensure_base_metrics_creates_pending_snapshot_with_archive_meta(
+    session_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.project_metrics.get_project_zip_meta",
+        AsyncMock(
+            return_value={
+                "file_size": 3072,
+                "original_filename": "bootstrap.zip",
+                "uploaded_at": "2026-03-18T08:00:00+00:00",
+            }
+        ),
+    )
+
+    async with session_factory() as session:
+        user = User(
+            email="pending-metrics@example.com",
+            full_name="Pending Metrics",
+            hashed_password=get_password_hash("password123"),
+            is_active=True,
+            role="admin",
+        )
+        session.add(user)
+        await session.flush()
+
+        project = Project(
+            name="Pending Metrics Fixture",
+            description="base metrics regression fixture",
+            source_type="zip",
+            repository_url=None,
+            repository_type="other",
+            default_branch="main",
+            programming_languages='["python"]',
+            owner_id=user.id,
+            is_active=True,
+        )
+        session.add(project)
+        await session.flush()
+
+        metrics = await ProjectMetricsService.ensure_base_metrics(session, project.id)
+        await session.commit()
+
+    assert metrics.status == "pending"
+    assert metrics.archive_size_bytes == 3072
+    assert metrics.total_tasks == 0
+    assert metrics.completed_tasks == 0
+    assert metrics.running_tasks == 0
+    assert metrics.critical == 0
+    assert metrics.low == 0
+    assert metrics.error_message is None
+
+
+@pytest.mark.asyncio
 async def test_recalc_project_uses_updated_at_for_static_scan_tasks_without_completed_at(
     session_factory,
     monkeypatch,

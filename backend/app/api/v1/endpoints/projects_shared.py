@@ -222,6 +222,7 @@ from app.services.upload.project_stats import (
     get_cloc_stats_from_extracted_dir,
     generate_project_description_from_extracted_dir,
 )
+from app.services.project_metrics import ProjectMetricsService
 from app.services.opengrep_confidence import (
     build_rule_confidence_map,
     count_high_confidence_findings_by_task_ids,
@@ -735,6 +736,7 @@ async def _store_uploaded_archive_for_project(
             project_info.language_info = language_info
             project_info.description = description
             project_info.status = "completed"
+            await ProjectMetricsService.ensure_base_metrics(db, project.id)
             db.add(project)
             db.add(project_info)
 
@@ -1185,7 +1187,35 @@ async def load_project_for_response(
         .options(*build_project_response_load_options(include_metrics=include_metrics))
         .where(Project.id == project_id)
     )
-    return result.scalars().first()
+    project = result.scalars().first()
+    if include_metrics:
+        await _hydrate_project_management_metrics(db, project)
+    return project
+
+
+async def _hydrate_project_management_metrics(
+    db: AsyncSession,
+    project: Project | None,
+) -> Project | None:
+    if project is None or getattr(project, "management_metrics", None) is not None:
+        return project
+    if await ProjectMetricsService.has_task_history(db, project.id):
+        project.management_metrics = await ProjectMetricsService.recalc_project(
+            db,
+            project.id,
+        )
+        return project
+    project.management_metrics = await ProjectMetricsService.build_pending_metrics(project.id)
+    return project
+
+
+async def _hydrate_projects_management_metrics(
+    db: AsyncSession,
+    projects: List[Project],
+) -> List[Project]:
+    for project in projects:
+        await _hydrate_project_management_metrics(db, project)
+    return projects
 
 
 class StaticScanOverviewItem(BaseModel):

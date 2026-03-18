@@ -77,16 +77,6 @@ export default function ProjectsTable({
 	rows,
 	onCreateScan,
 }: ProjectsTableProps) {
-	const formatMetricValue = (
-		row: ProjectsPageRowViewModel,
-		value: number,
-	) => {
-		if (row.metricsStatus !== "ready") {
-			return "—";
-		}
-		return value;
-	};
-
 	return (
 		<Table>
 			<TableHeader>
@@ -139,10 +129,7 @@ export default function ProjectsTable({
 										: undefined}
 								>
 									<span className={METRIC_CHIP_VALUE_CLASSNAME}>
-										{formatMetricValue(
-											row,
-											row.executionStats[column.key],
-										)}
+										{row.executionStats[column.key]}
 									</span>
 									<span className={METRIC_CHIP_LABEL_CLASSNAME}>
 										{column.label}
@@ -163,10 +150,7 @@ export default function ProjectsTable({
 										: undefined}
 								>
 									<span className={METRIC_CHIP_VALUE_CLASSNAME}>
-										{formatMetricValue(
-											row,
-											row.vulnerabilityStats[column.key],
-										)}
+										{row.vulnerabilityStats[column.key]}
 									</span>
 									<span className={METRIC_CHIP_LABEL_CLASSNAME}> 
 										{column.label}

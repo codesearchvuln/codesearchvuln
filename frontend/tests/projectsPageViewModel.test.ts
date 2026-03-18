@@ -87,7 +87,7 @@ test("projects selectors calculate responsive project page size from container m
 	);
 });
 
-test("projects view model renders placeholder when metrics pending", async () => {
+test("projects view model renders archive size and zero stats when metrics pending", async () => {
 	const builder = await importOrFail<any>(
 		"../src/pages/projects/lib/buildProjectsPageViewModel.ts",
 	);
@@ -106,12 +106,13 @@ test("projects view model renders placeholder when metrics pending", async () =>
 			owner_id: "u1",
 			is_active: true,
 			created_at: "2024-01-01T00:00:00Z",
-			updated_at: "2024-01-01T00:00:00Z",
-			management_metrics: {
-				status: "pending",
+				updated_at: "2024-01-01T00:00:00Z",
+				management_metrics: {
+					status: "pending",
+					archive_size_bytes: 4096,
+				},
 			},
-		},
-	];
+		];
 
 	const viewModel = builder.buildProjectsPageViewModel({
 		loading: false,
@@ -124,8 +125,12 @@ test("projects view model renders placeholder when metrics pending", async () =>
 		searchPlaceholder: "Search",
 	});
 
-	assert.equal(viewModel.rows[0].sizeText, "--");
+	assert.equal(viewModel.rows[0].sizeText, "4.00 Kb");
 	assert.equal(viewModel.rows[0].metricsStatus, "pending");
+	assert.equal(viewModel.rows[0].executionStats.completed, 0);
+	assert.equal(viewModel.rows[0].executionStats.running, 0);
+	assert.equal(viewModel.rows[0].vulnerabilityStats.critical, 0);
+	assert.equal(viewModel.rows[0].vulnerabilityStats.low, 0);
 });
 
 test("projects view model exposes metrics when ready", async () => {
@@ -187,3 +192,64 @@ test("projects view model exposes metrics when ready", async () => {
 });
 
 test("projects view model exposes vulnerability stats and browse guards", async () => {
+	const builder = await importOrFail<any>(
+		"../src/pages/projects/lib/buildProjectsPageViewModel.ts",
+	);
+
+	const projects = [
+		{
+			id: "p-guards",
+			name: "Guarded Project",
+			description: "",
+			source_type: "repository",
+			repository_url: "https://example.com/repo.git",
+			repository_type: "other",
+			default_branch: "main",
+			programming_languages: "ts",
+			owner_id: "u1",
+			is_active: true,
+			created_at: "2024-01-01T00:00:00Z",
+			updated_at: "2024-01-01T00:00:00Z",
+			management_metrics: {
+				status: "ready",
+				archive_size_bytes: 512,
+				completed_tasks: 0,
+				running_tasks: 0,
+				total_tasks: 0,
+				audit_tasks: 0,
+				agent_tasks: 0,
+				opengrep_tasks: 0,
+				gitleaks_tasks: 0,
+				bandit_tasks: 0,
+				phpstan_tasks: 0,
+				critical: 0,
+				high: 1,
+				medium: 2,
+				low: 3,
+				created_at: "2024-01-01T00:00:00Z",
+				updated_at: "2024-01-01T00:00:00Z",
+			},
+		},
+	];
+
+	const viewModel = builder.buildProjectsPageViewModel({
+		loading: false,
+		filteredProjects: projects,
+		pagedProjects: projects,
+		projectPage: 1,
+		totalProjectPages: 1,
+		projectDetailFrom: "/projects",
+		searchTerm: "",
+		searchPlaceholder: "Search",
+	});
+
+	const row = viewModel.rows[0];
+	assert.equal(row.vulnerabilityStats.high, 1);
+	assert.equal(row.vulnerabilityStats.medium, 2);
+	assert.equal(row.vulnerabilityStats.low, 3);
+	assert.equal(row.actions.canBrowseCode, false);
+	assert.equal(
+		row.actions.browseCodeDisabledReason,
+		"仅 ZIP 类型项目支持代码浏览",
+	);
+});

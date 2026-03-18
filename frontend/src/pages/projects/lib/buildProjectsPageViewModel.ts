@@ -101,10 +101,7 @@ export function buildProjectsPageViewModel(
 				name: project.name,
 				detailPath: `/projects/${project.id}`,
 				detailState: { from: projectDetailFrom },
-				sizeText:
-					metricsStatus === "ready"
-						? formatArchiveSize(metrics?.archive_size_bytes)
-						: "--",
+				sizeText: formatArchiveSize(metrics?.archive_size_bytes),
 				vulnerabilityStats: buildVulnerabilityStats(metrics),
 				executionStats: buildExecutionStats(metrics),
 				metricsStatus,
