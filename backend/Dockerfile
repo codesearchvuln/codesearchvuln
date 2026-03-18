@@ -13,6 +13,7 @@ ARG BACKEND_PYPI_INDEX_CANDIDATES=https://mirrors.aliyun.com/pypi/simple/,https:
 ARG BACKEND_INSTALL_CJK_FONTS=0
 ARG BACKEND_INSTALL_YASA=1
 ARG YASA_VERSION=v0.2.33
+ARG YASA_BUILD_FROM_SOURCE=1
 FROM ${UV_IMAGE} AS uvbin
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS builder
 
@@ -281,6 +282,9 @@ FROM runtime-base AS scanner-tools-base
 ARG OPENGREP_VERSION=v1.15.1
 ARG BACKEND_INSTALL_YASA
 ARG YASA_VERSION
+ARG YASA_BUILD_FROM_SOURCE
+
+COPY docker/yasa-engine-overrides /tmp/yasa-engine-overrides
 
 RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhunter-tools \
     set -eux; \
@@ -295,12 +299,14 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
         OG_DIST="opengrep_manylinux_x86"; \
         YASA_RELEASE_ASSET="yasa-linux-x64.zip"; \
         YASA_RELEASE_BIN="yasa-engine-linux-x64"; \
-        UAST_PLATFORM="linux-amd64" ;; \
+        UAST_PLATFORM="linux-amd64"; \
+        YASA_PKG_TARGET="node18-linux-x64" ;; \
       aarch64|arm64) \
         OG_DIST="opengrep_manylinux_aarch64"; \
         YASA_RELEASE_ASSET=""; \
         YASA_RELEASE_BIN=""; \
-        UAST_PLATFORM="" ;; \
+        UAST_PLATFORM=""; \
+        YASA_PKG_TARGET="node18-linux-arm64" ;; \
       *) echo "unsupported arch: ${ARCH}" >&2; exit 1 ;; \
     esac; \
     download_with_fallback() { \
@@ -372,8 +378,12 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
       echo "BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA}, skip built-in YASA install."; \
       exit 0; \
     fi; \
-    if [ -z "${YASA_RELEASE_ASSET}" ] || [ -z "${YASA_RELEASE_BIN}" ] || [ -z "${UAST_PLATFORM}" ]; then \
-      echo "YASA prebuilt release is unavailable for ${ARCH}; set BACKEND_INSTALL_YASA=0 or provide host override." >&2; \
+    if [ -z "${UAST_PLATFORM}" ]; then \
+      echo "YASA UAST binaries are unavailable for ${ARCH}; set BACKEND_INSTALL_YASA=0 or provide host override." >&2; \
+      exit 1; \
+    fi; \
+    if [ "${YASA_BUILD_FROM_SOURCE}" != "1" ] && { [ -z "${YASA_RELEASE_ASSET}" ] || [ -z "${YASA_RELEASE_BIN}" ]; }; then \
+      echo "YASA prebuilt release is unavailable for ${ARCH}; set YASA_BUILD_FROM_SOURCE=1, BACKEND_INSTALL_YASA=0, or provide host override." >&2; \
       exit 1; \
     fi; \
     YASA_TARBALL="/var/cache/vulhunter-tools/yasa-engine-${YASA_VERSION}.tar.gz"; \
@@ -388,18 +398,44 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
     tar -xzf "${YASA_TARBALL}" -C /tmp; \
     rm -rf "${YASA_ENGINE_DIR}"; \
     mv "/tmp/YASA-Engine-${YASA_VERSION#v}" "${YASA_ENGINE_DIR}"; \
-    YASA_RELEASE_ZIP="/var/cache/vulhunter-tools/${YASA_RELEASE_ASSET}"; \
-    if [ ! -s "${YASA_RELEASE_ZIP}" ]; then \
-      download_with_fallback \
-        "${YASA_RELEASE_ZIP}" \
-        "https://gh-proxy.com/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
-        "https://v6.gh-proxy.org/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
-        "https://gh-proxy.org/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
-        "https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}"; \
+    if [ "${YASA_BUILD_FROM_SOURCE}" = "1" ]; then \
+      apt-get update; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs npm; \
+      rm -rf /var/lib/apt/lists/*; \
+      if [ -f /tmp/yasa-engine-overrides/src/config.ts ]; then \
+        cp /tmp/yasa-engine-overrides/src/config.ts "${YASA_ENGINE_DIR}/src/config.ts"; \
+      fi; \
+      if [ -f /tmp/yasa-engine-overrides/src/interface/starter.ts ]; then \
+        cp /tmp/yasa-engine-overrides/src/interface/starter.ts "${YASA_ENGINE_DIR}/src/interface/starter.ts"; \
+      fi; \
+      if [ -f /tmp/yasa-engine-overrides/src/engine/analyzer/common/analyzer.ts ]; then \
+        cp /tmp/yasa-engine-overrides/src/engine/analyzer/common/analyzer.ts "${YASA_ENGINE_DIR}/src/engine/analyzer/common/analyzer.ts"; \
+      fi; \
+      if [ -f /tmp/yasa-engine-overrides/src/engine/analyzer/java/common/java-analyzer.ts ]; then \
+        cp /tmp/yasa-engine-overrides/src/engine/analyzer/java/common/java-analyzer.ts "${YASA_ENGINE_DIR}/src/engine/analyzer/java/common/java-analyzer.ts"; \
+      fi; \
+      cd "${YASA_ENGINE_DIR}"; \
+      npm ci --no-audit --fund=false || npm install --no-audit --fund=false; \
+      npx tsc; \
+      npx pkg . --targets "${YASA_PKG_TARGET}" --output "${YASA_REAL_BIN}" --options max-old-space-size=13312; \
+    else \
+      if [ -z "${YASA_RELEASE_ASSET}" ] || [ -z "${YASA_RELEASE_BIN}" ]; then \
+        echo "YASA prebuilt release is unavailable for ${ARCH}; set YASA_BUILD_FROM_SOURCE=1 or BACKEND_INSTALL_YASA=0." >&2; \
+        exit 1; \
+      fi; \
+      YASA_RELEASE_ZIP="/var/cache/vulhunter-tools/${YASA_RELEASE_ASSET}"; \
+      if [ ! -s "${YASA_RELEASE_ZIP}" ]; then \
+        download_with_fallback \
+          "${YASA_RELEASE_ZIP}" \
+          "https://gh-proxy.com/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
+          "https://v6.gh-proxy.org/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
+          "https://gh-proxy.org/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
+          "https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}"; \
+      fi; \
+      rm -rf /tmp/yasa-release; \
+      unzip -oq "${YASA_RELEASE_ZIP}" "${YASA_RELEASE_BIN}" -d /tmp/yasa-release; \
+      cp "/tmp/yasa-release/${YASA_RELEASE_BIN}" "${YASA_REAL_BIN}"; \
     fi; \
-    rm -rf /tmp/yasa-release; \
-    unzip -oq "${YASA_RELEASE_ZIP}" "${YASA_RELEASE_BIN}" -d /tmp/yasa-release; \
-    cp "/tmp/yasa-release/${YASA_RELEASE_BIN}" "${YASA_REAL_BIN}"; \
     chmod +x "${YASA_REAL_BIN}"; \
     mkdir -p "${YASA_ENGINE_DIR}/deps/uast4go" "${YASA_ENGINE_DIR}/deps/uast4py"; \
     download_uast_bin() { \
