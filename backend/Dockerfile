@@ -222,11 +222,16 @@ ENV NPM_REGISTRY_CANDIDATES=${BACKEND_NPM_REGISTRY_CANDIDATES}
 ENV OPENGREP_HOME=/opt/opengrep
 ENV OPENGREP_REAL_BIN=/opt/opengrep/opengrep.real
 ENV OPENGREP_WRAPPER_BIN=/opt/opengrep/opengrep
+ENV PHPSTAN_HOME=/opt/phpstan
+ENV YASA_HOME=/opt/yasa
+ENV YASA_BIN_DIR=/opt/yasa/bin
+ENV YASA_ENGINE_DIR=/opt/yasa/engine
+ENV YASA_REAL_BIN=/opt/yasa/bin/yasa-engine.real
+ENV YASA_ENGINE_WRAPPER_BIN=/opt/yasa/bin/yasa-engine
+ENV YASA_WRAPPER_BIN=/opt/yasa/bin/yasa
 
 # 只安装运行时依赖（不需要 gcc）；CJK 字体可通过 BACKEND_INSTALL_CJK_FONTS 控制
 ARG BACKEND_INSTALL_CJK_FONTS
-ARG BACKEND_INSTALL_YASA
-ARG YASA_VERSION
 RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-backend-runtime-apt-cache,target=/var/cache/apt,sharing=locked \
     set -eux; \
@@ -320,105 +325,6 @@ RUN --mount=type=cache,id=vulhunter-backend-npm,target=/root/.npm \
     pnpm --version; \
     node --version; \
     npm --version
-
-# 默认内置安装 YASA（可通过 BACKEND_INSTALL_YASA=0 关闭）
-RUN --mount=type=cache,id=vulhunter-backend-yasa-src,target=/var/cache/vulhunter-yasa \
-    --mount=type=cache,id=vulhunter-backend-yasa-uast,target=/var/cache/vulhunter-yasa-uast \
-    --mount=type=cache,id=vulhunter-backend-yasa-npm,target=/root/.npm \
-    set -eux; \
-    if [ "${BACKEND_INSTALL_YASA}" != "1" ]; then \
-      echo "BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA}, skip built-in YASA install."; \
-      exit 0; \
-    fi; \
-    YASA_ROOT=/opt/yasa; \
-    YASA_ENGINE_DIR="${YASA_ROOT}/engine"; \
-    YASA_BIN_DIR="${YASA_ROOT}/bin"; \
-    mkdir -p "${YASA_ENGINE_DIR}" "${YASA_BIN_DIR}" /var/cache/vulhunter-yasa /var/cache/vulhunter-yasa-uast; \
-    YASA_TARBALL="/var/cache/vulhunter-yasa/yasa-engine-${YASA_VERSION}.tar.gz"; \
-    if [ ! -s "${YASA_TARBALL}" ]; then \
-      curl -fL \
-        --connect-timeout 8 \
-        --max-time 120 \
-        --retry 2 \
-        --retry-delay 2 \
-        "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" \
-        -o "${YASA_TARBALL}.tmp"; \
-      mv "${YASA_TARBALL}.tmp" "${YASA_TARBALL}"; \
-    fi; \
-    tar -xzf "${YASA_TARBALL}" -C /tmp; \
-    rm -rf "${YASA_ENGINE_DIR}"; \
-    mv "/tmp/YASA-Engine-${YASA_VERSION#v}" "${YASA_ENGINE_DIR}"; \
-    ARCH="$(uname -m)"; \
-    case "${ARCH}" in \
-      x86_64|amd64) \
-        YASA_RELEASE_ASSET="yasa-linux-x64.zip"; \
-        YASA_RELEASE_BIN="yasa-engine-linux-x64"; \
-        UAST_PLATFORM="linux-amd64" ;; \
-      aarch64|arm64) \
-        echo "YASA prebuilt release is unavailable for ${ARCH}; set BACKEND_INSTALL_YASA=0 or provide host override." >&2; \
-        exit 1 ;; \
-      *) echo "unsupported arch for YASA UAST binaries: ${ARCH}" >&2; exit 1 ;; \
-    esac; \
-    YASA_RELEASE_ZIP="/var/cache/vulhunter-yasa/${YASA_RELEASE_ASSET}"; \
-    if [ ! -s "${YASA_RELEASE_ZIP}" ]; then \
-      curl -fL \
-        --connect-timeout 8 \
-        --max-time 240 \
-        --retry 2 \
-        --retry-delay 2 \
-        "https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
-        -o "${YASA_RELEASE_ZIP}.tmp"; \
-      mv "${YASA_RELEASE_ZIP}.tmp" "${YASA_RELEASE_ZIP}"; \
-    fi; \
-    unzip -oq "${YASA_RELEASE_ZIP}" "${YASA_RELEASE_BIN}" -d /tmp/yasa-release; \
-    cp "/tmp/yasa-release/${YASA_RELEASE_BIN}" "${YASA_BIN_DIR}/yasa-engine.real"; \
-    chmod +x "${YASA_BIN_DIR}/yasa-engine.real"; \
-    mkdir -p "${YASA_ENGINE_DIR}/deps/uast4go" "${YASA_ENGINE_DIR}/deps/uast4py"; \
-    download_uast_bin() { \
-      bin_name="$1"; \
-      target="$2"; \
-      cache_file="/var/cache/vulhunter-yasa-uast/${bin_name}"; \
-      if [ ! -s "${cache_file}" ]; then \
-        curl -fL \
-          --connect-timeout 8 \
-          --max-time 120 \
-          --retry 2 \
-          --retry-delay 2 \
-          "https://github.com/antgroup/YASA-UAST/releases/latest/download/${bin_name}" \
-          -o "${cache_file}.tmp"; \
-        mv "${cache_file}.tmp" "${cache_file}"; \
-      fi; \
-      cp "${cache_file}" "${target}"; \
-      chmod +x "${target}"; \
-    }; \
-    download_uast_bin "uast4go-${UAST_PLATFORM}" "${YASA_ENGINE_DIR}/deps/uast4go/uast4go"; \
-    download_uast_bin "uast4py-${UAST_PLATFORM}" "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \
-    ln -sfn "${YASA_ENGINE_DIR}/resource" "${YASA_ROOT}/resource"; \
-    printf '%s\n' '#!/usr/bin/env bash' \
-      'set -euo pipefail' \
-      'ENGINE_BIN="/opt/yasa/bin/yasa-engine.real"' \
-      'if [[ ! -x "$ENGINE_BIN" ]]; then' \
-      '  echo "yasa-engine binary not found: $ENGINE_BIN" >&2' \
-      '  exit 127' \
-      'fi' \
-      'exec "$ENGINE_BIN" "$@"' \
-      > "${YASA_BIN_DIR}/yasa-engine"; \
-    chmod +x "${YASA_BIN_DIR}/yasa-engine"; \
-    printf '%s\n' '#!/usr/bin/env bash' \
-      'set -euo pipefail' \
-      'ENGINE_ROOT="/opt/yasa/engine"' \
-      'ENGINE="/opt/yasa/bin/yasa-engine"' \
-      'if [[ ! -x "$ENGINE" ]]; then' \
-      '  echo "YASA engine wrapper not found: $ENGINE" >&2' \
-      '  exit 127' \
-      'fi' \
-      '(cd "$ENGINE_ROOT" && "$ENGINE" "$@")' \
-      > "${YASA_BIN_DIR}/yasa"; \
-    chmod +x "${YASA_BIN_DIR}/yasa"; \
-    ln -sfn "${YASA_BIN_DIR}/yasa" /usr/local/bin/yasa; \
-    ln -sfn "${YASA_BIN_DIR}/yasa-engine" /usr/local/bin/yasa-engine; \
-    /usr/local/bin/yasa --version; \
-    test -d /opt/yasa/resource
 
 # ============================================
 # 多阶段构建 - MCP 运行时构建阶段
@@ -560,17 +466,15 @@ RUN --mount=type=cache,id=vulhunter-backend-pnpm-store,target=/pnpm/store \
     node -e 'const path=require("node:path");const pkg=process.env.PNPM_BETTER_SQLITE_DIR;if(!pkg){throw new Error("PNPM_BETTER_SQLITE_DIR is not set");}const Database=require(path.join(pkg,"node_modules","better-sqlite3"));const db=new Database(":memory:");db.prepare("SELECT 1 AS ok").get();db.close();console.log("better-sqlite3 smoke check passed");'
 
 # ============================================
-# 多阶段构建 - 运行阶段
+# 多阶段构建 - 扫描工具基础阶段
 # ============================================
-FROM runtime-base AS dev-runtime
-
-COPY --from=builder /app/.venv /opt/backend-venv
-COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
-COPY --chmod=755 scripts/dev-entrypoint.sh /usr/local/bin/backend-dev-entrypoint.sh
+FROM runtime-base AS scanner-tools-base
 
 ARG OPENGREP_VERSION=v1.15.1
 ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS
+ARG BACKEND_INSTALL_YASA
+ARG YASA_VERSION
+
 RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhunter-tools \
     set -eux; \
     unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; \
@@ -578,12 +482,20 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
     case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
     download_step_timeout=90; \
     if [ "${cmd_timeout}" -lt "${download_step_timeout}" ]; then download_step_timeout="${cmd_timeout}"; fi; \
-    mkdir -p /var/cache/vulhunter-tools "${OPENGREP_HOME}"; \
+    mkdir -p /var/cache/vulhunter-tools "${OPENGREP_HOME}" "${PHPSTAN_HOME}" "${YASA_BIN_DIR}" "${YASA_ENGINE_DIR}"; \
     ARCH="$(uname -m)"; \
-    case "$ARCH" in \
-      x86_64|amd64) OG_DIST="opengrep_manylinux_x86" ;; \
-      aarch64|arm64) OG_DIST="opengrep_manylinux_aarch64" ;; \
-      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    case "${ARCH}" in \
+      x86_64|amd64) \
+        OG_DIST="opengrep_manylinux_x86"; \
+        YASA_RELEASE_ASSET="yasa-linux-x64.zip"; \
+        YASA_RELEASE_BIN="yasa-engine-linux-x64"; \
+        UAST_PLATFORM="linux-amd64" ;; \
+      aarch64|arm64) \
+        OG_DIST="opengrep_manylinux_aarch64"; \
+        YASA_RELEASE_ASSET=""; \
+        YASA_RELEASE_BIN=""; \
+        UAST_PLATFORM="" ;; \
+      *) echo "unsupported arch: ${ARCH}" >&2; exit 1 ;; \
     esac; \
     download_with_fallback() { \
       output="$1"; \
@@ -646,10 +558,113 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
         "https://gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
         "https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"; \
     fi; \
-    cp "${PHPSTAN_CACHE}" /usr/local/bin/phpstan; \
-    chmod +x /usr/local/bin/phpstan; \
-    phpstan --version
+    cp "${PHPSTAN_CACHE}" "${PHPSTAN_HOME}/phpstan"; \
+    chmod +x "${PHPSTAN_HOME}/phpstan"; \
+    ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
+    phpstan --version; \
+    if [ "${BACKEND_INSTALL_YASA}" != "1" ]; then \
+      echo "BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA}, skip built-in YASA install."; \
+      exit 0; \
+    fi; \
+    if [ -z "${YASA_RELEASE_ASSET}" ] || [ -z "${YASA_RELEASE_BIN}" ] || [ -z "${UAST_PLATFORM}" ]; then \
+      echo "YASA prebuilt release is unavailable for ${ARCH}; set BACKEND_INSTALL_YASA=0 or provide host override." >&2; \
+      exit 1; \
+    fi; \
+    YASA_TARBALL="/var/cache/vulhunter-tools/yasa-engine-${YASA_VERSION}.tar.gz"; \
+    if [ ! -s "${YASA_TARBALL}" ]; then \
+      download_with_fallback \
+        "${YASA_TARBALL}" \
+        "https://gh-proxy.com/https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" \
+        "https://v6.gh-proxy.org/https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" \
+        "https://gh-proxy.org/https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" \
+        "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz"; \
+    fi; \
+    tar -xzf "${YASA_TARBALL}" -C /tmp; \
+    rm -rf "${YASA_ENGINE_DIR}"; \
+    mv "/tmp/YASA-Engine-${YASA_VERSION#v}" "${YASA_ENGINE_DIR}"; \
+    YASA_RELEASE_ZIP="/var/cache/vulhunter-tools/${YASA_RELEASE_ASSET}"; \
+    if [ ! -s "${YASA_RELEASE_ZIP}" ]; then \
+      download_with_fallback \
+        "${YASA_RELEASE_ZIP}" \
+        "https://gh-proxy.com/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
+        "https://v6.gh-proxy.org/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
+        "https://gh-proxy.org/https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}" \
+        "https://github.com/antgroup/YASA-Engine/releases/download/${YASA_VERSION}/${YASA_RELEASE_ASSET}"; \
+    fi; \
+    rm -rf /tmp/yasa-release; \
+    unzip -oq "${YASA_RELEASE_ZIP}" "${YASA_RELEASE_BIN}" -d /tmp/yasa-release; \
+    cp "/tmp/yasa-release/${YASA_RELEASE_BIN}" "${YASA_REAL_BIN}"; \
+    chmod +x "${YASA_REAL_BIN}"; \
+    mkdir -p "${YASA_ENGINE_DIR}/deps/uast4go" "${YASA_ENGINE_DIR}/deps/uast4py"; \
+    download_uast_bin() { \
+      bin_name="$1"; \
+      target="$2"; \
+      cache_file="/var/cache/vulhunter-tools/${bin_name}"; \
+      if [ ! -s "${cache_file}" ]; then \
+        download_with_fallback \
+          "${cache_file}" \
+          "https://gh-proxy.com/https://github.com/antgroup/YASA-UAST/releases/latest/download/${bin_name}" \
+          "https://v6.gh-proxy.org/https://github.com/antgroup/YASA-UAST/releases/latest/download/${bin_name}" \
+          "https://gh-proxy.org/https://github.com/antgroup/YASA-UAST/releases/latest/download/${bin_name}" \
+          "https://github.com/antgroup/YASA-UAST/releases/latest/download/${bin_name}"; \
+      fi; \
+      cp "${cache_file}" "${target}"; \
+      chmod +x "${target}"; \
+    }; \
+    download_uast_bin "uast4go-${UAST_PLATFORM}" "${YASA_ENGINE_DIR}/deps/uast4go/uast4go"; \
+    download_uast_bin "uast4py-${UAST_PLATFORM}" "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \
+    ln -sfn "${YASA_ENGINE_DIR}/resource" "${YASA_HOME}/resource"; \
+    printf '%s\n' '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'ENGINE_BIN="/opt/yasa/bin/yasa-engine.real"' \
+      'if [[ ! -x "$ENGINE_BIN" ]]; then' \
+      '  echo "yasa-engine binary not found: $ENGINE_BIN" >&2' \
+      '  exit 127' \
+      'fi' \
+      'exec "$ENGINE_BIN" "$@"' \
+      > "${YASA_ENGINE_WRAPPER_BIN}"; \
+    chmod +x "${YASA_ENGINE_WRAPPER_BIN}"; \
+    printf '%s\n' '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'ENGINE_ROOT="/opt/yasa/engine"' \
+      'ENGINE="/opt/yasa/bin/yasa-engine"' \
+      'if [[ ! -x "$ENGINE" ]]; then' \
+      '  echo "YASA engine wrapper not found: $ENGINE" >&2' \
+      '  exit 127' \
+      'fi' \
+      '(cd "$ENGINE_ROOT" && "$ENGINE" "$@")' \
+      > "${YASA_WRAPPER_BIN}"; \
+    chmod +x "${YASA_WRAPPER_BIN}"; \
+    ln -sf "${YASA_WRAPPER_BIN}" /usr/local/bin/yasa; \
+    ln -sf "${YASA_ENGINE_WRAPPER_BIN}" /usr/local/bin/yasa-engine; \
+    /usr/local/bin/yasa --version; \
+    test -d /opt/yasa/resource
 
+# ============================================
+# 多阶段构建 - 运行阶段
+# ============================================
+FROM runtime-base AS dev-runtime
+
+COPY --from=builder /app/.venv /opt/backend-venv
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
+COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
+COPY --from=scanner-tools-base /opt/phpstan /opt/phpstan
+COPY --from=scanner-tools-base /opt/yasa /opt/yasa
+COPY --chmod=755 scripts/dev-entrypoint.sh /usr/local/bin/backend-dev-entrypoint.sh
+
+RUN set -eux; \
+    ln -sf "${OPENGREP_REAL_BIN}" /usr/local/bin/opengrep.real; \
+    ln -sf "${OPENGREP_WRAPPER_BIN}" /usr/local/bin/opengrep; \
+    opengrep --version; \
+    ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
+    phpstan --version; \
+    if [ -x "${YASA_WRAPPER_BIN}" ]; then \
+      ln -sf "${YASA_ENGINE_WRAPPER_BIN}" /usr/local/bin/yasa-engine; \
+      ln -sf "${YASA_WRAPPER_BIN}" /usr/local/bin/yasa; \
+      /usr/local/bin/yasa --version; \
+      test -d /opt/yasa/resource; \
+    fi
 
 ENV PATH=/app/.venv/bin:/pnpm:${PATH}
 
@@ -668,12 +683,12 @@ COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
 
 # 从 mcp-builder 复制 MCP 运行时（前置以减少网络并发抢占）
 COPY --from=mcp-builder /pnpm /pnpm
+COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
+COPY --from=scanner-tools-base /opt/phpstan /opt/phpstan
+COPY --from=scanner-tools-base /opt/yasa /opt/yasa
 
-# 安装 Opengrep CLI 和 PMD
-ARG OPENGREP_VERSION=v1.15.1
+# 复制共享扫描工具并安装 PMD
 ARG BACKEND_PNPM_CMD_TIMEOUT_SECONDS
-ARG BACKEND_PYPI_INDEX_PRIMARY
-ARG BACKEND_PYPI_INDEX_FALLBACK
 
 RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhunter-tools \
     set -eux; \
@@ -682,13 +697,7 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
     case "${cmd_timeout}" in ''|*[!0-9]*) cmd_timeout=420 ;; esac; \
     download_step_timeout=90; \
     if [ "${cmd_timeout}" -lt "${download_step_timeout}" ]; then download_step_timeout="${cmd_timeout}"; fi; \
-    mkdir -p /var/cache/vulhunter-tools "${OPENGREP_HOME}"; \
-    ARCH="$(uname -m)"; \
-    case "$ARCH" in \
-      x86_64|amd64) OG_DIST="opengrep_manylinux_x86" ;; \
-      aarch64|arm64) OG_DIST="opengrep_manylinux_aarch64" ;; \
-      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
-    esac; \
+    mkdir -p /var/cache/vulhunter-tools; \
     download_with_fallback() { \
       output="$1"; \
       shift; \
@@ -724,23 +733,17 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
       done; \
       return 1; \
     }; \
-    OG_CACHE="/var/cache/vulhunter-tools/opengrep-${OPENGREP_VERSION}-${OG_DIST}"; \
-    if [ ! -s "${OG_CACHE}" ]; then \
-      download_with_fallback \
-        "${OG_CACHE}" \
-        "https://gh-proxy.com/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-        "https://v6.gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-        "https://gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-        "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}"; \
-    fi; \
-    cp "${OG_CACHE}" "${OPENGREP_REAL_BIN}"; \
-    chmod +x "${OPENGREP_REAL_BIN}"; \
-    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY="*"\nexport no_proxy="*"\nexec /usr/local/bin/opengrep.real "$@"\n' \
-      > "${OPENGREP_WRAPPER_BIN}"; \
-    chmod +x "${OPENGREP_WRAPPER_BIN}"; \
     ln -sf "${OPENGREP_REAL_BIN}" /usr/local/bin/opengrep.real; \
     ln -sf "${OPENGREP_WRAPPER_BIN}" /usr/local/bin/opengrep; \
     opengrep --version; \
+    ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
+    phpstan --version; \
+    if [ -x "${YASA_WRAPPER_BIN}" ]; then \
+      ln -sf "${YASA_ENGINE_WRAPPER_BIN}" /usr/local/bin/yasa-engine; \
+      ln -sf "${YASA_WRAPPER_BIN}" /usr/local/bin/yasa; \
+      /usr/local/bin/yasa --version; \
+      test -d /opt/yasa/resource; \
+    fi; \
     PMD_CACHE="/var/cache/vulhunter-tools/pmd-dist-7.0.0-bin.zip"; \
     if [ ! -s "${PMD_CACHE}" ]; then \
       download_with_fallback \
@@ -754,18 +757,7 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
     unzip -q /tmp/pmd.zip -d /opt; \
     ln -s /opt/pmd-bin-7.0.0/bin/pmd /usr/local/bin/pmd; \
     rm /tmp/pmd.zip; \
-    PHPSTAN_CACHE="/var/cache/vulhunter-tools/phpstan.phar"; \
-    if [ ! -s "${PHPSTAN_CACHE}" ]; then \
-      download_with_fallback \
-        "${PHPSTAN_CACHE}" \
-        "https://gh-proxy.com/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
-        "https://v6.gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
-        "https://gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
-        "https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"; \
-    fi; \
-    cp "${PHPSTAN_CACHE}" /usr/local/bin/phpstan; \
-    chmod +x /usr/local/bin/phpstan; \
-    phpstan --version
+    pmd --version
 
 # MCP / QMD 持久化目录
 ENV XDG_DATA_HOME=/app/data/mcp/xdg-data

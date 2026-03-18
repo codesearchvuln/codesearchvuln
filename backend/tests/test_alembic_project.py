@@ -44,6 +44,27 @@ def _load_revision_graph():
     return revisions, down_revisions, file_names
 
 
+def _created_tables_in_source(source: str) -> list[str]:
+    module = ast.parse(source)
+    created_tables: list[str] = []
+
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not isinstance(func, ast.Attribute) or func.attr != "create_table":
+            continue
+        if not node.args:
+            continue
+        table_name_arg = node.args[0]
+        if isinstance(table_name_arg, ast.Constant) and isinstance(
+            table_name_arg.value, str
+        ):
+            created_tables.append(table_name_arg.value)
+
+    return created_tables
+
+
 def test_alembic_revisions_form_a_single_head_graph():
     revisions, down_revisions, _ = _load_revision_graph()
     all_revisions = set(down_revisions)
@@ -55,8 +76,18 @@ def test_alembic_revisions_form_a_single_head_graph():
     heads = sorted(all_revisions - referenced_revisions)
 
     assert len(heads) == 1, f"Expected a single Alembic head, got {heads}"
-    assert heads == ["5f6a7b8c9d0e"], heads
+    assert heads == ["90a71996ac03"], heads
     assert len(revisions) == len(down_revisions)
+
+
+def test_project_management_metrics_table_is_created_by_a_single_migration():
+    matching_files = []
+    for path in sorted(VERSIONS_DIR.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if "project_management_metrics" in _created_tables_in_source(source):
+            matching_files.append(path.name)
+
+    assert matching_files == ["e5f6a7b8c9d0_add_project_management_metrics.py"]
 
 
 def test_alembic_versions_directory_keeps_expected_base_revisions_and_merge_files():
@@ -69,8 +100,24 @@ def test_alembic_versions_directory_keeps_expected_base_revisions_and_merge_file
     assert file_names["6c8d9e0f1a2b"] == "6c8d9e0f1a2b_finalize_projects_zip_file_hash.py"
     assert file_names["d4e5f6a7b8c9"] == "d4e5f6a7b8c9_merge_phpstan_and_agent_heads.py"
     assert file_names["5f6a7b8c9d0e"] == "5f6a7b8c9d0e_merge_project_metrics_and_yasa_phpstan_heads.py"
+    assert file_names["90a71996ac03"] == "90a71996ac03_add_project_management_metrics_table.py"
     assert "048836873140" not in file_names
     assert down_revisions["5f6a7b8c9d0e"] == ("b7e8f9a0b1c2", "e5f6a7b8c9d0")
+    assert down_revisions["90a71996ac03"] == ("5f6a7b8c9d0e",)
+
+
+def test_project_management_metrics_bridge_revision_is_a_no_op():
+    bridge_file = (
+        BACKEND_ROOT
+        / "alembic"
+        / "versions"
+        / "90a71996ac03_add_project_management_metrics_table.py"
+    )
+    bridge_source = bridge_file.read_text(encoding="utf-8")
+
+    assert "Compatibility no-op" in bridge_source
+    assert "create_table('project_management_metrics'" not in bridge_source
+    assert 'create_table("project_management_metrics"' not in bridge_source
 
 
 def test_bridge_downgrade_keeps_zip_file_hash_baseline_contract():
