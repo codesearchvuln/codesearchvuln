@@ -226,3 +226,5 @@ docs/plans/
 output/
 .mcp.json
 backend/data/
+
+./dist/
