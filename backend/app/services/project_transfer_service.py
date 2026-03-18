@@ -9,25 +9,21 @@ import subprocess
 import tempfile
 import uuid
 import zipfile
+from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import or_, select
+from sqlalchemy import UniqueConstraint, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app import models as _all_models  # noqa: F401  # Ensure all models are registered
+from app.db.base import Base
 from app.db.init_db import DEFAULT_DEMO_EMAIL, _build_default_seed_projects
-from app.models.agent_task import AgentEvent, AgentFinding, AgentTask
-from app.models.audit import AuditIssue, AuditTask
-from app.models.bandit import BanditFinding, BanditScanTask
-from app.models.gitleaks import GitleaksFinding, GitleaksScanTask
-from app.models.opengrep import OpengrepFinding, OpengrepScanTask
-from app.models.phpstan import PhpstanFinding, PhpstanScanTask
 from app.models.project import Project, ProjectMember
-from app.models.project_info import ProjectInfo
 from app.models.user import User
 from app.services.zip_storage import (
     delete_project_zip,
@@ -41,25 +37,6 @@ logger = logging.getLogger(__name__)
 TRANSFER_SCOPE = "project-domain"
 TRANSFER_EXPORT_VERSION = "project-export-v1"
 TRANSFER_BUNDLE_PREFIX = "deepaudit-project-export-v1"
-
-DATA_FILE_ORDER = [
-    "projects",
-    "project_members",
-    "project_info",
-    "audit_tasks",
-    "audit_issues",
-    "agent_tasks",
-    "agent_events",
-    "agent_findings",
-    "opengrep_scan_tasks",
-    "opengrep_findings",
-    "gitleaks_scan_tasks",
-    "gitleaks_findings",
-    "bandit_scan_tasks",
-    "bandit_findings",
-    "phpstan_scan_tasks",
-    "phpstan_findings",
-]
 
 
 @dataclass
@@ -75,6 +52,26 @@ class ProjectImportSummary:
     skipped_projects: list[dict[str, Any]]
     failed_projects: list[dict[str, Any]]
     warnings: list[str]
+
+
+@dataclass(frozen=True)
+class DomainForeignKey:
+    child_column: str
+    parent_table: str
+    parent_column: str
+
+
+@dataclass(frozen=True)
+class DomainModelSpec:
+    table_name: str
+    model: type
+    primary_keys: tuple[str, ...]
+    foreign_keys: tuple[DomainForeignKey, ...]
+    unique_columns: tuple[tuple[str, ...], ...]
+    user_fk_columns: tuple[str, ...]
+
+
+_DOMAIN_SPEC_CACHE: tuple[list[str], dict[str, DomainModelSpec]] | None = None
 
 
 def _json_default(value: Any) -> Any:
@@ -205,12 +202,197 @@ def _is_seed_project(project: Project, owner: User | None, zip_meta: dict[str, A
     return False
 
 
+def _model_registry_by_table() -> dict[str, type]:
+    registry: dict[str, type] = {}
+    for mapper in Base.registry.mappers:
+        model = mapper.class_
+        table = getattr(model, "__table__", None)
+        if table is None:
+            continue
+        registry[table.name] = model
+    return registry
+
+
+def _iter_unique_column_sets(model: type) -> tuple[tuple[str, ...], ...]:
+    unique_sets: list[tuple[str, ...]] = []
+
+    for column in model.__table__.columns:
+        if getattr(column, "unique", False):
+            unique_sets.append((column.name,))
+
+    for constraint in model.__table__.constraints:
+        if isinstance(constraint, UniqueConstraint):
+            columns = tuple(column.name for column in constraint.columns)
+            if columns:
+                unique_sets.append(columns)
+
+    for index in model.__table__.indexes:
+        if not getattr(index, "unique", False):
+            continue
+        columns = tuple(getattr(column, "name", "") for column in index.columns)
+        columns = tuple(column for column in columns if column)
+        if columns:
+            unique_sets.append(columns)
+
+    deduped: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    for column_set in unique_sets:
+        if column_set in seen:
+            continue
+        seen.add(column_set)
+        deduped.append(column_set)
+    return tuple(deduped)
+
+
+def _user_fk_columns(model: type) -> tuple[str, ...]:
+    user_columns: list[str] = []
+    for column in model.__table__.columns:
+        for foreign_key in column.foreign_keys:
+            if foreign_key.column.table.name == "users" and foreign_key.column.name == "id":
+                user_columns.append(column.name)
+                break
+    return tuple(user_columns)
+
+
+def _discover_project_domain_specs() -> tuple[list[str], dict[str, DomainModelSpec]]:
+    model_by_table = _model_registry_by_table()
+    root_table = Project.__table__.name
+    if root_table not in model_by_table:
+        raise RuntimeError("Project model is not registered")
+
+    children_by_parent: dict[str, set[str]] = defaultdict(set)
+    explicit_fks_by_child: dict[str, list[DomainForeignKey]] = defaultdict(list)
+
+    for child_table, model in model_by_table.items():
+        for foreign_key in model.__table__.foreign_keys:
+            parent_table = foreign_key.column.table.name
+            if parent_table not in model_by_table:
+                continue
+            children_by_parent[parent_table].add(child_table)
+            explicit_fks_by_child[child_table].append(
+                DomainForeignKey(
+                    child_column=foreign_key.parent.name,
+                    parent_table=parent_table,
+                    parent_column=foreign_key.column.name,
+                )
+            )
+
+    domain_tables: set[str] = {root_table}
+    queue: deque[str] = deque([root_table])
+    while queue:
+        parent = queue.popleft()
+        for child in sorted(children_by_parent.get(parent, set())):
+            if child in domain_tables:
+                continue
+            domain_tables.add(child)
+            queue.append(child)
+
+    soft_edges: set[tuple[str, str]] = set()
+    for table_name in domain_tables:
+        model = model_by_table[table_name]
+        explicit_fk_columns = {fk.child_column for fk in explicit_fks_by_child.get(table_name, [])}
+        table_prefix = table_name.split("_", 1)[0]
+
+        for column in model.__table__.columns:
+            if column.name in explicit_fk_columns:
+                continue
+            if not column.name.endswith("_id"):
+                continue
+
+            stem = column.name[:-3]
+            candidates = [f"{table_prefix}_{stem}s", f"{stem}s"]
+            for candidate in candidates:
+                if candidate not in domain_tables or candidate == table_name:
+                    continue
+                candidate_model = model_by_table[candidate]
+                candidate_pk = tuple(col.name for col in candidate_model.__table__.primary_key.columns)
+                if "id" not in candidate_pk:
+                    continue
+                soft_edges.add((candidate, table_name))
+
+    indegree: dict[str, int] = {table: 0 for table in domain_tables}
+    edges: dict[str, set[str]] = {table: set() for table in domain_tables}
+
+    for parent, children in children_by_parent.items():
+        if parent not in domain_tables:
+            continue
+        for child in children:
+            if child not in domain_tables:
+                continue
+            if child not in edges[parent]:
+                edges[parent].add(child)
+                indegree[child] += 1
+
+    for parent, child in soft_edges:
+        if child not in edges[parent]:
+            edges[parent].add(child)
+            indegree[child] += 1
+
+    topo_queue: list[str] = sorted([table for table, degree in indegree.items() if degree == 0])
+    table_order: list[str] = []
+    while topo_queue:
+        current = topo_queue.pop(0)
+        table_order.append(current)
+        for child in sorted(edges[current]):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                topo_queue.append(child)
+                topo_queue.sort()
+
+    if len(table_order) != len(domain_tables):
+        remaining = sorted(domain_tables - set(table_order))
+        table_order.extend(remaining)
+
+    specs: dict[str, DomainModelSpec] = {}
+    for table_name in table_order:
+        model = model_by_table[table_name]
+        primary_keys = tuple(column.name for column in model.__table__.primary_key.columns)
+        foreign_keys = tuple(
+            sorted(
+                [
+                    fk
+                    for fk in explicit_fks_by_child.get(table_name, [])
+                    if fk.parent_table in domain_tables
+                ],
+                key=lambda item: (item.parent_table, item.child_column, item.parent_column),
+            )
+        )
+        specs[table_name] = DomainModelSpec(
+            table_name=table_name,
+            model=model,
+            primary_keys=primary_keys,
+            foreign_keys=foreign_keys,
+            unique_columns=_iter_unique_column_sets(model),
+            user_fk_columns=_user_fk_columns(model),
+        )
+
+    return table_order, specs
+
+
+def _project_domain_specs() -> tuple[list[str], dict[str, DomainModelSpec]]:
+    global _DOMAIN_SPEC_CACHE
+    if _DOMAIN_SPEC_CACHE is None:
+        _DOMAIN_SPEC_CACHE = _discover_project_domain_specs()
+    return _DOMAIN_SPEC_CACHE
+
+
+def _referenced_columns(table_order: list[str], specs: dict[str, DomainModelSpec]) -> dict[str, set[str]]:
+    columns: dict[str, set[str]] = {table: set() for table in table_order}
+    for table_name in table_order:
+        for primary_key in specs[table_name].primary_keys:
+            columns[table_name].add(primary_key)
+
+    for table_name in table_order:
+        for foreign_key in specs[table_name].foreign_keys:
+            columns[foreign_key.parent_table].add(foreign_key.parent_column)
+    return columns
+
+
 async def _resolve_export_projects(
     db: AsyncSession,
     current_user: User,
     project_ids: list[str] | None,
 ) -> tuple[list[Project], list[dict[str, Any]], list[str]]:
-    member_project_ids: list[str] = []
     member_result = await db.execute(
         select(ProjectMember.project_id).where(ProjectMember.user_id == current_user.id)
     )
@@ -249,109 +431,54 @@ async def _resolve_export_projects(
 async def _collect_project_domain_rows(
     db: AsyncSession,
     projects: list[Project],
-) -> dict[str, list[dict[str, Any]]]:
-    project_ids = [project.id for project in projects]
-    datasets: dict[str, list[dict[str, Any]]] = {name: [] for name in DATA_FILE_ORDER}
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    table_order, specs = _project_domain_specs()
+    datasets: dict[str, list[dict[str, Any]]] = {table: [] for table in table_order}
 
-    if not project_ids:
-        return datasets
+    if not projects:
+        return datasets, table_order
 
-    project_member_result = await db.execute(
-        select(ProjectMember).where(ProjectMember.project_id.in_(project_ids))
-    )
-    project_info_result = await db.execute(
-        select(ProjectInfo).where(ProjectInfo.project_id.in_(project_ids))
-    )
-    audit_task_result = await db.execute(select(AuditTask).where(AuditTask.project_id.in_(project_ids)))
-    agent_task_result = await db.execute(select(AgentTask).where(AgentTask.project_id.in_(project_ids)))
-    opengrep_task_result = await db.execute(
-        select(OpengrepScanTask).where(OpengrepScanTask.project_id.in_(project_ids))
-    )
-    gitleaks_task_result = await db.execute(
-        select(GitleaksScanTask).where(GitleaksScanTask.project_id.in_(project_ids))
-    )
-    bandit_task_result = await db.execute(
-        select(BanditScanTask).where(BanditScanTask.project_id.in_(project_ids))
-    )
-    phpstan_task_result = await db.execute(
-        select(PhpstanScanTask).where(PhpstanScanTask.project_id.in_(project_ids))
-    )
+    referenced_columns = _referenced_columns(table_order, specs)
+    values_by_table_column: dict[str, dict[str, set[Any]]] = defaultdict(lambda: defaultdict(set))
 
-    audit_tasks = audit_task_result.scalars().all()
-    agent_tasks = agent_task_result.scalars().all()
-    opengrep_tasks = opengrep_task_result.scalars().all()
-    gitleaks_tasks = gitleaks_task_result.scalars().all()
-    bandit_tasks = bandit_task_result.scalars().all()
-    phpstan_tasks = phpstan_task_result.scalars().all()
+    project_rows = _stable_sort_rows([_model_to_dict(project) for project in projects])
+    datasets[Project.__table__.name] = project_rows
+    for row in project_rows:
+        for column_name in referenced_columns[Project.__table__.name]:
+            value = row.get(column_name)
+            if value is not None:
+                values_by_table_column[Project.__table__.name][column_name].add(value)
 
-    audit_task_ids = [row.id for row in audit_tasks]
-    agent_task_ids = [row.id for row in agent_tasks]
-    opengrep_task_ids = [row.id for row in opengrep_tasks]
-    gitleaks_task_ids = [row.id for row in gitleaks_tasks]
-    bandit_task_ids = [row.id for row in bandit_tasks]
-    phpstan_task_ids = [row.id for row in phpstan_tasks]
+    for table_name in table_order:
+        if table_name == Project.__table__.name:
+            continue
 
-    audit_issue_result = await db.execute(
-        select(AuditIssue).where(AuditIssue.task_id.in_(audit_task_ids or ["__none__"]))
-    )
-    agent_event_result = await db.execute(
-        select(AgentEvent).where(AgentEvent.task_id.in_(agent_task_ids or ["__none__"]))
-    )
-    agent_finding_result = await db.execute(
-        select(AgentFinding).where(AgentFinding.task_id.in_(agent_task_ids or ["__none__"]))
-    )
-    opengrep_finding_result = await db.execute(
-        select(OpengrepFinding).where(OpengrepFinding.scan_task_id.in_(opengrep_task_ids or ["__none__"]))
-    )
-    gitleaks_finding_result = await db.execute(
-        select(GitleaksFinding).where(GitleaksFinding.scan_task_id.in_(gitleaks_task_ids or ["__none__"]))
-    )
-    bandit_finding_result = await db.execute(
-        select(BanditFinding).where(BanditFinding.scan_task_id.in_(bandit_task_ids or ["__none__"]))
-    )
-    phpstan_finding_result = await db.execute(
-        select(PhpstanFinding).where(PhpstanFinding.scan_task_id.in_(phpstan_task_ids or ["__none__"]))
-    )
+        spec = specs[table_name]
+        conditions = []
+        for foreign_key in spec.foreign_keys:
+            parent_values = values_by_table_column[foreign_key.parent_table].get(
+                foreign_key.parent_column,
+                set(),
+            )
+            if not parent_values:
+                continue
+            conditions.append(getattr(spec.model, foreign_key.child_column).in_(list(parent_values)))
 
-    datasets["projects"] = _stable_sort_rows([_model_to_dict(project) for project in projects])
-    datasets["project_members"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in project_member_result.scalars().all()]
-    )
-    datasets["project_info"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in project_info_result.scalars().all()]
-    )
-    datasets["audit_tasks"] = _stable_sort_rows([_model_to_dict(row) for row in audit_tasks])
-    datasets["audit_issues"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in audit_issue_result.scalars().all()]
-    )
-    datasets["agent_tasks"] = _stable_sort_rows([_model_to_dict(row) for row in agent_tasks])
-    datasets["agent_events"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in agent_event_result.scalars().all()]
-    )
-    datasets["agent_findings"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in agent_finding_result.scalars().all()]
-    )
-    datasets["opengrep_scan_tasks"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in opengrep_tasks]
-    )
-    datasets["opengrep_findings"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in opengrep_finding_result.scalars().all()]
-    )
-    datasets["gitleaks_scan_tasks"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in gitleaks_tasks]
-    )
-    datasets["gitleaks_findings"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in gitleaks_finding_result.scalars().all()]
-    )
-    datasets["bandit_scan_tasks"] = _stable_sort_rows([_model_to_dict(row) for row in bandit_tasks])
-    datasets["bandit_findings"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in bandit_finding_result.scalars().all()]
-    )
-    datasets["phpstan_scan_tasks"] = _stable_sort_rows([_model_to_dict(row) for row in phpstan_tasks])
-    datasets["phpstan_findings"] = _stable_sort_rows(
-        [_model_to_dict(row) for row in phpstan_finding_result.scalars().all()]
-    )
-    return datasets
+        if not conditions:
+            datasets[table_name] = []
+            continue
+
+        result = await db.execute(select(spec.model).where(or_(*conditions)))
+        rows = _stable_sort_rows([_model_to_dict(instance) for instance in result.scalars().all()])
+        datasets[table_name] = rows
+
+        for row in rows:
+            for column_name in referenced_columns[table_name]:
+                value = row.get(column_name)
+                if value is not None:
+                    values_by_table_column[table_name][column_name].add(value)
+
+    return datasets, table_order
 
 
 async def export_projects_bundle(
@@ -365,10 +492,10 @@ async def export_projects_bundle(
         current_user=current_user,
         project_ids=project_ids,
     )
-    datasets = await _collect_project_domain_rows(db=db, projects=projects)
+    datasets, table_order = await _collect_project_domain_rows(db=db, projects=projects)
 
     tmp_dir = tempfile.mkdtemp(prefix="deepaudit-project-export-")
-    bundle_filename = f"{TRANSFER_BUNDLE_PREFIX}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.zip"
+    bundle_filename = f"{TRANSFER_BUNDLE_PREFIX}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.zip"
     bundle_path = os.path.join(tmp_dir, bundle_filename)
 
     zip_entries: dict[str, dict[str, Any]] = {}
@@ -393,12 +520,13 @@ async def export_projects_bundle(
 
     manifest = {
         "export_version": TRANSFER_EXPORT_VERSION,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "source_app_version": _git_commit(),
         "scope": TRANSFER_SCOPE,
         "conflict_policy": "skip",
         "project_count": len(projects),
-        "table_counts": {name: len(datasets[name]) for name in DATA_FILE_ORDER},
+        "table_order": table_order,
+        "table_counts": {name: len(datasets[name]) for name in table_order},
         "zip_entries": zip_entries,
         "excluded_seed_projects": excluded_seed_projects,
         "warnings": sorted(set(warnings)),
@@ -406,7 +534,7 @@ async def export_projects_bundle(
 
     with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         bundle.writestr("manifest.json", _to_json_bytes(manifest))
-        for name in DATA_FILE_ORDER:
+        for name in table_order:
             bundle.writestr(f"data/{name}.json", _to_json_bytes(datasets[name]))
         if include_archives:
             for project in projects:
@@ -449,6 +577,33 @@ def _read_bundle_bytes(bundle: zipfile.ZipFile, path: str) -> bytes | None:
         return None
 
 
+def _bundle_data_tables(bundle: zipfile.ZipFile, manifest: dict[str, Any]) -> list[str]:
+    available_tables = sorted(
+        {
+            entry[len("data/") : -len(".json")]
+            for entry in bundle.namelist()
+            if entry.startswith("data/") and entry.endswith(".json")
+        }
+    )
+
+    manifest_order = manifest.get("table_order")
+    if isinstance(manifest_order, list):
+        normalized_manifest_order = [
+            str(table).strip() for table in manifest_order if str(table).strip() in available_tables
+        ]
+    else:
+        normalized_manifest_order = []
+
+    if not normalized_manifest_order:
+        return available_tables
+
+    order = list(normalized_manifest_order)
+    for table in available_tables:
+        if table not in order:
+            order.append(table)
+    return order
+
+
 async def _detect_project_conflict(
     db: AsyncSession,
     current_user: User,
@@ -488,6 +643,169 @@ def _source_project_is_seed(project_row: dict[str, Any], zip_meta: dict[str, Any
     return _is_seed_project(project, owner, zip_meta)
 
 
+def _select_rows_for_source_project(
+    source_project_id: str,
+    datasets: dict[str, list[dict[str, Any]]],
+    table_order: list[str],
+    specs: dict[str, DomainModelSpec],
+) -> dict[str, list[dict[str, Any]]]:
+    selected_rows: dict[str, list[dict[str, Any]]] = {table: [] for table in table_order}
+
+    project_rows = datasets.get(Project.__table__.name, [])
+    target_project_row = next(
+        (
+            row
+            for row in project_rows
+            if isinstance(row, dict) and str(row.get("id") or "") == source_project_id
+        ),
+        None,
+    )
+    if not target_project_row:
+        return selected_rows
+
+    selected_rows[Project.__table__.name] = [target_project_row]
+
+    referenced_columns = _referenced_columns(table_order, specs)
+    source_values: dict[str, dict[str, set[Any]]] = defaultdict(lambda: defaultdict(set))
+    source_values[Project.__table__.name]["id"].add(source_project_id)
+
+    for table_name in table_order:
+        if table_name == Project.__table__.name:
+            rows = selected_rows[table_name]
+        else:
+            rows = []
+            for row in datasets.get(table_name, []):
+                if not isinstance(row, dict):
+                    continue
+                for foreign_key in specs[table_name].foreign_keys:
+                    parent_values = source_values[foreign_key.parent_table].get(
+                        foreign_key.parent_column,
+                        set(),
+                    )
+                    if not parent_values:
+                        continue
+                    if row.get(foreign_key.child_column) in parent_values:
+                        rows.append(row)
+                        break
+            selected_rows[table_name] = rows
+
+        for row in rows:
+            for column_name in referenced_columns[table_name]:
+                value = row.get(column_name)
+                if value is not None:
+                    source_values[table_name][column_name].add(value)
+
+    return selected_rows
+
+
+def _rebind_user_foreign_keys(
+    spec: DomainModelSpec,
+    payload: dict[str, Any],
+    source_row: dict[str, Any],
+    current_user: User,
+) -> None:
+    model_columns = {column.name: column for column in spec.model.__table__.columns}
+    for column_name in spec.user_fk_columns:
+        column = model_columns[column_name]
+        source_value = source_row.get(column_name)
+        if source_value is None and column.nullable:
+            payload[column_name] = None
+        else:
+            payload[column_name] = current_user.id
+
+
+def _remap_explicit_foreign_keys(
+    spec: DomainModelSpec,
+    payload: dict[str, Any],
+    source_row: dict[str, Any],
+    remap_values: dict[str, dict[str, dict[Any, Any]]],
+) -> bool:
+    for foreign_key in spec.foreign_keys:
+        source_value = source_row.get(foreign_key.child_column)
+        if source_value is None:
+            continue
+
+        parent_map = remap_values.get(foreign_key.parent_table, {}).get(foreign_key.parent_column, {})
+        mapped_value = parent_map.get(source_value)
+        if mapped_value is None:
+            return False
+        payload[foreign_key.child_column] = mapped_value
+
+    return True
+
+
+def _remap_soft_id_columns(
+    payload: dict[str, Any],
+    explicit_fk_columns: set[str],
+    user_fk_columns: set[str],
+    remap_values: dict[str, dict[str, dict[Any, Any]]],
+) -> None:
+    for column_name, value in list(payload.items()):
+        if value is None:
+            continue
+        if not column_name.endswith("_id"):
+            continue
+        if column_name in explicit_fk_columns or column_name in user_fk_columns:
+            continue
+
+        candidates: set[Any] = set()
+        for table_map in remap_values.values():
+            id_map = table_map.get("id", {})
+            if value in id_map:
+                candidates.add(id_map[value])
+
+        if len(candidates) == 1:
+            payload[column_name] = next(iter(candidates))
+
+
+def _record_column_remaps(
+    table_name: str,
+    source_row: dict[str, Any],
+    payload: dict[str, Any],
+    tracked_columns: set[str],
+    remap_values: dict[str, dict[str, dict[Any, Any]]],
+) -> None:
+    for column_name in tracked_columns:
+        source_value = source_row.get(column_name)
+        target_value = payload.get(column_name)
+        if source_value is None or target_value is None:
+            continue
+        remap_values.setdefault(table_name, {}).setdefault(column_name, {})[source_value] = target_value
+
+
+def _is_duplicate_by_unique_columns(
+    table_name: str,
+    payload: dict[str, Any],
+    unique_columns: tuple[tuple[str, ...], ...],
+    unique_seen: dict[str, dict[tuple[str, ...], set[tuple[Any, ...]]]],
+) -> bool:
+    for column_set in unique_columns:
+        if any(column not in payload for column in column_set):
+            continue
+        values = tuple(payload.get(column) for column in column_set)
+        if any(value is None for value in values):
+            continue
+        seen = unique_seen.setdefault(table_name, {}).setdefault(column_set, set())
+        if values in seen:
+            return True
+    return False
+
+
+def _mark_unique_columns_seen(
+    table_name: str,
+    payload: dict[str, Any],
+    unique_columns: tuple[tuple[str, ...], ...],
+    unique_seen: dict[str, dict[tuple[str, ...], set[tuple[Any, ...]]]],
+) -> None:
+    for column_set in unique_columns:
+        if any(column not in payload for column in column_set):
+            continue
+        values = tuple(payload.get(column) for column in column_set)
+        if any(value is None for value in values):
+            continue
+        unique_seen.setdefault(table_name, {}).setdefault(column_set, set()).add(values)
+
+
 async def import_projects_bundle(
     db: AsyncSession,
     current_user: User,
@@ -496,6 +814,9 @@ async def import_projects_bundle(
 ) -> ProjectImportSummary:
     if conflict_policy != "skip":
         raise HTTPException(status_code=400, detail="当前仅支持 skip 冲突策略")
+
+    current_table_order, current_specs = _project_domain_specs()
+    tracked_columns = _referenced_columns(current_table_order, current_specs)
 
     temp_dir = tempfile.mkdtemp(prefix="deepaudit-project-import-")
     bundle_path = os.path.join(temp_dir, bundle_file.filename or "project-transfer.zip")
@@ -515,37 +836,44 @@ async def import_projects_bundle(
             if manifest.get("scope") != TRANSFER_SCOPE:
                 raise HTTPException(status_code=400, detail="导入包 scope 非 project-domain")
 
-            datasets = {name: _load_bundle_json(bundle, f"data/{name}.json") for name in DATA_FILE_ORDER}
-            project_rows = datasets["projects"]
-            if not isinstance(project_rows, list):
-                raise HTTPException(status_code=400, detail="projects.json 格式错误")
+            bundle_table_order = _bundle_data_tables(bundle, manifest)
+            bundle_tables_set = set(bundle_table_order)
+            unknown_tables = [
+                table for table in bundle_table_order if table not in current_specs
+            ]
+            for table in unknown_tables:
+                warnings.append(f"table {table} is not recognized by current backend and was skipped")
 
-            project_rows_by_id = {row["id"]: row for row in project_rows if isinstance(row, dict) and row.get("id")}
-            project_member_rows = datasets["project_members"]
-            project_info_rows = datasets["project_info"]
-            audit_task_rows = datasets["audit_tasks"]
-            audit_issue_rows = datasets["audit_issues"]
-            agent_task_rows = datasets["agent_tasks"]
-            agent_event_rows = datasets["agent_events"]
-            agent_finding_rows = datasets["agent_findings"]
-            opengrep_task_rows = datasets["opengrep_scan_tasks"]
-            opengrep_finding_rows = datasets["opengrep_findings"]
-            gitleaks_task_rows = datasets["gitleaks_scan_tasks"]
-            gitleaks_finding_rows = datasets["gitleaks_findings"]
-            bandit_task_rows = datasets["bandit_scan_tasks"]
-            bandit_finding_rows = datasets["bandit_findings"]
-            phpstan_task_rows = datasets["phpstan_scan_tasks"]
-            phpstan_finding_rows = datasets["phpstan_findings"]
+            import_table_order = [
+                table for table in current_table_order if table in bundle_tables_set and table in current_specs
+            ]
+            if Project.__table__.name not in import_table_order:
+                raise HTTPException(status_code=400, detail="导入包缺少 projects 数据")
 
+            datasets: dict[str, list[dict[str, Any]]] = {
+                table: _load_bundle_json(bundle, f"data/{table}.json") for table in import_table_order
+            }
+            for table_name, rows in datasets.items():
+                if not isinstance(rows, list):
+                    raise HTTPException(status_code=400, detail=f"{table_name}.json 格式错误")
+
+            project_rows = datasets.get(Project.__table__.name, [])
             zip_entries = manifest.get("zip_entries", {}) or {}
-            saved_project_ids: list[str] = []
 
             for project_row in project_rows:
                 if not isinstance(project_row, dict) or not project_row.get("id"):
                     continue
 
                 source_project_id = project_row["id"]
-                zip_meta = _load_bundle_json(bundle, f"project_zips/{source_project_id}.meta") if f"project_zips/{source_project_id}.meta" in bundle.namelist() else None
+                project_rows_by_table = _select_rows_for_source_project(
+                    source_project_id=source_project_id,
+                    datasets=datasets,
+                    table_order=import_table_order,
+                    specs=current_specs,
+                )
+
+                zip_meta_path = f"project_zips/{source_project_id}.meta"
+                zip_meta = _load_bundle_json(bundle, zip_meta_path) if zip_meta_path in bundle.namelist() else None
                 zip_blob = _read_bundle_bytes(bundle, f"project_zips/{source_project_id}.zip")
 
                 if _source_project_is_seed(project_row, zip_meta):
@@ -583,148 +911,85 @@ async def import_projects_bundle(
                     continue
 
                 new_project_id = str(uuid.uuid4())
-                audit_task_id_map: dict[str, str] = {}
-                agent_task_id_map: dict[str, str] = {}
-                agent_finding_id_map: dict[str, str] = {}
-                opengrep_task_id_map: dict[str, str] = {}
-                gitleaks_task_id_map: dict[str, str] = {}
-                bandit_task_id_map: dict[str, str] = {}
-                phpstan_task_id_map: dict[str, str] = {}
+                remap_values: dict[str, dict[str, dict[Any, Any]]] = defaultdict(lambda: defaultdict(dict))
+                unique_seen: dict[str, dict[tuple[str, ...], set[tuple[Any, ...]]]] = defaultdict(dict)
 
                 zip_temp_path: str | None = None
                 try:
                     async with db.begin_nested():
-                        project_data = _coerce_row_for_model(Project, project_row)
-                        project_data.update(
-                            {
-                                "id": new_project_id,
-                                "owner_id": current_user.id,
-                            }
-                        )
-                        project = Project(**project_data)
-                        db.add(project)
-
-                        membership_payload = {
-                            "id": str(uuid.uuid4()),
-                            "project_id": new_project_id,
-                            "user_id": current_user.id,
-                            "role": "owner",
-                            "permissions": "{}",
-                        }
-                        source_member = next(
-                            (row for row in project_member_rows if row.get("project_id") == source_project_id),
-                            None,
-                        )
-                        if source_member:
-                            membership_payload["role"] = source_member.get("role") or "owner"
-                            membership_payload["permissions"] = source_member.get("permissions") or "{}"
-                            membership_payload["joined_at"] = _parse_datetime(source_member.get("joined_at"))
-                            membership_payload["created_at"] = _parse_datetime(source_member.get("created_at"))
-                        db.add(ProjectMember(**membership_payload))
-
-                        for row in project_info_rows:
-                            if row.get("project_id") != source_project_id:
+                        for table_name in import_table_order:
+                            rows = project_rows_by_table.get(table_name, [])
+                            if not rows:
                                 continue
-                            payload = _coerce_row_for_model(ProjectInfo, row)
-                            payload.update({"id": str(uuid.uuid4()), "project_id": new_project_id})
-                            db.add(ProjectInfo(**payload))
 
-                        for row in audit_task_rows:
-                            if row.get("project_id") != source_project_id:
-                                continue
-                            new_id = str(uuid.uuid4())
-                            audit_task_id_map[row["id"]] = new_id
-                            payload = _coerce_row_for_model(AuditTask, row)
-                            payload.update(
-                                {
-                                    "id": new_id,
-                                    "project_id": new_project_id,
-                                    "created_by": current_user.id,
-                                }
-                            )
-                            db.add(AuditTask(**payload))
+                            spec = current_specs[table_name]
+                            explicit_fk_columns = {fk.child_column for fk in spec.foreign_keys}
+                            user_fk_columns = set(spec.user_fk_columns)
 
-                        for row in audit_issue_rows:
-                            source_task_id = row.get("task_id")
-                            if source_task_id not in audit_task_id_map:
-                                continue
-                            payload = _coerce_row_for_model(AuditIssue, row)
-                            payload.update(
-                                {
-                                    "id": str(uuid.uuid4()),
-                                    "task_id": audit_task_id_map[source_task_id],
-                                    "resolved_by": current_user.id if row.get("resolved_by") else None,
-                                }
-                            )
-                            db.add(AuditIssue(**payload))
-
-                        for row in agent_task_rows:
-                            if row.get("project_id") != source_project_id:
-                                continue
-                            new_id = str(uuid.uuid4())
-                            agent_task_id_map[row["id"]] = new_id
-                            payload = _coerce_row_for_model(AgentTask, row)
-                            payload.update(
-                                {
-                                    "id": new_id,
-                                    "project_id": new_project_id,
-                                    "created_by": current_user.id,
-                                }
-                            )
-                            db.add(AgentTask(**payload))
-
-                        for row in agent_finding_rows:
-                            source_task_id = row.get("task_id")
-                            if source_task_id not in agent_task_id_map:
-                                continue
-                            new_id = str(uuid.uuid4())
-                            agent_finding_id_map[row["id"]] = new_id
-                            payload = _coerce_row_for_model(AgentFinding, row)
-                            payload.update({"id": new_id, "task_id": agent_task_id_map[source_task_id]})
-                            db.add(AgentFinding(**payload))
-
-                        for row in agent_event_rows:
-                            source_task_id = row.get("task_id")
-                            if source_task_id not in agent_task_id_map:
-                                continue
-                            payload = _coerce_row_for_model(AgentEvent, row)
-                            payload.update(
-                                {
-                                    "id": str(uuid.uuid4()),
-                                    "task_id": agent_task_id_map[source_task_id],
-                                    "finding_id": agent_finding_id_map.get(row.get("finding_id")),
-                                }
-                            )
-                            db.add(AgentEvent(**payload))
-
-                        for model, rows, task_id_map, task_model_name, task_fk, finding_model in [
-                            (OpengrepScanTask, opengrep_task_rows, opengrep_task_id_map, "opengrep", "scan_task_id", OpengrepFinding),
-                            (GitleaksScanTask, gitleaks_task_rows, gitleaks_task_id_map, "gitleaks", "scan_task_id", GitleaksFinding),
-                            (BanditScanTask, bandit_task_rows, bandit_task_id_map, "bandit", "scan_task_id", BanditFinding),
-                            (PhpstanScanTask, phpstan_task_rows, phpstan_task_id_map, "phpstan", "scan_task_id", PhpstanFinding),
-                        ]:
-                            for row in rows:
-                                if row.get("project_id") != source_project_id:
+                            for source_row in rows:
+                                if not isinstance(source_row, dict):
                                     continue
-                                new_id = str(uuid.uuid4())
-                                task_id_map[row["id"]] = new_id
-                                payload = _coerce_row_for_model(model, row)
-                                payload.update({"id": new_id, "project_id": new_project_id})
-                                db.add(model(**payload))
 
-                            finding_rows = {
-                                "opengrep": opengrep_finding_rows,
-                                "gitleaks": gitleaks_finding_rows,
-                                "bandit": bandit_finding_rows,
-                                "phpstan": phpstan_finding_rows,
-                            }[task_model_name]
-                            for row in finding_rows:
-                                source_task_id = row.get(task_fk)
-                                if source_task_id not in task_id_map:
+                                payload = _coerce_row_for_model(spec.model, source_row)
+                                _rebind_user_foreign_keys(
+                                    spec=spec,
+                                    payload=payload,
+                                    source_row=source_row,
+                                    current_user=current_user,
+                                )
+
+                                if table_name != Project.__table__.name:
+                                    if not _remap_explicit_foreign_keys(
+                                        spec=spec,
+                                        payload=payload,
+                                        source_row=source_row,
+                                        remap_values=remap_values,
+                                    ):
+                                        continue
+
+                                if table_name == Project.__table__.name:
+                                    payload["id"] = new_project_id
+                                    payload["owner_id"] = current_user.id
+
+                                for primary_key in spec.primary_keys:
+                                    if table_name == Project.__table__.name and primary_key == "id":
+                                        continue
+                                    if primary_key in explicit_fk_columns:
+                                        continue
+                                    if primary_key == "id":
+                                        payload[primary_key] = str(uuid.uuid4())
+                                    elif primary_key not in payload and primary_key in source_row:
+                                        payload[primary_key] = source_row[primary_key]
+
+                                _remap_soft_id_columns(
+                                    payload=payload,
+                                    explicit_fk_columns=explicit_fk_columns,
+                                    user_fk_columns=user_fk_columns,
+                                    remap_values=remap_values,
+                                )
+
+                                if _is_duplicate_by_unique_columns(
+                                    table_name=table_name,
+                                    payload=payload,
+                                    unique_columns=spec.unique_columns,
+                                    unique_seen=unique_seen,
+                                ):
                                     continue
-                                payload = _coerce_row_for_model(finding_model, row)
-                                payload.update({"id": str(uuid.uuid4()), task_fk: task_id_map[source_task_id]})
-                                db.add(finding_model(**payload))
+
+                                db.add(spec.model(**payload))
+                                _mark_unique_columns_seen(
+                                    table_name=table_name,
+                                    payload=payload,
+                                    unique_columns=spec.unique_columns,
+                                    unique_seen=unique_seen,
+                                )
+                                _record_column_remaps(
+                                    table_name=table_name,
+                                    source_row=source_row,
+                                    payload=payload,
+                                    tracked_columns=tracked_columns[table_name],
+                                    remap_values=remap_values,
+                                )
 
                         await db.flush()
 
@@ -745,7 +1010,6 @@ async def import_projects_bundle(
                                 file_path=zip_temp_path,
                                 original_filename=(zip_meta or {}).get("original_filename") or f"{new_project_id}.zip",
                             )
-                            saved_project_ids.append(new_project_id)
 
                     imported_projects.append(
                         {

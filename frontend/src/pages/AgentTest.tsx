@@ -162,8 +162,16 @@ function TransferPanel() {
       const importedCount = result.imported_projects.length;
       const skippedCount = result.skipped_projects.length;
       const failedCount = result.failed_projects.length;
+      const warningCount = result.warnings.length;
       if (failedCount > 0) {
-        toast.warning(`导入完成：成功 ${importedCount} / 跳过 ${skippedCount} / 失败 ${failedCount}`);
+        toast.warning(`导入完成：成功 ${importedCount} / 跳过 ${skippedCount} / 失败 ${failedCount}`, {
+          description:
+            warningCount > 0 ? `另有 ${warningCount} 条警告，请查看下方详情。` : undefined,
+        });
+      } else if (warningCount > 0) {
+        toast.warning(`导入完成：成功 ${importedCount} / 跳过 ${skippedCount}`, {
+          description: `存在 ${warningCount} 条警告，请查看下方详情。`,
+        });
       } else {
         toast.success(`导入完成：成功 ${importedCount} / 跳过 ${skippedCount}`);
       }
@@ -180,7 +188,8 @@ function TransferPanel() {
       <div className="mb-3 rounded border border-border/30 bg-muted/30 p-2.5">
         <p className="text-xs text-muted-foreground">
           <strong className="text-cyan-400">Project Transfer</strong> —
-          项目域数据迁移工具：导出当前用户的项目、任务、扫描结果与 ZIP 源码包，并将导入数据重绑定到当前用户。
+          项目域数据迁移工具：自动发现项目关联数据并导出（项目、任务、扫描结果、Agent 轨迹等）与 ZIP 源码包，
+          导入时会将归属重绑定到当前用户。
         </p>
       </div>
 
@@ -193,7 +202,7 @@ function TransferPanel() {
                 导出项目迁移包
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                默认导出当前用户可见的非初始化项目。可按项目筛选后只导出选中项。
+                默认导出当前用户可见的非初始化项目，并自动发现关联表数据。可按项目筛选后只导出选中项。
               </p>
             </div>
             <Button
@@ -309,7 +318,7 @@ function TransferPanel() {
               导入项目迁移包
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              导入默认按 skip 策略处理冲突，并将项目归属、任务创建者等字段重绑定到当前用户。
+              导入默认按 skip 策略处理冲突，并将项目归属、任务创建者等用户字段重绑定到当前用户。
             </p>
           </div>
 
@@ -396,6 +405,8 @@ function TransferPanel() {
             </h3>
             <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
               <li>只导入项目域数据，不导入系统模板、系统规则、用户配置。</li>
+              <li>导入时按当前后端可识别的项目域表执行，未知表会跳过并记录警告。</li>
+              <li>建议导出端与导入端保持接近版本，减少兼容性警告。</li>
               <li>冲突优先按 ZIP 哈希判断，其次按项目名 + 来源类型 + 仓库地址跳过。</li>
               <li>ZIP 项目缺失源码包时会失败，不会导入半残项目。</li>
             </ul>

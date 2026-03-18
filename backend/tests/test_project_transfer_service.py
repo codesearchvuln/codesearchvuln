@@ -14,11 +14,13 @@ import app.models.bandit  # noqa: F401
 import app.models.gitleaks  # noqa: F401
 import app.models.opengrep  # noqa: F401
 import app.models.phpstan  # noqa: F401
+import app.models.project_management_metrics  # noqa: F401
+import app.models.yasa  # noqa: F401
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.db.base import Base
 from app.db.init_db import DEFAULT_DEMO_EMAIL, _build_default_seed_projects
-from app.models.agent_task import AgentEvent, AgentFinding, AgentTask
+from app.models.agent_task import AgentCheckpoint, AgentEvent, AgentFinding, AgentTask, AgentTreeNode
 from app.models.audit import AuditIssue, AuditTask
 from app.models.bandit import BanditFinding, BanditScanTask
 from app.models.gitleaks import GitleaksFinding, GitleaksScanTask
@@ -26,7 +28,9 @@ from app.models.opengrep import OpengrepFinding, OpengrepScanTask
 from app.models.phpstan import PhpstanFinding, PhpstanScanTask
 from app.models.project import Project, ProjectMember
 from app.models.project_info import ProjectInfo
+from app.models.project_management_metrics import ProjectManagementMetrics
 from app.models.user import User
+from app.models.yasa import YasaFinding, YasaScanTask
 from app.services.project_transfer_service import (
     TRANSFER_EXPORT_VERSION,
     cleanup_export_bundle,
@@ -254,6 +258,25 @@ async def _build_full_source_bundle(tmp_path: Path) -> tuple[bytes, str, str]:
                 sequence=1,
             )
         )
+        source_db.add(
+            AgentCheckpoint(
+                task_id=agent_task.id,
+                agent_id="agent-root",
+                agent_name="OrchestratorAgent",
+                agent_type="orchestrator",
+                state_data='{"phase":"completed"}',
+                status="completed",
+            )
+        )
+        source_db.add(
+            AgentTreeNode(
+                task_id=agent_task.id,
+                agent_id="agent-root",
+                agent_name="OrchestratorAgent",
+                agent_type="orchestrator",
+                status="completed",
+            )
+        )
 
         opengrep_task = OpengrepScanTask(
             project_id=project.id,
@@ -286,6 +309,17 @@ async def _build_full_source_bundle(tmp_path: Path) -> tuple[bytes, str, str]:
         await source_db.refresh(bandit_task)
         await source_db.refresh(phpstan_task)
 
+        yasa_task = YasaScanTask(
+            project_id=project.id,
+            name="yasa",
+            status="completed",
+            target_path=".",
+            language="python",
+        )
+        source_db.add(yasa_task)
+        await source_db.commit()
+        await source_db.refresh(yasa_task)
+
         source_db.add_all(
             [
                 OpengrepFinding(
@@ -316,7 +350,22 @@ async def _build_full_source_bundle(tmp_path: Path) -> tuple[bytes, str, str]:
                     message="Undefined variable",
                     status="open",
                 ),
+                YasaFinding(
+                    scan_task_id=yasa_task.id,
+                    level="warning",
+                    message="Potential issue",
+                    file_path="src/main.py",
+                ),
             ]
+        )
+        source_db.add(
+            ProjectManagementMetrics(
+                project_id=project.id,
+                status="ready",
+                total_tasks=5,
+                completed_tasks=5,
+                running_tasks=0,
+            )
         )
         await source_db.commit()
 
@@ -387,6 +436,14 @@ async def test_import_projects_bundle_restores_graph_and_rebinds_user(tmp_path: 
             await target_db.execute(select(AgentEvent).where(AgentEvent.task_id == agent_task.id))
         ).scalar_one()
         assert agent_event.finding_id == agent_finding.id
+        agent_checkpoint = (
+            await target_db.execute(select(AgentCheckpoint).where(AgentCheckpoint.task_id == agent_task.id))
+        ).scalar_one()
+        assert agent_checkpoint.agent_id == "agent-root"
+        agent_tree_node = (
+            await target_db.execute(select(AgentTreeNode).where(AgentTreeNode.task_id == agent_task.id))
+        ).scalar_one()
+        assert agent_tree_node.agent_id == "agent-root"
 
         gitleaks_task = (
             await target_db.execute(select(GitleaksScanTask).where(GitleaksScanTask.project_id == imported_project_id))
@@ -397,6 +454,16 @@ async def test_import_projects_bundle_restores_graph_and_rebinds_user(tmp_path: 
             )
         ).scalar_one()
         assert gitleaks_finding.scan_task_id == gitleaks_task.id
+        yasa_task = (
+            await target_db.execute(select(YasaScanTask).where(YasaScanTask.project_id == imported_project_id))
+        ).scalar_one()
+        yasa_finding = (
+            await target_db.execute(select(YasaFinding).where(YasaFinding.scan_task_id == yasa_task.id))
+        ).scalar_one()
+        assert yasa_finding.scan_task_id == yasa_task.id
+        metrics = await target_db.get(ProjectManagementMetrics, imported_project_id)
+        assert metrics is not None
+        assert metrics.total_tasks == 5
 
         assert source_user_id != target_user.id
     finally:
@@ -476,24 +543,6 @@ async def test_import_projects_bundle_skips_seed_and_rejects_unsupported_version
                     ]
                 ),
             )
-            for name in [
-                "project_members",
-                "project_info",
-                "audit_tasks",
-                "audit_issues",
-                "agent_tasks",
-                "agent_events",
-                "agent_findings",
-                "opengrep_scan_tasks",
-                "opengrep_findings",
-                "gitleaks_scan_tasks",
-                "gitleaks_findings",
-                "bandit_scan_tasks",
-                "bandit_findings",
-                "phpstan_scan_tasks",
-                "phpstan_findings",
-            ]:
-                bundle.writestr(f"data/{name}.json", "[]")
             bundle.writestr("project_zips/seed-project.meta", json.dumps({"original_filename": seed.archive_name}))
             bundle.writestr("project_zips/seed-project.zip", b"zip-bytes")
 
@@ -508,25 +557,7 @@ async def test_import_projects_bundle_skips_seed_and_rejects_unsupported_version
         bad_bundle_path = tmp_path / "bad-bundle.zip"
         with zipfile.ZipFile(bad_bundle_path, "w", zipfile.ZIP_DEFLATED) as bundle:
             bundle.writestr("manifest.json", json.dumps({"export_version": "legacy", "scope": "project-domain"}))
-            for name in [
-                "projects",
-                "project_members",
-                "project_info",
-                "audit_tasks",
-                "audit_issues",
-                "agent_tasks",
-                "agent_events",
-                "agent_findings",
-                "opengrep_scan_tasks",
-                "opengrep_findings",
-                "gitleaks_scan_tasks",
-                "gitleaks_findings",
-                "bandit_scan_tasks",
-                "bandit_findings",
-                "phpstan_scan_tasks",
-                "phpstan_findings",
-            ]:
-                bundle.writestr(f"data/{name}.json", "[]")
+            bundle.writestr("data/projects.json", "[]")
 
         with pytest.raises(Exception) as exc_info:
             await import_projects_bundle(
