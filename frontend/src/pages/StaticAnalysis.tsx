@@ -77,6 +77,17 @@ export default function StaticAnalysis() {
     return taskId;
   }, [searchParams, taskId, toolParam]);
 
+  const usesPathTaskIdFallback = useMemo(() => {
+    const hasExplicitEngineTaskId = Boolean(
+      searchParams.get("opengrepTaskId") ||
+        searchParams.get("gitleaksTaskId") ||
+        searchParams.get("banditTaskId") ||
+        searchParams.get("phpstanTaskId") ||
+        searchParams.get("yasaTaskId"),
+    );
+    return !hasExplicitEngineTaskId && Boolean(taskId);
+  }, [searchParams, taskId]);
+
   const gitleaksTaskId = useMemo(() => {
     const explicit = searchParams.get("gitleaksTaskId");
     if (explicit) return explicit;
@@ -212,6 +223,14 @@ export default function StaticAnalysis() {
       setPage(listState.clampedPage);
     }
   }, [listState.clampedPage, page]);
+
+  useEffect(() => {
+    if (!usesPathTaskIdFallback) return;
+    console.info(
+      "[StaticAnalysis] Using path taskId fallback. Prefer explicit engine task ids in query params for stable detail resolution.",
+      { pathTaskId: taskId, toolParam },
+    );
+  }, [taskId, toolParam, usesPathTaskIdFallback]);
 
   const handleBack = () => {
     if (returnTo) {

@@ -1,6 +1,10 @@
 import { getEstimatedTaskProgressPercent } from "@/features/tasks/services/taskProgress";
 import { resolveStaticScanGroupStatus } from "@/features/tasks/services/staticScanGrouping";
 import {
+  formatTaskDuration,
+  getTaskDisplayStatusSummary,
+} from "@/features/tasks/services/taskDisplay";
+import {
 	normalizeStaticAnalysisSeverity,
 	type NormalizedSeverity,
 } from "@/shared/utils/staticAnalysisSeverity";
@@ -231,13 +235,7 @@ export function getStaticAnalysisConfidenceBadgeClass(
 }
 
 export function formatStaticAnalysisDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "0 ms";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(2)} s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainSeconds = Math.round(seconds % 60);
-  return `${minutes}m ${remainSeconds}s`;
+  return formatTaskDuration(ms, { showMsWhenSubSecond: true });
 }
 
 export function toStaticAnalysisPositiveLine(value: unknown): number | null {
@@ -275,50 +273,19 @@ function getEngineLabel(engine: Engine): string {
 }
 
 function getStaticAnalysisStatusLabel(status: string): string {
-  const normalized = normalizeStaticAnalysisStatus(status);
-  if (normalized === "completed") return "任务完成";
-  if (normalized === "running") return "任务运行中";
-  if (normalized === "failed") return "任务失败";
-  if (normalized === "pending") return "任务待处理";
-  if (
-    normalized === "cancelled" ||
-    normalized === "interrupted" ||
-    normalized === "aborted"
-  ) {
-    return "任务中止";
-  }
-  return normalized || "未知状态";
+  return getTaskDisplayStatusSummary(status).statusLabel;
 }
 
 export function getStaticAnalysisStatusBadgeClassName(status: string): string {
-  const normalized = normalizeStaticAnalysisStatus(status);
-  if (normalized === "completed") return "cyber-badge-success";
-  if (normalized === "running" || normalized === "pending") return "cyber-badge-info";
-  if (normalized === "failed") return "cyber-badge-danger";
-  if (
-    normalized === "cancelled" ||
-    normalized === "interrupted" ||
-    normalized === "aborted"
-  ) {
-    return "cyber-badge-warning";
-  }
-  return "cyber-badge-muted";
+  return getTaskDisplayStatusSummary(status).badgeClassName;
 }
 
 export function getStaticAnalysisProgressAccentClassName(status: string): string {
-  const normalized = normalizeStaticAnalysisStatus(status);
-  if (normalized === "completed") return "[&>div]:bg-emerald-500";
-  if (normalized === "running" || normalized === "pending") {
-    return "[&>div]:bg-sky-500";
-  }
-  if (normalized === "failed") return "[&>div]:bg-rose-500";
-  if (
-    normalized === "cancelled" ||
-    normalized === "interrupted" ||
-    normalized === "aborted"
-  ) {
-    return "[&>div]:bg-amber-500";
-  }
+  const progressBarClass = getTaskDisplayStatusSummary(status).progressBarClassName;
+  if (progressBarClass === "bg-emerald-400") return "[&>div]:bg-emerald-500";
+  if (progressBarClass === "bg-sky-400") return "[&>div]:bg-sky-500";
+  if (progressBarClass === "bg-rose-400") return "[&>div]:bg-rose-500";
+  if (progressBarClass === "bg-orange-400") return "[&>div]:bg-amber-500";
   return "[&>div]:bg-muted-foreground";
 }
 

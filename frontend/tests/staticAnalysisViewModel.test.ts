@@ -246,8 +246,8 @@ test("buildStaticAnalysisListState applies confidenceFilter to gitleaks rows too
 
 test("formatStaticAnalysisDuration formats milliseconds into readable labels", () => {
   assert.equal(formatStaticAnalysisDuration(12), "12 ms");
-  assert.equal(formatStaticAnalysisDuration(1200), "1.20 s");
-  assert.equal(formatStaticAnalysisDuration(61_000), "1m 1s");
+  assert.equal(formatStaticAnalysisDuration(1200), "00:00:01");
+  assert.equal(formatStaticAnalysisDuration(61_000), "00:01:01");
 });
 
 test("getStaticAnalysisTaskDisplayDurationMs uses elapsed time for running tasks when backend duration is stale", () => {

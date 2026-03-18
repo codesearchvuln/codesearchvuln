@@ -21,9 +21,13 @@ import {
 } from "@/shared/api/opengrep";
 import type { Project } from "@/shared/types";
 import {
-	getEstimatedTaskProgressPercent,
 	INTERRUPTED_STATUSES,
 } from "./taskProgress";
+import {
+	formatTaskDuration,
+	getTaskDisplayProgressPercent,
+	getTaskDisplayStatusSummary,
+} from "./taskDisplay";
 import {
 	buildStaticScanGroups,
 	resolveStaticScanGroupStatus,
@@ -527,22 +531,7 @@ export function filterMixedActivities(
 }
 
 export function getTaskStatusText(status: string): string {
-	switch (status) {
-		case "completed":
-			return "任务完成";
-		case "running":
-			return "任务运行中";
-		case "failed":
-			return "任务失败";
-		case "pending":
-			return "任务待处理";
-		case "cancelled":
-		case "interrupted":
-		case "aborted":
-			return "任务中止";
-		default:
-			return status || "未知状态";
-	}
+	return getTaskDisplayStatusSummary(status).statusLabel;
 }
 
 export function getTaskStatusClassName(status: string): string {
@@ -562,33 +551,23 @@ export function getTaskStatusClassName(status: string): string {
 }
 
 export function getTaskStatusBadgeClassName(status: string): string {
-	if (status === "completed") return "cyber-badge-success";
-	if (status === "running" || status === "pending") return "cyber-badge-info";
-	if (status === "failed") return "cyber-badge-danger";
-	if (INTERRUPTED_STATUSES.has(status)) return "cyber-badge-warning";
-	return "cyber-badge-muted";
+	return getTaskDisplayStatusSummary(status).badgeClassName;
 }
 
 export function getTaskProgressBarClassName(status: string): string {
-	if (status === "completed") return "bg-emerald-400";
-	if (status === "running" || status === "pending") return "bg-sky-400";
-	if (status === "failed") return "bg-rose-400";
-	if (INTERRUPTED_STATUSES.has(status)) return "bg-orange-400";
-	return "bg-muted-foreground";
+	return getTaskDisplayStatusSummary(status).progressBarClassName;
 }
 
 export function getTaskProgressPercent(
 	activity: TaskActivityItem,
 	nowMs = Date.now(),
 ): number {
-	return getEstimatedTaskProgressPercent(
-		{
-			status: activity.status,
-			createdAt: activity.createdAt,
-			startedAt: activity.startedAt,
-		},
+	return getTaskDisplayProgressPercent({
+		status: activity.status,
+		createdAt: activity.createdAt,
+		startedAt: activity.startedAt,
 		nowMs,
-	);
+	});
 }
 
 export function formatCreatedAt(time: string): string {
@@ -617,15 +596,7 @@ export function getRelativeTime(time: string, nowMs = Date.now()): string {
 }
 
 export function formatDurationMs(durationMs: number): string {
-	const safe = Number.isFinite(durationMs)
-		? Math.max(0, Math.floor(durationMs))
-		: 0;
-	const totalSeconds = Math.floor(safe / 1000);
-	const hours = Math.floor(totalSeconds / 3600);
-	const minutes = Math.floor((totalSeconds % 3600) / 60);
-	const seconds = totalSeconds % 60;
-	const pad = (n: number) => String(n).padStart(2, "0");
-	return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+	return formatTaskDuration(durationMs, { showMsWhenSubSecond: true });
 }
 
 export function getActivityDurationLabel(

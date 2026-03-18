@@ -14,14 +14,21 @@ interface UseTaskActivitiesSnapshotOptions {
 	 * 所有任务均为终态时停止轮询。
 	 */
 	pollingIntervalMs?: number;
+	idlePollingIntervalMs?: number;
 }
 
 const ACTIVE_STATUSES = new Set(["running", "pending"]);
+const IDLE_POLLING_INTERVAL_MS = 60_000;
 
 export function useTaskActivitiesSnapshot(
 	options: UseTaskActivitiesSnapshotOptions = {},
 ) {
-	const { autoLoad = true, forceInitial = false, pollingIntervalMs } = options;
+	const {
+		autoLoad = true,
+		forceInitial = false,
+		pollingIntervalMs,
+		idlePollingIntervalMs = IDLE_POLLING_INTERVAL_MS,
+	} = options;
 	const [storeState, setStoreState] = useState(() =>
 		getTaskActivitiesStoreState(),
 	);
@@ -54,6 +61,35 @@ export function useTaskActivitiesSnapshot(
 			window.clearInterval(timer);
 		};
 	}, [pollingIntervalMs, hasActiveTasks]);
+
+	useEffect(() => {
+		if (!pollingIntervalMs || hasActiveTasks) return;
+		const interval = Math.max(idlePollingIntervalMs, pollingIntervalMs);
+		const timer = window.setInterval(() => {
+			void refreshTaskActivitiesSnapshot();
+		}, interval);
+		return () => {
+			window.clearInterval(timer);
+		};
+	}, [idlePollingIntervalMs, pollingIntervalMs, hasActiveTasks]);
+
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			if (!document.hidden) {
+				void refreshTaskActivitiesSnapshot();
+			}
+		};
+		const handleFocus = () => {
+			void refreshTaskActivitiesSnapshot();
+		};
+
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		window.addEventListener("focus", handleFocus);
+		return () => {
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
+			window.removeEventListener("focus", handleFocus);
+		};
+	}, []);
 
 	const refresh = useCallback(() => {
 		return refreshTaskActivitiesSnapshot();
