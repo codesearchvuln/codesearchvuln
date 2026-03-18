@@ -220,6 +220,8 @@ export function fromAgentFinding(
     line_start: finding.line_start ?? null,
     line_end: finding.line_end ?? null,
     cwe_id: toOptionalString(finding.cwe_id),
+    status: toOptionalString(finding.status),
+    verification_status: toOptionalString(findingRecord.verification_status),
     code_snippet: finding.code_snippet ?? null,
     code_context: finding.code_context ?? null,
     function_trigger_flow:
@@ -322,6 +324,8 @@ export function fromAgentEvent(event: AgentEvent): RealtimeMergedFindingItem | n
     line_start: lineStart,
     line_end: toOptionalNumber(metadata.line_end),
     cwe_id: toOptionalString(metadata.cwe_id),
+    status: toOptionalString(metadata.status),
+    verification_status: toOptionalString(metadata.verification_status),
     code_snippet: toOptionalString(metadata.code_snippet),
     code_context: toOptionalString(metadata.code_context),
     function_trigger_flow: Array.isArray(metadata.function_trigger_flow)

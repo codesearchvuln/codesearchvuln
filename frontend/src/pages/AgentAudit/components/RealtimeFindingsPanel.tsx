@@ -70,6 +70,8 @@ export type RealtimeMergedFindingItem = {
 	reachability_function_end_line?: number | null;
 	context_start_line?: number | null;
 	context_end_line?: number | null;
+	status?: string | null;
+	verification_status?: string | null;
 	authenticity?: string | null;
 	verification_evidence?: string | null;
 	verification_todo_id?: string | null;
@@ -120,39 +122,145 @@ function getConfidenceBadgeClass(confidenceLabel: string): string {
 	return "border-border bg-muted text-muted-foreground";
 }
 
+type ProcessingStatusKey =
+	| "false_positive"
+	| "verified"
+	| "verification"
+	| "analysis"
+	| "unscouted";
+
+function getProcessingStatusClassName(status: ProcessingStatusKey): string {
+	if (status === "false_positive") {
+		return "border-zinc-500/30 bg-zinc-500/15 text-zinc-300";
+	}
+	if (status === "verified") {
+		return "border-emerald-500/30 bg-emerald-500/15 text-emerald-300";
+	}
+	if (status === "verification") {
+		return "border-sky-500/30 bg-sky-500/15 text-sky-300";
+	}
+	if (status === "analysis") {
+		return "border-amber-500/30 bg-amber-500/15 text-amber-300";
+	}
+	return "border-border bg-muted text-muted-foreground";
+}
+
+function normalizeProcessingToken(value: unknown): string {
+	return String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+}
+
+function resolveStatusKeyFromBackendToken(token: string): ProcessingStatusKey | null {
+	if (
+		token === "false_positive" ||
+		token === "invalid" ||
+		token === "误报"
+	) {
+		return "false_positive";
+	}
+	if (
+		token === "verified" ||
+		token === "confirmed" ||
+		token === "likely" ||
+		token === "fixed" ||
+		token === "wont_fix" ||
+		token === "duplicate" ||
+		token === "resolved" ||
+		token === "closed" ||
+		token === "已验证"
+	) {
+		return "verified";
+	}
+	if (
+		token === "new" ||
+		token === "running" ||
+		token === "pending" ||
+		token === "pending_verification" ||
+		token === "verifying" ||
+		token === "verification" ||
+		token === "uncertain" ||
+		token === "needs_review"
+	) {
+		return "verification";
+	}
+	if (token === "analyzing" || token === "analysis") {
+		return "analysis";
+	}
+	if (token === "unscouted" || token === "not_started") {
+		return "unscouted";
+	}
+	return null;
+}
+
+function defaultStatusLabel(status: ProcessingStatusKey): string {
+	if (status === "false_positive") return "误报";
+	if (status === "verified") return "已验证";
+	if (status === "verification") return "验证";
+	if (status === "analysis") return "分析";
+	return "未侦察";
+}
+
+function resolveBackendProcessingStatus(
+	item: RealtimeMergedFindingItem,
+): { label: string; className: string } | null {
+	const statusToken = normalizeProcessingToken(item.status);
+	const verificationStatusToken = normalizeProcessingToken(item.verification_status);
+	const statusKey =
+		resolveStatusKeyFromBackendToken(statusToken) ||
+		resolveStatusKeyFromBackendToken(verificationStatusToken);
+
+	if (!statusToken && !verificationStatusToken) {
+		return null;
+	}
+	if (!statusKey) {
+		return {
+			label: "验证",
+			className: getProcessingStatusClassName("verification"),
+		};
+	}
+	return {
+		label: defaultStatusLabel(statusKey),
+		className: getProcessingStatusClassName(statusKey),
+	};
+}
+
 function getProcessingStatus(input: {
 	item: RealtimeMergedFindingItem;
 	currentPhase?: string | null;
 	isRunning: boolean;
 }): { label: string; className: string } {
+	const backendStatus = resolveBackendProcessingStatus(input.item);
+	if (backendStatus) {
+		return backendStatus;
+	}
+
 	const phase = String(input.currentPhase || "").trim().toLowerCase();
 	if (isFalsePositiveFinding(input.item)) {
 		return {
 			label: "误报",
-			className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-300",
+			className: getProcessingStatusClassName("false_positive"),
 		};
 	}
 	if (input.item.verification_progress === "verified" || input.item.is_verified) {
 		return {
 			label: "已验证",
-			className: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
+			className: getProcessingStatusClassName("verified"),
 		};
 	}
 	if (phase === "verification" || !input.isRunning) {
 		return {
 			label: "验证",
-			className: "border-sky-500/30 bg-sky-500/15 text-sky-300",
+			className: getProcessingStatusClassName("verification"),
 		};
 	}
 	if (phase === "analysis") {
 		return {
 			label: "分析",
-			className: "border-amber-500/30 bg-amber-500/15 text-amber-300",
+			className: getProcessingStatusClassName("analysis"),
 		};
 	}
 	return {
 		label: "未侦察",
-		className: "border-border bg-muted text-muted-foreground",
+		className: getProcessingStatusClassName("unscouted"),
 	};
 }
 

@@ -144,6 +144,12 @@ export function mergeRealtimeFindingsBatch(
       cwe_id: preferIncoming
         ? (item.cwe_id ?? existing.cwe_id)
         : (existing.cwe_id ?? item.cwe_id),
+      status: preferIncoming
+        ? (item.status ?? existing.status ?? null)
+        : (existing.status ?? item.status ?? null),
+      verification_status: preferIncoming
+        ? (item.verification_status ?? existing.verification_status ?? null)
+        : (existing.verification_status ?? item.verification_status ?? null),
       code_snippet: preferIncoming
         ? (item.code_snippet ?? existing.code_snippet)
         : (existing.code_snippet ?? item.code_snippet),
