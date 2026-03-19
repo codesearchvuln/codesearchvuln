@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildProjectDetailPotentialTree } from "../src/pages/project-detail/potentialVulnerabilities.ts";
+import {
+	buildProjectDetailPotentialTree,
+	flattenProjectDetailPotentialFindings,
+} from "../src/pages/project-detail/potentialVulnerabilities.ts";
 
 test("buildProjectDetailPotentialTree 保留中高置信度且中危以上漏洞并取消 top10 截断", () => {
 	const result = buildProjectDetailPotentialTree({
@@ -254,4 +257,113 @@ test("buildProjectDetailPotentialTree 按任务时间倒序并保留静态扫描
 	const staticSrcDirectory = result.tasks[0]?.children[0];
 	assert.equal(staticSrcDirectory?.type, "directory");
 	assert.equal(staticSrcDirectory?.name, "src");
+});
+
+test("flattenProjectDetailPotentialFindings 输出排序后的平铺列表并保留任务元信息", () => {
+	const tree = buildProjectDetailPotentialTree({
+		projectName: "demo",
+		agentTasks: [
+			{
+				id: "agent-critical-task",
+				project_id: "project-1",
+				name: "最新智能扫描",
+				description: "intelligent",
+				created_at: "2026-03-20T12:00:00Z",
+			},
+			{
+				id: "agent-high-new-task",
+				project_id: "project-1",
+				name: "智能扫描 A",
+				description: "intelligent",
+				created_at: "2026-03-20T10:00:00Z",
+			},
+			{
+				id: "agent-high-old-task",
+				project_id: "project-1",
+				name: "智能扫描 B",
+				description: "intelligent",
+				created_at: "2026-03-18T10:00:00Z",
+			},
+		] as any,
+		opengrepTasks: [
+			{
+				id: "static-medium-task",
+				project_id: "project-1",
+				name: "静态扫描",
+				created_at: "2026-03-19T08:00:00Z",
+			},
+		] as any,
+		agentFindings: [
+			{
+				id: "agent-critical",
+				task_id: "agent-critical-task",
+				vulnerability_type: "RCE",
+				severity: "critical",
+				title: "远程执行",
+				display_title: "远程执行",
+				description: "desc",
+				file_path: "/tmp/work/demo/src/app.ts",
+				line_start: 10,
+				ai_confidence: 0.9,
+				confidence: 0.9,
+				created_at: "2026-03-20T12:00:00Z",
+			},
+			{
+				id: "agent-high-new",
+				task_id: "agent-high-new-task",
+				vulnerability_type: "SQL Injection",
+				severity: "high",
+				title: "SQL 注入 A",
+				display_title: "SQL 注入 A",
+				description: "desc",
+				file_path: "/tmp/work/demo/src/db.ts",
+				line_start: 22,
+				ai_confidence: 0.7,
+				confidence: 0.7,
+				created_at: "2026-03-20T10:00:00Z",
+			},
+			{
+				id: "agent-high-old",
+				task_id: "agent-high-old-task",
+				vulnerability_type: "SQL Injection",
+				severity: "high",
+				title: "SQL 注入 B",
+				display_title: "SQL 注入 B",
+				description: "desc",
+				file_path: "/tmp/work/demo/src/db.ts",
+				line_start: 30,
+				ai_confidence: 0.7,
+				confidence: 0.7,
+				created_at: "2026-03-18T10:00:00Z",
+			},
+		] as any,
+		opengrepFindings: [
+			{
+				id: "static-medium",
+				scan_task_id: "static-medium-task",
+				rule: {},
+				rule_name: "路径遍历",
+				cwe: ["CWE-22"],
+				description: "desc",
+				file_path: "/workspace/demo/src/http/download.ts",
+				start_line: 33,
+				severity: "WARNING",
+				status: "open",
+				confidence: "MEDIUM",
+			},
+		] as any,
+	});
+
+	const list = flattenProjectDetailPotentialFindings(tree);
+	assert.equal(list.length, 4);
+	assert.deepEqual(
+		list.map((item) => item.id),
+		["agent-critical", "agent-high-new", "agent-high-old", "static-medium"],
+	);
+	assert.ok(list[0]?.taskLabel.length);
+	assert.ok(
+		list[0]?.taskCategory === "intelligent" || list[0]?.taskCategory === "hybrid",
+	);
+	assert.equal(list[3]?.taskCategory, "static");
+	assert.equal(list[3]?.taskLabel, "静态扫描");
 });

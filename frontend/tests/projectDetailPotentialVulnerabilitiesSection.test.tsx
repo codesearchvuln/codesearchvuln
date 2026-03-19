@@ -10,92 +10,66 @@ import {
 
 globalThis.React = React;
 
-const tree = [
-	{
-		type: "task",
-		nodeKey: "task:intelligent:agent-1",
-		taskId: "agent-1",
-		taskCategory: "intelligent",
-		taskLabel: "智能扫描",
-		taskName: "智能审计任务",
-		createdAt: "2026-03-19T08:00:00Z",
-		count: 1,
-		children: [
-			{
-				type: "file",
-				nodeKey: "task:intelligent:agent-1:file:src/auth.ts",
-				name: "auth.ts",
-				path: "src/auth.ts",
-				count: 1,
-				children: [
-					{
-						type: "finding",
-						nodeKey: "task:intelligent:agent-1:finding:finding-1",
-						id: "finding-1",
-						title: "SQL 注入",
-						cweLabel: "CWE-89 SQL注入",
-						cweTooltip: "tooltip",
-						severity: "HIGH",
-						confidence: "HIGH",
-						location: "src/auth.ts:18",
-						route: "/findings/agent-1/finding-1",
-						taskCategory: "intelligent",
-						source: "agent",
-					},
-				],
-			},
-		],
-	},
-] as any;
+const sampleFindings = Array.from({ length: 12 }, (_, index) => ({
+	id: `finding-${index + 1}`,
+	title: `漏洞 ${index + 1}`,
+	cweLabel: `CWE-${index + 1}`,
+	cweTooltip: `说明 ${index + 1}`,
+	severity: index === 0 ? "CRITICAL" : index < 5 ? "HIGH" : "MEDIUM",
+	confidence: index % 2 === 0 ? "HIGH" : "MEDIUM",
+	taskId: index % 2 === 0 ? "agent-task" : "static-task",
+	taskCategory: index % 2 === 0 ? "intelligent" : "static",
+	taskLabel: index % 2 === 0 ? "智能扫描" : "静态扫描",
+	taskName: index % 2 === 0 ? "智能扫描任务" : "静态扫描任务",
+	taskCreatedAt: "2026-03-19T08:00:00Z",
+	route: `/findings/${index + 1}`,
+	source: index % 2 === 0 ? "agent" : "static",
+})) as any;
 
-test("ProjectPotentialVulnerabilitiesSection 默认展开任务层并显示规则说明", () => {
+test("ProjectPotentialVulnerabilitiesSection 渲染表格并默认分页显示首批漏洞", () => {
 	const markup = renderToStaticMarkup(
 		createElement(
 			MemoryRouter,
 			{},
 			createElement(ProjectPotentialVulnerabilitiesSection, {
 				status: "ready",
-				tree,
-				totalFindings: 1,
+				findings: sampleFindings,
+				totalFindings: sampleFindings.length,
 				currentRoute: "/projects/project-1",
-				initialExpandedKeys: ["task:intelligent:agent-1"],
-				formatDate: () => "2026年3月19日 08:00",
+				pageSize: 10,
 			}),
 		),
 	);
 
 	assert.match(markup, /潜在漏洞/);
 	assert.match(markup, /仅显示中\/高置信度且中危及以上漏洞/);
+	assert.match(markup, /漏洞 1/);
+	assert.match(markup, /CWE-1/);
 	assert.match(markup, /智能扫描/);
-	assert.match(markup, /2026年3月19日 08:00/);
-	assert.match(markup, /auth\.ts/);
-	assert.doesNotMatch(markup, /SQL 注入/);
+	assert.match(markup, /returnTo=%2Fprojects%2Fproject-1/);
+	assert.match(markup, /第 1 \/ 2 页/);
+	assert.doesNotMatch(markup, /漏洞 12/);
 });
 
-test("ProjectPotentialVulnerabilitiesSection 展开文件层后显示漏洞叶子和详情回跳", () => {
+test("ProjectPotentialVulnerabilitiesSection 显示分页按钮并在第一页禁用上一页", () => {
 	const markup = renderToStaticMarkup(
 		createElement(
 			MemoryRouter,
 			{},
 			createElement(ProjectPotentialVulnerabilitiesSection, {
 				status: "ready",
-				tree,
-				totalFindings: 1,
+				findings: sampleFindings.slice(0, 5),
+				totalFindings: 5,
 				currentRoute: "/projects/project-1",
-				initialExpandedKeys: [
-					"task:intelligent:agent-1",
-					"task:intelligent:agent-1:file:src/auth.ts",
-				],
-				formatDate: () => "2026年3月19日 08:00",
+				pageSize: 10,
 			}),
 		),
 	);
 
-	assert.match(markup, /SQL 注入/);
-	assert.match(markup, /CWE-89 SQL注入/);
-	assert.match(markup, /src\/auth\.ts:18/);
-	assert.match(markup, /详情/);
-	assert.match(markup, /returnTo=%2Fprojects%2Fproject-1/);
+	assert.match(markup, /第 1 \/ 1 页/);
+	assert.match(markup, /上一页/);
+	assert.match(markup, /下一页/);
+	assert.match(markup, /disabled/);
 });
 
 test("ProjectPotentialVulnerabilitiesSection 在非 ready 状态显示反馈文案", () => {
@@ -105,7 +79,7 @@ test("ProjectPotentialVulnerabilitiesSection 在非 ready 状态显示反馈文�
 			{},
 			createElement(ProjectPotentialVulnerabilitiesSection, {
 				status: "loading",
-				tree: [],
+				findings: [],
 				totalFindings: 0,
 				currentRoute: "/projects/project-1",
 			}),
@@ -119,7 +93,7 @@ test("ProjectPotentialVulnerabilitiesSection 在非 ready 状态显示反馈文�
 			{},
 			createElement(ProjectPotentialVulnerabilitiesSection, {
 				status: "empty",
-				tree: [],
+				findings: [],
 				totalFindings: 0,
 				currentRoute: "/projects/project-1",
 			}),

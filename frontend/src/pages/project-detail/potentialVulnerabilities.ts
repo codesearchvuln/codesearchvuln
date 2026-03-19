@@ -64,6 +64,22 @@ export interface ProjectDetailPotentialTree {
 	tasks: ProjectDetailPotentialTaskNode[];
 }
 
+export interface ProjectDetailPotentialListItem {
+	id: string;
+	title: string;
+	cweLabel: string;
+	cweTooltip?: string | null;
+	severity: ProjectCardVulnerabilitySeverity;
+	confidence: ProjectCardVulnerabilityConfidence;
+	taskId: string;
+	taskCategory: ProjectCardTaskFindingCategory;
+	taskLabel: string;
+	taskName: string;
+	taskCreatedAt: string;
+	route: string;
+	source: "static" | "agent";
+}
+
 type MutableDirectoryNode = {
 	type: "directory";
 	nodeKey: string;
@@ -387,6 +403,71 @@ function buildTaskNode(params: {
 		count: params.findings.length,
 		children: sortTreeNodes(rootNodes),
 	};
+}
+
+function collectFindingLeaves(
+	nodes: Array<
+		ProjectDetailPotentialDirectoryNode | ProjectDetailPotentialFileNode
+	>,
+): ProjectDetailPotentialFindingNode[] {
+	const leaves: ProjectDetailPotentialFindingNode[] = [];
+	for (const node of nodes) {
+		if (node.type === "file" || node.type === "directory") {
+			for (const child of node.children) {
+				if (child.type === "finding") {
+					leaves.push(child);
+				} else {
+					leaves.push(...collectFindingLeaves([child]));
+				}
+			}
+		}
+	}
+	return leaves;
+}
+
+export function sortProjectDetailPotentialFindings(
+	left: ProjectDetailPotentialListItem,
+	right: ProjectDetailPotentialListItem,
+): number {
+	const bySeverity = severityRank(right.severity) - severityRank(left.severity);
+	if (bySeverity !== 0) return bySeverity;
+	const byConfidence =
+		confidenceRank(right.confidence) - confidenceRank(left.confidence);
+	if (byConfidence !== 0) return byConfidence;
+	const byTaskTime =
+		normalizeTimestamp(right.taskCreatedAt) -
+		normalizeTimestamp(left.taskCreatedAt);
+	if (byTaskTime !== 0) return byTaskTime;
+	return left.title.localeCompare(right.title, "zh-CN");
+}
+
+export function flattenProjectDetailPotentialFindings(
+	tree: ProjectDetailPotentialTree,
+): ProjectDetailPotentialListItem[] {
+	const items: ProjectDetailPotentialListItem[] = [];
+
+	for (const task of tree.tasks) {
+		const leaves = collectFindingLeaves(task.children);
+		for (const leaf of leaves) {
+			items.push({
+				id: leaf.id,
+				title: leaf.title,
+				cweLabel: leaf.cweLabel,
+				cweTooltip: leaf.cweTooltip,
+				severity: leaf.severity,
+				confidence: leaf.confidence,
+				taskId: task.taskId,
+				taskCategory: task.taskCategory,
+				taskLabel: task.taskLabel,
+				taskName: task.taskName,
+				taskCreatedAt: task.createdAt,
+				route: leaf.route,
+				source: leaf.source,
+			});
+		}
+	}
+
+	return items.sort(sortProjectDetailPotentialFindings);
 }
 
 export function buildProjectDetailPotentialTree(params: {

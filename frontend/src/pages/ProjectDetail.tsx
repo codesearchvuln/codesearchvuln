@@ -33,8 +33,9 @@ import ProjectTaskFindingsDialog from "@/pages/project-detail/components/Project
 import ProjectPotentialVulnerabilitiesSection from "@/pages/project-detail/components/ProjectPotentialVulnerabilitiesSection";
 import {
 	buildProjectDetailPotentialTree,
+	flattenProjectDetailPotentialFindings,
 	getProjectDetailPotentialTaskCategoryText,
-	type ProjectDetailPotentialTaskNode,
+	type ProjectDetailPotentialListItem,
 } from "@/pages/project-detail/potentialVulnerabilities";
 import {
 	getProjectCardRecentTasks,
@@ -71,6 +72,7 @@ import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 const DETAIL_RECENT_TASK_LIMIT = 10;
 const DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT = 200;
+const DETAIL_POTENTIAL_FINDINGS_PAGE_SIZE = 10;
 
 type PotentialStatus = "loading" | "ready" | "empty" | "failed";
 type ProjectDescriptionStatus = "idle" | "generating" | "ready" | "failed";
@@ -146,20 +148,13 @@ export function ProjectDescriptionSection({
 	const hasDescription = paragraphs.length > 0;
 
 	return (
-		<section className="cyber-card p-5">
-			<div className="flex flex-wrap items-start justify-between gap-3">
-				<div className="flex items-center gap-2">
+		<div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+			<div className="flex items-center gap-2">
 					<FileText className="w-4 h-4 text-sky-400" />
 					<h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">
 						项目简介
 					</h2>
 				</div>
-				{status === "ready" && source ? (
-					<Badge className="cyber-badge-muted">
-						{source === "llm" ? "LLM 生成" : "静态生成"}
-					</Badge>
-				) : null}
-			</div>
 
 			<div className="mt-4 space-y-3">
 				{status === "generating" ? (
@@ -219,11 +214,7 @@ export function ProjectDescriptionSection({
 					</div>
 				) : null}
 			</div>
-
-			<p className="mt-4 text-xs uppercase tracking-[0.22em] text-muted-foreground">
-				内容基于项目结构自动整理
-			</p>
-		</section>
+		</div>
 	);
 }
 
@@ -238,8 +229,8 @@ export default function ProjectDetail() {
 	const [gitleaksTasks, setGitleaksTasks] = useState<GitleaksScanTask[]>([]);
 	const [banditTasks, setBanditTasks] = useState<BanditScanTask[]>([]);
 	const [phpstanTasks, setPhpstanTasks] = useState<PhpstanScanTask[]>([]);
-	const [potentialTree, setPotentialTree] = useState<
-		ProjectDetailPotentialTaskNode[]
+	const [potentialFindings, setPotentialFindings] = useState<
+		ProjectDetailPotentialListItem[]
 	>([]);
 	const [potentialTotalFindings, setPotentialTotalFindings] = useState(0);
 	const [potentialStatus, setPotentialStatus] =
@@ -294,7 +285,7 @@ export default function ProjectDetail() {
 			sourceOpengrepTaskPool: OpengrepScanTask[],
 		) => {
 			setPotentialStatus("loading");
-			setPotentialTree([]);
+			setPotentialFindings([]);
 			setPotentialTotalFindings(0);
 
 			try {
@@ -371,11 +362,15 @@ export default function ProjectDetail() {
 					opengrepFindings: staticFindings,
 				});
 
-				setPotentialTree(nextTree.tasks);
-				setPotentialTotalFindings(nextTree.totalFindings);
-				setPotentialStatus(nextTree.totalFindings > 0 ? "ready" : "empty");
+				const flattenedFindings = flattenProjectDetailPotentialFindings(
+					nextTree,
+				);
+				setPotentialFindings(flattenedFindings);
+				setPotentialTotalFindings(flattenedFindings.length);
+				setPotentialStatus(flattenedFindings.length > 0 ? "ready" : "empty");
 			} catch {
 				setPotentialStatus("failed");
+				setPotentialFindings([]);
 			}
 		},
 		[],
@@ -387,7 +382,7 @@ export default function ProjectDetail() {
 		try {
 			setLoading(true);
 			setPotentialStatus("loading");
-			setPotentialTree([]);
+			setPotentialFindings([]);
 			setPotentialTotalFindings(0);
 
 			const [
@@ -486,7 +481,7 @@ export default function ProjectDetail() {
 			console.error("Failed to load project data:", error);
 			toast.error("加载项目数据失败");
 			setPotentialStatus("failed");
-			setPotentialTree([]);
+			setPotentialFindings([]);
 			setPotentialTotalFindings(0);
 		} finally {
 			setLoading(false);
@@ -683,11 +678,6 @@ export default function ProjectDetail() {
 			);
 		});
 	}, [formatDate, recentTaskTimeKeyword, recentTasks]);
-	const defaultExpandedPotentialKeys = useMemo(
-		() => potentialTree.map((task) => task.nodeKey),
-		[potentialTree],
-	);
-
 	if (loading) {
 		return (
 			<div className="flex items-center justify-center min-h-[60vh]">
@@ -761,7 +751,7 @@ export default function ProjectDetail() {
 					}}
 				/>
 
-				{/* <div className="cyber-card p-5"> */}
+
 					<div className="flex flex-wrap items-center justify-between gap-3 mb-3">
 						<div className="flex items-center gap-2">
 							<Activity className="w-4 h-4 text-sky-400" />
@@ -883,15 +873,13 @@ export default function ProjectDetail() {
 							)}
 						</TableBody>
 					</Table>
-				{/* </div> */}
 
 				<ProjectPotentialVulnerabilitiesSection
 					status={potentialStatus}
-					tree={potentialTree}
+					findings={potentialFindings}
 					totalFindings={potentialTotalFindings}
 					currentRoute={currentRoute}
-					initialExpandedKeys={defaultExpandedPotentialKeys}
-					formatDate={formatDate}
+					pageSize={DETAIL_POTENTIAL_FINDINGS_PAGE_SIZE}
 				/>
 			</div>
 

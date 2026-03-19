@@ -1,33 +1,30 @@
-import {
-	AlertTriangle,
-	Bug,
-	ChevronRight,
-	FileCode2,
-	Folder,
-	Radar,
-} from "lucide-react";
+import { AlertTriangle, Bug } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type {
-	ProjectDetailPotentialDirectoryNode,
-	ProjectDetailPotentialFileNode,
-	ProjectDetailPotentialFindingNode,
-	ProjectDetailPotentialTaskNode,
-} from "@/pages/project-detail/potentialVulnerabilities";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import type { ProjectDetailPotentialListItem } from "@/pages/project-detail/potentialVulnerabilities";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 type PotentialStatus = "loading" | "ready" | "empty" | "failed";
 
 interface ProjectPotentialVulnerabilitiesSectionProps {
 	status: PotentialStatus;
-	tree: ProjectDetailPotentialTaskNode[];
+	findings: ProjectDetailPotentialListItem[];
 	totalFindings: number;
 	currentRoute: string;
-	initialExpandedKeys?: string[];
-	formatDate?: (value: string) => string;
+	pageSize?: number;
 }
+
+const DEFAULT_PAGE_SIZE = 10;
 
 function getStatusMessage(status: PotentialStatus): string | null {
 	if (status === "loading") return "加载中...";
@@ -37,7 +34,7 @@ function getStatusMessage(status: PotentialStatus): string | null {
 }
 
 function getSeverityBadgeClassName(
-	severity: ProjectDetailPotentialFindingNode["severity"],
+	severity: ProjectDetailPotentialListItem["severity"],
 ): string {
 	if (severity === "CRITICAL") return "cyber-badge-danger";
 	if (severity === "HIGH") return "cyber-badge-warning";
@@ -46,7 +43,7 @@ function getSeverityBadgeClassName(
 }
 
 function getSeverityText(
-	severity: ProjectDetailPotentialFindingNode["severity"],
+	severity: ProjectDetailPotentialListItem["severity"],
 ): string {
 	if (severity === "CRITICAL") return "严重";
 	if (severity === "HIGH") return "高危";
@@ -56,7 +53,7 @@ function getSeverityText(
 }
 
 function getConfidenceBadgeClassName(
-	confidence: ProjectDetailPotentialFindingNode["confidence"],
+	confidence: ProjectDetailPotentialListItem["confidence"],
 ): string {
 	if (confidence === "HIGH") {
 		return "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
@@ -71,7 +68,7 @@ function getConfidenceBadgeClassName(
 }
 
 function getConfidenceText(
-	confidence: ProjectDetailPotentialFindingNode["confidence"],
+	confidence: ProjectDetailPotentialListItem["confidence"],
 ): string {
 	if (confidence === "HIGH") return "高";
 	if (confidence === "MEDIUM") return "中";
@@ -80,7 +77,7 @@ function getConfidenceText(
 }
 
 function getTaskCategoryBadgeClassName(
-	category: ProjectDetailPotentialTaskNode["taskCategory"],
+	category: ProjectDetailPotentialListItem["taskCategory"],
 ): string {
 	if (category === "static") {
 		return "bg-sky-500/20 text-sky-300 border-sky-500/30";
@@ -91,189 +88,40 @@ function getTaskCategoryBadgeClassName(
 	return "bg-amber-500/20 text-amber-300 border-amber-500/30";
 }
 
-function BranchContainer(props: {
-	depth: number;
-	children: React.ReactNode;
-}) {
-	return (
-		<div
-			className="space-y-2"
-			style={{ paddingLeft: props.depth > 0 ? props.depth * 14 : 0 }}
-		>
-			{props.children}
-		</div>
-	);
-}
-
-function FindingLeaf(props: {
-	node: ProjectDetailPotentialFindingNode;
-	currentRoute: string;
-}) {
-	return (
-		<div className="rounded-sm border border-border/60 bg-slate-950/40 px-3 py-3">
-			<div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-				<div className="min-w-0 space-y-2">
-					<div
-						className="text-sm font-semibold text-foreground"
-						title={[props.node.cweLabel, props.node.cweTooltip, props.node.title]
-							.filter(Boolean)
-							.join("\n")}
-					>
-						{props.node.title}
-					</div>
-					<div className="text-xs text-muted-foreground">
-						{props.node.cweLabel}
-					</div>
-					<div className="text-xs text-slate-300/85">{props.node.location}</div>
-				</div>
-				<div className="flex flex-wrap items-center gap-2">
-					<Badge className={getSeverityBadgeClassName(props.node.severity)}>
-						{getSeverityText(props.node.severity)}
-					</Badge>
-					<Badge className={getConfidenceBadgeClassName(props.node.confidence)}>
-						{getConfidenceText(props.node.confidence)}
-					</Badge>
-					<Button
-						asChild
-						size="sm"
-						variant="outline"
-						className="cyber-btn-ghost h-7 px-3"
-					>
-						<Link to={appendReturnTo(props.node.route, props.currentRoute)}>
-							详情
-						</Link>
-					</Button>
-				</div>
-			</div>
-		</div>
-	);
-}
-
-function NodeBranch(props: {
-	node:
-		| ProjectDetailPotentialTaskNode
-		| ProjectDetailPotentialDirectoryNode
-		| ProjectDetailPotentialFileNode;
-	depth: number;
-	expandedKeys: Set<string>;
-	onToggle: (nodeKey: string) => void;
-	currentRoute: string;
-	formatDate: (value: string) => string;
-}) {
-	const isOpen = props.expandedKeys.has(props.node.nodeKey);
-	const isTask = props.node.type === "task";
-	const isDirectory = props.node.type === "directory";
-	const icon = isTask ? (
-		<Radar className="h-4 w-4 text-sky-300" />
-	) : isDirectory ? (
-		<Folder className="h-4 w-4 text-amber-300" />
-	) : (
-		<FileCode2 className="h-4 w-4 text-emerald-300" />
-	);
-
-	return (
-		<BranchContainer depth={props.depth}>
-			<div className="rounded-sm border border-border/60 bg-slate-950/35">
-				<button
-					type="button"
-					className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-slate-900/50"
-					onClick={() => props.onToggle(props.node.nodeKey)}
-				>
-					<ChevronRight
-						className={`h-4 w-4 text-muted-foreground transition-transform ${
-							isOpen ? "rotate-90" : ""
-						}`}
-					/>
-					{icon}
-					<div className="min-w-0 flex-1">
-						<div className="flex flex-wrap items-center gap-2">
-							<span className="text-sm font-semibold text-foreground">
-								{isTask ? props.node.taskLabel : props.node.name}
-							</span>
-							{isTask ? (
-								<Badge
-									className={getTaskCategoryBadgeClassName(props.node.taskCategory)}
-								>
-									{props.node.taskLabel}
-								</Badge>
-							) : null}
-							<Badge className="cyber-badge-muted">{props.node.count}</Badge>
-						</div>
-						{isTask ? (
-							<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-								{props.node.taskName ? <span>{props.node.taskName}</span> : null}
-								<span>{props.formatDate(props.node.createdAt)}</span>
-							</div>
-						) : (
-							<div className="mt-1 text-xs text-muted-foreground">
-								{props.node.path}
-							</div>
-						)}
-					</div>
-				</button>
-				{isOpen ? (
-					<div className="space-y-2 border-t border-border/50 px-3 py-3">
-						{props.node.children.map((child) =>
-							child.type === "finding" ? (
-								<FindingLeaf
-									key={child.nodeKey}
-									node={child}
-									currentRoute={props.currentRoute}
-								/>
-							) : (
-								<NodeBranch
-									key={child.nodeKey}
-									node={child}
-									depth={props.depth + 1}
-									expandedKeys={props.expandedKeys}
-									onToggle={props.onToggle}
-									currentRoute={props.currentRoute}
-									formatDate={props.formatDate}
-								/>
-							),
-						)}
-					</div>
-				) : null}
-			</div>
-		</BranchContainer>
-	);
-}
-
 export function ProjectPotentialVulnerabilitiesSection({
 	status,
-	tree,
+	findings,
 	totalFindings,
 	currentRoute,
-	initialExpandedKeys = [],
-	formatDate = (value) =>
-		new Date(value).toLocaleDateString("zh-CN", {
-			year: "numeric",
-			month: "short",
-			day: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-		}),
+	pageSize = DEFAULT_PAGE_SIZE,
 }: ProjectPotentialVulnerabilitiesSectionProps) {
-	const [expandedKeys, setExpandedKeys] = useState<Set<string>>(
-		() => new Set(initialExpandedKeys),
-	);
+	const [page, setPage] = useState(1);
 
 	useEffect(() => {
-		setExpandedKeys(new Set(initialExpandedKeys));
-	}, [initialExpandedKeys]);
+		setPage(1);
+	}, [findings.length, status, pageSize]);
 
 	const statusMessage = useMemo(() => getStatusMessage(status), [status]);
 
-	const toggleNode = (nodeKey: string) => {
-		setExpandedKeys((previous) => {
-			const next = new Set(previous);
-			if (next.has(nodeKey)) {
-				next.delete(nodeKey);
-			} else {
-				next.add(nodeKey);
-			}
-			return next;
-		});
+	const totalPages = Math.max(
+		1,
+		Math.ceil(Math.max(totalFindings, findings.length) / Math.max(1, pageSize)),
+	);
+	const safePage = Math.min(page, totalPages);
+	const pageSizeToUse = Math.max(1, pageSize);
+
+	const pagedFindings = useMemo(() => {
+		if (findings.length === 0) return [];
+		const start = (safePage - 1) * pageSizeToUse;
+		return findings.slice(start, start + pageSizeToUse);
+	}, [findings, safePage, pageSizeToUse]);
+
+	const handlePrev = () => {
+		setPage((previous) => Math.max(1, previous - 1));
+	};
+
+	const handleNext = () => {
+		setPage((previous) => Math.min(totalPages, previous + 1));
 	};
 
 	return (
@@ -287,9 +135,6 @@ export function ProjectPotentialVulnerabilitiesSection({
 						</h3>
 						<Badge className="cyber-badge-muted">{totalFindings}</Badge>
 					</div>
-					<p className="text-xs leading-5 text-muted-foreground">
-						仅显示中/高置信度且中危及以上漏洞
-					</p>
 				</div>
 			</div>
 
@@ -303,18 +148,101 @@ export function ProjectPotentialVulnerabilitiesSection({
 					{statusMessage}
 				</div>
 			) : (
-				<div className="space-y-2">
-					{tree.map((task) => (
-						<NodeBranch
-							key={task.nodeKey}
-							node={task}
-							depth={0}
-							expandedKeys={expandedKeys}
-							onToggle={toggleNode}
-							currentRoute={currentRoute}
-							formatDate={formatDate}
-						/>
-					))}
+				<div className="space-y-3">
+					<div className="overflow-x-auto rounded-sm border border-border/60 bg-slate-950/20">
+						<Table className="table-fixed">
+							<TableHeader>
+								<TableRow>
+									<TableHead className="w-[40%]">漏洞</TableHead>
+									<TableHead className="w-[20%]">任务</TableHead>
+									<TableHead className="w-[15%]">严重度</TableHead>
+									<TableHead className="w-[15%]">置信度</TableHead>
+									<TableHead className="w-[10%]">操作</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{pagedFindings.length > 0 ? (
+									pagedFindings.map((finding) => (
+										<TableRow key={`${finding.taskId}:${finding.id}`}>
+											<TableCell>
+												<div className="space-y-1" title={finding.cweTooltip || undefined}>
+													<div className="text-sm font-semibold text-foreground">
+														{finding.cweLabel}
+													</div>
+												</div>
+											</TableCell>
+											<TableCell>
+												<div className="space-y-2">
+													<Badge className={getTaskCategoryBadgeClassName(finding.taskCategory)}>
+														{finding.taskLabel}
+													</Badge>
+													{/* <div className="text-xs text-muted-foreground" title={finding.taskName || finding.taskId}>
+														{finding.taskName || `#${finding.taskId}`}
+													</div> */}
+												</div>
+											</TableCell>
+											<TableCell>
+												<Badge className={getSeverityBadgeClassName(finding.severity)}>
+													{getSeverityText(finding.severity)}
+												</Badge>
+											</TableCell>
+											<TableCell>
+												<Badge className={getConfidenceBadgeClassName(finding.confidence)}>
+													{getConfidenceText(finding.confidence)}
+												</Badge>
+											</TableCell>
+											<TableCell>
+												<Button
+													asChild
+													size="sm"
+													variant="outline"
+													className="cyber-btn-ghost h-7 px-3"
+												>
+													<Link to={appendReturnTo(finding.route, currentRoute)}>详情</Link>
+												</Button>
+											</TableCell>
+										</TableRow>
+									))
+								) : (
+									<TableRow>
+										<TableCell
+											colSpan={5}
+											className="py-10 text-center text-sm text-muted-foreground"
+										>
+											暂无潜在漏洞
+										</TableCell>
+									</TableRow>
+								)}
+							</TableBody>
+						</Table>
+					</div>
+					<div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+						<span>
+							第 {safePage} / {totalPages} 页
+						</span>
+						<div className="flex items-center gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="cyber-btn-ghost h-7 px-3"
+								onClick={handlePrev}
+								disabled={safePage === 1}
+							>
+								上一页
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="cyber-btn-ghost h-7 px-3"
+								onClick={handleNext}
+								disabled={safePage >= totalPages}
+							>
+								下一页
+							</Button>
+						</div>
+					</div>
 				</div>
 			)}
 		</section>
