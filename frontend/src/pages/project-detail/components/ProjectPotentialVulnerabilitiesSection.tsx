@@ -135,6 +135,9 @@ export function ProjectPotentialVulnerabilitiesSection({
 						</h3>
 						<Badge className="cyber-badge-muted">{totalFindings}</Badge>
 					</div>
+					<p className="text-xs text-muted-foreground">
+						仅显示中/高置信度且中危及以上漏洞
+					</p>
 				</div>
 			</div>
 
@@ -149,30 +152,50 @@ export function ProjectPotentialVulnerabilitiesSection({
 				</div>
 			) : (
 				<div className="space-y-3">
-					<div className="overflow-x-auto rounded-sm border border-border/60 bg-slate-950/20">
+					<div className="rounded-sm border border-border/60 bg-slate-950/20">
 						<Table className="table-fixed">
 							<TableHeader>
-								<TableRow>
-									<TableHead className="w-[40%]">漏洞</TableHead>
-									<TableHead className="w-[20%]">任务</TableHead>
-									<TableHead className="w-[15%]">严重度</TableHead>
-									<TableHead className="w-[15%]">置信度</TableHead>
-									<TableHead className="w-[10%]">操作</TableHead>
+								<TableRow className="border-b border-border/60">
+									<TableHead className="w-[20%] border-r border-border/50 text-center">
+										漏洞ID
+									</TableHead>
+									<TableHead className="w-[26%] border-r border-border/50 text-center">
+										漏洞
+									</TableHead>
+									<TableHead className="w-[14%] border-r border-border/50 text-center">
+										任务
+									</TableHead>
+									<TableHead className="w-[10%] border-r border-border/50 text-center">
+										严重度
+									</TableHead>
+									<TableHead className="w-[10%] border-r border-border/50 text-center">
+										置信度
+									</TableHead>
+									<TableHead className="w-[20%] text-center">操作</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
 								{pagedFindings.length > 0 ? (
 									pagedFindings.map((finding) => (
-										<TableRow key={`${finding.taskId}:${finding.id}`}>
-											<TableCell>
-												<div className="space-y-1" title={finding.cweTooltip || undefined}>
+										<TableRow
+											key={`${finding.taskId}:${finding.id}`}
+											className="border-b border-border/40"
+										>
+											<TableCell className="border-r border-border/30 text-center text-sm text-foreground whitespace-nowrap">
+												#{finding.id}
+											</TableCell>
+											<TableCell className="border-r border-border/30 text-center">
+												<div
+													className="space-y-1"
+													title={finding.cweTooltip || undefined}
+												>
 													<div className="text-sm font-semibold text-foreground">
 														{finding.cweLabel}
 													</div>
 												</div>
 											</TableCell>
-											<TableCell>
-												<div className="space-y-2">
+											<TableCell className="border-r border-border/30 text-center">
+												<div className="flex flex-col items-center gap-2">
 													<Badge className={getTaskCategoryBadgeClassName(finding.taskCategory)}>
 														{finding.taskLabel}
 													</Badge>
@@ -181,17 +204,17 @@ export function ProjectPotentialVulnerabilitiesSection({
 													</div> */}
 												</div>
 											</TableCell>
-											<TableCell>
+											<TableCell className="border-r border-border/30 text-center">
 												<Badge className={getSeverityBadgeClassName(finding.severity)}>
 													{getSeverityText(finding.severity)}
 												</Badge>
 											</TableCell>
-											<TableCell>
+											<TableCell className="border-r border-border/30 text-center">
 												<Badge className={getConfidenceBadgeClassName(finding.confidence)}>
 													{getConfidenceText(finding.confidence)}
 												</Badge>
 											</TableCell>
-											<TableCell>
+											<TableCell className="text-center">
 												<Button
 													asChild
 													size="sm"
@@ -206,7 +229,7 @@ export function ProjectPotentialVulnerabilitiesSection({
 								) : (
 									<TableRow>
 										<TableCell
-											colSpan={5}
+											colSpan={6}
 											className="py-10 text-center text-sm text-muted-foreground"
 										>
 											暂无潜在漏洞

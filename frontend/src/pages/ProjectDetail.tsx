@@ -19,7 +19,6 @@ import CreateScanTaskDialog from "@/components/scan/CreateScanTaskDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
 	Table,
@@ -146,17 +145,29 @@ export function ProjectDescriptionSection({
 }: ProjectDescriptionSectionProps) {
 	const paragraphs = splitProjectDescription(description);
 	const hasDescription = paragraphs.length > 0;
+	const sourceLabel =
+		source === "llm" ? "LLM 生成" : source === "fallback" ? "规则生成" : null;
 
 	return (
-		<div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-			<div className="flex items-center gap-2">
+		<section className="mb-3 space-y-4">
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<div className="flex items-center gap-2">
 					<FileText className="w-4 h-4 text-sky-400" />
 					<h2 className="text-sm font-semibold uppercase tracking-wider text-foreground">
 						项目简介
 					</h2>
 				</div>
+				<div className="flex items-center gap-2">
+					{sourceLabel ? (
+						<Badge className="cyber-badge-muted">{sourceLabel}</Badge>
+					) : null}
+					<span className="text-xs leading-5 text-muted-foreground">
+						内容基于项目结构自动整理
+					</span>
+				</div>
+			</div>
 
-			<div className="mt-4 space-y-3">
+			<div className="space-y-3">
 				{status === "generating" ? (
 					<div className="space-y-3">
 						<div className="flex items-center gap-2 text-sm text-sky-200">
@@ -214,7 +225,7 @@ export function ProjectDescriptionSection({
 					</div>
 				) : null}
 			</div>
-		</div>
+		</section>
 	);
 }
 
@@ -618,15 +629,6 @@ export default function ProjectDetail() {
 		}
 	};
 
-	const getTaskProgressBarClassName = (status: string) => {
-		const normalized = String(status || "")
-			.trim()
-			.toLowerCase();
-		if (normalized === "running") return "[&>div]:bg-sky-500";
-		if (normalized === "completed") return "[&>div]:bg-emerald-500";
-		return "[&>div]:bg-slate-400";
-	};
-
 	const openTaskFindingsDialog = useCallback(
 		(
 			taskId: string,
@@ -774,47 +776,52 @@ export default function ProjectDetail() {
 
 					<Table className="table-fixed">
 						<TableHeader>
-							<TableRow>
-								<TableHead className="w-[18%]">类型</TableHead>
-								<TableHead className="w-[24%]">创建时间</TableHead>
-								<TableHead className="w-[20%]">进度</TableHead>
-								<TableHead className="w-[16%]">状态</TableHead>
-								<TableHead className="w-[10%]">漏洞</TableHead>
-								<TableHead className="w-[20%]">操作</TableHead>
+							<TableRow className="border-b border-border/60">
+								<TableHead className="w-[28%] border-r border-border/50 text-center">
+									任务ID
+								</TableHead>
+								<TableHead className="w-[14%] border-r border-border/50 text-center">
+									类型
+								</TableHead>
+								<TableHead className="w-[18%] border-r border-border/50 text-center">
+									创建时间
+								</TableHead>
+								<TableHead className="w-[10%] border-r border-border/50 text-center">
+									状态
+								</TableHead>
+								<TableHead className="w-[8%] border-r border-border/50 text-center">
+									漏洞
+								</TableHead>
+								<TableHead className="w-[22%] text-center">操作</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
 							{filteredRecentTasks.length > 0 ? (
 								filteredRecentTasks.map((task) => {
-									const progressPercent = Math.max(
-										0,
-										Math.min(100, Math.round(task.progressPercent)),
-									);
 									return (
-										<TableRow key={`${task.kind}:${task.id}`}>
-											<TableCell className="text-sm text-foreground">
+										<TableRow
+											key={`${task.kind}:${task.id}`}
+											className="border-b border-border/40"
+										>
+											<TableCell className="border-r border-border/30 text-center text-sm text-foreground whitespace-nowrap">
+												#{task.id}
+											</TableCell>
+											<TableCell className="border-r border-border/30 text-center text-sm text-foreground">
 												{task.scanTypeLabel}
 											</TableCell>
-											<TableCell className="text-sm text-muted-foreground">
+											<TableCell className="border-r border-border/30 text-center text-sm text-muted-foreground">
 												{formatDate(task.createdAt)}
 											</TableCell>
-											<TableCell>
-												<div className="space-y-1.5">
-													<div className="text-xs text-muted-foreground">
-														{progressPercent}%
-													</div>
-													<Progress
-														value={progressPercent}
-														className={`h-1.5 bg-muted ${getTaskProgressBarClassName(task.status)}`}
-													/>
+											<TableCell className="border-r border-border/30 text-center">
+												<div className="flex justify-center">
+													{getStatusBadge(task.status)}
 												</div>
 											</TableCell>
-											<TableCell>{getStatusBadge(task.status)}</TableCell>
-											<TableCell className="text-sm text-muted-foreground">
+											<TableCell className="border-r border-border/30 text-center text-sm text-muted-foreground">
 												{formatRecentTaskMetricValue(task.vulnerabilities)}
 											</TableCell>
-											<TableCell>
-													<div className="flex items-center gap-2 whitespace-nowrap">
+											<TableCell className="text-center">
+													<div className="flex items-center justify-center gap-2 whitespace-nowrap">
 														<Button
 															asChild
 															size="sm"

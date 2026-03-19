@@ -20,14 +20,14 @@ const EXECUTION_COLUMNS = [
 	{
 		key: "completed",
 		label: "已完成",
-		cellClassName: "text-left",
+		cellClassName: "text-center",
 		chipClassName:
 			"border-emerald-500/35 bg-emerald-500/12 text-emerald-200 shadow-[inset_0_1px_0_rgba(52,211,153,0.18)]",
 	},
 	{
 		key: "running",
 		label: "进行中",
-		cellClassName: "text-left",
+		cellClassName: "text-center",
 		chipClassName:
 			"border-sky-500/35 bg-sky-500/12 text-sky-200 shadow-[inset_0_1px_0_rgba(56,189,248,0.18)]",
 	},
@@ -37,41 +37,44 @@ const VULNERABILITY_COLUMNS = [
 	{
 		key: "critical",
 		label: "严重",
-		cellClassName: "text-left",
+		cellClassName: "text-center",
 		chipClassName:
 			"border-rose-500/35 bg-rose-500/12 text-rose-200 shadow-[inset_0_1px_0_rgba(251,113,133,0.18)]",
 	},
 	{
 		key: "high",
 		label: "高危",
-		cellClassName: "text-left",
+		cellClassName: "text-center",
 		chipClassName:
 			"border-amber-500/35 bg-amber-500/12 text-amber-200 shadow-[inset_0_1px_0_rgba(251,191,36,0.18)]",
 	},
 	{
 		key: "medium",
 		label: "中危",
-		cellClassName: "text-left",
+		cellClassName: "text-center",
 		chipClassName:
 			"border-sky-500/35 bg-sky-500/12 text-sky-200 shadow-[inset_0_1px_0_rgba(56,189,248,0.18)]",
 	},
 	{
 		key: "low",
 		label: "低危",
-		cellClassName: "text-left",
+		cellClassName: "text-center",
 		chipClassName:
 			"border-emerald-500/35 bg-emerald-500/12 text-emerald-200 shadow-[inset_0_1px_0_rgba(52,211,153,0.18)]",
 	},
 ] as const;
 
 const METRIC_CHIP_CLASSNAME =
-	"inline-grid grid-cols-[2ch_auto] items-center gap-1 rounded-md border px-2.5 py-1 text-sm leading-none";
-const METRIC_CHIP_CLASSNAME_2 =
-	"inline-grid grid-cols-[2ch_auto] items-center gap-5 rounded-md border px-2.5 py-1 text-sm leading-none";
+	"inline-block min-w-[2ch] text-center leading-none";
 const METRIC_CHIP_VALUE_CLASSNAME =
-	"text-left font-semibold tabular-nums text-[16px] gap-2";
-const METRIC_CHIP_LABEL_CLASSNAME =
-	"whitespace-nowrap text-left text-[16px] font-medium tracking-[0.02em]";
+	"text-center font-semibold tabular-nums text-[18px]";
+const HEADER_CELL_CLASSNAME =
+	"border-b border-border/60 bg-muted/75 text-center font-mono text-[15px] font-semibold uppercase tracking-[0.18em] text-foreground/80";
+const SUBHEADER_CELL_CLASSNAME =
+	"border-b border-border/85 bg-muted/40 text-center font-mono text-[14px] font-medium tracking-[0.14em] text-muted-foreground";
+const BODY_CELL_CLASSNAME = "border-b border-border/85";
+const DIVIDER_CELL_CLASSNAME = "border-r border-border/75";
+const SECTION_DIVIDER_CLASSNAME = "border-l border-border/85";
 
 export default function ProjectsTable({
 	rows,
@@ -80,38 +83,58 @@ export default function ProjectsTable({
 	return (
 		<Table>
 			<TableHeader>
-				<TableRow>
-					<TableHead className="min-w-[176px]">
+				<TableRow className="border-b border-border/60">
+					<TableHead className={`${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} min-w-[176px]`} rowSpan={2}>
 						项目名称
 					</TableHead>
-					<TableHead className="min-w-[132px]">
+					<TableHead className={`${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} min-w-[132px]`} rowSpan={2}>
 						项目大小
 					</TableHead>
-					<TableHead className="text-left" colSpan={2}>
+					<TableHead className={`${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`} colSpan={2}>
 						执行任务
 					</TableHead>
-					<TableHead className="text-left" colSpan={4}>
+					<TableHead className={`${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`} colSpan={4}>
 						发现漏洞
 					</TableHead>
-					<TableHead className="min-w-[320px]">
+					<TableHead className={`${HEADER_CELL_CLASSNAME} ${SECTION_DIVIDER_CLASSNAME} min-w-[320px]`} rowSpan={2}>
 						操作
 					</TableHead>
+				</TableRow>
+				<TableRow className="border-b border-border/60">
+					{EXECUTION_COLUMNS.map((column) => (
+						<TableHead
+							key={`header-${column.key}`}
+							className={`${SUBHEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME}`}
+						>
+							{column.label}
+						</TableHead>
+					))}
+					{VULNERABILITY_COLUMNS.map((column, index) => (
+						<TableHead
+							key={`header-${column.key}`}
+							className={`${SUBHEADER_CELL_CLASSNAME} ${
+								index === VULNERABILITY_COLUMNS.length - 1 ? "" : DIVIDER_CELL_CLASSNAME
+							}`}
+						>
+							{column.label}
+						</TableHead>
+					))}
 				</TableRow>
 			</TableHeader>
 			<TableBody>
 				{rows.map((row) => (
-					<TableRow key={row.id}>
-						<TableCell>
+					<TableRow key={row.id} className="border-b border-border/60">
+						<TableCell className={`${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`}>
 							<Link
 								to={row.detailPath}
 								state={row.detailState}
 								title={row.name}
-								className="block max-w-[180px] truncate text-foreground hover:text-primary transition-colors font-semibold"
+								className="mx-auto block max-w-[180px] truncate text-center text-[18px] font-semibold text-foreground transition-colors hover:text-primary"
 							>
 								{row.name}
 							</Link>
 						</TableCell>
-						<TableCell className="text-base text-muted-foreground">
+						<TableCell className={`${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center text-[17px] text-muted-foreground`}>
 							<span title={row.metricsStatusMessage ?? undefined}>
 								{row.sizeText}
 							</span>
@@ -119,11 +142,11 @@ export default function ProjectsTable({
 						{EXECUTION_COLUMNS.map((column) => (
 							<TableCell
 								key={`${row.id}-${column.key}`}
-								className={column.cellClassName}
+								className={`${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} ${column.cellClassName}`}
 							>
 								<span
 									data-project-metric-chip={column.key}
-									className={`${METRIC_CHIP_CLASSNAME} ${column.chipClassName}`}
+									className={METRIC_CHIP_CLASSNAME}
 									title={row.metricsStatus !== "ready"
 										? row.metricsStatusMessage ?? undefined
 										: undefined}
@@ -131,20 +154,19 @@ export default function ProjectsTable({
 									<span className={METRIC_CHIP_VALUE_CLASSNAME}>
 										{row.executionStats[column.key]}
 									</span>
-									<span className={METRIC_CHIP_LABEL_CLASSNAME}>
-										{column.label}
-									</span>
 								</span>
 							</TableCell>
 						))}
-						{VULNERABILITY_COLUMNS.map((column) => (
+						{VULNERABILITY_COLUMNS.map((column, index) => (
 							<TableCell
 								key={`${row.id}-${column.key}`}
-								className={column.cellClassName}
+								className={`${BODY_CELL_CLASSNAME} ${
+									index === VULNERABILITY_COLUMNS.length - 1 ? "" : DIVIDER_CELL_CLASSNAME
+								} ${column.cellClassName}`}
 							>
 								<span
 									data-project-metric-chip={column.key}
-									className={`${METRIC_CHIP_CLASSNAME_2} ${column.chipClassName}`}
+									className={METRIC_CHIP_CLASSNAME}
 									title={row.metricsStatus !== "ready"
 										? row.metricsStatusMessage ?? undefined
 										: undefined}
@@ -152,14 +174,11 @@ export default function ProjectsTable({
 									<span className={METRIC_CHIP_VALUE_CLASSNAME}>
 										{row.vulnerabilityStats[column.key]}
 									</span>
-									<span className={METRIC_CHIP_LABEL_CLASSNAME}> 
-										{column.label}
-									</span>
 								</span>
 							</TableCell>
 						))}
-						<TableCell>
-							<div className="flex items-center gap-2 whitespace-nowrap">
+						<TableCell className={`${BODY_CELL_CLASSNAME} ${SECTION_DIVIDER_CLASSNAME} text-center`}>
+							<div className="flex items-center justify-center gap-2 whitespace-nowrap text-[16px]">
 								<Button
 									asChild
 									size="sm"
