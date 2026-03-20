@@ -114,6 +114,11 @@ function createInitialTableState(initialState: DataTableQueryState): DataTableQu
       pageIndex: initialState.pagination.pageIndex,
       pageSize: initialState.pagination.pageSize || DEFAULT_PAGE_SIZE,
     },
+    columnVisibility: {
+      ...initialState.columnVisibility,
+      secretGroup: false,
+      createdAt: false,
+    },
   });
 }
 
@@ -236,16 +241,10 @@ export default function GitleaksRules({
         accessorFn: (row) =>
           [row.name, row.rule_id, row.regex, row.id].filter(Boolean).join(" "),
         header: "规则名称",
-        meta: { label: "规则名称", minWidth: 320, filterVariant: "text" },
+        meta: { label: "规则名称", minWidth: 200, filterVariant: "text" },
         cell: ({ row }) => (
           <div className="space-y-1">
             <div className="font-semibold text-foreground break-all">{row.original.name}</div>
-            <div className="font-mono text-xs text-muted-foreground break-all">
-              {row.original.rule_id}
-            </div>
-            <div className="line-clamp-2 font-mono text-[11px] text-muted-foreground/90 break-all">
-              {row.original.regex}
-            </div>
           </div>
         ),
       },
@@ -253,7 +252,9 @@ export default function GitleaksRules({
         id: "keywords",
         accessorFn: (row) => row.keywords?.length ?? 0,
         header: "关键词数",
-        meta: { label: "关键词数", align: "center", width: 120 },
+        enableSorting: false,
+        // enableHiding: false,
+        meta: { label: "关键词数", align: "center", width: 100 },
         cell: ({ row }) => (
           <span className="font-mono tabular-nums text-sm text-muted-foreground">
             {row.original.keywords?.length || 0}
@@ -264,6 +265,8 @@ export default function GitleaksRules({
         id: "secretGroup",
         accessorFn: (row) => row.secret_group ?? 0,
         header: "密钥分组",
+        enableSorting: false,
+        enableHiding: false,
         meta: { label: "密钥分组", align: "center", width: 120 },
         cell: ({ row }) => (
           <span className="font-mono tabular-nums text-sm text-muted-foreground">
@@ -275,6 +278,8 @@ export default function GitleaksRules({
         id: "entropy",
         accessorFn: (row) => row.entropy ?? -1,
         header: "熵值",
+        enableSorting: false,
+        enableHiding: false,
         meta: {
           label: "熵值",
           align: "center",
@@ -301,6 +306,8 @@ export default function GitleaksRules({
         id: "source",
         accessorFn: (row) => row.source || "",
         header: "来源",
+        enableSorting: false,
+        enableHiding: false,
         meta: {
           label: "规则来源",
           width: 120,
@@ -323,6 +330,8 @@ export default function GitleaksRules({
         id: "enabledState",
         accessorFn: (row) => String(row.is_active),
         header: "启用状态",
+        enableSorting: false,
+        enableHiding: false,
         meta: {
           label: "启用状态",
           width: 136,
@@ -556,7 +565,7 @@ export default function GitleaksRules({
           }
         }}
       >
-        <SelectTrigger className="cyber-input h-9 min-w-[150px]">
+        <SelectTrigger className="cyber-input h-10 min-w-[150px]">
           <SelectValue placeholder="选择引擎" />
         </SelectTrigger>
         <SelectContent className="cyber-dialog border-border">
@@ -634,11 +643,10 @@ export default function GitleaksRules({
           toolbar={{
             searchPlaceholder: "搜索名称/ID/正则...",
             leadingActions: engineSelector,
-            trailingActions: (
-              <Button className="cyber-btn-primary h-9" onClick={openCreateDialog}>
-                新建规则
-              </Button>
-            ),
+            showGlobalSearch: false,
+            showColumnVisibility: false,
+						showDensityToggle: false,
+						showReset: false,
           }}
           selection={
             !loading && rules.length > 0
@@ -665,6 +673,9 @@ export default function GitleaksRules({
                         >
                           {batchOperating ? "处理中..." : "批量禁用"}
                         </Button>
+                        <Button className="cyber-btn-primary h-9" onClick=  {openCreateDialog}>
+                          新建规则
+                        </Button>
                       </>
                     );
                   },
@@ -672,7 +683,7 @@ export default function GitleaksRules({
               : undefined
           }
           pagination={{ enabled: true, pageSizeOptions: [10, 20, 50] }}
-          tableClassName="min-w-[1380px]"
+          tableClassName="min-w-[1400px]"
           getRowId={(row) => row.id}
         />
       </div>

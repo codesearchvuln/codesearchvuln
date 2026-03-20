@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
-import { Copy, Database, Info, Shield, Tag } from "lucide-react";
+import { Copy, Database, Shield, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,6 +100,8 @@ function buildColumns(
       id: "languages",
       accessorFn: (row) => row.languages.join(","),
       header: "编程语言",
+      enableSorting: false,
+      enableHiding: false,
       meta: {
         label: "编程语言",
         filterVariant: "select",
@@ -111,7 +113,7 @@ function buildColumns(
           { label: "java", value: "java" },
         ],
       },
-      filterFn: (row, columnId, filterValue) => {
+      filterFn: (row, filterValue) => {
         if (!filterValue) return true;
         const languages = row.original.languages || [];
         return languages.includes(String(filterValue));
@@ -133,6 +135,8 @@ function buildColumns(
     {
       accessorKey: "source",
       header: "规则来源",
+      enableSorting: false,
+      enableHiding: false,
       meta: {
         label: "规则来源",
         filterVariant: "select",
@@ -143,6 +147,8 @@ function buildColumns(
     {
       accessorKey: "confidence",
       header: "置信度",
+      enableSorting: false,
+      enableHiding: false,
       meta: {
         label: "置信度",
         filterVariant: "select",
@@ -153,6 +159,8 @@ function buildColumns(
     {
       accessorKey: "activeStatus",
       header: "启用状态",
+      enableSorting: false,
+      enableHiding: false,
       meta: {
         label: "启用状态",
         filterVariant: "select",
@@ -168,13 +176,13 @@ function buildColumns(
       },
       cell: ({ row }) => <span className="text-emerald-400">{row.original.verifyStatus}</span>,
     },
-    {
-      accessorKey: "createdAt",
-      header: "创建时间",
-      meta: {
-        label: "创建时间",
-      },
-    },
+    // {
+    //   accessorKey: "createdAt",
+    //   header: "创建时间",
+    //   meta: {
+    //     label: "创建时间",
+    //   },
+    // },
     {
       id: "checkerPack",
       accessorFn: (row) => row.checkerPacks.join(","),
@@ -432,12 +440,6 @@ export default function YasaRules({
         </div>
       </div>
 
-      <div className="cyber-card p-4">
-        <p className="text-sm text-muted-foreground">
-          YASA 规则来自本机 yasa-engine 资源，当前为只读展示。
-        </p>
-      </div>
-
       <div className="cyber-card relative z-10 overflow-hidden">
         <DataTable
           data={rows}
@@ -451,6 +453,10 @@ export default function YasaRules({
           toolbar={{
             searchPlaceholder: "搜索规则名称或ID...",
             leadingActions: engineSelector,
+            showGlobalSearch: false,
+            showColumnVisibility: false,
+						showDensityToggle: false,
+						showReset: false,
           }}
           selection={{
             enableRowSelection: true,
@@ -475,12 +481,6 @@ export default function YasaRules({
               </>
             ),
           }}
-          summary={
-            <div className="flex items-center gap-1 text-xs text-amber-300">
-              <Info className="h-3 w-3" />
-              YASA 规则当前只读，暂不支持启停写回
-            </div>
-          }
           pagination={{
             enabled: true,
             pageSizeOptions: [10, 20, 50],
@@ -560,6 +560,12 @@ function createInitialTableState(initialState: DataTableQueryState): DataTableQu
     pagination: {
       pageIndex: initialState.pagination.pageIndex,
       pageSize: initialState.pagination.pageSize || 10,
+    },
+    columnVisibility: {
+      ...initialState.columnVisibility,
+      checkerPack: false,
+      verifyStatus: false,
+      languages: false,
     },
   };
 }

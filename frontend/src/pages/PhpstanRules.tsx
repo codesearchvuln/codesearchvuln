@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+// import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   type AppColumnDef,
@@ -56,7 +56,7 @@ import {
 import { resolveDeletedFilterValue } from "@/pages/rulesTableState";
 
 type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
-type DeletedFilterValue = "false" | "true" | "all";
+// type DeletedFilterValue = "false" | "true" | "all";
 
 interface PhpstanRulesProps {
   showEngineSelector?: boolean;
@@ -75,9 +75,9 @@ const getSourceLabel = (source?: string) => {
 };
 const DEFAULT_PAGE_SIZE = 10;
 
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "-";
-}
+// function formatDate(value?: string | null) {
+//   return value ? new Date(value).toLocaleString("zh-CN") : "-";
+// }
 
 function getColumnFilterValue(state: DataTableQueryState, columnId: string) {
   return state.columnFilters.find((filter) => filter.id === columnId)?.value;
@@ -246,18 +246,18 @@ export default function PhpstanRules({
             .filter(Boolean)
             .join(" "),
         header: "规则",
-        meta: { label: "规则", minWidth: 340, filterVariant: "text" },
+        meta: { label: "规则", minWidth: 300, filterVariant: "text" },
         cell: ({ row }) => (
           <div className="space-y-0.5">
             <div className="font-semibold text-foreground break-all">{row.original.name}</div>
-            <div className="font-mono text-xs text-muted-foreground break-all">
+            {/* <div className="font-mono text-xs text-muted-foreground break-all">
               {row.original.rule_class}
-            </div>
-            {row.original.description_summary ? (
+            </div> */}
+            {/* {row.original.description_summary ? (
               <div className="text-xs text-muted-foreground break-all line-clamp-2">
                 {row.original.description_summary}
               </div>
-            ) : null}
+            ) : null} */}
           </div>
         ),
       },
@@ -265,7 +265,7 @@ export default function PhpstanRules({
         id: "package",
         accessorFn: (row) => row.package || "",
         header: "扩展包",
-        meta: { label: "扩展包", minWidth: 220 },
+        meta: { label: "扩展包", minWidth: 200 },
         cell: ({ row }) => (
           <span className="text-sm text-muted-foreground break-all">
             {row.original.package || "-"}
@@ -276,6 +276,8 @@ export default function PhpstanRules({
         id: "source",
         accessorFn: (row) => row.source || "",
         header: "来源",
+        enableSorting: false,
+        enableHiding: false,
         meta: {
           label: "规则来源",
           width: 120,
@@ -292,6 +294,8 @@ export default function PhpstanRules({
         id: "status",
         accessorFn: (row) => String(row.is_active),
         header: "启用状态",
+        enableSorting: false,
+        enableHiding: false,
         meta: {
           label: "启用状态",
           width: 136,
@@ -313,46 +317,46 @@ export default function PhpstanRules({
           </Badge>
         ),
       },
-      {
-        id: "deletedStatus",
-        accessorFn: (row) => String(row.is_deleted),
-        header: "删除状态",
-        meta: {
-          label: "删除状态",
-          width: 136,
-          filterVariant: "select",
-          filterOptions: [
-            { label: "未删除", value: "false" },
-            { label: "已删除", value: "true" },
-          ],
-        },
-        filterFn: (row, _columnId, filterValue) => {
-          if (!filterValue) return true;
-          return String(row.original.is_deleted) === String(filterValue);
-        },
-        cell: ({ row }) => (
-          <Badge
-            className={
-              row.original.is_deleted
-                ? "cyber-badge cyber-badge-warning"
-                : "cyber-badge cyber-badge-info"
-            }
-          >
-            {row.original.is_deleted ? "已删除" : "未删除"}
-          </Badge>
-        ),
-      },
-      {
-        id: "updatedAt",
-        accessorFn: (row) => row.updated_at || "",
-        header: "更新时间",
-        meta: { label: "更新时间", width: 180 },
-        cell: ({ row }) => (
-          <span className="text-xs text-muted-foreground">
-            {formatDate(row.original.updated_at)}
-          </span>
-        ),
-      },
+      // {
+      //   id: "deletedStatus",
+      //   accessorFn: (row) => String(row.is_deleted),
+      //   header: "删除状态",
+      //   meta: {
+      //     label: "删除状态",
+      //     width: 136,
+      //     filterVariant: "select",
+      //     filterOptions: [
+      //       { label: "未删除", value: "false" },
+      //       { label: "已删除", value: "true" },
+      //     ],
+      //   },
+      //   filterFn: (row, _columnId, filterValue) => {
+      //     if (!filterValue) return true;
+      //     return String(row.original.is_deleted) === String(filterValue);
+      //   },
+      //   cell: ({ row }) => (
+      //     <Badge
+      //       className={
+      //         row.original.is_deleted
+      //           ? "cyber-badge cyber-badge-warning"
+      //           : "cyber-badge cyber-badge-info"
+      //       }
+      //     >
+      //       {row.original.is_deleted ? "已删除" : "未删除"}
+      //     </Badge>
+      //   ),
+      // },
+      // {
+      //   id: "updatedAt",
+      //   accessorFn: (row) => row.updated_at || "",
+      //   header: "更新时间",
+      //   meta: { label: "更新时间", width: 180 },
+      //   cell: ({ row }) => (
+      //     <span className="text-xs text-muted-foreground">
+      //       {formatDate(row.original.updated_at)}
+      //     </span>
+      //   ),
+      // },
       {
         id: "actions",
         header: "操作",
@@ -679,6 +683,10 @@ export default function PhpstanRules({
           toolbar={{
             searchPlaceholder: "搜索名称/类名/包名...",
             leadingActions: engineSelector,
+            showGlobalSearch: false,
+            showColumnVisibility: false,
+						showDensityToggle: false,
+						showReset: false,
           }}
           selection={
             loading

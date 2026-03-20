@@ -5,7 +5,7 @@
  * 说明：此处启停与删除仅影响规则页展示状态，不影响 Bandit 扫描执行命令。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+// import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   type AppColumnDef,
@@ -56,7 +56,7 @@ import {
 import { resolveDeletedFilterValue } from "@/pages/rulesTableState";
 
 type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
-type DeletedFilterValue = "false" | "true" | "all";
+// type DeletedFilterValue = "false" | "true" | "all";
 
 interface BanditRulesProps {
   showEngineSelector?: boolean;
@@ -67,9 +67,9 @@ interface BanditRulesProps {
 const getSourceLabel = () => "内置规则";
 const DEFAULT_PAGE_SIZE = 10;
 
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString("zh-CN") : "-";
-}
+// function formatDate(value?: string | null) {
+//   return value ? new Date(value).toLocaleString("zh-CN") : "-";
+// }
 
 function getColumnFilterValue(state: DataTableQueryState, columnId: string) {
   return state.columnFilters.find((filter) => filter.id === columnId)?.value;
@@ -154,7 +154,7 @@ export default function BanditRules({
   const deletedFilter = resolveDeletedFilterValue(tableState);
   const activeFilter = getStringColumnFilter(tableState, "status");
 
-  const loadRules = async () => {
+  const loadRules = useCallback(async () => {
     try {
       setLoading(true);
       setLoadError(null);
@@ -170,7 +170,7 @@ export default function BanditRules({
     } finally {
       setLoading(false);
     }
-  };
+  }, [deletedFilter]);
 
   useEffect(() => {
     void loadRules();
@@ -201,6 +201,110 @@ export default function BanditRules({
     };
   }, [rules]);
 
+  const handleStartEditRule = (rule: BanditRule) => {
+    setEditRuleForm({
+      name: rule.name || "",
+      description_summary: rule.description_summary || "",
+      description: rule.description || "",
+      checks_text: (rule.checks || []).join(", "),
+    });
+    setIsEditingRule(true);
+  };
+
+  const handleViewRuleDetail = useCallback(async (rule: BanditRule, mode: "view" | "edit" = "view") => {
+    setSelectedRule(rule);
+    setShowRuleDetail(true);
+    setIsEditingRule(mode === "edit");
+    setLoadingDetail(true);
+    try {
+      const detail = await getBanditRule(rule.test_id);
+      setSelectedRule(detail);
+      if (mode === "edit") {
+        handleStartEditRule(detail);
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || "加载规则详情失败");
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, []);
+
+  const handleCancelEditRule = () => {
+    setIsEditingRule(false);
+    setSavingRule(false);
+  };
+
+  const handleSaveRule = async () => {
+    if (!selectedRule) return;
+    const normalizedChecks = editRuleForm.checks_text
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!editRuleForm.name.trim()) {
+      toast.error("规则名称不能为空");
+      return;
+    }
+
+    try {
+      setSavingRule(true);
+      const result = await updateBanditRule({
+        ruleId: selectedRule.test_id,
+        name: editRuleForm.name.trim(),
+        description_summary: editRuleForm.description_summary.trim(),
+        description: editRuleForm.description.trim(),
+        checks: normalizedChecks,
+      });
+      const updatedRule = result.rule;
+      setSelectedRule(updatedRule);
+      setRules((prev) =>
+        prev.map((item) => (item.id === updatedRule.id ? { ...item, ...updatedRule } : item)),
+      );
+      setIsEditingRule(false);
+      toast.success(result.message || "规则更新成功");
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || "更新规则失败");
+    } finally {
+      setSavingRule(false);
+    }
+  };
+
+  const handleDeleteRule = useCallback(async (rule: BanditRule) => {
+    try {
+      await deleteBanditRule(rule.test_id);
+      toast.success(`规则「${rule.test_id}」已删除`);
+      await loadRules();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || "删除规则失败");
+    }
+  }, [loadRules]);
+
+  const handleRestoreRule = useCallback(async (rule: BanditRule) => {
+    try {
+      await restoreBanditRule(rule.test_id);
+      toast.success(`规则「${rule.test_id}」已恢复`);
+      await loadRules();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || "恢复规则失败");
+    }
+  }, [loadRules]);
+
+  const handleToggleRule = useCallback(async (rule: BanditRule) => {
+    if (rule.is_deleted) {
+      toast.error("已删除规则请先恢复后再启用/禁用");
+      return;
+    }
+    try {
+      await updateBanditRuleEnabled({
+        ruleId: rule.test_id,
+        is_active: !rule.is_active,
+      });
+      await loadRules();
+      toast.success(`规则已${rule.is_active ? "禁用" : "启用"}`);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || "更新规则失败");
+    }
+  }, [loadRules]);
+
   const columns = useMemo<AppColumnDef<BanditRule, unknown>[]>(
     () => [
       {
@@ -221,13 +325,10 @@ export default function BanditRules({
             .filter(Boolean)
             .join(" "),
         header: "规则名称",
-        meta: { label: "规则名称", minWidth: 320, filterVariant: "text" },
+        meta: { label: "规则名称", minWidth: 200, filterVariant: "text" },
         cell: ({ row }) => (
           <div className="space-y-0.5">
             <div className="font-semibold text-foreground break-all">{row.original.name}</div>
-            <div className="font-mono text-xs text-muted-foreground break-all">
-              {row.original.test_id}
-            </div>
           </div>
         ),
       },
@@ -235,7 +336,7 @@ export default function BanditRules({
         id: "checks",
         accessorFn: (row) => (row.checks || []).join(", "),
         header: "检查节点",
-        meta: { label: "检查节点", minWidth: 220 },
+        meta: { label: "检查节点", minWidth: 120 },
         cell: ({ row }) => (
           <span className="text-sm text-muted-foreground">
             {(row.original.checks || []).join(", ") || "-"}
@@ -277,46 +378,6 @@ export default function BanditRules({
           >
             {row.original.is_active ? "已启用" : "已禁用"}
           </Badge>
-        ),
-      },
-      {
-        id: "deletedStatus",
-        accessorFn: (row) => String(row.is_deleted),
-        header: "删除状态",
-        meta: {
-          label: "删除状态",
-          width: 136,
-          filterVariant: "select",
-          filterOptions: [
-            { label: "未删除", value: "false" },
-            { label: "已删除", value: "true" },
-          ],
-        },
-        filterFn: (row, _columnId, filterValue) => {
-          if (!filterValue) return true;
-          return String(row.original.is_deleted) === String(filterValue);
-        },
-        cell: ({ row }) => (
-          <Badge
-            className={
-              row.original.is_deleted
-                ? "cyber-badge cyber-badge-warning"
-                : "cyber-badge cyber-badge-info"
-            }
-          >
-            {row.original.is_deleted ? "已删除" : "未删除"}
-          </Badge>
-        ),
-      },
-      {
-        id: "updatedAt",
-        accessorFn: (row) => row.updated_at || "",
-        header: "更新时间",
-        meta: { label: "更新时间", width: 180 },
-        cell: ({ row }) => (
-          <span className="text-xs text-muted-foreground">
-            {formatDate(row.original.updated_at)}
-          </span>
         ),
       },
       {
@@ -369,111 +430,8 @@ export default function BanditRules({
         ),
       },
     ],
-    );
-
-  const handleStartEditRule = (rule: BanditRule) => {
-    setEditRuleForm({
-      name: rule.name || "",
-      description_summary: rule.description_summary || "",
-      description: rule.description || "",
-      checks_text: (rule.checks || []).join(", "),
-    });
-    setIsEditingRule(true);
-  };
-
-  const handleViewRuleDetail = async (rule: BanditRule, mode: "view" | "edit" = "view") => {
-    setSelectedRule(rule);
-    setShowRuleDetail(true);
-    setIsEditingRule(mode === "edit");
-    setLoadingDetail(true);
-    try {
-      const detail = await getBanditRule(rule.test_id);
-      setSelectedRule(detail);
-      if (mode === "edit") {
-        handleStartEditRule(detail);
-      }
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || "加载规则详情失败");
-    } finally {
-      setLoadingDetail(false);
-    }
-  };
-
-  const handleCancelEditRule = () => {
-    setIsEditingRule(false);
-    setSavingRule(false);
-  };
-
-  const handleSaveRule = async () => {
-    if (!selectedRule) return;
-    const normalizedChecks = editRuleForm.checks_text
-      .split(/[\n,]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (!editRuleForm.name.trim()) {
-      toast.error("规则名称不能为空");
-      return;
-    }
-
-    try {
-      setSavingRule(true);
-      const result = await updateBanditRule({
-        ruleId: selectedRule.test_id,
-        name: editRuleForm.name.trim(),
-        description_summary: editRuleForm.description_summary.trim(),
-        description: editRuleForm.description.trim(),
-        checks: normalizedChecks,
-      });
-      const updatedRule = result.rule;
-      setSelectedRule(updatedRule);
-      setRules((prev) =>
-        prev.map((item) => (item.id === updatedRule.id ? { ...item, ...updatedRule } : item)),
-      );
-      setIsEditingRule(false);
-      toast.success(result.message || "规则更新成功");
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || "更新规则失败");
-    } finally {
-      setSavingRule(false);
-    }
-  };
-
-  const handleDeleteRule = async (rule: BanditRule) => {
-    try {
-      await deleteBanditRule(rule.test_id);
-      toast.success(`规则「${rule.test_id}」已删除`);
-      await loadRules();
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || "删除规则失败");
-    }
-  };
-
-  const handleRestoreRule = async (rule: BanditRule) => {
-    try {
-      await restoreBanditRule(rule.test_id);
-      toast.success(`规则「${rule.test_id}」已恢复`);
-      await loadRules();
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || "恢复规则失败");
-    }
-  };
-
-  const handleToggleRule = async (rule: BanditRule) => {
-    if (rule.is_deleted) {
-      toast.error("已删除规则请先恢复后再启用/禁用");
-      return;
-    }
-    try {
-      await updateBanditRuleEnabled({
-        ruleId: rule.test_id,
-        is_active: !rule.is_active,
-      });
-      await loadRules();
-      toast.success(`规则已${rule.is_active ? "禁用" : "启用"}`);
-    } catch (error: any) {
-      toast.error(error?.response?.data?.detail || "更新规则失败");
-    }
-  };
+    [handleDeleteRule, handleRestoreRule, handleToggleRule, handleViewRuleDetail],
+  );
 
   const handleBatchToggleEnabled = async (selectedRows: BanditRule[], isActive: boolean) => {
     try {
@@ -644,6 +602,10 @@ export default function BanditRules({
           toolbar={{
             searchPlaceholder: "搜索名称/ID/描述...",
             leadingActions: engineSelector,
+            showGlobalSearch: false,
+            showColumnVisibility: false,
+						showDensityToggle: false,
+						showReset: false,
           }}
           selection={
             loading

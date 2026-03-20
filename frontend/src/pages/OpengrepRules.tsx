@@ -40,7 +40,6 @@ import {
 	PencilLine,
 	Save,
 	Code,
-	AlertCircle,
 	AlertTriangle,
 	ArrowLeft,
 	Database,
@@ -550,15 +549,15 @@ export default function OpengrepRules({
 			const nextRules = rules.map((ruleItem) =>
 				ruleItem.id === updatedRule.id
 					? {
-							...ruleItem,
-							name: updatedRule.name,
-							language: updatedRule.language,
-							severity: updatedRule.severity,
-							source: updatedRule.source,
-							correct: updatedRule.correct,
-							is_active: updatedRule.is_active,
-							created_at: updatedRule.created_at,
-						}
+						...ruleItem,
+						name: updatedRule.name,
+						language: updatedRule.language,
+						severity: updatedRule.severity,
+						source: updatedRule.source,
+						correct: updatedRule.correct,
+						is_active: updatedRule.is_active,
+						created_at: updatedRule.created_at,
+					}
 					: ruleItem,
 			);
 			setRules(nextRules);
@@ -1151,7 +1150,7 @@ export default function OpengrepRules({
 				meta: { label: "序号", align: "center", width: 72 },
 				cell: ({ row, table }) =>
 					table.getState().pagination.pageIndex *
-						table.getState().pagination.pageSize +
+					table.getState().pagination.pageSize +
 					row.index +
 					1,
 			},
@@ -1159,7 +1158,7 @@ export default function OpengrepRules({
 				id: "ruleName",
 				accessorFn: (row) => [row.name, row.id].filter(Boolean).join(" "),
 				header: "规则名称",
-				meta: { label: "规则名称", minWidth: 280, filterVariant: "text" },
+				meta: { label: "规则名称", minWidth: 240, filterVariant: "text" },
 				cell: ({ row }) => (
 					<div
 						className={
@@ -1171,18 +1170,20 @@ export default function OpengrepRules({
 						<div className="font-semibold text-foreground break-all">
 							{row.original.name}
 						</div>
-						<div className="font-mono text-xs text-muted-foreground break-all">
+						{/* <div className="font-mono text-xs text-muted-foreground break-all">
 							{row.original.id}
-						</div>
+						</div> */}
 					</div>
 				),
 			},
 			{
 				id: "language",
 				accessorFn: (row) => row.language || "",
-				header: "编程语言",
+				header: "语言",
+				enableSorting: false,
+				enableHiding: false,
 				meta: {
-					label: "编程语言",
+					label: "语言",
 					width: 120,
 					filterVariant: "select",
 					filterOptions: languageOptions,
@@ -1197,6 +1198,8 @@ export default function OpengrepRules({
 				id: "source",
 				accessorFn: (row) => row.source || "",
 				header: "规则来源",
+				enableSorting: false,
+				enableHiding: false,
 				meta: {
 					label: "规则来源",
 					width: 120,
@@ -1205,11 +1208,10 @@ export default function OpengrepRules({
 				},
 				cell: ({ row }) => (
 					<Badge
-						className={`cyber-badge ${
-							row.original.source === "patch"
+						className={`cyber-badge ${row.original.source === "patch"
 								? "cyber-badge-warning"
 								: "cyber-badge-info"
-						}`}
+							}`}
 					>
 						{getSourceBadge(row.original.source)}
 					</Badge>
@@ -1219,6 +1221,8 @@ export default function OpengrepRules({
 				id: "confidence",
 				accessorFn: (row) => normalizeConfidence(row.confidence),
 				header: "置信度",
+				enableSorting: false,
+				enableHiding: false,
 				meta: {
 					label: "置信度",
 					width: 120,
@@ -1240,6 +1244,8 @@ export default function OpengrepRules({
 				id: "status",
 				accessorFn: (row) => String(row.is_active),
 				header: "启用状态",
+				enableSorting: false,
+				enableHiding: false,
 				meta: {
 					label: "启用状态",
 					width: 136,
@@ -1260,34 +1266,34 @@ export default function OpengrepRules({
 					</Badge>
 				),
 			},
-			{
-				id: "correct",
-				accessorFn: (row) => (row.correct ? "correct" : "uncertain"),
-				header: "验证状态",
-				meta: { label: "验证状态", width: 120 },
-				cell: ({ row }) => (
-					<span
-						className={
-							row.original.correct
-								? "text-sm text-emerald-400"
-								: "text-sm text-amber-400"
-						}
-					>
-						{row.original.correct ? "✓ 正确" : "⚠ 未验证"}
-					</span>
-				),
-			},
-			{
-				id: "createdAt",
-				accessorFn: (row) => row.created_at || "",
-				header: "创建时间",
-				meta: { label: "创建时间", width: 150 },
-				cell: ({ row }) => (
-					<span className="text-sm text-muted-foreground">
-						{new Date(row.original.created_at).toLocaleDateString("zh-CN")}
-					</span>
-				),
-			},
+			// {
+			// 	id: "correct",
+			// 	accessorFn: (row) => (row.correct ? "correct" : "uncertain"),
+			// 	header: "验证状态",
+			// 	meta: { label: "验证状态", width: 120 },
+			// 	cell: ({ row }) => (
+			// 		<span
+			// 			className={
+			// 				row.original.correct
+			// 					? "text-sm text-emerald-400"
+			// 					: "text-sm text-amber-400"
+			// 			}
+			// 		>
+			// 			{row.original.correct ? "✓ 正确" : "⚠ 未验证"}
+			// 		</span>
+			// 	),
+			// },
+			// {
+			// 	id: "createdAt",
+			// 	accessorFn: (row) => row.created_at || "",
+			// 	header: "创建时间",
+			// 	meta: { label: "创建时间", width: 150 },
+			// 	cell: ({ row }) => (
+			// 		<span className="text-sm text-muted-foreground">
+			// 			{new Date(row.original.created_at).toLocaleDateString("zh-CN")}
+			// 		</span>
+			// 	),
+			// },
 			{
 				id: "actions",
 				header: "操作",
@@ -1508,10 +1514,10 @@ export default function OpengrepRules({
 								title: "未找到规则",
 								description:
 									tableState.globalFilter ||
-									languageFilter ||
-									sourceFilter ||
-									confidenceFilter ||
-									activeFilter
+										languageFilter ||
+										sourceFilter ||
+										confidenceFilter ||
+										activeFilter
 										? "调整筛选条件尝试"
 										: "暂无规则数据",
 							}}
@@ -1536,7 +1542,7 @@ export default function OpengrepRules({
 												}
 											}}
 										>
-											<SelectTrigger className="cyber-input h-9 min-w-[150px]">
+											<SelectTrigger className="cyber-input h-10 min-w-[150px]">
 												<SelectValue placeholder="选择引擎" />
 											</SelectTrigger>
 											<SelectContent className="cyber-dialog border-border">
@@ -1551,7 +1557,7 @@ export default function OpengrepRules({
 								) : undefined,
 								trailingActions: (
 									<>
-										{generatingRules.size > 0 ? (
+										{/* {generatingRules.size > 0 ? (
 											<Button
 												onClick={() => setShowGeneratingQueue(!showGeneratingQueue)}
 												className="cyber-btn-primary h-9 bg-cyan-950 border-cyan-500 hover:bg-cyan-900"
@@ -1561,63 +1567,68 @@ export default function OpengrepRules({
 												</div>
 												生成队列 ({generatingRules.size})
 											</Button>
-										) : null}
-										<Button
-											onClick={() => {
-												if (isGitleaksEngine) {
-													showGitleaksNotReady();
-													return;
-												}
-												setShowRuleTypeDialog(true);
-											}}
-											className="cyber-btn-primary h-9"
-										>
-											新建规则
-										</Button>
+										) : null} */}
+										
 									</>
 								),
+								showGlobalSearch: false,
+								showColumnVisibility: false,
+								showDensityToggle: false,
+								showReset: false,
 							}}
 							selection={
 								!loading && rules.length > 0
 									? {
-											enableRowSelection: true,
-											summary: buildSelectionSummary,
-											actions: ({ selectedRows, table }) => {
-												const filteredRows = table
-													.getFilteredRowModel()
-													.rows.map((row) => row.original);
-												return (
-													<>
-														<Button
-															onClick={() =>
-																void handleBatchUpdateRules(
-																	selectedRows,
-																	filteredRows,
-																	true,
-																)
+										enableRowSelection: true,
+										summary: buildSelectionSummary,
+										actions: ({ selectedRows, table }) => {
+											const filteredRows = table
+												.getFilteredRowModel()
+												.rows.map((row) => row.original);
+											return (
+												<>
+													<Button
+														onClick={() =>
+															void handleBatchUpdateRules(
+																selectedRows,
+																filteredRows,
+																true,
+															)
+														}
+														disabled={batchOperating}
+														className="cyber-btn-primary h-8 text-sm"
+													>
+														{batchOperating ? "处理中..." : "批量启用"}
+													</Button>
+													<Button
+														onClick={() =>
+															void handleBatchUpdateRules(
+																selectedRows,
+																filteredRows,
+																false,
+															)
+														}
+														disabled={batchOperating}
+														className="cyber-btn-outline h-8 text-sm"
+													>
+														{batchOperating ? "处理中..." : "批量禁用"}
+													</Button>
+													<Button
+														onClick={() => {
+															if (isGitleaksEngine) {
+																showGitleaksNotReady();
+																return;
 															}
-															disabled={batchOperating}
-															className="cyber-btn-primary h-8 text-sm"
-														>
-															{batchOperating ? "处理中..." : "批量启用"}
-														</Button>
-														<Button
-															onClick={() =>
-																void handleBatchUpdateRules(
-																	selectedRows,
-																	filteredRows,
-																	false,
-																)
-															}
-															disabled={batchOperating}
-															className="cyber-btn-outline h-8 text-sm"
-														>
-															{batchOperating ? "处理中..." : "批量禁用"}
-														</Button>
-													</>
-												);
-											},
-										}
+															setShowRuleTypeDialog(true);
+														}}
+														className="cyber-btn-primary h-9"
+													>
+														新建规则
+													</Button>
+												</>
+											);
+										},
+									}
 									: undefined
 							}
 							pagination={{ enabled: true, pageSizeOptions: [10, 20, 50, 100] }}
@@ -1698,12 +1709,12 @@ export default function OpengrepRules({
 													) : (
 														<p className="text-foreground font-bold mt-1">
 															{selectedRule.language}
-															</p>
-														)}
-													</div>
-													<div>
-														<p className="text-muted-foreground">规则来源</p>
-														<Badge
+														</p>
+													)}
+												</div>
+												<div>
+													<p className="text-muted-foreground">规则来源</p>
+													<Badge
 														className={`cyber-badge mt-1 ${selectedRule.source === "patch" ? "cyber-badge-warning" : "cyber-badge-info"}`}
 													>
 														{getSourceBadge(selectedRule.source)}
@@ -1715,11 +1726,10 @@ export default function OpengrepRules({
 													</p>
 													<div className="mt-2 flex flex-wrap gap-2">
 														<Badge
-															className={`cyber-badge ${
-																selectedRule.correct
+															className={`cyber-badge ${selectedRule.correct
 																	? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
 																	: "bg-amber-500/20 text-amber-300 border-amber-500/30"
-															}`}
+																}`}
 														>
 															{selectedRule.correct ? "✓ 正确" : "⚠ 未验证"}
 														</Badge>
@@ -1998,31 +2008,28 @@ export default function OpengrepRules({
 							<div className="flex-shrink-0 px-6 flex gap-2 border-b border-border">
 								<button
 									onClick={() => setGenericRuleUploadTab("manual")}
-									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-										genericRuleUploadTab === "manual"
+									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${genericRuleUploadTab === "manual"
 											? "border-primary text-primary"
 											: "border-transparent text-muted-foreground hover:text-foreground"
-									}`}
+										}`}
 								>
 									手动上传
 								</button>
 								<button
 									onClick={() => setGenericRuleUploadTab("compressed")}
-									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-										genericRuleUploadTab === "compressed"
+									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${genericRuleUploadTab === "compressed"
 											? "border-primary text-primary"
 											: "border-transparent text-muted-foreground hover:text-foreground"
-									}`}
+										}`}
 								>
 									压缩包上传
 								</button>
 								<button
 									onClick={() => setGenericRuleUploadTab("directory")}
-									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-										genericRuleUploadTab === "directory"
+									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${genericRuleUploadTab === "directory"
 											? "border-primary text-primary"
 											: "border-transparent text-muted-foreground hover:text-foreground"
-									}`}
+										}`}
 								>
 									目录上传
 								</button>
@@ -2088,11 +2095,11 @@ export default function OpengrepRules({
 													}
 													placeholder="例如: python, javascript, java"
 													className="cyber-input mt-1.5 font-mono text-xs"
-													/>
-												</div>
+												/>
+											</div>
 
-												{/* Confidence (Optional) */}
-												<div>
+											{/* Confidence (Optional) */}
+											<div>
 												<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
 													置信度{" "}
 													<span className="text-muted-foreground/60">
@@ -2433,10 +2440,9 @@ export default function OpengrepRules({
 												上传中...
 											</>
 										) : (
-											`${
-												genericRuleUploadTab === "manual"
-													? "生成规则"
-													: "上传规则"
+											`${genericRuleUploadTab === "manual"
+												? "生成规则"
+												: "上传规则"
 											}`
 										)}
 									</Button>
@@ -2465,31 +2471,28 @@ export default function OpengrepRules({
 							<div className="flex-shrink-0 px-6 flex gap-2 border-b border-border">
 								<button
 									onClick={() => setEventRuleUploadTab("manual")}
-									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-										eventRuleUploadTab === "manual"
+									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${eventRuleUploadTab === "manual"
 											? "border-primary text-primary"
 											: "border-transparent text-muted-foreground hover:text-foreground"
-									}`}
+										}`}
 								>
 									手动输入
 								</button>
 								<button
 									onClick={() => setEventRuleUploadTab("archive")}
-									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-										eventRuleUploadTab === "archive"
+									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${eventRuleUploadTab === "archive"
 											? "border-primary text-primary"
 											: "border-transparent text-muted-foreground hover:text-foreground"
-									}`}
+										}`}
 								>
 									压缩包上传
 								</button>
 								<button
 									onClick={() => setEventRuleUploadTab("directory")}
-									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${
-										eventRuleUploadTab === "directory"
+									className={`px-4 py-2 font-mono text-xs font-bold uppercase border-b-2 transition-colors ${eventRuleUploadTab === "directory"
 											? "border-primary text-primary"
 											: "border-transparent text-muted-foreground hover:text-foreground"
-									}`}
+										}`}
 								>
 									目录上传
 								</button>
