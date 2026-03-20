@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-// import { ThemeProvider } from "next-themes";
+import { ThemeProvider } from "next-themes";
 import "@/assets/styles/globals.css";
 import App from "./App.tsx";
 import { AppWrapper } from "@/components/layout/PageMeta";
@@ -12,7 +12,7 @@ createRoot(document.getElementById("root")!).render(
     <StrictMode>
         <LanguageProvider>
             <ErrorBoundary>
-                {/*<ThemeProvider
+                <ThemeProvider
                     attribute="class"
                     defaultTheme="dark"
                     enableSystem
@@ -21,10 +21,7 @@ createRoot(document.getElementById("root")!).render(
                     <AppWrapper>
                         <App />
                     </AppWrapper>
-                </ThemeProvider>*/}
-                <AppWrapper>
-                    <App />
-                </AppWrapper>
+                </ThemeProvider>
             </ErrorBoundary>
         </LanguageProvider>
     </StrictMode>,

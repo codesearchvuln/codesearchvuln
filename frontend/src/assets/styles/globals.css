@@ -49,50 +49,55 @@
 @layer base {
 	/* ====== Light Mode ====== */
 	:root {
-		--background: 0 0% 0%;
-		--foreground: 0 0% 98%;
-		--card: 220 30% 6%;
-		--card-foreground: 0 0% 98%;
-		--popover: 220 30% 4%;
-		--popover-foreground: 0 0% 98%;
-		--primary: 205 100% 40%;
+		--background: 0 0% 100%;
+		--foreground: 0 0% 5%;
+		--card: 210 40% 98%;
+		--card-foreground: 0 0% 5%;
+		--popover: 0 0% 100%;
+		--popover-foreground: 0 0% 5%;
+
+		--primary: 199 89% 48%;
 		--primary-foreground: 0 0% 100%;
-		--secondary: 205 85% 36%;
+
+		--secondary: 199 89% 48%;
 		--secondary-foreground: 0 0% 100%;
-		--success: 142 60% 40%;
+		--success: 142 71% 45%;
 		--success-foreground: 0 0% 100%;
-		--muted: 220 20% 14%;
-		--muted-foreground: 210 20% 80%;
-		--accent: 205 90% 45%;
+		--muted: 210 40% 96%;
+		--muted-foreground: 215 35% 18%;
+		--accent: 262 83% 58%;
 		--accent-foreground: 0 0% 100%;
-		--destructive: 0 80% 55%;
+		--destructive: 0 72% 51%;
 		--destructive-foreground: 0 0% 100%;
-		--warning: 38 85% 52%;
-		--warning-foreground: 0 0% 10%;
-		--border: 210 35% 24%;
-		--input: 210 30% 20%;
-		--ring: 205 100% 40%;
+		--warning: 32 95% 44%;
+		--warning-foreground: 0 0% 100%;
+		--border: 214 32% 70%;
+		--input: 214 32% 88%;
+
+		--ring: 199 89% 48%;
 		--radius: 4px;
 
 		/* Light mode specific */
 		--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
 		--shadow-md: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
 		--shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
-		--shadow-focus: 0 0 0 3px rgba(59, 130, 246, 0.35);
-		--glow-primary: 0 2px 8px rgba(59, 130, 246, 0.2);
+
+		--shadow-focus: 0 0 0 3px rgba(14, 165, 233, 0.25);
+		--glow-primary: 0 2px 8px rgba(14, 165, 233, 0.15);
+
 		--glow-success: 0 2px 8px rgba(22, 163, 74, 0.15);
-		--glow-accent: 0 2px 8px rgba(59, 130, 246, 0.2);
-		--glow-cyan: 0 2px 8px rgba(14, 165, 233, 0.2);
+		--glow-accent: 0 2px 8px rgba(124, 58, 237, 0.15);
+		--glow-cyan: 0 2px 8px rgba(2, 132, 199, 0.15);
 		--glow-red: 0 2px 8px rgba(220, 38, 38, 0.15);
 
 		/* Theme-specific colors for utilities - 高对比度深色字体 */
-		--cyber-bg: #000000;
-		--cyber-bg-elevated: #0b0f1a;
-		--cyber-border: #1f2a44;
-		--cyber-border-accent: rgba(59, 130, 246, 0.6);
-		--cyber-text: #ffffff;
-		--cyber-text-muted: #cbd5f5;
-		--cyber-hover-bg: #0f172a;
+		--cyber-bg: #ffffff;
+		--cyber-bg-elevated: #f8fafc;
+		--cyber-border: #94a3b8;
+		--cyber-border-accent: rgba(14, 165, 233, 0.4);
+		--cyber-text: #0a0a0a;
+		--cyber-text-muted: #334155;
+		--cyber-hover-bg: #f1f5f9;
 	}
 
 	/* ====== Dark Mode ====== */
