@@ -471,6 +471,11 @@ class BaseAgent(ABC):
         self._trace_log_path: Optional[str] = None
         self.configure_trace_logger(identity=self.name, task_id=None)
         self._trace("agent_initialized", agent_type=self.config.agent_type.value)
+
+        self._trace_logger: Optional[logging.Logger] = None
+        self._trace_log_path: Optional[str] = None
+        self.configure_trace_logger(identity=self.name, task_id=None)
+        self._trace("agent_initialized", agent_type=self.config.agent_type.value)
         
         # 🔥 加载知识模块到系统提示词
         if self.knowledge_modules:
@@ -5571,12 +5576,19 @@ user: Observation: 数据库连接失败
                             "title": finding.get("title"),
                             "vulnerability_type": finding.get("vulnerability_type"),
                             "severity": finding.get("severity"),
+                            "description": finding.get("description"),
+                            "source": finding.get("source"),
+                            "sink": finding.get("sink"),
+                            "dataflow_path": finding.get("dataflow_path"),
+                            "is_verified": finding.get("is_verified"),
+                            "poc_code": finding.get("poc_code"),
+                            "cvss_score": finding.get("cvss_score"),
+                            "cvss_vector": finding.get("cvss_vector"),
                             "verdict": vr.get("verdict") or finding.get("verdict"),
                             "confidence": vr.get("confidence") or finding.get("confidence"),
                             "reachability": vr.get("reachability") or finding.get("reachability"),
                             "verification_evidence": vr.get("verification_evidence") or finding.get("verification_evidence"),
                             "cwe_id": finding.get("cwe_id"),
-                            "description": finding.get("description"),
                             "suggestion": finding.get("suggestion"),
                         }
                         result = await self.execute_tool("save_verification_result", params)

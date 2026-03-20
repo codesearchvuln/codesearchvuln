@@ -116,6 +116,7 @@ class AgentTask(Base):
     
     # 审计计划
     audit_plan = Column(JSON, nullable=True)  # Agent 生成的审计计划
+    report = Column(Text, nullable=True)  # ReportAgent 生成的项目级风险评估报告（Markdown）
     
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())

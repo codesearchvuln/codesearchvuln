@@ -173,6 +173,7 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
                 data={
                     "findings": self._all_findings,
                     "workflow_state": workflow_state.to_summary(),
+                    "project_risk_report": workflow_state.project_risk_report,
                 },
                 iterations=self._iteration,
                 tool_calls=self._tool_calls,
@@ -190,6 +191,7 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
                 data={
                     "findings": self._all_findings,
                     "workflow_state": workflow_state.to_summary(),
+                    "project_risk_report": workflow_state.project_risk_report,
                 },
                 iterations=self._iteration,
                 tool_calls=self._tool_calls,
@@ -244,6 +246,7 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
                 "summary": self._generate_default_summary(),
                 "workflow_state": workflow_state.to_summary(),
                 "steps": [r.to_dict() for r in workflow_state.step_records],
+                "project_risk_report": workflow_state.project_risk_report,
             },
             iterations=self._iteration,
             tool_calls=self._tool_calls,

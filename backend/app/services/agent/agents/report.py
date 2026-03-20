@@ -164,6 +164,25 @@ Final Answer:
 """
 
 
+PROJECT_REPORT_SYSTEM_PROMPT = """你是 VulHunter 的项目风险评估智能体。你的输入是已经验证过的漏洞列表（可包含 confirmed / likely / uncertain / false_positive）。
+
+你的任务是生成一份**项目总体风险评估报告**（Markdown），用于管理层和研发团队决策。请严格遵守：
+
+1. 基于输入数据进行归纳，禁止虚构不存在的漏洞或组件
+2. 报告必须包含：总体风险等级、漏洞分布、主要攻击面、关键证据摘要、优先修复路线
+3. 若输入为空或仅有误报，明确说明“当前未发现可确认风险”
+4. 输出必须是完整 Markdown，禁止 JSON
+
+建议结构：
+- 项目概览
+- 风险总览（总数、confirmed/likely/uncertain 分布、严重程度分布）
+- Top 风险条目（含文件和行号）
+- 业务影响评估
+- 优先级修复计划（P0/P1/P2）
+- 后续治理建议（测试、监控、流程）
+"""
+
+
 @dataclass
 class ReportStep:
     """ReportAgent 的单步 ReAct 执行记录"""
@@ -208,6 +227,8 @@ class ReportAgent(BaseAgent):
         self._conversation_history: List[Dict[str, str]] = []
         self._steps: List[ReportStep] = []
         self._latest_updated_finding: Optional[Dict[str, Any]] = None
+        # WorkflowEngine 会据此决定是否调用项目级报告模式。
+        self.supports_project_risk_report: bool = True
 
     # ------------------------------------------------------------------
     # ReAct 解析
@@ -259,9 +280,22 @@ class ReportAgent(BaseAgent):
         self._steps = []
         self._latest_updated_finding = None
 
-        finding: Dict[str, Any] = input_data.get("finding") or {}
         project_info: Dict[str, Any] = input_data.get("project_info") or {}
         config: Dict[str, Any] = input_data.get("config") or {}
+        report_mode = str(input_data.get("report_mode") or "").strip().lower()
+        findings_payload = input_data.get("findings")
+        finding: Dict[str, Any] = input_data.get("finding") or {}
+
+        project_mode = report_mode == "project" or (
+            isinstance(findings_payload, list) and not finding
+        )
+        if project_mode:
+            return await self._run_project_report_mode(
+                findings=findings_payload if isinstance(findings_payload, list) else [],
+                project_info=project_info,
+                config=config,
+                start_ts=start_ts,
+            )
 
         if not finding:
             return AgentResult(
@@ -408,6 +442,129 @@ class ReportAgent(BaseAgent):
     # 内部辅助
     # ------------------------------------------------------------------
 
+    async def _run_project_report_mode(
+        self,
+        findings: List[Dict[str, Any]],
+        project_info: Dict[str, Any],
+        config: Dict[str, Any],
+        start_ts: float,
+    ) -> AgentResult:
+        """项目级风险评估报告模式：一次性汇总所有 findings。"""
+        safe_findings = [item for item in findings if isinstance(item, dict)]
+        project_name = (
+            project_info.get("name")
+            or project_info.get("project_name")
+            or config.get("project_name")
+            or "unknown"
+        )
+        root_path = project_info.get("root") or config.get("project_root") or ""
+
+        severity_stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        verdict_stats = {"confirmed": 0, "likely": 0, "uncertain": 0, "false_positive": 0}
+        vuln_type_stats: Dict[str, int] = {}
+        for item in safe_findings:
+            severity = str(item.get("severity") or "").strip().lower()
+            if severity in severity_stats:
+                severity_stats[severity] += 1
+            verdict = str(
+                item.get("verdict")
+                or ((item.get("verification_result") or {}).get("verdict") if isinstance(item.get("verification_result"), dict) else "")
+                or ""
+            ).strip().lower()
+            if verdict in verdict_stats:
+                verdict_stats[verdict] += 1
+            vuln_type = str(item.get("vulnerability_type") or "unknown").strip().lower()
+            vuln_type_stats[vuln_type] = vuln_type_stats.get(vuln_type, 0) + 1
+
+        condensed_findings = []
+        for idx, item in enumerate(safe_findings[:50], start=1):
+            condensed_findings.append(
+                {
+                    "rank": idx,
+                    "title": item.get("title"),
+                    "vulnerability_type": item.get("vulnerability_type"),
+                    "severity": item.get("severity"),
+                    "verdict": item.get("verdict")
+                    or (
+                        (item.get("verification_result") or {}).get("verdict")
+                        if isinstance(item.get("verification_result"), dict)
+                        else None
+                    ),
+                    "confidence": item.get("confidence")
+                    or (
+                        (item.get("verification_result") or {}).get("confidence")
+                        if isinstance(item.get("verification_result"), dict)
+                        else None
+                    ),
+                    "file_path": item.get("file_path"),
+                    "line_start": item.get("line_start"),
+                    "line_end": item.get("line_end"),
+                    "source": item.get("source"),
+                    "sink": item.get("sink"),
+                }
+            )
+
+        user_payload = {
+            "project": {"name": project_name, "root": root_path},
+            "stats": {
+                "total_findings": len(safe_findings),
+                "severity_distribution": severity_stats,
+                "verdict_distribution": verdict_stats,
+                "vulnerability_type_distribution": vuln_type_stats,
+            },
+            "findings": condensed_findings,
+        }
+
+        prompt = (
+            "请基于以下输入生成项目总体风险评估报告。"
+            "输出必须是 Markdown，且包含风险等级、重点漏洞、业务影响与修复优先级。\n\n"
+            f"```json\n{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n```"
+        )
+        messages = [
+            {"role": "system", "content": PROJECT_REPORT_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+
+        tokens_used = 0
+        report_text = ""
+        error_text: Optional[str] = None
+        try:
+            report_text, usage = await self._call_llm(messages)
+            if isinstance(usage, dict):
+                tokens_used = int(usage.get("total_tokens") or 0)
+        except Exception as exc:
+            error_text = str(exc)
+            logger.warning("[ReportAgent] Project report LLM call failed: %s", exc)
+
+        if not report_text or not str(report_text).strip():
+            report_text = self._build_project_report_fallback(
+                project_name=project_name,
+                findings=safe_findings,
+                severity_stats=severity_stats,
+                verdict_stats=verdict_stats,
+                vuln_type_stats=vuln_type_stats,
+            )
+            if not error_text:
+                error_text = "ReportAgent: 项目级报告使用兜底模板生成"
+
+        duration_ms = int((time.time() - start_ts) * 1000)
+        return AgentResult(
+            success=bool(report_text),
+            error=None if report_text else (error_text or "ReportAgent: 项目级报告生成失败"),
+            data={
+                "project_risk_report": report_text,
+                "project_name": project_name,
+                "total_findings": len(safe_findings),
+                "severity_distribution": severity_stats,
+                "verdict_distribution": verdict_stats,
+                "vulnerability_type_distribution": vuln_type_stats,
+            },
+            iterations=1,
+            tool_calls=0,
+            tokens_used=tokens_used,
+            duration_ms=duration_ms,
+        )
+
     async def _call_llm(self, messages: List[Dict[str, str]]):
         """调用 LLM 服务，返回 (response_text, usage_dict)。"""
         result = await self.llm_service.complete(
@@ -417,6 +574,86 @@ class ReportAgent(BaseAgent):
         if isinstance(result, dict):
             return result.get("content", ""), result.get("usage", {})
         return str(result), {}
+
+    def _build_project_report_fallback(
+        self,
+        *,
+        project_name: str,
+        findings: List[Dict[str, Any]],
+        severity_stats: Dict[str, int],
+        verdict_stats: Dict[str, int],
+        vuln_type_stats: Dict[str, int],
+    ) -> str:
+        """LLM 失败时的项目级风险报告兜底模板。"""
+        total = len(findings)
+        top_findings = sorted(
+            [item for item in findings if isinstance(item, dict)],
+            key=lambda item: (
+                {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
+                    str(item.get("severity") or "").strip().lower(),
+                    9,
+                ),
+                -(float(item.get("confidence") or 0) if str(item.get("confidence") or "").strip() else 0),
+            ),
+        )[:10]
+
+        lines = [
+            f"# 项目风险评估报告：{project_name}",
+            "",
+            "## 项目概览",
+            "",
+            f"- 漏洞总数：{total}",
+            f"- confirmed：{verdict_stats.get('confirmed', 0)}",
+            f"- likely：{verdict_stats.get('likely', 0)}",
+            f"- uncertain：{verdict_stats.get('uncertain', 0)}",
+            f"- false_positive：{verdict_stats.get('false_positive', 0)}",
+            "",
+            "## 风险总览",
+            "",
+            f"- 严重程度分布：critical={severity_stats.get('critical', 0)}, high={severity_stats.get('high', 0)}, medium={severity_stats.get('medium', 0)}, low={severity_stats.get('low', 0)}, info={severity_stats.get('info', 0)}",
+            f"- 漏洞类型分布：{json.dumps(vuln_type_stats, ensure_ascii=False)}",
+            "",
+            "## Top 风险条目",
+            "",
+        ]
+
+        if not top_findings:
+            lines.extend(
+                [
+                    "- 当前未发现可确认风险，建议继续保持基线安全扫描与代码审查。",
+                    "",
+                ]
+            )
+        else:
+            for idx, item in enumerate(top_findings, start=1):
+                lines.append(
+                    f"{idx}. {item.get('title') or '未命名漏洞'} | "
+                    f"{item.get('severity') or 'unknown'} | "
+                    f"{item.get('file_path') or '-'}:{item.get('line_start') or '-'}"
+                )
+            lines.append("")
+
+        lines.extend(
+            [
+                "## 业务影响评估",
+                "",
+                "- 高危漏洞可能导致核心数据泄露、权限绕过或远程代码执行，建议优先治理 confirmed/high-risk 项。",
+                "- uncertain 项建议安排人工复核，避免遗漏真实风险。",
+                "",
+                "## 优先级修复计划",
+                "",
+                "- P0：confirmed 且严重程度为 critical/high 的漏洞，立即修复并回归验证。",
+                "- P1：likely 或 medium 风险漏洞，纳入最近迭代修复计划。",
+                "- P2：uncertain/low 风险项，结合业务暴露面做人工复审与监控。",
+                "",
+                "## 后续治理建议",
+                "",
+                "- 将漏洞类型热点沉淀为编码规范与静态规则。",
+                "- 对关键入口补充单元/集成安全测试和运行时告警。",
+                "- 在发布前执行最小化回归与复测，确保修复不引入新缺陷。",
+            ]
+        )
+        return "\n".join(lines)
 
     async def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> str:
         """执行单个工具，返回 observation 字符串。"""

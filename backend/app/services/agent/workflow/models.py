@@ -127,6 +127,8 @@ class WorkflowState:
     # Report 阶段统计
     report_findings_total: int = 0
     report_findings_processed: int = 0
+    project_report_generated: bool = False
+    project_risk_report: Optional[str] = None
 
     # 每步调度记录
     step_records: List[WorkflowStepRecord] = field(default_factory=list)
@@ -160,6 +162,8 @@ class WorkflowState:
             "all_findings_count": len(self.all_findings),
             "report_findings_total": self.report_findings_total,
             "report_findings_processed": self.report_findings_processed,
+            "project_report_generated": self.project_report_generated,
+            "project_report_length": len(self.project_risk_report or ""),
             "step_records": [r.to_dict() for r in self.step_records],
             "error": self.error,
             "total_iterations": self.total_iterations,

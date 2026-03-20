@@ -207,7 +207,8 @@ class AgentTaskResponse(BaseModel):
     
     # 错误信息
     error_message: Optional[str] = None
-    
+    report: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -3951,6 +3952,32 @@ async def _execute_agent_task(task_id: str):
                         audit_plan_metadata.get("vuln_queue_findings_processed"),
                         audit_plan_metadata.get("vuln_queue_findings_total"),
                     )
+
+                project_risk_report = None
+                if isinstance(result.data, dict):
+                    project_risk_report = _normalize_optional_text(
+                        result.data.get("project_risk_report")
+                    )
+                if not project_risk_report and isinstance(workflow_state_summary, dict):
+                    project_risk_report = _normalize_optional_text(
+                        workflow_state_summary.get("project_risk_report")
+                    )
+                if (
+                    not project_risk_report
+                    and orchestrator
+                    and isinstance(getattr(orchestrator, "_agent_results", None), dict)
+                ):
+                    report_payload = getattr(orchestrator, "_agent_results", {}).get("report")
+                    if isinstance(report_payload, dict):
+                        project_risk_report = _normalize_optional_text(
+                            report_payload.get("project_risk_report")
+                        )
+                if project_risk_report:
+                    task.report = project_risk_report
+                    logger.info(
+                        "[AgentTask] Project risk report persisted to task.report (length=%s)",
+                        len(project_risk_report),
+                    )
                 
                 # 计算安全评分
                 task.security_score = _calculate_security_score(
@@ -5872,6 +5899,7 @@ async def _save_findings(
                     cvss_score = float(cvss_score)
                 except ValueError:
                     cvss_score = None
+            cvss_vector = _normalize_optional_text(finding.get("cvss_vector"))
 
             # 12) Deduplication and Persistence
             # Logic: If a finding with same fingerprint exists for this task, update it.
@@ -5940,6 +5968,7 @@ async def _save_findings(
                 db_finding.finding_metadata = finding_metadata_payload or None
                 db_finding.finding_identity = finding_identity
                 db_finding.cvss_score = cvss_score
+                db_finding.cvss_vector = cvss_vector
                 db_finding.references = [{"cwe": cwe_id}] if cwe_id else None
                 db_finding.fingerprint = fingerprint
                 db_finding.updated_at = func.now()
@@ -5980,6 +6009,7 @@ async def _save_findings(
                     finding_metadata=finding_metadata_payload or None,
                     finding_identity=finding_identity,
                     cvss_score=cvss_score,
+                    cvss_vector=cvss_vector,
                     references=[{"cwe": cwe_id}] if cwe_id else None,
                     fingerprint=fingerprint,
                 )
@@ -6399,6 +6429,7 @@ async def get_agent_task(
             "verification_level": _normalize_verification_level(task.verification_level),
             "exclude_patterns": task.exclude_patterns,
             "target_files": task.target_files,
+            "report": task.report,
         }
         
         return AgentTaskResponse(**response_data)
@@ -7780,9 +7811,10 @@ async def generate_audit_report(
     def _build_report_descriptions(
         finding_row: AgentFinding,
     ) -> Tuple[Optional[str], Optional[str]]:
+        verification_raw = getattr(finding_row, "verification_result", None)
         verification_payload = (
-            finding_row.verification_result
-            if isinstance(finding_row.verification_result, dict)
+            verification_raw
+            if isinstance(verification_raw, dict)
             else {}
         )
         verification_evidence = (
@@ -7818,24 +7850,37 @@ async def generate_audit_report(
                     if isinstance(step, str) and str(step).strip()
                 ]
 
+        raw_description = getattr(finding_row, "description", None)
+        if raw_description and not verification_payload and not function_trigger_flow:
+            # 兼容历史报告导出：在缺少验证结构化数据时保留原始描述全文，避免长文本被压缩。
+            description_text = str(raw_description)
+            return description_text, description_text
+
         normalized_file_path = _normalize_relative_file_path(
-            str(finding_row.file_path or ""),
+            str(getattr(finding_row, "file_path", "") or ""),
             None,
         )
+        vulnerability_type = str(getattr(finding_row, "vulnerability_type", "") or "")
+        title_text = str(getattr(finding_row, "title", "") or "")
+        description_text = getattr(finding_row, "description", None)
+        code_snippet_text = getattr(finding_row, "code_snippet", None)
+        code_context_text = getattr(finding_row, "code_context", None)
+        line_start = getattr(finding_row, "line_start", None)
+        line_end = getattr(finding_row, "line_end", None)
         cwe_id = _extract_cwe_from_references(getattr(finding_row, "references", None))
         if not cwe_id:
             cwe_id = _resolve_cwe_id(
                 verification_payload.get("cwe_id") or verification_payload.get("cwe"),
-                finding_row.vulnerability_type,
-                title=finding_row.title,
-                description=finding_row.description,
-                code_snippet=finding_row.code_snippet,
+                vulnerability_type,
+                title=title_text,
+                description=description_text,
+                code_snippet=code_snippet_text,
             )
         profile = _resolve_vulnerability_profile(
-            finding_row.vulnerability_type,
-            title=finding_row.title,
-            description=finding_row.description,
-            code_snippet=finding_row.code_snippet,
+            vulnerability_type,
+            title=title_text,
+            description=description_text,
+            code_snippet=code_snippet_text,
         )
         function_name = (
             str(verification_payload.get("function") or "").strip()
@@ -7846,14 +7891,14 @@ async def generate_audit_report(
             file_path=normalized_file_path,
             function_name=function_name,
             vulnerability_type=profile["key"],
-            title=finding_row.title,
-            description=finding_row.description,
-            code_snippet=finding_row.code_snippet,
-            code_context=finding_row.code_context,
+            title=title_text,
+            description=description_text,
+            code_snippet=code_snippet_text,
+            code_context=code_context_text,
             cwe_id=cwe_id,
-            raw_description=finding_row.description,
-            line_start=finding_row.line_start,
-            line_end=finding_row.line_end,
+            raw_description=description_text,
+            line_start=line_start,
+            line_end=line_end,
             verification_evidence=verification_evidence,
             function_trigger_flow=function_trigger_flow,
         )
@@ -7861,14 +7906,14 @@ async def generate_audit_report(
             file_path=normalized_file_path,
             function_name=function_name,
             vulnerability_type=profile["key"],
-            title=finding_row.title,
-            description=finding_row.description,
-            code_snippet=finding_row.code_snippet,
-            code_context=finding_row.code_context,
+            title=title_text,
+            description=description_text,
+            code_snippet=code_snippet_text,
+            code_context=code_context_text,
             cwe_id=cwe_id,
-            raw_description=finding_row.description,
-            line_start=finding_row.line_start,
-            line_end=finding_row.line_end,
+            raw_description=description_text,
+            line_start=line_start,
+            line_end=line_end,
             verification_evidence=verification_evidence,
             function_trigger_flow=function_trigger_flow,
         )

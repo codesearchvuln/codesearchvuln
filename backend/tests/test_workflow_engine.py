@@ -578,6 +578,78 @@ class TestReportCorrectionFlow:
         assert final_finding["function_name"] == "correct_func"
         assert final_finding["vulnerability_report"] == "# corrected report"
 
+    @pytest.mark.asyncio
+    async def test_report_phase_generates_project_risk_report(self, orchestrator_with_queues):
+        orch, recon_q, vuln_q = orchestrator_with_queues
+        vuln_q.enqueue_finding(
+            TASK_ID,
+            {
+                "finding_identity": "fid:project-report",
+                "title": "project risk seed",
+                "file_path": "svc.py",
+                "line_start": 20,
+                "vulnerability_type": "sql_injection",
+                "severity": "high",
+            },
+        )
+
+        async def mock_dispatch(params: Dict) -> str:
+            if params.get("agent") == "verification":
+                finding_from_params = dict(params.get("finding") or {})
+                finding_from_params.update(
+                    {
+                        "verdict": "confirmed",
+                        "confidence": 0.9,
+                        "finding_identity": "fid:project-report",
+                    }
+                )
+                orch._agent_results["verification"] = {
+                    "_run_success": True,
+                    "findings": [finding_from_params],
+                }
+                orch._all_findings.append(dict(finding_from_params))
+                return "Verification 完成"
+            return "ok"
+
+        class _ProjectAwareReportAgent:
+            supports_project_risk_report = True
+
+            async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+                if str(input_data.get("report_mode") or "").strip().lower() == "project":
+                    return AgentResult(
+                        success=True,
+                        data={"project_risk_report": "# project risk report"},
+                        iterations=1,
+                        tool_calls=0,
+                        tokens_used=8,
+                    )
+                finding = dict(input_data.get("finding") or {})
+                return AgentResult(
+                    success=True,
+                    data={
+                        "vulnerability_report": "# per finding report",
+                        "updated_finding": finding,
+                    },
+                    iterations=1,
+                    tool_calls=1,
+                    tokens_used=10,
+                )
+
+            def reset_cancellation_state(self) -> None:
+                return None
+
+        orch._dispatch_agent = mock_dispatch
+        orch.sub_agents["report"] = _ProjectAwareReportAgent()
+        orch._agent_results["recon"] = {"_run_success": True}
+
+        engine = AuditWorkflowEngine(recon_q, vuln_q, TASK_ID, orch)
+        state = await engine.run({}, {}, "/tmp", TASK_ID)
+
+        assert state.phase == WorkflowPhase.COMPLETE
+        assert state.project_report_generated is True
+        assert state.project_risk_report == "# project risk report"
+        assert orch._agent_results["report"]["project_risk_report"] == "# project risk report"
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # WorkflowOrchestratorAgent 集成测试

@@ -328,6 +328,9 @@ class AuditWorkflowEngine:
             if self.enable_memory_monitoring:
                 self.memory_monitor.take_snapshot(phase="verification_done", agent_name="verification")
 
+            if not orc.is_cancelled:
+                self._ensure_verification_reports()
+
             if orc.is_cancelled:
                 state.phase = WorkflowPhase.CANCELLED
                 return state
@@ -904,6 +907,114 @@ class AuditWorkflowEngine:
             len(self.orchestrator._all_findings),
         )
 
+    def _ensure_verification_reports(self) -> None:
+        """
+        为 Verification 阶段产出的 findings 补全标准化漏洞报告。
+
+        说明：
+        - docs/yh/codex.md 要求 VerificationAgent 在结束时输出漏洞报告；
+          这里提供工程兜底，避免 report 字段为空导致入库缺失。
+        - 已存在 vulnerability_report/report 时不覆盖。
+        """
+        for idx, finding in enumerate(self.orchestrator._all_findings):
+            if not isinstance(finding, dict):
+                continue
+            existing_report = str(
+                finding.get("vulnerability_report") or finding.get("report") or ""
+            ).strip()
+            if existing_report:
+                continue
+            fallback_report = self._build_verification_report_markdown(finding)
+            finding["vulnerability_report"] = fallback_report
+            self.orchestrator._all_findings[idx] = finding
+
+    @staticmethod
+    def _build_verification_report_markdown(finding: Dict[str, Any]) -> str:
+        """根据 finding 字段构建 9 段式漏洞详情报告（Markdown 兜底模板）。"""
+        title = str(finding.get("title") or "未命名漏洞").strip()
+        vuln_type = str(finding.get("vulnerability_type") or "unknown").strip()
+        severity = str(finding.get("severity") or "unknown").strip()
+        cvss_score = finding.get("cvss_score")
+        cvss_vector = str(finding.get("cvss_vector") or "N/A").strip()
+        file_path = str(finding.get("file_path") or "unknown").strip()
+        line_start = finding.get("line_start")
+        line_end = finding.get("line_end") or line_start
+        source = str(finding.get("source") or "未明确 source").strip()
+        sink = str(finding.get("sink") or "未明确 sink").strip()
+        description = str(finding.get("description") or "暂无漏洞描述").strip()
+        suggestion = str(finding.get("suggestion") or "请结合业务场景补充修复方案。").strip()
+        poc_code = str(finding.get("poc_code") or "").strip()
+        verification_result = finding.get("verification_result")
+        if not isinstance(verification_result, dict):
+            verification_result = {}
+        confidence = verification_result.get("confidence", finding.get("confidence", "N/A"))
+        verdict = verification_result.get("verdict", finding.get("verdict", "unknown"))
+        dataflow_path = finding.get("dataflow_path")
+        if isinstance(dataflow_path, list) and dataflow_path:
+            flow_text = " -> ".join([str(item) for item in dataflow_path if str(item).strip()])
+        else:
+            flow_text = f"{source} -> {sink}"
+        code_snippet = str(finding.get("code_snippet") or "").strip()
+
+        return "\n".join(
+            [
+                f"# 漏洞报告：{title}",
+                "",
+                "## 1. 基本信息",
+                "",
+                (
+                    f"- 漏洞类型/CWE：{vuln_type}\n"
+                    f"- 严重程度：{severity}\n"
+                    f"- CVSS3.1：{cvss_score if cvss_score is not None else 'N/A'} ({cvss_vector})\n"
+                    f"- 受影响组件：`{file_path}`\n"
+                    f"- 位置：{file_path}:{line_start}-{line_end}\n"
+                    f"- 结论：{verdict}（confidence={confidence}）"
+                ),
+                "",
+                "## 2. 触发条件",
+                "",
+                "- 外部输入可控并能够进入目标函数执行路径。",
+                "- 缺少有效输入校验/编码/隔离机制。",
+                "",
+                "## 3. 所需权限",
+                "",
+                "- 默认按低权限或未认证入口评估，需结合部署拓扑复核。",
+                "",
+                "## 4. 漏洞原理",
+                "",
+                "1. 攻击者通过可控输入构造恶意载荷。",
+                f"2. 载荷沿调用链传播并最终到达危险点：`{sink}`。",
+                "3. 缺乏充分防护导致安全边界被突破。",
+                "",
+                "## 5. 代码证据",
+                "",
+                f"- 位置：`{file_path}` 行 {line_start}-{line_end}",
+                "```",
+                code_snippet or description,
+                "```",
+                "",
+                "## 6. 调用链",
+                "",
+                f"- Source：`{source}`",
+                f"- Sink：`{sink}`",
+                f"- 路径：{flow_text}",
+                "",
+                "## 7. PoC",
+                "",
+                "```",
+                poc_code or "暂无可执行 PoC，可基于 source->sink 路径补充 Fuzzing Harness。",
+                "```",
+                "",
+                "## 8. 业务影响",
+                "",
+                "- 可能导致数据泄露、权限提升或系统稳定性下降，具体影响取决于暴露面与资产等级。",
+                "",
+                "## 9. 修复建议",
+                "",
+                suggestion,
+            ]
+        )
+
     async def _run_report_phase(
         self,
         state: WorkflowState,
@@ -911,11 +1022,14 @@ class AuditWorkflowEngine:
         config: Dict[str, Any],
     ) -> None:
         """
-        为每条 confirmed/likely 漏洞调度 Report Agent，生成结构化 Markdown 详情报告。
+        Report 阶段包含两部分：
+        1) 为每条 confirmed/likely 漏洞生成详情报告（兼容旧链路）
+        2) 基于全部发现生成项目级风险评估报告（docs/yh/codex.md 新需求）
 
         报告写入：
         - finding["vulnerability_report"]（同步修改 orc._all_findings 中的对应项）
         - state.finding_reports[finding_title]（汇总）
+        - state.project_risk_report（项目级总体风险报告）
         """
         orc = self.orchestrator
         report_agent = orc.sub_agents.get("report")
@@ -938,38 +1052,157 @@ class AuditWorkflowEngine:
                 "⏭️ [Workflow] 无 confirmed/likely 漏洞，跳过报告生成阶段",
             )
             logger.info("[WorkflowEngine] Report phase skipped: no reportable findings")
+        else:
+            state.report_findings_total = len(reportable)
+            await orc.emit_event(
+                "info",
+                f"[Workflow] Report 阶段：共 {len(reportable)} 条漏洞需要生成报告",
+            )
+
+            if self.workflow_config.should_parallelize_report:
+                await self._run_parallel_report_phase(
+                    state=state,
+                    reportable=reportable,
+                    project_info=project_info,
+                    config=config,
+                )
+            else:
+                await self._run_sequential_report_phase(
+                    state=state,
+                    reportable=reportable,
+                    project_info=project_info,
+                    config=config,
+                )
+
+            await orc.emit_event(
+                "info",
+                f"[Workflow] Report 阶段完成：{state.report_findings_processed}/{state.report_findings_total} 条报告已生成",
+            )
+            logger.info(
+                "[WorkflowEngine] Report phase done: %s/%s reports generated",
+                state.report_findings_processed,
+                state.report_findings_total,
+            )
+
+        await self._run_project_risk_report_phase(
+            state=state,
+            project_info=project_info,
+            config=config,
+        )
+
+    async def _run_project_risk_report_phase(
+        self,
+        state: WorkflowState,
+        project_info: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> None:
+        """调用 ReportAgent 生成项目级风险评估报告并落到 workflow state。"""
+        orc = self.orchestrator
+        report_agent = orc.sub_agents.get("report")
+        if report_agent is None:
+            return
+        if not bool(getattr(report_agent, "supports_project_risk_report", False)):
+            logger.info(
+                "[WorkflowEngine] Report agent does not support project summary mode, skip project report"
+            )
             return
 
-        state.report_findings_total = len(reportable)
+        candidate_findings = [
+            item
+            for item in (orc._all_findings or [])
+            if isinstance(item, dict)
+            and str(item.get("verdict") or "").strip().lower() != "false_positive"
+        ]
+        if not candidate_findings:
+            await orc.emit_event(
+                "info",
+                "⏭️ [Workflow] 项目级风险评估报告跳过：无可用漏洞数据",
+            )
+            return
+
         await orc.emit_event(
             "info",
-            f"[Workflow] Report 阶段：共 {len(reportable)} 条漏洞需要生成报告",
+            f"[Workflow] 开始生成项目级风险评估报告（输入漏洞 {len(candidate_findings)} 条）",
         )
 
-        if self.workflow_config.should_parallelize_report:
-            await self._run_parallel_report_phase(
-                state=state,
-                reportable=reportable,
-                project_info=project_info,
-                config=config,
+        step_start = time.time()
+        success = False
+        error_msg: Optional[str] = None
+        project_report_text = ""
+        tool_calls = 0
+        tokens_used = 0
+        iterations = 0
+
+        try:
+            result = await report_agent.run(
+                {
+                    "report_mode": "project",
+                    "findings": [dict(item) for item in candidate_findings],
+                    "project_info": project_info,
+                    "config": config,
+                }
+            )
+            tool_calls = int(getattr(result, "tool_calls", 0) or 0)
+            tokens_used = int(getattr(result, "tokens_used", 0) or 0)
+            iterations = int(getattr(result, "iterations", 0) or 0)
+            self.orchestrator._tool_calls += tool_calls
+            self.orchestrator._total_tokens += tokens_used
+            self.orchestrator._iteration += iterations
+            state.total_iterations += iterations
+            state.total_tokens += tokens_used
+            state.tool_calls += tool_calls
+
+            if result.success and isinstance(result.data, dict):
+                project_report_text = str(result.data.get("project_risk_report") or "").strip()
+                success = bool(project_report_text)
+                if not success:
+                    error_msg = "Report Agent 未返回 project_risk_report"
+            else:
+                error_msg = getattr(result, "error", None) or "Report Agent 生成失败"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            error_msg = str(exc)
+            logger.exception("[WorkflowEngine] Project risk report generation failed: %s", exc)
+
+        duration_ms = int((time.time() - step_start) * 1000)
+        state.step_records.append(
+            WorkflowStepRecord(
+                phase=WorkflowPhase.REPORT,
+                agent="report_project_summary",
+                injected_context={
+                    "input_findings": len(candidate_findings),
+                },
+                success=success,
+                error=error_msg,
+                findings_count=len(orc._all_findings),
+                duration_ms=duration_ms,
+            )
+        )
+
+        if success:
+            state.project_report_generated = True
+            state.project_risk_report = project_report_text
+            report_payload = orc._agent_results.get("report")
+            if not isinstance(report_payload, dict):
+                report_payload = {}
+            report_payload["project_risk_report"] = project_report_text
+            report_payload["project_report_generated"] = True
+            report_payload["project_report_source"] = "workflow_engine_report_phase"
+            orc._agent_results["report"] = report_payload
+            await orc.emit_event(
+                "info",
+                f"[Workflow] 项目级风险评估报告生成完成（长度 {len(project_report_text)} 字符）",
+            )
+            logger.info(
+                "[WorkflowEngine] Project risk report generated, length=%s chars",
+                len(project_report_text),
             )
         else:
-            await self._run_sequential_report_phase(
-                state=state,
-                reportable=reportable,
-                project_info=project_info,
-                config=config,
+            await orc.emit_event(
+                "warning",
+                f"[Workflow] 项目级风险评估报告生成失败（非关键）：{str(error_msg or '')[:120]}",
             )
-
-        await orc.emit_event(
-            "info",
-            f"[Workflow] Report 阶段完成：{state.report_findings_processed}/{state.report_findings_total} 条报告已生成",
-        )
-        logger.info(
-            "[WorkflowEngine] Report phase done: %s/%s reports generated",
-            state.report_findings_processed,
-            state.report_findings_total,
-        )
 
     def _create_report_worker_agent(self, worker_id: int) -> Any:
         """为 Report 阶段创建独立 worker agent，避免会话状态互相污染。"""

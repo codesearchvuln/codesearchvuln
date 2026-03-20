@@ -616,42 +616,37 @@ class SaveVerificationResultTool(AgentTool):
     def description(self) -> str:
         return """将单个验证结果持久化保存到数据库。
 
-在验证完一个漏洞、确定其 verdict / confidence / reachability / verification_evidence 之后，
-立即调用此工具保存结果，否则结果只存在内存中，任务结束后会丢失。
+在验证完一个漏洞后立即调用，避免结果只存在会话内存中而丢失。
 
-必需参数:
-- file_path: 文件路径
-- line_start: 起始行号（>= 1）
-- function_name: 函数名称（必填，无法精确定位时使用语义化占位符如 <function_at_line_120>）
-- title: 发现标题（5-200 字符）
-- vulnerability_type: 漏洞类型（如 sql_injection、xss 等）
+【文档要求的必填字段（由 LLM 提供）】
+- vulnerability_type: 漏洞类型（建议使用 CWE 编码或规范化类型）
 - severity: 严重程度（critical|high|medium|low|info）
-- verdict: 真实性判定（confirmed|likely|uncertain|false_positive）
-- confidence: 置信度 [0.0-1.0 浮点数]
-- reachability: 可达性（reachable|likely_reachable|unknown|unreachable）
-- verification_evidence: 验证证据（至少 10 字符）
-
-可选参数:
-- line_end: 代码结束行号（默认等于 line_start）
-- cwe_id: CWE 编号（如 CWE-89）
-- description: 详细描述
-- poc_plan: PoC 思路
-- code_snippet: 相关代码片段
+- cvss_score: CVSS3.1 分数（可为 null）
+- cvss_vector: CVSS3.1 向量（可为 null）
+- title: 漏洞标题
+- description: 漏洞描述
+- file_path: 漏洞文件路径
+- line_start: 起始行号（>= 1）
+- line_end: 结束行号（默认等于 line_start）
+- function_name: 函数名称（无法定位时可用占位符）
+- source: Source 描述
+- sink: Sink 描述
+- dataflow_path: 数据流路径（数组）
+- is_verified: 是否确认漏洞存在（bool）
+- poc_code: Fuzzing Harness / PoC 代码
 - suggestion: 修复建议
-- function_trigger_flow: 函数触发链
-- code_context: 代码上下文
-- localization_status: 代码定位状态
+- confidence: 置信度 [0.0, 1.0]
 
-返回值:
-- saved: 是否成功保存（true/false）
-- total_saved: 任务累计已保存的 findings 数量
-- message: 结果描述
+【由 Python 程序补全】
+- task_id, status, code_snippet, report
 
-注意：
-- 每验证完一个漏洞就调用一次此工具
-- false_positive 和 uncertain 的 findings 也会被保存，但标记不同状态
-- confidence 必须是浮点数，不能为字符串
-- cwe_id 必须符合 CWE-XXX 格式或为 null"""
+兼容字段（旧链路可继续传）：
+- verdict, reachability, verification_evidence, cwe_id, poc_plan, code_context, localization_status
+
+返回值：
+- saved: 是否成功保存
+- total_saved: 任务累计保存数
+- message: 结果描述"""
 
     # args_schema intentionally not overridden (returns None from base class).
     # _execute() accepts individual flat params; SaveVerificationResultInput
@@ -696,17 +691,24 @@ class SaveVerificationResultTool(AgentTool):
         title: str,
         vulnerability_type: str,
         severity: str,
-        verdict: str,
         confidence: float,
-        reachability: str,
-        verification_evidence: str,
+        description: Optional[str] = None,
         finding_identity: Optional[str] = None,
         line_end: Optional[int] = None,
+        source: Optional[str] = None,
+        sink: Optional[str] = None,
+        dataflow_path: Optional[List[str]] = None,
+        is_verified: Optional[bool] = None,
+        cvss_score: Optional[float] = None,
+        cvss_vector: Optional[str] = None,
+        poc_code: Optional[str] = None,
+        suggestion: Optional[str] = None,
+        verdict: Optional[str] = None,
+        reachability: Optional[str] = None,
+        verification_evidence: Optional[str] = None,
         cwe_id: Optional[str] = None,
-        description: Optional[str] = None,
         poc_plan: Optional[str] = None,
         code_snippet: Optional[str] = None,
-        suggestion: Optional[str] = None,
         function_trigger_flow: Optional[List[str]] = None,
         code_context: Optional[str] = None,
         localization_status: Optional[str] = None,
@@ -733,6 +735,57 @@ class SaveVerificationResultTool(AgentTool):
         """
         task_id = self.task_id
 
+        try:
+            normalized_confidence = max(0.0, min(float(confidence), 1.0))
+        except Exception:
+            normalized_confidence = 0.5
+
+        normalized_severity = str(severity or "medium").strip().lower()
+        if normalized_severity not in {"critical", "high", "medium", "low", "info"}:
+            normalized_severity = "medium"
+
+        normalized_verdict = str(verdict or "").strip().lower()
+        if normalized_verdict not in {"confirmed", "likely", "uncertain", "false_positive"}:
+            normalized_verdict = "confirmed" if bool(is_verified) else "uncertain"
+
+        normalized_is_verified = bool(is_verified)
+        if not normalized_is_verified and normalized_verdict in {"confirmed", "likely"} and normalized_confidence >= 0.7:
+            normalized_is_verified = True
+
+        normalized_reachability = str(reachability or "").strip().lower()
+        if normalized_reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
+            if normalized_verdict == "confirmed":
+                normalized_reachability = "reachable"
+            elif normalized_verdict == "likely":
+                normalized_reachability = "likely_reachable"
+            elif normalized_verdict == "false_positive":
+                normalized_reachability = "unreachable"
+            else:
+                normalized_reachability = "unknown"
+
+        evidence_text = str(verification_evidence or "").strip()
+        if len(evidence_text) < 10:
+            evidence_text = (
+                f"auto_generated_verification_evidence: verdict={normalized_verdict}; "
+                f"confidence={normalized_confidence:.2f}; file={file_path}"
+            )
+
+        if isinstance(dataflow_path, list):
+            normalized_dataflow_path = [str(item) for item in dataflow_path if str(item).strip()]
+        elif dataflow_path is None:
+            normalized_dataflow_path = function_trigger_flow[:] if isinstance(function_trigger_flow, list) else None
+        else:
+            normalized_dataflow_path = [str(dataflow_path)]
+
+        normalized_cvss_score: Optional[float]
+        if cvss_score is None:
+            normalized_cvss_score = None
+        else:
+            try:
+                normalized_cvss_score = float(cvss_score)
+            except Exception:
+                normalized_cvss_score = None
+
         # 构造 finding 字典
         finding = {
             "finding_identity": finding_identity,
@@ -742,14 +795,23 @@ class SaveVerificationResultTool(AgentTool):
             "function_name": function_name,
             "title": title,
             "vulnerability_type": vulnerability_type,
-            "severity": severity,
+            "severity": normalized_severity,
             "cwe_id": cwe_id,
             "description": description,
+            "source": source,
+            "sink": sink,
+            "dataflow_path": normalized_dataflow_path,
+            "is_verified": normalized_is_verified,
+            "poc_code": poc_code,
+            "suggestion": suggestion,
+            "confidence": normalized_confidence,
+            "cvss_score": normalized_cvss_score,
+            "cvss_vector": cvss_vector,
             "verification_result": {
-                "verdict": verdict,
-                "confidence": confidence,
-                "reachability": reachability,
-                "verification_evidence": verification_evidence,
+                "verdict": normalized_verdict,
+                "confidence": normalized_confidence,
+                "reachability": normalized_reachability,
+                "verification_evidence": evidence_text,
                 "poc_plan": poc_plan,
                 "code_snippet": code_snippet,
                 "suggestion": suggestion,
@@ -792,8 +854,8 @@ class SaveVerificationResultTool(AgentTool):
             task_id,
             title,
             file_path,
-            verdict,
-            confidence,
+            normalized_verdict,
+            normalized_confidence,
         )
 
         if self._save_callback is None:
@@ -831,7 +893,10 @@ class SaveVerificationResultTool(AgentTool):
                 data={
                     "saved": saved > 0,
                     "total_saved": self._saved_count,
-                    "message": f"验证结果已保存：{title}（verdict={verdict}, confidence={confidence:.2f}），累计 {self._saved_count} 条",
+                    "message": (
+                        f"验证结果已保存：{title}（verdict={normalized_verdict}, "
+                        f"confidence={normalized_confidence:.2f}），累计 {self._saved_count} 条"
+                    ),
                 },
             )
         except Exception as exc:
