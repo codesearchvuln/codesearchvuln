@@ -29,6 +29,7 @@ export interface ToolEvidenceSearchHitEntry {
   filePath: string;
   matchLine: number;
   matchText: string;
+  language?: string;
   column?: number | null;
   symbolName?: string;
   matchKind?: string;
@@ -221,6 +222,7 @@ function parseSearchHitEntries(value: unknown): ToolEvidenceSearchHitEntry[] | n
       filePath,
       matchLine,
       matchText: toStringValue(record.match_text),
+      language: toStringValue(record.language) || undefined,
       column: toInt(record.column),
       symbolName: toStringValue(record.symbol_name) || undefined,
       matchKind: toStringValue(record.match_kind) || undefined,
@@ -713,6 +715,7 @@ function synthesizeSearchCodeEvidence(
       filePath,
       matchLine,
       matchText,
+      language: detectLanguageFromPath(filePath),
     });
   }
 

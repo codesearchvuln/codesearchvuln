@@ -437,9 +437,6 @@ test("buildStaticAnalysisTaskStatusSummary marks mixed completed and failed engi
       total_findings: 0,
       scan_duration_ms: 0,
       files_scanned: 0,
-      language: "go",
-      name: "YASA",
-      target_path: ".",
     },
   });
 
@@ -471,9 +468,6 @@ test("buildStaticAnalysisTaskStatusSummary falls back to diagnostics summary for
       total_findings: 0,
       scan_duration_ms: 0,
       files_scanned: 0,
-      language: "go",
-      name: "YASA",
-      target_path: ".",
     },
   });
 

@@ -134,7 +134,7 @@ function summarizeLogOverview(logItem: LogItem): string[] {
       `${first.filePath}:${first.matchLine}`,
       `${evidence.entries.length} 条命中`,
       first.language,
-    ].filter(Boolean);
+    ].filter((item): item is string => Boolean(item));
   }
 
   if (evidence.renderType === "code_window") {
@@ -144,16 +144,30 @@ function summarizeLogOverview(logItem: LogItem): string[] {
       `${first.filePath}:${first.startLine}-${first.endLine}`,
       first.focusLine ? `焦点行 ${first.focusLine}` : "",
       first.language,
-    ].filter(Boolean);
+    ].filter((item): item is string => Boolean(item));
   }
 
-  const first = evidence.entries[0];
-  if (!first) return [];
-  return [
-    `退出码 ${first.exitCode}`,
-    first.language || "",
-    first.executionCommand || first.description || "",
-  ].filter(Boolean);
+  if (evidence.renderType === "symbol_body") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [
+      `${first.filePath}:${first.startLine}-${first.endLine}`,
+      first.symbolName ? `${first.symbolKind || "symbol"} ${first.symbolName}` : "",
+      first.language,
+    ].filter((item): item is string => Boolean(item));
+  }
+
+  if (evidence.renderType === "execution_result") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [
+      `退出码 ${first.exitCode}`,
+      first.language || "",
+      first.executionCommand || first.description || "",
+    ].filter((item): item is string => Boolean(item));
+  }
+
+  return [];
 }
 
 export interface AuditDetailContentProps

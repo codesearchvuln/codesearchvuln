@@ -5,7 +5,6 @@ import {
 	Bug,
 	Radar,
 	ShieldAlert,
-	Target,
 } from "lucide-react";
 import {
 	Area,
@@ -50,7 +49,7 @@ interface DashboardCommandCenterProps {
 	onRangeDaysChange: (value: RangeDays) => void;
 }
 
-const RANGE_OPTIONS: RangeDays[] = [7, 14, 30];
+export const RANGE_OPTIONS: RangeDays[] = [7, 14, 30];
 
 const ENGINE_LABELS: Record<string, string> = {
 	agent: "Agent 审计",
@@ -259,7 +258,7 @@ function SummaryStrip({
 	);
 }
 
-function VerificationFunnel({
+export function VerificationFunnel({
 	raw,
 	effective,
 	verified,
@@ -547,7 +546,7 @@ export function AttackSurfaceTreemapTooltipContent({
 	);
 }
 
-function AttackSurfaceTreemap({ items }: { items: DashboardCweDistributionItem[] }) {
+export function AttackSurfaceTreemap({ items }: { items: DashboardCweDistributionItem[] }) {
 	const data = useMemo(() => buildCweTreemapNodes(items), [items]);
 
 	if (data.length === 0) {
@@ -586,7 +585,7 @@ function AttackSurfaceTreemap({ items }: { items: DashboardCweDistributionItem[]
 export default function DashboardCommandCenter({
 	snapshot,
 	rangeDays,
-	onRangeDaysChange,
+	onRangeDaysChange: _onRangeDaysChange,
 }: DashboardCommandCenterProps) {
 	const trendData = useMemo(
 		() => normalizeTrendSeries(snapshot.daily_activity || []),

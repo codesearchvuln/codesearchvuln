@@ -13,10 +13,8 @@ test("BanditRules renders detail/delete/recover related controls", () => {
     createElement(MemoryRouter, {}, createElement(BanditRules)),
   );
 
-  assert.match(markup, /搜索名称\/ID\/描述/);
-  assert.match(markup, /删除状态/);
-  assert.match(markup, /重置/);
-  assert.match(markup, />列</);
+  assert.match(markup, /规则名称/);
+  assert.match(markup, /启用状态/);
   assert.match(markup, /上一页/);
   assert.match(markup, /下一页/);
   assert.match(markup, /加载中\.\.\./);

@@ -136,10 +136,6 @@ export default function ProjectsPage({
 			paginateItems(filteredProjects, browser.projectPage, projectPageSize),
 		[filteredProjects, browser.projectPage, projectPageSize],
 	);
-	const currentPageProjectIds = useMemo(
-		() => pagedProjects.map((project) => project.id),
-		[pagedProjects],
-	);
 	const projectDetailFrom = `${location.pathname}${location.search}${location.hash}`;
 
 	useEffect(() => {

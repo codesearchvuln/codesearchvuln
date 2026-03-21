@@ -17,26 +17,25 @@ async function importOrFail<TModule = Record<string, unknown>>(
 	}
 }
 
-test("ProjectDescriptionSection renders ready and failed states with source badge", async () => {
+test("ProjectDescriptionSection renders ready and failed states with the current simplified header", async () => {
 	const pageModule = await importOrFail<any>("../src/pages/ProjectDetail.tsx");
 
 	const readyMarkup = renderToStaticMarkup(
 		createElement(pageModule.ProjectDescriptionSection, {
 			description: "系统会根据项目结构自动生成简要介绍。",
 			status: "ready",
-			source: "llm",
 			unsupported: false,
 			onRetry: () => {},
 		}),
 	);
 	assert.match(readyMarkup, /项目简介/);
-	assert.match(readyMarkup, /LLM 生成/);
+	assert.match(readyMarkup, /系统会根据项目结构自动生成简要介绍。/);
+	assert.doesNotMatch(readyMarkup, /LLM 生成/);
 
 	const failedMarkup = renderToStaticMarkup(
 		createElement(pageModule.ProjectDescriptionSection, {
 			description: "",
 			status: "failed",
-			source: null,
 			unsupported: false,
 			onRetry: () => {},
 		}),

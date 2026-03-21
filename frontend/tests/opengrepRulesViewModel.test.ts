@@ -15,7 +15,7 @@ test("OpengrepRules renders unified table layout shell", () => {
     createElement(
       MemoryRouter,
       {},
-      createElement(LanguageProvider, {}, createElement(OpengrepRules)),
+      createElement(LanguageProvider, null, createElement(OpengrepRules)),
     ),
   );
 

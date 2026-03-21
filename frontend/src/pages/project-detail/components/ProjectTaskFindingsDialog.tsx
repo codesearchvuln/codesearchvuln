@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Bug, Loader2 } from "lucide-react";
+import { ArrowLeft, Bug } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";

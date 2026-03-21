@@ -167,7 +167,7 @@ function createSnapshotFixture() {
 	};
 }
 
-test("DashboardCommandCenter renders the control-center sections and hotspot data", async () => {
+test("DashboardCommandCenter renders the current summary strip and primary panels", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
@@ -180,28 +180,29 @@ test("DashboardCommandCenter renders the control-center sections and hotspot dat
 		}),
 	);
 
-	assert.match(markup, /漏洞扫描统计/);
-	assert.match(markup, /当前有效风险/);
+	assert.match(markup, /扫描项目总数/);
+	assert.match(markup, /当前发现漏洞/);
+	assert.match(markup, /已验证漏洞/);
 	assert.match(markup, /累计扫描时长/);
 	assert.match(markup, /累计执行扫描/);
 	assert.match(markup, /可挖掘漏洞类型/);
+	assert.match(markup, /漏洞态势趋势/);
 	assert.match(markup, /任务状态/);
 	assert.match(markup, /风险热点项目/);
+	assert.match(markup, /引擎贡献/);
 	assert.match(markup, /语言风险热力/);
-	assert.match(markup, /CWE 攻击面/);
 	assert.match(markup, /TypeScript/);
-	assert.match(markup, /--color-cwe: #6CC4E1;/);
 	assert.match(markup, /1天 1时 1分 1秒/);
 	assert.match(markup, />8</);
 	assert.match(markup, />2</);
+	assert.match(markup, /过去 14 天内各扫描引擎的有效风险发现和扫描活跃度/);
 	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">误报率<\/p>/);
 	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">扫描成功率<\/p>/);
 	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">平均扫描耗时<\/p>/);
 	assert.doesNotMatch(markup, /3 条发现/);
 	assert.doesNotMatch(markup, /2 条发现/);
-	assert.match(markup, />7 天</);
-	assert.match(markup, />14 天</);
-	assert.match(markup, />30 天</);
+	assert.doesNotMatch(markup, /data-panel="funnel"/);
+	assert.doesNotMatch(markup, /data-panel="cwe"/);
 });
 
 test("formatCumulativeDuration formats dashboard scan duration with zh units down to seconds", async () => {
@@ -216,7 +217,7 @@ test("formatCumulativeDuration formats dashboard scan duration with zh units dow
 	assert.equal(module.formatCumulativeDuration(90061000), "1天 1时 1分 1秒");
 });
 
-test("DashboardCommandCenter places cwe in the third primary row and moves language risk below the grid", async () => {
+test("DashboardCommandCenter keeps the current primary grid order and leaves language risk below the grid", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
@@ -234,32 +235,24 @@ test("DashboardCommandCenter places cwe in the third primary row and moves langu
 		/data-layout="primary-grid"[^>]*class="[^"]*grid[^"]*gap-4[^"]*lg:grid-cols-12/,
 	);
 	assert.match(markup, /data-panel="trend"[^>]*class="[^"]*lg:col-span-7/);
-	assert.match(markup, /data-panel="funnel"[^>]*class="[^"]*lg:col-span-5/);
 	assert.match(markup, /data-panel="hotspots"[^>]*class="[^"]*lg:col-span-7/);
 	assert.match(markup, /data-panel="status"[^>]*class="[^"]*lg:col-span-5/);
 	assert.match(markup, /data-panel="engines"[^>]*class="[^"]*lg:col-span-7/);
-	assert.match(
-		markup,
-		/data-panel="cwe"[^>]*class="[^"]*rounded-none[^"]*lg:col-span-5[^"]*flex[^"]*flex-col/,
-	);
 	assert.match(markup, /data-panel="language-risk"/);
-	assert.match(markup, /min-h-\[31rem\]/);
 
 	const trendIndex = markup.indexOf('data-panel="trend"');
-	const funnelIndex = markup.indexOf('data-panel="funnel"');
 	const hotspotsIndex = markup.indexOf('data-panel="hotspots"');
 	const statusIndex = markup.indexOf('data-panel="status"');
 	const enginesIndex = markup.indexOf('data-panel="engines"');
-	const cweIndex = markup.indexOf('data-panel="cwe"');
 	const languageRiskIndex = markup.indexOf('data-panel="language-risk"');
 
 	assert.notEqual(trendIndex, -1);
-	assert.ok(trendIndex < funnelIndex);
-	assert.ok(funnelIndex < hotspotsIndex);
+	assert.ok(trendIndex < hotspotsIndex);
 	assert.ok(hotspotsIndex < statusIndex);
 	assert.ok(statusIndex < enginesIndex);
-	assert.ok(enginesIndex < cweIndex);
-	assert.ok(cweIndex < languageRiskIndex);
+	assert.ok(enginesIndex < languageRiskIndex);
+	assert.equal(markup.indexOf('data-panel="funnel"'), -1);
+	assert.equal(markup.indexOf('data-panel="cwe"'), -1);
 });
 
 test("DashboardCommandCenter shows empty-state copy when snapshot panels are empty", async () => {
@@ -283,11 +276,12 @@ test("DashboardCommandCenter shows empty-state copy when snapshot panels are emp
 
 	assert.match(markup, /暂无趋势数据/);
 	assert.match(markup, /暂无热点项目/);
+	assert.match(markup, /暂无引擎贡献数据/);
 	assert.match(markup, /暂无语言风险数据/);
-	assert.match(markup, /暂无 CWE 攻击面数据/);
+	assert.doesNotMatch(markup, /暂无 CWE 攻击面数据/);
 });
 
-test("DashboardCommandCenter hides zero-value cwe rows and keeps the empty-state copy", async () => {
+test("DashboardCommandCenter no longer renders the legacy cwe panel in the main layout", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
@@ -319,9 +313,10 @@ test("DashboardCommandCenter hides zero-value cwe rows and keeps the empty-state
 		}),
 	);
 
-	assert.match(markup, /暂无 CWE 攻击面数据/);
 	assert.doesNotMatch(markup, /CWE-79/);
 	assert.doesNotMatch(markup, /CWE-89/);
+	assert.doesNotMatch(markup, /CWE 攻击面/);
+	assert.equal(markup.indexOf('data-panel="cwe"'), -1);
 });
 
 test("AttackSurfaceTreemapContent renders tile text from flat treemap node props", async () => {

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

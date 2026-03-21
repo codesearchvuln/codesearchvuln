@@ -39,14 +39,7 @@ test("AuditDetailContent 渲染 search_code 结构化证据详情", () => {
           filePath: "src/auth.ts",
           matchLine: 88,
           matchText: "if (!is_admin(user)) return",
-          windowStartLine: 87,
-          windowEndLine: 89,
           language: "typescript",
-          lines: [
-            { lineNumber: 87, text: "function guard(user) {", kind: "context" },
-            { lineNumber: 88, text: "if (!is_admin(user)) return", kind: "match" },
-            { lineNumber: 89, text: "}", kind: "context" },
-          ],
         },
       ],
     },
@@ -61,7 +54,7 @@ test("AuditDetailContent 渲染 search_code 结构化证据详情", () => {
 
   assert.match(markup, /结构化证据/);
   assert.match(markup, /rg -&gt; sed/);
-  assert.match(markup, /src\/auth\.ts:87-89/);
+  assert.match(markup, /src\/auth\.ts:88/);
   assert.match(markup, /概览/);
   assert.doesNotMatch(markup, /已完成：search_code/);
   assert.doesNotMatch(markup, /命中窗口/);

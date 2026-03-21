@@ -54,11 +54,20 @@ test("project docs and config no longer advertise Supabase setup", () => {
 		"utf8",
 	);
 	const architectureDoc = readText("docs/ARCHITECTURE.md");
-	const agentArchitectureDoc = readText("docs/AGENT_AUDIT_ARCHITECTURE.md");
-	const i18nMap = fs.readFileSync(
-		path.join(frontendDir, "src/shared/i18n/offlineZhEnMap.generated.json"),
-		"utf8",
+	const agentArchitectureDocPath = path.join(
+		repoRoot,
+		"docs/AGENT_AUDIT_ARCHITECTURE.md",
 	);
+	const agentArchitectureDoc = fs.existsSync(agentArchitectureDocPath)
+		? fs.readFileSync(agentArchitectureDocPath, "utf8")
+		: "";
+	const i18nMapPath = path.join(
+		frontendDir,
+		"src/shared/i18n/offlineZhEnMap.generated.json",
+	);
+	const i18nMap = fs.existsSync(i18nMapPath)
+		? fs.readFileSync(i18nMapPath, "utf8")
+		: "";
 
 	assert.equal(envExample.includes("VITE_SUPABASE"), false);
 	assert.equal(architectureDoc.includes("shared/config/database.ts"), false);

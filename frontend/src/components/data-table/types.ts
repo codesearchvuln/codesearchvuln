@@ -129,7 +129,7 @@ export interface DataTablePaginationConfig<TData> {
   infoLabel?: (context: DataTableSummaryContext<TData>) => ReactNode;
 }
 
-export interface DataTableEmptyState {
+export interface DataTableEmptyStateConfig {
   title?: string;
   description?: string;
 }
@@ -144,7 +144,7 @@ export interface DataTableProps<TData> {
   onStateChange?: (state: DataTableQueryState) => void;
   loading?: boolean;
   error?: ReactNode;
-  emptyState?: DataTableEmptyState;
+  emptyState?: DataTableEmptyStateConfig;
   toolbar?: false | DataTableToolbarConfig<TData>;
   selection?: DataTableSelectionConfig<TData>;
   summary?: ReactNode | ((context: DataTableSummaryContext<TData>) => ReactNode);
