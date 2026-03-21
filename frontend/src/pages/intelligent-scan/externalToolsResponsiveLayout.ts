@@ -24,25 +24,17 @@ function toSafePositiveNumber(value: number, fallback: number) {
 export function resolveResponsiveExternalToolsLayout({
   width,
   height,
-  minCardWidth = EXTERNAL_TOOLS_CARD_MIN_WIDTH,
   minCardHeight = EXTERNAL_TOOLS_CARD_MIN_HEIGHT,
   gap = EXTERNAL_TOOLS_GRID_GAP,
 }: ResponsiveExternalToolsLayoutInput): ResponsiveExternalToolsLayout {
   const safeWidth = Math.max(0, width);
   const safeHeight = Math.max(0, height);
-  const safeMinCardWidth = toSafePositiveNumber(
-    minCardWidth,
-    EXTERNAL_TOOLS_CARD_MIN_WIDTH,
-  );
   const safeMinCardHeight = toSafePositiveNumber(
     minCardHeight,
     EXTERNAL_TOOLS_CARD_MIN_HEIGHT,
   );
   const safeGap = Math.max(0, gap);
-  const columnCount = Math.max(
-    1,
-    Math.floor((safeWidth + safeGap) / (safeMinCardWidth + safeGap)) || 1,
-  );
+  const columnCount = safeWidth >= 0 ? 1 : 1;
   const rowCount = Math.max(
     1,
     Math.floor((safeHeight + safeGap) / (safeMinCardHeight + safeGap)) || 1,

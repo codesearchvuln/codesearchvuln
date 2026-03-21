@@ -53,6 +53,27 @@ interface AgentTaskPreflightPayload {
   savedConfig?: LlmQuickConfigSnapshotPayload | null;
 }
 
+export interface SkillCatalogItemPayload {
+  skill_id: string;
+  name: string;
+  namespace: string;
+  summary: string;
+  entrypoint: string;
+  aliases: string[];
+  has_scripts: boolean;
+  has_bin: boolean;
+  has_assets: boolean;
+}
+
+interface SkillCatalogResponsePayload {
+  enabled: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  items: SkillCatalogItemPayload[];
+  error?: string | null;
+}
+
 export interface ProjectTransferItem {
   source_project_id: string;
   name?: string | null;
@@ -532,6 +553,28 @@ export const api = {
       };
       console.error('[API] getUserConfig 失败:', apiError?.response?.status, apiError?.message);
       return null;
+    }
+  },
+
+  async getSkillCatalog(params?: {
+    q?: string;
+    namespace?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<SkillCatalogItemPayload[]> {
+    try {
+      const res = await apiClient.get<SkillCatalogResponsePayload>("/skills/catalog", {
+        params: {
+          q: params?.q ?? "",
+          namespace: params?.namespace,
+          limit: params?.limit ?? 200,
+          offset: params?.offset ?? 0,
+        },
+      });
+      return Array.isArray(res.data?.items) ? res.data.items : [];
+    } catch (error) {
+      console.error("[API] getSkillCatalog 失败:", error);
+      return [];
     }
   },
 
