@@ -1,5 +1,13 @@
 # Phase 4：Thread Checkpoint And Recovery
 
+## 阅读定位
+
+- **文档类型**：How-to oriented implementation spec。
+- **目标读者**：负责恢复机制、持久化边界和 checkpoint 模型设计的实现者。
+- **阅读目标**：明确 Phase 4 不是“把所有运行时细节都落盘”，而是在不破坏 queue 真相源的前提下保存可恢复的 thread envelope。
+- **建议前置**：默认已经读完 [phase1-session-runtime-and-middleware.md](./phase1-session-runtime-and-middleware.md)、[phase2-skills-progressive-loading.md](./phase2-skills-progressive-loading.md) 和 [phase3-isolated-subagent-runtime.md](./phase3-isolated-subagent-runtime.md)。
+- **术语入口**：`thread checkpoint`、`latest_agent_checkpoint_ref` 等词可先看 [../glossary.md](../glossary.md)。
+
 ## 目标与边界
 
 ### 目标
@@ -30,6 +38,12 @@
 - `WorkflowState` 作为领域状态摘要的地位
 - `TaskWriteScopeGuard`
 - `ToolExecutionCoordinator`
+
+## 上下游文档
+
+- 上一篇：[phase3-isolated-subagent-runtime.md](./phase3-isolated-subagent-runtime.md)
+- 总览入口：[README.md](./README.md)
+- 术语对照：[../glossary.md](../glossary.md)
 
 ## 当前代码锚点
 

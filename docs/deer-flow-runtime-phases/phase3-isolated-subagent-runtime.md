@@ -1,5 +1,13 @@
 # Phase 3：Isolated Sub-Agent Runtime
 
+## 阅读定位
+
+- **文档类型**：How-to oriented implementation spec。
+- **目标读者**：负责 worker runtime、handoff、并发配额和 legacy sub-agent 兼容桥接的实现者。
+- **阅读目标**：理解本 phase 的重点是“统一 worker 壳与隔离规则”，不是重写顶层 orchestrator。
+- **建议前置**：先读 [phase0-runtime-contracts-and-guardrails.md](./phase0-runtime-contracts-and-guardrails.md) 和 [phase1-session-runtime-and-middleware.md](./phase1-session-runtime-and-middleware.md)；如果会依赖 skills 能力，再补读 [phase2-skills-progressive-loading.md](./phase2-skills-progressive-loading.md)。
+- **术语入口**：`worker profile`、`HandoffEnvelope` 等词可先在 [../glossary.md](../glossary.md) 中对齐。
+
 ## 目标与边界
 
 ### 目标
@@ -30,6 +38,12 @@
 ### 哪些模块语义不动
 
 - `WorkflowOrchestratorAgent` 的顶层确定性阶段推进
+
+## 上下游文档
+
+- 上一篇：[phase2-skills-progressive-loading.md](./phase2-skills-progressive-loading.md)
+- 下一篇：[phase4-thread-checkpoint-and-recovery.md](./phase4-thread-checkpoint-and-recovery.md)
+- 总览入口：[README.md](./README.md)
 - `AuditWorkflowEngine` 的 phase 顺序和队列驱动语义
 - `TaskWriteScopeGuard` 的写保护语义
 - `ToolExecutionCoordinator` 的工具 contract 语义

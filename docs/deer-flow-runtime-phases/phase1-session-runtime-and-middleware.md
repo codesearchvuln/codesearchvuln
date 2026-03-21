@@ -1,5 +1,13 @@
 # Phase 1：Session Runtime And Middleware
 
+## 阅读定位
+
+- **文档类型**：How-to oriented implementation spec。
+- **目标读者**：准备落地 session runtime、history compaction 和 runtime middleware 的实现者。
+- **阅读目标**：明确 Phase 1 只解决 host session 真相源，不提前混入 skill loading、worker isolation 和 checkpoint 完整实现。
+- **建议前置**：先读 [phase0-runtime-contracts-and-guardrails.md](./phase0-runtime-contracts-and-guardrails.md)，再进入本文。
+- **术语入口**：`host session`、`loaded_skill_ids` 等词可先在 [../glossary.md](../glossary.md) 中统一。
+
 ## 目标与边界
 
 ### 目标
@@ -223,6 +231,12 @@ class AgentRuntimeSession:
 4. 把 `ReconAgent` / `BusinessLogicReconAgent` 的压缩逻辑改造成 session summary provider。
 5. 再扩展到 `AnalysisAgent`、`BusinessLogicAnalysisAgent`、`VerificationAgent`、`ReportAgent`、`WorkflowOrchestratorAgent`。
 6. 最后补齐 runtime event adapter 与 deterministic short-circuit 规则。
+
+## 上下游文档
+
+- 上一篇：[phase0-runtime-contracts-and-guardrails.md](./phase0-runtime-contracts-and-guardrails.md)
+- 下一篇：[phase2-skills-progressive-loading.md](./phase2-skills-progressive-loading.md)
+- 总览入口：[README.md](./README.md)
 
 ## 测试入口
 

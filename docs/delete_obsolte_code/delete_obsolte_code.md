@@ -1,4 +1,4 @@
-# delete_obsolte_code Implementation Plan
+# Legacy Early-Scan Decommission Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -10,6 +10,21 @@
 
 ---
 
+## Reading Guide
+
+- **Document type:** How-to / execution plan.
+- **Target audience:** Developers actively removing the legacy early-scan chain from frontend, backend, tests, and schema.
+- **Primary goal:** Decommission the old audit-task stack without regressing the current three supported scan modes.
+- **Recommended reading strategy:** Read `Core Constraints`, `Definition of Done`, and `Phase Gates` first; only then move into the task-by-task checklist.
+- **Background docs:** Use [../architecture.md](../architecture.md) for the current three-scan architecture and [../glossary.md](../glossary.md) for term alignment.
+- **Out of scope:** Redesigning the active static, intelligent, or hybrid scan architecture.
+
+## What This Plan Optimizes For
+
+- Remove legacy code in a controlled order instead of deleting references opportunistically.
+- Keep the current three-scan product model stable at every gate.
+- Treat verification as a release blocker, not a cleanup afterthought.
+
 ## Core Constraints
 
 - The only supported scan modes after this work are static, intelligent, and hybrid.
@@ -18,9 +33,9 @@
   - `/api/v1/static-tasks/*`
   - `/api/v1/agent-tasks/*`
   - `/tasks/static`
-- `/tasks/intelligent`
-- `/tasks/hybrid`
-- `frontend/src/components/scan/CreateProjectScanDialog.tsx`
+  - `/tasks/intelligent`
+  - `/tasks/hybrid`
+  - `frontend/src/components/scan/CreateProjectScanDialog.tsx`
 - `frontend/src/features/projects/services/repoZipScan.ts` cannot be deleted wholesale because `validateZipFile` is still used by current flows.
 
 ## Definition of Done

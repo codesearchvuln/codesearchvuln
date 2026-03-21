@@ -1,5 +1,13 @@
 # Phase 0：Runtime Contracts And Guardrails
 
+## 阅读定位
+
+- **文档类型**：Reference-heavy design spec。
+- **目标读者**：负责 DeerFlow runtime 改造总体设计、需要冻结术语和边界的人。
+- **阅读目标**：先把“哪些词不能改、哪些边界不能破、后续 phase 该依赖什么”定下来。
+- **建议前置**：先读 [README.md](./README.md) 了解 5 个 phase 的整体依赖顺序。
+- **术语入口**：相关核心词可在 [../glossary.md](../glossary.md) 中快速查阅。
+
 ## 目标与边界
 
 ### 目标
@@ -218,6 +226,12 @@
 | `memory_refs` | `list[dict]` | shared/agent memory 节点引用 |
 | `selected_context` | `dict` | 从父线程裁剪出的最小必要上下文 |
 | `trace_context` | `dict` | trace、correlation、parent agent 元信息 |
+
+## 上下游文档
+
+- 总览入口：[README.md](./README.md)
+- 下一篇：[phase1-session-runtime-and-middleware.md](./phase1-session-runtime-and-middleware.md)
+- 术语对照：[../glossary.md](../glossary.md)
 
 ### `ThreadCheckpointEnvelope`
 

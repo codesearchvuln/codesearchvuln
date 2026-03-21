@@ -1,5 +1,13 @@
 # DeerFlow Runtime Phases 总览
 
+## 阅读定位
+
+- **文档类型**：Explanation + migration planning reference。
+- **目标读者**：负责 DeerFlow runtime 改造的实现者、reviewer 和方案维护者。
+- **阅读目标**：先看清整个改造为什么拆成 5 个 phase，再进入单个 phase 文档执行。
+- **建议前置**：默认读者已经知道当前审计 workflow 主线；如果没有这层背景，先回看 [../architecture.md](../architecture.md) 和 [../agentic_scan_core/workflow_overview.md](../agentic_scan_core/workflow_overview.md)。
+- **术语入口**：如果你需要先统一 `host session`、`worker profile`、`thread checkpoint` 等词，先看 [../glossary.md](../glossary.md)。
+
 ## 目的
 
 本目录用于把 DeerFlow runtime 改造拆成一个共享契约层和四个能力阶段，确保实现者在落代码时不会重复定义 `session / thread / worker / checkpoint / skill`，也不会把现有审计 workflow 的确定性语义改散。
@@ -10,6 +18,16 @@
 - 业务逻辑链路：`business_logic_recon -> business_logic_analysis`
 
 两条链路都属于同一套 runtime 契约，不再把业务逻辑轨道视为临时兼容实现。
+
+## 五个 phase 分别解决什么问题
+
+| Phase | 文档 | 解决的问题 | 进入下一阶段前要稳定什么 |
+| --- | --- | --- | --- |
+| Phase 0 | [phase0-runtime-contracts-and-guardrails.md](./phase0-runtime-contracts-and-guardrails.md) | 冻结术语、对象模型、事件和边界 | 词表与不可破坏边界 |
+| Phase 1 | [phase1-session-runtime-and-middleware.md](./phase1-session-runtime-and-middleware.md) | 统一 host session 真相源 | session、history、runtime policy |
+| Phase 2 | [phase2-skills-progressive-loading.md](./phase2-skills-progressive-loading.md) | 收敛 skill 目录与按需加载策略 | unified skill catalog 与 prompt 注入协议 |
+| Phase 3 | [phase3-isolated-subagent-runtime.md](./phase3-isolated-subagent-runtime.md) | 把 workflow worker 和 legacy sub-agent 收敛到同一壳 | worker profile、handoff、并发规则 |
+| Phase 4 | [phase4-thread-checkpoint-and-recovery.md](./phase4-thread-checkpoint-and-recovery.md) | 建立 thread 级 checkpoint 与恢复 | thread envelope、恢复边界、checkpoint 策略 |
 
 ## 当前代码到 Runtime 契约映射
 
@@ -119,3 +137,9 @@
 - BL 双轨一致：`business_logic_recon` / `business_logic_analysis` 在 phase、profile、worker、checkpoint 中都被纳入一等契约。
 - 技能目录一致：unified catalog、`SKILLS.md` 快照、`shared.md` 工具目录摘要、`/skills` API 与 `/config.skillAvailability` 不再各说各话。
 - 恢复边界一致：thread checkpoint 只恢复 runtime state，不回灌 finding/risk/todo 实体，不覆盖 queue 真相源。
+
+## 推荐跳转
+
+- 要统一术语和边界：先读 [phase0-runtime-contracts-and-guardrails.md](./phase0-runtime-contracts-and-guardrails.md)。
+- 要按实施顺序推进：从 [phase1-session-runtime-and-middleware.md](./phase1-session-runtime-and-middleware.md) 开始往后读。
+- 要回到系统级和智能扫描背景：读 [../architecture.md](../architecture.md) 和 [../agentic_scan_core/workflow_overview.md](../agentic_scan_core/workflow_overview.md)。

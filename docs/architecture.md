@@ -2,6 +2,23 @@
 
 > 这份文档不是接口清单，也不是目录罗列。它的目标只有一个：让第一次接手这个项目的开发者，能在最短时间内看懂系统主线，并知道应该从哪里开始读代码。
 
+## 阅读定位
+
+- **文档类型**：以 Explanation 为主，兼顾入门阶段最常用的 Reference 索引。
+- **目标读者**：第一次接手 AuditTool / VulHunter 的前端、后端或全栈开发者。
+- **阅读目标**：快速建立系统主线，理解三类扫描模式的边界，并知道该从哪些代码入口开始定位问题。
+- **建议搭配**：如果你接下来主要改智能扫描或混合扫描，再继续阅读 [agentic_scan_core/README.md](./agentic_scan_core/README.md)。
+- **术语入口**：如果你对 `Project`、`AgentTask`、bootstrap、finding 这些词还不熟，先看 [glossary.md](./glossary.md)。
+- **本文不覆盖**：接口字段逐项解释、数据库逐表说明、未来规划设计。
+
+## 建议阅读方式
+
+按下面的顺序阅读，最容易形成稳定心智模型：
+
+1. 先看“这个系统是什么”和“三类扫描任务”，建立产品级边界。
+2. 再看“核心运行模型”和“请求怎么流动”，理解对象关系与执行主线。
+3. 最后按“代码从哪里读”和“常见开发任务怎么定位”回到具体文件。
+
 ## 先看懂系统
 
 ### 这个系统是什么
@@ -402,6 +419,12 @@ AuditTool 是一个面向代码仓库安全扫描的平台。仓库名叫 `Audit
 - 前端任务聚合入口：`frontend/src/features/tasks/services/taskActivities.ts`
 
 这几个文件合起来，基本就能覆盖你第一次接手项目时最常见的理解路径。
+
+## 继续阅读
+
+- 想继续看智能扫描 / 混合扫描主线：读 [agentic_scan_core/workflow_overview.md](./agentic_scan_core/workflow_overview.md)。
+- 想继续看智能体职责和工具边界：读 [agentic_scan_core/agent_tools.md](./agentic_scan_core/agent_tools.md)。
+- 想统一术语理解：回看 [glossary.md](./glossary.md)。
 
 ---
 

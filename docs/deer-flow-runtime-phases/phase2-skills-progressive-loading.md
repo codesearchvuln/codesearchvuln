@@ -1,5 +1,13 @@
 # Phase 2：Skills Progressive Loading
 
+## 阅读定位
+
+- **文档类型**：How-to oriented implementation spec。
+- **目标读者**：负责统一 skill 目录、prompt 注入和按需加载链路的实现者。
+- **阅读目标**：看清 Phase 2 的核心不是“多加一个技能来源”，而是把 skill 摘要、正文加载和接口视图收敛为一套协议。
+- **建议前置**：先读 [phase1-session-runtime-and-middleware.md](./phase1-session-runtime-and-middleware.md)，因为 `loaded_skill_ids` 和 prompt 注入都依赖稳定 session。
+- **术语入口**：`unified skill catalog` 等词建议先看 [../glossary.md](../glossary.md)。
+
 ## 目标与边界
 
 ### 目标
@@ -30,6 +38,12 @@
 - `backend/scripts/build_skill_registry.py` 的镜像和 manifest 输出职责
 - `MarkdownMemoryStore.write_skills_snapshot()` 的兼容快照职责
 - tool contract / queue / workflow 领域逻辑
+
+## 上下游文档
+
+- 上一篇：[phase1-session-runtime-and-middleware.md](./phase1-session-runtime-and-middleware.md)
+- 下一篇：[phase3-isolated-subagent-runtime.md](./phase3-isolated-subagent-runtime.md)
+- 总览入口：[README.md](./README.md)
 
 ## 当前代码锚点
 
