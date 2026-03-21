@@ -6,7 +6,6 @@
 import { useCallback, useRef, useState } from "react";
 import { Link, matchPath, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import LanguageToggle from "@/components/layout/LanguageToggle";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import {
 	Menu,
@@ -63,7 +62,7 @@ interface SidebarProps {
 export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 	const location = useLocation();
 	const [mobileOpen, setMobileOpen] = useState(false);
-	const { t, isEnglish } = useI18n();
+	const { t } = useI18n();
 	const { logoSrc } = useLogoVariant();
 	const hasPrefetchedTaskGroupRef = useRef(false);
 	const hasPrefetchedDashboardRef = useRef(false);
@@ -208,7 +207,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 
 				{!collapsed && (
 					<span
-						className={`tracking-wide transition-all duration-300 break-words leading-snug ${isEnglish ? "text-sm" : "text-base"} ${isActive ? "font-semibold" : "font-medium"} ${compact ? "font-mono text-sm" : "font-mono"}`}
+						className={`tracking-wide transition-all duration-300 break-words leading-snug text-base ${isActive ? "font-semibold" : "font-medium"} ${compact ? "font-mono text-sm" : "font-mono"}`}
 					>
 						{routeLabel}
 					</span>
@@ -386,7 +385,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 											</span>
 											{!collapsed && (
 												<span
-													className={`font-mono tracking-wide ${isEnglish ? "text-sm" : "text-base"} ${isGroupActive ? "font-semibold" : "font-medium"}`}
+													className={`font-mono tracking-wide text-base ${isGroupActive ? "font-semibold" : "font-medium"}`}
 												>
 													{groupLabel}
 												</span>
@@ -421,35 +420,6 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 
 						{/* Theme Toggle */}
 						<ThemeToggle collapsed={collapsed} />
-
-						{/* Account Link */}
-						{/*<Link
-                            to="/account"
-                            className={`
-                                flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-300 group
-                                ${location.pathname === '/account'
-                                    ? 'bg-primary/15 border border-primary/40'
-                                    : 'border border-transparent hover:bg-card/60 hover:border-border/50'
-                                }
-                            `}
-                            style={{
-                                color: location.pathname === '/account' ? 'hsl(var(--primary))' : 'var(--cyber-text-muted)'
-                            }}
-                            onClick={() => setMobileOpen(false)}
-                            title={collapsed ? "账号管理" : undefined}
-                        >
-                            <span className={`p-1.5 rounded-md transition-all duration-300 ${location.pathname === '/account' ? 'bg-primary/20' : 'group-hover:bg-muted/50'}`}>
-                                <UserCircle className="w-[18px] h-[18px] flex-shrink-0" />
-                            </span>
-                            {!collapsed && (
-                                <span className="font-mono text-sm">账号管理</span>
-                            )}
-                        </Link>*/}
-
-						<LanguageToggle
-							compact={collapsed}
-							className={collapsed ? "px-0" : "px-1"}
-						/>
 					</div>
 				</div>
 			</aside>

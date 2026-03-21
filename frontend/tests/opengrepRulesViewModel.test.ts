@@ -21,10 +21,10 @@ test("OpengrepRules renders unified table layout shell", () => {
 
   assert.match(markup, /有效规则总数/);
   assert.match(markup, /支持编程语言个数/);
-  assert.match(markup, /搜索规则名称或ID/);
+  assert.match(markup, /规则名称/);
   assert.match(markup, /规则来源/);
-  assert.match(markup, /重置/);
-  assert.match(markup, />列</);
+  assert.match(markup, /语言/);
+  assert.match(markup, /序号/);
   assert.match(markup, /上一页/);
   assert.match(markup, /下一页/);
 });

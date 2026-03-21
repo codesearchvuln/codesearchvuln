@@ -150,7 +150,7 @@ export default function OpengrepRules({
 		toast.info("gitleaks 规则管理暂未接入");
 	};
 
-	const { t, isEnglish } = useI18n();
+	const { t } = useI18n();
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [rules, setRules] = useState<OpengrepRule[]>([]);
@@ -1086,12 +1086,6 @@ export default function OpengrepRules({
 	const getConfidenceLabel = (confidence?: string | null) => {
 		const normalized = normalizeConfidence(confidence);
 		if (!normalized) return "";
-		if (isEnglish) {
-			if (normalized === "HIGH") return "High";
-			if (normalized === "MEDIUM") return "Medium";
-			if (normalized === "LOW") return "Low";
-			return normalized;
-		}
 		if (normalized === "HIGH") return "高";
 		if (normalized === "MEDIUM") return "中";
 		if (normalized === "LOW") return "低";
@@ -1137,7 +1131,7 @@ export default function OpengrepRules({
 			{ label: getConfidenceLabel("MEDIUM"), value: "MEDIUM" },
 			{ label: getConfidenceLabel("LOW"), value: "LOW" },
 		],
-		[isEnglish],
+		[],
 	);
 
 	const columns = useMemo<AppColumnDef<OpengrepRule, unknown>[]>(
@@ -1347,7 +1341,7 @@ export default function OpengrepRules({
 				),
 			},
 		],
-		[availableLanguages, confidenceOptions, highlightRuleKeyword, isEnglish],
+		[availableLanguages, confidenceOptions, highlightRuleKeyword],
 	);
 
 	return (

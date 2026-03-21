@@ -550,14 +550,14 @@ def _sanitize_mcp_config(raw_mcp_config: Any) -> dict:
 
 def _sanitize_other_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
-    for retired_key in ("githubToken", "gitlabToken", "giteaToken"):
+    for retired_key in ("githubToken", "gitlabToken", "giteaToken", "outputLanguage"):
         candidate.pop(retired_key, None)
     candidate.pop("mcpConfig", None)
     return candidate
 
 def _strip_mcp_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
-    for retired_key in ("githubToken", "gitlabToken", "giteaToken"):
+    for retired_key in ("githubToken", "gitlabToken", "giteaToken", "outputLanguage"):
         candidate.pop(retired_key, None)
     candidate.pop("mcpConfig", None)
     return candidate
@@ -695,7 +695,6 @@ class OtherConfigSchema(BaseModel):
     maxAnalyzeFiles: Optional[int] = None
     llmConcurrency: Optional[int] = None
     llmGapMs: Optional[int] = None
-    outputLanguage: Optional[str] = None
 
 class UserConfigRequest(BaseModel):
     """用户配置请求"""
@@ -748,7 +747,6 @@ def get_default_config() -> dict:
             "maxAnalyzeFiles": settings.MAX_ANALYZE_FILES,
             "llmConcurrency": settings.LLM_CONCURRENCY,
             "llmGapMs": settings.LLM_GAP_MS,
-            "outputLanguage": settings.OUTPUT_LANGUAGE,
         }
     }
 
@@ -991,7 +989,6 @@ async def _execute_llm_test_request(
     saved_concurrency = saved_other_config.get('llmConcurrency', settings.LLM_CONCURRENCY)
     saved_gap_ms = saved_other_config.get('llmGapMs', settings.LLM_GAP_MS)
     saved_max_files = saved_other_config.get('maxAnalyzeFiles', settings.MAX_ANALYZE_FILES)
-    saved_output_lang = saved_other_config.get('outputLanguage', settings.OUTPUT_LANGUAGE)
 
     debug_info = {
         "provider_requested": request.provider,
@@ -1006,7 +1003,6 @@ async def _execute_llm_test_request(
             "concurrency": saved_concurrency,
             "gap_ms": saved_gap_ms,
             "max_analyze_files": saved_max_files,
-            "output_language": saved_output_lang,
         },
     }
 

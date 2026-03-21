@@ -118,9 +118,6 @@ class Settings(BaseSettings):
     # 通用缓存目录（git缓存等）
     CACHE_DIR: str = "./data/cache"  # 缓存目录基础路径
     
-    # 输出语言配置 - 支持 zh-CN（中文）和 en-US（英文）
-    OUTPUT_LANGUAGE: str = "zh-CN"
-    
     # ============ Agent 模块配置 ============
 
     # 嵌入模型配置（独立于 LLM 配置）

@@ -187,11 +187,6 @@ class LLMService:
         }
         return provider_map.get(resolved, LLMProvider.OPENAI)
     
-    def _get_output_language(self) -> str:
-        """获取输出语言配置（优先使用用户配置）"""
-        user_other_config = self._user_config.get('otherConfig', {})
-        return user_other_config.get('outputLanguage') or getattr(settings, 'OUTPUT_LANGUAGE', 'zh-CN')
-    
     def _build_system_prompt(self, is_chinese: bool) -> str:
         """构建系统提示词（支持中英文）"""
         schema = """{
@@ -344,14 +339,11 @@ CRITICAL: Read line numbers from the "lineNumber|" prefix on the left of each co
     async def analyze_code(self, code: str, language: str) -> Dict[str, Any]:
         """
         分析代码并返回结构化问题
-        支持中英文输出
         
         Raises:
             Exception: 当LLM调用失败或返回无效响应时抛出异常
         """
-        # 获取输出语言配置
-        output_language = self._get_output_language()
-        is_chinese = output_language == 'zh-CN'
+        is_chinese = True
         
         # 添加行号帮助LLM定位问题
         code_with_lines = '\n'.join(
@@ -852,7 +844,6 @@ Please analyze the following code:
         language: str, 
         custom_prompt: str,
         rules: Optional[list] = None,
-        output_language: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         使用自定义提示词分析代码
@@ -862,13 +853,8 @@ Please analyze the following code:
             language: 编程语言
             custom_prompt: 自定义系统提示词
             rules: 可选的审计规则列表
-            output_language: 输出语言 (zh/en)，如果不指定则使用系统配置
         """
-        if output_language:
-            is_chinese = output_language == 'zh'
-        else:
-            system_output_language = self._get_output_language()
-            is_chinese = system_output_language == 'zh-CN'
+        is_chinese = True
         
         # 添加行号
         code_with_lines = '\n'.join(
@@ -1015,8 +1001,7 @@ Please analyze the following code:
                 )
                 template = result.scalar_one_or_none()
                 if template:
-                    output_language = self._get_output_language()
-                    custom_prompt = template.content_zh if output_language == 'zh-CN' else template.content_en
+                    custom_prompt = template.content_zh or custom_prompt
             elif use_default_template:
                 # 没有指定模板时，使用数据库中的默认模板
                 result = await db_session.execute(
@@ -1028,8 +1013,7 @@ Please analyze the following code:
                 )
                 template = result.scalar_one_or_none()
                 if template:
-                    output_language = self._get_output_language()
-                    custom_prompt = template.content_zh if output_language == 'zh-CN' else template.content_en
+                    custom_prompt = template.content_zh or custom_prompt
                     logger.info(f"使用默认提示词模板: {template.name}")
             
             # 获取规则集

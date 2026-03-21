@@ -148,7 +148,6 @@ interface SystemConfigData {
 	maxAnalyzeFiles: number;
 	llmConcurrency: number;
 	llmGapMs: number;
-	outputLanguage: string;
 }
 
 type ConfigSection = "llm" | "embedding" | "analysis";
@@ -205,8 +204,7 @@ type AdvancedConfigItemId =
 	| "toolTimeout"
 	| "maxAnalyzeFiles"
 	| "llmConcurrency"
-	| "llmGapMs"
-	| "outputLanguage";
+	| "llmGapMs";
 
 const DEFAULT_CONFIG: SystemConfigData = {
 	llmProvider: "openai",
@@ -225,7 +223,6 @@ const DEFAULT_CONFIG: SystemConfigData = {
 	maxAnalyzeFiles: 0,
 	llmConcurrency: 1,
 	llmGapMs: 3000,
-	outputLanguage: "zh-CN",
 };
 
 function buildSystemConfigDataFromBackendConfig(
@@ -297,10 +294,6 @@ function buildSystemConfigDataFromBackendConfig(
 			typeof otherConfig.llmGapMs === "number"
 				? otherConfig.llmGapMs
 				: DEFAULT_CONFIG.llmGapMs,
-		outputLanguage:
-			typeof otherConfig.outputLanguage === "string"
-				? otherConfig.outputLanguage
-				: DEFAULT_CONFIG.outputLanguage,
 	};
 }
 
@@ -533,28 +526,6 @@ function AdvancedConfigDialog(props: {
 					/>
 				),
 			},
-			outputLanguage: {
-				label: "输出语言",
-				desc: "智能扫描输出语言。",
-				input: (
-					<Select
-						value={cfg.outputLanguage}
-						onValueChange={(value) => update("outputLanguage", value)}
-					>
-						<SelectTrigger className="h-10 cyber-input">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent className="cyber-dialog border-border">
-							<SelectItem value="zh-CN" className="font-mono">
-								🇨🇳 中文
-							</SelectItem>
-							<SelectItem value="en-US" className="font-mono">
-								🇺🇸 English
-							</SelectItem>
-						</SelectContent>
-					</Select>
-				),
-			},
 		};
 
 		const meta = panelMeta[item as AdvancedConfigItemId];
@@ -657,7 +628,6 @@ function AdvancedConfigDialog(props: {
 										["maxAnalyzeFiles", "最大分析文件数"],
 										["llmConcurrency", "LLM 并发数"],
 										["llmGapMs", "请求间隔"],
-										["outputLanguage", "输出语言"],
 									].map(([id, label]) => (
 										<button
 											key={id}
@@ -1308,7 +1278,6 @@ export function SystemConfig({
 					maxAnalyzeFiles: config.maxAnalyzeFiles,
 					llmConcurrency: config.llmConcurrency,
 					llmGapMs: config.llmGapMs,
-					outputLanguage: config.outputLanguage,
 				},
 			});
 
@@ -2020,29 +1989,6 @@ export function SystemConfig({
 										}
 										className="h-10 cyber-input"
 									/>
-								</div>
-								<div className="space-y-2">
-									<Label className="text-xs font-bold text-muted-foreground uppercase">
-										输出语言
-									</Label>
-									<Select
-										value={config.outputLanguage}
-										onValueChange={(value) =>
-											updateConfig("outputLanguage", value)
-										}
-									>
-										<SelectTrigger className="h-10 cyber-input">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent className="cyber-dialog border-border">
-											<SelectItem value="zh-CN" className="font-mono">
-												🇨🇳 中文
-											</SelectItem>
-											<SelectItem value="en-US" className="font-mono">
-												🇺🇸 English
-											</SelectItem>
-										</SelectContent>
-									</Select>
 								</div>
 							</div>
 						</div>

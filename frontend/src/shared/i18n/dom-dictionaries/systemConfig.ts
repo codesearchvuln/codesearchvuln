@@ -1,1 +1,0 @@
-export { systemConfigDictionary } from "./index";

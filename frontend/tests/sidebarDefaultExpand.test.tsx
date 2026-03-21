@@ -36,6 +36,7 @@ test("Sidebar 默认宽版会展开全部分组子菜单", async () => {
 	assert.match(markup, /智能引擎/);
 	assert.match(markup, /外部工具/);
 	assert.match(markup, /Agent 测试/);
+	assert.doesNotMatch(markup, />\s*EN\s*</);
 });
 
 test("Sidebar 分组父项不是可点击链接", async () => {

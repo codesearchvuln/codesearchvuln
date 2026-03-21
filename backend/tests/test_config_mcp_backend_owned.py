@@ -9,6 +9,7 @@ from app.api.v1.endpoints.config import (
     OtherConfigSchema,
     UserConfigRequest,
     get_my_config,
+    get_default_config,
     update_my_config,
 )
 from app.models.user_config import UserConfig
@@ -136,3 +137,72 @@ async def test_get_my_config_strips_legacy_git_tokens_from_other_config(
     assert response.otherConfig.get("maxAnalyzeFiles") == 9
     assert "githubToken" not in response.otherConfig
     assert "gitlabToken" not in response.otherConfig
+
+
+@pytest.mark.asyncio
+async def test_get_my_config_strips_legacy_output_language_from_response(
+    monkeypatch,
+):
+    existing = UserConfig(
+        user_id="user-1",
+        llm_config=json.dumps({}),
+        other_config=json.dumps(
+            {
+                "maxAnalyzeFiles": 5,
+                "outputLanguage": "en-US",
+            }
+        ),
+    )
+    existing.id = "cfg-existing"
+    existing.created_at = datetime.now(timezone.utc)
+
+    fake_db = _FakeDB(existing)
+
+    response = await get_my_config(
+        db=fake_db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert response.otherConfig.get("maxAnalyzeFiles") == 5
+    assert "outputLanguage" not in response.otherConfig
+
+
+@pytest.mark.asyncio
+async def test_update_my_config_strips_legacy_output_language_from_persisted_config(
+    monkeypatch,
+):
+    existing = UserConfig(
+        user_id="user-1",
+        llm_config=json.dumps({}),
+        other_config=json.dumps(
+            {
+                "maxAnalyzeFiles": 7,
+                "outputLanguage": "en-US",
+            }
+        ),
+    )
+    existing.id = "cfg-existing"
+    existing.created_at = datetime.now(timezone.utc)
+
+    fake_db = _FakeDB(existing)
+
+    response = await update_my_config(
+        UserConfigRequest(
+            otherConfig=OtherConfigSchema(
+                llmConcurrency=2,
+            )
+        ),
+        db=fake_db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    stored_other = json.loads(fake_db.saved_config.other_config or "{}")
+    assert stored_other.get("llmConcurrency") == 2
+    assert "outputLanguage" not in stored_other
+    assert "outputLanguage" not in response.otherConfig
+
+
+def test_default_config_does_not_expose_output_language():
+    config = get_default_config()
+
+    assert "outputLanguage" not in config["otherConfig"]

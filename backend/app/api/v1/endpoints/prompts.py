@@ -315,7 +315,6 @@ async def test_prompt_template(
             code=request.code,
             language=request.language,
             custom_prompt=request.content,
-            output_language=request.output_language,
         )
         
         execution_time = time.time() - start_time

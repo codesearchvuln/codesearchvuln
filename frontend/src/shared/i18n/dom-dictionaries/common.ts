@@ -1,1 +1,0 @@
-export { commonDictionary } from "./index";

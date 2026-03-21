@@ -1,1 +1,0 @@
-export { opengrepRulesDictionary } from "./index";

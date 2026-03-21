@@ -1,1 +1,0 @@
-export { dashboardDictionary } from "./index";

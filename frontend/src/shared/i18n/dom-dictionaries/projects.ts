@@ -1,1 +1,0 @@
-export { projectsDictionary } from "./index";

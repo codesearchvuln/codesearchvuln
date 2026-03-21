@@ -1,1 +1,0 @@
-export { intelligentScanDictionary } from "./index";
