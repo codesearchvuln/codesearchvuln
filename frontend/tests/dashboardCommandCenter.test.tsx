@@ -331,10 +331,17 @@ test("DashboardCommandCenter uses enlarged axes and fixed chart spacing constant
 
 	assert.equal(module.HORIZONTAL_STATS_AXIS_FONT_SIZE, 16);
 	assert.equal(module.HORIZONTAL_STATS_LABEL_FONT_SIZE, 16);
-	assert.equal(module.HORIZONTAL_STATS_Y_AXIS_WIDTH, 128);
+	assert.equal(module.HORIZONTAL_STATS_Y_AXIS_MIN_WIDTH, 84);
+	assert.equal(module.HORIZONTAL_STATS_Y_AXIS_MAX_WIDTH, 120);
 	assert.equal(module.HORIZONTAL_STATS_BAR_SIZE, 14);
 	assert.equal(module.HORIZONTAL_STATS_ROW_HEIGHT, 60);
 	assert.equal(module.HORIZONTAL_STATS_BAR_CATEGORY_GAP, 10);
+	assert.deepEqual(module.HORIZONTAL_STATS_CHART_MARGIN, {
+		top: 8,
+		right: 24,
+		left: 12,
+		bottom: 8,
+	});
 	assert.equal(
 		module.HORIZONTAL_STATS_META_ROW_CLASSNAME,
 		"mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between",
@@ -344,6 +351,86 @@ test("DashboardCommandCenter uses enlarged axes and fixed chart spacing constant
 		"flex flex-wrap justify-start gap-2 sm:justify-end",
 	);
 	assert.equal(module.TOP_STATS_GRID_CLASSNAME, "grid grid-cols-2 gap-3 xl:grid-cols-5");
+});
+
+test("estimateHorizontalStatsYAxisWidth shrinks short labels while keeping long labels readable", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+
+	assert.equal(
+		module.estimateHorizontalStatsYAxisWidth([
+			{
+				label: "llm",
+				meta: "",
+				total: 1,
+				critical: 0,
+				high: 0,
+				medium: 0,
+				low: 0,
+				tone: "low",
+			},
+		]),
+		module.HORIZONTAL_STATS_Y_AXIS_MIN_WIDTH,
+	);
+	assert.equal(
+		module.estimateHorizontalStatsYAxisWidth([
+			{
+				label: "Alpha Gateway",
+				meta: "",
+				total: 1,
+				critical: 0,
+				high: 0,
+				medium: 0,
+				low: 0,
+				tone: "high",
+			},
+		]),
+		module.HORIZONTAL_STATS_Y_AXIS_MAX_WIDTH,
+	);
+});
+
+test("vulnerability-types view uses 5-step x-axis ticks", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+
+	assert.deepEqual(module.getHorizontalStatsXAxisProps("vulnerability-types"), {
+		minTickGap: 0,
+		tickCount: 6,
+		allowDecimals: false,
+		domain: [0, "dataMax"],
+		ticks: undefined,
+	});
+	assert.deepEqual(module.getHorizontalStatsXAxisProps("language-risk"), {
+		minTickGap: 0,
+		tickCount: undefined,
+		allowDecimals: false,
+		domain: [0, "auto"],
+		ticks: undefined,
+	});
+	assert.deepEqual(module.getHorizontalStatsXAxisProps("vulnerability-types", [
+		{
+			label: "CWE-89",
+			meta: "SQL 注入",
+			total: 8,
+			critical: 0,
+			high: 0,
+			medium: 0,
+			low: 0,
+			tone: "medium",
+		},
+		{
+			label: "CWE-79",
+			meta: "跨站脚本",
+			total: 13,
+			critical: 0,
+			high: 0,
+			medium: 0,
+			low: 0,
+			tone: "high",
+		},
+	]).ticks, [0, 5, 10, 15]);
 });
 
 test("formatCumulativeDuration formats scan durations with zh units", async () => {

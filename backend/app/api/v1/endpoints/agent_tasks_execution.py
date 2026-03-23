@@ -881,11 +881,15 @@ async def _execute_agent_task(task_id: str):
             async def _run_orchestrator_once():
                 # 将 orchestrator.run() 包装在 asyncio.Task 中，以便可以强制取消
                 run_task = asyncio.create_task(orchestrator.run(input_data))
-                _running_asyncio_tasks[task_id] = run_task
                 try:
                     run_result = await run_task
+                except asyncio.CancelledError:
+                    run_task.cancel()
+                    await asyncio.gather(run_task, return_exceptions=True)
+                    raise
                 finally:
-                    _running_asyncio_tasks.pop(task_id, None)
+                    if not run_task.done():
+                        run_task.cancel()
 
                 if not run_result.success and run_result.error != "任务已取消":
                     raise RuntimeError(run_result.error or "Orchestrator returned unsuccessful result")

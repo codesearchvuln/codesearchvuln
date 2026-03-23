@@ -328,6 +328,28 @@ async def lifespan(app: FastAPI):
 
     # 清理资源
     logger.info("清理资源...")
+    try:
+        from app.api.v1.endpoints.agent_tasks_runtime import _running_asyncio_tasks
+        from app.api.v1.endpoints.static_tasks_shared import _shutdown_static_background_jobs
+
+        active_agent_tasks = [
+            task for task in list(_running_asyncio_tasks.values()) if task and not task.done()
+        ]
+        for task in active_agent_tasks:
+            task.cancel()
+        if active_agent_tasks:
+            await asyncio.gather(*active_agent_tasks, return_exceptions=True)
+
+        cancelled_static_jobs = await _shutdown_static_background_jobs()
+        if active_agent_tasks or cancelled_static_jobs:
+            logger.info(
+                "  - 已取消后台任务: agent=%s static=%s",
+                len(active_agent_tasks),
+                cancelled_static_jobs,
+            )
+    except Exception as e:
+        logger.warning(f"停止后台任务失败: {e}")
+
     # 停止每日清理任务
     try:
         stop_event = getattr(app.state, "cache_cleanup_stop", None)

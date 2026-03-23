@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ import threading
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Dict, List, Optional
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -133,6 +134,7 @@ async def _get_project_root(project_id: str) -> Optional[str]:
 _static_scan_process_lock = threading.Lock()
 _static_running_scan_processes: Dict[str, subprocess.Popen] = {}
 _static_cancelled_scan_tasks: set[str] = set()
+_static_background_jobs: Dict[str, asyncio.Task] = {}
 
 
 def _ensure_opengrep_xdg_dirs() -> None:
@@ -148,6 +150,77 @@ def _ensure_opengrep_xdg_dirs() -> None:
 
 def _scan_task_key(scan_type: str, task_id: str) -> str:
     return f"{scan_type}:{task_id}"
+
+
+def _register_static_background_job(
+    scan_type: str,
+    task_id: str,
+    job: asyncio.Task,
+) -> None:
+    _static_background_jobs[_scan_task_key(scan_type, task_id)] = job
+
+
+def _pop_static_background_job(scan_type: str, task_id: str) -> Optional[asyncio.Task]:
+    return _static_background_jobs.pop(_scan_task_key(scan_type, task_id), None)
+
+
+def _get_static_background_job(scan_type: str, task_id: str) -> Optional[asyncio.Task]:
+    return _static_background_jobs.get(_scan_task_key(scan_type, task_id))
+
+
+def _launch_static_background_job(
+    scan_type: str,
+    task_id: str,
+    coro: Awaitable[Any],
+) -> asyncio.Task:
+    task_name = f"static_scan:{scan_type}:{task_id}"
+    job = asyncio.create_task(coro, name=task_name)
+    _register_static_background_job(scan_type, task_id, job)
+
+    def _on_done(done_task: asyncio.Task) -> None:
+        _pop_static_background_job(scan_type, task_id)
+        try:
+            done_task.exception()
+        except asyncio.CancelledError:
+            logger.info("Static background job cancelled: %s", task_name)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Static background job failed: %s: %s", task_name, exc)
+
+    job.add_done_callback(_on_done)
+    return job
+
+
+async def _shutdown_static_background_jobs() -> int:
+    jobs = [job for job in list(_static_background_jobs.values()) if not job.done()]
+    for job in jobs:
+        job.cancel()
+    if jobs:
+        await asyncio.gather(*jobs, return_exceptions=True)
+    return len(jobs)
+
+
+async def _release_request_db_session(db: Any) -> None:
+    in_transaction = getattr(db, "in_transaction", None)
+    should_rollback = False
+    try:
+        should_rollback = bool(in_transaction()) if callable(in_transaction) else bool(in_transaction)
+    except Exception:
+        should_rollback = False
+
+    if should_rollback:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            try:
+                await rollback()
+            except Exception:
+                pass
+
+    close = getattr(db, "close", None)
+    if callable(close):
+        try:
+            await close()
+        except Exception:
+            pass
 
 
 def _is_scan_task_cancelled(scan_type: str, task_id: str) -> bool:
@@ -171,6 +244,10 @@ def _request_scan_task_cancel(scan_type: str, task_id: str) -> bool:
         process = _static_running_scan_processes.get(key)
 
     if not process:
+        job = _get_static_background_job(scan_type, task_id)
+        if job and not job.done():
+            job.cancel()
+            return True
         return False
 
     try:
@@ -182,6 +259,9 @@ def _request_scan_task_cancel(scan_type: str, task_id: str) -> bool:
                 process.kill()
     except Exception as e:
         logger.warning("Failed to terminate %s scan process for task %s: %s", scan_type, task_id, e)
+    job = _get_static_background_job(scan_type, task_id)
+    if job and not job.done():
+        job.cancel()
     return True
 
 

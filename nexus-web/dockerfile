@@ -14,17 +14,14 @@ ENV PATH=/pnpm:${PATH}
 
 RUN apk add --no-cache git
 
-RUN --mount=type=cache,id=nexus-web-corepack,target=/root/.cache/node/corepack \
-    --mount=type=cache,id=nexus-web-npm,target=/root/.npm \
+RUN --mount=type=cache,id=nexus-web-npm,target=/root/.npm \
     set -eux; \
-    corepack enable; \
-    prepare_pnpm() { \
+    install_pnpm() { \
       reg="$1"; \
       attempt=1; \
       npm config set registry "${reg}"; \
-      export COREPACK_NPM_REGISTRY="${reg}"; \
       while [ "${attempt}" -le 2 ]; do \
-        if corepack prepare "pnpm@${NEXUS_WEB_PNPM_VERSION}" --activate; then \
+        if npm install -g "pnpm@${NEXUS_WEB_PNPM_VERSION}" --registry "${reg}"; then \
           return 0; \
         fi; \
         sleep $((attempt + 1)); \
@@ -32,16 +29,14 @@ RUN --mount=type=cache,id=nexus-web-corepack,target=/root/.cache/node/corepack \
       done; \
       return 1; \
     }; \
-    prepare_pnpm "${NEXUS_WEB_NPM_REGISTRY}" || prepare_pnpm "${NEXUS_WEB_NPM_REGISTRY_FALLBACK}"; \
+    install_pnpm "${NEXUS_WEB_NPM_REGISTRY}" || install_pnpm "${NEXUS_WEB_NPM_REGISTRY_FALLBACK}"; \
     pnpm config set store-dir /pnpm/store
 
 RUN git clone --depth=1 "${NEXUS_WEB_GIT_MIRROR_PREFIX}${NEXUS_WEB_REPO_URL}" .
 
-RUN --mount=type=cache,id=nexus-web-corepack,target=/root/.cache/node/corepack \
-    --mount=type=cache,id=nexus-web-pnpm,target=/pnpm/store \
+RUN --mount=type=cache,id=nexus-web-pnpm,target=/pnpm/store \
     --mount=type=cache,id=nexus-web-npm,target=/root/.npm \
     set -eux; \
-    export COREPACK_NPM_REGISTRY="${NEXUS_WEB_NPM_REGISTRY}"; \
     pnpm config set store-dir /pnpm/store; \
     pnpm config set network-timeout 120000; \
     pnpm config set fetch-retries 1; \

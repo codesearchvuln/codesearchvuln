@@ -50,6 +50,20 @@ class _FakeAsyncSession:
     async def rollback(self):
         self.rollback_calls += 1
 
+    async def close(self):
+        return None
+
+
+class _SessionFactory:
+    def __init__(self, *sessions):
+        self._sessions = list(sessions)
+        self.calls = 0
+
+    def __call__(self):
+        session = self._sessions[min(self.calls, len(self._sessions) - 1)]
+        self.calls += 1
+        return session
+
 
 def test_parse_phpstan_output_payload_supports_empty_noise_and_json():
     parsed_empty = static_tasks._parse_phpstan_output_payload("")
@@ -134,8 +148,10 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
         target_path=".",
         level=5,
     )
-    fake_session = _FakeAsyncSession(task)
-    monkeypatch.setattr(static_tasks, "async_session_factory", lambda: fake_session)
+    load_session = _FakeAsyncSession(task)
+    persist_session = _FakeAsyncSession(task)
+    session_factory = _SessionFactory(load_session, persist_session)
+    monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
 
@@ -194,7 +210,8 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
     assert task.level == 6
     assert task.total_findings == 1
     assert task.files_scanned == 2
-    assert len(fake_session.findings) == 1
+    assert session_factory.calls >= 2
+    assert len(persist_session.findings) == 1
 
 
 @pytest.mark.asyncio
@@ -207,8 +224,10 @@ async def test_execute_phpstan_scan_completes_when_all_findings_filtered(monkeyp
         target_path=".",
         level=5,
     )
-    fake_session = _FakeAsyncSession(task)
-    monkeypatch.setattr(static_tasks, "async_session_factory", lambda: fake_session)
+    load_session = _FakeAsyncSession(task)
+    persist_session = _FakeAsyncSession(task)
+    session_factory = _SessionFactory(load_session, persist_session)
+    monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
 
@@ -251,4 +270,5 @@ async def test_execute_phpstan_scan_completes_when_all_findings_filtered(monkeyp
 
     assert task.status == "completed"
     assert task.total_findings == 0
-    assert len(fake_session.findings) == 0
+    assert session_factory.calls >= 2
+    assert len(persist_session.findings) == 0

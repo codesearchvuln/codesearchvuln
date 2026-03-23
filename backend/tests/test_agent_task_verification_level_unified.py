@@ -2,9 +2,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import BackgroundTasks
 
 from app.api.v1.endpoints.agent_tasks import AgentTaskCreate, create_agent_task
+from app.api.v1.endpoints import agent_tasks_routes_tasks
 import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
 
@@ -16,8 +16,33 @@ def _mock_db_with_project(project_id: str = "project-1"):
     )
     db.add = MagicMock()
     db.commit = AsyncMock()
-    db.refresh = AsyncMock()
+    db.rollback = AsyncMock()
+    db.close = AsyncMock()
+    db.in_transaction = MagicMock(return_value=False)
     return db
+
+
+def _stub_background_launch(monkeypatch):
+    created_tasks = []
+
+    class _CreatedTask:
+        def __init__(self, coro):
+            self._coro = coro
+
+        def cancel(self):
+            self._coro.close()
+
+    monkeypatch.setattr(
+        agent_tasks_routes_tasks.asyncio,
+        "create_task",
+        lambda coro, name=None: created_tasks.append((name, coro)) or _CreatedTask(coro),
+    )
+    monkeypatch.setattr(
+        agent_tasks_routes_tasks.project_metrics_refresher,
+        "enqueue",
+        lambda *_args, **_kwargs: None,
+    )
+    return created_tasks
 
 
 @pytest.mark.asyncio
@@ -33,8 +58,9 @@ def _mock_db_with_project(project_id: str = "project-1"):
         None,
     ],
 )
-async def test_create_agent_task_normalizes_verification_level(verification_level):
+async def test_create_agent_task_normalizes_verification_level(monkeypatch, verification_level):
     db = _mock_db_with_project()
+    created_tasks = _stub_background_launch(monkeypatch)
     request = AgentTaskCreate(
         project_id="project-1",
         verification_level=verification_level,  # type: ignore[arg-type]
@@ -43,7 +69,6 @@ async def test_create_agent_task_normalizes_verification_level(verification_leve
 
     task = await create_agent_task(
         request=request,
-        background_tasks=BackgroundTasks(),
         db=db,
         current_user=SimpleNamespace(id="user-1"),
     )
@@ -51,11 +76,15 @@ async def test_create_agent_task_normalizes_verification_level(verification_leve
     assert task.verification_level == "analysis_with_poc_plan"
     assert task.target_files == ["src/app.py"]
     db.commit.assert_awaited()
+    assert created_tasks
+    for _name, coro in created_tasks:
+        coro.close()
 
 
 @pytest.mark.asyncio
-async def test_create_agent_task_merges_system_core_exclude_patterns():
+async def test_create_agent_task_merges_system_core_exclude_patterns(monkeypatch):
     db = _mock_db_with_project()
+    created_tasks = _stub_background_launch(monkeypatch)
     request = AgentTaskCreate(
         project_id="project-1",
         verification_level="analysis_with_poc_plan",
@@ -64,7 +93,6 @@ async def test_create_agent_task_merges_system_core_exclude_patterns():
 
     task = await create_agent_task(
         request=request,
-        background_tasks=BackgroundTasks(),
         db=db,
         current_user=SimpleNamespace(id="user-1"),
     )
@@ -73,3 +101,6 @@ async def test_create_agent_task_merges_system_core_exclude_patterns():
     assert "test/**" in (task.exclude_patterns or [])
     assert "**/.*/**" in (task.exclude_patterns or [])
     assert "**/*.yaml" in (task.exclude_patterns or [])
+    assert created_tasks
+    for _name, coro in created_tasks:
+        coro.close()

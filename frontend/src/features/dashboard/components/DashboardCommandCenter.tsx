@@ -153,15 +153,88 @@ const TONE_STYLES: Record<
 
 export const HORIZONTAL_STATS_AXIS_FONT_SIZE = 16;
 export const HORIZONTAL_STATS_LABEL_FONT_SIZE = 16;
-export const HORIZONTAL_STATS_Y_AXIS_WIDTH = 128;
+export const HORIZONTAL_STATS_Y_AXIS_MIN_WIDTH = 84;
+export const HORIZONTAL_STATS_Y_AXIS_MAX_WIDTH = 120;
 export const HORIZONTAL_STATS_BAR_SIZE = 14;
 export const HORIZONTAL_STATS_ROW_HEIGHT = 60;
 export const HORIZONTAL_STATS_BAR_CATEGORY_GAP = 10;
+export const HORIZONTAL_STATS_CHART_MARGIN = {
+	top: 8,
+	right: 24,
+	left: 12,
+	bottom: 8,
+} as const;
 export const HORIZONTAL_STATS_META_ROW_CLASSNAME =
 	"mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between";
 export const HORIZONTAL_STATS_META_LEGEND_CLASSNAME =
 	"flex flex-wrap justify-start gap-2 sm:justify-end";
 export const TOP_STATS_GRID_CLASSNAME = "grid grid-cols-2 gap-3 xl:grid-cols-5";
+
+function estimateAxisLabelUnits(label: string) {
+	return Array.from(label).reduce((total, char) => {
+		if (/\p{Script=Han}/u.test(char)) {
+			return total + 1;
+		}
+		if (/[A-Z0-9]/.test(char)) {
+			return total + 0.72;
+		}
+		if (/[a-z]/.test(char)) {
+			return total + 0.58;
+		}
+		return total + 0.42;
+	}, 0);
+}
+
+export function estimateHorizontalStatsYAxisWidth(rows: HorizontalRow[]) {
+	const widestLabelUnits = rows.reduce(
+		(maxWidth, row) => Math.max(maxWidth, estimateAxisLabelUnits(row.label)),
+		0,
+	);
+	const estimatedWidth = Math.ceil(widestLabelUnits * HORIZONTAL_STATS_AXIS_FONT_SIZE + 18);
+
+	return Math.min(
+		Math.max(estimatedWidth, HORIZONTAL_STATS_Y_AXIS_MIN_WIDTH),
+		HORIZONTAL_STATS_Y_AXIS_MAX_WIDTH,
+	);
+}
+
+function buildFiveStepTicks(rows: HorizontalRow[]) {
+	const upperBound = Math.max(
+		5,
+		Math.ceil(
+			rows.reduce((maxValue, row) => Math.max(maxValue, Number(row.total || 0)), 0) / 5,
+		) * 5,
+	);
+
+	const ticks: number[] = [];
+	for (let value = 0; value <= upperBound; value += 5) {
+		ticks.push(value);
+	}
+	return ticks;
+}
+
+export function getHorizontalStatsXAxisProps(
+	viewId: DashboardViewId,
+	rows: HorizontalRow[] = [],
+) {
+	if (viewId === "vulnerability-types") {
+		return {
+			minTickGap: 0,
+			tickCount: 6,
+			allowDecimals: false,
+			domain: [0, "dataMax"] as const,
+			ticks: rows.length > 0 ? buildFiveStepTicks(rows) : undefined,
+		};
+	}
+
+	return {
+		minTickGap: 0,
+		tickCount: undefined,
+		allowDecimals: false,
+		domain: [0, "auto"] as const,
+		ticks: undefined,
+	};
+}
 
 function formatNumber(value: number | null | undefined) {
 	return Math.max(Number(value || 0), 0).toLocaleString("zh-CN");
@@ -710,12 +783,14 @@ function HorizontalStatsChart({
 	title,
 	description,
 	rows,
+	viewId,
 	yAxisLabel,
 	stacked = false,
 }: {
 	title: string;
 	description: string;
 	rows: HorizontalRow[];
+	viewId: DashboardViewId;
 	yAxisLabel: string;
 	stacked?: boolean;
 }) {
@@ -729,6 +804,8 @@ function HorizontalStatsChart({
 	}
 
 	const chartHeight = Math.max(rows.length * HORIZONTAL_STATS_ROW_HEIGHT, 260);
+	const yAxisWidth = estimateHorizontalStatsYAxisWidth(rows);
+	const xAxisProps = getHorizontalStatsXAxisProps(viewId, rows);
 	const primaryTone = rows[0]?.tone ?? "low";
 	const legendItems = stacked
 		? [
@@ -768,7 +845,7 @@ function HorizontalStatsChart({
 						<BarChart
 							data={rows}
 							layout="vertical"
-							margin={{ top: 8, right: 24, left: 36, bottom: 8 }}
+							margin={HORIZONTAL_STATS_CHART_MARGIN}
 							barCategoryGap={HORIZONTAL_STATS_BAR_CATEGORY_GAP}
 						>
 							<CartesianGrid
@@ -776,16 +853,21 @@ function HorizontalStatsChart({
 								strokeDasharray="4 4"
 								horizontal={false}
 							/>
-							<XAxis
-								type="number"
-								tick={{ fill: "#94a3b8", fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE }}
-								axisLine={false}
-								tickLine={false}
-							/>
+								<XAxis
+									type="number"
+									tick={{ fill: "#94a3b8", fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE }}
+									axisLine={false}
+									tickLine={false}
+									minTickGap={xAxisProps.minTickGap}
+									tickCount={xAxisProps.tickCount}
+									allowDecimals={xAxisProps.allowDecimals}
+									domain={xAxisProps.domain}
+									ticks={xAxisProps.ticks}
+								/>
 							<YAxis
 								type="category"
 								dataKey="label"
-								width={HORIZONTAL_STATS_Y_AXIS_WIDTH}
+								width={yAxisWidth}
 								tick={{ fill: "#e2e8f0", fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE }}
 								axisLine={false}
 								tickLine={false}
@@ -867,6 +949,7 @@ export default function DashboardCommandCenter({
 								title={activeMeta.label}
 								description={activeMeta.description}
 								rows={rows}
+								viewId={activeView}
 								yAxisLabel={activeMeta.yAxisLabel}
 								stacked={activeView === "project-risk"}
 							/>

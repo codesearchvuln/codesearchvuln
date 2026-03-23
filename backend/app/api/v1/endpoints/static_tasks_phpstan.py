@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
@@ -60,6 +60,8 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _get_user_config,
     _is_scan_task_cancelled,
     _is_test_like_directory,
+    _launch_static_background_job,
+    _release_request_db_session,
     _normalize_llm_config_error_message,
     _record_scan_progress,
     _request_scan_task_cancel,
@@ -118,6 +120,23 @@ class PhpstanFindingResponse(BaseModel):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _build_phpstan_scan_task_response(task: PhpstanScanTask) -> PhpstanScanTaskResponse:
+    return PhpstanScanTaskResponse(
+        id=str(task.id),
+        project_id=str(task.project_id),
+        name=str(task.name or ""),
+        status=str(task.status or "pending"),
+        target_path=str(task.target_path or "."),
+        level=int(task.level or 0),
+        total_findings=int(task.total_findings or 0),
+        scan_duration_ms=int(task.scan_duration_ms or 0),
+        files_scanned=int(task.files_scanned or 0),
+        error_message=task.error_message,
+        created_at=task.created_at or datetime.now(timezone.utc),
+        updated_at=task.updated_at,
+    )
 
 
 # PHPStan rules integration: 规则页响应与更新请求模型（仅用于前端展示/启停状态持久化）。
@@ -474,190 +493,169 @@ async def _execute_phpstan_scan(
     target_path: str,
     level: int = 8,
 ) -> None:
-    async with async_session_factory() as db:
-        try:
-            result = await db.execute(
-                select(PhpstanScanTask).where(PhpstanScanTask.id == task_id)
-            )
+    async def _update_task_state(
+        status: str,
+        *,
+        error_message: Optional[str] = None,
+        findings: Optional[List[Dict[str, Any]]] = None,
+        files_scanned: int = 0,
+    ) -> Optional[PhpstanScanTask]:
+        async with async_session_factory() as db:
+            result = await db.execute(select(PhpstanScanTask).where(PhpstanScanTask.id == task_id))
+            task = result.scalar_one_or_none()
+            if not task:
+                return None
+            if findings:
+                for msg in findings:
+                    db.add(
+                        PhpstanFinding(
+                            scan_task_id=task_id,
+                            file_path=str(msg.get("file_path") or "")[:1000],
+                            line=msg.get("line"),
+                            message=str(msg.get("message") or "")[:4000],
+                            identifier=(str(msg.get("identifier") or "")[:500] or None),
+                            tip=(str(msg.get("tip") or "")[:2000] or None),
+                            status="open",
+                        )
+                    )
+            task.status = status
+            if error_message is not None:
+                task.error_message = error_message[:500] if error_message else None
+            if status == "completed":
+                task.level = _normalize_phpstan_level(level)
+                task.total_findings = len(findings or [])
+                task.files_scanned = files_scanned
+            _sync_task_scan_duration(task)
+            await db.commit()
+            return task
+
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(select(PhpstanScanTask).where(PhpstanScanTask.id == task_id))
             task = result.scalar_one_or_none()
             if not task:
                 logger.error(f"PHPStan task {task_id} not found")
                 return
-
             if _is_scan_task_cancelled("phpstan", task_id) or task.status == "interrupted":
                 task.status = "interrupted"
-                if not task.error_message:
-                    task.error_message = "扫描任务已中止（用户操作）"
+                task.error_message = task.error_message or "扫描任务已中止（用户操作）"
                 _sync_task_scan_duration(task)
                 await db.commit()
                 return
-
             task.status = "running"
             await db.commit()
 
-            full_target_path = os.path.join(project_root, target_path)
-            if not os.path.exists(full_target_path):
-                task.status = "failed"
-                task.error_message = f"Target path {full_target_path} not found"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                logger.error(f"PHPStan target path not found: {full_target_path}")
-                return
+        full_target_path = os.path.join(project_root, target_path)
+        if not os.path.exists(full_target_path):
+            await _update_task_state("failed", error_message=f"Target path {full_target_path} not found")
+            logger.error(f"PHPStan target path not found: {full_target_path}")
+            return
 
-            normalized_level = _normalize_phpstan_level(level)
-            # PHPStan rules integration: 规则页 enabled/deleted/edited 状态当前仅用于前端展示，不参与扫描命令构建。
-            cmd = [
+        normalized_level = _normalize_phpstan_level(level)
+        cmd = [
+            "phpstan",
+            "analyse",
+            full_target_path,
+            "--error-format=json",
+            "--no-progress",
+            "--no-interaction",
+            f"--level={normalized_level}",
+        ]
+        logger.info(f"Executing phpstan for task {task_id}: {' '.join(cmd)}")
+
+        loop = asyncio.get_event_loop()
+        process_result = await loop.run_in_executor(
+            None,
+            lambda: _run_subprocess_with_tracking(
                 "phpstan",
-                "analyse",
-                full_target_path,
-                "--error-format=json",
-                "--no-progress",
-                "--no-interaction",
-                f"--level={normalized_level}",
-            ]
-            logger.info(f"Executing phpstan for task {task_id}: {' '.join(cmd)}")
-
-            loop = asyncio.get_event_loop()
-            process_result = await loop.run_in_executor(
-                None,
-                lambda: _run_subprocess_with_tracking(
-                    "phpstan",
-                    task_id,
-                    cmd,
-                    timeout=600,
-                ),
-            )
-
-            if _is_scan_task_cancelled("phpstan", task_id):
-                task.status = "interrupted"
-                if not task.error_message:
-                    task.error_message = "扫描任务已中止（用户操作）"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-
-            stdout_text = process_result.stdout or ""
-            stderr_text = process_result.stderr or ""
-            if process_result.returncode > 1:
-                task.status = "failed"
-                task.error_message = (stderr_text or stdout_text or "Unknown error")[:500]
-                _sync_task_scan_duration(task)
-                await db.commit()
-                logger.error(
-                    f"PHPStan task {task_id} failed: {task.error_message}"
-                )
-                return
-
-            payload: Dict[str, Any] = {}
-            parse_error: Optional[Exception] = None
-            try:
-                payload = _parse_phpstan_output_payload(stdout_text)
-            except Exception as exc:  # noqa: BLE001
-                parse_error = exc
-                # 部分运行时可能将输出写到 stderr，回退尝试一次。
-                try:
-                    payload = _parse_phpstan_output_payload(stderr_text)
-                    parse_error = None
-                except Exception:  # noqa: BLE001
-                    payload = {}
-
-            if parse_error is not None and process_result.returncode in {0, 1}:
-                task.status = "failed"
-                task.error_message = f"Failed to parse PHPStan JSON output: {parse_error}"[:500]
-                _sync_task_scan_duration(task)
-                await db.commit()
-                logger.error(f"Failed to parse phpstan output for task {task_id}: {parse_error}")
-                return
-
-            files_payload = payload.get("files")
-            files_map: Dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
-
-            finding_count = 0
-            raw_finding_count = 0
-            dropped_finding_count = 0
-            for file_path, file_data in files_map.items():
-                if not isinstance(file_data, dict):
-                    continue
-                messages = file_data.get("messages")
-                filtered_result = _filter_phpstan_security_messages(messages)
-                kept_messages = filtered_result["kept"]
-                dropped_messages = filtered_result["dropped"]
-                raw_finding_count += len(kept_messages) + len(dropped_messages)
-                dropped_finding_count += len(dropped_messages)
-                if not kept_messages:
-                    continue
-                for msg in kept_messages:
-                    finding = PhpstanFinding(
-                        scan_task_id=task_id,
-                        file_path=str(file_path or "")[:1000],
-                        line=msg.get("line"),
-                        message=str(msg.get("message") or "")[:4000],
-                        identifier=(str(msg.get("identifier") or "")[:500] or None),
-                        tip=(str(msg.get("tip") or "")[:2000] or None),
-                        status="open",
-                    )
-                    db.add(finding)
-                    finding_count += 1
-
-            if _is_scan_task_cancelled("phpstan", task_id):
-                task.status = "interrupted"
-                if not task.error_message:
-                    task.error_message = "扫描任务已中止（用户操作）"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-
-            task.status = "completed"
-            task.level = normalized_level
-            task.total_findings = finding_count
-            task.files_scanned = len(files_map)
-            logger.info(
-                "PHPStan task %s filter summary: raw_count=%s, kept_count=%s, dropped_count=%s",
                 task_id,
-                raw_finding_count,
-                finding_count,
-                dropped_finding_count,
+                cmd,
+                timeout=600,
+            ),
+        )
+
+        if _is_scan_task_cancelled("phpstan", task_id):
+            await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
+            return
+
+        stdout_text = process_result.stdout or ""
+        stderr_text = process_result.stderr or ""
+        if process_result.returncode > 1:
+            error_message = (stderr_text or stdout_text or "Unknown error")[:500]
+            await _update_task_state("failed", error_message=error_message)
+            logger.error(f"PHPStan task {task_id} failed: {error_message}")
+            return
+
+        payload: Dict[str, Any] = {}
+        parse_error: Optional[Exception] = None
+        try:
+            payload = _parse_phpstan_output_payload(stdout_text)
+        except Exception as exc:  # noqa: BLE001
+            parse_error = exc
+            try:
+                payload = _parse_phpstan_output_payload(stderr_text)
+                parse_error = None
+            except Exception:  # noqa: BLE001
+                payload = {}
+
+        if parse_error is not None and process_result.returncode in {0, 1}:
+            await _update_task_state(
+                "failed",
+                error_message=f"Failed to parse PHPStan JSON output: {parse_error}",
             )
-            _sync_task_scan_duration(task)
-            await db.commit()
-            project_metrics_refresher.enqueue(task.project_id)
-        except asyncio.CancelledError:
-            logger.warning(f"PHPStan task {task_id} interrupted by service shutdown")
-            try:
-                await db.rollback()
-                result = await db.execute(
-                    select(PhpstanScanTask).where(PhpstanScanTask.id == task_id)
+            logger.error(f"Failed to parse phpstan output for task {task_id}: {parse_error}")
+            return
+
+        files_payload = payload.get("files")
+        files_map: Dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
+
+        persisted_findings: List[Dict[str, Any]] = []
+        raw_finding_count = 0
+        dropped_finding_count = 0
+        for file_path, file_data in files_map.items():
+            if not isinstance(file_data, dict):
+                continue
+            messages = file_data.get("messages")
+            filtered_result = _filter_phpstan_security_messages(messages)
+            kept_messages = filtered_result["kept"]
+            dropped_messages = filtered_result["dropped"]
+            raw_finding_count += len(kept_messages) + len(dropped_messages)
+            dropped_finding_count += len(dropped_messages)
+            for msg in kept_messages:
+                persisted_findings.append(
+                    {
+                        **msg,
+                        "file_path": str(file_path or "")[:1000],
+                    }
                 )
-                task = result.scalar_one_or_none()
-                if task and task.status in {"pending", "running"}:
-                    task.status = "interrupted"
-                    if not task.error_message:
-                        task.error_message = "扫描任务因服务中断被标记为中止"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-            except Exception as commit_error:
-                logger.error(
-                    f"Failed to update PHPStan interrupted task status: {commit_error}"
-                )
-        except Exception as exc:
-            logger.error(f"Error executing PHPStan task {task_id}: {exc}")
-            try:
-                await db.rollback()
-                result = await db.execute(
-                    select(PhpstanScanTask).where(PhpstanScanTask.id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                if task:
-                    task.status = "failed"
-                    task.error_message = str(exc)[:500]
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-            except Exception as rollback_error:
-                logger.error(
-                    f"Failed to rollback/update failed PHPStan task {task_id}: {rollback_error}"
-                )
-        finally:
-            _clear_scan_task_cancel("phpstan", task_id)
+
+        if _is_scan_task_cancelled("phpstan", task_id):
+            await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
+            return
+
+        updated_task = await _update_task_state(
+            "completed",
+            findings=persisted_findings,
+            files_scanned=len(files_map),
+        )
+        logger.info(
+            "PHPStan task %s filter summary: raw_count=%s, kept_count=%s, dropped_count=%s",
+            task_id,
+            raw_finding_count,
+            len(persisted_findings),
+            dropped_finding_count,
+        )
+        if updated_task is not None:
+            project_metrics_refresher.enqueue(updated_task.project_id)
+    except asyncio.CancelledError:
+        logger.warning(f"PHPStan task {task_id} interrupted by service shutdown")
+        await _update_task_state("interrupted", error_message="扫描任务因服务中断被标记为中止")
+        raise
+    except Exception as exc:
+        logger.error(f"Error executing PHPStan task {task_id}: {exc}")
+        await _update_task_state("failed", error_message=str(exc))
+    finally:
+        _clear_scan_task_cancel("phpstan", task_id)
 
 
 @router.get("/phpstan/rules", response_model=List[PhpstanRuleResponse])
@@ -1080,7 +1078,6 @@ async def _batch_update_phpstan_rules_deleted(
 @router.post("/phpstan/scan", response_model=PhpstanScanTaskResponse)
 async def create_phpstan_scan(
     request: PhpstanScanTaskCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -1105,16 +1102,21 @@ async def create_phpstan_scan(
     )
     db.add(scan_task)
     await db.commit()
-    await db.refresh(scan_task)
-
-    background_tasks.add_task(
-        _execute_phpstan_scan,
-        scan_task.id,
-        project_root,
-        request.target_path,
-        scan_task.level,
+    response = _build_phpstan_scan_task_response(scan_task)
+    task_id = response.id
+    level = scan_task.level
+    await _release_request_db_session(db)
+    _launch_static_background_job(
+        "phpstan",
+        task_id,
+        _execute_phpstan_scan(
+            task_id,
+            project_root,
+            request.target_path,
+            level,
+        ),
     )
-    return scan_task
+    return response
 
 
 @router.get("/phpstan/tasks", response_model=List[PhpstanScanTaskResponse])

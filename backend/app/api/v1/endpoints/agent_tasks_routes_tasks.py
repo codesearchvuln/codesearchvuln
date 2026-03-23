@@ -8,18 +8,20 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api import deps
 from app.db.session import async_session_factory, get_db
+from app.api.v1.endpoints.static_tasks_shared import _release_request_db_session
 from app.models.agent_task import AgentEvent, AgentTask, AgentTaskPhase, AgentTaskStatus
 from app.models.project import Project
 from app.models.user import User
 from app.services.project_metrics import project_metrics_refresher
 
+from .agent_tasks_access import build_agent_task_response
 from .agent_tasks_bootstrap import *
 from .agent_tasks_contracts import *
 from .agent_tasks_execution import _execute_agent_task
@@ -31,7 +33,6 @@ logger = logging.getLogger(__name__)
 @router.post("/", response_model=AgentTaskResponse)
 async def create_agent_task(
     request: AgentTaskCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
@@ -85,15 +86,20 @@ async def create_agent_task(
     
     db.add(task)
     await db.commit()
-    await db.refresh(task)
+    response = build_agent_task_response(task)
+    task_id = response.id
     project_metrics_refresher.enqueue(task.project_id)
+
+    await _release_request_db_session(db)
+    asyncio_task = asyncio.create_task(
+        _execute_agent_task(task_id),
+        name=f"agent_task:{task_id}",
+    )
+    _running_asyncio_tasks[task_id] = asyncio_task
     
-    # 在后台启动任务（项目根目录在任务内部获取）
-    background_tasks.add_task(_execute_agent_task, task.id)
+    logger.info(f"Created agent task {task_id} for project {project.name}")
     
-    logger.info(f"Created agent task {task.id} for project {project.name}")
-    
-    return task
+    return response
 
 
 @router.get("/", response_model=List[AgentTaskResponse])

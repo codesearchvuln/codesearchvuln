@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
@@ -60,6 +60,8 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _get_user_config,
     _is_scan_task_cancelled,
     _is_test_like_directory,
+    _launch_static_background_job,
+    _release_request_db_session,
     _normalize_llm_config_error_message,
     _record_scan_progress,
     _request_scan_task_cancel,
@@ -124,6 +126,23 @@ class GitleaksFindingResponse(BaseModel):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _build_gitleaks_scan_task_response(task: GitleaksScanTask) -> GitleaksScanTaskResponse:
+    return GitleaksScanTaskResponse(
+        id=str(task.id),
+        project_id=str(task.project_id),
+        name=str(task.name or ""),
+        status=str(task.status or "pending"),
+        target_path=str(task.target_path or "."),
+        no_git=str(task.no_git or "true"),
+        total_findings=int(task.total_findings or 0),
+        scan_duration_ms=int(task.scan_duration_ms or 0),
+        files_scanned=int(task.files_scanned or 0),
+        error_message=task.error_message,
+        created_at=task.created_at or datetime.now(timezone.utc),
+        updated_at=task.updated_at,
+    )
 
 
 def _to_clean_string_list(raw_value: Any) -> List[str]:
@@ -676,155 +695,30 @@ async def _execute_gitleaks_scan(
         target_path: 扫描目标路径
         no_git: 是否不使用 git history
     """
-    async with async_session_factory() as db:
-        try:
-            # 获取任务
-            result = await db.execute(
-                select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
-            )
+    async def _update_task_state(
+        status: str,
+        *,
+        error_message: Optional[str] = None,
+        findings: Optional[List[Dict[str, Any]]] = None,
+        files_scanned_count: int = 0,
+    ) -> Optional[GitleaksScanTask]:
+        async with async_session_factory() as db:
+            result = await db.execute(select(GitleaksScanTask).where(GitleaksScanTask.id == task_id))
             task = result.scalar_one_or_none()
             if not task:
-                logger.error(f"Gitleaks task {task_id} not found")
-                return
-
-            if _is_scan_task_cancelled("gitleaks", task_id) or task.status == "interrupted":
-                task.status = "interrupted"
-                if not task.error_message:
-                    task.error_message = "扫描任务已中止（用户操作）"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-
-            # 更新任务状态为运行中
-            task.status = "running"
-            await db.commit()
-
-            # 构建扫描路径
-            full_target_path = os.path.join(project_root, target_path)
-            if not os.path.exists(full_target_path):
-                task.status = "failed"
-                task.error_message = f"Target path {full_target_path} not found"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                logger.error(f"Target path {full_target_path} not found")
-                return
-
-            # 规范化运行时配置（来自 /config/me -> otherConfig.gitleaksConfig）
-            gcfg = _normalize_gitleaks_runtime_config(runtime_config)
-
-            # 创建临时输出文件
-            report_suffix = ".sarif" if gcfg.get("reportFormat") == "sarif" else ".json"
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=report_suffix, delete=False
-            ) as tf:
-                report_file = tf.name
-
-            config_file: Optional[str] = None
-            effective_toml = await _build_effective_gitleaks_config_toml(db, gcfg)
-            if effective_toml:
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as ctf:
-                    ctf.write(effective_toml)
-                    config_file = ctf.name
-            else:
-                logger.warning(
-                    "No active gitleaks rules and no custom config for task %s; scanning with tool defaults",
-                    task_id,
-                )
-
-            try:
-                cmd = _build_gitleaks_command(
-                    full_target_path=full_target_path,
-                    report_file=report_file,
-                    report_format=str(gcfg.get("reportFormat") or "json"),
-                    no_git=no_git,
-                    redact=bool(gcfg.get("redact")),
-                    config_file=config_file,
-                )
-
-                logger.info(
-                    f"Executing gitleaks for task {task_id}: {' '.join(cmd)}"
-                )
-                
-                # 在线程池中执行阻塞操作
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: _run_subprocess_with_tracking(
-                        "gitleaks",
-                        task_id,
-                        cmd,
-                        timeout=600,
-                    )
-                )
-
-                if _is_scan_task_cancelled("gitleaks", task_id):
-                    task.status = "interrupted"
-                    if not task.error_message:
-                        task.error_message = "扫描任务已中止（用户操作）"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    return
-
-                # 检查执行结果
-                if result.returncode != 0:
-                    error_msg = result.stderr or result.stdout or "Unknown error"
-                    task.status = "failed"
-                    task.error_message = error_msg[:500]
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    logger.error(
-                        f"Gitleaks scan task {task_id} failed: {error_msg}"
-                    )
-                    return
-
-                # 读取扫描结果
-                if not os.path.exists(report_file):
-                    task.status = "completed"
-                    task.total_findings = 0
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    project_metrics_refresher.enqueue(task.project_id)
-                    logger.info(
-                        f"Gitleaks scan task {task_id} completed with no findings"
-                    )
-                    return
-
-                with open(report_file, "r") as f:
-                    content = f.read().strip()
-                    if not content:
-                        raw_payload = []
-                    else:
-                        try:
-                            raw_payload = json.loads(content)
-                        except json.JSONDecodeError as e:
-                            logger.error(
-                                f"Failed to parse gitleaks output: {e}"
-                            )
-                            task.status = "failed"
-                            task.error_message = f"Failed to parse JSON output: {str(e)}"
-                            _sync_task_scan_duration(task)
-                            await db.commit()
-                            return
-
-                findings = _parse_gitleaks_report_payload(raw_payload)
-
-                # 保存发现的密钥泄露
-                files_scanned = set()
+                return None
+            if findings:
                 for finding in findings:
-                    try:
-                        file_path = finding.get("File", "")
-                        if file_path:
-                            files_scanned.add(file_path)
-
-                        gitleaks_finding = GitleaksFinding(
+                    db.add(
+                        GitleaksFinding(
                             scan_task_id=task_id,
                             rule_id=finding.get("RuleID", "unknown"),
                             description=finding.get("Description", ""),
-                            file_path=file_path,
+                            file_path=finding.get("File", ""),
                             start_line=finding.get("StartLine"),
                             end_line=finding.get("EndLine"),
                             secret=_mask_gitleaks_secret(finding.get("Secret", "")),
-                            match=finding.get("Match", "")[:500],  # 限制长度
+                            match=finding.get("Match", "")[:500],
                             commit=finding.get("Commit"),
                             author=finding.get("Author"),
                             email=finding.get("Email"),
@@ -832,93 +726,158 @@ async def _execute_gitleaks_scan(
                             fingerprint=finding.get("Fingerprint"),
                             status="open",
                         )
-                        db.add(gitleaks_finding)
-                    except Exception as e:
-                        logger.error(f"Error processing gitleaks finding: {e}")
+                    )
+            task.status = status
+            if error_message is not None:
+                task.error_message = error_message[:500] if error_message else None
+            if status == "completed":
+                task.total_findings = len(findings or [])
+                task.files_scanned = files_scanned_count
+            _sync_task_scan_duration(task)
+            await db.commit()
+            return task
 
-                # 更新任务统计
-                if _is_scan_task_cancelled("gitleaks", task_id):
-                    task.status = "interrupted"
-                    if not task.error_message:
-                        task.error_message = "扫描任务已中止（用户操作）"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
+    config_file: Optional[str] = None
+    report_file: Optional[str] = None
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(select(GitleaksScanTask).where(GitleaksScanTask.id == task_id))
+            task = result.scalar_one_or_none()
+            if not task:
+                logger.error(f"Gitleaks task {task_id} not found")
+                return
+            if _is_scan_task_cancelled("gitleaks", task_id) or task.status == "interrupted":
+                task.status = "interrupted"
+                task.error_message = task.error_message or "扫描任务已中止（用户操作）"
+                _sync_task_scan_duration(task)
+                await db.commit()
+                return
+            task.status = "running"
+            await db.commit()
+            gcfg = _normalize_gitleaks_runtime_config(runtime_config)
+            effective_toml = await _build_effective_gitleaks_config_toml(db, gcfg)
+
+        full_target_path = os.path.join(project_root, target_path)
+        if not os.path.exists(full_target_path):
+            await _update_task_state("failed", error_message=f"Target path {full_target_path} not found")
+            logger.error(f"Target path {full_target_path} not found")
+            return
+
+        report_suffix = ".sarif" if gcfg.get("reportFormat") == "sarif" else ".json"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=report_suffix, delete=False) as tf:
+            report_file = tf.name
+
+        if effective_toml:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as ctf:
+                ctf.write(effective_toml)
+                config_file = ctf.name
+        else:
+            logger.warning(
+                "No active gitleaks rules and no custom config for task %s; scanning with tool defaults",
+                task_id,
+            )
+
+        cmd = _build_gitleaks_command(
+            full_target_path=full_target_path,
+            report_file=report_file,
+            report_format=str(gcfg.get("reportFormat") or "json"),
+            no_git=no_git,
+            redact=bool(gcfg.get("redact")),
+            config_file=config_file,
+        )
+        logger.info(f"Executing gitleaks for task {task_id}: {' '.join(cmd)}")
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: _run_subprocess_with_tracking(
+                "gitleaks",
+                task_id,
+                cmd,
+                timeout=600,
+            )
+        )
+
+        if _is_scan_task_cancelled("gitleaks", task_id):
+            await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
+            return
+
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout or "Unknown error"
+            await _update_task_state("failed", error_message=error_msg)
+            logger.error(f"Gitleaks scan task {task_id} failed: {error_msg}")
+            return
+
+        if not report_file or not os.path.exists(report_file):
+            updated_task = await _update_task_state("completed", findings=[], files_scanned_count=0)
+            if updated_task is not None:
+                project_metrics_refresher.enqueue(updated_task.project_id)
+            logger.info(f"Gitleaks scan task {task_id} completed with no findings")
+            return
+
+        with open(report_file, "r") as f:
+            content = f.read().strip()
+            if not content:
+                raw_payload = []
+            else:
+                try:
+                    raw_payload = json.loads(content)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse gitleaks output: {e}")
+                    await _update_task_state("failed", error_message=f"Failed to parse JSON output: {str(e)}")
                     return
 
-                task.status = "completed"
-                task.total_findings = len(findings)
-                task.files_scanned = len(files_scanned)
-                _sync_task_scan_duration(task)
+        findings = _parse_gitleaks_report_payload(raw_payload)
+        files_scanned = {
+            finding.get("File", "")
+            for finding in findings
+            if finding.get("File", "")
+        }
 
-                await db.commit()
-                project_metrics_refresher.enqueue(task.project_id)
-                logger.info(
-                    f"Gitleaks scan task {task_id} completed: "
-                    f"{len(findings)} findings in {len(files_scanned)} files"
-                )
+        if _is_scan_task_cancelled("gitleaks", task_id):
+            await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
+            return
 
-            finally:
-                # 清理临时文件
-                try:
-                    if os.path.exists(report_file):
-                        os.unlink(report_file)
-                except Exception as e:
-                    logger.warning(f"Failed to delete temporary report file: {e}")
-                try:
-                    if config_file and os.path.exists(config_file):
-                        os.unlink(config_file)
-                except Exception as e:
-                    logger.warning(f"Failed to delete temporary gitleaks config file: {e}")
-
-        except asyncio.CancelledError:
-            logger.warning(f"Gitleaks scan task {task_id} interrupted by service shutdown")
-            try:
-                await db.rollback()
-                result = await db.execute(
-                    select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                if task:
-                    task.status = "interrupted"
-                    if not task.error_message:
-                        task.error_message = "扫描任务已中断（服务关闭或沙箱停止）"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-            except Exception as commit_error:
-                logger.error(
-                    f"Failed to update gitleaks interrupted task status: {commit_error}"
-                )
+        updated_task = await _update_task_state(
+            "completed",
+            findings=findings,
+            files_scanned_count=len(files_scanned),
+        )
+        if updated_task is not None:
+            project_metrics_refresher.enqueue(updated_task.project_id)
+        logger.info(
+            f"Gitleaks scan task {task_id} completed: "
+            f"{len(findings)} findings in {len(files_scanned)} files"
+        )
+    except asyncio.CancelledError:
+        logger.warning(f"Gitleaks scan task {task_id} interrupted by service shutdown")
+        await _update_task_state("interrupted", error_message="扫描任务已中断（服务关闭或沙箱停止）")
+        raise
+    except Exception as e:
+        logger.error(f"Error executing gitleaks scan for task {task_id}: {e}")
+        await _update_task_state("failed", error_message=str(e))
+    finally:
+        _clear_scan_task_cancel("gitleaks", task_id)
+        try:
+            if report_file and os.path.exists(report_file):
+                os.unlink(report_file)
         except Exception as e:
-            logger.error(f"Error executing gitleaks scan for task {task_id}: {e}")
+            logger.warning(f"Failed to delete temporary report file: {e}")
+        try:
+            if config_file and os.path.exists(config_file):
+                os.unlink(config_file)
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary gitleaks config file: {e}")
+        if project_root and project_root.startswith("/tmp") and os.path.exists(project_root):
             try:
-                await db.rollback()
-                result = await db.execute(
-                    select(GitleaksScanTask).where(GitleaksScanTask.id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                if task:
-                    task.status = "failed"
-                    task.error_message = str(e)[:500]
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-            except Exception as commit_error:
-                logger.error(
-                    f"Failed to update task status after error: {commit_error}"
-                )
-        finally:
-            _clear_scan_task_cancel("gitleaks", task_id)
-            if project_root and project_root.startswith("/tmp") and os.path.exists(project_root):
-                try:
-                    shutil.rmtree(project_root, ignore_errors=True)
-                    logger.info(f"Cleaned up temporary project directory: {project_root}")
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temporary directory {project_root}: {e}")
+                shutil.rmtree(project_root, ignore_errors=True)
+                logger.info(f"Cleaned up temporary project directory: {project_root}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temporary directory {project_root}: {e}")
 
 
 @router.post("/gitleaks/scan", response_model=GitleaksScanTaskResponse)
 async def create_gitleaks_scan(
     request: GitleaksScanTaskCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -956,7 +915,6 @@ async def create_gitleaks_scan(
     )
     db.add(scan_task)
     await db.commit()
-    await db.refresh(scan_task)
 
     # 读取当前用户 gitleaks 配置（/config/me -> otherConfig.gitleaksConfig）
     user_cfg = await _get_user_config(db, current_user.id)
@@ -965,21 +923,26 @@ async def create_gitleaks_scan(
     if isinstance(other_cfg, dict):
         gitleaks_cfg = other_cfg.get("gitleaksConfig") or {}
 
-    # 添加后台任务
-    background_tasks.add_task(
-        _execute_gitleaks_scan,
-        scan_task.id,
-        project_root,
-        request.target_path,
-        request.no_git,
-        gitleaks_cfg,
+    response = _build_gitleaks_scan_task_response(scan_task)
+    task_id = response.id
+    await _release_request_db_session(db)
+    _launch_static_background_job(
+        "gitleaks",
+        task_id,
+        _execute_gitleaks_scan(
+            task_id,
+            project_root,
+            request.target_path,
+            request.no_git,
+            gitleaks_cfg,
+        ),
     )
 
     logger.info(
-        f"Created gitleaks scan task {scan_task.id} for project {request.project_id}"
+        f"Created gitleaks scan task {task_id} for project {request.project_id}"
     )
 
-    return scan_task
+    return response
 
 
 @router.get("/gitleaks/tasks", response_model=List[GitleaksScanTaskResponse])

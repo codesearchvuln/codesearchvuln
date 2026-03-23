@@ -8,18 +8,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api.v1.endpoints.static_tasks_shared import (
+    _launch_static_background_job,
     _clear_scan_task_cancel,
     _get_project_root,
     _is_scan_task_cancelled,
+    _release_request_db_session,
     _request_scan_task_cancel,
     _run_subprocess_with_tracking,
     _sync_task_scan_duration,
+    async_session_factory,
     deps,
     get_db,
     logger,
@@ -28,6 +31,7 @@ from app.api.v1.endpoints.static_tasks_shared import (
 from app.models.project import Project
 from app.models.user import User
 from app.models.yasa import YasaFinding, YasaScanTask
+from app.services.project_metrics import project_metrics_refresher
 from app.services.yasa_runtime import build_yasa_scan_command
 from app.services.yasa_language import (
     YASA_SUPPORTED_LANGUAGES,
@@ -92,6 +96,27 @@ class YasaRuleResponse(BaseModel):
     languages: List[str] = []
     demo_rule_config_path: Optional[str] = None
     source: str = "builtin"
+
+
+def _build_yasa_scan_task_response(task: YasaScanTask) -> YasaScanTaskResponse:
+    return YasaScanTaskResponse(
+        id=str(task.id),
+        project_id=str(task.project_id),
+        name=str(task.name or ""),
+        status=str(task.status or "pending"),
+        target_path=str(task.target_path or "."),
+        language=str(task.language or ""),
+        checker_pack_ids=task.checker_pack_ids,
+        checker_ids=task.checker_ids,
+        rule_config_file=task.rule_config_file,
+        total_findings=int(task.total_findings or 0),
+        scan_duration_ms=int(task.scan_duration_ms or 0),
+        files_scanned=int(task.files_scanned or 0),
+        diagnostics_summary=task.diagnostics_summary,
+        error_message=task.error_message,
+        created_at=task.created_at or datetime.now(),
+        updated_at=task.updated_at,
+    )
 
 
 _SUPPORTED_YASA_LANGUAGES = YASA_SUPPORTED_LANGUAGES
@@ -386,11 +411,61 @@ async def _execute_yasa_scan(
     checker_ids: Optional[str],
     rule_config_file: Optional[str],
 ) -> None:
-    from app.db.session import async_session_factory
+    report_dir: Optional[str] = None
 
-    async with async_session_factory() as db:
-        report_dir: Optional[str] = None
-        try:
+    async def _update_task_state(
+        status: str,
+        *,
+        error_message: Optional[str] = None,
+        diagnostics_summary: Optional[str] = None,
+        findings: Optional[List[Dict[str, Any]]] = None,
+        language_value: Optional[str] = None,
+        checker_pack_ids_value: Optional[str] = None,
+        checker_ids_value: Optional[str] = None,
+        rule_config_file_value: Optional[str] = None,
+        files_scanned_count: int = 0,
+    ) -> Optional[YasaScanTask]:
+        async with async_session_factory() as db:
+            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
+            task = result.scalar_one_or_none()
+            if not task:
+                return None
+
+            if findings:
+                for finding_item in findings:
+                    db.add(
+                        YasaFinding(
+                            scan_task_id=task_id,
+                            rule_id=finding_item.get("rule_id"),
+                            rule_name=finding_item.get("rule_name"),
+                            level=str(finding_item.get("level") or "warning")[:32],
+                            message=str(finding_item.get("message") or "")[:4000],
+                            file_path=str(finding_item.get("file_path") or "unknown")[:1200],
+                            start_line=finding_item.get("start_line"),
+                            end_line=finding_item.get("end_line"),
+                            status="open",
+                            raw_payload=finding_item.get("raw_payload"),
+                        )
+                    )
+
+            task.status = status
+            if error_message is not None:
+                task.error_message = error_message[:500] if error_message else None
+            if diagnostics_summary is not None:
+                task.diagnostics_summary = diagnostics_summary
+            if status == "completed":
+                task.language = language_value or task.language
+                task.checker_pack_ids = checker_pack_ids_value
+                task.checker_ids = checker_ids_value
+                task.rule_config_file = rule_config_file_value
+                task.total_findings = len(findings or [])
+                task.files_scanned = files_scanned_count
+            _sync_task_scan_duration(task)
+            await db.commit()
+            return task
+
+    try:
+        async with async_session_factory() as db:
             result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
             task = result.scalar_one_or_none()
             if not task:
@@ -414,99 +489,90 @@ async def _execute_yasa_scan(
             task.status = "running"
             await db.commit()
 
-            full_target_path = os.path.join(project_root, target_path)
-            if not os.path.exists(full_target_path):
-                task.status = "failed"
-                task.error_message = f"Target path {full_target_path} not found"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
+        full_target_path = os.path.join(project_root, target_path)
+        if not os.path.exists(full_target_path):
+            await _update_task_state("failed", error_message=f"Target path {full_target_path} not found")
+            return
 
-            resolved_bin = _resolve_yasa_binary()
-            try:
-                profile = _resolve_language_profile(language)
-            except ValueError as exc:
-                task.status = "failed"
-                task.error_message = str(exc)[:500]
-                task.diagnostics_summary = json.dumps(
+        resolved_bin = _resolve_yasa_binary()
+        try:
+            profile = _resolve_language_profile(language)
+        except ValueError as exc:
+            await _update_task_state(
+                "failed",
+                error_message=str(exc),
+                diagnostics_summary=json.dumps(
                     {
                         "failure_type": "unsupported_or_missing_language",
                         "language": str(language or "").strip(),
                         "supported_languages": list(_SUPPORTED_YASA_LANGUAGES),
                     },
                     ensure_ascii=False,
-                )[:3000]
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-            normalized_language = profile["language"]
-
-            packs = _split_csv(checker_pack_ids)
-            if not packs:
-                packs = [profile["checker_pack"]]
-
-            resolved_rule_config = str(rule_config_file or "").strip()
-            if not resolved_rule_config:
-                default_rule_config = _build_default_rule_config_path(profile)
-                if default_rule_config:
-                    resolved_rule_config = default_rule_config
-
-            report_dir = tempfile.mkdtemp(prefix=f"yasa_report_{task_id}_")
-            checker_values = _split_csv(checker_ids)
-            cmd = build_yasa_scan_command(
-                binary=resolved_bin,
-                source_path=full_target_path,
-                language=normalized_language,
-                report_dir=report_dir,
-                checker_pack_ids=packs,
-                checker_ids=checker_values,
-                rule_config_file=resolved_rule_config or None,
+                )[:3000],
             )
+            return
 
-            timeout_seconds = int(getattr(settings, "YASA_TIMEOUT_SECONDS", 600) or 600)
-            loop = asyncio.get_event_loop()
-            process_result = await loop.run_in_executor(
-                None,
-                lambda: _run_subprocess_with_tracking(
-                    "yasa",
-                    task_id,
-                    cmd,
-                    timeout=max(1, timeout_seconds),
-                ),
+        normalized_language = profile["language"]
+        packs = _split_csv(checker_pack_ids)
+        if not packs:
+            packs = [profile["checker_pack"]]
+
+        resolved_rule_config = str(rule_config_file or "").strip()
+        if not resolved_rule_config:
+            default_rule_config = _build_default_rule_config_path(profile)
+            if default_rule_config:
+                resolved_rule_config = default_rule_config
+
+        report_dir = tempfile.mkdtemp(prefix=f"yasa_report_{task_id}_")
+        checker_values = _split_csv(checker_ids)
+        cmd = build_yasa_scan_command(
+            binary=resolved_bin,
+            source_path=full_target_path,
+            language=normalized_language,
+            report_dir=report_dir,
+            checker_pack_ids=packs,
+            checker_ids=checker_values,
+            rule_config_file=resolved_rule_config or None,
+        )
+
+        timeout_seconds = int(getattr(settings, "YASA_TIMEOUT_SECONDS", 600) or 600)
+        loop = asyncio.get_event_loop()
+        process_result = await loop.run_in_executor(
+            None,
+            lambda: _run_subprocess_with_tracking(
+                "yasa",
+                task_id,
+                cmd,
+                timeout=max(1, timeout_seconds),
+            ),
+        )
+
+        if _is_scan_task_cancelled("yasa", task_id):
+            await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
+            return
+
+        sarif_path = Path(report_dir) / "report.sarif"
+        findings_payload: List[Dict[str, Any]] = []
+        if sarif_path.exists():
+            try:
+                sarif_data = json.loads(sarif_path.read_text(encoding="utf-8", errors="ignore"))
+                findings_payload = _parse_yasa_sarif_output(sarif_data)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to parse YASA SARIF for task %s: %s", task_id, exc)
+
+        if process_result.returncode != 0 and not findings_payload:
+            stderr_text = str(process_result.stderr or "").strip()
+            stdout_text = str(process_result.stdout or "").strip()
+            diagnostics_log = _read_diagnostics_summary(report_dir)
+            short_message = (
+                stderr_text
+                or stdout_text
+                or "YASA 扫描失败，请检查 YASA_BIN_PATH 或规则参数"
             )
-
-            if _is_scan_task_cancelled("yasa", task_id):
-                task.status = "interrupted"
-                task.error_message = task.error_message or "扫描任务已中止（用户操作）"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-
-            sarif_path = Path(report_dir) / "report.sarif"
-            findings_payload: List[Dict[str, Any]] = []
-            if sarif_path.exists():
-                try:
-                    sarif_data = json.loads(
-                        sarif_path.read_text(encoding="utf-8", errors="ignore")
-                    )
-                    findings_payload = _parse_yasa_sarif_output(sarif_data)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to parse YASA SARIF for task %s: %s", task_id, exc)
-
-            if process_result.returncode != 0 and not findings_payload:
-                stderr_text = str(process_result.stderr or "").strip()
-                stdout_text = str(process_result.stdout or "").strip()
-                diagnostics_log = _read_diagnostics_summary(report_dir)
-
-                short_message = (
-                    stderr_text
-                    or stdout_text
-                    or "YASA 扫描失败，请检查 YASA_BIN_PATH 或规则参数"
-                )
-
-                task.status = "failed"
-                task.error_message = short_message[:500]
-                task.diagnostics_summary = _build_failure_diagnostics_summary(
+            await _update_task_state(
+                "failed",
+                error_message=short_message,
+                diagnostics_summary=_build_failure_diagnostics_summary(
                     language=normalized_language,
                     checker_packs=packs,
                     rule_config_file=resolved_rule_config or None,
@@ -515,92 +581,51 @@ async def _execute_yasa_scan(
                     stderr_text=stderr_text,
                     stdout_text=stdout_text,
                     diagnostics_log=diagnostics_log,
-                )
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
+                ),
+            )
+            return
 
-            for finding_item in findings_payload:
-                db.add(
-                    YasaFinding(
-                        scan_task_id=task_id,
-                        rule_id=finding_item.get("rule_id"),
-                        rule_name=finding_item.get("rule_name"),
-                        level=str(finding_item.get("level") or "warning")[:32],
-                        message=str(finding_item.get("message") or "")[:4000],
-                        file_path=str(finding_item.get("file_path") or "unknown")[:1200],
-                        start_line=finding_item.get("start_line"),
-                        end_line=finding_item.get("end_line"),
-                        status="open",
-                        raw_payload=finding_item.get("raw_payload"),
-                    )
-                )
+        diagnostics_summary = _read_diagnostics_summary(report_dir)
+        if not findings_payload and not diagnostics_summary:
+            diagnostics_summary = "YASA 扫描完成，未发现 SARIF 结果"
 
-            task.status = "completed"
-            task.language = normalized_language
-            task.checker_pack_ids = ",".join(packs)
-            task.checker_ids = checker_ids
-            task.rule_config_file = resolved_rule_config or None
-            task.total_findings = len(findings_payload)
-            task.files_scanned = len(
+        updated_task = await _update_task_state(
+            "completed",
+            findings=findings_payload,
+            diagnostics_summary=diagnostics_summary,
+            language_value=normalized_language,
+            checker_pack_ids_value=",".join(packs),
+            checker_ids_value=checker_ids,
+            rule_config_file_value=resolved_rule_config or None,
+            files_scanned_count=len(
                 {
                     str(item.get("file_path") or "").strip()
                     for item in findings_payload
                     if str(item.get("file_path") or "").strip()
                 }
-            )
-            task.diagnostics_summary = _read_diagnostics_summary(report_dir)
-            if task.total_findings == 0 and not task.diagnostics_summary:
-                task.diagnostics_summary = "YASA 扫描完成，未发现 SARIF 结果"
-            _sync_task_scan_duration(task)
-            await db.commit()
-        except subprocess.TimeoutExpired:
-            await db.rollback()
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = "failed"
-                task.error_message = "YASA 扫描超时"
-                _sync_task_scan_duration(task)
-                await db.commit()
-        except FileNotFoundError as exc:
-            await db.rollback()
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = "failed"
-                task.error_message = str(exc)[:500]
-                _sync_task_scan_duration(task)
-                await db.commit()
-        except asyncio.CancelledError:
-            await db.rollback()
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task and task.status in {"pending", "running"}:
-                task.status = "interrupted"
-                task.error_message = task.error_message or "扫描任务因服务中断被标记为中止"
-                _sync_task_scan_duration(task)
-                await db.commit()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Error executing YASA task %s: %s", task_id, exc)
-            await db.rollback()
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = "failed"
-                task.error_message = str(exc)[:500]
-                _sync_task_scan_duration(task)
-                await db.commit()
-        finally:
-            if report_dir:
-                shutil.rmtree(report_dir, ignore_errors=True)
-            _clear_scan_task_cancel("yasa", task_id)
+            ),
+        )
+        if updated_task is not None:
+            project_metrics_refresher.enqueue(updated_task.project_id)
+    except subprocess.TimeoutExpired:
+        await _update_task_state("failed", error_message="YASA 扫描超时")
+    except FileNotFoundError as exc:
+        await _update_task_state("failed", error_message=str(exc))
+    except asyncio.CancelledError:
+        await _update_task_state("interrupted", error_message="扫描任务因服务中断被标记为中止")
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error executing YASA task %s: %s", task_id, exc)
+        await _update_task_state("failed", error_message=str(exc))
+    finally:
+        if report_dir:
+            shutil.rmtree(report_dir, ignore_errors=True)
+        _clear_scan_task_cancel("yasa", task_id)
 
 
 @router.post("/yasa/scan", response_model=YasaScanTaskResponse)
 async def create_yasa_scan(
     request: YasaScanTaskCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -632,19 +657,28 @@ async def create_yasa_scan(
     )
     db.add(scan_task)
     await db.commit()
-    await db.refresh(scan_task)
+    response = _build_yasa_scan_task_response(scan_task)
+    task_id = response.id
+    language = scan_task.language
+    checker_pack_ids_value = scan_task.checker_pack_ids
+    checker_ids_value = scan_task.checker_ids
+    rule_config_file_value = scan_task.rule_config_file
 
-    background_tasks.add_task(
-        _execute_yasa_scan,
-        scan_task.id,
-        project_root,
-        request.target_path,
-        scan_task.language,
-        scan_task.checker_pack_ids,
-        scan_task.checker_ids,
-        scan_task.rule_config_file,
+    await _release_request_db_session(db)
+    _launch_static_background_job(
+        "yasa",
+        task_id,
+        _execute_yasa_scan(
+            task_id,
+            project_root,
+            request.target_path,
+            language,
+            checker_pack_ids_value,
+            checker_ids_value,
+            rule_config_file_value,
+        ),
     )
-    return scan_task
+    return response
 
 
 @router.get("/yasa/tasks", response_model=List[YasaScanTaskResponse])

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
@@ -65,6 +65,8 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _get_user_config,
     _is_scan_task_cancelled,
     _is_test_like_directory,
+    _launch_static_background_job,
+    _release_request_db_session,
     _normalize_llm_config_error_message,
     _record_scan_progress,
     _request_scan_task_cancel,
@@ -132,6 +134,27 @@ class BanditFindingResponse(BaseModel):
     status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _build_bandit_scan_task_response(task: BanditScanTask) -> BanditScanTaskResponse:
+    return BanditScanTaskResponse(
+        id=str(task.id),
+        project_id=str(task.project_id),
+        name=str(task.name or ""),
+        status=str(task.status or "pending"),
+        target_path=str(task.target_path or "."),
+        severity_level=str(task.severity_level or "medium"),
+        confidence_level=str(task.confidence_level or "medium"),
+        total_findings=int(task.total_findings or 0),
+        high_count=int(task.high_count or 0),
+        medium_count=int(task.medium_count or 0),
+        low_count=int(task.low_count or 0),
+        scan_duration_ms=int(task.scan_duration_ms or 0),
+        files_scanned=int(task.files_scanned or 0),
+        error_message=task.error_message,
+        created_at=task.created_at or datetime.now(timezone.utc),
+        updated_at=task.updated_at,
+    )
 
 
 # Bandit integration: 规则页响应与更新请求模型（仅用于前端展示/启停状态持久化）。
@@ -310,212 +333,200 @@ async def _execute_bandit_scan(
     severity_level: str = "medium",
     confidence_level: str = "medium",
 ) -> None:
-    async with async_session_factory() as db:
-        try:
-            result = await db.execute(
-                select(BanditScanTask).where(BanditScanTask.id == task_id)
-            )
+    project_id: Optional[str] = None
+
+    async def _update_task_state(
+        status: str,
+        *,
+        error_message: Optional[str] = None,
+        findings: Optional[List[Dict[str, Any]]] = None,
+        high_count: int = 0,
+        medium_count: int = 0,
+        low_count: int = 0,
+        scanned_file_count: int = 0,
+    ) -> Optional[BanditScanTask]:
+        async with async_session_factory() as db:
+            result = await db.execute(select(BanditScanTask).where(BanditScanTask.id == task_id))
             task = result.scalar_one_or_none()
             if not task:
-                logger.error(f"Bandit task {task_id} not found")
-                return
-
-            if _is_scan_task_cancelled("bandit", task_id) or task.status == "interrupted":
-                task.status = "interrupted"
-                if not task.error_message:
-                    task.error_message = "扫描任务已中止（用户操作）"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-
-            task.status = "running"
-            await db.commit()
-
-            full_target_path = os.path.join(project_root, target_path)
-            if not os.path.exists(full_target_path):
-                task.status = "failed"
-                task.error_message = f"Target path {full_target_path} not found"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                logger.error(f"Bandit target path not found: {full_target_path}")
-                return
-
-            normalized_severity = _normalize_bandit_level(severity_level, fallback="medium")
-            normalized_confidence = _normalize_bandit_level(
-                confidence_level, fallback="medium"
-            )
-
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-                report_file = tf.name
-
-            try:
-                # Bandit integration: 规则页 enabled 状态当前仅用于前端展示，不参与扫描命令构建。
-                cmd = [
-                    "bandit",
-                    "-r",
-                    full_target_path,
-                    "-f",
-                    "json",
-                    "-o",
-                    report_file,
-                    "--severity-level",
-                    normalized_severity,
-                    "--confidence-level",
-                    normalized_confidence,
-                    "-q",
-                ]
-
-                logger.info(f"Executing bandit for task {task_id}: {' '.join(cmd)}")
-                loop = asyncio.get_event_loop()
-                process_result = await loop.run_in_executor(
-                    None,
-                    lambda: _run_subprocess_with_tracking(
-                        "bandit",
-                        task_id,
-                        cmd,
-                        timeout=600,
-                    ),
-                )
-
-                if _is_scan_task_cancelled("bandit", task_id):
-                    task.status = "interrupted"
-                    if not task.error_message:
-                        task.error_message = "扫描任务已中止（用户操作）"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    return
-
-                if process_result.returncode > 1:
-                    error_msg = process_result.stderr or process_result.stdout or "Unknown error"
-                    task.status = "failed"
-                    task.error_message = str(error_msg)[:500]
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    logger.error(f"Bandit task {task_id} failed: {error_msg}")
-                    return
-
-                raw_payload: Any = {}
-                if os.path.exists(report_file):
-                    with open(report_file, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read().strip()
-                    if content:
-                        try:
-                            raw_payload = json.loads(content)
-                        except json.JSONDecodeError as exc:
-                            task.status = "failed"
-                            task.error_message = f"Failed to parse Bandit JSON output: {exc}"
-                            _sync_task_scan_duration(task)
-                            await db.commit()
-                            logger.error(
-                                f"Failed to parse Bandit output for task {task_id}: {exc}"
-                            )
-                            return
-
-                findings = _parse_bandit_output_payload(raw_payload)
-                high_count = 0
-                medium_count = 0
-                low_count = 0
-                scanned_files: set[str] = set()
-
+                return None
+            if findings:
                 for finding in findings:
-                    try:
-                        severity = str(finding.get("issue_severity") or "LOW").strip().upper()
-                        confidence = str(finding.get("issue_confidence") or "LOW").strip().upper()
-                        file_path = normalize_static_scan_file_path(
-                            str(finding.get("filename") or "").strip(),
-                            project_root,
-                        )
-                        if file_path:
-                            scanned_files.add(file_path)
-
-                        if severity == "HIGH":
-                            high_count += 1
-                        elif severity == "MEDIUM":
-                            medium_count += 1
-                        else:
-                            low_count += 1
-
-                        bandit_finding = BanditFinding(
+                    db.add(
+                        BanditFinding(
                             scan_task_id=task_id,
                             test_id=str(finding.get("test_id") or "unknown"),
                             test_name=str(finding.get("test_name") or "unknown"),
-                            issue_severity=severity if severity in {"HIGH", "MEDIUM", "LOW"} else "LOW",
-                            issue_confidence=(
-                                confidence if confidence in {"HIGH", "MEDIUM", "LOW"} else "LOW"
-                            ),
-                            file_path=file_path or "",
+                            issue_severity=str(finding.get("issue_severity") or "LOW").strip().upper(),
+                            issue_confidence=str(finding.get("issue_confidence") or "LOW").strip().upper(),
+                            file_path=str(finding.get("file_path") or ""),
                             line_number=finding.get("line_number"),
                             code_snippet=str(finding.get("code") or "")[:2000] or None,
                             issue_text=str(finding.get("issue_text") or "")[:4000] or None,
                             more_info=str(finding.get("more_info") or "")[:1000] or None,
                             status="open",
                         )
-                        db.add(bandit_finding)
-                    except Exception as exc:
-                        logger.error(f"Error processing Bandit finding for task {task_id}: {exc}")
+                    )
 
-                if _is_scan_task_cancelled("bandit", task_id):
-                    task.status = "interrupted"
-                    if not task.error_message:
-                        task.error_message = "扫描任务已中止（用户操作）"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    return
-
-                task.status = "completed"
-                task.severity_level = normalized_severity
-                task.confidence_level = normalized_confidence
-                task.total_findings = len(findings)
+            task.status = status
+            if error_message is not None:
+                task.error_message = error_message[:500] if error_message else None
+            if status == "completed":
+                task.severity_level = _normalize_bandit_level(severity_level, fallback="medium")
+                task.confidence_level = _normalize_bandit_level(confidence_level, fallback="medium")
+                task.total_findings = len(findings or [])
                 task.high_count = high_count
                 task.medium_count = medium_count
                 task.low_count = low_count
-                task.files_scanned = len(scanned_files)
+                task.files_scanned = scanned_file_count
+            _sync_task_scan_duration(task)
+            await db.commit()
+            return task
+
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(select(BanditScanTask).where(BanditScanTask.id == task_id))
+            task = result.scalar_one_or_none()
+            if not task:
+                logger.error(f"Bandit task {task_id} not found")
+                return
+            project_id = task.project_id
+            if _is_scan_task_cancelled("bandit", task_id) or task.status == "interrupted":
+                task.status = "interrupted"
+                task.error_message = task.error_message or "扫描任务已中止（用户操作）"
                 _sync_task_scan_duration(task)
                 await db.commit()
-                project_metrics_refresher.enqueue(task.project_id)
-            finally:
+                return
+            task.status = "running"
+            await db.commit()
+
+        full_target_path = os.path.join(project_root, target_path)
+        if not os.path.exists(full_target_path):
+            await _update_task_state("failed", error_message=f"Target path {full_target_path} not found")
+            logger.error(f"Bandit target path not found: {full_target_path}")
+            return
+
+        normalized_severity = _normalize_bandit_level(severity_level, fallback="medium")
+        normalized_confidence = _normalize_bandit_level(confidence_level, fallback="medium")
+
+        findings_to_persist: List[Dict[str, Any]] = []
+        high_count = 0
+        medium_count = 0
+        low_count = 0
+        scanned_files: set[str] = set()
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
+            report_file = tf.name
+
+        try:
+            cmd = [
+                "bandit",
+                "-r",
+                full_target_path,
+                "-f",
+                "json",
+                "-o",
+                report_file,
+                "--severity-level",
+                normalized_severity,
+                "--confidence-level",
+                normalized_confidence,
+                "-q",
+            ]
+            logger.info(f"Executing bandit for task {task_id}: {' '.join(cmd)}")
+            loop = asyncio.get_event_loop()
+            process_result = await loop.run_in_executor(
+                None,
+                lambda: _run_subprocess_with_tracking(
+                    "bandit",
+                    task_id,
+                    cmd,
+                    timeout=600,
+                ),
+            )
+
+            if _is_scan_task_cancelled("bandit", task_id):
+                await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
+                return
+
+            if process_result.returncode > 1:
+                error_msg = process_result.stderr or process_result.stdout or "Unknown error"
+                await _update_task_state("failed", error_message=str(error_msg))
+                logger.error(f"Bandit task {task_id} failed: {error_msg}")
+                return
+
+            raw_payload: Any = {}
+            if os.path.exists(report_file):
+                with open(report_file, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read().strip()
+                if content:
+                    try:
+                        raw_payload = json.loads(content)
+                    except json.JSONDecodeError as exc:
+                        await _update_task_state(
+                            "failed",
+                            error_message=f"Failed to parse Bandit JSON output: {exc}",
+                        )
+                        logger.error(f"Failed to parse Bandit output for task {task_id}: {exc}")
+                        return
+
+            findings = _parse_bandit_output_payload(raw_payload)
+            for finding in findings:
                 try:
-                    if os.path.exists(report_file):
-                        os.unlink(report_file)
+                    severity = str(finding.get("issue_severity") or "LOW").strip().upper()
+                    confidence = str(finding.get("issue_confidence") or "LOW").strip().upper()
+                    file_path = normalize_static_scan_file_path(
+                        str(finding.get("filename") or "").strip(),
+                        project_root,
+                    )
+                    if file_path:
+                        scanned_files.add(file_path)
+                    if severity == "HIGH":
+                        high_count += 1
+                    elif severity == "MEDIUM":
+                        medium_count += 1
+                    else:
+                        low_count += 1
+                    findings_to_persist.append(
+                        {
+                            **finding,
+                            "issue_severity": severity if severity in {"HIGH", "MEDIUM", "LOW"} else "LOW",
+                            "issue_confidence": confidence if confidence in {"HIGH", "MEDIUM", "LOW"} else "LOW",
+                            "file_path": file_path or "",
+                        }
+                    )
                 except Exception as exc:
-                    logger.warning(f"Failed to delete temporary Bandit report file: {exc}")
-        except asyncio.CancelledError:
-            logger.warning(f"Bandit task {task_id} interrupted by service shutdown")
-            try:
-                await db.rollback()
-                result = await db.execute(
-                    select(BanditScanTask).where(BanditScanTask.id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                if task and task.status in {"pending", "running"}:
-                    task.status = "interrupted"
-                    if not task.error_message:
-                        task.error_message = "扫描任务因服务中断被标记为中止"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-            except Exception as commit_error:
-                logger.error(
-                    f"Failed to update Bandit interrupted task status: {commit_error}"
-                )
-        except Exception as exc:
-            logger.error(f"Error executing Bandit task {task_id}: {exc}")
-            try:
-                await db.rollback()
-                result = await db.execute(
-                    select(BanditScanTask).where(BanditScanTask.id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                if task:
-                    task.status = "failed"
-                    task.error_message = str(exc)[:500]
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-            except Exception as rollback_error:
-                logger.error(
-                    f"Failed to rollback/update failed Bandit task {task_id}: {rollback_error}"
-                )
+                    logger.error(f"Error processing Bandit finding for task {task_id}: {exc}")
         finally:
-            _clear_scan_task_cancel("bandit", task_id)
+            try:
+                if os.path.exists(report_file):
+                    os.unlink(report_file)
+            except Exception as exc:
+                logger.warning(f"Failed to delete temporary Bandit report file: {exc}")
+
+        if _is_scan_task_cancelled("bandit", task_id):
+            await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
+            return
+
+        updated_task = await _update_task_state(
+            "completed",
+            findings=findings_to_persist,
+            high_count=high_count,
+            medium_count=medium_count,
+            low_count=low_count,
+            scanned_file_count=len(scanned_files),
+        )
+        if updated_task is not None:
+            project_metrics_refresher.enqueue(updated_task.project_id)
+    except asyncio.CancelledError:
+        logger.warning(f"Bandit task {task_id} interrupted by service shutdown")
+        await _update_task_state("interrupted", error_message="扫描任务因服务中断被标记为中止")
+        raise
+    except Exception as exc:
+        logger.error(f"Error executing Bandit task {task_id}: {exc}")
+        await _update_task_state("failed", error_message=str(exc))
+    finally:
+        _clear_scan_task_cancel("bandit", task_id)
 
 
 @router.get("/bandit/rules", response_model=List[BanditRuleResponse])
@@ -947,7 +958,6 @@ async def _batch_update_bandit_rules_deleted(
 @router.post("/bandit/scan", response_model=BanditScanTaskResponse)
 async def create_bandit_scan(
     request: BanditScanTaskCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -973,17 +983,23 @@ async def create_bandit_scan(
     )
     db.add(scan_task)
     await db.commit()
-    await db.refresh(scan_task)
-
-    background_tasks.add_task(
-        _execute_bandit_scan,
-        scan_task.id,
-        project_root,
-        request.target_path,
-        scan_task.severity_level,
-        scan_task.confidence_level,
+    response = _build_bandit_scan_task_response(scan_task)
+    task_id = response.id
+    severity_level = scan_task.severity_level
+    confidence_level = scan_task.confidence_level
+    await _release_request_db_session(db)
+    _launch_static_background_job(
+        "bandit",
+        task_id,
+        _execute_bandit_scan(
+            task_id,
+            project_root,
+            request.target_path,
+            severity_level,
+            confidence_level,
+        ),
     )
-    return scan_task
+    return response
 
 
 @router.get("/bandit/tasks", response_model=List[BanditScanTaskResponse])

@@ -140,6 +140,15 @@ def test_frontend_dev_entrypoint_prints_ready_banner() -> None:
     assert 'backend docs: ${BACKEND_PUBLIC_URL}/docs' in frontend_entrypoint
 
 
+def test_nexus_web_dockerfile_persists_runtime_pnpm() -> None:
+    nexus_dockerfile = (REPO_ROOT / "nexus-web" / "dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'npm install -g "pnpm@${NEXUS_WEB_PNPM_VERSION}"' in nexus_dockerfile
+    assert 'CMD ["pnpm", "dev", "--host", "0.0.0.0"]' in nexus_dockerfile
+
+
 def test_scripts_and_packaging_use_new_compose_layout() -> None:
     dev_frontend_script = (REPO_ROOT / "scripts" / "dev-frontend.sh").read_text(encoding="utf-8")
     frontend_exec_script = (

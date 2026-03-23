@@ -1,5 +1,6 @@
 """Shared access and response helpers for agent task routes."""
 
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from fastapi import HTTPException
@@ -61,7 +62,7 @@ def build_agent_task_response(task: AgentTask) -> AgentTaskResponse:
         quality_score=float(task.quality_score or 0.0),
         security_score=float(task.security_score) if task.security_score is not None else None,
         progress_percentage=progress,
-        created_at=task.created_at,
+        created_at=task.created_at or datetime.now(timezone.utc),
         started_at=task.started_at,
         completed_at=task.completed_at,
         error_message=task.error_message,

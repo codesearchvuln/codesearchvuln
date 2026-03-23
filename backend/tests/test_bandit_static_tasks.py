@@ -50,6 +50,20 @@ class _FakeAsyncSession:
     async def rollback(self):
         self.rollback_calls += 1
 
+    async def close(self):
+        return None
+
+
+class _SessionFactory:
+    def __init__(self, *sessions):
+        self._sessions = list(sessions)
+        self.calls = 0
+
+    def __call__(self):
+        session = self._sessions[min(self.calls, len(self._sessions) - 1)]
+        self.calls += 1
+        return session
+
 
 @pytest.mark.asyncio
 async def test_parse_bandit_output_payload_supports_dict_and_list():
@@ -112,8 +126,10 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
         severity_level="medium",
         confidence_level="medium",
     )
-    fake_session = _FakeAsyncSession(task)
-    monkeypatch.setattr(static_tasks, "async_session_factory", lambda: fake_session)
+    load_session = _FakeAsyncSession(task)
+    persist_session = _FakeAsyncSession(task)
+    session_factory = _SessionFactory(load_session, persist_session)
+    monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
 
@@ -167,5 +183,6 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
     assert task.medium_count == 0
     assert task.low_count == 0
     assert task.files_scanned == 1
-    assert len(fake_session.findings) == 1
-    assert fake_session.findings[0].file_path == "app/main.py"
+    assert session_factory.calls >= 2
+    assert len(persist_session.findings) == 1
+    assert persist_session.findings[0].file_path == "app/main.py"

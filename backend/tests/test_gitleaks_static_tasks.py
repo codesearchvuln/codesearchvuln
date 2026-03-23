@@ -49,6 +49,20 @@ class _FakeAsyncSession:
     async def rollback(self):
         self.rollback_calls += 1
 
+    async def close(self):
+        return None
+
+
+class _SessionFactory:
+    def __init__(self, *sessions):
+        self._sessions = list(sessions)
+        self.calls = 0
+
+    def __call__(self):
+        session = self._sessions[min(self.calls, len(self._sessions) - 1)]
+        self.calls += 1
+        return session
+
 
 def test_normalize_gitleaks_runtime_config_defaults_to_unredacted_and_parses_strings():
     assert static_tasks_gitleaks._normalize_gitleaks_runtime_config({}) == {
@@ -89,8 +103,10 @@ async def test_execute_gitleaks_scan_keeps_match_content_and_masks_secret(monkey
         target_path=".",
         no_git="true",
     )
-    fake_session = _FakeAsyncSession(task)
-    monkeypatch.setattr(static_tasks_gitleaks, "async_session_factory", lambda: fake_session)
+    load_session = _FakeAsyncSession(task)
+    persist_session = _FakeAsyncSession(task)
+    session_factory = _SessionFactory(load_session, persist_session)
+    monkeypatch.setattr(static_tasks_gitleaks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks_gitleaks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks_gitleaks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -144,6 +160,7 @@ async def test_execute_gitleaks_scan_keeps_match_content_and_masks_secret(monkey
     assert task.status == "completed"
     assert task.total_findings == 1
     assert task.files_scanned == 1
-    assert len(fake_session.findings) == 1
-    assert fake_session.findings[0].match == "ghp_example_secret"
-    assert fake_session.findings[0].secret == "ghp_**********cret"
+    assert session_factory.calls >= 2
+    assert len(persist_session.findings) == 1
+    assert persist_session.findings[0].match == "ghp_example_secret"
+    assert persist_session.findings[0].secret == "ghp_**********cret"
