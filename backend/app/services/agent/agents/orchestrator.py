@@ -1319,6 +1319,10 @@ Action Input: {{}}
                 else {}
             )
 
+            thinking_push_mode = str(params.get("thinking_push_mode") or "").strip().lower()
+            if thinking_push_mode:
+                runtime_config["thinking_push_mode"] = thinking_push_mode
+
             if agent_name == "analysis":
                 single_risk_point = self._extract_single_risk_point_for_analysis(
                     params=params,

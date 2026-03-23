@@ -436,6 +436,7 @@ class BaseAgent(ABC):
         #  最近一次工具输出快照（用于避免 llm_observation 复写同一段 tool_result）
         self._last_tool_result_snapshot: Optional[Dict[str, Any]] = None
         self._last_llm_stream_meta: Dict[str, Any] = {}
+        self._thinking_push_mode: str = "stream"
         self._last_llm_thought_digest: Optional[str] = None
         self._llm_thought_repeat_count: int = 0
         self._llm_thought_suppressed_count: int = 0
@@ -1763,6 +1764,11 @@ class BaseAgent(ABC):
         Returns:
             (完整响应内容, token数量)
         """
+        thinking_push_mode = str(getattr(self, "_thinking_push_mode", "stream") or "stream").strip().lower()
+        if thinking_push_mode not in {"stream", "final_only"}:
+            thinking_push_mode = "stream"
+        emit_stream_thinking = thinking_push_mode != "final_only"
+
         #  自动压缩过长的消息历史
         if auto_compress:
             messages = self.compress_messages_if_needed(messages)
@@ -1790,9 +1796,12 @@ class BaseAgent(ABC):
             logger.info(f"[{self.name}] Cancelled before LLM call")
             return "", 0
 
-        logger.info(f"[{self.name}] Starting stream_llm_call, emitting thinking_start...")
-        await self.emit_thinking_start()
-        logger.info(f"[{self.name}] thinking_start emitted, starting LLM stream...")
+        if emit_stream_thinking:
+            logger.info(f"[{self.name}] Starting stream_llm_call, emitting thinking_start...")
+            await self.emit_thinking_start()
+            logger.info(f"[{self.name}] thinking_start emitted, starting LLM stream...")
+        else:
+            logger.info(f"[{self.name}] Starting stream_llm_call with final_only thinking mode...")
 
         try:
             # 获取流式迭代器（传入 None 时使用用户配置）
@@ -1870,7 +1879,8 @@ class BaseAgent(ABC):
                         if not accumulated and token:
                             accumulated += token # Fallback
 
-                        await self.emit_thinking_token(token, accumulated)
+                        if emit_stream_thinking:
+                            await self.emit_thinking_token(token, accumulated)
                         #  CRITICAL: 让出控制权给事件循环，让 SSE 有机会发送事件
                         await asyncio.sleep(0)
 
@@ -1967,7 +1977,19 @@ class BaseAgent(ABC):
             )
             accumulated = f"[LLM调用错误: {str(e)}] 请重试。"
         finally:
-            await self.emit_thinking_end(accumulated)
+            if emit_stream_thinking:
+                await self.emit_thinking_end(accumulated)
+            else:
+                final_text = str(accumulated or "").strip()
+                if final_text:
+                    await self.emit_event(
+                        "thinking",
+                        "思考完成",
+                        metadata={
+                            "thought": final_text,
+                            "final_only": True,
+                        },
+                    )
             self._trace(
                 "llm_stream_finished",
                 chunk_count=chunk_count,

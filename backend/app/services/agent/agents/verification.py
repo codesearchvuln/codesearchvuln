@@ -2129,6 +2129,8 @@ class VerificationAgent(BaseAgent):
 
         previous_results = input_data.get("previous_results", {})
         config = input_data.get("config", {})
+        thinking_push_mode = str(config.get("thinking_push_mode", "stream") or "stream").strip().lower()
+        self._thinking_push_mode = thinking_push_mode if thinking_push_mode in {"stream", "final_only"} else "stream"
         task = input_data.get("task", "")
         task_context = input_data.get("task_context", "")
         project_root = input_data.get("project_root")

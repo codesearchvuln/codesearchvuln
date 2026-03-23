@@ -163,6 +163,8 @@ class ParallelPhaseExecutor:
             and isinstance(runtime_context.get("config"), dict)
             else {}
         )
+        if self.agent_type in {"analysis", "verification"}:
+            runtime_config["thinking_push_mode"] = "final_only"
         previous_results = self._build_previous_results()
 
         handoff = None
@@ -908,6 +910,7 @@ class ParallelPhaseExecutor:
                 "risk_point": risk_point,
                 "context": json.dumps(risk_point, ensure_ascii=False),
                 "task_id": task_id,
+                "thinking_push_mode": "final_only",
             }
 
             orc._last_recon_risk_point = risk_point
@@ -998,6 +1001,7 @@ class ParallelPhaseExecutor:
                 "finding": finding,
                 "context": json.dumps(finding, ensure_ascii=False),
                 "task_id": task_id,
+                "thinking_push_mode": "final_only",
             }
 
             try:
