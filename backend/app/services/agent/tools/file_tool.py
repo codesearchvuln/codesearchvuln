@@ -525,6 +525,7 @@ class FileReadTool(AgentTool):
 - start_line: 可选，起始行号
 - end_line: 可选，结束行号
 - max_lines: 最大返回行数（默认500）
+- project_scope: 可选，允许在项目范围内按 basename 自动补全路径（默认 false）
 
 输出格式: 每行代码前带有文件中的原始行号，格式为 `行号| 代码`，例如：
 ```
@@ -1160,6 +1161,8 @@ class FileSearchTool(AgentTool):
 
 输入:
 - keyword: 搜索关键字或正则表达式
+- file_path: 可选，限定到单个文件（相对于项目根目录）
+- path: 可选，file_path 的兼容别名
 - file_pattern: 可选，文件名模式（如 *.py）
 - directory: 可选，搜索目录 (相对于项目根目录)
 - case_sensitive: 是否区分大小写（默认 false）
@@ -1407,7 +1410,13 @@ class CodeWindowTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "围绕 file_path + anchor_line 返回极小代码窗口，用于取证和前端代码展示。"
+        return """围绕锚点返回极小代码窗口，用于取证和前端代码展示。
+
+输入:
+- file_path: 文件路径（相对于项目根目录）
+- anchor_line: 锚点行号（从1开始）
+- before_lines: 可选，向前读取的行数（默认2）
+- after_lines: 可选，向后读取的行数（默认2）"""
 
     @property
     def args_schema(self):
@@ -1520,7 +1529,10 @@ class FileOutlineTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "返回文件职责、关键符号、imports、入口点和风险提示，不输出大段源码。"
+        return """返回文件职责、关键符号、imports、入口点和风险提示，不输出大段源码。
+
+输入:
+- file_path: 文件路径（相对于项目根目录）"""
 
     @property
     def args_schema(self):
@@ -1637,7 +1649,12 @@ class FunctionSummaryTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "解释单个函数的职责、输入输出、关键调用与风险点，不返回大段源码。"
+        return """解释单个函数的职责、输入输出、关键调用与风险点，不返回大段源码。
+
+输入:
+- file_path: 文件路径（相对于项目根目录）
+- function_name: 可选，目标函数名
+- line: 可选，函数内任意锚点行（当 function_name 缺失时用于定位）"""
 
     @property
     def args_schema(self):
@@ -1766,7 +1783,11 @@ class SymbolBodyTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "提取函数/方法主体源码，只负责源码提取，不负责语义解释。"
+        return """提取函数/方法主体源码，只负责源码提取，不负责语义解释。
+
+输入:
+- file_path: 文件路径（相对于项目根目录）
+- symbol_name: 目标符号名（函数/方法名）"""
 
     @property
     def args_schema(self):
@@ -1899,7 +1920,9 @@ class ListFilesTool(AgentTool):
 - directory: 目录路径 (相对于项目根目录)
 - pattern: 可选，文件名模式
 - recursive: 是否递归
-- max_files: 最大文件数"""
+- max_files: 最大文件数
+- recursive_mode: 可选，shallow/deep，兼容更明确的递归模式
+- max_entries: 可选，最大返回条目数（优先覆盖 max_files）"""
     
     @property
     def args_schema(self):
@@ -2337,7 +2360,11 @@ class LocateEnclosingFunctionTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return "根据 file_path + line 定位包含该行的函数/方法，并返回符号范围与签名事实。"
+        return """根据 file_path + line 定位包含该行的函数/方法，并返回符号范围与签名事实。
+
+输入:
+- file_path: 文件路径（相对于项目根目录）
+- line: 目标行号（从1开始）"""
 
     @property
     def args_schema(self):
