@@ -35,7 +35,9 @@ export function hasDashboardSnapshotContent(snapshot: DashboardSnapshotResponse)
 		snapshot.summary.total_projects > 0 ||
 		snapshot.daily_activity.length > 0 ||
 		snapshot.project_hotspots.length > 0 ||
+		snapshot.project_risk_distribution.length > 0 ||
 		snapshot.language_risk.length > 0 ||
+		snapshot.recent_tasks.length > 0 ||
 		hasCweContent
 	);
 }

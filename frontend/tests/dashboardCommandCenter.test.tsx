@@ -19,155 +19,241 @@ async function importOrFail<TModule = Record<string, unknown>>(
 
 function createSnapshotFixture() {
 	return {
-		generated_at: "2026-03-16T03:00:00.000Z",
+		generated_at: "2026-03-23T03:00:00.000Z",
 		total_scan_duration_ms: 90061000,
 		scan_runs: [],
 		vulns: [],
 		rule_confidence: [],
-		rule_confidence_by_language: [
-			{ language: "TypeScript", high_count: 1, medium_count: 0 },
-			{ language: "Python", high_count: 0, medium_count: 1 },
-		],
+		rule_confidence_by_language: [],
 		cwe_distribution: [
 			{
 				cwe_id: "CWE-79",
 				cwe_name: "跨站脚本",
 				total_findings: 3,
-				opengrep_findings: 2,
-				agent_findings: 1,
-				bandit_findings: 0,
-			},
-			{
-				cwe_id: "CWE-89",
-				cwe_name: "SQL 注入",
-				total_findings: 2,
 				opengrep_findings: 1,
-				agent_findings: 1,
+				agent_findings: 2,
 				bandit_findings: 0,
 			},
 		],
 		summary: {
-			total_projects: 2,
-			current_effective_findings: 9,
-			current_verified_findings: 5,
-			false_positive_rate: 0.2307,
-			scan_success_rate: 0.8889,
-			avg_scan_duration_ms: 819,
-			window_scanned_projects: 2,
-			window_new_effective_findings: 8,
-			window_verified_findings: 5,
-			window_false_positive_rate: 0.2727,
-			window_scan_success_rate: 1,
-			window_avg_scan_duration_ms: 825,
+			total_projects: 12,
+			current_effective_findings: 48,
+			current_verified_findings: 21,
+			total_model_tokens: 1482360,
+			false_positive_rate: 0.12,
+			scan_success_rate: 0.92,
+			avg_scan_duration_ms: 825,
+			window_scanned_projects: 10,
+			window_new_effective_findings: 18,
+			window_verified_findings: 9,
+			window_false_positive_rate: 0.08,
+			window_scan_success_rate: 0.94,
+			window_avg_scan_duration_ms: 810,
 		},
 		daily_activity: [
 			{
-				date: "2026-03-14",
-				completed_scans: 2,
-				agent_findings: 0,
-				opengrep_findings: 0,
+				date: "2026-03-20",
+				completed_scans: 4,
+				agent_findings: 3,
+				opengrep_findings: 5,
 				gitleaks_findings: 2,
 				bandit_findings: 1,
-				phpstan_findings: 0,
+				phpstan_findings: 2,
+				yasa_findings: 1,
 			},
 			{
-				date: "2026-03-15",
-				completed_scans: 3,
-				agent_findings: 1,
-				opengrep_findings: 2,
-				gitleaks_findings: 0,
-				bandit_findings: 0,
+				date: "2026-03-21",
+				completed_scans: 5,
+				agent_findings: 4,
+				opengrep_findings: 6,
+				gitleaks_findings: 3,
+				bandit_findings: 2,
 				phpstan_findings: 2,
+				yasa_findings: 1,
 			},
 		],
 		verification_funnel: {
-			raw_findings: 11,
-			effective_findings: 8,
-			verified_findings: 5,
-			false_positive_count: 3,
+			raw_findings: 30,
+			effective_findings: 18,
+			verified_findings: 9,
+			false_positive_count: 4,
 		},
 		task_status_breakdown: {
 			pending: 0,
-			running: 1,
-			completed: 8,
+			running: 2,
+			completed: 12,
 			failed: 1,
-			interrupted: 0,
+			interrupted: 1,
 			cancelled: 0,
 		},
 		engine_breakdown: [
 			{
-				engine: "agent",
-				completed_scans: 1,
-				effective_findings: 1,
-				verified_findings: 1,
+				engine: "llm",
+				completed_scans: 3,
+				effective_findings: 18,
+				verified_findings: 9,
+				false_positive_count: 1,
+				avg_scan_duration_ms: 1200,
+				success_rate: 1,
+			},
+			{
+				engine: "opengrep",
+				completed_scans: 4,
+				effective_findings: 15,
+				verified_findings: 4,
 				false_positive_count: 1,
 				avg_scan_duration_ms: 1000,
 				success_rate: 1,
 			},
 			{
-				engine: "opengrep",
-				completed_scans: 1,
-				effective_findings: 2,
-				verified_findings: 1,
+				engine: "gitleaks",
+				completed_scans: 4,
+				effective_findings: 9,
+				verified_findings: 2,
 				false_positive_count: 1,
-				avg_scan_duration_ms: 1200,
+				avg_scan_duration_ms: 900,
 				success_rate: 1,
 			},
-		],
-		project_hotspots: [
 			{
-				project_id: "p1",
-				project_name: "Alpha",
-				risk_score: 32,
-				scan_runs_window: 4,
+				engine: "bandit",
+				completed_scans: 3,
 				effective_findings: 7,
-				verified_findings: 4,
-				false_positive_rate: 0,
-				dominant_language: "TypeScript",
-				last_scan_at: "2026-03-15T03:00:00.000Z",
-				top_engine: "opengrep",
+				verified_findings: 2,
+				false_positive_count: 0,
+				avg_scan_duration_ms: 760,
+				success_rate: 1,
 			},
 			{
-				project_id: "p2",
-				project_name: "Beta",
-				risk_score: 12.5,
-				scan_runs_window: 2,
-				effective_findings: 2,
+				engine: "phpstan",
+				completed_scans: 2,
+				effective_findings: 5,
 				verified_findings: 1,
-				false_positive_rate: 0.6667,
-				dominant_language: "Python",
-				last_scan_at: "2026-03-16T01:00:00.000Z",
-				top_engine: "bandit",
+				false_positive_count: 0,
+				avg_scan_duration_ms: 700,
+				success_rate: 1,
+			},
+			{
+				engine: "yasa",
+				completed_scans: 2,
+				effective_findings: 4,
+				verified_findings: 1,
+				false_positive_count: 0,
+				avg_scan_duration_ms: 680,
+				success_rate: 0.5,
 			},
 		],
+		project_hotspots: [],
 		language_risk: [
 			{
 				language: "TypeScript",
-				project_count: 1,
-				loc_number: 700,
-				effective_findings: 5,
-				verified_findings: 3,
-				false_positive_count: 0,
-				findings_per_kloc: 7.14,
-				rules_high: 1,
-				rules_medium: 0,
+				project_count: 4,
+				loc_number: 182400,
+				effective_findings: 28,
+				verified_findings: 12,
+				false_positive_count: 1,
+				findings_per_kloc: 15.35,
+				rules_high: 4,
+				rules_medium: 2,
 			},
 			{
-				language: "PHP",
-				project_count: 1,
-				loc_number: 300,
-				effective_findings: 2,
-				verified_findings: 1,
-				false_positive_count: 0,
-				findings_per_kloc: 6.67,
-				rules_high: 1,
-				rules_medium: 0,
+				language: "Python",
+				project_count: 3,
+				loc_number: 124600,
+				effective_findings: 16,
+				verified_findings: 7,
+				false_positive_count: 1,
+				findings_per_kloc: 12.84,
+				rules_high: 2,
+				rules_medium: 3,
 			},
+		],
+		recent_tasks: [
+			{
+				task_id: "at-1",
+				task_type: "混合扫描",
+				title: "混合扫描 · Alpha Gateway",
+				engine: "llm",
+				status: "running",
+				created_at: "2026-03-23T02:30:00.000Z",
+				detail_path: "/agent-audit/at-1",
+			},
+			{
+				task_id: "at-2",
+				task_type: "智能扫描",
+				title: "智能扫描 · Beta API",
+				engine: "llm",
+				status: "completed",
+				created_at: "2026-03-23T01:30:00.000Z",
+				detail_path: "/agent-audit/at-2",
+			},
+			{
+				task_id: "og-1",
+				task_type: "静态扫描",
+				title: "静态扫描 · Gamma Portal",
+				engine: "opengrep",
+				status: "failed",
+				created_at: "2026-03-23T00:30:00.000Z",
+				detail_path: "/tasks/static",
+			},
+			{
+				task_id: "ps-1",
+				task_type: "静态扫描",
+				title: "静态扫描 · Delta PHP",
+				engine: "phpstan",
+				status: "completed",
+				created_at: "2026-03-22T23:30:00.000Z",
+				detail_path: "/tasks/static",
+			},
+			{
+				task_id: "ya-1",
+				task_type: "静态扫描",
+				title: "静态扫描 · Echo Console",
+				engine: "yasa",
+				status: "interrupted",
+				created_at: "2026-03-22T22:30:00.000Z",
+				detail_path: "/tasks/static",
+			},
+		],
+		project_risk_distribution: [
+			{
+				project_id: "p1",
+				project_name: "Alpha Gateway",
+				critical_count: 3,
+				high_count: 7,
+				medium_count: 5,
+				low_count: 2,
+				total_findings: 17,
+			},
+			{
+				project_id: "p2",
+				project_name: "Beta API",
+				critical_count: 1,
+				high_count: 4,
+				medium_count: 3,
+				low_count: 1,
+				total_findings: 9,
+			},
+		],
+		verified_vulnerability_types: [
+			{ type_code: "CWE-89", type_name: "SQL 注入", verified_count: 8 },
+			{ type_code: "CWE-79", type_name: "跨站脚本", verified_count: 5 },
+		],
+		static_engine_rule_totals: [
+			{ engine: "opengrep", total_rules: 368 },
+			{ engine: "gitleaks", total_rules: 214 },
+			{ engine: "bandit", total_rules: 172 },
+			{ engine: "phpstan", total_rules: 129 },
+			{ engine: "yasa", total_rules: 84 },
+		],
+		language_loc_distribution: [
+			{ language: "TypeScript", loc_number: 182400, project_count: 4 },
+			{ language: "Python", loc_number: 124600, project_count: 3 },
+			{ language: "PHP", loc_number: 109300, project_count: 2 },
 		],
 	};
 }
 
-test("DashboardCommandCenter renders the current summary strip and primary panels", async () => {
+test("DashboardCommandCenter renders the live single-page dashboard layout", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
@@ -180,128 +266,46 @@ test("DashboardCommandCenter renders the current summary strip and primary panel
 		}),
 	);
 
-	assert.match(markup, /扫描项目总数/);
-	assert.match(markup, /当前发现漏洞/);
-	assert.match(markup, /已验证漏洞/);
-	// assert.match(markup, /累计扫描时长/);
-	assert.match(markup, /累计执行扫描/);
-	assert.match(markup, /可挖掘漏洞类型/);
+	assert.match(markup, /项目总数/);
+	assert.match(markup, /累计发现漏洞总数/);
+	assert.match(markup, /AI累计验证漏洞总数/);
+	assert.match(markup, /累计执行扫描任务次数/);
+	assert.match(markup, /累计消耗模型token/);
 	assert.match(markup, /漏洞态势趋势/);
+	assert.match(markup, /项目风险统计图/);
+	assert.match(markup, /语言风险统计图/);
+	assert.match(markup, /漏洞类型统计图/);
+	assert.match(markup, /扫描引擎统计图/);
+	assert.match(markup, /静态扫描引擎规则统计图/);
+	assert.match(markup, /语言代码行数统计图/);
 	assert.match(markup, /任务状态/);
-	assert.match(markup, /风险热点项目/);
-	// assert.match(markup, /引擎贡献/);
-	// assert.match(markup, /语言风险热力/);
-	assert.match(markup, /TypeScript/);
-	assert.match(markup, /1天 1时 1分 1秒/);
-	assert.match(markup, />8</);
-	assert.match(markup, />2</);
-	assert.match(markup, /过去 14 天内各扫描引擎的有效风险发现和扫描活跃度/);
-	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">误报率<\/p>/);
-	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">扫描成功率<\/p>/);
-	assert.doesNotMatch(markup, /text-\[11px\] uppercase tracking-\[0\.28em\] text-slate-400">平均扫描耗时<\/p>/);
-	assert.doesNotMatch(markup, /3 条发现/);
-	assert.doesNotMatch(markup, /2 条发现/);
-	assert.doesNotMatch(markup, /data-panel="funnel"/);
-	assert.doesNotMatch(markup, /data-panel="cwe"/);
+	assert.match(markup, /横坐标：日期/);
+	assert.match(markup, /纵坐标：漏洞数量/);
+	assert.match(markup, /新增风险/);
+	assert.match(markup, /已验证/);
+	assert.match(markup, /data-panel="trend"/);
+	assert.match(markup, /aria-pressed="true"/);
+	assert.match(markup, /混合扫描 · Alpha Gateway/);
+	assert.match(markup, /查看详情/);
+	assert.doesNotMatch(markup, /排行榜/);
+	assert.doesNotMatch(markup, /等待中/);
 });
 
-test("formatCumulativeDuration formats dashboard scan duration with zh units down to seconds", async () => {
-	const module = await importOrFail<any>(
-		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
-	);
-
-	assert.equal(module.formatCumulativeDuration(0), "0秒");
-	assert.equal(module.formatCumulativeDuration(7050), "7秒");
-	assert.equal(module.formatCumulativeDuration(61000), "1分 1秒");
-	assert.equal(module.formatCumulativeDuration(3605000), "1时 0分 5秒");
-	assert.equal(module.formatCumulativeDuration(90061000), "1天 1时 1分 1秒");
-});
-
-test("DashboardCommandCenter keeps the current primary grid order and leaves language risk below the grid", async () => {
-	const module = await importOrFail<any>(
-		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
-	);
-
-	const markup = renderToStaticMarkup(
-		createElement(module.default, {
-			snapshot: createSnapshotFixture(),
-			rangeDays: 14,
-			onRangeDaysChange: () => {},
-		}),
-	);
-
-	assert.match(
-		markup,
-		/data-layout="primary-grid"[^>]*class="[^"]*grid[^"]*gap-4[^"]*lg:grid-cols-12/,
-	);
-	assert.match(markup, /data-panel="trend"[^>]*class="[^"]*lg:col-span-7/);
-	assert.match(markup, /data-panel="hotspots"[^>]*class="[^"]*lg:col-span-7/);
-	assert.match(markup, /data-panel="status"[^>]*class="[^"]*lg:col-span-5/);
-	assert.match(markup, /data-panel="engines"[^>]*class="[^"]*lg:col-span-7/);
-	assert.match(markup, /data-panel="language-risk"/);
-
-	const trendIndex = markup.indexOf('data-panel="trend"');
-	const hotspotsIndex = markup.indexOf('data-panel="hotspots"');
-	const statusIndex = markup.indexOf('data-panel="status"');
-	const enginesIndex = markup.indexOf('data-panel="engines"');
-	const languageRiskIndex = markup.indexOf('data-panel="language-risk"');
-
-	assert.notEqual(trendIndex, -1);
-	assert.ok(trendIndex < hotspotsIndex);
-	assert.ok(hotspotsIndex < statusIndex);
-	assert.ok(statusIndex < enginesIndex);
-	assert.ok(enginesIndex < languageRiskIndex);
-	assert.equal(markup.indexOf('data-panel="funnel"'), -1);
-	assert.equal(markup.indexOf('data-panel="cwe"'), -1);
-});
-
-test("DashboardCommandCenter shows empty-state copy when snapshot panels are empty", async () => {
+test("DashboardCommandCenter recent static task uses the provided aggregated detail path", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
 	const snapshot = createSnapshotFixture();
-	snapshot.daily_activity = [];
-	snapshot.engine_breakdown = [];
-	snapshot.project_hotspots = [];
-	snapshot.language_risk = [];
-	snapshot.cwe_distribution = [];
-
-	const markup = renderToStaticMarkup(
-		createElement(module.default, {
-			snapshot,
-			rangeDays: 7,
-			onRangeDaysChange: () => {},
-		}),
-	);
-
-	assert.match(markup, /暂无趋势数据/);
-	assert.match(markup, /暂无热点项目/);
-	// assert.match(markup, /暂无引擎贡献数据/);
-	// assert.match(markup, /暂无语言风险数据/);
-	// assert.doesNotMatch(markup, /暂无 CWE 攻击面数据/);
-});
-
-test("DashboardCommandCenter no longer renders the legacy cwe panel in the main layout", async () => {
-	const module = await importOrFail<any>(
-		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
-	);
-	const snapshot = createSnapshotFixture();
-	snapshot.cwe_distribution = [
+	snapshot.recent_tasks = [
 		{
-			cwe_id: "CWE-79",
-			cwe_name: "跨站脚本",
-			total_findings: 0,
-			opengrep_findings: 0,
-			agent_findings: 0,
-			bandit_findings: 0,
-		},
-		{
-			cwe_id: "CWE-89",
-			cwe_name: "SQL 注入",
-			total_findings: -1,
-			opengrep_findings: 0,
-			agent_findings: 0,
-			bandit_findings: 0,
+			task_id: "gl-batch",
+			task_type: "静态扫描",
+			title: "静态扫描 · Gamma Portal",
+			engine: "gitleaks",
+			status: "completed",
+			created_at: "2026-03-23T00:30:00.000Z",
+			detail_path:
+				"/static-analysis/gl-batch?gitleaksTaskId=gl-batch&banditTaskId=ba-batch",
 		},
 	];
 
@@ -313,68 +317,43 @@ test("DashboardCommandCenter no longer renders the legacy cwe panel in the main 
 		}),
 	);
 
-	assert.doesNotMatch(markup, /CWE-79/);
-	assert.doesNotMatch(markup, /CWE-89/);
-	assert.doesNotMatch(markup, /CWE 攻击面/);
-	assert.equal(markup.indexOf('data-panel="cwe"'), -1);
+	assert.match(
+		markup,
+		/href="\/static-analysis\/gl-batch\?gitleaksTaskId=gl-batch&amp;banditTaskId=ba-batch"/,
+	);
+	assert.doesNotMatch(markup, /href="\/tasks\/static"/);
 });
 
-test("AttackSurfaceTreemapContent renders tile text from flat treemap node props", async () => {
+test("DashboardCommandCenter uses enlarged axes and fixed chart spacing constants", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
 
-	const markup = renderToStaticMarkup(
-		createElement(
-			"svg",
-			null,
-			createElement(module.AttackSurfaceTreemapContent, {
-				x: 0,
-				y: 0,
-				width: 124,
-				height: 72,
-				fill: "#155e75",
-				cweId: "CWE-79",
-				cweName: "跨站脚本",
-				totalFindings: 3,
-				opengrepFindings: 2,
-				agentFindings: 1,
-				banditFindings: 0,
-				name: "CWE-79",
-				size: 3,
-			}),
-		),
+	assert.equal(module.HORIZONTAL_STATS_AXIS_FONT_SIZE, 16);
+	assert.equal(module.HORIZONTAL_STATS_LABEL_FONT_SIZE, 16);
+	assert.equal(module.HORIZONTAL_STATS_Y_AXIS_WIDTH, 128);
+	assert.equal(module.HORIZONTAL_STATS_BAR_SIZE, 14);
+	assert.equal(module.HORIZONTAL_STATS_ROW_HEIGHT, 60);
+	assert.equal(module.HORIZONTAL_STATS_BAR_CATEGORY_GAP, 10);
+	assert.equal(
+		module.HORIZONTAL_STATS_META_ROW_CLASSNAME,
+		"mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between",
 	);
-
-	assert.match(markup, /跨站脚本/);
-	assert.match(markup, /3 条发现/);
-	assert.doesNotMatch(markup, /\srx="/);
-	assert.doesNotMatch(markup, /\sry="/);
+	assert.equal(
+		module.HORIZONTAL_STATS_META_LEGEND_CLASSNAME,
+		"flex flex-wrap justify-start gap-2 sm:justify-end",
+	);
+	assert.equal(module.TOP_STATS_GRID_CLASSNAME, "grid grid-cols-2 gap-3 xl:grid-cols-5");
 });
 
-test("AttackSurfaceTreemapTooltipContent uses straight-edge tooltip styling", async () => {
+test("formatCumulativeDuration formats scan durations with zh units", async () => {
 	const module = await importOrFail<any>(
 		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
 	);
 
-	const markup = renderToStaticMarkup(
-		createElement(module.AttackSurfaceTreemapTooltipContent, {
-			item: {
-				cweId: "CWE-79",
-				cweName: "跨站脚本",
-				totalFindings: 3,
-				opengrepFindings: 2,
-				agentFindings: 1,
-				banditFindings: 0,
-				name: "CWE-79",
-				size: 3,
-				fill: "#155e75",
-			},
-		}),
-	);
-
-	assert.match(markup, /rounded-none/);
-	assert.doesNotMatch(markup, /rounded-2xl/);
-	assert.match(markup, /跨站脚本/);
-	assert.match(markup, /发现总数：3/);
+	assert.equal(module.formatCumulativeDuration(0), "0秒");
+	assert.equal(module.formatCumulativeDuration(7050), "7秒");
+	assert.equal(module.formatCumulativeDuration(61000), "1分 1秒");
+	assert.equal(module.formatCumulativeDuration(3605000), "1时 0分 5秒");
+	assert.equal(module.formatCumulativeDuration(90061000), "1天 1时 1分 1秒");
 });

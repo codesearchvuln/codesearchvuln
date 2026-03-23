@@ -187,9 +187,10 @@ from app.models.project import Project
 from app.models.user import User
 from app.models.agent_task import AgentTask, AgentFinding
 from app.models.opengrep import OpengrepScanTask, OpengrepFinding, OpengrepRule
-from app.models.gitleaks import GitleaksScanTask, GitleaksFinding
-from app.models.bandit import BanditScanTask, BanditFinding
-from app.models.phpstan import PhpstanScanTask, PhpstanFinding
+from app.models.gitleaks import GitleaksScanTask, GitleaksFinding, GitleaksRule
+from app.models.bandit import BanditScanTask, BanditFinding, BanditRuleState
+from app.models.phpstan import PhpstanScanTask, PhpstanFinding, PhpstanRuleState
+from app.models.yasa import YasaScanTask, YasaFinding
 from app.models.user_config import UserConfig
 from app.models.project_info import ProjectInfo
 import zipfile
@@ -919,6 +920,11 @@ class DashboardSnapshotResponse(BaseModel):
     engine_breakdown: List["DashboardEngineBreakdownItem"]
     project_hotspots: List["DashboardProjectHotspotItem"]
     language_risk: List["DashboardLanguageRiskItem"]
+    recent_tasks: List["DashboardRecentTaskItem"]
+    project_risk_distribution: List["DashboardProjectRiskDistributionItem"]
+    verified_vulnerability_types: List["DashboardVerifiedVulnerabilityTypeItem"]
+    static_engine_rule_totals: List["DashboardStaticEngineRuleTotalItem"]
+    language_loc_distribution: List["DashboardLanguageLocItem"]
 
 
 class DashboardRuleConfidenceItem(BaseModel):
@@ -946,6 +952,7 @@ class DashboardSummaryItem(BaseModel):
     total_projects: int
     current_effective_findings: int
     current_verified_findings: int
+    total_model_tokens: int
     false_positive_rate: float
     scan_success_rate: float
     avg_scan_duration_ms: int
@@ -965,6 +972,7 @@ class DashboardDailyActivityItem(BaseModel):
     gitleaks_findings: int
     bandit_findings: int
     phpstan_findings: int
+    yasa_findings: int
 
 
 class DashboardVerificationFunnelItem(BaseModel):
@@ -984,7 +992,7 @@ class DashboardTaskStatusBreakdownItem(BaseModel):
 
 
 class DashboardEngineBreakdownItem(BaseModel):
-    engine: Literal["agent", "opengrep", "gitleaks", "bandit", "phpstan"]
+    engine: Literal["llm", "opengrep", "gitleaks", "bandit", "phpstan", "yasa"]
     completed_scans: int
     effective_findings: int
     verified_findings: int
@@ -1016,6 +1024,43 @@ class DashboardLanguageRiskItem(BaseModel):
     findings_per_kloc: float
     rules_high: int
     rules_medium: int
+
+
+class DashboardRecentTaskItem(BaseModel):
+    task_id: str
+    task_type: str
+    title: str
+    engine: str
+    status: str
+    created_at: datetime
+    detail_path: str
+
+
+class DashboardProjectRiskDistributionItem(BaseModel):
+    project_id: str
+    project_name: str
+    critical_count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    total_findings: int
+
+
+class DashboardVerifiedVulnerabilityTypeItem(BaseModel):
+    type_code: str
+    type_name: str
+    verified_count: int
+
+
+class DashboardStaticEngineRuleTotalItem(BaseModel):
+    engine: Literal["opengrep", "gitleaks", "bandit", "phpstan", "yasa"]
+    total_rules: int
+
+
+class DashboardLanguageLocItem(BaseModel):
+    language: str
+    loc_number: int
+    project_count: int
 
 
 def _normalize_dashboard_rule_confidence(
@@ -1451,11 +1496,12 @@ def _sort_dashboard_items_by_total_and_name(
 
 
 DASHBOARD_ENGINE_ORDER: tuple[str, ...] = (
-    "agent",
+    "llm",
     "opengrep",
     "gitleaks",
     "bandit",
     "phpstan",
+    "yasa",
 )
 
 OPENGREP_RISK_WEIGHTS: Dict[str, int] = {
@@ -1637,6 +1683,7 @@ def _update_window_activity(
             "gitleaks_findings": 0,
             "bandit_findings": 0,
             "phpstan_findings": 0,
+            "yasa_findings": 0,
         },
     )
     bucket[field] = _to_non_negative_int(bucket.get(field, 0)) + 1

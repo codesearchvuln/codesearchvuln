@@ -1,6 +1,251 @@
 from app.api.v1.endpoints.projects_shared import *
+from app.api.v1.endpoints.static_tasks_yasa import (
+    _extract_yasa_rules_from_resource_dir,
+    _resolve_resource_dir,
+)
+from urllib.parse import urlencode
 
 router = APIRouter()
+
+STATIC_SCAN_BATCH_MARKER_PREFIX = "[[STATIC_BATCH:"
+STATIC_SCAN_BATCH_MARKER_SUFFIX = "]]"
+STATIC_SCAN_PAIRING_WINDOW_MS = 60 * 1000
+
+
+def _extract_static_scan_batch_id(name: Any) -> Optional[str]:
+    text = str(name or "")
+    start = text.rfind(STATIC_SCAN_BATCH_MARKER_PREFIX)
+    if start == -1:
+        return None
+    content_start = start + len(STATIC_SCAN_BATCH_MARKER_PREFIX)
+    end = text.find(STATIC_SCAN_BATCH_MARKER_SUFFIX, content_start)
+    if end == -1:
+        return None
+    batch_id = text[content_start:end].strip()
+    return batch_id or None
+
+
+def _normalize_dashboard_task_timestamp(value: Any) -> int:
+    normalized = _coerce_datetime(value)
+    if normalized is None:
+        return 0
+    return int(normalized.timestamp() * 1000)
+
+
+def _resolve_dashboard_static_group_status(group: Dict[str, Any]) -> str:
+    statuses = [
+        _normalize_status_token((group.get("opengrep_task") or {}).get("status")),
+        _normalize_status_token((group.get("gitleaks_task") or {}).get("status")),
+        _normalize_status_token((group.get("bandit_task") or {}).get("status")),
+        _normalize_status_token((group.get("phpstan_task") or {}).get("status")),
+        _normalize_status_token((group.get("yasa_task") or {}).get("status")),
+    ]
+    statuses = [status for status in statuses if status]
+
+    if not statuses:
+        return "failed"
+    if any(status == "running" for status in statuses):
+        return "running"
+    if all(status == "pending" for status in statuses):
+        return "pending"
+    if any(status == "failed" for status in statuses):
+        return "failed"
+    if any(status == "pending" for status in statuses):
+        return "running"
+    if all(status == "completed" for status in statuses):
+        return "completed"
+    if any(status in {"cancelled", "interrupted", "aborted"} for status in statuses):
+        return "interrupted"
+    return "failed"
+
+
+def _build_dashboard_static_detail_path(group: Dict[str, Any]) -> str:
+    opengrep_task = group.get("opengrep_task")
+    gitleaks_task = group.get("gitleaks_task")
+    bandit_task = group.get("bandit_task")
+    phpstan_task = group.get("phpstan_task")
+    yasa_task = group.get("yasa_task")
+    primary_task = opengrep_task or gitleaks_task or bandit_task or phpstan_task or yasa_task
+    if not primary_task:
+        return "/tasks/static"
+
+    query_params: List[tuple[str, str]] = []
+    if opengrep_task:
+        query_params.append(("opengrepTaskId", str(opengrep_task["task_id"])))
+    if gitleaks_task:
+        query_params.append(("gitleaksTaskId", str(gitleaks_task["task_id"])))
+    if bandit_task:
+        query_params.append(("banditTaskId", str(bandit_task["task_id"])))
+    if phpstan_task:
+        query_params.append(("phpstanTaskId", str(phpstan_task["task_id"])))
+    if yasa_task:
+        query_params.append(("yasaTaskId", str(yasa_task["task_id"])))
+
+    if (
+        not opengrep_task
+        and gitleaks_task
+        and not bandit_task
+        and not phpstan_task
+        and not yasa_task
+    ):
+        query_params.append(("tool", "gitleaks"))
+    if (
+        not opengrep_task
+        and not gitleaks_task
+        and bandit_task
+        and not phpstan_task
+        and not yasa_task
+    ):
+        query_params.append(("tool", "bandit"))
+    if (
+        not opengrep_task
+        and not gitleaks_task
+        and not bandit_task
+        and phpstan_task
+        and not yasa_task
+    ):
+        query_params.append(("tool", "phpstan"))
+    if (
+        not opengrep_task
+        and not gitleaks_task
+        and not bandit_task
+        and not phpstan_task
+        and yasa_task
+    ):
+        query_params.append(("tool", "yasa"))
+
+    query_string = urlencode(query_params)
+    base_path = f"/static-analysis/{primary_task['task_id']}"
+    return f"{base_path}?{query_string}" if query_string else base_path
+
+
+def _build_dashboard_static_recent_tasks(
+    static_task_records: List[Dict[str, Any]],
+    project_name_map: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    tasks_by_project: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for record in static_task_records:
+        project_id = str(record.get("project_id") or "")
+        created_at = _coerce_datetime(record.get("created_at"))
+        if not project_id or created_at is None:
+            continue
+        normalized_record = dict(record)
+        normalized_record["project_id"] = project_id
+        normalized_record["created_at"] = created_at
+        tasks_by_project[project_id].append(normalized_record)
+
+    grouped_recent_tasks: List[Dict[str, Any]] = []
+    engine_key_map = {
+        "opengrep": "opengrep_task",
+        "gitleaks": "gitleaks_task",
+        "bandit": "bandit_task",
+        "phpstan": "phpstan_task",
+        "yasa": "yasa_task",
+    }
+
+    for project_id, records in tasks_by_project.items():
+        sorted_records = sorted(
+            records,
+            key=lambda item: _normalize_dashboard_task_timestamp(item.get("created_at")),
+        )
+        batch_tagged_records = [
+            item for item in sorted_records if _extract_static_scan_batch_id(item.get("name"))
+        ]
+        legacy_records = [
+            item for item in sorted_records if not _extract_static_scan_batch_id(item.get("name"))
+        ]
+        project_groups: List[Dict[str, Any]] = []
+
+        def assign_record_to_groups(
+            item: Dict[str, Any],
+            candidate_groups: List[Dict[str, Any]],
+            *,
+            ignore_window: bool,
+        ) -> None:
+            task_timestamp = _normalize_dashboard_task_timestamp(item.get("created_at"))
+            engine_key = engine_key_map[str(item.get("engine") or "")]
+            best_group_index = -1
+            best_diff = float("inf")
+
+            for index, group in enumerate(candidate_groups):
+                group_timestamp = _normalize_dashboard_task_timestamp(group.get("created_at"))
+                diff = abs(task_timestamp - group_timestamp)
+                if not ignore_window and diff > STATIC_SCAN_PAIRING_WINDOW_MS:
+                    continue
+                if group.get(engine_key) is not None:
+                    continue
+                if diff < best_diff:
+                    best_diff = diff
+                    best_group_index = index
+
+            if best_group_index == -1:
+                next_group = {
+                    "project_id": project_id,
+                    "created_at": item.get("created_at"),
+                    "opengrep_task": None,
+                    "gitleaks_task": None,
+                    "bandit_task": None,
+                    "phpstan_task": None,
+                    "yasa_task": None,
+                }
+                next_group[engine_key] = item
+                candidate_groups.append(next_group)
+                return
+
+            candidate_groups[best_group_index][engine_key] = item
+
+        groups_by_batch: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for item in batch_tagged_records:
+            batch_id = _extract_static_scan_batch_id(item.get("name"))
+            if not batch_id:
+                continue
+            assign_record_to_groups(
+                item,
+                groups_by_batch[batch_id],
+                ignore_window=True,
+            )
+        for groups_of_batch in groups_by_batch.values():
+            project_groups.extend(groups_of_batch)
+
+        legacy_groups: List[Dict[str, Any]] = []
+        for item in legacy_records:
+            assign_record_to_groups(item, legacy_groups, ignore_window=False)
+        project_groups.extend(legacy_groups)
+
+        project_name = project_name_map.get(project_id, "未知项目")
+        for group in project_groups:
+            primary_task = (
+                group.get("opengrep_task")
+                or group.get("gitleaks_task")
+                or group.get("bandit_task")
+                or group.get("phpstan_task")
+                or group.get("yasa_task")
+            )
+            if not primary_task:
+                continue
+            grouped_recent_tasks.append(
+                {
+                    "task_id": str(primary_task.get("task_id") or ""),
+                    "task_type": "静态扫描",
+                    "title": f"静态扫描 · {project_name}",
+                    "engine": str(primary_task.get("engine") or "opengrep"),
+                    "status": _resolve_dashboard_static_group_status(group),
+                    "created_at": group.get("created_at"),
+                    "detail_path": _build_dashboard_static_detail_path(group),
+                }
+            )
+
+    return grouped_recent_tasks
+
+
+async def _get_yasa_rule_total() -> int:
+    resource_dir = _resolve_resource_dir()
+    if resource_dir is None:
+        return 0
+    try:
+        return len(_extract_yasa_rules_from_resource_dir(resource_dir))
+    except Exception:
+        return 0
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -209,6 +454,7 @@ async def get_dashboard_snapshot(
             OpengrepScanTask.id,
             OpengrepScanTask.project_id,
             OpengrepScanTask.status,
+            OpengrepScanTask.name,
             OpengrepScanTask.scan_duration_ms,
             OpengrepScanTask.created_at,
         )
@@ -225,6 +471,7 @@ async def get_dashboard_snapshot(
             GitleaksScanTask.id,
             GitleaksScanTask.project_id,
             GitleaksScanTask.status,
+            GitleaksScanTask.name,
             GitleaksScanTask.total_findings,
             GitleaksScanTask.scan_duration_ms,
             GitleaksScanTask.created_at,
@@ -237,6 +484,7 @@ async def get_dashboard_snapshot(
             BanditScanTask.id,
             BanditScanTask.project_id,
             BanditScanTask.status,
+            BanditScanTask.name,
             BanditScanTask.high_count,
             BanditScanTask.medium_count,
             BanditScanTask.low_count,
@@ -251,12 +499,26 @@ async def get_dashboard_snapshot(
             PhpstanScanTask.id,
             PhpstanScanTask.project_id,
             PhpstanScanTask.status,
+            PhpstanScanTask.name,
             PhpstanScanTask.total_findings,
             PhpstanScanTask.scan_duration_ms,
             PhpstanScanTask.created_at,
         )
     )
     phpstan_rows = phpstan_result.all()
+
+    yasa_result = await db.execute(
+        select(
+            YasaScanTask.id,
+            YasaScanTask.project_id,
+            YasaScanTask.status,
+            YasaScanTask.name,
+            YasaScanTask.total_findings,
+            YasaScanTask.scan_duration_ms,
+            YasaScanTask.created_at,
+        )
+    )
+    yasa_rows = yasa_result.all()
 
     agent_result = await db.execute(
         select(
@@ -266,6 +528,7 @@ async def get_dashboard_snapshot(
             AgentTask.name,
             AgentTask.description,
             AgentTask.verified_count,
+            AgentTask.tokens_used,
             AgentTask.started_at,
             AgentTask.completed_at,
             AgentTask.created_at,
@@ -284,6 +547,19 @@ async def get_dashboard_snapshot(
         ).where(OpengrepRule.severity == "ERROR")
     )
     rule_rows = rule_result.all()
+
+    gitleaks_rule_result = await db.execute(select(GitleaksRule.id))
+    gitleaks_rule_rows = gitleaks_rule_result.all()
+
+    bandit_rule_result = await db.execute(
+        select(BanditRuleState.id).where(BanditRuleState.is_deleted.is_(False))
+    )
+    bandit_rule_rows = bandit_rule_result.all()
+
+    phpstan_rule_result = await db.execute(
+        select(PhpstanRuleState.id).where(PhpstanRuleState.is_deleted.is_(False))
+    )
+    phpstan_rule_rows = phpstan_rule_result.all()
 
     opengrep_finding_result = await db.execute(
         select(
@@ -334,6 +610,17 @@ async def get_dashboard_snapshot(
     )
     phpstan_finding_rows = phpstan_finding_result.all()
 
+    yasa_finding_result = await db.execute(
+        select(
+            YasaFinding.scan_task_id,
+            YasaFinding.status,
+            YasaFinding.level,
+            YasaFinding.file_path,
+            YasaFinding.created_at,
+        )
+    )
+    yasa_finding_rows = yasa_finding_result.all()
+
     agent_finding_result = await db.execute(
         select(
             AgentFinding.task_id,
@@ -364,6 +651,7 @@ async def get_dashboard_snapshot(
     }
     rule_confidence_by_language: Dict[str, Dict[str, int]] = {}
     cwe_distribution_map: Dict[str, Dict[str, Any]] = {}
+    verified_vulnerability_type_map: Dict[str, Dict[str, Any]] = {}
     task_status_breakdown = {
         "pending": 0,
         "running": 0,
@@ -392,12 +680,16 @@ async def get_dashboard_snapshot(
     gitleaks_task_project_map: Dict[str, str] = {}
     bandit_task_project_map: Dict[str, str] = {}
     phpstan_task_project_map: Dict[str, str] = {}
+    yasa_task_project_map: Dict[str, str] = {}
     agent_task_project_map: Dict[str, str] = {}
+    recent_task_items: List[Dict[str, Any]] = []
+    static_recent_task_records: List[Dict[str, Any]] = []
     window_scanned_projects: set[str] = set()
     all_counts = {"raw": 0, "effective": 0, "verified": 0, "false_positive": 0}
     window_counts = {"raw": 0, "effective": 0, "verified": 0, "false_positive": 0}
     success_totals = {"completed": 0, "terminal": 0}
     duration_totals = {"sum": 0, "count": 0, "window_sum": 0, "window_count": 0}
+    total_model_tokens = 0
 
     def ensure_scan_runs(project_id: str) -> Dict[str, int]:
         existing = scan_runs_map.get(project_id)
@@ -439,6 +731,10 @@ async def get_dashboard_snapshot(
             "dominant_language": project_dominant_language_map.get(project_id, "unknown"),
             "last_scan_at": None,
             "engine_effective_counts": {},
+            "critical_count": 0,
+            "high_count": 0,
+            "medium_count": 0,
+            "low_count": 0,
         }
         hotspots_map[project_id] = created
         return created
@@ -455,6 +751,67 @@ async def get_dashboard_snapshot(
         }
         language_risk_map[normalized_language] = created
         return created
+
+    def resolve_activity_field(engine: str) -> str:
+        return "agent_findings" if engine == "llm" else f"{engine}_findings"
+
+    def bucket_severity(severity: Any, engine: str) -> str:
+        normalized = _normalize_status_token(severity)
+        if engine == "opengrep":
+            normalized = str(severity or "").strip().upper()
+            if normalized == "ERROR":
+                return "high"
+            if normalized == "WARNING":
+                return "medium"
+            return "low"
+        if engine == "gitleaks":
+            return "high"
+        if engine == "phpstan":
+            return "medium"
+        if engine == "yasa":
+            if normalized in {"error", "high"}:
+                return "high"
+            if normalized in {"warning", "medium"}:
+                return "medium"
+            return "low"
+        if normalized == "critical":
+            return "critical"
+        if normalized == "high":
+            return "high"
+        if normalized == "medium":
+            return "medium"
+        return "low"
+
+    def register_project_risk_severity(project_id: str, bucket: str) -> None:
+        hotspot = ensure_hotspot(project_id)
+        key = f"{bucket}_count"
+        hotspot[key] = _to_non_negative_int(hotspot.get(key, 0)) + 1
+
+    def register_recent_task(
+        *,
+        task_id: Any,
+        project_id: str,
+        task_type: str,
+        engine: str,
+        status: Any,
+        created_at: Any,
+        detail_path: str,
+    ) -> None:
+        normalized_timestamp = _coerce_datetime(created_at)
+        if not normalized_timestamp:
+            return
+        project_name = project_name_map.get(project_id, "未知项目")
+        recent_task_items.append(
+            {
+                "task_id": str(task_id or ""),
+                "task_type": task_type,
+                "title": f"{task_type} · {project_name}",
+                "engine": engine,
+                "status": _normalize_status_token(status) or "running",
+                "created_at": normalized_timestamp,
+                "detail_path": detail_path,
+            }
+        )
 
     def register_task(
         engine: str,
@@ -555,7 +912,7 @@ async def get_dashboard_snapshot(
                 activity_map,
                 normalized_timestamp,
                 window_start,
-                f"{engine}_findings",
+                resolve_activity_field(engine),
             )
         if verified:
             window_counts["verified"] += 1
@@ -565,7 +922,7 @@ async def get_dashboard_snapshot(
             engine_metrics[engine]["false_positive_count"] += 1
 
     opengrep_duration_ms = 0
-    for task_id, project_id, status, scan_duration_ms, created_at in opengrep_rows:
+    for task_id, project_id, status, name, scan_duration_ms, created_at in opengrep_rows:
         if not project_id:
             continue
         normalized_project_id = str(project_id)
@@ -582,9 +939,27 @@ async def get_dashboard_snapshot(
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         opengrep_duration_ms += duration_ms
         register_task("opengrep", normalized_project_id, status, task_timestamp, duration_ms)
+        static_recent_task_records.append(
+            {
+                "task_id": normalized_task_id,
+                "project_id": normalized_project_id,
+                "engine": "opengrep",
+                "status": status,
+                "created_at": created_at,
+                "name": name,
+            }
+        )
 
     gitleaks_duration_ms = 0
-    for task_id, project_id, status, total_findings, scan_duration_ms, created_at in gitleaks_rows:
+    for (
+        task_id,
+        project_id,
+        status,
+        name,
+        total_findings,
+        scan_duration_ms,
+        created_at,
+    ) in gitleaks_rows:
         if not project_id:
             continue
         normalized_project_id = str(project_id)
@@ -599,12 +974,23 @@ async def get_dashboard_snapshot(
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         gitleaks_duration_ms += duration_ms
         register_task("gitleaks", normalized_project_id, status, task_timestamp, duration_ms)
+        static_recent_task_records.append(
+            {
+                "task_id": normalized_task_id,
+                "project_id": normalized_project_id,
+                "engine": "gitleaks",
+                "status": status,
+                "created_at": created_at,
+                "name": name,
+            }
+        )
 
     bandit_duration_ms = 0
     for (
         task_id,
         project_id,
         status,
+        name,
         high_count,
         medium_count,
         low_count,
@@ -629,9 +1015,27 @@ async def get_dashboard_snapshot(
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         bandit_duration_ms += duration_ms
         register_task("bandit", normalized_project_id, status, task_timestamp, duration_ms)
+        static_recent_task_records.append(
+            {
+                "task_id": normalized_task_id,
+                "project_id": normalized_project_id,
+                "engine": "bandit",
+                "status": status,
+                "created_at": created_at,
+                "name": name,
+            }
+        )
 
     phpstan_duration_ms = 0
-    for task_id, project_id, status, total_findings, scan_duration_ms, created_at in phpstan_rows:
+    for (
+        task_id,
+        project_id,
+        status,
+        name,
+        total_findings,
+        scan_duration_ms,
+        created_at,
+    ) in phpstan_rows:
         if not project_id:
             continue
         normalized_project_id = str(project_id)
@@ -646,6 +1050,51 @@ async def get_dashboard_snapshot(
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         phpstan_duration_ms += duration_ms
         register_task("phpstan", normalized_project_id, status, task_timestamp, duration_ms)
+        static_recent_task_records.append(
+            {
+                "task_id": normalized_task_id,
+                "project_id": normalized_project_id,
+                "engine": "phpstan",
+                "status": status,
+                "created_at": created_at,
+                "name": name,
+            }
+        )
+
+    yasa_duration_ms = 0
+    for (
+        task_id,
+        project_id,
+        status,
+        name,
+        total_findings,
+        scan_duration_ms,
+        created_at,
+    ) in yasa_rows:
+        if not project_id:
+            continue
+        normalized_project_id = str(project_id)
+        normalized_task_id = str(task_id or "")
+        duration_ms = _to_non_negative_int(scan_duration_ms)
+        task_timestamp = _coerce_datetime(created_at)
+        if normalized_task_id:
+            yasa_task_project_map[normalized_task_id] = normalized_project_id
+        project_vulns = ensure_vulns(normalized_project_id)
+        project_vulns["static_vulns"] += _to_non_negative_int(total_findings)
+        if _normalize_status_token(status) == "completed":
+            ensure_scan_runs(normalized_project_id)["static_runs"] += 1
+        yasa_duration_ms += duration_ms
+        register_task("yasa", normalized_project_id, status, task_timestamp, duration_ms)
+        static_recent_task_records.append(
+            {
+                "task_id": normalized_task_id,
+                "project_id": normalized_project_id,
+                "engine": "yasa",
+                "status": status,
+                "created_at": created_at,
+                "name": name,
+            }
+        )
 
     agent_duration_ms = 0
     for (
@@ -655,6 +1104,7 @@ async def get_dashboard_snapshot(
         name,
         description,
         verified_count,
+        tokens_used,
         started_at,
         completed_at,
         created_at,
@@ -667,6 +1117,7 @@ async def get_dashboard_snapshot(
         source_mode = _resolve_agent_source_mode(name, description)
         if normalized_task_id:
             agent_task_project_map[normalized_task_id] = normalized_project_id
+        total_model_tokens += _to_non_negative_int(tokens_used)
         verified = _to_non_negative_int(verified_count)
         project_vulns = ensure_vulns(normalized_project_id)
         if source_mode == "intelligent":
@@ -685,7 +1136,20 @@ async def get_dashboard_snapshot(
                 (_coerce_datetime(completed_at) - _coerce_datetime(started_at)).total_seconds() * 1000
             )
             agent_duration_ms += duration_ms
-        register_task("agent", normalized_project_id, status, task_timestamp, duration_ms)
+        register_task("llm", normalized_project_id, status, task_timestamp, duration_ms)
+        register_recent_task(
+            task_id=task_id,
+            project_id=normalized_project_id,
+            task_type="智能扫描" if source_mode == "intelligent" else "混合扫描",
+            engine="llm",
+            status=status,
+            created_at=created_at,
+            detail_path=f"/agent-audit/{normalized_task_id}",
+        )
+
+    recent_task_items.extend(
+        _build_dashboard_static_recent_tasks(static_recent_task_records, project_name_map)
+    )
 
     severe_rule_rows: List[tuple[Any, Any, Any, Any, Any, Any]] = [
         row for row in rule_rows if str(row[2] or "").strip().upper() == "ERROR"
@@ -738,6 +1202,11 @@ async def get_dashboard_snapshot(
             timestamp=_coerce_datetime(created_at),
             file_path=file_path,
         )
+        if is_effective:
+            register_project_risk_severity(
+                project_id,
+                bucket_severity(severity, "opengrep"),
+            )
 
         if not is_effective:
             continue
@@ -798,6 +1267,11 @@ async def get_dashboard_snapshot(
             timestamp=_coerce_datetime(created_at),
             file_path=file_path,
         )
+        if is_effective:
+            register_project_risk_severity(
+                project_id,
+                bucket_severity(None, "gitleaks"),
+            )
 
     for (
         scan_task_id,
@@ -827,6 +1301,11 @@ async def get_dashboard_snapshot(
             timestamp=_coerce_datetime(created_at),
             file_path=file_path,
         )
+        if is_effective:
+            register_project_risk_severity(
+                project_id,
+                bucket_severity(issue_severity, "bandit"),
+            )
 
         if not is_effective:
             continue
@@ -869,6 +1348,35 @@ async def get_dashboard_snapshot(
             timestamp=_coerce_datetime(created_at),
             file_path=file_path,
         )
+        if is_effective:
+            register_project_risk_severity(
+                project_id,
+                bucket_severity(None, "phpstan"),
+            )
+
+    for scan_task_id, status, level, file_path, created_at in yasa_finding_rows:
+        project_id = yasa_task_project_map.get(str(scan_task_id or ""))
+        if not project_id:
+            continue
+        normalized_status = _normalize_status_token(status)
+        is_false_positive = _is_static_finding_false_positive(normalized_status)
+        is_verified = _is_static_finding_verified(normalized_status)
+        is_effective = _is_static_finding_effective(normalized_status)
+        register_finding(
+            project_id=project_id,
+            engine="yasa",
+            effective=is_effective,
+            verified=is_verified,
+            false_positive=is_false_positive,
+            risk_weight=float(_risk_weight_from_severity(level)) * _risk_multiplier(is_verified),
+            timestamp=_coerce_datetime(created_at),
+            file_path=file_path,
+        )
+        if is_effective:
+            register_project_risk_severity(
+                project_id,
+                bucket_severity(level, "yasa"),
+            )
 
     for (
         task_id,
@@ -894,7 +1402,7 @@ async def get_dashboard_snapshot(
         is_effective = _is_agent_finding_effective(status, verdict)
         register_finding(
             project_id=project_id,
-            engine="agent",
+            engine="llm",
             effective=is_effective,
             verified=verified_flag,
             false_positive=is_false_positive,
@@ -902,6 +1410,11 @@ async def get_dashboard_snapshot(
             timestamp=_coerce_datetime(created_at),
             file_path=file_path,
         )
+        if is_effective:
+            register_project_risk_severity(
+                project_id,
+                bucket_severity(severity, "llm"),
+            )
 
         if not verified_flag or not is_effective:
             continue
@@ -935,6 +1448,17 @@ async def get_dashboard_snapshot(
             bucket["cwe_name"] = cwe_name
         bucket["total_findings"] += 1
         bucket["agent_findings"] += 1
+        type_bucket = verified_vulnerability_type_map.setdefault(
+            cwe_id,
+            {
+                "type_code": cwe_id,
+                "type_name": cwe_name,
+                "verified_count": 0,
+            },
+        )
+        if type_bucket.get("type_name") == type_bucket.get("type_code") and cwe_name != cwe_id:
+            type_bucket["type_name"] = cwe_name
+        type_bucket["verified_count"] += 1
 
     scan_runs_items: List[Dict[str, Any]] = []
     for project_id, item in scan_runs_map.items():
@@ -990,6 +1514,7 @@ async def get_dashboard_snapshot(
         + gitleaks_duration_ms
         + bandit_duration_ms
         + phpstan_duration_ms
+        + yasa_duration_ms
         + agent_duration_ms,
         0,
     )
@@ -1097,7 +1622,7 @@ async def get_dashboard_snapshot(
                 for engine in DASHBOARD_ENGINE_ORDER
                 if _to_non_negative_int(engine_effective_counts.get(engine, 0)) > 0
             ),
-            "agent",
+            "llm",
         )
         hotspot_items.append(
             DashboardProjectHotspotItem(
@@ -1127,6 +1652,82 @@ async def get_dashboard_snapshot(
         ),
     )[:top_n]
 
+    sorted_recent_tasks = sorted(
+        recent_task_items,
+        key=lambda item: (
+            -(item["created_at"].timestamp() if item.get("created_at") else 0.0),
+            item["task_id"],
+        ),
+    )[:5]
+
+    project_risk_distribution = [
+        DashboardProjectRiskDistributionItem(
+            project_id=project_id,
+            project_name=str(hotspot.get("project_name") or "未知项目"),
+            critical_count=_to_non_negative_int(hotspot.get("critical_count", 0)),
+            high_count=_to_non_negative_int(hotspot.get("high_count", 0)),
+            medium_count=_to_non_negative_int(hotspot.get("medium_count", 0)),
+            low_count=_to_non_negative_int(hotspot.get("low_count", 0)),
+            total_findings=(
+                _to_non_negative_int(hotspot.get("critical_count", 0))
+                + _to_non_negative_int(hotspot.get("high_count", 0))
+                + _to_non_negative_int(hotspot.get("medium_count", 0))
+                + _to_non_negative_int(hotspot.get("low_count", 0))
+            ),
+        )
+        for project_id, hotspot in sorted(
+            hotspots_map.items(),
+            key=lambda item: (
+                -(
+                    _to_non_negative_int(item[1].get("critical_count", 0))
+                    + _to_non_negative_int(item[1].get("high_count", 0))
+                    + _to_non_negative_int(item[1].get("medium_count", 0))
+                    + _to_non_negative_int(item[1].get("low_count", 0))
+                ),
+                item[1].get("project_name") or "",
+            ),
+        )[:top_n]
+        if (
+            _to_non_negative_int(hotspot.get("critical_count", 0))
+            + _to_non_negative_int(hotspot.get("high_count", 0))
+            + _to_non_negative_int(hotspot.get("medium_count", 0))
+            + _to_non_negative_int(hotspot.get("low_count", 0))
+        )
+        > 0
+    ]
+
+    verified_vulnerability_types = [
+        DashboardVerifiedVulnerabilityTypeItem(**item)
+        for item in sorted(
+            verified_vulnerability_type_map.values(),
+            key=lambda item: (
+                -_to_non_negative_int(item.get("verified_count", 0)),
+                str(item.get("type_code") or ""),
+            ),
+        )[:top_n]
+    ]
+
+    yasa_rule_total = await _get_yasa_rule_total()
+    static_engine_rule_totals = [
+        DashboardStaticEngineRuleTotalItem(engine="opengrep", total_rules=len(severe_rule_rows)),
+        DashboardStaticEngineRuleTotalItem(engine="gitleaks", total_rules=len(gitleaks_rule_rows)),
+        DashboardStaticEngineRuleTotalItem(engine="bandit", total_rules=len(bandit_rule_rows)),
+        DashboardStaticEngineRuleTotalItem(engine="phpstan", total_rules=len(phpstan_rule_rows)),
+        DashboardStaticEngineRuleTotalItem(engine="yasa", total_rules=_to_non_negative_int(yasa_rule_total)),
+    ]
+
+    language_loc_distribution = [
+        DashboardLanguageLocItem(
+            language=language,
+            loc_number=_to_non_negative_int(loc_number),
+            project_count=len(language_project_sets.get(language, set())),
+        )
+        for language, loc_number in sorted(
+            language_loc_totals.items(),
+            key=lambda item: (-_to_non_negative_int(item[1]), item[0]),
+        )[:10]
+    ]
+
     return DashboardSnapshotResponse(
         generated_at=now,
         total_scan_duration_ms=total_scan_duration_ms,
@@ -1152,6 +1753,7 @@ async def get_dashboard_snapshot(
             total_projects=len(project_name_map),
             current_effective_findings=all_counts["effective"],
             current_verified_findings=all_counts["verified"],
+            total_model_tokens=total_model_tokens,
             false_positive_rate=_to_ratio(all_counts["false_positive"], all_counts["raw"]),
             scan_success_rate=_to_ratio(success_totals["completed"], success_totals["terminal"]),
             avg_scan_duration_ms=_round_non_negative_int(
@@ -1190,6 +1792,14 @@ async def get_dashboard_snapshot(
             DashboardLanguageRiskItem(**item)
             for item in sorted_language_risk
         ],
+        recent_tasks=[
+            DashboardRecentTaskItem(**item)
+            for item in sorted_recent_tasks
+        ],
+        project_risk_distribution=project_risk_distribution,
+        verified_vulnerability_types=verified_vulnerability_types,
+        static_engine_rule_totals=static_engine_rule_totals,
+        language_loc_distribution=language_loc_distribution,
     )
 
 

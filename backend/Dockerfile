@@ -15,7 +15,7 @@ ARG BACKEND_INSTALL_YASA=1
 ARG YASA_VERSION=v0.2.33
 ARG YASA_BUILD_FROM_SOURCE=1
 FROM ${UV_IMAGE} AS uvbin
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS builder
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS builder
 
 WORKDIR /app
 ARG BACKEND_APT_MIRROR_PRIMARY
@@ -180,7 +180,7 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
 # ============================================
 # 多阶段构建 - 运行时基础阶段
 # ============================================
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.12-slim AS runtime-base
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS runtime-base
 
 WORKDIR /app
 ARG BACKEND_APT_MIRROR_PRIMARY

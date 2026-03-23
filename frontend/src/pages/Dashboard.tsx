@@ -40,6 +40,7 @@ const EMPTY_SNAPSHOT: DashboardSnapshotResponse = {
 		total_projects: 0,
 		current_effective_findings: 0,
 		current_verified_findings: 0,
+		total_model_tokens: 0,
 		false_positive_rate: 0,
 		scan_success_rate: 0,
 		avg_scan_duration_ms: 0,
@@ -68,6 +69,11 @@ const EMPTY_SNAPSHOT: DashboardSnapshotResponse = {
 	engine_breakdown: [],
 	project_hotspots: [],
 	language_risk: [],
+	recent_tasks: [],
+	project_risk_distribution: [],
+	verified_vulnerability_types: [],
+	static_engine_rule_totals: [],
+	language_loc_distribution: [],
 };
 
 function DashboardFallback() {
@@ -100,6 +106,10 @@ function DashboardFallback() {
 function normalizeSnapshot(snapshot: DashboardSnapshotResponse): DashboardSnapshotResponse {
 	return {
 		...snapshot,
+		daily_activity: (snapshot.daily_activity || []).map((item) => ({
+			...item,
+			yasa_findings: Math.max(Number(item.yasa_findings || 0), 0),
+		})),
 		cwe_distribution: (snapshot.cwe_distribution || []).map((item) => {
 			const cweDisplay = resolveCweDisplay({
 				cwe: item.cwe_id,

@@ -12,11 +12,12 @@
 
 ## 目录目的
 
-这组文档回答 3 个问题：
+这组文档回答 4 个问题：
 
 1. 当前项目里的“智能扫描”和“混合扫描”到底是不是两套模型。
 2. 真实运行时是由谁负责编排、谁负责分析、谁负责验证、谁负责出报告。
 3. 每个智能体到底能调哪些工具、边界在哪里、上下游怎么交接。
+4. 当前运行时真实会触发的 skill，如何和配置页展示、evidence 视图展示保持一致。
 
 ## 两种扫描模式
 
@@ -45,13 +46,15 @@
 | --- | --- | --- |
 | [workflow_overview.md](./workflow_overview.md) | 智能扫描和混合扫描的执行主线到底怎么流动 | Explanation |
 | [agent_tools.md](./agent_tools.md) | 每个智能体负责什么，真实可用工具是什么 | Reference |
+| [skill-evidence-alignment/README.md](./skill-evidence-alignment/README.md) | skill 真相源、配置页展示和 evidence 视图如何对齐 | Implementation reference |
 | [../architecture.md](../architecture.md) | 这些链路放回整个系统里时，该从哪里读代码 | Explanation / onboarding reference |
 
 ## 建议阅读顺序
 
 1. 先读 [workflow_overview.md](./workflow_overview.md)，先把主线看顺。
 2. 再读 [agent_tools.md](./agent_tools.md)，把角色边界和工具边界补齐。
-3. 需要补更大范围背景时，再回看 [../architecture.md](../architecture.md)。
+3. 如果你正在改配置页或 evidence 视图，再读 [skill-evidence-alignment/README.md](./skill-evidence-alignment/README.md)，把展示边界和协议对齐。
+4. 需要补更大范围背景时，再回看 [../architecture.md](../architecture.md)。
 
 ## 文档边界
 
@@ -63,4 +66,5 @@
 
 - 要先把执行主线看顺：读 [workflow_overview.md](./workflow_overview.md)。
 - 要查具体角色和工具边界：读 [agent_tools.md](./agent_tools.md)。
+- 要对齐 skill 展示和 evidence 视图：读 [skill-evidence-alignment/README.md](./skill-evidence-alignment/README.md)。
 - 要回到系统级背景：读 [../architecture.md](../architecture.md)。

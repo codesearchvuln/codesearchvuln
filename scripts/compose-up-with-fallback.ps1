@@ -237,7 +237,7 @@ if (-not $env:UV_IMAGE) {
 }
 
 if (-not $env:SANDBOX_BASE_IMAGE) {
-    $env:SANDBOX_BASE_IMAGE = "$($env:DOCKERHUB_LIBRARY_MIRROR)/python:3.12-slim"
+    $env:SANDBOX_BASE_IMAGE = "$($env:DOCKERHUB_LIBRARY_MIRROR)/python:3.11-slim"
 }
 
 if (-not $env:SANDBOX_IMAGE) {

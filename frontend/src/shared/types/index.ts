@@ -147,6 +147,7 @@ export interface DashboardSummaryItem {
   total_projects: number;
   current_effective_findings: number;
   current_verified_findings: number;
+  total_model_tokens: number;
   false_positive_rate: number;
   scan_success_rate: number;
   avg_scan_duration_ms: number;
@@ -166,6 +167,7 @@ export interface DashboardDailyActivityItem {
   gitleaks_findings: number;
   bandit_findings: number;
   phpstan_findings: number;
+  yasa_findings: number;
 }
 
 export interface DashboardVerificationFunnelItem {
@@ -185,7 +187,7 @@ export interface DashboardTaskStatusBreakdownItem {
 }
 
 export interface DashboardEngineBreakdownItem {
-  engine: "agent" | "opengrep" | "gitleaks" | "bandit" | "phpstan";
+  engine: "llm" | "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
   completed_scans: number;
   effective_findings: number;
   verified_findings: number;
@@ -219,6 +221,43 @@ export interface DashboardLanguageRiskItem {
   rules_medium: number;
 }
 
+export interface DashboardRecentTaskItem {
+  task_id: string;
+  task_type: string;
+  title: string;
+  engine: string;
+  status: string;
+  created_at: string;
+  detail_path: string;
+}
+
+export interface DashboardProjectRiskDistributionItem {
+  project_id: string;
+  project_name: string;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  total_findings: number;
+}
+
+export interface DashboardVerifiedVulnerabilityTypeItem {
+  type_code: string;
+  type_name: string;
+  verified_count: number;
+}
+
+export interface DashboardStaticEngineRuleTotalItem {
+  engine: "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
+  total_rules: number;
+}
+
+export interface DashboardLanguageLocItem {
+  language: string;
+  loc_number: number;
+  project_count: number;
+}
+
 export interface DashboardSnapshotResponse {
   generated_at: string;
   total_scan_duration_ms: number;
@@ -234,6 +273,11 @@ export interface DashboardSnapshotResponse {
   engine_breakdown: DashboardEngineBreakdownItem[];
   project_hotspots: DashboardProjectHotspotItem[];
   language_risk: DashboardLanguageRiskItem[];
+  recent_tasks: DashboardRecentTaskItem[];
+  project_risk_distribution: DashboardProjectRiskDistributionItem[];
+  verified_vulnerability_types: DashboardVerifiedVulnerabilityTypeItem[];
+  static_engine_rule_totals: DashboardStaticEngineRuleTotalItem[];
+  language_loc_distribution: DashboardLanguageLocItem[];
 }
 
 export interface StaticScanOverviewItem {

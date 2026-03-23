@@ -78,7 +78,7 @@ jobs:
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.11'
       
       # 9. 确定版本号
       - name: 确定版本号

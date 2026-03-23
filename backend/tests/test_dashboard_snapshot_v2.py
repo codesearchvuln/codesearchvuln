@@ -49,20 +49,24 @@ def _build_execute_side_effect(now: datetime):
     ]
 
     opengrep_rows = [
-        ("og1", "p1", "completed", 1200, now - timedelta(days=1)),
-        ("og2", "p2", "failed", 500, now - timedelta(days=9)),
+        ("og1", "p1", "completed", "OpenGrep scan", 1200, now - timedelta(days=1)),
+        ("og2", "p2", "failed", "OpenGrep scan", 500, now - timedelta(days=9)),
     ]
     gitleaks_rows = [
-        ("gl1", "p1", "completed", 2, 800, now - timedelta(days=2)),
-        ("gl2", "p2", "completed", 1, 900, now - timedelta(days=15)),
+        ("gl1", "p1", "completed", "Gitleaks scan", 2, 800, now - timedelta(days=2)),
+        ("gl2", "p2", "completed", "Gitleaks scan", 1, 900, now - timedelta(days=15)),
     ]
     bandit_rows = [
-        ("ba1", "p2", "completed", 1, 0, 0, 600, now - timedelta(days=3)),
-        ("ba2", "p2", "completed", 0, 1, 0, 650, now - timedelta(days=4)),
+        ("ba1", "p2", "completed", "Bandit scan", 1, 0, 0, 600, now - timedelta(days=3)),
+        ("ba2", "p2", "completed", "Bandit scan", 0, 1, 0, 650, now - timedelta(days=4)),
     ]
     phpstan_rows = [
-        ("ps1", "p1", "completed", 3, 700, now - timedelta(days=1)),
-        ("ps2", "p2", "completed", 2, 700, now - timedelta(days=40)),
+        ("ps1", "p1", "completed", "PHPStan scan", 3, 700, now - timedelta(days=1)),
+        ("ps2", "p2", "completed", "PHPStan scan", 2, 700, now - timedelta(days=40)),
+    ]
+    yasa_rows = [
+        ("ya1", "p1", "completed", "YASA scan", 4, 550, now - timedelta(days=1, hours=6)),
+        ("ya2", "p2", "failed", "YASA scan", 1, 300, now - timedelta(days=6)),
     ]
     agent_rows = [
         (
@@ -72,6 +76,7 @@ def _build_execute_side_effect(now: datetime):
             "[HYBRID] audit",
             "",
             2,
+            2048,
             now - timedelta(days=1, seconds=1),
             now - timedelta(days=1),
             now - timedelta(days=1),
@@ -83,6 +88,7 @@ def _build_execute_side_effect(now: datetime):
             "[INTELLIGENT] audit",
             "",
             0,
+            512,
             now - timedelta(hours=2),
             None,
             now - timedelta(hours=2),
@@ -93,6 +99,9 @@ def _build_execute_side_effect(now: datetime):
         ("py.rule", "Python", "ERROR", "MEDIUM", True, ["CWE-89"]),
         ("php.rule", "PHP", "ERROR", "HIGH", True, ["CWE-89"]),
     ]
+    gitleaks_rule_rows = [("gl.rule.1",), ("gl.rule.2",)]
+    bandit_rule_rows = [("bandit.rule.1",), ("bandit.rule.2",), ("bandit.rule.3",)]
+    phpstan_rule_rows = [("phpstan.rule.1",), ("phpstan.rule.2",)]
     opengrep_finding_rows = [
         (
             "og1",
@@ -165,6 +174,11 @@ def _build_execute_side_effect(now: datetime):
         ("ps1", "verified", "src/risk.php", now - timedelta(days=1)),
         ("ps2", "verified", "legacy.php", now - timedelta(days=40)),
     ]
+    yasa_finding_rows = [
+        ("ya1", "open", "high", "src/policy.ts", now - timedelta(days=1, hours=6)),
+        ("ya1", "verified", "warning", "src/access.ts", now - timedelta(days=1, hours=6)),
+        ("ya2", "false_positive", "warning", "scripts/run.sh", now - timedelta(days=6)),
+    ]
     agent_finding_rows = [
         (
             "at1",
@@ -207,12 +221,112 @@ def _build_execute_side_effect(now: datetime):
         _RowsResult(gitleaks_rows),
         _RowsResult(bandit_rows),
         _RowsResult(phpstan_rows),
+        _RowsResult(yasa_rows),
         _RowsResult(agent_rows),
         _RowsResult(rule_rows),
+        _RowsResult(gitleaks_rule_rows),
+        _RowsResult(bandit_rule_rows),
+        _RowsResult(phpstan_rule_rows),
         _RowsResult(opengrep_finding_rows),
         _RowsResult(gitleaks_finding_rows),
         _RowsResult(bandit_finding_rows),
         _RowsResult(phpstan_finding_rows),
+        _RowsResult(yasa_finding_rows),
+        _RowsResult(agent_finding_rows),
+    ]
+
+
+def _build_grouped_static_recent_tasks_side_effect(now: datetime):
+    project_rows = [
+        ("p1", "Alpha"),
+    ]
+
+    project_info_rows = [
+        (
+            "p1",
+            {
+                "total": 1000,
+                "total_files": 10,
+                "languages": {
+                    "Python": {"loc_number": 1000, "files_count": 10, "proportion": 1.0},
+                },
+            },
+            "completed",
+        ),
+    ]
+
+    batch_marker = "[[STATIC_BATCH:batch-123]]"
+    opengrep_rows = []
+    gitleaks_rows = [
+        (
+            "gl-batch",
+            "p1",
+            "completed",
+            f"Gitleaks scan {batch_marker}",
+            2,
+            800,
+            now - timedelta(minutes=12),
+        ),
+    ]
+    bandit_rows = [
+        (
+            "ba-batch",
+            "p1",
+            "completed",
+            f"Bandit scan {batch_marker}",
+            1,
+            1,
+            0,
+            600,
+            now - timedelta(minutes=6),
+        ),
+    ]
+    phpstan_rows = []
+    yasa_rows = []
+    agent_rows = []
+    rule_rows = []
+    gitleaks_rule_rows = []
+    bandit_rule_rows = []
+    phpstan_rule_rows = []
+    opengrep_finding_rows = []
+    gitleaks_finding_rows = [
+        ("gl-batch", "open", "config/.env", now - timedelta(minutes=12)),
+    ]
+    bandit_finding_rows = [
+        (
+            "ba-batch",
+            "B602",
+            "HIGH",
+            "subprocess shell true",
+            "subprocess_shell_true",
+            "HIGH",
+            "verified",
+            "app/main.py",
+            now - timedelta(minutes=6),
+        ),
+    ]
+    phpstan_finding_rows = []
+    yasa_finding_rows = []
+    agent_finding_rows = []
+
+    return [
+        _RowsResult(project_rows),
+        _RowsResult(project_info_rows),
+        _RowsResult(opengrep_rows),
+        _RowsResult(gitleaks_rows),
+        _RowsResult(bandit_rows),
+        _RowsResult(phpstan_rows),
+        _RowsResult(yasa_rows),
+        _RowsResult(agent_rows),
+        _RowsResult(rule_rows),
+        _RowsResult(gitleaks_rule_rows),
+        _RowsResult(bandit_rule_rows),
+        _RowsResult(phpstan_rule_rows),
+        _RowsResult(opengrep_finding_rows),
+        _RowsResult(gitleaks_finding_rows),
+        _RowsResult(bandit_finding_rows),
+        _RowsResult(phpstan_finding_rows),
+        _RowsResult(yasa_finding_rows),
         _RowsResult(agent_finding_rows),
     ]
 
@@ -226,6 +340,11 @@ async def test_dashboard_snapshot_v2_exposes_summary_and_windowed_panels(monkeyp
         "count_high_confidence_findings_by_task_ids",
         AsyncMock(return_value={"og1": 1, "og2": 1}),
     )
+    monkeypatch.setattr(
+        projects_insights,
+        "_get_yasa_rule_total",
+        AsyncMock(return_value=7),
+    )
 
     snapshot = await projects.get_dashboard_snapshot(
         top_n=10,
@@ -235,25 +354,32 @@ async def test_dashboard_snapshot_v2_exposes_summary_and_windowed_panels(monkeyp
     )
 
     assert snapshot.summary.total_projects == 2
-    assert snapshot.summary.current_effective_findings == 10
-    assert snapshot.summary.current_verified_findings == 6
+    assert snapshot.summary.current_effective_findings == 12
+    assert snapshot.summary.current_verified_findings == 7
+    assert snapshot.summary.total_model_tokens == 2560
     assert snapshot.summary.window_scanned_projects == 2
-    assert snapshot.summary.window_new_effective_findings == 8
-    assert snapshot.summary.window_verified_findings == 5
-    assert snapshot.verification_funnel.raw_findings == 11
-    assert snapshot.verification_funnel.effective_findings == 8
-    assert snapshot.verification_funnel.verified_findings == 5
-    assert snapshot.verification_funnel.false_positive_count == 3
-    assert snapshot.task_status_breakdown.completed == 8
-    assert snapshot.task_status_breakdown.failed == 1
+    assert snapshot.summary.window_new_effective_findings == 10
+    assert snapshot.summary.window_verified_findings == 6
+    assert snapshot.verification_funnel.raw_findings == 14
+    assert snapshot.verification_funnel.effective_findings == 10
+    assert snapshot.verification_funnel.verified_findings == 6
+    assert snapshot.verification_funnel.false_positive_count == 4
+    assert snapshot.task_status_breakdown.completed == 9
+    assert snapshot.task_status_breakdown.failed == 2
     assert snapshot.task_status_breakdown.running == 1
     assert [item.engine for item in snapshot.engine_breakdown] == [
-        "agent",
+        "llm",
         "opengrep",
         "gitleaks",
         "bandit",
         "phpstan",
+        "yasa",
     ]
+    assert snapshot.engine_breakdown[-1].effective_findings == 2
+    assert snapshot.recent_tasks[0].task_id == "at2"
+    assert snapshot.recent_tasks[0].task_type == "智能扫描"
+    assert snapshot.recent_tasks[1].task_type in {"静态扫描", "混合扫描"}
+    assert len(snapshot.recent_tasks) == 5
     assert [item.date for item in snapshot.daily_activity]
 
 
@@ -266,6 +392,11 @@ async def test_dashboard_snapshot_v2_builds_weighted_hotspots_and_language_risk(
         "count_high_confidence_findings_by_task_ids",
         AsyncMock(return_value={"og1": 1, "og2": 1}),
     )
+    monkeypatch.setattr(
+        projects_insights,
+        "_get_yasa_rule_total",
+        AsyncMock(return_value=7),
+    )
 
     snapshot = await projects.get_dashboard_snapshot(
         top_n=10,
@@ -275,16 +406,78 @@ async def test_dashboard_snapshot_v2_builds_weighted_hotspots_and_language_risk(
     )
 
     assert [item.project_name for item in snapshot.project_hotspots] == ["Alpha", "Beta"]
-    assert snapshot.project_hotspots[0].risk_score == pytest.approx(32.0)
+    assert snapshot.project_hotspots[0].risk_score == pytest.approx(38.5)
     assert snapshot.project_hotspots[1].risk_score == pytest.approx(14.0)
-    assert snapshot.project_hotspots[0].verified_findings == 4
+    assert snapshot.project_hotspots[0].verified_findings == 5
     assert snapshot.project_hotspots[1].effective_findings == 3
     assert [item.language for item in snapshot.language_risk] == [
         "TypeScript",
         "PHP",
         "Python",
+        "Shell",
     ]
     assert snapshot.language_risk[0].rules_high == 1
     assert snapshot.language_risk[2].rules_medium == 1
-    assert snapshot.language_risk[0].findings_per_kloc == pytest.approx(7.14, abs=0.01)
+    assert snapshot.language_risk[0].findings_per_kloc == pytest.approx(10.0, abs=0.01)
     assert {item.cwe_id for item in snapshot.cwe_distribution} == {"CWE-79", "CWE-78"}
+    assert [item.project_name for item in snapshot.project_risk_distribution] == [
+        "Alpha",
+        "Beta",
+    ]
+    assert snapshot.project_risk_distribution[0].high_count == 5
+    assert snapshot.project_risk_distribution[0].medium_count == 4
+    assert snapshot.project_risk_distribution[1].total_findings == 3
+    assert snapshot.verified_vulnerability_types[0].type_code == "CWE-79"
+    assert snapshot.verified_vulnerability_types[0].verified_count == 1
+    assert [item.engine for item in snapshot.static_engine_rule_totals] == [
+        "opengrep",
+        "gitleaks",
+        "bandit",
+        "phpstan",
+        "yasa",
+    ]
+    assert snapshot.static_engine_rule_totals[1].total_rules == 2
+    assert snapshot.static_engine_rule_totals[2].total_rules == 3
+    assert snapshot.static_engine_rule_totals[3].total_rules == 2
+    assert snapshot.static_engine_rule_totals[-1].total_rules == 7
+    assert [item.language for item in snapshot.language_loc_distribution] == [
+        "TypeScript",
+        "Python",
+        "PHP",
+        "Shell",
+    ]
+    assert snapshot.language_loc_distribution[0].loc_number == 700
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_v2_groups_multi_engine_static_recent_tasks(monkeypatch):
+    now = datetime.now(timezone.utc)
+    db = SimpleNamespace(
+        execute=AsyncMock(side_effect=_build_grouped_static_recent_tasks_side_effect(now))
+    )
+    monkeypatch.setattr(
+        projects_insights,
+        "count_high_confidence_findings_by_task_ids",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        projects_insights,
+        "_get_yasa_rule_total",
+        AsyncMock(return_value=0),
+    )
+
+    snapshot = await projects.get_dashboard_snapshot(
+        top_n=10,
+        range_days=7,
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert len(snapshot.recent_tasks) == 1
+    recent_task = snapshot.recent_tasks[0]
+    assert recent_task.task_id == "gl-batch"
+    assert recent_task.task_type == "静态扫描"
+    assert recent_task.detail_path.startswith("/static-analysis/gl-batch?")
+    assert "gitleaksTaskId=gl-batch" in recent_task.detail_path
+    assert "banditTaskId=ba-batch" in recent_task.detail_path
+    assert recent_task.detail_path != "/tasks/static"

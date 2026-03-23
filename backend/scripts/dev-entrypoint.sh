@@ -9,9 +9,46 @@ SEED_VENV_DIR="/opt/backend-venv"
 STAMP_FILE="${VENV_DIR}/.vulhunter-dev-lock.sha256"
 DEFAULT_PYPI_INDEX_CANDIDATES="https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple"
 
+read_venv_version() {
+    venv_dir="$1"
+    cfg_file="${venv_dir}/pyvenv.cfg"
+
+    if [ ! -f "${cfg_file}" ]; then
+        return 1
+    fi
+
+    sed -n 's/^version_info = //p' "${cfg_file}" | sed -n '1p'
+}
+
+venv_can_run_backend() {
+    venv_dir="$1"
+
+    if [ ! -x "${venv_dir}/bin/python" ]; then
+        return 1
+    fi
+
+    "${venv_dir}/bin/python" - <<'PY' >/dev/null 2>&1
+import sqlalchemy, alembic, uvicorn
+PY
+}
+
 ensure_seed_venv() {
     if [ -x "${VENV_DIR}/bin/python" ] && "${VENV_DIR}/bin/python" -V >/dev/null 2>&1; then
-        return 0
+        seed_version="$(read_venv_version "${SEED_VENV_DIR}" 2>/dev/null || true)"
+        current_version="$(read_venv_version "${VENV_DIR}" 2>/dev/null || true)"
+
+        if [ -z "${seed_version}" ]; then
+            echo "Seed virtualenv metadata missing, keep existing ${VENV_DIR}"
+            return 0
+        fi
+
+        if [ -z "${current_version}" ] || [ "${current_version}" != "${seed_version}" ]; then
+            echo "Detected stale virtualenv (${current_version:-unknown}); expected ${seed_version}"
+        elif ! venv_can_run_backend "${VENV_DIR}"; then
+            echo "Detected incomplete virtualenv in ${VENV_DIR}, restoring seed"
+        else
+            return 0
+        fi
     fi
 
     echo "Restoring seeded virtualenv into ${VENV_DIR}..."

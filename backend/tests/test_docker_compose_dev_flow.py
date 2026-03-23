@@ -189,3 +189,16 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
         assert 'cp "$ROOT_DIR/deploy/compose/docker-compose.prod.cn.yml"' in deb_build_script
     assert "https://pypi.tuna.tsinghua.edu.cn/simple" in compose_wrapper_script
     assert "https://pypi.tuna.tsinghua.edu.cn/simple" in compose_wrapper_ps1
+
+
+def test_backend_dev_entrypoint_validates_seeded_venv_before_skipping_sync() -> None:
+    entrypoint_text = (
+        REPO_ROOT / "backend" / "scripts" / "dev-entrypoint.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'read_venv_version()' in entrypoint_text
+    assert 'venv_can_run_backend()' in entrypoint_text
+    assert 'seed_version="$(read_venv_version "${SEED_VENV_DIR}"' in entrypoint_text
+    assert 'current_version="$(read_venv_version "${VENV_DIR}"' in entrypoint_text
+    assert 'if [ -z "${current_version}" ] || [ "${current_version}" != "${seed_version}" ]; then' in entrypoint_text
+    assert 'import sqlalchemy, alembic, uvicorn' in entrypoint_text

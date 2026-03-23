@@ -143,7 +143,7 @@ detect_python() {
             PIP_CMD="python -m pip"
         fi
     else
-        log_error "未找到 Python！请先安装 Python 3.8+"
+        log_error "未找到 Python！请先安装 Python 3.11+"
         return 1
     fi
 

@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useTaskClock } from "@/features/tasks/hooks/useTaskClock";
+import { getTaskDisplayStatusSummary } from "@/features/tasks/services/taskDisplay";
 import type { GitleaksScanTask } from "@/shared/api/gitleaks";
 import type { OpengrepScanTask } from "@/shared/api/opengrep";
 import type { BanditScanTask } from "@/shared/api/bandit";
@@ -29,6 +30,15 @@ interface StaticAnalysisSummaryCardsProps {
   phpstanTask: PhpstanScanTask | null;
   yasaTask: YasaScanTask | null;
   enabledEngines: Engine[];
+  loadingInitial?: boolean;
+}
+
+function getEngineDisplayLabel(engine: Engine): string {
+  if (engine === "opengrep") return "Opengrep";
+  if (engine === "gitleaks") return "Gitleaks";
+  if (engine === "bandit") return "Bandit";
+  if (engine === "phpstan") return "PHPStan";
+  return "YASA";
 }
 
 export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCards({
@@ -38,7 +48,12 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
   phpstanTask,
   yasaTask,
   enabledEngines,
+  loadingInitial = false,
 }: StaticAnalysisSummaryCardsProps) {
+  const hasAnyLoadedTask = Boolean(
+    opengrepTask || gitleaksTask || banditTask || phpstanTask || yasaTask,
+  );
+  const isBootstrapping = loadingInitial && enabledEngines.length > 0 && !hasAnyLoadedTask;
   const shouldTickClock = useMemo(
     () =>
       [opengrepTask, gitleaksTask, banditTask, phpstanTask, yasaTask].some((task) =>
@@ -62,15 +77,40 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
   );
 
   const statusSummary = useMemo(
-    () =>
-      buildStaticAnalysisTaskStatusSummary({
+    () => {
+      if (isBootstrapping) {
+        const pendingSummary = getTaskDisplayStatusSummary("pending");
+        return {
+          aggregateStatus: "pending" as const,
+          aggregateLabel: pendingSummary.statusLabel,
+          progressHint: pendingSummary.progressHint,
+          engineStatuses: enabledEngines.map((engine) => ({
+            engine,
+            engineLabel: getEngineDisplayLabel(engine),
+            status: "pending",
+            statusLabel: pendingSummary.statusLabel,
+          })),
+          failureReasons: [],
+        };
+      }
+
+      return buildStaticAnalysisTaskStatusSummary({
         opengrepTask,
         gitleaksTask,
         banditTask,
         phpstanTask,
         yasaTask,
-      }),
-    [banditTask, gitleaksTask, opengrepTask, phpstanTask, yasaTask],
+      });
+    },
+    [
+      banditTask,
+      enabledEngines,
+      gitleaksTask,
+      isBootstrapping,
+      opengrepTask,
+      phpstanTask,
+      yasaTask,
+    ],
   );
 
   const totalScanDurationMs = useMemo(
@@ -178,17 +218,7 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
           </p>
           <p className="text-xs text-muted-foreground">
             {enabledEngines
-              .map((engine) =>
-                engine === "opengrep"
-                  ? "Opengrep"
-                  : engine === "gitleaks"
-                    ? "Gitleaks"
-                    : engine === "bandit"
-                      ? "Bandit"
-                      : engine === "phpstan"
-                        ? "PHPStan"
-                        : "YASA",
-              )
+              .map((engine) => getEngineDisplayLabel(engine))
               .join(" / ") || "-"}
           </p>
         </div>

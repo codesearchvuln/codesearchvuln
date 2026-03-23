@@ -808,7 +808,7 @@ for ((phase_index = 0; phase_index < PHASE_COUNT; phase_index++)); do
   if [ -n "${SANDBOX_BASE_IMAGE:-}" ]; then
     sandbox_base_image="${SANDBOX_BASE_IMAGE}"
   else
-    sandbox_base_image="${dockerhub_mirror}/python:3.12-slim"
+    sandbox_base_image="${dockerhub_mirror}/python:3.11-slim"
   fi
 
   if [ -n "${SANDBOX_IMAGE:-}" ]; then

@@ -255,7 +255,7 @@ function Detect-PythonEnvironment {
         }
     }
     else {
-        Write-ColorOutput "未找到 Python！请先安装 Python 3.8+" "Error"
+        Write-ColorOutput "未找到 Python！请先安装 Python 3.11+" "Error"
         Write-ColorOutput "下载地址: https://www.python.org/downloads/" "Info"
         return $false
     }

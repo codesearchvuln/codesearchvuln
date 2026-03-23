@@ -41,7 +41,7 @@ REM Set default mirrors (China mirrors for better connectivity)
 if not defined DOCKERHUB_LIBRARY_MIRROR set "DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library"
 if not defined GHCR_REGISTRY set "GHCR_REGISTRY=ghcr.nju.edu.cn"
 if not defined UV_IMAGE set "UV_IMAGE=%GHCR_REGISTRY%/astral-sh/uv:latest"
-if not defined SANDBOX_BASE_IMAGE set "SANDBOX_BASE_IMAGE=%DOCKERHUB_LIBRARY_MIRROR%/python:3.12-slim"
+if not defined SANDBOX_BASE_IMAGE set "SANDBOX_BASE_IMAGE=%DOCKERHUB_LIBRARY_MIRROR%/python:3.11-slim"
 if not defined SANDBOX_IMAGE set "SANDBOX_IMAGE=%GHCR_REGISTRY%/lintsinghua/vulhunter-sandbox:latest"
 if not defined FRONTEND_NPM_REGISTRY set "FRONTEND_NPM_REGISTRY=https://registry.npmmirror.com"
 if not defined FRONTEND_NPM_REGISTRY_FALLBACK set "FRONTEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org"

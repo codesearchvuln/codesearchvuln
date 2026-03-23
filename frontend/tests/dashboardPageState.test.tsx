@@ -33,6 +33,7 @@ function createEmptySnapshot(): DashboardSnapshotResponse {
 			total_projects: 0,
 			current_effective_findings: 0,
 			current_verified_findings: 0,
+			total_model_tokens: 0,
 			false_positive_rate: 0,
 			scan_success_rate: 0,
 			avg_scan_duration_ms: 0,
@@ -61,6 +62,11 @@ function createEmptySnapshot(): DashboardSnapshotResponse {
 		engine_breakdown: [],
 		project_hotspots: [],
 		language_risk: [],
+		recent_tasks: [],
+		project_risk_distribution: [],
+		verified_vulnerability_types: [],
+		static_engine_rule_totals: [],
+		language_loc_distribution: [],
 	};
 }
 

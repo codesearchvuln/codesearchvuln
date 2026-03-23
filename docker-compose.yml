@@ -177,7 +177,7 @@ services:
       dockerfile: Dockerfile
       args:
         - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
-        - SANDBOX_BASE_IMAGE=${SANDBOX_BASE_IMAGE:-docker.m.daocloud.io/python:3.12-slim}
+        - SANDBOX_BASE_IMAGE=${SANDBOX_BASE_IMAGE:-docker.m.daocloud.io/python:3.11-slim}
         - SANDBOX_APT_MIRROR_PRIMARY=${SANDBOX_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}
         - SANDBOX_APT_SECURITY_PRIMARY=${SANDBOX_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
         - SANDBOX_APT_MIRROR_FALLBACK=${SANDBOX_APT_MIRROR_FALLBACK:-deb.debian.org}

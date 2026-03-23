@@ -3,7 +3,7 @@
 # 集成各类安全扫描工具 (Opengrep, Bandit, Gitleaks, etc.)
 
 ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-ARG SANDBOX_BASE_IMAGE=docker.m.daocloud.io/python:3.12-slim
+ARG SANDBOX_BASE_IMAGE=docker.m.daocloud.io/python:3.11-slim
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS nodebase
 FROM ${SANDBOX_BASE_IMAGE}
 

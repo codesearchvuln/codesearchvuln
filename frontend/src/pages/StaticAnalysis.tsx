@@ -325,6 +325,7 @@ export default function StaticAnalysis() {
         phpstanTask={phpstanTask}
         yasaTask={yasaTask}
         enabledEngines={enabledEngines}
+        loadingInitial={loadingInitial}
       />
 
         <StaticAnalysisFindingsTable
