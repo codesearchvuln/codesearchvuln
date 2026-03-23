@@ -34,6 +34,15 @@ RUN --mount=type=cache,id=nexus-web-npm,target=/root/.npm \
 
 RUN git clone --depth=1 "${NEXUS_WEB_GIT_MIRROR_PREFIX}${NEXUS_WEB_REPO_URL}" .
 
+RUN NEXUS_WEB_PNPM_VERSION="${NEXUS_WEB_PNPM_VERSION}" node -e '\
+const fs = require("fs");\
+const path = "/app/package.json";\
+const pkg = JSON.parse(fs.readFileSync(path, "utf8"));\
+if (pkg.packageManager) process.exit(0);\
+pkg.packageManager = `pnpm@${process.env.NEXUS_WEB_PNPM_VERSION}`;\
+fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);\
+'
+
 RUN --mount=type=cache,id=nexus-web-pnpm,target=/pnpm/store \
     --mount=type=cache,id=nexus-web-npm,target=/root/.npm \
     set -eux; \

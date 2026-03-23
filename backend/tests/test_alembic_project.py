@@ -6,6 +6,30 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 VERSIONS_DIR = BACKEND_ROOT / "alembic" / "versions"
 SNAPSHOTS_DIR = BACKEND_ROOT / "app" / "db" / "schema_snapshots"
 
+EXPECTED_LINEAR_REVISIONS = [
+    "5b0f3c9a6d7e",
+    "6c8d9e0f1a2b",
+    "7f8e9d0c1b2a",
+    "8c1d2e3f4a5b",
+    "9a7b6c5d4e3f",
+    "9d3e4f5a6b7c",
+    "a1b2c3d4e5f6",
+    "b2c3d4e5f6a7",
+    "c3d4e5f6a7b8",
+    "e5f6a7b8c9d0",
+    "b7e8f9a0b1c2",
+    "a8f1c2d3e4b5",
+    "b9d8e7f6a5b4",
+    "f6a7b8c9d0e1",
+]
+
+OBSOLETE_MIGRATION_FILES = {
+    "c4b1a7e8d9f0_legacy_agent_findings_report_bridge.py",
+    "d4e5f6a7b8c9_merge_phpstan_and_agent_heads.py",
+    "5f6a7b8c9d0e_merge_project_metrics_and_yasa_phpstan_heads.py",
+    "90a71996ac03_add_project_management_metrics_table.py",
+}
+
 
 def _literal_eval_revision_value(source: str, variable_name: str):
     module = ast.parse(source)
@@ -65,19 +89,27 @@ def _created_tables_in_source(source: str) -> list[str]:
     return created_tables
 
 
-def test_alembic_revisions_form_a_single_head_graph():
-    revisions, down_revisions, _ = _load_revision_graph()
-    all_revisions = set(down_revisions)
-    referenced_revisions = {
-        down_revision
-        for item in down_revisions.values()
-        for down_revision in item
-    }
-    heads = sorted(all_revisions - referenced_revisions)
+def test_alembic_versions_directory_is_linear():
+    revisions, down_revisions, file_names = _load_revision_graph()
+    base_revisions = sorted(
+        revision for revision, parents in down_revisions.items() if not parents
+    )
 
-    assert len(heads) == 1, f"Expected a single Alembic head, got {heads}"
-    assert heads == ["f6a7b8c9d0e1"], heads
-    assert len(revisions) == len(down_revisions)
+    assert base_revisions == ["5b0f3c9a6d7e"]
+
+    for revision, parents in down_revisions.items():
+        assert len(parents) <= 1, (revision, parents)
+
+    actual_order = []
+    current_revision = "f6a7b8c9d0e1"
+    while current_revision:
+        actual_order.append(current_revision)
+        parents = down_revisions[current_revision]
+        current_revision = parents[0] if parents else None
+
+    assert list(reversed(actual_order)) == EXPECTED_LINEAR_REVISIONS
+    assert set(file_names.values()).isdisjoint(OBSOLETE_MIGRATION_FILES)
+    assert len(revisions) == len(EXPECTED_LINEAR_REVISIONS)
 
 
 def test_project_management_metrics_table_is_created_by_a_single_migration():
@@ -90,40 +122,9 @@ def test_project_management_metrics_table_is_created_by_a_single_migration():
     assert matching_files == ["e5f6a7b8c9d0_add_project_management_metrics.py"]
 
 
-def test_alembic_versions_directory_keeps_expected_base_revisions_and_merge_files():
-    _, down_revisions, file_names = _load_revision_graph()
-    base_revisions = sorted(
-        revision for revision, parents in down_revisions.items() if len(parents) == 0
-    )
-
-    assert base_revisions == ["5b0f3c9a6d7e", "c4b1a7e8d9f0"]
-    assert file_names["6c8d9e0f1a2b"] == "6c8d9e0f1a2b_finalize_projects_zip_file_hash.py"
-    assert file_names["d4e5f6a7b8c9"] == "d4e5f6a7b8c9_merge_phpstan_and_agent_heads.py"
-    assert file_names["5f6a7b8c9d0e"] == "5f6a7b8c9d0e_merge_project_metrics_and_yasa_phpstan_heads.py"
-    assert file_names["90a71996ac03"] == "90a71996ac03_add_project_management_metrics_table.py"
-    assert file_names["a8f1c2d3e4b5"] == "a8f1c2d3e4b5_add_agent_tasks_report_column.py"
-    assert file_names["b9d8e7f6a5b4"] == "b9d8e7f6a5b4_drop_legacy_audit_tables.py"
-    assert file_names["f6a7b8c9d0e1"] == "f6a7b8c9d0e1_remove_fixed_static_finding_status.py"
-    assert "048836873140" not in file_names
-    assert down_revisions["5f6a7b8c9d0e"] == ("b7e8f9a0b1c2", "e5f6a7b8c9d0")
-    assert down_revisions["90a71996ac03"] == ("5f6a7b8c9d0e",)
-    assert down_revisions["a8f1c2d3e4b5"] == ("90a71996ac03",)
-    assert down_revisions["b9d8e7f6a5b4"] == ("a8f1c2d3e4b5",)
-    assert down_revisions["f6a7b8c9d0e1"] == ("b9d8e7f6a5b4",)
-
-
-def test_project_management_metrics_bridge_revision_is_a_no_op():
-    bridge_file = (
-        BACKEND_ROOT
-        / "alembic"
-        / "versions"
-        / "90a71996ac03_add_project_management_metrics_table.py"
-    )
-    bridge_source = bridge_file.read_text(encoding="utf-8")
-
-    assert "Compatibility no-op" in bridge_source
-    assert "create_table('project_management_metrics'" not in bridge_source
-    assert 'create_table("project_management_metrics"' not in bridge_source
+def test_obsolete_merge_and_bridge_files_are_removed():
+    file_names = {path.name for path in VERSIONS_DIR.glob("*.py")}
+    assert file_names.isdisjoint(OBSOLETE_MIGRATION_FILES)
 
 
 def test_bridge_downgrade_keeps_zip_file_hash_baseline_contract():

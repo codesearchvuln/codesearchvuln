@@ -1,7 +1,7 @@
 """add yasa static scan tables
 
 Revision ID: b7e8f9a0b1c2
-Revises: a1b2c3d4e5f6
+Revises: e5f6a7b8c9d0
 Create Date: 2026-03-16 18:25:00.000000
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "b7e8f9a0b1c2"
-down_revision = "a1b2c3d4e5f6"
+down_revision = "e5f6a7b8c9d0"
 branch_labels = None
 depends_on = None
 

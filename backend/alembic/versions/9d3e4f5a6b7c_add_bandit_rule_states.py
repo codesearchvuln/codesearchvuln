@@ -1,7 +1,7 @@
 """add bandit rule states table for rules page
 
 Revision ID: 9d3e4f5a6b7c
-Revises: 8c1d2e3f4a5b
+Revises: 9a7b6c5d4e3f
 Create Date: 2026-03-15 19:10:00.000000
 
 变更目的：为 Bandit 规则页提供启停状态持久化存储（不影响扫描执行路径）。
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "9d3e4f5a6b7c"
-down_revision = "8c1d2e3f4a5b"
+down_revision = "9a7b6c5d4e3f"
 branch_labels = None
 depends_on = None
 

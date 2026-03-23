@@ -146,6 +146,8 @@ def test_nexus_web_dockerfile_persists_runtime_pnpm() -> None:
     )
 
     assert 'npm install -g "pnpm@${NEXUS_WEB_PNPM_VERSION}"' in nexus_dockerfile
+    assert 'if (pkg.packageManager) process.exit(0);' in nexus_dockerfile
+    assert 'pkg.packageManager = `pnpm@${process.env.NEXUS_WEB_PNPM_VERSION}`;' in nexus_dockerfile
     assert 'CMD ["pnpm", "dev", "--host", "0.0.0.0"]' in nexus_dockerfile
 
 

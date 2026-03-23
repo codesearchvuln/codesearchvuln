@@ -1,6 +1,25 @@
+import sys
+import types
+
 import pytest
 
+fastmcp_module = types.ModuleType("fastmcp")
+fastmcp_module.Client = object
+fastmcp_client_module = types.ModuleType("fastmcp.client")
+fastmcp_transports_module = types.ModuleType("fastmcp.client.transports")
+fastmcp_transports_module.StdioTransport = object
+fastmcp_transports_module.StreamableHttpTransport = object
+git_module = types.ModuleType("git")
+
+sys.modules.setdefault("fastmcp", fastmcp_module)
+sys.modules.setdefault("fastmcp.client", fastmcp_client_module)
+sys.modules.setdefault("fastmcp.client.transports", fastmcp_transports_module)
+sys.modules.setdefault("git", git_module)
+
 from app.main import assert_database_schema_is_latest
+
+CURRENT_REVISION = "prev_linear_revision"
+LATEST_REVISION = "linear_head_revision"
 
 
 class _FakeScalarResult:
@@ -43,13 +62,13 @@ class _FakeScriptDirectory:
 async def test_assert_database_schema_is_latest_runs_alembic_upgrade_on_revision_mismatch(
     monkeypatch,
 ):
-    fake_session = _FakeSession([["90a71996ac03"], ["a8f1c2d3e4b5"]])
+    fake_session = _FakeSession([[CURRENT_REVISION], [LATEST_REVISION]])
     upgrade_calls = []
 
     monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
     monkeypatch.setattr(
         "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory(["a8f1c2d3e4b5"]),
+        lambda _cfg: _FakeScriptDirectory([LATEST_REVISION]),
     )
 
     async def _fake_run_upgrade():
@@ -67,12 +86,12 @@ async def test_assert_database_schema_is_latest_runs_alembic_upgrade_on_revision
 async def test_assert_database_schema_is_latest_raises_when_schema_still_mismatched_after_upgrade(
     monkeypatch,
 ):
-    fake_session = _FakeSession([["90a71996ac03"], ["90a71996ac03"]])
+    fake_session = _FakeSession([[CURRENT_REVISION], [CURRENT_REVISION]])
 
     monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
     monkeypatch.setattr(
         "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory(["a8f1c2d3e4b5"]),
+        lambda _cfg: _FakeScriptDirectory([LATEST_REVISION]),
     )
 
     async def _fake_run_upgrade():
@@ -80,5 +99,24 @@ async def test_assert_database_schema_is_latest_raises_when_schema_still_mismatc
 
     monkeypatch.setattr("app.main.run_pending_database_migrations", _fake_run_upgrade)
 
-    with pytest.raises(RuntimeError, match="current=\\['90a71996ac03'\\] heads=\\['a8f1c2d3e4b5'\\]"):
+    with pytest.raises(
+        RuntimeError,
+        match="current=\\['prev_linear_revision'\\] expected=\\['linear_head_revision'\\]",
+    ):
+        await assert_database_schema_is_latest()
+
+
+@pytest.mark.asyncio
+async def test_assert_database_schema_is_latest_rejects_multiple_alembic_heads(
+    monkeypatch,
+):
+    fake_session = _FakeSession([[LATEST_REVISION]])
+
+    monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
+    monkeypatch.setattr(
+        "app.main.ScriptDirectory.from_config",
+        lambda _cfg: _FakeScriptDirectory(["head_a", "head_b"]),
+    )
+
+    with pytest.raises(RuntimeError, match="Alembic migration graph is not linear"):
         await assert_database_schema_is_latest()
