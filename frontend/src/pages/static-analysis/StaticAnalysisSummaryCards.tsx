@@ -53,7 +53,28 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
   const hasAnyLoadedTask = Boolean(
     opengrepTask || gitleaksTask || banditTask || phpstanTask || yasaTask,
   );
-  const isBootstrapping = loadingInitial && enabledEngines.length > 0 && !hasAnyLoadedTask;
+  const loadedEnabledEngineCount = useMemo(
+    () =>
+      enabledEngines.filter((engine) => {
+        if (engine === "opengrep") return Boolean(opengrepTask);
+        if (engine === "gitleaks") return Boolean(gitleaksTask);
+        if (engine === "bandit") return Boolean(banditTask);
+        if (engine === "phpstan") return Boolean(phpstanTask);
+        return Boolean(yasaTask);
+      }).length,
+    [
+      banditTask,
+      enabledEngines,
+      gitleaksTask,
+      opengrepTask,
+      phpstanTask,
+      yasaTask,
+    ],
+  );
+  const isBootstrapping =
+    loadingInitial &&
+    enabledEngines.length > 0 &&
+    (!hasAnyLoadedTask || loadedEnabledEngineCount < enabledEngines.length);
   const shouldTickClock = useMemo(
     () =>
       [opengrepTask, gitleaksTask, banditTask, phpstanTask, yasaTask].some((task) =>
@@ -64,16 +85,21 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
   const nowMs = useTaskClock({ enabled: shouldTickClock, intervalMs: 1000 });
 
   const progressPercent = useMemo(
-    () =>
-      buildStaticAnalysisProgressSummary({
+    () => {
+      if (isBootstrapping) {
+        return 0;
+      }
+
+      return buildStaticAnalysisProgressSummary({
         opengrepTask,
         gitleaksTask,
         banditTask,
         phpstanTask,
         yasaTask,
         nowMs,
-      }).progressPercent,
-    [banditTask, gitleaksTask, nowMs, opengrepTask, phpstanTask, yasaTask],
+      }).progressPercent;
+    },
+    [banditTask, gitleaksTask, isBootstrapping, nowMs, opengrepTask, phpstanTask, yasaTask],
   );
 
   const statusSummary = useMemo(

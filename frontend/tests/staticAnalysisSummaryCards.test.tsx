@@ -28,3 +28,41 @@ test("StaticAnalysisSummaryCards keeps the initial zero-progress state pending w
   assert.doesNotMatch(markup, /任务失败/);
   assert.doesNotMatch(markup, /存在失败引擎/);
 });
+
+test("StaticAnalysisSummaryCards keeps all enabled engines pending while multi-engine bootstrap is still in progress", async () => {
+  const summaryCardsModule = await import(
+    "../src/pages/static-analysis/StaticAnalysisSummaryCards.tsx"
+  );
+
+  const markup = renderToStaticMarkup(
+    createElement(summaryCardsModule.StaticAnalysisSummaryCards, {
+      opengrepTask: {
+        id: "og-1",
+        project_id: "project-1",
+        name: "OpenGrep scan",
+        status: "completed",
+        target_path: "/repo",
+        scan_type: "full",
+        total_findings: 3,
+        error_count: 1,
+        warning_count: 2,
+        scan_duration_ms: 1200,
+        created_at: "2026-03-23T10:00:00.000Z",
+        updated_at: "2026-03-23T10:01:00.000Z",
+      },
+      gitleaksTask: null,
+      banditTask: null,
+      phpstanTask: null,
+      yasaTask: null,
+      enabledEngines: ["opengrep", "gitleaks"],
+      loadingInitial: true,
+    }),
+  );
+
+  assert.match(markup, /0%/);
+  assert.match(markup, /任务待处理/);
+  assert.match(markup, /扫描排队中，等待引擎启动/);
+  assert.match(markup, /Opengrep · 任务待处理/);
+  assert.match(markup, /Gitleaks · 任务待处理/);
+  assert.doesNotMatch(markup, /Opengrep · 任务完成/);
+});
