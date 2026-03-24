@@ -3,6 +3,8 @@ set -e
 
 echo "VulHunter 后端启动中..."
 
+BACKEND_VENV_DIR="${BACKEND_VENV_PATH:-/opt/backend-venv}"
+
 is_true() {
     case "${1:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -16,31 +18,17 @@ is_true() {
 
 ensure_code2flow() {
     export CODE2FLOW_AUTO_INSTALL_FAILED=0
-    if command -v code2flow >/dev/null 2>&1; then
+    if [ -x "${BACKEND_VENV_DIR}/bin/code2flow" ]; then
         echo "code2flow 已可用"
         return 0
     fi
 
-    echo "code2flow 缺失，尝试自动安装..."
-    index_candidates="${BACKEND_PYPI_INDEX_CANDIDATES:-${PIP_INDEX_URL:-https://pypi.org/simple}}"
-    install_ok=0
-    old_ifs="$IFS"
-    IFS=','
-    for index_url in $index_candidates; do
-        [ -n "$index_url" ] || continue
-        if PIP_INDEX_URL="$index_url" python3 -m pip install --retries 3 --timeout 60 --disable-pip-version-check code2flow; then
-            install_ok=1
-            break
-        fi
-    done
-    IFS="$old_ifs"
-
-    if [ "$install_ok" -eq 1 ] && command -v code2flow >/dev/null 2>&1; then
-        echo "code2flow 安装完成"
+    if [ -x "${BACKEND_VENV_DIR}/bin/python" ] && "${BACKEND_VENV_DIR}/bin/python" -c "import code2flow" >/dev/null 2>&1; then
+        echo "code2flow 已通过 ${BACKEND_VENV_DIR}/bin/python 就绪"
         return 0
     fi
 
-    echo "code2flow 自动安装失败，控制流分析将退化为无 code2flow 模式"
+    echo "code2flow 在 ${BACKEND_VENV_DIR} 中不可用，控制流分析将退化为无 code2flow 模式"
     export CODE2FLOW_AUTO_INSTALL_FAILED=1
     return 0
 }
@@ -53,7 +41,7 @@ fi
 # 启动前构建统一 Skill Registry（失败不阻断启动）
 if [ -f "/app/scripts/build_skill_registry.py" ] && \
    is_true "${SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP:-true}"; then
-    .venv/bin/python /app/scripts/build_skill_registry.py --print-json || \
+    "${BACKEND_VENV_DIR}/bin/python" /app/scripts/build_skill_registry.py --print-json || \
         echo "[SkillRegistry] build failed, continue startup"
 fi
 
@@ -65,7 +53,7 @@ max_retries=30
 retry_count=0
 
 while [ $retry_count -lt $max_retries ]; do
-    if .venv/bin/python -c "
+    if "${BACKEND_VENV_DIR}/bin/python" -c "
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 import os
@@ -107,10 +95,10 @@ echo "数据库迁移完成"
 # 可选：重置 opengrep_rules 表并重建规则（结构升级时使用）
 if [ "${RESET_STATIC_SCAN_TABLES_ON_DEPLOY}" = "true" ] || [ "${RESET_STATIC_SCAN_TABLES_ON_DEPLOY}" = "1" ]; then
     echo "🧹 重置 opengrep_rules 表并重建规则..."
-    .venv/bin/python scripts/reset_static_scan_tables.py
+    "${BACKEND_VENV_DIR}/bin/python" scripts/reset_static_scan_tables.py
     echo "opengrep_rules 表重置完成"
 fi
 
 # 启动 uvicorn
 echo "🌐 启动 API 服务..."
-exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec "${BACKEND_VENV_DIR}/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000

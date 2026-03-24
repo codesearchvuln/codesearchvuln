@@ -53,7 +53,7 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app
-      - backend_venv:/app/.venv
+      - backend_venv:/opt/backend-venv
       - backend_uv_cache:/root/.cache/uv
       - backend_uploads:/app/uploads
       - mcp_data:/app/data/mcp

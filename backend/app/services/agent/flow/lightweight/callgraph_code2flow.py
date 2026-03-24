@@ -4,12 +4,13 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
+
+from app.services.backend_venv import build_backend_venv_env, resolve_backend_venv_executable
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class Code2FlowCallGraph:
         commands: List[List[str]] = []
         path_args = [str(item) for item in file_paths]
 
-        binary = shutil.which("code2flow")
+        binary = resolve_backend_venv_executable("code2flow", required=False)
         if binary:
             commands.extend(
                 [
@@ -130,7 +131,7 @@ class Code2FlowCallGraph:
                 ]
             )
 
-        python_bin = shutil.which("python3") or shutil.which("python")
+        python_bin = resolve_backend_venv_executable("python", required=False)
         if python_bin:
             commands.append([python_bin, "-m", "code2flow", *path_args, "-o", output_dot])
 
@@ -148,6 +149,7 @@ class Code2FlowCallGraph:
                     capture_output=True,
                     text=True,
                     timeout=self.timeout_sec,
+                    env=build_backend_venv_env(),
                 )
             except Exception as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
@@ -167,9 +169,9 @@ class Code2FlowCallGraph:
         }
 
     def _has_code2flow_runtime(self) -> bool:
-        if shutil.which("code2flow"):
+        if resolve_backend_venv_executable("code2flow", required=False):
             return True
-        python_bin = shutil.which("python3") or shutil.which("python")
+        python_bin = resolve_backend_venv_executable("python", required=False)
         if not python_bin:
             return False
         try:
@@ -179,6 +181,7 @@ class Code2FlowCallGraph:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=build_backend_venv_env(),
             )
         except Exception:
             return False

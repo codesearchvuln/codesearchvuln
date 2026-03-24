@@ -60,6 +60,7 @@ dependencies = [
     "docker>=7.0.0",
     # ============ Security Tools ============
     "bandit>=1.7.0",
+    "code2flow>=2.5.1",
     "safety>=2.3.0",
     "pip-audit>=2.6.0",
     # ============ Kunlun-M Dependencies (MIT License) ============

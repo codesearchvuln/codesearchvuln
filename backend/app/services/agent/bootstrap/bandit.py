@@ -6,6 +6,8 @@ import re
 import subprocess
 from typing import Any, Dict, List, Optional
 
+from app.services.backend_venv import build_backend_venv_env, resolve_backend_venv_executable
+
 from .base import (
     StaticBootstrapFinding,
     StaticBootstrapScanResult,
@@ -126,31 +128,40 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
 
     async def scan(self, project_root: str) -> StaticBootstrapScanResult:
         # Use quiet mode to reduce non-JSON log noise in output streams.
-        cmd = ["bandit", "-q", "-r", "-f", "json", project_root]
+        try:
+            bandit_bin = resolve_backend_venv_executable("bandit")
+        except FileNotFoundError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        cmd = [bandit_bin, "-q", "-r", "-f", "json", project_root]
         process_result = await asyncio.to_thread(
             subprocess.run,
             cmd,
             capture_output=True,
             text=True,
             timeout=self.timeout_seconds,
+            env=build_backend_venv_env(),
         )
         stdout_text = process_result.stdout or ""
         stderr_text = process_result.stderr or ""
 
-        parse_error: Optional[Exception] = None
         payload_findings: List[Dict[str, Any]] = []
+        stdout_parse_error: Optional[Exception] = None
+        stderr_parse_error: Optional[Exception] = None
         try:
             payload_findings = _parse_output(stdout_text)
         except Exception as exc:  # noqa: BLE001
-            parse_error = exc
-            # Some runtimes may put payload into stderr; attempt fallback parse.
+            stdout_parse_error = exc
+
+        if not payload_findings and stderr_text.strip():
             try:
                 payload_findings = _parse_output(stderr_text)
-                parse_error = None
-            except Exception:  # noqa: BLE001
-                payload_findings = []
+            except Exception as exc:  # noqa: BLE001
+                stderr_parse_error = exc
 
-        if parse_error is not None and process_result.returncode in {0, 1}:
+        parse_error = stdout_parse_error or stderr_parse_error
+
+        if parse_error is not None and not payload_findings and process_result.returncode in {0, 1}:
             raise RuntimeError(f"bandit output parse failed: {parse_error}") from parse_error
 
         if process_result.returncode != 0 and not payload_findings:

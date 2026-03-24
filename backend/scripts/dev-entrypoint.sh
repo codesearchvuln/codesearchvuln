@@ -4,8 +4,7 @@ set -eu
 echo "Starting VulHunter backend dev container..."
 
 APP_ROOT="/app"
-VENV_DIR="${APP_ROOT}/.venv"
-SEED_VENV_DIR="/opt/backend-venv"
+VENV_DIR="${BACKEND_VENV_PATH:-/opt/backend-venv}"
 STAMP_FILE="${VENV_DIR}/.vulhunter-dev-lock.sha256"
 DEFAULT_PYPI_INDEX_CANDIDATES="https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple"
 
@@ -32,29 +31,26 @@ import sqlalchemy, alembic, uvicorn
 PY
 }
 
-ensure_seed_venv() {
-    if [ -x "${VENV_DIR}/bin/python" ] && "${VENV_DIR}/bin/python" -V >/dev/null 2>&1; then
-        seed_version="$(read_venv_version "${SEED_VENV_DIR}" 2>/dev/null || true)"
-        current_version="$(read_venv_version "${VENV_DIR}" 2>/dev/null || true)"
+ensure_backend_venv() {
+    current_version="$(read_venv_version "${VENV_DIR}" 2>/dev/null || true)"
+    expected_version="$(python3 - <<'PY'
+import sys
+print(".".join(str(part) for part in sys.version_info[:3]))
+PY
+)"
 
-        if [ -z "${seed_version}" ]; then
-            echo "Seed virtualenv metadata missing, keep existing ${VENV_DIR}"
-            return 0
-        fi
-
-        if [ -z "${current_version}" ] || [ "${current_version}" != "${seed_version}" ]; then
-            echo "Detected stale virtualenv (${current_version:-unknown}); expected ${seed_version}"
-        elif ! venv_can_run_backend "${VENV_DIR}"; then
-            echo "Detected incomplete virtualenv in ${VENV_DIR}, restoring seed"
-        else
-            return 0
-        fi
+    if [ -n "${current_version}" ] && [ "${current_version}" = "${expected_version}" ] && venv_can_run_backend "${VENV_DIR}"; then
+        return 0
     fi
 
-    echo "Restoring seeded virtualenv into ${VENV_DIR}..."
-    mkdir -p "${VENV_DIR}"
-    find "${VENV_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-    cp -a "${SEED_VENV_DIR}/." "${VENV_DIR}/"
+    if [ -z "${current_version}" ]; then
+        echo "Creating backend virtualenv in ${VENV_DIR}..."
+    else
+        echo "Recreating backend virtualenv in ${VENV_DIR} (current=${current_version}, expected=${expected_version})..."
+    fi
+
+    mkdir -p "$(dirname "${VENV_DIR}")"
+    uv venv --clear "${VENV_DIR}"
 }
 
 compute_lock_hash() {
@@ -94,10 +90,9 @@ select_pypi_index() {
 }
 
 sync_python_env_if_needed() {
-    ensure_seed_venv
-
     export VIRTUAL_ENV="${VENV_DIR}"
     export PATH="${VENV_DIR}/bin:${PATH}"
+    ensure_backend_venv
 
     current_hash=""
     previous_hash=""
@@ -118,7 +113,7 @@ sync_python_env_if_needed() {
         export PIP_INDEX_URL="${selected_pypi_index}"
         echo "Selected PyPI index: ${selected_pypi_index}"
     fi
-    uv sync --frozen --no-dev
+    uv sync --active --frozen --no-dev
 
     if [ -n "${current_hash}" ]; then
         printf '%s\n' "${current_hash}" > "${STAMP_FILE}"

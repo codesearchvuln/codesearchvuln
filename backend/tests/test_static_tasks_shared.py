@@ -8,6 +8,30 @@ from app.api.v1.endpoints import static_tasks_shared
 from app.api.v1.endpoints.static_tasks_opengrep import get_static_task_progress
 
 
+def test_build_backend_venv_env_prefixes_backend_venv_bin(monkeypatch):
+    monkeypatch.setattr(static_tasks_shared.settings, "BACKEND_VENV_PATH", "/opt/backend-venv")
+
+    env = static_tasks_shared._build_backend_venv_env({"PATH": "/usr/local/bin:/usr/bin"})
+
+    assert env["VIRTUAL_ENV"] == "/opt/backend-venv"
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env["PATH"].startswith("/opt/backend-venv/bin:")
+
+
+def test_resolve_backend_venv_executable_uses_configured_dir(tmp_path, monkeypatch):
+    venv_dir = tmp_path / "backend-venv"
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    bandit_bin = bin_dir / "bandit"
+    bandit_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(static_tasks_shared.settings, "BACKEND_VENV_PATH", str(venv_dir))
+
+    resolved = static_tasks_shared._resolve_backend_venv_executable("bandit")
+
+    assert resolved == str(bandit_bin)
+
+
 def test_record_scan_progress_initializes_shared_store():
     task_id = "task-progress-1"
     static_tasks_shared._scan_progress_store.clear()

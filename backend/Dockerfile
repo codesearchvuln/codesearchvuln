@@ -29,6 +29,7 @@ ARG BACKEND_PYPI_INDEX_CANDIDATES
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV BACKEND_VENV_PATH=/opt/backend-venv
 
 # 彻底清除代理设置
 ENV http_proxy=""
@@ -124,7 +125,7 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
       attempt=1; \
       while [ "${attempt}" -le 2 ]; do \
         echo "uv sync via ${index_url} (attempt ${attempt}/2, timeout ${uv_step_timeout}s)"; \
-        if timeout "${uv_step_timeout}" env UV_HTTP_TIMEOUT="${uv_http_timeout}" UV_INDEX_URL="${index_url}" PIP_INDEX_URL="${index_url}" uv sync --frozen --no-dev; then \
+        if timeout "${uv_step_timeout}" env VIRTUAL_ENV="${BACKEND_VENV_PATH}" PATH="${BACKEND_VENV_PATH}/bin:${PATH}" UV_HTTP_TIMEOUT="${uv_http_timeout}" UV_INDEX_URL="${index_url}" PIP_INDEX_URL="${index_url}" uv sync --active --frozen --no-dev; then \
           return 0; \
         else \
           status="$?"; \
@@ -164,6 +165,7 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
         append_unique_index "${index_url}" "${attempt_indexes_file}"; \
       done < "${ordered_indexes_file}"; \
     fi; \
+    uv venv "${BACKEND_VENV_PATH}"; \
     echo "uv sync candidate order:"; \
     cat "${attempt_indexes_file}"; \
     install_result=1; \
@@ -194,6 +196,7 @@ ARG BACKEND_PYPI_INDEX_CANDIDATES
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV BACKEND_VENV_PATH=/opt/backend-venv
 
 # 彻底清除代理设置
 ENV http_proxy=""
@@ -564,7 +567,7 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
 # ============================================
 FROM runtime-base AS dev-runtime
 
-COPY --from=builder /app/.venv /opt/backend-venv
+COPY --from=builder /opt/backend-venv /opt/backend-venv
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
 COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
@@ -583,11 +586,18 @@ RUN set -eux; \
       ln -sf "${YASA_WRAPPER_BIN}" /usr/local/bin/yasa; \
       /usr/local/bin/yasa --version; \
       test -d /opt/yasa/resource; \
-    fi
+    fi; \
+    for site_packages_dir in $(python3 -c 'import site; [print(path) for path in site.getsitepackages() if "site-packages" in path]'); do \
+      find "${site_packages_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +; \
+    done; \
+    rm -rf /root/.cache/pip; \
+    rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
 
-ENV PATH=/app/.venv/bin:${PATH}
+ENV VIRTUAL_ENV=/opt/backend-venv
+ENV PATH=/opt/backend-venv/bin:${PATH}
+ENV PYTHONNOUSERSITE=1
 
-RUN mkdir -p /app /app/.venv /root/.cache/uv /app/uploads/zip_files /app/data/mcp
+RUN mkdir -p /app /root/.cache/uv /app/uploads/zip_files /app/data/mcp
 
 EXPOSE 8000
 
@@ -596,7 +606,7 @@ CMD ["/usr/local/bin/backend-dev-entrypoint.sh"]
 FROM runtime-base AS runtime
 
 # 提前复制 builder 产物，避免 runtime 与 builder 并行下载导致网络争抢
-COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /opt/backend-venv /opt/backend-venv
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
 COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
@@ -670,7 +680,16 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
     unzip -q /tmp/pmd.zip -d /opt; \
     ln -s /opt/pmd-bin-7.0.0/bin/pmd /usr/local/bin/pmd; \
     rm /tmp/pmd.zip; \
-    pmd --version
+    pmd --version; \
+    for site_packages_dir in $(python3 -c 'import site; [print(path) for path in site.getsitepackages() if "site-packages" in path]'); do \
+      find "${site_packages_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +; \
+    done; \
+    rm -rf /root/.cache/pip; \
+    rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
+
+ENV VIRTUAL_ENV=/opt/backend-venv
+ENV PATH=/opt/backend-venv/bin:${PATH}
+ENV PYTHONNOUSERSITE=1
 
 # MCP / QMD 持久化目录
 ENV XDG_DATA_HOME=/app/data/mcp/xdg-data
@@ -679,32 +698,6 @@ ENV XDG_CONFIG_HOME=/app/data/mcp/xdg-config
 RUN mkdir -p /app/data/mcp/xdg-data /app/data/mcp/xdg-cache /app/data/mcp/xdg-config
 
 
-
-# code2flow 是 Python 包（非 npm 包），安装到系统 PATH（镜像失败时回退官方源）
-RUN --mount=type=cache,id=vulhunter-backend-pip-cache,target=/root/.cache/pip \
-    set -eux; \
-    pypi_index_candidates="${PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"; \
-    order_indexes() { \
-      raw_candidates="$1"; \
-      python3 /usr/local/bin/package_source_selector.py --candidates "${raw_candidates}" --kind pypi --timeout-seconds 2 || printf '%s\n' "${raw_candidates}" | tr ',' '\n'; \
-    }; \
-    install_python_helpers() { \
-      idx="$1"; \
-      PIP_INDEX_URL="${idx}" pip install --retries 5 --timeout 60 --disable-pip-version-check code2flow bandit; \
-    }; \
-    installed=0; \
-    ordered_indexes="$(order_indexes "${pypi_index_candidates}")"; \
-    order_file="$(mktemp)"; \
-    printf '%s\n' "${ordered_indexes}" > "${order_file}"; \
-    while IFS= read -r idx; do \
-      [ -n "${idx}" ] || continue; \
-      if install_python_helpers "${idx}"; then \
-        installed=1; \
-        break; \
-      fi; \
-    done < "${order_file}"; \
-    rm -f "${order_file}"; \
-    [ "${installed}" -eq 1 ]
 
 # 仅复制运行时所需代码与脚本，避免把测试/文档打进运行镜像
 COPY app /app/app

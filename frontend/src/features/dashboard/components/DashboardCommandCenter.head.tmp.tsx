@@ -213,16 +213,24 @@ function buildFiveStepTicks(rows: HorizontalRow[]) {
 	return ticks;
 }
 
+type HorizontalStatsXAxisProps = {
+	minTickGap: number;
+	tickCount: number | undefined;
+	allowDecimals: boolean;
+	domain: [number, "dataMax" | "auto"];
+	ticks: number[] | undefined;
+};
+
 export function getHorizontalStatsXAxisProps(
 	viewId: DashboardViewId,
 	rows: HorizontalRow[] = [],
-) {
+): HorizontalStatsXAxisProps {
 	if (viewId === "vulnerability-types") {
 		return {
 			minTickGap: 0,
 			tickCount: 6,
 			allowDecimals: false,
-			domain: [0, "dataMax"] as const,
+			domain: [0, "dataMax"],
 			ticks: rows.length > 0 ? buildFiveStepTicks(rows) : undefined,
 		};
 	}
@@ -231,7 +239,7 @@ export function getHorizontalStatsXAxisProps(
 		minTickGap: 0,
 		tickCount: undefined,
 		allowDecimals: false,
-		domain: [0, "auto"] as const,
+		domain: [0, "auto"],
 		ticks: undefined,
 	};
 }

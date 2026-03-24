@@ -67,6 +67,7 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _is_test_like_directory,
     _launch_static_background_job,
     _release_request_db_session,
+    _resolve_backend_venv_executable,
     _normalize_llm_config_error_message,
     _record_scan_progress,
     _request_scan_task_cancel,
@@ -419,8 +420,14 @@ async def _execute_bandit_scan(
             report_file = tf.name
 
         try:
+            try:
+                bandit_bin = _resolve_backend_venv_executable("bandit")
+            except FileNotFoundError as exc:
+                await _update_task_state("failed", error_message=str(exc))
+                logger.error("Bandit executable unavailable for task %s: %s", task_id, exc)
+                return
             cmd = [
-                "bandit",
+                bandit_bin,
                 "-r",
                 full_target_path,
                 "-f",

@@ -37,6 +37,10 @@ async def test_bandit_bootstrap_scanner_parses_and_normalizes_findings(monkeypat
         "app.services.agent.bootstrap.bandit.subprocess.run",
         _fake_run,
     )
+    monkeypatch.setattr(
+        "app.services.agent.bootstrap.bandit.resolve_backend_venv_executable",
+        lambda name: f"/opt/backend-venv/bin/{name}",
+    )
 
     scanner = BanditBootstrapScanner(timeout_seconds=30)
     result = await scanner.scan("/tmp/project")
@@ -60,6 +64,10 @@ async def test_bandit_bootstrap_scanner_raises_on_invalid_json(monkeypatch):
         "app.services.agent.bootstrap.bandit.subprocess.run",
         _fake_run,
     )
+    monkeypatch.setattr(
+        "app.services.agent.bootstrap.bandit.resolve_backend_venv_executable",
+        lambda name: f"/opt/backend-venv/bin/{name}",
+    )
 
     scanner = BanditBootstrapScanner()
     with pytest.raises(RuntimeError, match="bandit output parse failed"):
@@ -74,6 +82,10 @@ async def test_bandit_bootstrap_scanner_raises_when_failed_without_results(monke
     monkeypatch.setattr(
         "app.services.agent.bootstrap.bandit.subprocess.run",
         _fake_run,
+    )
+    monkeypatch.setattr(
+        "app.services.agent.bootstrap.bandit.resolve_backend_venv_executable",
+        lambda name: f"/opt/backend-venv/bin/{name}",
     )
 
     scanner = BanditBootstrapScanner()
@@ -103,6 +115,10 @@ async def test_bandit_bootstrap_scanner_supports_stderr_payload_fallback(monkeyp
         "app.services.agent.bootstrap.bandit.subprocess.run",
         _fake_run,
     )
+    monkeypatch.setattr(
+        "app.services.agent.bootstrap.bandit.resolve_backend_venv_executable",
+        lambda name: f"/opt/backend-venv/bin/{name}",
+    )
 
     scanner = BanditBootstrapScanner()
     result = await scanner.scan("/tmp/project")
@@ -110,3 +126,26 @@ async def test_bandit_bootstrap_scanner_supports_stderr_payload_fallback(monkeyp
     assert len(result.findings) == 1
     assert result.findings[0].severity == "ERROR"
     assert result.findings[0].confidence == "MEDIUM"
+
+
+@pytest.mark.asyncio
+async def test_bandit_bootstrap_scanner_uses_backend_venv_bandit_binary(monkeypatch):
+    seen = {}
+
+    def _fake_run(cmd, *_args, **_kwargs):
+        seen["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stdout='{"results":[]}', stderr="")
+
+    monkeypatch.setattr(
+        "app.services.agent.bootstrap.bandit.subprocess.run",
+        _fake_run,
+    )
+    monkeypatch.setattr(
+        "app.services.agent.bootstrap.bandit.resolve_backend_venv_executable",
+        lambda name: f"/opt/backend-venv/bin/{name}",
+    )
+
+    scanner = BanditBootstrapScanner()
+    await scanner.scan("/tmp/project")
+
+    assert seen["cmd"][0] == "/opt/backend-venv/bin/bandit"

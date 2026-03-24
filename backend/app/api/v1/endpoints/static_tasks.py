@@ -11,6 +11,7 @@ from app.api.v1.endpoints import static_tasks_phpstan as _phpstan
 from app.api.v1.endpoints import static_tasks_yasa as _yasa
 from app.api.v1.endpoints.static_tasks_shared import (
     _clear_scan_task_cancel,
+    _resolve_backend_venv_executable,
     _get_project_root,
     _is_scan_task_cancelled,
     _request_scan_task_cancel,
@@ -40,6 +41,7 @@ def _bind_bandit_runtime() -> None:
     _bandit._clear_scan_task_cancel = _clear_scan_task_cancel
     _bandit._get_project_root = _get_project_root
     _bandit._is_scan_task_cancelled = _is_scan_task_cancelled
+    _bandit._resolve_backend_venv_executable = _resolve_backend_venv_executable
     _bandit._request_scan_task_cancel = _request_scan_task_cancel
     _bandit._run_subprocess_with_tracking = _run_subprocess_with_tracking
     _bandit._sync_task_scan_duration = _sync_task_scan_duration

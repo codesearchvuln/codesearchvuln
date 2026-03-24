@@ -111,6 +111,7 @@ class Settings(BaseSettings):
     
     # ZIP文件存储配置
     ZIP_STORAGE_PATH: str = "./uploads/zip_files"  # ZIP文件存储目录
+    BACKEND_VENV_PATH: str = "/opt/backend-venv"
     SEED_ARCHIVE_PROBE_ATTEMPTS: int = 2
     SEED_ARCHIVE_PROBE_TIMEOUT_SECONDS: int = 5
     SEED_ARCHIVE_DOWNLOAD_TIMEOUT_SECONDS: int = 180

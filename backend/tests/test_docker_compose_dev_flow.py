@@ -26,7 +26,8 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert "target: dev" in compose_text
     assert "./backend:/app" in compose_text
     assert "./frontend:/app" in compose_text
-    assert "/app/.venv" in compose_text
+    assert "/opt/backend-venv" in compose_text
+    assert "/app/.venv" not in compose_text
     assert "/root/.cache/uv" in compose_text
     assert "/app/node_modules" in compose_text
     assert "/pnpm/store" in compose_text
@@ -92,10 +93,11 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert " AS dev" in frontend_text
 
     entrypoint_text = backend_entrypoint.read_text(encoding="utf-8")
-    assert "uv sync --frozen --no-dev" in entrypoint_text
+    assert 'VENV_DIR="${BACKEND_VENV_PATH:-/opt/backend-venv}"' in entrypoint_text
+    assert "uv sync --active --frozen --no-dev" in entrypoint_text
+    assert 'uv venv --clear "${VENV_DIR}"' in entrypoint_text
     assert "app.main:app --reload" in entrypoint_text
     assert 'rm -rf "${VENV_DIR}"' not in entrypoint_text
-    assert 'find "${VENV_DIR}" -mindepth 1 -maxdepth 1' in entrypoint_text
     assert "select_pypi_index()" in entrypoint_text
     assert 'export UV_INDEX_URL="${selected_pypi_index}"' in entrypoint_text
     assert 'export PIP_INDEX_URL="${selected_pypi_index}"' in entrypoint_text
@@ -223,7 +225,30 @@ def test_backend_dev_entrypoint_validates_seeded_venv_before_skipping_sync() -> 
 
     assert 'read_venv_version()' in entrypoint_text
     assert 'venv_can_run_backend()' in entrypoint_text
-    assert 'seed_version="$(read_venv_version "${SEED_VENV_DIR}"' in entrypoint_text
+    assert 'ensure_backend_venv()' in entrypoint_text
     assert 'current_version="$(read_venv_version "${VENV_DIR}"' in entrypoint_text
-    assert 'if [ -z "${current_version}" ] || [ "${current_version}" != "${seed_version}" ]; then' in entrypoint_text
+    assert 'expected_version="$(python3 - <<' in entrypoint_text
     assert 'import sqlalchemy, alembic, uvicorn' in entrypoint_text
+    assert 'uv venv --clear "${VENV_DIR}"' in entrypoint_text
+
+
+def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
+    backend_text = (REPO_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    pyproject_text = (REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
+    entrypoint_text = (REPO_ROOT / "backend" / "docker-entrypoint.sh").read_text(encoding="utf-8")
+
+    assert '"code2flow>=' in pyproject_text
+    assert '"bandit>=' in pyproject_text
+    assert "pip install --retries 5 --timeout 60 --disable-pip-version-check code2flow bandit" not in backend_text
+    assert "install_python_helpers()" not in backend_text
+    assert "ENV BACKEND_VENV_PATH=/opt/backend-venv" in backend_text
+    assert 'uv venv "${BACKEND_VENV_PATH}"' in backend_text
+    assert 'uv sync --active --frozen --no-dev' in backend_text
+    assert "COPY --from=builder /app/.venv /opt/backend-venv" not in backend_text
+    assert "COPY --from=builder /opt/backend-venv /opt/backend-venv" in backend_text
+    assert 'ln -sfn /opt/backend-venv /app/.venv' not in backend_text
+    assert 'rm -rf /root/.cache/pip' in backend_text
+    assert 'rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11' in backend_text
+    assert "python3 -m pip install" not in entrypoint_text
+    assert 'BACKEND_VENV_DIR="${BACKEND_VENV_PATH:-/opt/backend-venv}"' in entrypoint_text
+    assert '"${BACKEND_VENV_DIR}/bin/code2flow"' in entrypoint_text

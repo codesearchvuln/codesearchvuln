@@ -132,11 +132,17 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
     monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        static_tasks,
+        "_resolve_backend_venv_executable",
+        lambda name: f"/opt/backend-venv/bin/{name}",
+    )
 
     def _fake_run_subprocess_with_tracking(scan_type, task_id, cmd, timeout):
         assert scan_type == "bandit"
         assert task_id == "bandit-task-1"
         assert timeout == 600
+        assert cmd[0] == "/opt/backend-venv/bin/bandit"
         report_path = cmd[cmd.index("-o") + 1]
         payload = {
             "results": [
