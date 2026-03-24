@@ -4,11 +4,13 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set, Tuple
+from uuid import uuid4
 
 import yaml
 from fastapi import HTTPException
@@ -16,6 +18,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.api.v1.endpoints.static_tasks_shared import (
+    cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
+    ensure_scan_logs_dir,
+    ensure_scan_meta_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
+)
+from app.core.config import settings
+from app.db.static_finding_paths import normalize_static_scan_file_path
 from app.models.agent_task import AgentTask
 from app.models.opengrep import OpengrepRule
 from app.services.agent.bootstrap import (
@@ -24,6 +37,7 @@ from app.services.agent.bootstrap import (
     PhpstanBootstrapScanner,
     YasaBootstrapScanner,
 )
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 from app.services.agent.utils.vulnerability_naming import (
     normalize_cwe_id as normalize_cwe_id_util,
 )
@@ -313,7 +327,10 @@ def _normalize_bootstrap_finding_from_gitleaks_payload(
 ) -> Dict[str, Any]:
     rule_id = str(finding.get("RuleID") or "gitleaks_secret").strip()
     description = str(finding.get("Description") or "Gitleaks 密钥泄露候选").strip()
-    file_path = str(finding.get("File") or "").strip()
+    file_path = normalize_static_scan_file_path(
+        str(finding.get("File") or "").strip(),
+        "/scan/project",
+    )
     start_line = int(finding.get("StartLine") or 0)
     end_line = int(finding.get("EndLine") or start_line)
     code_snippet = finding.get("Match") or finding.get("Secret")
@@ -418,44 +435,62 @@ def _parse_bootstrap_gitleaks_output(stdout: str) -> List[Dict[str, Any]]:
 async def _run_bootstrap_gitleaks_scan(
     project_root: str,
 ) -> List[Dict[str, Any]]:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-        report_path = tf.name
+    task_id = f"bootstrap-{uuid4().hex}"
+    workspace_dir = ensure_scan_workspace("gitleaks-bootstrap", task_id)
+    project_dir = ensure_scan_project_dir("gitleaks-bootstrap", task_id)
+    output_dir = ensure_scan_output_dir("gitleaks-bootstrap", task_id)
+    logs_dir = ensure_scan_logs_dir("gitleaks-bootstrap", task_id)
+    meta_dir = ensure_scan_meta_dir("gitleaks-bootstrap", task_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / "report.json"
 
     try:
+        shutil.rmtree(project_dir, ignore_errors=True)
+        copy_project_tree_to_scan_dir(project_root, project_dir)
+
         cmd = [
             "gitleaks",
             "detect",
             "--source",
-            project_root,
+            "/scan/project",
             "--report-format",
             "json",
             "--report-path",
-            report_path,
+            "/scan/output/report.json",
             "--exit-code",
             "0",
             "--no-git",
         ]
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=900,
+        result = await run_scanner_container(
+            ScannerRunSpec(
+                scanner_type="gitleaks-bootstrap",
+                image=str(
+                    getattr(settings, "SCANNER_GITLEAKS_IMAGE", "vulhunter/gitleaks-runner:latest")
+                ),
+                workspace_dir=str(workspace_dir),
+                command=cmd,
+                timeout_seconds=900,
+                env={},
+            )
         )
-        if result.returncode != 0:
-            stderr_text = (result.stderr or result.stdout or "unknown error").strip()
-            raise RuntimeError(f"gitleaks failed: {stderr_text[:300]}")
+        if result.exit_code != 0:
+            stderr_text = ""
+            stdout_text = ""
+            if result.stderr_path and Path(result.stderr_path).exists():
+                stderr_text = Path(result.stderr_path).read_text(encoding="utf-8", errors="ignore")
+            if result.stdout_path and Path(result.stdout_path).exists():
+                stdout_text = Path(result.stdout_path).read_text(encoding="utf-8", errors="ignore")
+            error_text = (stderr_text or stdout_text or result.error or "unknown error").strip()
+            raise RuntimeError(f"gitleaks failed: {error_text[:300]}")
 
-        if not os.path.exists(report_path):
+        if not report_path.exists():
             return []
-        with open(report_path, "r", encoding="utf-8", errors="ignore") as f:
-            report_content = f.read()
+        report_content = report_path.read_text(encoding="utf-8", errors="ignore")
         return _parse_bootstrap_gitleaks_output(report_content)
     finally:
-        try:
-            os.unlink(report_path)
-        except Exception:
-            pass
+        cleanup_scan_workspace("gitleaks-bootstrap", task_id)
 
 
 def _dedupe_bootstrap_findings(

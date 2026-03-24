@@ -10,7 +10,7 @@ import { sanitizeAuditText } from "../utils";
 import {
   localizeAuditText,
 } from "../localization";
-import { isToolEvidenceCapableTool } from "../toolEvidence";
+import { getToolEvidencePayload, isToolEvidenceCapableTool } from "../toolEvidence";
 import type { LogItem } from "../types";
 
 const LOG_TYPE_LABELS: Record<string, string> = {
@@ -47,7 +47,7 @@ function buildToolListSummary(item: LogItem): string {
     return `${primaryTitle} · 正在执行`;
   }
 
-  const evidence = item.toolEvidence;
+  const evidence = getToolEvidencePayload(item.toolEvidence);
   if (evidence?.renderType === "search_hits") {
     const count = evidence.entries.length;
     return `${primaryTitle} · ${count} 条命中`;
@@ -65,6 +65,36 @@ function buildToolListSummary(item: LogItem): string {
     return typeof exitCode === "number"
       ? `${primaryTitle} · 执行结果 · 退出码 ${exitCode}`
       : `${primaryTitle} · 执行结果已生成`;
+  }
+
+  if (evidence?.renderType === "file_list") {
+    const first = evidence.entries[0];
+    return `${primaryTitle} · 目录摘要 · ${first?.directory || "未知目录"}`;
+  }
+
+  if (evidence?.renderType === "locator_result") {
+    const first = evidence.entries[0];
+    return `${primaryTitle} · 定位结果 · ${first?.filePath || ""}:${first?.line || ""}`;
+  }
+
+  if (evidence?.renderType === "analysis_summary") {
+    const first = evidence.entries[0];
+    return `${primaryTitle} · ${first?.hitCount || 0} 个发现`;
+  }
+
+  if (evidence?.renderType === "flow_analysis") {
+    const first = evidence.entries[0];
+    return `${primaryTitle} · 路径分析 · ${first?.reachability || "unknown"}`;
+  }
+
+  if (evidence?.renderType === "verification_summary") {
+    const first = evidence.entries[0];
+    return `${primaryTitle} · 验证结果 · ${first?.verdict || "unknown"}`;
+  }
+
+  if (evidence?.renderType === "report_summary") {
+    const first = evidence.entries[0];
+    return `${primaryTitle} · 报告摘要 · ${first?.severity || "unknown"}`;
   }
 
   if (item.tool?.status === "failed") {

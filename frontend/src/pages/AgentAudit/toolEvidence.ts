@@ -4,8 +4,19 @@ export type ToolEvidenceRenderType =
   | "execution_result"
   | "outline_summary"
   | "function_summary"
-  | "symbol_body";
+  | "symbol_body"
+  | "file_list"
+  | "locator_result"
+  | "analysis_summary"
+  | "flow_analysis"
+  | "verification_summary"
+  | "report_summary";
 export type ToolEvidenceLineKind = "context" | "focus" | "match";
+export type ToolEvidenceCompatibilityState =
+  | "native"
+  | "legacy-derived"
+  | "partial"
+  | "raw-only";
 
 export interface ToolEvidenceLine {
   lineNumber: number;
@@ -85,6 +96,80 @@ export interface ToolEvidenceExecutionResultEntry {
   code?: ToolEvidenceExecutionCode | null;
 }
 
+export interface ToolEvidenceFileListEntry {
+  directory: string;
+  pattern?: string;
+  recursive: boolean;
+  files: string[];
+  directories: string[];
+  fileCount: number;
+  dirCount: number;
+  truncated: boolean;
+  recommendedNextDirectories: string[];
+}
+
+export interface ToolEvidenceLocatorResultEntry {
+  filePath: string;
+  line: number;
+  symbolName: string;
+  startLine: number;
+  endLine: number;
+  signature?: string;
+  parameters: string[];
+  returnType?: string | null;
+  engine: string;
+  confidence: number;
+  degraded: boolean;
+}
+
+export interface ToolEvidenceAnalysisSummaryEntry {
+  title: string;
+  summary: string;
+  severityStats: Record<string, number>;
+  hitCount: number;
+  keyFiles: string[];
+  highlights: string[];
+  nextActions: string[];
+}
+
+export interface ToolEvidenceFlowAnalysisEntry {
+  sourceNodes: string[];
+  sinkNodes: string[];
+  taintSteps: string[];
+  callChain: string[];
+  blockedReasons: string[];
+  reachability: string;
+  pathFound: boolean;
+  pathScore: number;
+  confidence: number;
+  engine: string;
+  nextActions: string[];
+  filePath?: string;
+}
+
+export interface ToolEvidenceVerificationSummaryEntry {
+  vulnerabilityType: string;
+  target: string;
+  payload: string;
+  verdict: string;
+  evidence: string;
+  responseStatus?: number | null;
+  runtimeStatus?: string;
+  error?: string | null;
+}
+
+export interface ToolEvidenceReportSummaryEntry {
+  reportId: string;
+  title: string;
+  severity: string;
+  vulnerabilityType: string;
+  location: string;
+  verified: boolean;
+  recommendation: string;
+  confidence: number;
+  cvssScore: number;
+}
+
 export type ToolEvidencePayload =
   | {
       renderType: "code_window";
@@ -121,7 +206,50 @@ export type ToolEvidencePayload =
       commandChain: string[];
       displayCommand: string;
       entries: ToolEvidenceExecutionResultEntry[];
+    }
+  | {
+      renderType: "file_list";
+      commandChain: string[];
+      displayCommand: string;
+      entries: ToolEvidenceFileListEntry[];
+    }
+  | {
+      renderType: "locator_result";
+      commandChain: string[];
+      displayCommand: string;
+      entries: ToolEvidenceLocatorResultEntry[];
+    }
+  | {
+      renderType: "analysis_summary";
+      commandChain: string[];
+      displayCommand: string;
+      entries: ToolEvidenceAnalysisSummaryEntry[];
+    }
+  | {
+      renderType: "flow_analysis";
+      commandChain: string[];
+      displayCommand: string;
+      entries: ToolEvidenceFlowAnalysisEntry[];
+    }
+  | {
+      renderType: "verification_summary";
+      commandChain: string[];
+      displayCommand: string;
+      entries: ToolEvidenceVerificationSummaryEntry[];
+    }
+  | {
+      renderType: "report_summary";
+      commandChain: string[];
+      displayCommand: string;
+      entries: ToolEvidenceReportSummaryEntry[];
     };
+
+export interface ParsedToolEvidence {
+  state: ToolEvidenceCompatibilityState;
+  payload: ToolEvidencePayload | null;
+  rawOutput: unknown;
+  notices?: string[];
+}
 
 const TOOL_EVIDENCE_TOOLS = new Set([
   "read_file",
@@ -133,6 +261,16 @@ const TOOL_EVIDENCE_TOOLS = new Set([
   "extract_function",
   "run_code",
   "sandbox_exec",
+  "list_files",
+  "locate_enclosing_function",
+  "smart_scan",
+  "quick_audit",
+  "pattern_match",
+  "dataflow_analysis",
+  "controlflow_analysis_light",
+  "logic_authz_analysis",
+  "verify_vulnerability",
+  "create_vulnerability_report",
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -367,6 +505,218 @@ function parseExecutionEntries(value: unknown): ToolEvidenceExecutionResultEntry
   return parsed;
 }
 
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || "").trim()).filter(Boolean);
+}
+
+function parseStringNumberRecord(value: unknown): Record<string, number> {
+  const record = asRecord(value);
+  if (!record) return {};
+  return Object.fromEntries(
+    Object.entries(record)
+      .map(([key, item]) => [key, Number(item)])
+      .filter(([, item]) => Number.isFinite(item)),
+  );
+}
+
+function parseFileListEntries(value: unknown): ToolEvidenceFileListEntry[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: ToolEvidenceFileListEntry[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) return null;
+    const directory = toStringValue(record.directory).trim();
+    const recursive = typeof record.recursive === "boolean" ? record.recursive : null;
+    const fileCount = toInt(record.file_count);
+    const dirCount = toInt(record.dir_count);
+    const truncated = typeof record.truncated === "boolean" ? record.truncated : null;
+    if (!directory || recursive === null || fileCount === null || dirCount === null || truncated === null) {
+      return null;
+    }
+    parsed.push({
+      directory,
+      pattern: toStringValue(record.pattern) || undefined,
+      recursive,
+      files: parseStringArray(record.files),
+      directories: parseStringArray(record.directories),
+      fileCount,
+      dirCount,
+      truncated,
+      recommendedNextDirectories: parseStringArray(record.recommended_next_directories),
+    });
+  }
+  return parsed;
+}
+
+function parseLocatorEntries(value: unknown): ToolEvidenceLocatorResultEntry[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: ToolEvidenceLocatorResultEntry[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) return null;
+    const filePath = toStringValue(record.file_path).trim();
+    const line = toInt(record.line);
+    const startLine = toInt(record.start_line);
+    const endLine = toInt(record.end_line);
+    const symbolName = toStringValue(record.symbol_name).trim();
+    const confidence = Number(record.confidence);
+    const degraded = typeof record.degraded === "boolean" ? record.degraded : null;
+    if (!filePath || !symbolName || line === null || startLine === null || endLine === null || !Number.isFinite(confidence) || degraded === null) {
+      return null;
+    }
+    parsed.push({
+      filePath,
+      line,
+      symbolName,
+      startLine,
+      endLine,
+      signature: toStringValue(record.signature) || undefined,
+      parameters: parseStringArray(record.parameters).length > 0
+        ? parseStringArray(record.parameters)
+        : Array.isArray(record.parameters)
+          ? record.parameters.map((item) => asRecord(item)?.name).filter(Boolean).map(String)
+          : [],
+      returnType: toStringValue(record.return_type) || null,
+      engine: toStringValue(record.engine),
+      confidence,
+      degraded,
+    });
+  }
+  return parsed;
+}
+
+function parseAnalysisSummaryEntries(value: unknown): ToolEvidenceAnalysisSummaryEntry[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: ToolEvidenceAnalysisSummaryEntry[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) return null;
+    const title = toStringValue(record.title).trim();
+    const summary = toStringValue(record.summary).trim();
+    const hitCount = toInt(record.hit_count);
+    if (!title || !summary || hitCount === null) return null;
+    parsed.push({
+      title,
+      summary,
+      severityStats: parseStringNumberRecord(record.severity_stats),
+      hitCount,
+      keyFiles: parseStringArray(record.key_files),
+      highlights: parseStringArray(record.highlights),
+      nextActions: parseStringArray(record.next_actions),
+    });
+  }
+  return parsed;
+}
+
+function parseFlowAnalysisEntries(value: unknown): ToolEvidenceFlowAnalysisEntry[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: ToolEvidenceFlowAnalysisEntry[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) return null;
+    const pathScore = Number(record.path_score);
+    const confidence = Number(record.confidence);
+    const pathFound = typeof record.path_found === "boolean" ? record.path_found : null;
+    const reachability = toStringValue(record.reachability).trim();
+    const engine = toStringValue(record.engine).trim();
+    if (!Number.isFinite(pathScore) || !Number.isFinite(confidence) || pathFound === null || !reachability || !engine) {
+      return null;
+    }
+    parsed.push({
+      sourceNodes: parseStringArray(record.source_nodes),
+      sinkNodes: parseStringArray(record.sink_nodes),
+      taintSteps: parseStringArray(record.taint_steps),
+      callChain: parseStringArray(record.call_chain),
+      blockedReasons: parseStringArray(record.blocked_reasons),
+      reachability,
+      pathFound,
+      pathScore,
+      confidence,
+      engine,
+      nextActions: parseStringArray(record.next_actions),
+      filePath: toStringValue(record.file_path) || undefined,
+    });
+  }
+  return parsed;
+}
+
+function parseVerificationSummaryEntries(value: unknown): ToolEvidenceVerificationSummaryEntry[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: ToolEvidenceVerificationSummaryEntry[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) return null;
+    const vulnerabilityType = toStringValue(record.vulnerability_type).trim();
+    const target = toStringValue(record.target).trim();
+    const payload = toStringValue(record.payload);
+    const verdict = toStringValue(record.verdict).trim();
+    if (!vulnerabilityType || !target || !verdict) return null;
+    parsed.push({
+      vulnerabilityType,
+      target,
+      payload,
+      verdict,
+      evidence: toStringValue(record.evidence),
+      responseStatus: toInt(record.response_status),
+      runtimeStatus: toStringValue(record.runtime_status) || undefined,
+      error: toStringValue(record.error) || null,
+    });
+  }
+  return parsed;
+}
+
+function parseReportSummaryEntries(value: unknown): ToolEvidenceReportSummaryEntry[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: ToolEvidenceReportSummaryEntry[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (!record) return null;
+    const reportId = toStringValue(record.report_id).trim();
+    const title = toStringValue(record.title).trim();
+    const severity = toStringValue(record.severity).trim();
+    const vulnerabilityType = toStringValue(record.vulnerability_type).trim();
+    const location = toStringValue(record.location).trim();
+    const recommendation = toStringValue(record.recommendation);
+    const confidence = Number(record.confidence);
+    const cvssScore = Number(record.cvss_score);
+    const verified = typeof record.verified === "boolean" ? record.verified : null;
+    if (!reportId || !title || !severity || !vulnerabilityType || !location || verified === null || !Number.isFinite(confidence) || !Number.isFinite(cvssScore)) {
+      return null;
+    }
+    parsed.push({
+      reportId,
+      title,
+      severity,
+      vulnerabilityType,
+      location,
+      verified,
+      recommendation,
+      confidence,
+      cvssScore,
+    });
+  }
+  return parsed;
+}
+
+export function asParsedToolEvidence(
+  value: ParsedToolEvidence | ToolEvidencePayload | null | undefined,
+): ParsedToolEvidence | null {
+  if (!value) return null;
+  if ("state" in value) return value;
+  return {
+    state: "native",
+    payload: value,
+    rawOutput: value,
+  };
+}
+
+export function getToolEvidencePayload(
+  value: ParsedToolEvidence | ToolEvidencePayload | null | undefined,
+): ToolEvidencePayload | null {
+  return asParsedToolEvidence(value)?.payload ?? null;
+}
+
 export function isToolEvidenceCapableTool(toolName: string | null | undefined): boolean {
   return TOOL_EVIDENCE_TOOLS.has(String(toolName || "").trim().toLowerCase());
 }
@@ -432,6 +782,36 @@ export function parseToolEvidence(value: unknown): ToolEvidencePayload | null {
           entries,
         }
       : null;
+  }
+
+  if (renderType === "file_list") {
+    const entries = parseFileListEntries(metadata.entries);
+    return entries ? { renderType, commandChain, displayCommand, entries } : null;
+  }
+
+  if (renderType === "locator_result") {
+    const entries = parseLocatorEntries(metadata.entries);
+    return entries ? { renderType, commandChain, displayCommand, entries } : null;
+  }
+
+  if (renderType === "analysis_summary") {
+    const entries = parseAnalysisSummaryEntries(metadata.entries);
+    return entries ? { renderType, commandChain, displayCommand, entries } : null;
+  }
+
+  if (renderType === "flow_analysis") {
+    const entries = parseFlowAnalysisEntries(metadata.entries);
+    return entries ? { renderType, commandChain, displayCommand, entries } : null;
+  }
+
+  if (renderType === "verification_summary") {
+    const entries = parseVerificationSummaryEntries(metadata.entries);
+    return entries ? { renderType, commandChain, displayCommand, entries } : null;
+  }
+
+  if (renderType === "report_summary") {
+    const entries = parseReportSummaryEntries(metadata.entries);
+    return entries ? { renderType, commandChain, displayCommand, entries } : null;
   }
 
   return null;
@@ -855,45 +1235,339 @@ function synthesizeExecutionFallback(
   };
 }
 
+function wrapParsedEvidence(
+  state: ToolEvidenceCompatibilityState,
+  payload: ToolEvidencePayload | null,
+  rawOutput: unknown,
+  notices?: string[],
+): ParsedToolEvidence {
+  return { state, payload, rawOutput, notices };
+}
+
+function extractPrimaryRecord(value: unknown): Record<string, unknown> | null {
+  const direct = asRecord(value);
+  if (!direct) return null;
+  return asRecord(direct.data) || direct;
+}
+
+function synthesizeFileListEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
+  const source = asRecord(toolMetadata) || extractPrimaryRecord(toolOutput);
+  if (!source) return null;
+  const directory = toStringValue(source.directory).trim();
+  const recursive = typeof source.recursive === "boolean" ? source.recursive : false;
+  if (!directory) return null;
+  const commandChain = buildFallbackCommandChain({ toolName: "list_files", toolMetadata });
+  return {
+    renderType: "file_list",
+    commandChain,
+    displayCommand: buildDisplayCommand(commandChain),
+    entries: [
+      {
+        directory,
+        pattern: toStringValue(source.pattern) || undefined,
+        recursive,
+        files: parseStringArray(source.files),
+        directories: parseStringArray(source.directories),
+        fileCount: toInt(source.file_count) ?? parseStringArray(source.files).length,
+        dirCount: toInt(source.dir_count) ?? parseStringArray(source.directories).length,
+        truncated: Boolean(source.truncated),
+        recommendedNextDirectories: parseStringArray(source.recommended_next_directories),
+      },
+    ],
+  };
+}
+
+function synthesizeLocatorEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
+  const source = extractPrimaryRecord(toolOutput) || asRecord(toolMetadata);
+  const symbol = asRecord(source?.symbol);
+  const resolution = asRecord(source?.resolution);
+  if (!source || !symbol || !resolution) return null;
+  const filePath = toStringValue(source.file_path).trim();
+  const line = toInt(source.line);
+  const startLine = toInt(symbol.start_line);
+  const endLine = toInt(symbol.end_line);
+  const symbolName = toStringValue(symbol.name).trim();
+  if (!filePath || line === null || startLine === null || endLine === null || !symbolName) return null;
+  const commandChain = buildFallbackCommandChain({ toolName: "locate_enclosing_function", toolMetadata });
+  return {
+    renderType: "locator_result",
+    commandChain,
+    displayCommand: buildDisplayCommand(commandChain),
+    entries: [
+      {
+        filePath,
+        line,
+        symbolName,
+        startLine,
+        endLine,
+        signature: toStringValue(symbol.signature) || undefined,
+        parameters: Array.isArray(symbol.parameters)
+          ? symbol.parameters.map((item) => asRecord(item)?.name).filter(Boolean).map(String)
+          : [],
+        returnType: toStringValue(symbol.return_type) || null,
+        engine: toStringValue(resolution.engine || resolution.method),
+        confidence: Number(resolution.confidence) || 0,
+        degraded: Boolean(resolution.degraded),
+      },
+    ],
+  };
+}
+
+function synthesizeAnalysisSummaryEvidence(
+  toolName: string,
+  toolOutput: unknown,
+  toolMetadata?: unknown,
+): ToolEvidencePayload | null {
+  const metadata = asRecord(toolMetadata) || {};
+  const source = extractPrimaryRecord(toolOutput) || metadata;
+  const findings = Array.isArray(source.findings) ? source.findings : [];
+  const details = Array.isArray(source.details) ? source.details : [];
+  const severityStats =
+    parseStringNumberRecord(source.by_severity) ||
+    parseStringNumberRecord(source.severity_stats);
+  const hitCount =
+    toInt(source.total_findings) ??
+    toInt(source.findings_count) ??
+    toInt(source.matches) ??
+    findings.length ??
+    details.length;
+  const keyFiles = Array.from(
+    new Set(
+      [
+        ...parseStringArray(source.high_risk_files),
+        ...findings.map((item) => toStringValue(asRecord(item)?.file_path)),
+        ...details.map((item) => toStringValue(asRecord(item)?.file_path)),
+      ].filter(Boolean),
+    ),
+  );
+  const highlights = [
+    ...findings.slice(0, 5).map((item) => {
+      const record = asRecord(item);
+      return `${toStringValue(record?.vulnerability_type || record?.type)} @ ${toStringValue(record?.file_path)}:${toInt(record?.line_number ?? record?.line) ?? "?"}`;
+    }),
+    ...details.slice(0, 5).map((item) => {
+      const record = asRecord(item);
+      return `${toStringValue(record?.type)} @ ${toStringValue(record?.file_path)}:${toInt(record?.line) ?? "?"}`;
+    }),
+  ].filter(Boolean);
+  const summary =
+    toStringValue(source.summary) ||
+    `${toolName} 发现 ${hitCount ?? 0} 个潜在问题。`;
+  const commandChain = buildFallbackCommandChain({ toolName, toolMetadata });
+  if (hitCount === null) return null;
+  return {
+    renderType: "analysis_summary",
+    commandChain,
+    displayCommand: buildDisplayCommand(commandChain),
+    entries: [
+      {
+        title: `${toolName} summary`,
+        summary,
+        severityStats,
+        hitCount,
+        keyFiles,
+        highlights,
+        nextActions: parseStringArray(source.next_actions).length > 0
+          ? parseStringArray(source.next_actions)
+          : ["继续查看关键命中上下文并确认可利用性。"],
+      },
+    ],
+  };
+}
+
+function synthesizeFlowAnalysisEvidence(
+  toolName: string,
+  toolOutput: unknown,
+  toolMetadata?: unknown,
+): ToolEvidencePayload | null {
+  const metadata = asRecord(toolMetadata) || {};
+  const dataRecord = extractPrimaryRecord(toolOutput) || metadata;
+  const analysis = asRecord(dataRecord.analysis) || asRecord(dataRecord.flow) || dataRecord;
+  if (!analysis) return null;
+  const commandChain = buildFallbackCommandChain({ toolName, toolMetadata });
+  const sourceNodes = parseStringArray(analysis.source_nodes).length > 0
+    ? parseStringArray(analysis.source_nodes)
+    : parseStringArray(analysis.proof_nodes);
+  const sinkNodes = parseStringArray(analysis.sink_nodes).length > 0
+    ? parseStringArray(analysis.sink_nodes)
+    : parseStringArray(analysis.evidence);
+  const taintSteps = parseStringArray(analysis.taint_steps).length > 0
+    ? parseStringArray(analysis.taint_steps)
+    : parseStringArray(analysis.evidence);
+  const callChain = parseStringArray(analysis.call_chain).length > 0
+    ? parseStringArray(analysis.call_chain)
+    : parseStringArray(analysis.proof_nodes);
+  const blockedReasons = parseStringArray(analysis.blocked_reasons);
+  const pathFound =
+    typeof analysis.path_found === "boolean"
+      ? analysis.path_found
+      : Boolean(
+          analysis.missing_authz_checks || analysis.resource_scope_mismatch || analysis.idor_path,
+        );
+  const pathScore = Number(analysis.path_score ?? analysis.confidence ?? (pathFound ? 1 : 0));
+  const confidence = Number(analysis.confidence ?? pathScore ?? 0);
+  return {
+    renderType: "flow_analysis",
+    commandChain,
+    displayCommand: buildDisplayCommand(commandChain),
+    entries: [
+      {
+        sourceNodes,
+        sinkNodes,
+        taintSteps,
+        callChain,
+        blockedReasons,
+        reachability: toStringValue(analysis.reachability) || (pathFound ? "reachable" : blockedReasons.length > 0 ? "blocked" : "unknown"),
+        pathFound,
+        pathScore: Number.isFinite(pathScore) ? pathScore : 0,
+        confidence: Number.isFinite(confidence) ? confidence : 0,
+        engine: toStringValue(metadata.engine || analysis.analysis_engine || "legacy"),
+        nextActions: parseStringArray(analysis.next_actions).length > 0
+          ? parseStringArray(analysis.next_actions)
+          : ["补充上下文后继续验证路径与控制条件。"],
+        filePath: toStringValue(metadata.file_path || dataRecord.file_path) || undefined,
+      },
+    ],
+  };
+}
+
+function synthesizeVerificationSummaryEvidence(
+  toolOutput: unknown,
+  toolMetadata?: unknown,
+  toolInput?: unknown,
+): ToolEvidencePayload | null {
+  const metadata = asRecord(toolMetadata) || {};
+  const dataRecord = extractPrimaryRecord(toolOutput) || metadata;
+  const inputRecord = asRecord(toolInput);
+  const vulnerabilityType = toStringValue(metadata.vulnerability_type || dataRecord.vulnerability_type || inputRecord?.vulnerability_type).trim();
+  const target = toStringValue(inputRecord?.target_url || metadata.target || dataRecord.target).trim();
+  const payloadValue = toStringValue(inputRecord?.payload || metadata.payload || dataRecord.payload);
+  if (!vulnerabilityType || !target) return null;
+  const isVulnerable = Boolean(metadata.is_vulnerable ?? dataRecord.is_vulnerable);
+  const commandChain = buildFallbackCommandChain({ toolName: "verify_vulnerability", toolMetadata });
+  return {
+    renderType: "verification_summary",
+    commandChain,
+    displayCommand: buildDisplayCommand(commandChain),
+    entries: [
+      {
+        vulnerabilityType,
+        target,
+        payload: payloadValue,
+        verdict: isVulnerable ? "confirmed" : "not_confirmed",
+        evidence: toStringValue(metadata.evidence || dataRecord.evidence),
+        responseStatus: toInt(metadata.response_status || dataRecord.response_status),
+        runtimeStatus: toStringValue(metadata.runtime_status || dataRecord.runtime_status) || undefined,
+        error: toStringValue(metadata.error || dataRecord.error) || null,
+      },
+    ],
+  };
+}
+
+function synthesizeReportSummaryEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
+  const source = extractPrimaryRecord(toolOutput) || asRecord(toolMetadata);
+  if (!source) return null;
+  const reportId = toStringValue(source.report_id || source.id).trim();
+  const title = toStringValue(source.title).trim();
+  const severity = toStringValue(source.severity).trim();
+  const vulnerabilityType = toStringValue(source.vulnerability_type).trim();
+  const location = (() => {
+    const filePath = toStringValue(source.file_path).trim();
+    const lineStart = toInt(source.line_start);
+    return filePath ? `${filePath}${lineStart !== null ? `:${lineStart}` : ""}` : "";
+  })();
+  if (!reportId || !title || !severity || !vulnerabilityType || !location) return null;
+  const commandChain = buildFallbackCommandChain({ toolName: "create_vulnerability_report", toolMetadata });
+  return {
+    renderType: "report_summary",
+    commandChain,
+    displayCommand: buildDisplayCommand(commandChain),
+    entries: [
+      {
+        reportId,
+        title,
+        severity,
+        vulnerabilityType,
+        location,
+        verified: Boolean(source.is_verified ?? true),
+        recommendation: toStringValue(source.recommendation),
+        confidence: Number(source.confidence) || 0,
+        cvssScore: Number(source.cvss_score) || 0,
+      },
+    ],
+  };
+}
+
 export function parseToolEvidenceFromLog(args: {
   toolName?: string | null;
   toolOutput: unknown;
   toolMetadata?: unknown;
   toolInput?: unknown;
   logContent?: unknown;
-}): ToolEvidencePayload | null {
+}): ParsedToolEvidence | null {
   const direct = parseToolEvidence(args.toolOutput);
-  if (direct) return direct;
+  if (direct) return wrapParsedEvidence("native", direct, args.toolOutput);
 
   const metadataPayload = parseToolEvidence({ metadata: args.toolMetadata });
-  if (metadataPayload) return metadataPayload;
+  if (metadataPayload) return wrapParsedEvidence("native", metadataPayload, args.toolOutput);
 
   const normalizedTool = String(args.toolName || "").trim().toLowerCase();
-  if (normalizedTool === "read_file" || normalizedTool === "get_code_window") {
-    return synthesizeReadFileEvidence(args.toolOutput, args.toolInput, args.toolMetadata, args.logContent);
-  }
+  const synthesized = (() => {
+    if (normalizedTool === "read_file" || normalizedTool === "get_code_window") {
+      return synthesizeReadFileEvidence(args.toolOutput, args.toolInput, args.toolMetadata, args.logContent);
+    }
+    if (normalizedTool === "search_code") {
+      return synthesizeSearchCodeEvidence(args.toolOutput, args.toolMetadata, args.logContent);
+    }
+    if (normalizedTool === "extract_function" || normalizedTool === "get_symbol_body") {
+      return synthesizeExtractFunctionEvidence(
+        args.toolOutput,
+        args.toolInput,
+        args.toolMetadata,
+        args.logContent,
+      );
+    }
+    if (normalizedTool === "run_code" || normalizedTool === "sandbox_exec") {
+      return synthesizeExecutionFallback(
+        normalizedTool,
+        args.toolOutput,
+        args.toolInput,
+        args.toolMetadata,
+        args.logContent,
+      );
+    }
+    if (normalizedTool === "list_files") {
+      return synthesizeFileListEvidence(args.toolOutput, args.toolMetadata);
+    }
+    if (normalizedTool === "locate_enclosing_function") {
+      return synthesizeLocatorEvidence(args.toolOutput, args.toolMetadata);
+    }
+    if (["smart_scan", "quick_audit", "pattern_match"].includes(normalizedTool)) {
+      return synthesizeAnalysisSummaryEvidence(normalizedTool, args.toolOutput, args.toolMetadata);
+    }
+    if (["dataflow_analysis", "controlflow_analysis_light", "logic_authz_analysis"].includes(normalizedTool)) {
+      return synthesizeFlowAnalysisEvidence(normalizedTool, args.toolOutput, args.toolMetadata);
+    }
+    if (normalizedTool === "verify_vulnerability") {
+      return synthesizeVerificationSummaryEvidence(args.toolOutput, args.toolMetadata, args.toolInput);
+    }
+    if (normalizedTool === "create_vulnerability_report") {
+      return synthesizeReportSummaryEvidence(args.toolOutput, args.toolMetadata);
+    }
+    return null;
+  })();
 
-  if (normalizedTool === "search_code") {
-    return synthesizeSearchCodeEvidence(args.toolOutput, args.toolMetadata, args.logContent);
-  }
-
-  if (normalizedTool === "extract_function" || normalizedTool === "get_symbol_body") {
-    return synthesizeExtractFunctionEvidence(
+  if (synthesized) {
+    return wrapParsedEvidence(
+      "legacy-derived",
+      synthesized,
       args.toolOutput,
-      args.toolInput,
-      args.toolMetadata,
-      args.logContent,
+      ["结构化时间线基于历史旧协议提炼生成。"],
     );
   }
 
-  if (normalizedTool === "run_code" || normalizedTool === "sandbox_exec") {
-    return synthesizeExecutionFallback(
-      normalizedTool,
-      args.toolOutput,
-      args.toolInput,
-      args.toolMetadata,
-      args.logContent,
-    );
+  if (isToolEvidenceCapableTool(normalizedTool)) {
+    return wrapParsedEvidence("raw-only", null, args.toolOutput, ["无法安全提炼结构化证据，已回退原始 JSON。"]);
   }
 
   return null;

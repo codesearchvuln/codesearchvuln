@@ -12,10 +12,15 @@
 import os
 import re
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from dataclasses import dataclass
 
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 
 
 @dataclass
@@ -50,6 +55,20 @@ class PatternMatchInput(BaseModel):
         description="要检测的漏洞类型列表，如 ['sql_injection', 'xss']。为空则检测所有类型"
     )
     language: Optional[str] = Field(default=None, description="编程语言，用于选择特定模式")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_pattern_types(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            return values
+        pattern_types = values.get("pattern_types")
+        if isinstance(pattern_types, str):
+            values["pattern_types"] = [
+                item.strip()
+                for item in re.split(r"[|,;]", pattern_types)
+                if item.strip()
+            ]
+        return values
 
 
 class PatternMatchTool(AgentTool):
@@ -645,6 +664,44 @@ class PatternMatchTool(AgentTool):
         }
         if extra_metadata:
             metadata.update(extra_metadata)
+
+        severity_stats = dict(metadata["by_severity"])
+        key_files = list(dict.fromkeys(m.file_path for m in matches))[:5]
+        highlights = [
+            f"{m.pattern_type} @ {m.file_path}:{m.line_number} ({m.pattern_name})"
+            for m in matches[:5]
+        ]
+        next_actions = [
+            "结合 read_file / get_code_window 复核命中上下文。",
+            "对高风险命中继续执行 dataflow_analysis 或 controlflow_analysis_light。",
+        ]
+        command_chain = unique_command_chain(["pattern_match"])
+        display_command = build_display_command(command_chain)
+        entries = [
+            {
+                "title": "Pattern Match Summary",
+                "summary": f"Detected {len(matches)} potential issues across {len(key_files)} files.",
+                "severity_stats": severity_stats,
+                "hit_count": len(matches),
+                "key_files": key_files,
+                "highlights": highlights,
+                "next_actions": next_actions,
+            }
+        ]
+        validate_evidence_metadata(
+            render_type="analysis_summary",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=entries,
+        )
+        metadata.update(
+            {
+                "render_type": "analysis_summary",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": entries,
+            }
+        )
 
         return ToolResult(
             success=True,

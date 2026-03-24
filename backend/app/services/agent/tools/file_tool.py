@@ -91,155 +91,6 @@ def _split_file_patterns(file_pattern: Optional[Any]) -> List[str]:
     return parts or [text]
 
 
-_SOURCE_FILE_EXTENSIONS = (
-    ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh",
-    ".py", ".js", ".jsx", ".ts", ".tsx",
-    ".java", ".go", ".rs", ".php", ".rb", ".swift",
-    ".kt", ".m", ".mm", ".cs", ".scala",
-)
-
-_LANGUAGE_BY_EXTENSION = {
-    ".py": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".java": "java",
-    ".go": "go",
-    ".rs": "rust",
-    ".cpp": "cpp",
-    ".cc": "cpp",
-    ".cxx": "cpp",
-    ".hpp": "cpp",
-    ".hh": "cpp",
-    ".c": "c",
-    ".h": "c",
-    ".cs": "csharp",
-    ".php": "php",
-    ".rb": "ruby",
-    ".swift": "swift",
-    ".kt": "kotlin",
-}
-
-
-def _is_source_like_file(path_value: str) -> bool:
-    ext = Path(str(path_value or "")).suffix.lower()
-    return ext in _SOURCE_FILE_EXTENSIONS
-
-
-def _detect_language(path_value: str) -> str:
-    ext = os.path.splitext(str(path_value or ""))[1].lower()
-    return _LANGUAGE_BY_EXTENSION.get(ext, "text")
-
-
-def _unique_command_chain(commands: List[str]) -> List[str]:
-    seen: set[str] = set()
-    ordered: List[str] = []
-    for item in commands:
-        normalized = str(item or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        ordered.append(normalized)
-    return ordered
-
-
-def _build_display_command(command_chain: List[str]) -> str:
-    normalized = _unique_command_chain(command_chain)
-    return " -> ".join(normalized) if normalized else "python"
-
-
-def _build_structured_lines(
-    selected_lines: List[str],
-    start_line: int,
-    focus_start_line: int,
-    focus_end_line: int,
-    focus_kind: str,
-) -> List[Dict[str, Any]]:
-    structured: List[Dict[str, Any]] = []
-    for index, raw_line in enumerate(selected_lines):
-        line_number = start_line + index
-        kind = focus_kind if focus_start_line <= line_number <= focus_end_line else "context"
-        structured.append(
-            {
-                "line_number": line_number,
-                "text": str(raw_line).rstrip("\n"),
-                "kind": kind,
-            }
-        )
-    return structured
-
-
-def _format_structured_lines_for_code_block(lines: List[Dict[str, Any]]) -> str:
-    return "\n".join(
-        f"{int(item['line_number']):4d}| {str(item.get('text') or '')}"
-        for item in lines
-    )
-
-
-def _format_structured_lines_for_search(lines: List[Dict[str, Any]]) -> str:
-    rows: List[str] = []
-    for item in lines:
-        line_number = int(item["line_number"])
-        prefix = ">" if item.get("kind") == "match" else " "
-        rows.append(f"{prefix} {line_number:4d}| {str(item.get('text') or '')}")
-    return "\n".join(rows)
-
-
-def _validate_evidence_metadata(
-    *,
-    render_type: str,
-    command_chain: List[str],
-    display_command: str,
-    entries: List[Dict[str, Any]],
-) -> None:
-    if render_type not in {
-        "code_window",
-        "search_hits",
-        "outline_summary",
-        "function_summary",
-        "symbol_body",
-    }:
-        raise ValueError(f"unsupported render_type: {render_type}")
-    if not isinstance(command_chain, list) or not command_chain:
-        raise ValueError("command_chain is required")
-    if not isinstance(display_command, str) or not display_command.strip():
-        raise ValueError("display_command is required")
-    if entries is None:
-        raise ValueError("entries is required")
-
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise ValueError("entry must be an object")
-        if render_type == "search_hits":
-            if not str(entry.get("file_path") or "").strip():
-                raise ValueError("entry.file_path is required")
-            if not isinstance(entry.get("match_line"), int):
-                raise ValueError("entry.match_line is required")
-            if "match_text" not in entry:
-                raise ValueError("entry.match_text is required")
-            continue
-
-        if render_type in {"outline_summary", "function_summary"}:
-            if not str(entry.get("file_path") or "").strip():
-                raise ValueError("entry.file_path is required")
-            continue
-
-        if not str(entry.get("file_path") or "").strip():
-            raise ValueError("entry.file_path is required")
-        if not isinstance(entry.get("lines"), list):
-            raise ValueError("entry.lines is required")
-        for line in entry["lines"]:
-            if not isinstance(line, dict):
-                raise ValueError("line must be an object")
-            if not isinstance(line.get("line_number"), int):
-                raise ValueError("line.line_number is required")
-            if "text" not in line:
-                raise ValueError("line.text is required")
-            if str(line.get("kind") or "").strip() not in {"context", "focus", "match"}:
-                raise ValueError("line.kind is invalid")
-
-
 def _normalize_reason_path(path_value: Any, project_root: str) -> Optional[str]:
     text = str(path_value or "").strip().replace("\\", "/")
     if not text:
@@ -1349,9 +1200,11 @@ class FileSearchTool(AgentTool):
                 data="\n".join(output_parts),
                 metadata={
                     "keyword": keyword,
+                    "matches": raw_match_count,
                     "match_count_raw": raw_match_count,
                     "match_count_returned": len(entries),
                     "overflow_count": max(0, raw_match_count - len(entries)),
+                    "files_searched": 1 if single_file_mode else max(1, len({entry["file_path"] for entry in entries})),
                     "normalized_file_patterns": normalized_patterns,
                     "results": [
                         {
@@ -2146,6 +1999,27 @@ class ListFilesTool(AgentTool):
             
             recommended_next_directories = sorted(dirs)[:5]
             truncated = len(files) >= max_files
+            command_chain = _unique_command_chain(["list_files"])
+            display_command = _build_display_command(command_chain)
+            entries = [
+                {
+                    "directory": _normalize_rel_path(directory) or ".",
+                    "pattern": str(pattern or ""),
+                    "recursive": bool(recursive),
+                    "files": sorted(files),
+                    "directories": sorted(dirs),
+                    "file_count": len(files),
+                    "dir_count": len(dirs),
+                    "truncated": truncated,
+                    "recommended_next_directories": recommended_next_directories,
+                }
+            ]
+            _validate_evidence_metadata(
+                render_type="file_list",
+                command_chain=command_chain,
+                display_command=display_command,
+                entries=entries,
+            )
 
             return ToolResult(
                 success=True,
@@ -2158,6 +2032,10 @@ class ListFilesTool(AgentTool):
                     "dir_count": len(dirs),
                     "truncated": truncated,
                     "recommended_next_directories": recommended_next_directories,
+                    "render_type": "file_list",
+                    "command_chain": command_chain,
+                    "display_command": display_command,
+                    "entries": entries,
                 }
             )
             
@@ -2474,5 +2352,39 @@ class LocateEnclosingFunctionTool(AgentTool):
             },
             "diagnostics": diagnostics,
         }
+        command_chain = _unique_command_chain(["locate_enclosing_function"])
+        display_command = _build_display_command(command_chain)
+        entries = [
+            {
+                "file_path": relative_path,
+                "line": normalized_line,
+                "symbol_name": function_name,
+                "start_line": located.get("start_line"),
+                "end_line": located.get("end_line"),
+                "signature": signature or None,
+                "parameters": parameters,
+                "return_type": return_type,
+                "engine": resolution_engine,
+                "confidence": confidence,
+                "degraded": degraded,
+            }
+        ]
+        _validate_evidence_metadata(
+            render_type="locator_result",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=entries,
+        )
 
-        return ToolResult(success=True, data=payload, metadata={"file_path": relative_path, **payload})
+        return ToolResult(
+            success=True,
+            data=payload,
+            metadata={
+                "file_path": relative_path,
+                "render_type": "locator_result",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": entries,
+                **payload,
+            },
+        )

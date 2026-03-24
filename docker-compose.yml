@@ -74,6 +74,10 @@ services:
       YASA_ENABLED: ${YASA_ENABLED:-true}
       SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}
       SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}
+      SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-vulhunter/opengrep-runner-local:latest}
+      SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-vulhunter/bandit-runner-local:latest}
+      SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-vulhunter/gitleaks-runner-local:latest}
+      SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-vulhunter/phpstan-runner-local:latest}
       YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}
       MCP_ENABLED: "true"
       MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"
@@ -104,6 +108,14 @@ services:
         condition: service_healthy
       yasa-runner:
         condition: service_completed_successfully
+      opengrep-runner:
+        condition: service_completed_successfully
+      bandit-runner:
+        condition: service_completed_successfully
+      gitleaks-runner:
+        condition: service_completed_successfully
+      phpstan-runner:
+        condition: service_completed_successfully
     networks:
       - vulhunter-network
 
@@ -124,6 +136,95 @@ services:
         - ALL_PROXY=
     restart: "no"
     command: ["/bin/sh", "-lc", "/opt/yasa/bin/yasa --version >/dev/null 2>&1 || true"]
+    networks:
+      - vulhunter-network
+
+  opengrep-runner:
+    image: vulhunter/opengrep-runner-local:latest
+    build:
+      context: ./backend
+      dockerfile: ./docker/opengrep-runner.Dockerfile
+      args:
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - BACKEND_APT_MIRROR_PRIMARY=${BACKEND_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_SECURITY_PRIMARY=${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_MIRROR_FALLBACK=${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}
+        - BACKEND_APT_SECURITY_FALLBACK=${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
+        - http_proxy=
+        - https_proxy=
+        - HTTP_PROXY=
+        - HTTPS_PROXY=
+        - all_proxy=
+        - ALL_PROXY=
+    restart: "no"
+    command: ["/bin/sh", "-lc", "opengrep --version >/dev/null 2>&1 || true"]
+    networks:
+      - vulhunter-network
+
+  bandit-runner:
+    image: vulhunter/bandit-runner-local:latest
+    build:
+      context: ./backend
+      dockerfile: ./docker/bandit-runner.Dockerfile
+      args:
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - BACKEND_APT_MIRROR_PRIMARY=${BACKEND_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_SECURITY_PRIMARY=${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_MIRROR_FALLBACK=${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}
+        - BACKEND_APT_SECURITY_FALLBACK=${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
+        - BACKEND_PYPI_INDEX_PRIMARY=${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}
+        - http_proxy=
+        - https_proxy=
+        - HTTP_PROXY=
+        - HTTPS_PROXY=
+        - all_proxy=
+        - ALL_PROXY=
+    restart: "no"
+    command: ["/bin/sh", "-lc", "bandit --version >/dev/null 2>&1 || true"]
+    networks:
+      - vulhunter-network
+
+  gitleaks-runner:
+    image: vulhunter/gitleaks-runner-local:latest
+    build:
+      context: ./backend
+      dockerfile: ./docker/gitleaks-runner.Dockerfile
+      args:
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - BACKEND_APT_MIRROR_PRIMARY=${BACKEND_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_SECURITY_PRIMARY=${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_MIRROR_FALLBACK=${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}
+        - BACKEND_APT_SECURITY_FALLBACK=${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
+        - http_proxy=
+        - https_proxy=
+        - HTTP_PROXY=
+        - HTTPS_PROXY=
+        - all_proxy=
+        - ALL_PROXY=
+    restart: "no"
+    command: ["/bin/sh", "-lc", "gitleaks version >/dev/null 2>&1 || true"]
+    networks:
+      - vulhunter-network
+
+  phpstan-runner:
+    image: vulhunter/phpstan-runner-local:latest
+    build:
+      context: ./backend
+      dockerfile: ./docker/phpstan-runner.Dockerfile
+      args:
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - BACKEND_APT_MIRROR_PRIMARY=${BACKEND_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_SECURITY_PRIMARY=${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
+        - BACKEND_APT_MIRROR_FALLBACK=${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}
+        - BACKEND_APT_SECURITY_FALLBACK=${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
+        - http_proxy=
+        - https_proxy=
+        - HTTP_PROXY=
+        - HTTPS_PROXY=
+        - all_proxy=
+        - ALL_PROXY=
+    restart: "no"
+    command: ["/bin/sh", "-lc", "phpstan --version >/dev/null 2>&1 || true"]
     networks:
       - vulhunter-network
 

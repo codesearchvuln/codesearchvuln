@@ -3,7 +3,14 @@ from unittest.mock import patch
 
 import pytest
 
-from app.services.agent.tools import CodeWindowTool, FileOutlineTool, FileSearchTool
+from app.services.agent.tools import (
+    CodeWindowTool,
+    FileOutlineTool,
+    FileSearchTool,
+    ListFilesTool,
+)
+from app.services.agent.tools.evidence_protocol import validate_evidence_metadata
+from app.services.agent.tools.file_tool import LocateEnclosingFunctionTool
 
 
 @pytest.mark.asyncio
@@ -93,3 +100,163 @@ async def test_file_outline_tool_does_not_misclassify_java_file_as_express(temp_
     entry = metadata["entries"][0]
     assert entry["file_path"] == "src/ParserConfig.java"
     assert "express" not in entry["framework_hints"]
+
+
+def test_validate_evidence_metadata_accepts_new_render_types():
+    base = {
+        "command_chain": ["tool"],
+        "display_command": "tool",
+    }
+
+    validate_evidence_metadata(
+        render_type="file_list",
+        entries=[
+            {
+                "directory": "src",
+                "pattern": "*.py",
+                "recursive": True,
+                "files": ["src/sql_vuln.py"],
+                "directories": ["src/nested/"],
+                "file_count": 1,
+                "dir_count": 1,
+                "truncated": False,
+                "recommended_next_directories": ["src/nested/"],
+            }
+        ],
+        **base,
+    )
+    validate_evidence_metadata(
+        render_type="locator_result",
+        entries=[
+            {
+                "file_path": "src/sql_vuln.py",
+                "line": 8,
+                "symbol_name": "get_user",
+                "start_line": 4,
+                "end_line": 12,
+                "signature": "def get_user(user_id):",
+                "parameters": [{"name": "user_id"}],
+                "return_type": None,
+                "engine": "python_tree_sitter",
+                "confidence": 0.95,
+                "degraded": False,
+            }
+        ],
+        **base,
+    )
+    validate_evidence_metadata(
+        render_type="analysis_summary",
+        entries=[
+            {
+                "title": "Analysis",
+                "summary": "Found risky flows.",
+                "severity_stats": {"high": 1},
+                "hit_count": 1,
+                "key_files": ["src/sql_vuln.py"],
+                "highlights": ["Unsanitized SQL."],
+                "next_actions": ["Verify exploitability."],
+            }
+        ],
+        **base,
+    )
+    validate_evidence_metadata(
+        render_type="flow_analysis",
+        entries=[
+            {
+                "source_nodes": ["request.user_input"],
+                "sink_nodes": ["cursor.execute"],
+                "taint_steps": ["input -> sql"],
+                "call_chain": ["handler -> dao"],
+                "blocked_reasons": [],
+                "reachability": "reachable",
+                "path_found": True,
+                "path_score": 0.91,
+                "confidence": 0.88,
+                "engine": "llm",
+                "next_actions": ["Confirm at runtime."],
+            }
+        ],
+        **base,
+    )
+    validate_evidence_metadata(
+        render_type="verification_summary",
+        entries=[
+            {
+                "vulnerability_type": "sqli",
+                "target": "/users?id=1",
+                "payload": "' OR 1=1 --",
+                "verdict": "confirmed",
+                "evidence": "Echoed SQL syntax error.",
+                "response_status": 500,
+                "runtime_status": "passed",
+                "error": None,
+            }
+        ],
+        **base,
+    )
+    validate_evidence_metadata(
+        render_type="report_summary",
+        entries=[
+            {
+                "report_id": "rpt-1",
+                "title": "SQL Injection",
+                "severity": "high",
+                "vulnerability_type": "sqli",
+                "location": "src/sql_vuln.py:8",
+                "verified": True,
+                "recommendation": "Parameterize query.",
+                "confidence": 0.91,
+                "cvss_score": 8.8,
+            }
+        ],
+        **base,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_files_tool_returns_file_list_evidence_metadata(temp_project_dir):
+    tool = ListFilesTool(temp_project_dir)
+
+    result = await tool.execute(directory="src", recursive=True, pattern="*.py")
+
+    assert result.success is True
+    metadata = result.metadata
+    assert metadata.get("render_type") == "file_list"
+    assert metadata.get("display_command")
+    assert metadata.get("command_chain") == ["list_files"]
+    assert metadata.get("entries")
+
+    entry = metadata["entries"][0]
+    assert entry["directory"] == "src"
+    assert entry["pattern"] == "*.py"
+    assert entry["recursive"] is True
+    assert "src/sql_vuln.py" in entry["files"]
+    assert isinstance(entry["directories"], list)
+    assert isinstance(entry["file_count"], int)
+    assert isinstance(entry["dir_count"], int)
+    assert isinstance(entry["truncated"], bool)
+    assert isinstance(entry["recommended_next_directories"], list)
+
+
+@pytest.mark.asyncio
+async def test_locate_enclosing_function_tool_returns_locator_evidence_metadata(temp_project_dir):
+    tool = LocateEnclosingFunctionTool(project_root=temp_project_dir)
+
+    result = await tool.execute(file_path="src/sql_vuln.py", line=8)
+
+    assert result.success is True
+    metadata = result.metadata
+    assert metadata.get("render_type") == "locator_result"
+    assert metadata.get("display_command")
+    assert metadata.get("command_chain") == ["locate_enclosing_function"]
+    assert metadata.get("entries")
+
+    entry = metadata["entries"][0]
+    assert entry["file_path"] == "src/sql_vuln.py"
+    assert entry["line"] == 8
+    assert entry["symbol_name"]
+    assert isinstance(entry["start_line"], int)
+    assert isinstance(entry["end_line"], int)
+    assert "engine" in entry
+    assert "confidence" in entry
+    assert "degraded" in entry

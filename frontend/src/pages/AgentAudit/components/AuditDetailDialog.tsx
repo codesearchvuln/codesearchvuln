@@ -31,7 +31,7 @@ import FindingCodeWindow from "./FindingCodeWindow";
 import FindingNarrativeMarkdown from "./FindingNarrativeMarkdown";
 import { collectRawEvidenceEntries } from "./findingNarrative";
 import ToolEvidenceDetail from "./ToolEvidenceDetail";
-import { isToolEvidenceCapableTool } from "../toolEvidence";
+import { getToolEvidencePayload, isToolEvidenceCapableTool } from "../toolEvidence";
 
 interface AuditDetailDialogProps {
   open: boolean;
@@ -124,7 +124,7 @@ function Section({
 }
 
 function summarizeLogOverview(logItem: LogItem): string[] {
-  const evidence = logItem.toolEvidence;
+  const evidence = getToolEvidencePayload(logItem.toolEvidence);
   if (!evidence) return [];
 
   if (evidence.renderType === "search_hits") {
@@ -165,6 +165,42 @@ function summarizeLogOverview(logItem: LogItem): string[] {
       first.language || "",
       first.executionCommand || first.description || "",
     ].filter((item): item is string => Boolean(item));
+  }
+
+  if (evidence.renderType === "file_list") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [`${first.directory}`, `${first.fileCount} 文件`, `${first.dirCount} 目录`];
+  }
+
+  if (evidence.renderType === "locator_result") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [`${first.filePath}:${first.line}`, first.symbolName, first.engine];
+  }
+
+  if (evidence.renderType === "analysis_summary") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [first.title, `${first.hitCount} 发现`];
+  }
+
+  if (evidence.renderType === "flow_analysis") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [first.engine, first.reachability, `score ${first.pathScore.toFixed(2)}`];
+  }
+
+  if (evidence.renderType === "verification_summary") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [first.vulnerabilityType, first.verdict, first.target];
+  }
+
+  if (evidence.renderType === "report_summary") {
+    const first = evidence.entries[0];
+    if (!first) return [];
+    return [first.title, first.severity, first.location];
   }
 
   return [];

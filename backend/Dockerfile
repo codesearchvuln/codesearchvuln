@@ -67,8 +67,7 @@ RUN --mount=type=cache,id=vulhunter-backend-builder-apt-lists,target=/var/lib/ap
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         gcc \
         libpq-dev \
-        libffi-dev \
-        gitleaks; \
+        libffi-dev; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_builder_packages; then \
@@ -212,10 +211,6 @@ ENV UV_INDEX_URL=${BACKEND_PYPI_INDEX_PRIMARY}
 ENV PIP_INDEX_URL=${BACKEND_PYPI_INDEX_PRIMARY}
 ENV PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES}
 
-ENV OPENGREP_HOME=/opt/opengrep
-ENV OPENGREP_REAL_BIN=/opt/opengrep/opengrep.real
-ENV OPENGREP_WRAPPER_BIN=/opt/opengrep/opengrep
-ENV PHPSTAN_HOME=/opt/phpstan
 ENV YASA_HOME=/opt/yasa
 ENV YASA_BIN_DIR=/opt/yasa/bin
 ENV YASA_ENGINE_DIR=/opt/yasa/engine
@@ -284,7 +279,6 @@ COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.p
 # ============================================
 FROM runtime-base AS scanner-tools-base
 
-ARG OPENGREP_VERSION=v1.15.1
 ARG BACKEND_INSTALL_YASA
 ARG YASA_VERSION
 ARG YASA_UAST_VERSION
@@ -298,11 +292,10 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
     cmd_timeout=420; \
     download_step_timeout=90; \
     if [ "${cmd_timeout}" -lt "${download_step_timeout}" ]; then download_step_timeout="${cmd_timeout}"; fi; \
-    mkdir -p /var/cache/vulhunter-tools "${OPENGREP_HOME}" "${PHPSTAN_HOME}" "${YASA_BIN_DIR}" "${YASA_ENGINE_DIR}"; \
+    mkdir -p /var/cache/vulhunter-tools "${YASA_BIN_DIR}" "${YASA_ENGINE_DIR}"; \
     ARCH="$(uname -m)"; \
     case "${ARCH}" in \
       x86_64|amd64) \
-        OG_DIST="opengrep_manylinux_x86"; \
         YASA_RELEASE_ASSET="yasa-linux-x64.zip"; \
         YASA_RELEASE_BIN="yasa-engine-linux-x64"; \
         UAST_PLATFORM="linux-amd64"; \
@@ -311,7 +304,6 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
         YASA_UAST_BUILD_MODE="prebuilt"; \
         YASA_SOURCE_BUILD_REQUIRED="0" ;; \
       aarch64|arm64) \
-        OG_DIST="opengrep_manylinux_aarch64"; \
         YASA_RELEASE_ASSET=""; \
         YASA_RELEASE_BIN=""; \
         UAST_PLATFORM="linux-arm64"; \
@@ -356,36 +348,6 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
       done; \
       return 1; \
     }; \
-    OG_CACHE="/var/cache/vulhunter-tools/opengrep-${OPENGREP_VERSION}-${OG_DIST}"; \
-    if [ ! -s "${OG_CACHE}" ]; then \
-      download_with_fallback \
-        "${OG_CACHE}" \
-        "https://gh-proxy.com/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-        "https://v6.gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-        "https://gh-proxy.org/https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}" \
-        "https://github.com/opengrep/opengrep/releases/download/${OPENGREP_VERSION}/${OG_DIST}"; \
-    fi; \
-    cp "${OG_CACHE}" "${OPENGREP_REAL_BIN}"; \
-    chmod +x "${OPENGREP_REAL_BIN}"; \
-    printf '#!/bin/sh\nunset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy\nexport NO_PROXY="*"\nexport no_proxy="*"\nexec /usr/local/bin/opengrep.real "$@"\n' \
-      > "${OPENGREP_WRAPPER_BIN}"; \
-    chmod +x "${OPENGREP_WRAPPER_BIN}"; \
-    ln -sf "${OPENGREP_REAL_BIN}" /usr/local/bin/opengrep.real; \
-    ln -sf "${OPENGREP_WRAPPER_BIN}" /usr/local/bin/opengrep; \
-    opengrep --version; \
-    PHPSTAN_CACHE="/var/cache/vulhunter-tools/phpstan.phar"; \
-    if [ ! -s "${PHPSTAN_CACHE}" ]; then \
-      download_with_fallback \
-        "${PHPSTAN_CACHE}" \
-        "https://gh-proxy.com/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
-        "https://v6.gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
-        "https://gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
-        "https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"; \
-    fi; \
-    cp "${PHPSTAN_CACHE}" "${PHPSTAN_HOME}/phpstan"; \
-    chmod +x "${PHPSTAN_HOME}/phpstan"; \
-    ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
-    phpstan --version; \
     if [ "${BACKEND_INSTALL_YASA}" != "1" ]; then \
       echo "BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA}, skip built-in YASA install."; \
       exit 0; \
@@ -570,17 +532,9 @@ FROM runtime-base AS dev-runtime
 
 COPY --from=builder /opt/backend-venv /opt/backend-venv
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
-COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
-COPY --from=scanner-tools-base /opt/phpstan /opt/phpstan
 COPY --chmod=755 scripts/dev-entrypoint.sh /usr/local/bin/backend-dev-entrypoint.sh
 
 RUN set -eux; \
-    ln -sf "${OPENGREP_REAL_BIN}" /usr/local/bin/opengrep.real; \
-    ln -sf "${OPENGREP_WRAPPER_BIN}" /usr/local/bin/opengrep; \
-    opengrep --version; \
-    ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
-    phpstan --version; \
     for site_packages_dir in $(python3 -c 'import site; [print(path) for path in site.getsitepackages() if "site-packages" in path]'); do \
       find "${site_packages_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +; \
     done; \
@@ -602,9 +556,6 @@ FROM runtime-base AS runtime
 # 提前复制 builder 产物，避免 runtime 与 builder 并行下载导致网络争抢
 COPY --from=builder /opt/backend-venv /opt/backend-venv
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
-COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
-COPY --from=scanner-tools-base /opt/phpstan /opt/phpstan
 
 # 复制共享扫描工具并安装 PMD
 RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhunter-tools \
@@ -649,11 +600,6 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
       done; \
       return 1; \
     }; \
-    ln -sf "${OPENGREP_REAL_BIN}" /usr/local/bin/opengrep.real; \
-    ln -sf "${OPENGREP_WRAPPER_BIN}" /usr/local/bin/opengrep; \
-    opengrep --version; \
-    ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
-    phpstan --version; \
     PMD_CACHE="/var/cache/vulhunter-tools/pmd-dist-7.0.0-bin.zip"; \
     if [ ! -s "${PMD_CACHE}" ]; then \
       download_with_fallback \

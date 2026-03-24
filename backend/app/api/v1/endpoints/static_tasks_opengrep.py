@@ -57,6 +57,7 @@ from app.services.upload.upload_manager import UploadManager
 from app.api.v1.endpoints.static_tasks_shared import (
     _cleanup_incorrect_rules,
     _clear_scan_task_cancel,
+    copy_project_tree_to_scan_dir,
     _dt_to_iso,
     _ensure_opengrep_xdg_dirs,
     _get_project_root,
@@ -64,6 +65,8 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _is_scan_task_cancelled,
     _is_test_like_directory,
     _launch_static_background_job,
+    _pop_scan_container,
+    _register_scan_container,
     _release_request_db_session,
     _normalize_llm_config_error_message,
     _record_scan_progress,
@@ -74,12 +77,19 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _utc_now_iso,
     _validate_user_llm_config,
     async_session_factory,
+    cleanup_scan_workspace,
     deps,
+    ensure_scan_logs_dir,
+    ensure_scan_meta_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
     get_db,
     logger,
     settings,
 )
 from app.services.project_metrics import project_metrics_refresher
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 router = APIRouter()
 
@@ -342,6 +352,9 @@ async def _execute_opengrep_scan(
         target_path: 扫描目标路径
         rule_ids: 规则ID列表
     """
+    workspace_dir: Optional[Path] = None
+    active_container_id: Optional[str] = None
+
     async def _update_task_state(
         status: str,
         *,
@@ -445,7 +458,19 @@ async def _execute_opengrep_scan(
             logger.error(f"No active rules found for task {task_id}")
             return
 
-        full_target_path = os.path.join(project_root, target_path)
+        workspace_dir = ensure_scan_workspace("opengrep", task_id)
+        project_dir = ensure_scan_project_dir("opengrep", task_id)
+        output_dir = ensure_scan_output_dir("opengrep", task_id)
+        logs_dir = ensure_scan_logs_dir("opengrep", task_id)
+        meta_dir = ensure_scan_meta_dir("opengrep", task_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        shutil.rmtree(project_dir, ignore_errors=True)
+        copy_project_tree_to_scan_dir(project_root, project_dir)
+
+        full_target_path = os.path.join(str(project_dir), target_path)
         if not os.path.exists(full_target_path):
             await _update_task_state("failed", error_count=1)
             _record_scan_progress(
@@ -458,6 +483,11 @@ async def _execute_opengrep_scan(
             )
             logger.error(f"Target path {full_target_path} not found")
             return
+
+        runner_target_path = Path("/scan/project")
+        normalized_target_path = str(target_path or ".").strip()
+        if normalized_target_path not in {"", "."}:
+            runner_target_path = runner_target_path / normalized_target_path
 
         def remove_null_values(obj):
             """递归移除字典/列表中的 null 值"""
@@ -517,18 +547,10 @@ async def _execute_opengrep_scan(
             return True, "valid"
 
         _ensure_opengrep_xdg_dirs()
-        scan_env = os.environ.copy()
-        for proxy_key in (
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "ALL_PROXY",
-            "http_proxy",
-            "https_proxy",
-            "all_proxy",
-        ):
-            scan_env.pop(proxy_key, None)
-        scan_env["NO_PROXY"] = "*"
-        scan_env["no_proxy"] = "*"
+        scan_env = {
+            "NO_PROXY": "*",
+            "no_proxy": "*",
+        }
 
         valid_rule_entries: List[Dict[str, Any]] = []
         skipped_rule_count = 0
@@ -628,7 +650,6 @@ async def _execute_opengrep_scan(
         fallback_reason = "合并执行无有效结果"
         jobs = _resolve_opengrep_scan_jobs()
         use_jobs_option = True
-        loop = asyncio.get_event_loop()
 
         async def run_merged_group_scan(
             rule_entries: List[Dict[str, Any]],
@@ -638,7 +659,12 @@ async def _execute_opengrep_scan(
             nonlocal use_jobs_option
             rule_file = None
             try:
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as tf:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    suffix=".yml",
+                    dir=str(meta_dir),
+                    delete=False,
+                ) as tf:
                     yaml.dump(
                         {"rules": [entry["rule"] for entry in rule_entries]},
                         tf,
@@ -647,52 +673,89 @@ async def _execute_opengrep_scan(
                     )
                     rule_file = tf.name
 
-                cmd = ["opengrep", "--config", rule_file, "--json"]
+                runner_rule_file = str(Path("/scan/meta") / Path(rule_file).name)
+                cmd = ["opengrep", "--config", runner_rule_file, "--json"]
                 if use_jobs_option:
                     cmd.extend(["--jobs", str(jobs)])
-                cmd.append(full_target_path)
+                cmd.append(str(runner_target_path))
 
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: _run_subprocess_with_tracking(
-                        "opengrep",
-                        task_id,
-                        cmd,
+                def _on_container_started(container_id: str) -> None:
+                    nonlocal active_container_id
+                    active_container_id = container_id
+                    _register_scan_container("opengrep", task_id, container_id)
+
+                result = await run_scanner_container(
+                    ScannerRunSpec(
+                        scanner_type="opengrep",
+                        image=str(
+                            getattr(settings, "SCANNER_OPENGREP_IMAGE", "vulhunter/opengrep-runner:latest")
+                        ),
+                        workspace_dir=str(workspace_dir),
+                        command=cmd,
+                        timeout_seconds=timeout_seconds,
                         env=scan_env,
-                        timeout=timeout_seconds,
                     ),
+                    on_container_started=_on_container_started,
                 )
 
-                if use_jobs_option and result.returncode != 0 and (
-                    "unrecognized arguments: --jobs" in (result.stderr or "")
-                    or "unknown option '--jobs'" in (result.stderr or "")
+                stdout_text = ""
+                stderr_text = ""
+                if result.stdout_path:
+                    stdout_text = Path(result.stdout_path).read_text(
+                        encoding="utf-8",
+                        errors="ignore",
+                    )
+                if result.stderr_path:
+                    stderr_text = Path(result.stderr_path).read_text(
+                        encoding="utf-8",
+                        errors="ignore",
+                    )
+
+                if use_jobs_option and result.exit_code != 0 and (
+                    "unrecognized arguments: --jobs" in stderr_text
+                    or "unknown option '--jobs'" in stderr_text
                 ):
                     logger.warning(
                         "opengrep does not support --jobs, fallback to single process mode"
                     )
                     use_jobs_option = False
-                    cmd = ["opengrep", "--config", rule_file, "--json", full_target_path]
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: _run_subprocess_with_tracking(
-                            "opengrep",
-                            task_id,
-                            cmd,
+                    cmd = ["opengrep", "--config", runner_rule_file, "--json", str(runner_target_path)]
+                    result = await run_scanner_container(
+                        ScannerRunSpec(
+                            scanner_type="opengrep",
+                            image=str(
+                                getattr(settings, "SCANNER_OPENGREP_IMAGE", "vulhunter/opengrep-runner:latest")
+                            ),
+                            workspace_dir=str(workspace_dir),
+                            command=cmd,
+                            timeout_seconds=timeout_seconds,
                             env=scan_env,
-                            timeout=timeout_seconds,
                         ),
+                        on_container_started=_on_container_started,
                     )
+                    stdout_text = ""
+                    stderr_text = ""
+                    if result.stdout_path:
+                        stdout_text = Path(result.stdout_path).read_text(
+                            encoding="utf-8",
+                            errors="ignore",
+                        )
+                    if result.stderr_path:
+                        stderr_text = Path(result.stderr_path).read_text(
+                            encoding="utf-8",
+                            errors="ignore",
+                        )
 
-                parsed_findings, parsed_errors = _parse_opengrep_output(result.stdout)
+                parsed_findings, parsed_errors = _parse_opengrep_output(stdout_text)
                 fatal_errors = [item for item in parsed_errors if _is_fatal_rule_error(item)]
                 command_failed_without_output = (
-                    result.returncode != 0 and not parsed_findings and not parsed_errors
+                    result.exit_code != 0 and not parsed_findings and not parsed_errors
                 )
 
                 if command_failed_without_output:
-                    stderr_msg = _truncate_for_progress_log(result.stderr or "", 200)
+                    stderr_msg = _truncate_for_progress_log(stderr_text, 200)
                     reason = (
-                        f"命令失败（returncode={result.returncode}"
+                        f"命令失败（returncode={result.exit_code}"
                         + (f"，stderr={stderr_msg}" if stderr_msg else "")
                         + "）"
                     )
@@ -702,7 +765,7 @@ async def _execute_opengrep_scan(
                         "findings": [],
                         "errors": [],
                         "fatal_rule_ids": [],
-                        "returncode": result.returncode,
+                        "returncode": result.exit_code,
                     }
 
                 if fatal_errors and not parsed_findings:
@@ -718,7 +781,7 @@ async def _execute_opengrep_scan(
                         "findings": [],
                         "errors": parsed_errors,
                         "fatal_rule_ids": fatal_rule_ids,
-                        "returncode": result.returncode,
+                        "returncode": result.exit_code,
                     }
 
                 return {
@@ -727,7 +790,7 @@ async def _execute_opengrep_scan(
                     "findings": parsed_findings,
                     "errors": parsed_errors,
                     "fatal_rule_ids": [],
-                    "returncode": result.returncode,
+                    "returncode": result.exit_code,
                 }
             except ValueError as parse_error:
                 return {
@@ -1020,7 +1083,7 @@ async def _execute_opengrep_scan(
 
                 file_path = normalize_static_scan_file_path(
                     str(finding.get("path", "") or ""),
-                    project_root,
+                    "/scan/project",
                 )
                 if file_path:
                     files_scanned.add(file_path)
@@ -1103,6 +1166,9 @@ async def _execute_opengrep_scan(
         )
         await _update_task_state("failed", increment_error_count=True)
     finally:
+        _pop_scan_container("opengrep", task_id)
+        if workspace_dir is not None:
+            cleanup_scan_workspace("opengrep", task_id)
         _clear_scan_task_cancel("opengrep", task_id)
         if project_root and project_root.startswith("/tmp") and os.path.exists(project_root):
             try:

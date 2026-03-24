@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { ToolEvidencePayload } from "../src/pages/AgentAudit/toolEvidence.ts";
+import {
+  parseToolEvidence,
+  type ToolEvidencePayload,
+} from "../src/pages/AgentAudit/toolEvidence.ts";
 import ToolEvidencePreview from "../src/pages/AgentAudit/components/ToolEvidencePreview.tsx";
 import ToolEvidenceDetail from "../src/pages/AgentAudit/components/ToolEvidenceDetail.tsx";
 import FindingCodeWindow from "../src/pages/AgentAudit/components/FindingCodeWindow.tsx";
@@ -75,6 +78,41 @@ const executionEvidence: ToolEvidencePayload = {
   ],
 };
 
+const analysisSummaryEvidence: ToolEvidencePayload = {
+  renderType: "analysis_summary",
+  commandChain: ["smart_scan"],
+  displayCommand: "smart_scan",
+  entries: [
+    {
+      title: "Smart Scan Summary",
+      summary: "Scanned 6 files and found 3 potential issues.",
+      severityStats: { high: 2, medium: 1 },
+      hitCount: 3,
+      keyFiles: ["src/auth.ts", "src/admin.ts"],
+      highlights: ["sql_injection @ src/auth.ts:88"],
+      nextActions: ["继续查看关键命中上下文并确认可利用性。"],
+    },
+  ],
+};
+
+const verificationSummaryEvidence: ToolEvidencePayload = {
+  renderType: "verification_summary",
+  commandChain: ["verify_vulnerability"],
+  displayCommand: "verify_vulnerability",
+  entries: [
+    {
+      vulnerabilityType: "sql_injection",
+      target: "http://example.test/users?id=1",
+      payload: "' OR 1=1 --",
+      verdict: "confirmed",
+      evidence: "SQL error echoed in response",
+      responseStatus: 500,
+      runtimeStatus: "passed",
+      error: null,
+    },
+  ],
+};
+
 test("ToolEvidencePreview 渲染搜索命中卡片摘要", () => {
   const markup = renderToStaticMarkup(
     createElement(ToolEvidencePreview, { evidence: searchEvidence }),
@@ -111,6 +149,15 @@ test("ToolEvidencePreview 渲染执行证据摘要卡", () => {
   assert.doesNotMatch(markup, /执行代码/);
 });
 
+test("ToolEvidencePreview 渲染 analysis_summary 摘要卡", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ToolEvidencePreview, { evidence: analysisSummaryEvidence }),
+  );
+
+  assert.match(markup, /Smart Scan Summary/);
+  assert.match(markup, /Scanned 6 files and found 3 potential issues/);
+});
+
 test("ToolEvidenceDetail 渲染 execution_result 详情", () => {
   const markup = renderToStaticMarkup(
     createElement(ToolEvidenceDetail, {
@@ -120,10 +167,46 @@ test("ToolEvidenceDetail 渲染 execution_result 详情", () => {
     }),
   );
 
-  assert.match(markup, /执行摘要/);
+  assert.match(markup, /输入与目标/);
+  assert.match(markup, /关键证据/);
+  assert.match(markup, /结论与判断/);
   assert.match(markup, /Harness 执行结果:1-1/);
-  assert.match(markup, /vulhunter\/sandbox:latest/);
   assert.match(markup, /cd \/tmp &amp;&amp; python3 -c/);
+});
+
+test("parseToolEvidence 支持 analysis_summary 严格解析", () => {
+  const parsed = parseToolEvidence({
+    metadata: {
+      render_type: "analysis_summary",
+      display_command: "smart_scan",
+      command_chain: ["smart_scan"],
+      entries: [
+        {
+          title: "Smart Scan Summary",
+          summary: "Scanned 6 files and found 3 potential issues.",
+          severity_stats: { high: 2, medium: 1 },
+          hit_count: 3,
+          key_files: ["src/auth.ts", "src/admin.ts"],
+          highlights: ["sql_injection @ src/auth.ts:88"],
+          next_actions: ["继续查看关键命中上下文并确认可利用性。"],
+        },
+      ],
+    },
+  });
+
+  assert.equal(parsed?.renderType, "analysis_summary");
+  assert.ok(parsed && parsed.renderType === "analysis_summary");
+  assert.equal(parsed.entries[0]?.hitCount, 3);
+});
+
+test("ToolEvidencePreview 渲染 verification_summary 摘要", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ToolEvidencePreview, { evidence: verificationSummaryEvidence }),
+  );
+
+  assert.match(markup, /sql_injection/);
+  assert.match(markup, /http:\/\/example\.test\/users\?id=1/);
+  assert.match(markup, /SQL error echoed in response/);
 });
 
 test("FindingCodeWindow 默认使用路径优先的单色代码窗并隐藏装饰性标签", () => {
@@ -199,6 +282,6 @@ test("ToolEvidenceDetail 对旧协议显示不可展示提示和原始 JSON 入�
     }),
   );
 
-  assert.match(markup, /旧版工具结果协议，无法在新版证据视图中展示/);
-  assert.match(markup, /查看原始 JSON/);
+  assert.match(markup, /无法安全提炼结构化证据，已回退原始 JSON/);
+  assert.match(markup, /原始数据/);
 });

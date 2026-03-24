@@ -9,8 +9,62 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _build_flow_analysis_metadata(
+    *,
+    command_name: str,
+    analysis: Dict[str, Any],
+    file_path: str,
+    extra_metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    source_nodes = list(analysis.get("source_nodes") or [])
+    sink_nodes = list(analysis.get("sink_nodes") or [])
+    taint_steps = list(analysis.get("taint_steps") or [])
+    call_chain = list(analysis.get("call_chain") or taint_steps)
+    confidence = float(analysis.get("confidence") or 0.0)
+    path_found = bool(taint_steps and sink_nodes)
+    reachability = "reachable" if path_found else "unknown"
+    command_chain = unique_command_chain([command_name])
+    display_command = build_display_command(command_chain)
+    entries = [
+        {
+            "source_nodes": source_nodes,
+            "sink_nodes": sink_nodes,
+            "taint_steps": taint_steps,
+            "call_chain": call_chain,
+            "blocked_reasons": list(analysis.get("blocked_reasons") or []),
+            "reachability": reachability,
+            "path_found": path_found,
+            "path_score": confidence,
+            "confidence": confidence,
+            "engine": str(analysis.get("analysis_engine") or "rules"),
+            "next_actions": list(analysis.get("next_actions") or []),
+            "file_path": file_path,
+        }
+    ]
+    validate_evidence_metadata(
+        render_type="flow_analysis",
+        command_chain=command_chain,
+        display_command=display_command,
+        entries=entries,
+    )
+    metadata = {
+        "render_type": "flow_analysis",
+        "command_chain": command_chain,
+        "display_command": display_command,
+        "entries": entries,
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
+    return metadata
 
 
 class CodeAnalysisInput(BaseModel):
@@ -300,15 +354,20 @@ class DataFlowAnalysisTool(AgentTool):
         return ToolResult(
             success=True,
             data=output_text,
-            metadata={
-                "variable": normalized_variable,
-                "file_path": file_path,
-                "start_line": resolved_start_line,
-                "end_line": resolved_end_line,
-                "analysis": merged_analysis,
-                "fallback_used": fallback_used,
-                "analysis_mode": analysis_mode,
-            },
+            metadata=_build_flow_analysis_metadata(
+                command_name="dataflow_analysis",
+                analysis=merged_analysis,
+                file_path=file_path,
+                extra_metadata={
+                    "variable": normalized_variable,
+                    "file_path": file_path,
+                    "start_line": resolved_start_line,
+                    "end_line": resolved_end_line,
+                    "analysis": merged_analysis,
+                    "fallback_used": fallback_used,
+                    "analysis_mode": analysis_mode,
+                },
+            ),
         )
     
     def _quick_pattern_analysis(

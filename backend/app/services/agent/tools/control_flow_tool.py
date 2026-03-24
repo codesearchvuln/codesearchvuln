@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 from app.services.agent.flow.pipeline import FlowEvidencePipeline
 from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 
 
 class ControlFlowAnalysisLightInput(BaseModel):
@@ -123,10 +128,43 @@ class ControlFlowAnalysisLightTool(AgentTool):
         evidence = await self.pipeline.analyze_finding(finding)
         flow_payload = evidence.get("flow") if isinstance(evidence, dict) else {}
         summary = self._build_summary(flow_payload)
+        path_found = bool(flow_payload.get("path_found"))
+        path_score = self._coerce_float(flow_payload.get("path_score"))
+        blocked_reasons = (
+            flow_payload.get("blocked_reasons")
+            if isinstance(flow_payload.get("blocked_reasons"), list)
+            else []
+        )
+        entry = {
+            "source_nodes": effective_entry_points,
+            "sink_nodes": [f"{normalized_file_path}:{resolved_line_start}"],
+            "taint_steps": list(flow_payload.get("taint_steps") or []),
+            "call_chain": list(flow_payload.get("call_chain") or []),
+            "blocked_reasons": blocked_reasons,
+            "reachability": "reachable" if path_found else ("blocked" if blocked_reasons else "unknown"),
+            "path_found": path_found,
+            "path_score": path_score,
+            "confidence": self._coerce_float(confidence, default=path_score),
+            "engine": "ts_code2flow",
+            "next_actions": self._build_next_actions(path_found, blocked_reasons),
+            "file_path": normalized_file_path,
+        }
+        command_chain = unique_command_chain(["controlflow_analysis_light"])
+        display_command = build_display_command(command_chain)
+        validate_evidence_metadata(
+            render_type="flow_analysis",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=[entry],
+        )
         return ToolResult(
             success=True,
             data=evidence,
             metadata={
+                "render_type": "flow_analysis",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": [entry],
                 "engine": "ts_code2flow",
                 "file_path": normalized_file_path,
                 "line_start": resolved_line_start,
@@ -143,6 +181,13 @@ class ControlFlowAnalysisLightTool(AgentTool):
         except Exception:
             return None
         return parsed if parsed > 0 else None
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
 
     @staticmethod
     def _parse_file_path_line(file_path: str) -> tuple[str, Optional[int]]:
@@ -194,6 +239,14 @@ class ControlFlowAnalysisLightTool(AgentTool):
         if "auto_install_failed" in blocked:
             summary += "; install_hint=auto_install_failed"
         return summary
+
+    @staticmethod
+    def _build_next_actions(path_found: bool, blocked_reasons: List[str]) -> List[str]:
+        if path_found:
+            return ["结合 read_file 复核完整调用链上的控制条件。"]
+        if "code2flow_not_installed" in blocked_reasons:
+            return ["补齐 code2flow 环境后重试，或结合 AST 结果人工确认。"]
+        return ["补充更多入口点或函数上下文后再次分析。"]
 
 
 __all__ = ["ControlFlowAnalysisLightTool"]

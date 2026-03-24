@@ -116,7 +116,7 @@ async def test_update_bandit_finding_status_validation_and_success():
 
 
 @pytest.mark.asyncio
-async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
+async def test_execute_bandit_scan_transitions_to_completed(monkeypatch, tmp_path):
     task = BanditScanTask(
         id="bandit-task-1",
         project_id="project-1",
@@ -129,21 +129,53 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
     load_session = _FakeAsyncSession(task)
     persist_session = _FakeAsyncSession(task)
     session_factory = _SessionFactory(load_session, persist_session)
+    workspace_dir = SimpleNamespace()
     monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        static_tasks,
-        "_resolve_backend_venv_executable",
-        lambda name: f"/opt/backend-venv/bin/{name}",
+        static_tasks._bandit,
+        "settings",
+        SimpleNamespace(SCANNER_BANDIT_IMAGE="vulhunter/bandit-runner:test"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._bandit,
+        "ensure_scan_workspace",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "bandit" / task.id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._bandit,
+        "ensure_scan_project_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "bandit" / task.id / "project",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._bandit,
+        "ensure_scan_output_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "bandit" / task.id / "output",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._bandit,
+        "ensure_scan_logs_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "bandit" / task.id / "logs",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._bandit,
+        "ensure_scan_meta_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "bandit" / task.id / "meta",
+        raising=False,
     )
 
-    def _fake_run_subprocess_with_tracking(scan_type, task_id, cmd, timeout):
-        assert scan_type == "bandit"
-        assert task_id == "bandit-task-1"
-        assert timeout == 600
-        assert cmd[0] == "/opt/backend-venv/bin/bandit"
-        report_path = cmd[cmd.index("-o") + 1]
+    seen = {}
+
+    async def _fake_run_scanner_container(spec, **_kwargs):
+        seen["spec"] = spec
+        report_path = tmp_path / "scans" / "bandit" / task.id / "output" / "report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "results": [
                 {
@@ -151,7 +183,7 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
                     "test_name": "subprocess_popen_with_shell_equals_true",
                     "issue_severity": "HIGH",
                     "issue_confidence": "HIGH",
-                    "filename": "/tmp/app/main.py",
+                    "filename": "/scan/project/app/main.py",
                     "line_number": 42,
                     "code": "subprocess.Popen(cmd, shell=True)",
                     "issue_text": "subprocess call with shell=True identified",
@@ -159,25 +191,21 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
                 }
             ]
         }
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write(json.dumps(payload))
-        return SimpleNamespace(returncode=1, stdout="", stderr="")
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            container_id="bandit-container-1",
+            exit_code=1,
+            stdout_path=str(tmp_path / "scans" / "bandit" / task.id / "logs" / "stdout.log"),
+            stderr_path=str(tmp_path / "scans" / "bandit" / task.id / "logs" / "stderr.log"),
+            error=None,
+        )
 
-    monkeypatch.setattr(
-        static_tasks,
-        "_run_subprocess_with_tracking",
-        _fake_run_subprocess_with_tracking,
-    )
-
-    class _FakeLoop:
-        async def run_in_executor(self, _executor, fn):
-            return fn()
-
-    monkeypatch.setattr(static_tasks.asyncio, "get_event_loop", lambda: _FakeLoop())
+    monkeypatch.setattr(static_tasks._bandit, "run_scanner_container", _fake_run_scanner_container, raising=False)
 
     await static_tasks._execute_bandit_scan(
         task_id="bandit-task-1",
-        project_root="/tmp",
+        project_root=str(tmp_path),
         target_path=".",
         severity_level="medium",
         confidence_level="medium",
@@ -192,3 +220,6 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch):
     assert session_factory.calls >= 2
     assert len(persist_session.findings) == 1
     assert persist_session.findings[0].file_path == "app/main.py"
+    assert seen["spec"].image == "vulhunter/bandit-runner:test"
+    assert seen["spec"].command[0] == "bandit"
+    assert seen["spec"].command[seen["spec"].command.index("-o") + 1] == "/scan/output/report.json"

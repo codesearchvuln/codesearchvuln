@@ -1,32 +1,35 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
+import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import yaml
 
+from app.api.v1.endpoints.static_tasks_shared import (
+    cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
+    ensure_scan_logs_dir,
+    ensure_scan_meta_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
+)
+from app.core.config import settings
+from app.db.static_finding_paths import normalize_static_scan_file_path
 from app.models.opengrep import OpengrepRule
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 from .base import (
     StaticBootstrapFinding,
     StaticBootstrapScanResult,
     StaticBootstrapScanner,
 )
-
-
-def _ensure_opengrep_xdg_dirs() -> None:
-    """确保 XDG 目录存在，防止 opengrep (Semgrep) 因缺少 XDG_CONFIG_HOME 等目录而启动失败。"""
-    for env_key in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
-        path = os.environ.get(env_key, "")
-        if path and not os.path.isdir(path):
-            try:
-                os.makedirs(path, exist_ok=True)
-            except OSError:
-                pass
 
 
 def _normalize_confidence(value: Any) -> Optional[str]:
@@ -170,7 +173,10 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
             extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
             title = extra.get("message") or str(check_id or "OpenGrep 发现")
             description = extra.get("message") or ""
-            file_path = str(payload.get("path") or "").strip()
+            file_path = normalize_static_scan_file_path(
+                str(payload.get("path") or "").strip(),
+                "/scan/project",
+            )
             start_obj = payload.get("start")
             end_obj = payload.get("end")
             start_line = int(start_obj.get("line") or 0) if isinstance(start_obj, dict) else 0
@@ -200,25 +206,70 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
         if not merged_rules:
             raise ValueError("No executable opengrep rules found")
 
-        _ensure_opengrep_xdg_dirs()
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as temp_file:
-            yaml.dump({"rules": merged_rules}, temp_file, sort_keys=False, default_flow_style=False)
-            merged_rule_path = temp_file.name
+        task_id = f"bootstrap-{uuid4().hex}"
+        workspace_dir = ensure_scan_workspace("opengrep-bootstrap", task_id)
+        project_dir = ensure_scan_project_dir("opengrep-bootstrap", task_id)
+        output_dir = ensure_scan_output_dir("opengrep-bootstrap", task_id)
+        logs_dir = ensure_scan_logs_dir("opengrep-bootstrap", task_id)
+        meta_dir = ensure_scan_meta_dir("opengrep-bootstrap", task_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        merged_rule_path: Optional[str] = None
 
         try:
-            cmd = ["opengrep", "--config", merged_rule_path, "--json", project_root]
-            process_result = await asyncio.to_thread(
-                subprocess.run,
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
+            shutil.rmtree(project_dir, ignore_errors=True)
+            copy_project_tree_to_scan_dir(project_root, project_dir)
+
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".yml",
+                dir=str(meta_dir),
+                delete=False,
+            ) as temp_file:
+                yaml.dump(
+                    {"rules": merged_rules},
+                    temp_file,
+                    sort_keys=False,
+                    default_flow_style=False,
+                )
+                merged_rule_path = temp_file.name
+
+            runner_rule_path = str(Path("/scan/meta") / Path(merged_rule_path).name)
+            cmd = ["opengrep", "--config", runner_rule_path, "--json", "/scan/project"]
+            process_result = await run_scanner_container(
+                ScannerRunSpec(
+                    scanner_type="opengrep-bootstrap",
+                    image=str(
+                        getattr(settings, "SCANNER_OPENGREP_IMAGE", "vulhunter/opengrep-runner:latest")
+                    ),
+                    workspace_dir=str(workspace_dir),
+                    command=cmd,
+                    timeout_seconds=self.timeout_seconds,
+                    env={
+                        "NO_PROXY": "*",
+                        "no_proxy": "*",
+                    },
+                )
             )
-            payload_findings = _parse_output(process_result.stdout or "")
-            if process_result.returncode != 0 and not payload_findings:
-                stderr_text = (process_result.stderr or process_result.stdout or "unknown error").strip()
-                raise RuntimeError(f"opengrep failed: {stderr_text[:300]}")
+
+            stdout_text = ""
+            stderr_text = ""
+            if process_result.stdout_path and Path(process_result.stdout_path).exists():
+                stdout_text = Path(process_result.stdout_path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                )
+            if process_result.stderr_path and Path(process_result.stderr_path).exists():
+                stderr_text = Path(process_result.stderr_path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                )
+
+            payload_findings = _parse_output(stdout_text)
+            if process_result.exit_code != 0 and not payload_findings:
+                stderr_message = (stderr_text or stdout_text or process_result.error or "unknown error").strip()
+                raise RuntimeError(f"opengrep failed: {stderr_message[:300]}")
 
             findings = self._normalize_findings(payload_findings)
             return StaticBootstrapScanResult(
@@ -233,7 +284,9 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
                 },
             )
         finally:
-            try:
-                os.unlink(merged_rule_path)
-            except Exception:
-                pass
+            if merged_rule_path:
+                try:
+                    os.unlink(merged_rule_path)
+                except Exception:
+                    pass
+            cleanup_scan_workspace("opengrep-bootstrap", task_id)

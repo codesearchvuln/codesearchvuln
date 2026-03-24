@@ -13,6 +13,11 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +43,9 @@ class VulnerabilityReportInput(BaseModel):
     poc: Optional[str] = Field(default=None, description="概念验证/利用方法")
     impact: Optional[str] = Field(default=None, description="影响分析")
     recommendation: Optional[str] = Field(default=None, description="修复建议")
-    confidence: float = Field(default=0.8, description="置信度 0.0-1.0")
+    confidence: Any = Field(default=0.8, description="置信度 0.0-1.0")
     cwe_id: Optional[str] = Field(default=None, description="CWE编号")
-    cvss_score: Optional[float] = Field(default=None, description="CVSS评分")
+    cvss_score: Any = Field(default=None, description="CVSS评分")
 
 
 class CreateVulnerabilityReportTool(AgentTool):
@@ -245,6 +250,39 @@ class CreateVulnerabilityReportTool(AgentTool):
         logger.info(f"Created vulnerability report: [{severity.upper()}] {title}")
         
         # 返回结果
+        location = report["file_path"]
+        if report.get("line_start"):
+            location = f"{location}:{report['line_start']}"
+        command_chain = unique_command_chain(["create_vulnerability_report"])
+        display_command = build_display_command(command_chain)
+        entries = [
+            {
+                "report_id": report_id,
+                "title": report["title"],
+                "severity": report["severity"],
+                "vulnerability_type": report["vulnerability_type"],
+                "location": location,
+                "verified": bool(report["is_verified"]),
+                "recommendation": report["recommendation"],
+                "confidence": report["confidence"],
+                "cvss_score": report["cvss_score"] if report["cvss_score"] is not None else 0.0,
+            }
+        ]
+        validate_evidence_metadata(
+            render_type="report_summary",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=entries,
+        )
+        report_metadata = dict(report)
+        report_metadata.update(
+            {
+                "render_type": "report_summary",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": entries,
+            }
+        )
         return ToolResult(
             success=True,
             data={
@@ -252,7 +290,7 @@ class CreateVulnerabilityReportTool(AgentTool):
                 "report_id": report_id,
                 "severity": severity,
             },
-            metadata=report,
+            metadata=report_metadata,
         )
     
     def _get_default_recommendation(self, vuln_type: str) -> str:

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import ToolEvidencePreview from "@/pages/AgentAudit/components/ToolEvidencePreview";
-import { parseToolEvidence } from "@/pages/AgentAudit/toolEvidence";
+import { parseToolEvidenceFromLog } from "@/pages/AgentAudit/toolEvidence";
 import {
   AGENT_TEST_EVENT_COLORS,
   AGENT_TEST_EVENT_ICONS,
@@ -73,7 +73,13 @@ export default function SkillTestEventLog({
             <p className="py-8 text-center italic text-muted-foreground">等待执行…点击「运行测试」启动 Skill</p>
           ) : null}
           {visibleEvents.map((event) => {
-            const evidence = event.type === "tool_result" ? parseToolEvidence(event.metadata ?? null) : null;
+            const evidence = event.type === "tool_result"
+              ? parseToolEvidenceFromLog({
+                  toolName: event.tool_name,
+                  toolOutput: event.tool_output,
+                  toolMetadata: event.metadata ?? null,
+                })
+              : null;
             const colorClass = EXTRA_EVENT_COLORS[event.type] ?? AGENT_TEST_EVENT_COLORS[event.type] ?? "text-foreground/70";
             const icon = EXTRA_EVENT_ICONS[event.type] ?? AGENT_TEST_EVENT_ICONS[event.type] ?? "·";
 

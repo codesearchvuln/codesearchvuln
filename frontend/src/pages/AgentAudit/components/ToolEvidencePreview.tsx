@@ -1,6 +1,6 @@
 import FindingCodeWindow from "./FindingCodeWindow";
-import type { ToolEvidencePayload } from "../toolEvidence";
-import { toolEvidenceLinesToCode } from "../toolEvidence";
+import type { ParsedToolEvidence, ToolEvidencePayload } from "../toolEvidence";
+import { asParsedToolEvidence, toolEvidenceLinesToCode } from "../toolEvidence";
 
 function statusLabel(status: "passed" | "failed" | "error") {
   if (status === "passed") return "执行成功";
@@ -11,12 +11,15 @@ function statusLabel(status: "passed" | "failed" | "error") {
 export default function ToolEvidencePreview({
   evidence,
 }: {
-  evidence: ToolEvidencePayload;
+  evidence: ParsedToolEvidence | ToolEvidencePayload;
 }) {
-  if (evidence.renderType === "search_hits") {
-    const first = evidence.entries[0];
-    if (!first) return null;
+  const parsed = asParsedToolEvidence(evidence);
+  const payload = parsed?.payload;
+  if (!parsed || !payload) return null;
 
+  if (payload.renderType === "search_hits") {
+    const first = payload.entries[0];
+    if (!first) return null;
     return (
       <FindingCodeWindow
         code={first.matchText || "命中代码"}
@@ -28,124 +31,159 @@ export default function ToolEvidencePreview({
         focusLine={first.matchLine}
         title="命中定位"
         density="compact"
-        badges={[evidence.displayCommand, "命中"]}
-        meta={[
-          `${first.filePath}:${first.matchLine}${first.column ? `:${first.column}` : ""}`,
-          `${evidence.entries.length} 条命中`,
-          first.symbolName || "",
-        ]}
+        badges={[parsed.state, `${payload.entries.length} 条命中`]}
       />
     );
   }
 
-  if (evidence.renderType === "outline_summary") {
-    const first = evidence.entries[0];
+  if (payload.renderType === "code_window" || payload.renderType === "symbol_body") {
+    const first = payload.entries[0];
     if (!first) return null;
-
     return (
       <FindingCodeWindow
-        code={[
-          `角色: ${first.fileRole || "unknown"}`,
-          `关键符号: ${first.keySymbols.join(", ") || "无"}`,
-          `入口点: ${first.entrypoints.join(", ") || "无"}`,
-          `风险标记: ${first.riskMarkers.join(", ") || "无"}`,
-        ].join("\n")}
+        code={toolEvidenceLinesToCode(first.lines)}
         filePath={first.filePath}
-        lineStart={1}
-        lineEnd={4}
-        focusLine={1}
-        title="文件概览"
+        lineStart={first.startLine}
+        lineEnd={first.endLine}
+        highlightStartLine={first.focusLine}
+        highlightEndLine={first.focusLine}
+        focusLine={first.focusLine}
+        title={first.title || "代码窗口"}
         density="compact"
-        badges={[evidence.displayCommand, "outline"]}
+        badges={[parsed.state]}
       />
     );
   }
 
-  if (evidence.renderType === "function_summary") {
-    const first = evidence.entries[0];
+  if (payload.renderType === "execution_result") {
+    const first = payload.entries[0];
     if (!first) return null;
-
+    const content = first.code
+      ? toolEvidenceLinesToCode(first.code.lines)
+      : first.stdoutPreview || first.stderrPreview || first.executionCommand || first.description || "执行证据";
     return (
       <FindingCodeWindow
-        code={[
-          `签名: ${first.signature || "未知"}`,
-          `职责: ${first.purpose || "未提供"}`,
-          `关键调用: ${first.keyCalls.join(", ") || "无"}`,
-          `风险点: ${first.riskPoints.join(", ") || "无"}`,
-        ].join("\n")}
-        filePath={first.filePath}
-        lineStart={1}
-        lineEnd={4}
-        focusLine={1}
-        title={first.resolvedFunction || "函数摘要"}
-        density="compact"
-        badges={[evidence.displayCommand, "summary"]}
-      />
-    );
-  }
-
-  if (evidence.renderType === "execution_result") {
-    const first = evidence.entries[0];
-    if (!first) return null;
-
-    if (first.code) {
-      return (
-        <FindingCodeWindow
-          code={toolEvidenceLinesToCode(first.code.lines)}
-          filePath={first.title || "inline-harness"}
-          lineStart={first.code.lines[0]?.lineNumber ?? 1}
-          lineEnd={first.code.lines.at(-1)?.lineNumber ?? 1}
-          highlightStartLine={first.code.lines.find((line) => line.kind === "focus")?.lineNumber ?? 1}
-          highlightEndLine={first.code.lines.find((line) => line.kind === "focus")?.lineNumber ?? 1}
-          focusLine={first.code.lines.find((line) => line.kind === "focus")?.lineNumber ?? 1}
-          title="执行代码"
-          density="compact"
-          badges={[evidence.displayCommand, statusLabel(first.status)]}
-          meta={[
-            `退出码 ${first.exitCode}`,
-            first.language || "",
-            first.description || first.executionCommand || "",
-          ]}
-        />
-      );
-    }
-
-    return (
-      <FindingCodeWindow
-        code={first.stdoutPreview || first.stderrPreview || first.executionCommand || first.description || "执行证据"}
+        code={content}
         filePath={first.title || "execution-result"}
         lineStart={1}
-        lineEnd={(first.stdoutPreview || first.stderrPreview || first.executionCommand || first.description || "")
-          .split("\n").length}
+        lineEnd={content.split("\n").length}
         focusLine={1}
-        title="执行代码"
+        title={first.title || "执行证据"}
         density="compact"
-        badges={[evidence.displayCommand, statusLabel(first.status)]}
-        meta={[`退出码 ${first.exitCode}`, first.language || "text"]}
+        badges={[statusLabel(first.status), parsed.state]}
       />
     );
   }
 
-  const first = evidence.entries[0];
-  if (!first) return null;
+  if (payload.renderType === "file_list") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [...first.files.slice(0, 4), ...first.directories.slice(0, 2)].join("\n") || "暂无目录内容";
+    return (
+      <FindingCodeWindow
+        code={content}
+        filePath={first.directory}
+        lineStart={1}
+        lineEnd={Math.max(1, content.split("\n").length)}
+        focusLine={1}
+        title="目录摘要"
+        density="compact"
+        badges={[`${first.fileCount} 文件`, parsed.state]}
+      />
+    );
+  }
 
+  if (payload.renderType === "locator_result") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [first.signature || first.symbolName, ...first.parameters].filter(Boolean).join("\n");
+    return (
+      <FindingCodeWindow
+        code={content || first.symbolName}
+        filePath={first.filePath}
+        lineStart={first.startLine}
+        lineEnd={first.endLine}
+        focusLine={first.line}
+        highlightStartLine={first.line}
+        highlightEndLine={first.line}
+        title="定位结果"
+        density="compact"
+        badges={[first.engine, parsed.state]}
+      />
+    );
+  }
+
+  if (payload.renderType === "analysis_summary") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [first.summary, ...first.highlights.slice(0, 3)].join("\n");
+    return (
+      <FindingCodeWindow
+        code={content}
+        filePath={first.title}
+        lineStart={1}
+        lineEnd={Math.max(1, content.split("\n").length)}
+        focusLine={1}
+        title={first.title}
+        density="compact"
+        badges={[`${first.hitCount} 发现`, parsed.state]}
+      />
+    );
+  }
+
+  if (payload.renderType === "flow_analysis") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [
+      `reachability=${first.reachability}`,
+      ...first.callChain.slice(0, 3),
+      ...first.taintSteps.slice(0, 3),
+    ].join("\n");
+    return (
+      <FindingCodeWindow
+        code={content}
+        filePath={first.filePath || first.engine}
+        lineStart={1}
+        lineEnd={Math.max(1, content.split("\n").length)}
+        focusLine={1}
+        title="路径摘要"
+        density="compact"
+        badges={[first.engine, parsed.state]}
+      />
+    );
+  }
+
+  if (payload.renderType === "verification_summary") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [first.target, first.payload, first.evidence].filter(Boolean).join("\n");
+    return (
+      <FindingCodeWindow
+        code={content}
+        filePath={first.vulnerabilityType}
+        lineStart={1}
+        lineEnd={Math.max(1, content.split("\n").length)}
+        focusLine={1}
+        title={first.verdict}
+        density="compact"
+        badges={[parsed.state]}
+      />
+    );
+  }
+
+  const first = payload.entries[0];
+  if (!first) return null;
+  const content = [first.location, first.recommendation].filter(Boolean).join("\n");
   return (
     <FindingCodeWindow
-      code={toolEvidenceLinesToCode(first.lines)}
-      filePath={first.filePath}
-      lineStart={first.startLine}
-      lineEnd={first.endLine}
-      highlightStartLine={first.focusLine}
-      highlightEndLine={first.focusLine}
-      focusLine={first.focusLine}
-      title="代码窗口"
+      code={content}
+      filePath={first.title}
+      lineStart={1}
+      lineEnd={Math.max(1, content.split("\n").length)}
+      focusLine={1}
+      title={first.severity}
       density="compact"
-      badges={[evidence.displayCommand, first.focusLine ? "focus" : "code"]}
-      meta={[
-        first.language,
-        first.symbolName ? `${first.symbolKind || "symbol"} ${first.symbolName}` : "",
-        first.focusLine ? `焦点行 ${first.focusLine}` : "",
-      ]}
+      badges={[parsed.state]}
     />
   );
 }

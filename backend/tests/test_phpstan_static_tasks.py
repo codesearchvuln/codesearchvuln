@@ -139,7 +139,7 @@ async def test_update_phpstan_finding_status_validation_and_success():
 
 
 @pytest.mark.asyncio
-async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
+async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch, tmp_path):
     task = PhpstanScanTask(
         id="phpstan-task-1",
         project_id="project-1",
@@ -154,11 +154,46 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
     monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "settings",
+        SimpleNamespace(SCANNER_PHPSTAN_IMAGE="vulhunter/phpstan-runner:test"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_workspace",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_project_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "project",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_output_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "output",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_logs_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "logs",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_meta_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "meta",
+        raising=False,
+    )
+    seen = {}
 
-    def _fake_run_subprocess_with_tracking(scan_type, task_id, cmd, timeout):
-        assert scan_type == "phpstan"
-        assert task_id == "phpstan-task-1"
-        assert timeout == 600
+    async def _fake_run_scanner_container(spec, **_kwargs):
+        seen["spec"] = spec
         payload = {
             "totals": {"errors": 0, "file_errors": 2},
             "files": {
@@ -185,23 +220,23 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
                 },
             },
         }
-        return SimpleNamespace(returncode=1, stdout=json.dumps(payload), stderr="")
+        stdout_path = tmp_path / "scans" / "phpstan" / task.id / "logs" / "stdout.log"
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(
+            success=False,
+            container_id="phpstan-container-1",
+            exit_code=1,
+            stdout_path=str(stdout_path),
+            stderr_path=str(tmp_path / "scans" / "phpstan" / task.id / "logs" / "stderr.log"),
+            error="scanner container exited with code 1",
+        )
 
-    monkeypatch.setattr(
-        static_tasks,
-        "_run_subprocess_with_tracking",
-        _fake_run_subprocess_with_tracking,
-    )
-
-    class _FakeLoop:
-        async def run_in_executor(self, _executor, fn):
-            return fn()
-
-    monkeypatch.setattr(static_tasks.asyncio, "get_event_loop", lambda: _FakeLoop())
+    monkeypatch.setattr(static_tasks._phpstan, "run_scanner_container", _fake_run_scanner_container, raising=False)
 
     await static_tasks._execute_phpstan_scan(
         task_id="phpstan-task-1",
-        project_root="/tmp",
+        project_root=str(tmp_path),
         target_path=".",
         level=6,
     )
@@ -212,10 +247,12 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch):
     assert task.files_scanned == 2
     assert session_factory.calls >= 2
     assert len(persist_session.findings) == 1
+    assert seen["spec"].image == "vulhunter/phpstan-runner:test"
+    assert seen["spec"].command[:2] == ["phpstan", "analyse"]
 
 
 @pytest.mark.asyncio
-async def test_execute_phpstan_scan_completes_when_all_findings_filtered(monkeypatch):
+async def test_execute_phpstan_scan_completes_when_all_findings_filtered(monkeypatch, tmp_path):
     task = PhpstanScanTask(
         id="phpstan-task-2",
         project_id="project-1",
@@ -230,8 +267,44 @@ async def test_execute_phpstan_scan_completes_when_all_findings_filtered(monkeyp
     monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "settings",
+        SimpleNamespace(SCANNER_PHPSTAN_IMAGE="vulhunter/phpstan-runner:test"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_workspace",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_project_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "project",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_output_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "output",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_logs_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "logs",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "ensure_scan_meta_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "phpstan" / task.id / "meta",
+        raising=False,
+    )
 
-    def _fake_run_subprocess_with_tracking(_scan_type, _task_id, _cmd, timeout=None):
+    async def _fake_run_scanner_container(_spec, **_kwargs):
         payload = {
             "totals": {"errors": 0, "file_errors": 1},
             "files": {
@@ -247,23 +320,23 @@ async def test_execute_phpstan_scan_completes_when_all_findings_filtered(monkeyp
                 },
             },
         }
-        return SimpleNamespace(returncode=1, stdout=json.dumps(payload), stderr="")
+        stdout_path = tmp_path / "scans" / "phpstan" / task.id / "logs" / "stdout.log"
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(
+            success=False,
+            container_id="phpstan-container-2",
+            exit_code=1,
+            stdout_path=str(stdout_path),
+            stderr_path=str(tmp_path / "scans" / "phpstan" / task.id / "logs" / "stderr.log"),
+            error="scanner container exited with code 1",
+        )
 
-    monkeypatch.setattr(
-        static_tasks,
-        "_run_subprocess_with_tracking",
-        _fake_run_subprocess_with_tracking,
-    )
-
-    class _FakeLoop:
-        async def run_in_executor(self, _executor, fn):
-            return fn()
-
-    monkeypatch.setattr(static_tasks.asyncio, "get_event_loop", lambda: _FakeLoop())
+    monkeypatch.setattr(static_tasks._phpstan, "run_scanner_container", _fake_run_scanner_container, raising=False)
 
     await static_tasks._execute_phpstan_scan(
         task_id="phpstan-task-2",
-        project_root="/tmp",
+        project_root=str(tmp_path),
         target_path=".",
         level=5,
     )

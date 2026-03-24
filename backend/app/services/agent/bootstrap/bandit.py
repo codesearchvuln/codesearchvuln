@@ -1,12 +1,25 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import re
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
-from app.services.backend_venv import build_backend_venv_env, resolve_backend_venv_executable
+from app.api.v1.endpoints.static_tasks_shared import (
+    cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
+    ensure_scan_logs_dir,
+    ensure_scan_meta_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
+)
+from app.core.config import settings
+from app.db.static_finding_paths import normalize_static_scan_file_path
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 from .base import (
     StaticBootstrapFinding,
@@ -94,7 +107,10 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
             test_id = str(payload.get("test_id") or "").strip()
             test_name = str(payload.get("test_name") or "").strip()
             issue_text = str(payload.get("issue_text") or "").strip()
-            file_path = str(payload.get("filename") or "").strip()
+            file_path = normalize_static_scan_file_path(
+                str(payload.get("filename") or "").strip(),
+                "/scan/project",
+            )
             line_number = int(payload.get("line_number") or 0)
             issue_severity = str(payload.get("issue_severity") or "").strip().upper()
             issue_confidence = _normalize_confidence(payload.get("issue_confidence"))
@@ -127,54 +143,96 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
         return normalized
 
     async def scan(self, project_root: str) -> StaticBootstrapScanResult:
-        # Use quiet mode to reduce non-JSON log noise in output streams.
+        task_id = f"bootstrap-{uuid4().hex}"
+        workspace_dir = ensure_scan_workspace("bandit-bootstrap", task_id)
+        project_dir = ensure_scan_project_dir("bandit-bootstrap", task_id)
+        output_dir = ensure_scan_output_dir("bandit-bootstrap", task_id)
+        logs_dir = ensure_scan_logs_dir("bandit-bootstrap", task_id)
+        meta_dir = ensure_scan_meta_dir("bandit-bootstrap", task_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        report_file = output_dir / "report.json"
+
         try:
-            bandit_bin = resolve_backend_venv_executable("bandit")
-        except FileNotFoundError as exc:
-            raise RuntimeError(str(exc)) from exc
+            shutil.rmtree(project_dir, ignore_errors=True)
+            copy_project_tree_to_scan_dir(project_root, project_dir)
 
-        cmd = [bandit_bin, "-q", "-r", "-f", "json", project_root]
-        process_result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout_seconds,
-            env=build_backend_venv_env(),
-        )
-        stdout_text = process_result.stdout or ""
-        stderr_text = process_result.stderr or ""
+            cmd = [
+                "bandit",
+                "-r",
+                "/scan/project",
+                "-f",
+                "json",
+                "-o",
+                "/scan/output/report.json",
+                "-q",
+            ]
+            process_result = await run_scanner_container(
+                ScannerRunSpec(
+                    scanner_type="bandit-bootstrap",
+                    image=str(
+                        getattr(settings, "SCANNER_BANDIT_IMAGE", "vulhunter/bandit-runner:latest")
+                    ),
+                    workspace_dir=str(workspace_dir),
+                    command=cmd,
+                    timeout_seconds=self.timeout_seconds,
+                    env={},
+                )
+            )
 
-        payload_findings: List[Dict[str, Any]] = []
-        stdout_parse_error: Optional[Exception] = None
-        stderr_parse_error: Optional[Exception] = None
-        try:
-            payload_findings = _parse_output(stdout_text)
-        except Exception as exc:  # noqa: BLE001
-            stdout_parse_error = exc
+            stdout_text = ""
+            stderr_text = ""
+            if process_result.stdout_path and Path(process_result.stdout_path).exists():
+                stdout_text = Path(process_result.stdout_path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                )
+            if process_result.stderr_path and Path(process_result.stderr_path).exists():
+                stderr_text = Path(process_result.stderr_path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                )
 
-        if not payload_findings and stderr_text.strip():
-            try:
-                payload_findings = _parse_output(stderr_text)
-            except Exception as exc:  # noqa: BLE001
-                stderr_parse_error = exc
+            payload_findings: List[Dict[str, Any]] = []
+            parse_error: Optional[Exception] = None
+            if report_file.exists():
+                try:
+                    payload_findings = _parse_output(
+                        report_file.read_text(encoding="utf-8", errors="ignore")
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    parse_error = exc
+            elif stdout_text.strip():
+                try:
+                    payload_findings = _parse_output(stdout_text)
+                except Exception as exc:  # noqa: BLE001
+                    parse_error = exc
 
-        parse_error = stdout_parse_error or stderr_parse_error
+            if not payload_findings and stderr_text.strip():
+                try:
+                    payload_findings = _parse_output(stderr_text)
+                    parse_error = None
+                except Exception as exc:  # noqa: BLE001
+                    if parse_error is None:
+                        parse_error = exc
 
-        if parse_error is not None and not payload_findings and process_result.returncode in {0, 1}:
-            raise RuntimeError(f"bandit output parse failed: {parse_error}") from parse_error
+            if parse_error is not None and not payload_findings and process_result.exit_code in {0, 1}:
+                raise RuntimeError(f"bandit output parse failed: {parse_error}") from parse_error
 
-        if process_result.returncode != 0 and not payload_findings:
-            message = (stderr_text or stdout_text or "unknown error").strip()
-            raise RuntimeError(f"bandit failed: {message[:300]}")
+            if process_result.exit_code > 1 and not payload_findings:
+                message = (stderr_text or stdout_text or process_result.error or "unknown error").strip()
+                raise RuntimeError(f"bandit failed: {message[:300]}")
 
-        findings = self._normalize_findings(payload_findings)
-        return StaticBootstrapScanResult(
-            scanner_name=self.scanner_name,
-            source=self.source,
-            total_findings=len(payload_findings),
-            findings=findings,
-            metadata={
-                "timeout_seconds": self.timeout_seconds,
-            },
-        )
+            findings = self._normalize_findings(payload_findings)
+            return StaticBootstrapScanResult(
+                scanner_name=self.scanner_name,
+                source=self.source,
+                total_findings=len(payload_findings),
+                findings=findings,
+                metadata={
+                    "timeout_seconds": self.timeout_seconds,
+                },
+            )
+        finally:
+            cleanup_scan_workspace("bandit-bootstrap", task_id)

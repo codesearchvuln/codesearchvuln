@@ -35,7 +35,20 @@ _LANGUAGE_BY_EXTENSION = {
 }
 
 _LINE_KINDS = {"context", "focus", "match"}
-_RENDER_TYPES = {"code_window", "search_hits", "execution_result"}
+_RENDER_TYPES = {
+    "code_window",
+    "search_hits",
+    "execution_result",
+    "outline_summary",
+    "function_summary",
+    "symbol_body",
+    "file_list",
+    "locator_result",
+    "analysis_summary",
+    "flow_analysis",
+    "verification_summary",
+    "report_summary",
+}
 _EXECUTION_STATUSES = {"passed", "failed", "error"}
 
 
@@ -146,6 +159,51 @@ def validate_evidence_metadata(
             _validate_execution_entry(entry)
             continue
 
+        if render_type == "file_list":
+            _validate_file_list_entry(entry)
+            continue
+
+        if render_type == "locator_result":
+            _validate_locator_entry(entry)
+            continue
+
+        if render_type == "analysis_summary":
+            _validate_analysis_summary_entry(entry)
+            continue
+
+        if render_type == "flow_analysis":
+            _validate_flow_analysis_entry(entry)
+            continue
+
+        if render_type == "verification_summary":
+            _validate_verification_summary_entry(entry)
+            continue
+
+        if render_type == "report_summary":
+            _validate_report_summary_entry(entry)
+            continue
+
+        if render_type == "outline_summary":
+            if not str(entry.get("file_path") or "").strip():
+                raise ValueError("entry.file_path is required")
+            continue
+
+        if render_type == "function_summary":
+            if not str(entry.get("file_path") or "").strip():
+                raise ValueError("entry.file_path is required")
+            if not str(entry.get("resolved_function") or "").strip():
+                raise ValueError("entry.resolved_function is required")
+            continue
+
+        if render_type == "search_hits":
+            if not str(entry.get("file_path") or "").strip():
+                raise ValueError("entry.file_path is required")
+            if not isinstance(entry.get("match_line"), int):
+                raise ValueError("entry.match_line is required")
+            if "match_text" not in entry:
+                raise ValueError("entry.match_text is required")
+            continue
+
         if not str(entry.get("file_path") or "").strip():
             raise ValueError("entry.file_path is required")
         if not isinstance(entry.get("lines"), list):
@@ -157,13 +215,6 @@ def validate_evidence_metadata(
                 raise ValueError("entry.start_line is required")
             if not isinstance(entry.get("end_line"), int):
                 raise ValueError("entry.end_line is required")
-        elif render_type == "search_hits":
-            if not isinstance(entry.get("match_line"), int):
-                raise ValueError("entry.match_line is required")
-            if not isinstance(entry.get("window_start_line"), int):
-                raise ValueError("entry.window_start_line is required")
-            if not isinstance(entry.get("window_end_line"), int):
-                raise ValueError("entry.window_end_line is required")
 
 
 def _validate_lines(lines: List[Dict[str, Any]]) -> None:
@@ -211,3 +262,90 @@ def _validate_execution_entry(entry: Dict[str, Any]) -> None:
         if not isinstance(lines, list):
             raise ValueError("entry.code.lines is required")
         _validate_lines(lines)
+
+
+def _validate_file_list_entry(entry: Dict[str, Any]) -> None:
+    if not str(entry.get("directory") or "").strip():
+        raise ValueError("entry.directory is required")
+    if not isinstance(entry.get("recursive"), bool):
+        raise ValueError("entry.recursive is required")
+    for field in ("files", "directories", "recommended_next_directories"):
+        if not isinstance(entry.get(field), list):
+            raise ValueError(f"entry.{field} is required")
+    for field in ("file_count", "dir_count"):
+        if not isinstance(entry.get(field), int):
+            raise ValueError(f"entry.{field} is required")
+    if not isinstance(entry.get("truncated"), bool):
+        raise ValueError("entry.truncated is required")
+
+
+def _validate_locator_entry(entry: Dict[str, Any]) -> None:
+    if not str(entry.get("file_path") or "").strip():
+        raise ValueError("entry.file_path is required")
+    for field in ("line", "start_line", "end_line"):
+        if not isinstance(entry.get(field), int):
+            raise ValueError(f"entry.{field} is required")
+    if not str(entry.get("symbol_name") or "").strip():
+        raise ValueError("entry.symbol_name is required")
+    if not isinstance(entry.get("parameters"), list):
+        raise ValueError("entry.parameters is required")
+    if not str(entry.get("engine") or "").strip():
+        raise ValueError("entry.engine is required")
+    if not isinstance(entry.get("confidence"), (int, float)):
+        raise ValueError("entry.confidence is required")
+    if not isinstance(entry.get("degraded"), bool):
+        raise ValueError("entry.degraded is required")
+
+
+def _validate_analysis_summary_entry(entry: Dict[str, Any]) -> None:
+    for field in ("title", "summary"):
+        if not str(entry.get(field) or "").strip():
+            raise ValueError(f"entry.{field} is required")
+    if not isinstance(entry.get("severity_stats"), dict):
+        raise ValueError("entry.severity_stats is required")
+    if not isinstance(entry.get("hit_count"), int):
+        raise ValueError("entry.hit_count is required")
+    for field in ("key_files", "highlights", "next_actions"):
+        if not isinstance(entry.get(field), list):
+            raise ValueError(f"entry.{field} is required")
+
+
+def _validate_flow_analysis_entry(entry: Dict[str, Any]) -> None:
+    for field in (
+        "source_nodes",
+        "sink_nodes",
+        "taint_steps",
+        "call_chain",
+        "blocked_reasons",
+        "next_actions",
+    ):
+        if not isinstance(entry.get(field), list):
+            raise ValueError(f"entry.{field} is required")
+    if not isinstance(entry.get("path_found"), bool):
+        raise ValueError("entry.path_found is required")
+    if not isinstance(entry.get("path_score"), (int, float)):
+        raise ValueError("entry.path_score is required")
+    if not isinstance(entry.get("confidence"), (int, float)):
+        raise ValueError("entry.confidence is required")
+    if not str(entry.get("engine") or "").strip():
+        raise ValueError("entry.engine is required")
+    if "reachability" not in entry:
+        raise ValueError("entry.reachability is required")
+
+
+def _validate_verification_summary_entry(entry: Dict[str, Any]) -> None:
+    for field in ("vulnerability_type", "target", "payload", "verdict", "evidence"):
+        if field not in entry:
+            raise ValueError(f"entry.{field} is required")
+
+
+def _validate_report_summary_entry(entry: Dict[str, Any]) -> None:
+    for field in ("report_id", "title", "severity", "vulnerability_type", "location", "recommendation"):
+        if field not in entry:
+            raise ValueError(f"entry.{field} is required")
+    if not isinstance(entry.get("verified"), bool):
+        raise ValueError("entry.verified is required")
+    if not isinstance(entry.get("confidence"), (int, float)):
+        raise ValueError("entry.confidence is required")
+    if not isinstance(entry.get("cvss_score"), (int, float)):
+        raise ValueError("entry.cvss_score is required")

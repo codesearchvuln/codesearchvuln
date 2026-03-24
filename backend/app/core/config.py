@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     SCAN_WORKSPACE_ROOT: str = "/tmp/vulhunter/scans"
     SCANNER_YASA_IMAGE: str = "vulhunter/yasa-runner:latest"
     SCANNER_OPENGREP_IMAGE: str = "vulhunter/opengrep-runner:latest"
+    SCANNER_BANDIT_IMAGE: str = "vulhunter/bandit-runner:latest"
+    SCANNER_GITLEAKS_IMAGE: str = "vulhunter/gitleaks-runner:latest"
+    SCANNER_PHPSTAN_IMAGE: str = "vulhunter/phpstan-runner:latest"
     BACKEND_VENV_PATH: str = "/opt/backend-venv"
     SEED_ARCHIVE_PROBE_ATTEMPTS: int = 2
     SEED_ARCHIVE_PROBE_TIMEOUT_SECONDS: int = 5

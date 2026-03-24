@@ -3,7 +3,7 @@ import { Navigate, Link, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, Play, Square, Wrench } from "lucide-react";
 
 import ToolEvidencePreview from "@/pages/AgentAudit/components/ToolEvidencePreview";
-import { parseToolEvidence } from "@/pages/AgentAudit/toolEvidence";
+import { parseToolEvidenceFromLog } from "@/pages/AgentAudit/toolEvidence";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -230,8 +230,23 @@ function SkillFinalResult({
   events: SkillTestEvent[];
 }) {
   const cleanup = resolveCleanupSummary(result, events);
-  const latestEvidence = [...events].reverse().find((event) => event.type === "tool_result" && parseToolEvidence(event.metadata ?? null));
-  const evidence = latestEvidence ? parseToolEvidence(latestEvidence.metadata ?? null) : null;
+  const latestEvidence = [...events].reverse().find((event) => {
+    if (event.type !== "tool_result") return false;
+    return Boolean(
+      parseToolEvidenceFromLog({
+        toolName: event.tool_name,
+        toolOutput: event.tool_output,
+        toolMetadata: event.metadata ?? null,
+      }),
+    );
+  });
+  const evidence = latestEvidence
+    ? parseToolEvidenceFromLog({
+        toolName: latestEvidence.tool_name,
+        toolOutput: latestEvidence.tool_output,
+        toolMetadata: latestEvidence.metadata ?? null,
+      })
+    : null;
 
   return (
     <div className="space-y-4 rounded border border-border/40 bg-background/30 p-4">

@@ -51,6 +51,10 @@ def test_default_compose_uses_local_images_by_default() -> None:
     assert "YASA_ENABLED: ${YASA_ENABLED:-true}" in compose_text
     assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in compose_text
     assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}" in compose_text
+    assert "SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-vulhunter/opengrep-runner-local:latest}" in compose_text
+    assert "SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-vulhunter/bandit-runner-local:latest}" in compose_text
+    assert "SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-vulhunter/gitleaks-runner-local:latest}" in compose_text
+    assert "SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-vulhunter/phpstan-runner-local:latest}" in compose_text
     assert "YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}" in compose_text
     assert "/tmp/vulhunter/scans:/tmp/vulhunter/scans" in compose_text
     assert "/var/run/docker.sock:/var/run/docker.sock" in compose_text
@@ -58,6 +62,18 @@ def test_default_compose_uses_local_images_by_default() -> None:
     assert "\n  yasa-runner:" in compose_text
     assert "image: vulhunter/yasa-runner-local:latest" in compose_text
     assert "dockerfile: ./docker/yasa-runner.Dockerfile" in compose_text
+    assert "\n  opengrep-runner:" in compose_text
+    assert "image: vulhunter/opengrep-runner-local:latest" in compose_text
+    assert "dockerfile: ./docker/opengrep-runner.Dockerfile" in compose_text
+    assert "\n  bandit-runner:" in compose_text
+    assert "image: vulhunter/bandit-runner-local:latest" in compose_text
+    assert "dockerfile: ./docker/bandit-runner.Dockerfile" in compose_text
+    assert "\n  gitleaks-runner:" in compose_text
+    assert "image: vulhunter/gitleaks-runner-local:latest" in compose_text
+    assert "dockerfile: ./docker/gitleaks-runner.Dockerfile" in compose_text
+    assert "\n  phpstan-runner:" in compose_text
+    assert "image: vulhunter/phpstan-runner-local:latest" in compose_text
+    assert "dockerfile: ./docker/phpstan-runner.Dockerfile" in compose_text
     assert 'condition: service_completed_successfully' in compose_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in compose_text
     assert "BACKEND_NPM_REGISTRY_FALLBACK" not in compose_text
@@ -131,6 +147,18 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "image: vulhunter/yasa-runner-local:latest" in full_overlay_text
     assert "dockerfile: ./docker/yasa-runner.Dockerfile" in full_overlay_text
     assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}" in full_overlay_text
+    assert "SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-vulhunter/opengrep-runner-local:latest}" in full_overlay_text
+    assert "SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-vulhunter/bandit-runner-local:latest}" in full_overlay_text
+    assert "SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-vulhunter/gitleaks-runner-local:latest}" in full_overlay_text
+    assert "SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-vulhunter/phpstan-runner-local:latest}" in full_overlay_text
+    assert "\n  opengrep-runner:" in full_overlay_text
+    assert "dockerfile: ./docker/opengrep-runner.Dockerfile" in full_overlay_text
+    assert "\n  bandit-runner:" in full_overlay_text
+    assert "dockerfile: ./docker/bandit-runner.Dockerfile" in full_overlay_text
+    assert "\n  gitleaks-runner:" in full_overlay_text
+    assert "dockerfile: ./docker/gitleaks-runner.Dockerfile" in full_overlay_text
+    assert "\n  phpstan-runner:" in full_overlay_text
+    assert "dockerfile: ./docker/phpstan-runner.Dockerfile" in full_overlay_text
     assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_FALLBACK" not in full_overlay_text
@@ -267,12 +295,21 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     assert '"bandit>=' in pyproject_text
     assert "pip install --retries 5 --timeout 60 --disable-pip-version-check code2flow bandit" not in backend_text
     assert "install_python_helpers()" not in backend_text
+    assert "gitleaks; \\" not in backend_text
     assert "ENV BACKEND_VENV_PATH=/opt/backend-venv" in backend_text
     assert 'uv venv "${BACKEND_VENV_PATH}"' in backend_text
     assert 'uv sync --active --frozen --no-dev' in backend_text
     assert "COPY --from=builder /app/.venv /opt/backend-venv" not in backend_text
     assert "COPY --from=builder /opt/backend-venv /opt/backend-venv" in backend_text
+    assert "COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks" not in backend_text
+    assert "COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep" not in backend_text
+    assert "COPY --from=scanner-tools-base /opt/phpstan /opt/phpstan" not in backend_text
     assert "COPY --from=scanner-tools-base /opt/yasa /opt/yasa" not in backend_text
+    assert 'ln -sf "${OPENGREP_REAL_BIN}" /usr/local/bin/opengrep.real' not in backend_text
+    assert 'ln -sf "${OPENGREP_WRAPPER_BIN}" /usr/local/bin/opengrep' not in backend_text
+    assert 'ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan' not in backend_text
+    assert "opengrep --version;" not in backend_text
+    assert "phpstan --version;" not in backend_text
     assert 'if [ -x "${YASA_WRAPPER_BIN}" ]; then' not in backend_text
     assert 'ln -sfn /opt/backend-venv /app/.venv' not in backend_text
     assert 'rm -rf /root/.cache/pip' in backend_text
@@ -291,11 +328,49 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     assert "WORKDIR /scan" in yasa_runner_text
 
 
-def test_docker_publish_pushes_yasa_runner_image() -> None:
+def test_runner_dockerfiles_exist_for_all_migrated_scanners() -> None:
+    opengrep_runner_text = (
+        REPO_ROOT / "backend" / "docker" / "opengrep-runner.Dockerfile"
+    ).read_text(encoding="utf-8")
+    bandit_runner_text = (
+        REPO_ROOT / "backend" / "docker" / "bandit-runner.Dockerfile"
+    ).read_text(encoding="utf-8")
+    gitleaks_runner_text = (
+        REPO_ROOT / "backend" / "docker" / "gitleaks-runner.Dockerfile"
+    ).read_text(encoding="utf-8")
+    phpstan_runner_text = (
+        REPO_ROOT / "backend" / "docker" / "phpstan-runner.Dockerfile"
+    ).read_text(encoding="utf-8")
+
+    assert "WORKDIR /scan" in opengrep_runner_text
+    assert "opengrep" in opengrep_runner_text
+    assert "XDG_CACHE_HOME" in opengrep_runner_text
+    assert "WORKDIR /scan" in bandit_runner_text
+    assert "bandit" in bandit_runner_text
+    assert "/opt/bandit-venv" in bandit_runner_text
+    assert "WORKDIR /scan" in gitleaks_runner_text
+    assert "gitleaks" in gitleaks_runner_text
+    assert "WORKDIR /scan" in phpstan_runner_text
+    assert "phpstan" in phpstan_runner_text
+
+
+def test_docker_publish_pushes_all_runner_images() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
         encoding="utf-8"
     )
 
     assert "build_yasa_runner" in workflow_text
+    assert "build_opengrep_runner" in workflow_text
+    assert "build_bandit_runner" in workflow_text
+    assert "build_gitleaks_runner" in workflow_text
+    assert "build_phpstan_runner" in workflow_text
     assert "./backend/docker/yasa-runner.Dockerfile" in workflow_text
+    assert "./backend/docker/opengrep-runner.Dockerfile" in workflow_text
+    assert "./backend/docker/bandit-runner.Dockerfile" in workflow_text
+    assert "./backend/docker/gitleaks-runner.Dockerfile" in workflow_text
+    assert "./backend/docker/phpstan-runner.Dockerfile" in workflow_text
     assert "ghcr.io/${{ github.repository_owner }}/vulhunter-yasa-runner:${{ github.event.inputs.tag }}" in workflow_text
+    assert "ghcr.io/${{ github.repository_owner }}/vulhunter-opengrep-runner:${{ github.event.inputs.tag }}" in workflow_text
+    assert "ghcr.io/${{ github.repository_owner }}/vulhunter-bandit-runner:${{ github.event.inputs.tag }}" in workflow_text
+    assert "ghcr.io/${{ github.repository_owner }}/vulhunter-gitleaks-runner:${{ github.event.inputs.tag }}" in workflow_text
+    assert "ghcr.io/${{ github.repository_owner }}/vulhunter-phpstan-runner:${{ github.event.inputs.tag }}" in workflow_text

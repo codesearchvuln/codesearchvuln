@@ -1083,11 +1083,35 @@ class VulnerabilityVerifyTool(AgentTool):
         
         if result.get("response_status"):
             output_parts.append(f"\nHTTP 状态码: {result['response_status']}")
+        verdict = "confirmed" if result["is_vulnerable"] else "not_confirmed"
+        runtime_status = "passed" if not result.get("error") else "error"
+        command_chain = unique_command_chain(["verify_vulnerability"])
+        display_command = build_display_command(command_chain)
+        entry = {
+            "vulnerability_type": vulnerability_type,
+            "target": target_url,
+            "payload": payload,
+            "verdict": verdict,
+            "evidence": result.get("evidence"),
+            "response_status": result.get("response_status"),
+            "runtime_status": runtime_status,
+            "error": result.get("error"),
+        }
+        validate_evidence_metadata(
+            render_type="verification_summary",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=[entry],
+        )
         
         return ToolResult(
             success=True,
             data="\n".join(output_parts),
             metadata={
+                "render_type": "verification_summary",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": [entry],
                 "vulnerability_type": vulnerability_type,
                 "is_vulnerable": result["is_vulnerable"],
                 "evidence": result.get("evidence"),

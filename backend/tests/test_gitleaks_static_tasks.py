@@ -94,7 +94,7 @@ def test_build_gitleaks_command_only_adds_redact_when_explicitly_enabled():
 
 
 @pytest.mark.asyncio
-async def test_execute_gitleaks_scan_keeps_match_content_and_masks_secret(monkeypatch):
+async def test_execute_gitleaks_scan_keeps_match_content_and_masks_secret(monkeypatch, tmp_path):
     task = GitleaksScanTask(
         id="gitleaks-task-1",
         project_id="project-1",
@@ -111,16 +111,52 @@ async def test_execute_gitleaks_scan_keeps_match_content_and_masks_secret(monkey
     monkeypatch.setattr(static_tasks_gitleaks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         static_tasks_gitleaks,
+        "settings",
+        SimpleNamespace(SCANNER_GITLEAKS_IMAGE="vulhunter/gitleaks-runner:test"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks_gitleaks,
+        "ensure_scan_workspace",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "gitleaks" / task.id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks_gitleaks,
+        "ensure_scan_project_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "gitleaks" / task.id / "project",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks_gitleaks,
+        "ensure_scan_output_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "gitleaks" / task.id / "output",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks_gitleaks,
+        "ensure_scan_logs_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "gitleaks" / task.id / "logs",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks_gitleaks,
+        "ensure_scan_meta_dir",
+        lambda *_args, **_kwargs: tmp_path / "scans" / "gitleaks" / task.id / "meta",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        static_tasks_gitleaks,
         "_build_effective_gitleaks_config_toml",
         AsyncMock(return_value=None),
     )
+    seen = {}
 
-    def _fake_run_subprocess_with_tracking(scan_type, task_id, cmd, timeout):
-        assert scan_type == "gitleaks"
-        assert task_id == "gitleaks-task-1"
-        assert timeout == 600
-        assert "--redact" not in cmd
-        report_path = cmd[cmd.index("--report-path") + 1]
+    async def _fake_run_scanner_container(spec, **_kwargs):
+        seen["spec"] = spec
+        assert "--redact" not in spec.command
+        report_path = tmp_path / "scans" / "gitleaks" / task.id / "output" / "report.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         payload = [
             {
                 "RuleID": "generic-api-key",
@@ -133,25 +169,21 @@ async def test_execute_gitleaks_scan_keeps_match_content_and_masks_secret(monkey
                 "Fingerprint": "gl:1",
             }
         ]
-        with open(report_path, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            container_id="gitleaks-container-1",
+            exit_code=0,
+            stdout_path=str(tmp_path / "scans" / "gitleaks" / task.id / "logs" / "stdout.log"),
+            stderr_path=str(tmp_path / "scans" / "gitleaks" / task.id / "logs" / "stderr.log"),
+            error=None,
+        )
 
-    monkeypatch.setattr(
-        static_tasks_gitleaks,
-        "_run_subprocess_with_tracking",
-        _fake_run_subprocess_with_tracking,
-    )
-
-    class _FakeLoop:
-        async def run_in_executor(self, _executor, fn):
-            return fn()
-
-    monkeypatch.setattr(static_tasks_gitleaks.asyncio, "get_event_loop", lambda: _FakeLoop())
+    monkeypatch.setattr(static_tasks_gitleaks, "run_scanner_container", _fake_run_scanner_container, raising=False)
 
     await static_tasks_gitleaks._execute_gitleaks_scan(
         task_id="gitleaks-task-1",
-        project_root="/tmp",
+        project_root=str(tmp_path),
         target_path=".",
         no_git=True,
         runtime_config={},
@@ -164,3 +196,6 @@ async def test_execute_gitleaks_scan_keeps_match_content_and_masks_secret(monkey
     assert len(persist_session.findings) == 1
     assert persist_session.findings[0].match == "ghp_example_secret"
     assert persist_session.findings[0].secret == "ghp_**********cret"
+    assert seen["spec"].image == "vulhunter/gitleaks-runner:test"
+    assert seen["spec"].command[0] == "gitleaks"
+    assert seen["spec"].command[seen["spec"].command.index("--report-path") + 1] == "/scan/output/report.json"

@@ -132,6 +132,19 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
     monkeypatch.setattr(static_tasks_yasa, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks_yasa, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks_yasa, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    async def _fake_load_runtime_config(*_args, **_kwargs):
+        return {
+            "yasa_timeout_seconds": 600,
+            "yasa_exec_heartbeat_seconds": 15,
+            "yasa_orphan_stale_seconds": 120,
+        }
+
+    monkeypatch.setattr(
+        static_tasks_yasa,
+        "load_global_yasa_runtime_config",
+        _fake_load_runtime_config,
+        raising=False,
+    )
     captured = {}
 
     def _fake_build_yasa_scan_command(**kwargs):
@@ -144,6 +157,7 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_project_dir", lambda *_args, **_kwargs: tmp_path / "workspace" / "project", raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_output_dir", lambda *_args, **_kwargs: tmp_path / "workspace" / "output", raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_logs_dir", lambda *_args, **_kwargs: tmp_path / "workspace" / "logs", raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_meta_dir", lambda *_args, **_kwargs: tmp_path / "workspace" / "meta", raising=False)
 
     async def _fake_run_scanner_container(spec, **kwargs):
         assert spec.scanner_type == "yasa"
@@ -202,6 +216,7 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
         checker_pack_ids=None,
         checker_ids=None,
         rule_config_file=None,
+        rule_config_id=None,
     )
 
     assert task.status == "completed"
@@ -241,11 +256,25 @@ async def test_execute_yasa_scan_uses_scanner_runner_and_shared_workspace(
     monkeypatch.setattr(static_tasks_yasa, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks_yasa, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks_yasa, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    async def _fake_load_runtime_config(*_args, **_kwargs):
+        return {
+            "yasa_timeout_seconds": 600,
+            "yasa_exec_heartbeat_seconds": 15,
+            "yasa_orphan_stale_seconds": 120,
+        }
+
+    monkeypatch.setattr(
+        static_tasks_yasa,
+        "load_global_yasa_runtime_config",
+        _fake_load_runtime_config,
+        raising=False,
+    )
     monkeypatch.setattr(static_tasks_yasa.settings, "SCANNER_YASA_IMAGE", "vulhunter/yasa-runner:test")
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_workspace", lambda *_args, **_kwargs: project_dir.parent, raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_project_dir", lambda *_args, **_kwargs: project_dir, raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_output_dir", lambda *_args, **_kwargs: output_dir, raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_logs_dir", lambda *_args, **_kwargs: logs_dir, raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_meta_dir", lambda *_args, **_kwargs: project_dir.parent / "meta", raising=False)
 
     seen = {}
 
@@ -296,6 +325,7 @@ async def test_execute_yasa_scan_uses_scanner_runner_and_shared_workspace(
         checker_pack_ids=None,
         checker_ids=None,
         rule_config_file=None,
+        rule_config_id=None,
     )
 
     assert seen["spec"].image == "vulhunter/yasa-runner:test"
@@ -332,10 +362,24 @@ async def test_execute_yasa_scan_marks_failed_when_runner_fails_without_local_fa
     monkeypatch.setattr(static_tasks_yasa, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks_yasa, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks_yasa, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    async def _fake_load_runtime_config(*_args, **_kwargs):
+        return {
+            "yasa_timeout_seconds": 600,
+            "yasa_exec_heartbeat_seconds": 15,
+            "yasa_orphan_stale_seconds": 120,
+        }
+
+    monkeypatch.setattr(
+        static_tasks_yasa,
+        "load_global_yasa_runtime_config",
+        _fake_load_runtime_config,
+        raising=False,
+    )
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_workspace", lambda *_args, **_kwargs: project_dir.parent, raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_project_dir", lambda *_args, **_kwargs: project_dir, raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_output_dir", lambda *_args, **_kwargs: output_dir, raising=False)
     monkeypatch.setattr(static_tasks_yasa, "ensure_scan_logs_dir", lambda *_args, **_kwargs: tmp_path / "scans" / "yasa" / task.id / "logs", raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_meta_dir", lambda *_args, **_kwargs: project_dir.parent / "meta", raising=False)
 
     async def _fake_run_scanner_container(_spec, **_kwargs):
         return SimpleNamespace(
@@ -357,6 +401,7 @@ async def test_execute_yasa_scan_marks_failed_when_runner_fails_without_local_fa
         checker_pack_ids=None,
         checker_ids=None,
         rule_config_file=None,
+        rule_config_id=None,
     )
 
     assert task.status == "failed"
@@ -386,6 +431,11 @@ async def test_execute_opengrep_scan_uses_short_lived_sessions_and_persists_find
     persist_session = _FakeOpengrepSession(task)
     session_factory = _SessionFactory(load_session, persist_session)
     metric_enqueues = []
+    workspace_dir = tmp_path / "scans" / "opengrep" / task.id
+    project_dir = workspace_dir / "project"
+    output_dir = workspace_dir / "output"
+    logs_dir = workspace_dir / "logs"
+    meta_dir = workspace_dir / "meta"
 
     monkeypatch.setattr(static_tasks_opengrep, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks_opengrep, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
@@ -405,7 +455,7 @@ async def test_execute_opengrep_scan_uses_short_lived_sessions_and_persists_find
         lambda _stdout: (
             [
                 {
-                    "path": str(tmp_path / "src" / "app.py"),
+                    "path": "/scan/project/src/app.py",
                     "start": {"line": 3},
                     "end": {"line": 3},
                     "extra": {
@@ -418,16 +468,30 @@ async def test_execute_opengrep_scan_uses_short_lived_sessions_and_persists_find
             [],
         ),
     )
-    monkeypatch.setattr(
-        static_tasks_opengrep,
-        "_run_subprocess_with_tracking",
-        lambda scan_type, task_id, cmd, env, timeout: SimpleNamespace(
-            returncode=0,
-            stdout="{}",
-            stderr="",
-        ),
-    )
-    monkeypatch.setattr(static_tasks_opengrep.asyncio, "get_event_loop", lambda: _FakeLoop())
+    monkeypatch.setattr(static_tasks_opengrep.settings, "SCANNER_OPENGREP_IMAGE", "vulhunter/opengrep-runner:test")
+    monkeypatch.setattr(static_tasks_opengrep, "ensure_scan_workspace", lambda *_args, **_kwargs: workspace_dir, raising=False)
+    monkeypatch.setattr(static_tasks_opengrep, "ensure_scan_project_dir", lambda *_args, **_kwargs: project_dir, raising=False)
+    monkeypatch.setattr(static_tasks_opengrep, "ensure_scan_output_dir", lambda *_args, **_kwargs: output_dir, raising=False)
+    monkeypatch.setattr(static_tasks_opengrep, "ensure_scan_logs_dir", lambda *_args, **_kwargs: logs_dir, raising=False)
+    monkeypatch.setattr(static_tasks_opengrep, "ensure_scan_meta_dir", lambda *_args, **_kwargs: meta_dir, raising=False)
+
+    seen = {}
+
+    async def _fake_run_scanner_container(spec, **_kwargs):
+        seen["spec"] = spec
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        Path(logs_dir / "stdout.log").write_text("{}", encoding="utf-8")
+        Path(logs_dir / "stderr.log").write_text("", encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            container_id="opengrep-container-1",
+            exit_code=0,
+            stdout_path=str(logs_dir / "stdout.log"),
+            stderr_path=str(logs_dir / "stderr.log"),
+            error=None,
+        )
+
+    monkeypatch.setattr(static_tasks_opengrep, "run_scanner_container", _fake_run_scanner_container, raising=False)
 
     source_root = tmp_path / "src"
     source_root.mkdir()
@@ -449,3 +513,6 @@ async def test_execute_opengrep_scan_uses_short_lived_sessions_and_persists_find
     assert len(persist_session.findings) == 1
     assert persist_session.findings[0].file_path == "src/app.py"
     assert metric_enqueues == ["project-1"]
+    assert seen["spec"].image == "vulhunter/opengrep-runner:test"
+    assert seen["spec"].command[0] == "opengrep"
+    assert seen["spec"].command[-1] == "/scan/project"

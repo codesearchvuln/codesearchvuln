@@ -16,6 +16,7 @@ from sqlalchemy.future import select
 from app.api.v1.endpoints.static_tasks_shared import (
     _launch_static_background_job,
     _clear_scan_task_cancel,
+    copy_project_tree_to_scan_dir,
     _force_cleanup_yasa_processes,
     _get_project_root,
     _is_scan_task_cancelled,
@@ -863,7 +864,7 @@ async def _execute_yasa_scan(
         ensure_scan_logs_dir("yasa", task_id)
 
         shutil.rmtree(project_dir, ignore_errors=True)
-        shutil.copytree(project_root, project_dir, dirs_exist_ok=True)
+        copy_project_tree_to_scan_dir(project_root, project_dir)
 
         full_target_path = os.path.join(str(project_dir), target_path)
         if not os.path.exists(full_target_path):

@@ -59,6 +59,7 @@ from app.services.upload.upload_manager import UploadManager
 from app.api.v1.endpoints.static_tasks_shared import (
     _cleanup_incorrect_rules,
     _clear_scan_task_cancel,
+    copy_project_tree_to_scan_dir,
     _dt_to_iso,
     _ensure_opengrep_xdg_dirs,
     _get_project_root,
@@ -66,6 +67,8 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _is_scan_task_cancelled,
     _is_test_like_directory,
     _launch_static_background_job,
+    _pop_scan_container,
+    _register_scan_container,
     _release_request_db_session,
     _resolve_backend_venv_executable,
     _normalize_llm_config_error_message,
@@ -76,12 +79,19 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _utc_now_iso,
     _validate_user_llm_config,
     async_session_factory,
+    cleanup_scan_workspace,
     deps,
+    ensure_scan_logs_dir,
+    ensure_scan_meta_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
     get_db,
     logger,
     settings,
 )
 from app.services.project_metrics import project_metrics_refresher
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 router = APIRouter()
 
@@ -335,6 +345,8 @@ async def _execute_bandit_scan(
     confidence_level: str = "medium",
 ) -> None:
     project_id: Optional[str] = None
+    workspace_dir: Optional[Path] = None
+    active_container_id: Optional[str] = None
 
     async def _update_task_state(
         status: str,
@@ -401,7 +413,19 @@ async def _execute_bandit_scan(
             task.status = "running"
             await db.commit()
 
-        full_target_path = os.path.join(project_root, target_path)
+        workspace_dir = ensure_scan_workspace("bandit", task_id)
+        project_dir = ensure_scan_project_dir("bandit", task_id)
+        output_dir = ensure_scan_output_dir("bandit", task_id)
+        logs_dir = ensure_scan_logs_dir("bandit", task_id)
+        meta_dir = ensure_scan_meta_dir("bandit", task_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        shutil.rmtree(project_dir, ignore_errors=True)
+        copy_project_tree_to_scan_dir(project_root, project_dir)
+
+        full_target_path = os.path.join(str(project_dir), target_path)
         if not os.path.exists(full_target_path):
             await _update_task_state("failed", error_message=f"Target path {full_target_path} not found")
             logger.error(f"Bandit target path not found: {full_target_path}")
@@ -409,31 +433,32 @@ async def _execute_bandit_scan(
 
         normalized_severity = _normalize_bandit_level(severity_level, fallback="medium")
         normalized_confidence = _normalize_bandit_level(confidence_level, fallback="medium")
+        runner_target_path = Path("/scan/project")
+        normalized_target_path = str(target_path or ".").strip()
+        if normalized_target_path not in {"", "."}:
+            runner_target_path = runner_target_path / normalized_target_path
 
         findings_to_persist: List[Dict[str, Any]] = []
         high_count = 0
         medium_count = 0
         low_count = 0
         scanned_files: set[str] = set()
+        report_file = output_dir / "report.json"
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-            report_file = tf.name
+        def _on_container_started(container_id: str) -> None:
+            nonlocal active_container_id
+            active_container_id = container_id
+            _register_scan_container("bandit", task_id, container_id)
 
         try:
-            try:
-                bandit_bin = _resolve_backend_venv_executable("bandit")
-            except FileNotFoundError as exc:
-                await _update_task_state("failed", error_message=str(exc))
-                logger.error("Bandit executable unavailable for task %s: %s", task_id, exc)
-                return
             cmd = [
-                bandit_bin,
+                "bandit",
                 "-r",
-                full_target_path,
+                str(runner_target_path),
                 "-f",
                 "json",
                 "-o",
-                report_file,
+                "/scan/output/report.json",
                 "--severity-level",
                 normalized_severity,
                 "--confidence-level",
@@ -441,29 +466,32 @@ async def _execute_bandit_scan(
                 "-q",
             ]
             logger.info(f"Executing bandit for task {task_id}: {' '.join(cmd)}")
-            loop = asyncio.get_event_loop()
-            process_result = await loop.run_in_executor(
-                None,
-                lambda: _run_subprocess_with_tracking(
-                    "bandit",
-                    task_id,
-                    cmd,
-                    timeout=600,
+            process_result = await run_scanner_container(
+                ScannerRunSpec(
+                    scanner_type="bandit",
+                    image=str(
+                        getattr(settings, "SCANNER_BANDIT_IMAGE", "vulhunter/bandit-runner:latest")
+                    ),
+                    workspace_dir=str(workspace_dir),
+                    command=cmd,
+                    timeout_seconds=600,
+                    env={},
                 ),
+                on_container_started=_on_container_started,
             )
 
             if _is_scan_task_cancelled("bandit", task_id):
                 await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
                 return
 
-            if process_result.returncode > 1:
-                error_msg = process_result.stderr or process_result.stdout or "Unknown error"
+            if process_result.exit_code > 1:
+                error_msg = process_result.error or "Unknown error"
                 await _update_task_state("failed", error_message=str(error_msg))
                 logger.error(f"Bandit task {task_id} failed: {error_msg}")
                 return
 
             raw_payload: Any = {}
-            if os.path.exists(report_file):
+            if report_file.exists():
                 with open(report_file, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read().strip()
                 if content:
@@ -484,7 +512,7 @@ async def _execute_bandit_scan(
                     confidence = str(finding.get("issue_confidence") or "LOW").strip().upper()
                     file_path = normalize_static_scan_file_path(
                         str(finding.get("filename") or "").strip(),
-                        project_root,
+                        "/scan/project",
                     )
                     if file_path:
                         scanned_files.add(file_path)
@@ -504,12 +532,8 @@ async def _execute_bandit_scan(
                     )
                 except Exception as exc:
                     logger.error(f"Error processing Bandit finding for task {task_id}: {exc}")
-        finally:
-            try:
-                if os.path.exists(report_file):
-                    os.unlink(report_file)
-            except Exception as exc:
-                logger.warning(f"Failed to delete temporary Bandit report file: {exc}")
+        except Exception:
+            raise
 
         if _is_scan_task_cancelled("bandit", task_id):
             await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
@@ -533,6 +557,9 @@ async def _execute_bandit_scan(
         logger.error(f"Error executing Bandit task {task_id}: {exc}")
         await _update_task_state("failed", error_message=str(exc))
     finally:
+        _pop_scan_container("bandit", task_id)
+        if workspace_dir is not None:
+            cleanup_scan_workspace("bandit", task_id)
         _clear_scan_task_cancel("bandit", task_id)
 
 

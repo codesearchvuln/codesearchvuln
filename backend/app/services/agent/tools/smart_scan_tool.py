@@ -18,8 +18,55 @@ from pydantic import BaseModel, Field
 from dataclasses import dataclass, field
 
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _build_analysis_summary_metadata(
+    *,
+    command_name: str,
+    title: str,
+    summary: str,
+    severity_stats: Dict[str, int],
+    hit_count: int,
+    key_files: List[str],
+    highlights: List[str],
+    next_actions: List[str],
+    extra_metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    command_chain = unique_command_chain([command_name])
+    display_command = build_display_command(command_chain)
+    entries = [
+        {
+            "title": title,
+            "summary": summary,
+            "severity_stats": severity_stats,
+            "hit_count": hit_count,
+            "key_files": key_files,
+            "highlights": highlights,
+            "next_actions": next_actions,
+        }
+    ]
+    validate_evidence_metadata(
+        render_type="analysis_summary",
+        command_chain=command_chain,
+        display_command=display_command,
+        entries=entries,
+    )
+    metadata = {
+        "render_type": "analysis_summary",
+        "command_chain": command_chain,
+        "display_command": display_command,
+        "entries": entries,
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
+    return metadata
 
 
 class SmartScanInput(BaseModel):
@@ -442,15 +489,31 @@ class SmartScanTool(AgentTool):
         return ToolResult(
             success=True,
             data="\n".join(output_parts),
-            metadata={
-                "files_scanned": len(files_scanned),
-                "files_with_issues": len(files_with_issues),
-                "total_findings": len(findings),
-                "by_severity": {k: len(v) for k, v in by_severity.items()},
-                "by_type": {k: len(v) for k, v in by_type.items()},
-                "findings": findings[:20],
-                "high_risk_files": list(files_with_issues)[:10],
-            }
+            metadata=_build_analysis_summary_metadata(
+                command_name="smart_scan",
+                title="Smart Scan Summary",
+                summary=f"Scanned {len(files_scanned)} files and found {len(findings)} potential issues.",
+                severity_stats={k: len(v) for k, v in by_severity.items()},
+                hit_count=len(findings),
+                key_files=list(files_with_issues)[:10],
+                highlights=[
+                    f"{f['vulnerability_type']} @ {f['file_path']}:{f['line_number']}"
+                    for f in findings[:5]
+                ],
+                next_actions=[
+                    "优先阅读高风险文件中的命中上下文。",
+                    "对关键命中继续执行 quick_audit / dataflow_analysis / controlflow_analysis_light。",
+                ],
+                extra_metadata={
+                    "files_scanned": len(files_scanned),
+                    "files_with_issues": len(files_with_issues),
+                    "total_findings": len(findings),
+                    "by_severity": {k: len(v) for k, v in by_severity.items()},
+                    "by_type": {k: len(v) for k, v in by_type.items()},
+                    "findings": findings[:20],
+                    "high_risk_files": list(files_with_issues)[:10],
+                },
+            ),
         )
 
 
@@ -648,10 +711,29 @@ class QuickAuditTool(AgentTool):
         return ToolResult(
             success=True,
             data="\n".join(output_parts),
-            metadata={
-                "file_path": audit_result["file_path"],
-                "findings_count": len(findings),
-                "findings": findings,
-                "code_metrics": audit_result["code_metrics"],
-            }
+            metadata=_build_analysis_summary_metadata(
+                command_name="quick_audit",
+                title="Quick Audit Summary",
+                summary=f"Audited {audit_result['file_path']} and found {len(findings)} potential issues.",
+                severity_stats={
+                    level: len([item for item in findings if item.get("severity") == level])
+                    for level in ["critical", "high", "medium", "low"]
+                },
+                hit_count=len(findings),
+                key_files=[audit_result["file_path"]],
+                highlights=[
+                    f"{item['vulnerability_type']} @ line {item['line_number']}: {item['pattern_name']}"
+                    for item in findings[:5]
+                ],
+                next_actions=[
+                    "结合代码上下文确认命中是否真实可利用。",
+                    "必要时继续执行 create_vulnerability_report 记录已确认问题。",
+                ],
+                extra_metadata={
+                    "file_path": audit_result["file_path"],
+                    "findings_count": len(findings),
+                    "findings": findings,
+                    "code_metrics": audit_result["code_metrics"],
+                },
+            ),
         )

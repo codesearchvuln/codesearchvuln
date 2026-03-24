@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -144,7 +145,7 @@ async def test_prepare_embedded_bootstrap_with_gitleaks(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.api.v1.endpoints.agent_tasks._run_bootstrap_gitleaks_scan",
+        "app.api.v1.endpoints.agent_tasks_bootstrap._run_bootstrap_gitleaks_scan",
         AsyncMock(return_value=parsed_gitleaks),
     )
 
@@ -206,7 +207,7 @@ async def test_prepare_embedded_bootstrap_gitleaks_failed_abort(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.agent_tasks._run_bootstrap_gitleaks_scan",
+        "app.api.v1.endpoints.agent_tasks_bootstrap._run_bootstrap_gitleaks_scan",
         AsyncMock(side_effect=RuntimeError("gitleaks bootstrap failure")),
     )
 
@@ -235,35 +236,87 @@ async def test_run_bootstrap_gitleaks_scan_parses_report(monkeypatch, tmp_path):
             "Match": "apiKey = abc",
         },
     ]
-    captured_cmd = {}
-
-    def fake_run(cmd, capture_output, text, timeout):
-        assert capture_output is True
-        assert text is True
-        assert timeout == 900
-        captured_cmd["value"] = list(cmd)
-        report_path = cmd[cmd.index("--report-path") + 1]
-        with open(report_path, "w", encoding="utf-8") as report_file:
-            json.dump(parsed_gitleaks, report_file)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    workspace_dir = tmp_path / "scans" / "gitleaks-bootstrap" / "task-1"
+    project_dir = workspace_dir / "project"
+    output_dir = workspace_dir / "output"
+    logs_dir = workspace_dir / "logs"
+    meta_dir = workspace_dir / "meta"
+    captured = {}
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.agent_tasks.subprocess.run",
-        fake_run,
+        "app.api.v1.endpoints.agent_tasks_bootstrap.settings",
+        SimpleNamespace(SCANNER_GITLEAKS_IMAGE="vulhunter/gitleaks-runner:test"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.ensure_scan_workspace",
+        lambda *_args, **_kwargs: workspace_dir,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.ensure_scan_project_dir",
+        lambda *_args, **_kwargs: project_dir,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.ensure_scan_output_dir",
+        lambda *_args, **_kwargs: output_dir,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.ensure_scan_logs_dir",
+        lambda *_args, **_kwargs: logs_dir,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.ensure_scan_meta_dir",
+        lambda *_args, **_kwargs: meta_dir,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.subprocess.run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("bootstrap gitleaks helper should use runner container")
+        ),
+    )
+
+    async def _fake_run_scanner_container(spec, **_kwargs):
+        captured["spec"] = spec
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir / "report.json").write_text(
+            json.dumps(parsed_gitleaks),
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            success=True,
+            container_id="gitleaks-bootstrap-1",
+            exit_code=0,
+            stdout_path=str(logs_dir / "stdout.log"),
+            stderr_path=str(logs_dir / "stderr.log"),
+            error=None,
+        )
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
     )
 
     findings = await _run_bootstrap_gitleaks_scan(str(tmp_path))
 
     assert findings == parsed_gitleaks
-    assert captured_cmd["value"] == [
+    assert captured["spec"].image == "vulhunter/gitleaks-runner:test"
+    assert captured["spec"].workspace_dir == str(workspace_dir)
+    assert captured["spec"].command == [
         "gitleaks",
         "detect",
         "--source",
-        str(tmp_path),
+        "/scan/project",
         "--report-format",
         "json",
         "--report-path",
-        captured_cmd["value"][7],
+        "/scan/output/report.json",
         "--exit-code",
         "0",
         "--no-git",
@@ -280,12 +333,9 @@ async def test_prepare_embedded_bootstrap_gitleaks_missing_binary_abort(monkeypa
         emit_error=AsyncMock(),
     )
 
-    def fake_run(*args, **kwargs):
-        raise FileNotFoundError("gitleaks not found")
-
     monkeypatch.setattr(
-        "app.api.v1.endpoints.agent_tasks.subprocess.run",
-        fake_run,
+        "app.api.v1.endpoints.agent_tasks_bootstrap._run_bootstrap_gitleaks_scan",
+        AsyncMock(side_effect=FileNotFoundError("gitleaks not found")),
     )
 
     with pytest.raises(RuntimeError) as exc_info:

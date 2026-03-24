@@ -5,7 +5,7 @@
 
 import type { AgentTask, AgentFinding, AgentTreeNode } from "@/shared/api/agentTasks";
 import type { AgentAuditStatsSummary } from "./detailViewModel";
-import type { ToolEvidencePayload } from "./toolEvidence";
+import type { ParsedToolEvidence, ToolEvidencePayload } from "./toolEvidence";
 
 // ============ Log Types ============
 
@@ -63,7 +63,7 @@ export interface LogItem {
     status?: ToolStatus;
     callId?: string;
   };
-  toolEvidence?: ToolEvidencePayload | null;
+  toolEvidence?: ParsedToolEvidence | ToolEvidencePayload | null;
   severity?: string;
   agentName?: string;
   agentRawName?: string;

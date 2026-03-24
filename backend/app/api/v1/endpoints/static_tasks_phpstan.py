@@ -54,6 +54,7 @@ from app.services.upload.upload_manager import UploadManager
 from app.api.v1.endpoints.static_tasks_shared import (
     _cleanup_incorrect_rules,
     _clear_scan_task_cancel,
+    copy_project_tree_to_scan_dir,
     _dt_to_iso,
     _ensure_opengrep_xdg_dirs,
     _get_project_root,
@@ -61,6 +62,8 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _is_scan_task_cancelled,
     _is_test_like_directory,
     _launch_static_background_job,
+    _pop_scan_container,
+    _register_scan_container,
     _release_request_db_session,
     _normalize_llm_config_error_message,
     _record_scan_progress,
@@ -70,12 +73,20 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _utc_now_iso,
     _validate_user_llm_config,
     async_session_factory,
+    cleanup_scan_workspace,
     deps,
+    ensure_scan_logs_dir,
+    ensure_scan_meta_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
     get_db,
     logger,
     settings,
 )
 from app.services.project_metrics import project_metrics_refresher
+from app.db.static_finding_paths import normalize_static_scan_file_path
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 router = APIRouter()
 
@@ -493,6 +504,9 @@ async def _execute_phpstan_scan(
     target_path: str,
     level: int = 8,
 ) -> None:
+    workspace_dir: Optional[Path] = None
+    active_container_id: Optional[str] = None
+
     async def _update_task_state(
         status: str,
         *,
@@ -545,17 +559,34 @@ async def _execute_phpstan_scan(
             task.status = "running"
             await db.commit()
 
-        full_target_path = os.path.join(project_root, target_path)
+        workspace_dir = ensure_scan_workspace("phpstan", task_id)
+        project_dir = ensure_scan_project_dir("phpstan", task_id)
+        output_dir = ensure_scan_output_dir("phpstan", task_id)
+        logs_dir = ensure_scan_logs_dir("phpstan", task_id)
+        meta_dir = ensure_scan_meta_dir("phpstan", task_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        shutil.rmtree(project_dir, ignore_errors=True)
+        copy_project_tree_to_scan_dir(project_root, project_dir)
+
+        full_target_path = os.path.join(str(project_dir), target_path)
         if not os.path.exists(full_target_path):
             await _update_task_state("failed", error_message=f"Target path {full_target_path} not found")
             logger.error(f"PHPStan target path not found: {full_target_path}")
             return
 
         normalized_level = _normalize_phpstan_level(level)
+        runner_target_path = Path("/scan/project")
+        normalized_target_path = str(target_path or ".").strip()
+        if normalized_target_path not in {"", "."}:
+            runner_target_path = runner_target_path / normalized_target_path
+
         cmd = [
             "phpstan",
             "analyse",
-            full_target_path,
+            str(runner_target_path),
             "--error-format=json",
             "--no-progress",
             "--no-interaction",
@@ -563,25 +594,38 @@ async def _execute_phpstan_scan(
         ]
         logger.info(f"Executing phpstan for task {task_id}: {' '.join(cmd)}")
 
-        loop = asyncio.get_event_loop()
-        process_result = await loop.run_in_executor(
-            None,
-            lambda: _run_subprocess_with_tracking(
-                "phpstan",
-                task_id,
-                cmd,
-                timeout=600,
+        def _on_container_started(container_id: str) -> None:
+            nonlocal active_container_id
+            active_container_id = container_id
+            _register_scan_container("phpstan", task_id, container_id)
+
+        process_result = await run_scanner_container(
+            ScannerRunSpec(
+                scanner_type="phpstan",
+                image=str(
+                    getattr(settings, "SCANNER_PHPSTAN_IMAGE", "vulhunter/phpstan-runner:latest")
+                ),
+                workspace_dir=str(workspace_dir),
+                command=cmd,
+                timeout_seconds=600,
+                env={},
             ),
+            on_container_started=_on_container_started,
         )
 
         if _is_scan_task_cancelled("phpstan", task_id):
             await _update_task_state("interrupted", error_message="扫描任务已中止（用户操作）")
             return
 
-        stdout_text = process_result.stdout or ""
-        stderr_text = process_result.stderr or ""
-        if process_result.returncode > 1:
-            error_message = (stderr_text or stdout_text or "Unknown error")[:500]
+        stdout_text = ""
+        stderr_text = ""
+        if process_result.stdout_path and Path(process_result.stdout_path).exists():
+            stdout_text = Path(process_result.stdout_path).read_text(encoding="utf-8", errors="ignore")
+        if process_result.stderr_path and Path(process_result.stderr_path).exists():
+            stderr_text = Path(process_result.stderr_path).read_text(encoding="utf-8", errors="ignore")
+
+        if process_result.exit_code > 1:
+            error_message = (stderr_text or stdout_text or process_result.error or "Unknown error")[:500]
             await _update_task_state("failed", error_message=error_message)
             logger.error(f"PHPStan task {task_id} failed: {error_message}")
             return
@@ -625,7 +669,10 @@ async def _execute_phpstan_scan(
                 persisted_findings.append(
                     {
                         **msg,
-                        "file_path": str(file_path or "")[:1000],
+                        "file_path": normalize_static_scan_file_path(
+                            str(file_path or "")[:1000],
+                            "/scan/project",
+                        ),
                     }
                 )
 
@@ -655,6 +702,9 @@ async def _execute_phpstan_scan(
         logger.error(f"Error executing PHPStan task {task_id}: {exc}")
         await _update_task_state("failed", error_message=str(exc))
     finally:
+        _pop_scan_container("phpstan", task_id)
+        if workspace_dir is not None:
+            cleanup_scan_workspace("phpstan", task_id)
         _clear_scan_task_cancel("phpstan", task_id)
 
 

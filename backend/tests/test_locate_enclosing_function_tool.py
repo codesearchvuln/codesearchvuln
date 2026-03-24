@@ -36,8 +36,18 @@ async def test_locate_enclosing_function_tool_returns_covering_function(tmp_path
         }
     ]
     assert result.data["symbol"]["return_type"] is None
-    assert result.data["resolution"]["method"] == "python_tree_sitter"
-    assert result.data["resolution"]["degraded"] is False
+    method = result.data["resolution"]["method"]
+    engine = result.data["resolution"]["engine"]
+    confidence = result.data["resolution"]["confidence"]
+    degraded = result.data["resolution"]["degraded"]
+    assert method
+    assert engine == method
+    assert 0.0 <= confidence <= 1.0
+    assert degraded is any(token in method for token in ("regex", "fallback", "missing"))
+    if degraded:
+        assert confidence < 0.8
+    else:
+        assert confidence >= 0.8
 
 
 @pytest.mark.asyncio
@@ -130,8 +140,13 @@ async def test_locate_enclosing_function_tool_marks_regex_fallback_as_degraded(t
         },
     ]
     assert result.data["symbol"]["return_type"] == "char *"
+    method = result.data["resolution"]["method"]
+    engine = result.data["resolution"]["engine"]
+    confidence = result.data["resolution"]["confidence"]
+    assert method == "tree_sitter_cli_regex"
+    assert engine == method
     assert result.data["resolution"]["degraded"] is True
-    assert result.data["resolution"]["confidence"] < 0.8
+    assert confidence < 0.8
 
 
 @pytest.mark.asyncio

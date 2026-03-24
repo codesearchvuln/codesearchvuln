@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from app.api.v1.endpoints.static_tasks_shared import (
     cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
     ensure_scan_logs_dir,
     ensure_scan_output_dir,
     ensure_scan_project_dir,
@@ -154,7 +155,7 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         output_dir = ensure_scan_output_dir("yasa-bootstrap", task_id)
         ensure_scan_logs_dir("yasa-bootstrap", task_id)
         shutil.rmtree(project_dir, ignore_errors=True)
-        shutil.copytree(project_root, project_dir, dirs_exist_ok=True)
+        copy_project_tree_to_scan_dir(project_root, project_dir)
         cmd = build_yasa_scan_command(
             binary=YASA_RUNNER_BINARY,
             source_path="/scan/project",

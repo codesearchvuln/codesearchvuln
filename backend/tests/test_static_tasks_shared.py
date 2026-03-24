@@ -48,6 +48,19 @@ def test_cleanup_scan_workspace_removes_task_tree(tmp_path, monkeypatch):
     assert not workspace.exists()
 
 
+def test_copy_project_tree_to_scan_dir_ignores_nested_destination(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "src").mkdir()
+    (project_root / "src" / "app.py").write_text("dangerous()\n", encoding="utf-8")
+    nested_scan_dir = project_root / "scans" / "opengrep" / "task-1" / "project"
+
+    static_tasks_shared.copy_project_tree_to_scan_dir(project_root, nested_scan_dir)
+
+    assert (nested_scan_dir / "src" / "app.py").read_text(encoding="utf-8") == "dangerous()\n"
+    assert not (nested_scan_dir / "scans").exists()
+
+
 def test_build_backend_venv_env_prefixes_backend_venv_bin(monkeypatch):
     monkeypatch.setattr(static_tasks_shared.settings, "BACKEND_VENV_PATH", "/opt/backend-venv")
 

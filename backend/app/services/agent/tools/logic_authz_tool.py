@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field
 
 from app.services.agent.logic.authz_rules import AuthzRuleEngine
 from .base import AgentTool, ToolResult
+from .evidence_protocol import (
+    build_display_command,
+    unique_command_chain,
+    validate_evidence_metadata,
+)
 
 
 class LogicAuthzAnalysisInput(BaseModel):
@@ -64,10 +69,49 @@ class LogicAuthzAnalysisTool(AgentTool):
         else:
             result = self.engine.analyze_project()
 
+        blocked_reasons = list(result.get("blocked_reasons") or [])
+        issue_count = sum(
+            1
+            for flag in ("missing_authz_checks", "resource_scope_mismatch", "idor_path")
+            if result.get(flag)
+        )
+        entry = {
+            "source_nodes": list(result.get("proof_nodes") or []),
+            "sink_nodes": list(result.get("evidence") or []),
+            "taint_steps": list(result.get("evidence") or []),
+            "call_chain": list(result.get("proof_nodes") or []),
+            "blocked_reasons": blocked_reasons,
+            "reachability": "reachable" if issue_count > 0 else ("blocked" if blocked_reasons else "unknown"),
+            "path_found": issue_count > 0,
+            "path_score": 1.0 if issue_count > 0 else 0.0,
+            "confidence": 0.85 if issue_count > 0 else 0.4,
+            "engine": "logic_graph",
+            "next_actions": (
+                ["核对访问控制与对象级作用域检查实现。"]
+                if issue_count > 0
+                else ["补充目标定位信息或扩大项目级分析范围。"]
+            ),
+            "file_path": str(file_path or ""),
+        }
+        command_chain = unique_command_chain(["logic_authz_analysis"])
+        display_command = build_display_command(command_chain)
+        validate_evidence_metadata(
+            render_type="flow_analysis",
+            command_chain=command_chain,
+            display_command=display_command,
+            entries=[entry],
+        )
+
         return ToolResult(
             success=True,
             data=result,
-            metadata={"engine": "logic_graph"},
+            metadata={
+                "engine": "logic_graph",
+                "render_type": "flow_analysis",
+                "command_chain": command_chain,
+                "display_command": display_command,
+                "entries": [entry],
+            },
         )
 
 
