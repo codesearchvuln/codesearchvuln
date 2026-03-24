@@ -53,6 +53,10 @@ from app.services.yasa_runtime_config import (
     load_global_yasa_runtime_config,
     save_global_yasa_runtime_config,
 )
+from app.services.yasa_rules_snapshot import (
+    extract_yasa_snapshot_rules,
+    load_yasa_checker_catalog,
+)
 from app.services.yasa_language import (
     YASA_SUPPORTED_LANGUAGES,
     is_yasa_blocked_project_language,
@@ -244,22 +248,22 @@ def _resolve_yasa_binary() -> str:
     )
 
 
-def _resolve_resource_dir() -> Optional[Path]:
-    configured = str(getattr(settings, "YASA_RESOURCE_DIR", "") or "").strip()
-    if configured:
-        resource_dir = Path(configured).expanduser()
-        if resource_dir.exists():
-            return resource_dir
+def _load_yasa_snapshot_rules_or_http_error() -> List[Dict[str, Any]]:
+    try:
+        return extract_yasa_snapshot_rules()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    candidates = [
-        Path.home() / ".local" / "share" / "yasa-engine" / "resource",
-        Path("/usr/local/share/yasa-engine/resource"),
-        Path("/usr/share/yasa-engine/resource"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
+
+def _load_yasa_checker_catalog_or_http_error() -> Dict[str, Any]:
+    try:
+        return load_yasa_checker_catalog()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _build_default_rule_config_path(profile: Dict[str, str]) -> Optional[str]:
@@ -270,125 +274,6 @@ def _build_default_rule_config_path(profile: Dict[str, str]) -> Optional[str]:
         )
     except Exception:
         return None
-
-
-def _safe_json_load(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
-    except Exception:
-        return None
-
-
-def _infer_languages_from_pack_id(pack_id: str) -> List[str]:
-    normalized = str(pack_id or "").strip().lower()
-    tags: List[str] = []
-    if "java" in normalized:
-        tags.append("java")
-    if "python" in normalized:
-        tags.append("python")
-    if "go" in normalized or "golang" in normalized:
-        tags.append("golang")
-    if "javascript" in normalized or "js" in normalized or "express" in normalized:
-        tags.extend(["javascript", "typescript"])
-    seen = set()
-    ordered: List[str] = []
-    for item in tags:
-        if item not in seen:
-            seen.add(item)
-            ordered.append(item)
-    return ordered
-
-
-def _extract_yasa_rules_from_resource_dir(resource_dir: Path) -> List[YasaRuleResponse]:
-    checker_config_path = resource_dir / "checker" / "checker-config.json"
-    checker_pack_config_path = resource_dir / "checker" / "checker-pack-config.json"
-
-    checker_payload = _safe_json_load(checker_config_path)
-    checker_pack_payload = _safe_json_load(checker_pack_config_path)
-    if not isinstance(checker_payload, list) or not isinstance(checker_pack_payload, list):
-        return []
-
-    checker_pack_map: Dict[str, List[str]] = {}
-    checker_language_map: Dict[str, List[str]] = {}
-    for item in checker_pack_payload:
-        if not isinstance(item, dict):
-            continue
-        checker_pack_id = str(item.get("checkerPackId") or "").strip()
-        checker_ids = item.get("checkerIds")
-        if not checker_pack_id or not isinstance(checker_ids, list):
-            continue
-        languages = _infer_languages_from_pack_id(checker_pack_id)
-        for checker_id in checker_ids:
-            checker_key = str(checker_id or "").strip()
-            if not checker_key:
-                continue
-            checker_pack_map.setdefault(checker_key, []).append(checker_pack_id)
-            checker_language_map.setdefault(checker_key, [])
-            for language in languages:
-                if language not in checker_language_map[checker_key]:
-                    checker_language_map[checker_key].append(language)
-
-    rules: List[YasaRuleResponse] = []
-    for raw in checker_payload:
-        if not isinstance(raw, dict):
-            continue
-        checker_id = str(raw.get("checkerId") or "").strip()
-        if not checker_id:
-            continue
-        rules.append(
-            YasaRuleResponse(
-                checker_id=checker_id,
-                checker_path=str(raw.get("checkerPath") or "").strip() or None,
-                description=str(raw.get("description") or "").strip() or None,
-                checker_packs=checker_pack_map.get(checker_id, []),
-                languages=checker_language_map.get(checker_id, []),
-                demo_rule_config_path=str(raw.get("demoRuleConfigPath") or "").strip()
-                or None,
-                source="builtin",
-            )
-        )
-
-    rules.sort(key=lambda item: item.checker_id.lower())
-    return rules
-
-
-def _load_checker_catalog(resource_dir: Path) -> Dict[str, Any]:
-    checker_config_path = resource_dir / "checker" / "checker-config.json"
-    checker_pack_config_path = resource_dir / "checker" / "checker-pack-config.json"
-
-    checker_payload = _safe_json_load(checker_config_path)
-    checker_pack_payload = _safe_json_load(checker_pack_config_path)
-    if not isinstance(checker_payload, list) or not isinstance(checker_pack_payload, list):
-        raise HTTPException(status_code=500, detail="YASA checker 配置文件无效")
-
-    checker_ids: set[str] = set()
-    checker_pack_ids: set[str] = set()
-    pack_map: Dict[str, List[str]] = {}
-
-    for item in checker_payload:
-        if not isinstance(item, dict):
-            continue
-        checker_id = str(item.get("checkerId") or "").strip()
-        if checker_id:
-            checker_ids.add(checker_id)
-
-    for item in checker_pack_payload:
-        if not isinstance(item, dict):
-            continue
-        checker_pack_id = str(item.get("checkerPackId") or "").strip()
-        checker_members = item.get("checkerIds")
-        if not checker_pack_id or not isinstance(checker_members, list):
-            continue
-        checker_pack_ids.add(checker_pack_id)
-        pack_map[checker_pack_id] = [
-            str(member).strip() for member in checker_members if str(member).strip()
-        ]
-
-    return {
-        "checker_ids": checker_ids,
-        "checker_pack_ids": checker_pack_ids,
-        "pack_map": pack_map,
-    }
 
 
 def _parse_rule_config_checker_ids(rule_config_payload: Any) -> List[str]:
@@ -1506,14 +1391,7 @@ async def import_yasa_rule_config(
             detail="rule-config 缺少 checkerIds（必须为非空数组）",
         )
 
-    resource_dir = _resolve_resource_dir()
-    if resource_dir is None:
-        raise HTTPException(
-            status_code=500,
-            detail="未找到 YASA 资源目录，请确认 YASA_RESOURCE_DIR 或本机 yasa-engine 安装",
-        )
-
-    catalog = _load_checker_catalog(resource_dir)
+    catalog = _load_yasa_checker_catalog_or_http_error()
     normalized_checker_ids = _normalize_checker_values(_split_csv_form(checker_ids)) or derived_checker_ids
     normalized_checker_pack_ids = _normalize_checker_values(_split_csv_form(checker_pack_ids))
     _validate_checker_bindings(
@@ -1618,13 +1496,7 @@ async def update_yasa_rule_config(
         row.description = str(request.description or "").strip() or None
 
     if request.checker_ids is not None or request.checker_pack_ids is not None:
-        resource_dir = _resolve_resource_dir()
-        if resource_dir is None:
-            raise HTTPException(
-                status_code=500,
-                detail="未找到 YASA 资源目录，请确认 YASA_RESOURCE_DIR 或本机 yasa-engine 安装",
-            )
-        catalog = _load_checker_catalog(resource_dir)
+        catalog = _load_yasa_checker_catalog_or_http_error()
         normalized_checker_ids = (
             _normalize_checker_values(request.checker_ids)
             if request.checker_ids is not None
@@ -1681,14 +1553,7 @@ async def list_yasa_rules(
     current_user: User = Depends(deps.get_current_user),
 ):
     _ = current_user
-    resource_dir = _resolve_resource_dir()
-    if resource_dir is None:
-        raise HTTPException(
-            status_code=500,
-            detail="未找到 YASA 资源目录，请确认 YASA_RESOURCE_DIR 或本机 yasa-engine 安装",
-        )
-
-    rules = _extract_yasa_rules_from_resource_dir(resource_dir)
+    rules = [YasaRuleResponse(**item) for item in _load_yasa_snapshot_rules_or_http_error()]
     if checker_pack_id:
         expected_pack = str(checker_pack_id).strip()
         rules = [item for item in rules if expected_pack in item.checker_packs]

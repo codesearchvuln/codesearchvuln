@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
 	Activity,
 	BarChart3,
 	Boxes,
 	Bug,
+	ChevronLeft,
 	ChevronRight,
 	Cpu,
 	ListOrdered,
@@ -20,6 +21,7 @@ import {
 	XAxis,
 	YAxis,
 } from "recharts";
+import { Button } from "@/components/ui/button";
 import { getEstimatedTaskProgressPercent } from "@/features/tasks/services/taskProgress";
 import type {
 	DashboardDailyActivityItem,
@@ -169,6 +171,7 @@ export const HORIZONTAL_STATS_META_ROW_CLASSNAME =
 export const HORIZONTAL_STATS_META_LEGEND_CLASSNAME =
 	"flex flex-wrap justify-start gap-2 sm:justify-end";
 export const TOP_STATS_GRID_CLASSNAME = "grid grid-cols-2 gap-3 xl:grid-cols-5";
+export const DASHBOARD_RECENT_TASKS_PAGE_SIZE = 3;
 
 function estimateAxisLabelUnits(label: string) {
 	return Array.from(label).reduce((total, char) => {
@@ -248,8 +251,22 @@ function formatNumber(value: number | null | undefined) {
 	return Math.max(Number(value || 0), 0).toLocaleString("zh-CN");
 }
 
-function formatTokenValue(value: number | null | undefined) {
-	return formatNumber(value);
+function truncateDecimal(value: number, digits: number) {
+	if (!Number.isFinite(value) || value <= 0) return 0;
+	const factor = 10 ** digits;
+	return Math.floor(value * factor) / factor;
+}
+
+function trimTrailingZeroes(value: number, digits: number) {
+	return value.toFixed(digits).replace(/\.?0+$/, "");
+}
+
+export function formatTokenValue(value: number | null | undefined) {
+	const normalized = Math.max(Number(value || 0), 0);
+	const unit = normalized >= 1_000_000 ? "M" : "K";
+	const divisor = unit === "M" ? 1_000_000 : 1_000;
+	const truncated = truncateDecimal(normalized / divisor, 3);
+	return `${trimTrailingZeroes(truncated, 3)}${unit}`;
 }
 
 function normalizeViewTone(value: number): Tone {
@@ -465,6 +482,29 @@ function buildTaskStatusRows(snapshot: DashboardSnapshotResponse) {
 	].filter((item) => item.value > 0);
 }
 
+export function paginateRecentTasks(
+	tasks: DashboardRecentTaskItem[],
+	requestedPage: number,
+) {
+	const totalCount = tasks.length;
+	const totalPages = Math.max(
+		1,
+		Math.ceil(totalCount / DASHBOARD_RECENT_TASKS_PAGE_SIZE),
+	);
+	const currentPage = Math.min(
+		Math.max(Math.floor(Number(requestedPage) || 1), 1),
+		totalPages,
+	);
+	const startIndex = (currentPage - 1) * DASHBOARD_RECENT_TASKS_PAGE_SIZE;
+
+	return {
+		items: tasks.slice(startIndex, startIndex + DASHBOARD_RECENT_TASKS_PAGE_SIZE),
+		currentPage,
+		totalPages,
+		totalCount,
+	};
+}
+
 function PreviewHeader({ snapshot }: { snapshot: DashboardSnapshotResponse }) {
 	const totalTasks =
 		snapshot.task_status_breakdown.completed +
@@ -573,10 +613,20 @@ function TaskStatusPanel({
 }) {
 	const statusRows = buildTaskStatusRows(snapshot);
 	const total = statusRows.reduce((sum, item) => sum + item.value, 0);
+	const [recentTasksPage, setRecentTasksPage] = useState(1);
+	const recentTasksPagination = useMemo(
+		() => paginateRecentTasks(snapshot.recent_tasks, recentTasksPage),
+		[snapshot.recent_tasks, recentTasksPage],
+	);
+
+	useEffect(() => {
+		setRecentTasksPage(1);
+	}, [snapshot.recent_tasks]);
+
 	return (
 		<section
 			data-panel="status"
-			className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.45)]"
+			className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.45)] xl:flex xl:min-h-0 xl:flex-col"
 		>
 			<div className="flex items-start justify-between gap-4">
 				<div>
@@ -609,12 +659,59 @@ function TaskStatusPanel({
 					})
 				)}
 			</div>
-			<div className="mt-1 border-t border-white/10 pt-5">
-				<div className="space-y-3">
-					{snapshot.recent_tasks.slice(0, 5).map((task) => (
-						<RecentTaskCard key={task.task_id} task={task} />
-					))}
+			<div className="flex items-start justify-between gap-4">
+				<div>
+					<h2 className="mt-3 text-2xl font-semibold text-white">最近任务</h2>
 				</div>
+			</div>
+			<div className="mt-1 border-t border-white/10 pt-5 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+				<div className="space-y-3">
+					{recentTasksPagination.items.length === 0 ? (
+						<p className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400">
+							暂无最近任务
+						</p>
+					) : (
+						recentTasksPagination.items.map((task) => (
+							<RecentTaskCard key={task.task_id} task={task} />
+						))
+					)}
+				</div>
+				{recentTasksPagination.totalPages > 1 ? (
+					<div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+						<div className="flex items-center gap-2">
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="cyber-btn-outline h-8 border-white/15 bg-white/[0.03] px-3 text-slate-200 hover:bg-white/[0.08]"
+								onClick={() =>
+									setRecentTasksPage((page) => Math.max(page - 1, 1))
+								}
+								disabled={recentTasksPagination.currentPage <= 1}
+							>
+								<ChevronLeft className="h-4 w-4" />
+								上一页
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="cyber-btn-outline h-8 border-white/15 bg-white/[0.03] px-3 text-slate-200 hover:bg-white/[0.08]"
+								onClick={() =>
+									setRecentTasksPage((page) =>
+										Math.min(page + 1, recentTasksPagination.totalPages),
+									)
+								}
+								disabled={
+									recentTasksPagination.currentPage >= recentTasksPagination.totalPages
+								}
+							>
+								下一页
+								<ChevronRight className="h-4 w-4" />
+							</Button>
+						</div>
+					</div>
+				) : null}
 			</div>
 		</section>
 	);
@@ -941,12 +1038,12 @@ export default function DashboardCommandCenter({
 	const rows = useMemo(() => buildRowsForView(activeView, snapshot), [activeView, snapshot]);
 
 	return (
-		<div className="bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.12),transparent_22%),linear-gradient(180deg,#020617_0%,#020817_52%,#030712_100%)] px-1 py-1 text-slate-100">
-			<div className="space-y-6">
+		<div className="bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.12),transparent_22%),linear-gradient(180deg,#020617_0%,#020817_52%,#030712_100%)] px-1 py-1 text-slate-100 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden">
+			<div className="space-y-6 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:space-y-4">
 				<PreviewHeader snapshot={snapshot} />
-				<div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
+				<div className="grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-cols-[260px_minmax(0,1fr)_340px] xl:gap-4">
 					<ViewSidebar activeView={activeView} onChange={setActiveView} />
-					<section className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.45)]">
+					<section className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.45)] xl:min-h-0">
 						{activeView === "trend" ? (
 							<TrendPanel snapshot={snapshot} />
 						) : (

@@ -291,10 +291,10 @@ test("DashboardCommandCenter renders the live single-page dashboard layout", asy
 	assert.doesNotMatch(markup, /静态扫描 · Delta PHP/);
 	assert.doesNotMatch(markup, /静态扫描 · Echo Console/);
 	assert.match(markup, /查看详情/);
-	assert.match(markup, /共 5 条/);
-	assert.match(markup, /第 1 \/ 2 页/);
 	assert.match(markup, /上一页/);
 	assert.match(markup, /下一页/);
+	assert.doesNotMatch(markup, /共 \d+ 条/);
+	assert.doesNotMatch(markup, /第 \d+ \/ \d+ 页/);
 	assert.doesNotMatch(markup, /排行榜/);
 	assert.doesNotMatch(markup, /等待中/);
 });
@@ -330,6 +330,27 @@ test("DashboardCommandCenter recent static task uses the provided aggregated det
 		/href="\/static-analysis\/gl-batch\?gitleaksTaskId=gl-batch&amp;banditTaskId=ba-batch"/,
 	);
 	assert.doesNotMatch(markup, /href="\/tasks\/static"/);
+});
+
+test("DashboardCommandCenter shows an empty state when no recent tasks are available", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+	const snapshot = createSnapshotFixture();
+	snapshot.recent_tasks = [];
+
+	const markup = renderToStaticMarkup(
+		createElement(module.default, {
+			snapshot,
+			rangeDays: 14,
+			onRangeDaysChange: () => {},
+		}),
+	);
+
+	assert.match(markup, /暂无最近任务/);
+	assert.doesNotMatch(markup, /共 \d+ 条/);
+	assert.doesNotMatch(markup, /上一页/);
+	assert.doesNotMatch(markup, /下一页/);
 });
 
 test("DashboardCommandCenter uses enlarged axes and fixed chart spacing constants", async () => {

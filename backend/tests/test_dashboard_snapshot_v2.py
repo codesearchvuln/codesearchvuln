@@ -33,11 +33,13 @@ def test_parse_dashboard_language_info_accepts_legacy_language_maps():
 
 def _build_empty_project_info_side_effect():
     project_rows = [("p1", "Alpha", "zip")]
+    management_metrics_rows = [("p1", "ready", 0, 0, 0, 0)]
     project_info_rows = []
     empty_rows = _RowsResult([])
 
     return [
         _RowsResult(project_rows),
+        _RowsResult(management_metrics_rows),
         _RowsResult(project_info_rows),
         empty_rows,
         empty_rows,
@@ -62,6 +64,10 @@ def _build_execute_side_effect(now: datetime):
     project_rows = [
         ("p1", "Alpha", "zip"),
         ("p2", "Beta", "zip"),
+    ]
+    management_metrics_rows = [
+        ("p1", "ready", 1, 1, 2, 0),
+        ("p2", "ready", 0, 1, 0, 2),
     ]
 
     project_info_rows = [
@@ -259,6 +265,7 @@ def _build_execute_side_effect(now: datetime):
 
     return [
         _RowsResult(project_rows),
+        _RowsResult(management_metrics_rows),
         _RowsResult(project_info_rows),
         _RowsResult(opengrep_rows),
         _RowsResult(gitleaks_rows),
@@ -283,6 +290,7 @@ def _build_grouped_static_recent_tasks_side_effect(now: datetime):
     project_rows = [
         ("p1", "Alpha", "zip"),
     ]
+    management_metrics_rows = [("p1", "ready", 0, 0, 1, 1)]
 
     project_info_rows = [
         (
@@ -354,6 +362,7 @@ def _build_grouped_static_recent_tasks_side_effect(now: datetime):
 
     return [
         _RowsResult(project_rows),
+        _RowsResult(management_metrics_rows),
         _RowsResult(project_info_rows),
         _RowsResult(opengrep_rows),
         _RowsResult(gitleaks_rows),
@@ -371,6 +380,45 @@ def _build_grouped_static_recent_tasks_side_effect(now: datetime):
         _RowsResult(phpstan_finding_rows),
         _RowsResult(yasa_finding_rows),
         _RowsResult(agent_finding_rows),
+    ]
+
+
+def _build_project_risk_distribution_from_metrics_side_effect():
+    project_rows = [
+        ("p1", "Alpha", "repository"),
+        ("p2", "Beta", "repository"),
+        ("p3", "Gamma", "repository"),
+        ("p4", "Delta", "repository"),
+    ]
+    management_metrics_rows = [
+        ("p1", "ready", 0, 2, 1, 0),
+        ("p2", "ready", 0, 0, 0, 0),
+        ("p3", "failed", 3, 0, 0, 0),
+        ("p4", "ready", 1, 0, 1, 2),
+    ]
+    project_info_rows = []
+    empty_rows = _RowsResult([])
+
+    return [
+        _RowsResult(project_rows),
+        _RowsResult(management_metrics_rows),
+        _RowsResult(project_info_rows),
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
+        empty_rows,
     ]
 
 
@@ -407,7 +455,7 @@ async def test_dashboard_snapshot_v2_exposes_summary_and_windowed_panels(monkeyp
     assert snapshot.verification_funnel.effective_findings == 10
     assert snapshot.verification_funnel.verified_findings == 6
     assert snapshot.verification_funnel.false_positive_count == 4
-    assert snapshot.task_status_breakdown.completed == 9
+    assert snapshot.task_status_breakdown.completed == 8
     assert snapshot.task_status_breakdown.failed == 2
     assert snapshot.task_status_breakdown.running == 1
     assert [item.engine for item in snapshot.engine_breakdown] == [
@@ -421,8 +469,10 @@ async def test_dashboard_snapshot_v2_exposes_summary_and_windowed_panels(monkeyp
     assert snapshot.engine_breakdown[-1].effective_findings == 2
     assert snapshot.recent_tasks[0].task_id == "at2"
     assert snapshot.recent_tasks[0].task_type == "智能扫描"
-    assert snapshot.recent_tasks[1].task_type in {"静态扫描", "混合扫描"}
-    assert len(snapshot.recent_tasks) == 5
+    assert snapshot.recent_tasks[1].task_type == "混合扫描"
+    assert snapshot.recent_tasks[2].task_type == "静态扫描"
+    assert len(snapshot.recent_tasks) == 11
+    assert snapshot.recent_tasks[-1].task_id == "ps2"
     assert [item.date for item in snapshot.daily_activity]
 
 
@@ -467,8 +517,12 @@ async def test_dashboard_snapshot_v2_builds_weighted_hotspots_and_language_risk(
         "Alpha",
         "Beta",
     ]
-    assert snapshot.project_risk_distribution[0].high_count == 5
-    assert snapshot.project_risk_distribution[0].medium_count == 4
+    assert snapshot.project_risk_distribution[0].critical_count == 1
+    assert snapshot.project_risk_distribution[0].high_count == 1
+    assert snapshot.project_risk_distribution[0].medium_count == 2
+    assert snapshot.project_risk_distribution[0].total_findings == 4
+    assert snapshot.project_risk_distribution[1].high_count == 1
+    assert snapshot.project_risk_distribution[1].low_count == 2
     assert snapshot.project_risk_distribution[1].total_findings == 3
     assert snapshot.verified_vulnerability_types[0].type_code == "CWE-79"
     assert snapshot.verified_vulnerability_types[0].verified_count == 1
@@ -516,6 +570,7 @@ async def test_dashboard_snapshot_v2_groups_multi_engine_static_recent_tasks(mon
         current_user=SimpleNamespace(id="user-1"),
     )
 
+    assert snapshot.task_status_breakdown.completed == 1
     assert len(snapshot.recent_tasks) == 1
     recent_task = snapshot.recent_tasks[0]
     assert recent_task.task_id == "gl-batch"
@@ -524,6 +579,40 @@ async def test_dashboard_snapshot_v2_groups_multi_engine_static_recent_tasks(mon
     assert "gitleaksTaskId=gl-batch" in recent_task.detail_path
     assert "banditTaskId=ba-batch" in recent_task.detail_path
     assert recent_task.detail_path != "/tasks/static"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_v2_project_risk_distribution_uses_ready_management_metrics_only(
+    monkeypatch,
+):
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=_build_project_risk_distribution_from_metrics_side_effect()
+        )
+    )
+    monkeypatch.setattr(
+        projects_insights,
+        "count_high_confidence_findings_by_task_ids",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        projects_insights,
+        "_get_yasa_rule_total",
+        AsyncMock(return_value=0),
+    )
+
+    snapshot = await projects.get_dashboard_snapshot(
+        top_n=1,
+        range_days=14,
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert [item.project_name for item in snapshot.project_risk_distribution] == ["Delta"]
+    assert snapshot.project_risk_distribution[0].critical_count == 1
+    assert snapshot.project_risk_distribution[0].medium_count == 1
+    assert snapshot.project_risk_distribution[0].low_count == 2
+    assert snapshot.project_risk_distribution[0].total_findings == 4
 
 
 @pytest.mark.asyncio

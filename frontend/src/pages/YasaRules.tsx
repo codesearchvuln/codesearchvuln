@@ -29,15 +29,18 @@ import {
   useDataTableUrlState,
 } from "@/components/data-table";
 import {
-  getYasaRuntimeConfig,
-  getYasaRuleConfigs,
-  getYasaRules,
   importYasaRuleConfig,
   updateYasaRuntimeConfig,
   type YasaRule,
   type YasaRuleConfig,
   type YasaRuntimeConfig,
 } from "@/shared/api/yasa";
+import {
+  loadYasaRulesPageData,
+  YASA_CUSTOM_RULE_CONFIGS_LOAD_ERROR_FALLBACK,
+  YASA_RUNTIME_CONFIG_LOAD_ERROR_FALLBACK,
+  type YasaRulesLoaderResult,
+} from "@/pages/yasaRulesLoader";
 
 type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
 
@@ -310,7 +313,9 @@ export default function YasaRules({
   const [rules, setRules] = useState<YasaRule[]>([]);
   const [customRuleConfigs, setCustomRuleConfigs] = useState<YasaRuleConfig[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [rulesLoadError, setRulesLoadError] = useState<string | null>(null);
+  const [customConfigsLoadError, setCustomConfigsLoadError] = useState<string | null>(null);
+  const [runtimeConfigLoadError, setRuntimeConfigLoadError] = useState<string | null>(null);
   const [detailRule, setDetailRule] = useState<YasaRuleRowViewModel | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
@@ -332,32 +337,43 @@ export default function YasaRules({
     [initialState],
   );
 
-  const loadRules = async () => {
+  const applyLoaderResult = (result: YasaRulesLoaderResult) => {
+    setRules(result.rules);
+    setCustomRuleConfigs(result.customRuleConfigs);
+    setRulesLoadError(result.rulesLoadError);
+    setCustomConfigsLoadError(result.customConfigsLoadError);
+    setRuntimeConfigLoadError(result.runtimeConfigLoadError);
+    setRuntimeConfig(result.runtimeConfig);
+    setRuntimeConfigForm(result.runtimeConfig);
+  };
+
+  const loadPageData = async () => {
     try {
       setLoading(true);
-      setLoadFailed(false);
-      const [builtinRules, customConfigs, runtime] = await Promise.all([
-        getYasaRules({ limit: 2000 }),
-        getYasaRuleConfigs({ limit: 500 }),
-        getYasaRuntimeConfig(),
-      ]);
-      setRules(builtinRules);
-      setCustomRuleConfigs(customConfigs);
-      setRuntimeConfig(runtime);
-      setRuntimeConfigForm(runtime);
-    } catch (error: any) {
-      setLoadFailed(true);
-      const detail =
-        error?.response?.data?.detail ||
-        "未找到 YASA 资源目录，请检查 YASA_RESOURCE_DIR 或本机安装";
-      toast.error(String(detail));
+      const result = await loadYasaRulesPageData();
+      applyLoaderResult(result);
+      if (result.rulesLoadError) {
+        toast.error(result.rulesLoadError);
+      }
+      if (result.customConfigsLoadError) {
+        toast.error(
+          result.customConfigsLoadError ||
+            YASA_CUSTOM_RULE_CONFIGS_LOAD_ERROR_FALLBACK,
+        );
+      }
+      if (result.runtimeConfigLoadError) {
+        toast.error(
+          result.runtimeConfigLoadError ||
+            YASA_RUNTIME_CONFIG_LOAD_ERROR_FALLBACK,
+        );
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadRules();
+    void loadPageData();
   }, []);
 
   useEffect(() => {
@@ -517,7 +533,7 @@ export default function YasaRules({
       setImportDescription("");
       setImportRuleConfigJson("");
       setImportRuleConfigFile(null);
-      await loadRules();
+      await loadPageData();
     } catch (error: any) {
       const detail = error?.response?.data?.detail || "导入失败";
       toast.error(String(detail));
@@ -583,12 +599,24 @@ export default function YasaRules({
             size="sm"
             className="cyber-btn-primary h-8"
             onClick={() => void handleSaveRuntimeConfig()}
-            disabled={!runtimeConfigForm || savingRuntimeConfig || !isRuntimeConfigDirty}
+            disabled={
+              !runtimeConfigForm ||
+              Boolean(runtimeConfigLoadError) ||
+              savingRuntimeConfig ||
+              !isRuntimeConfigDirty
+            }
           >
             {savingRuntimeConfig ? "保存中..." : "保存配置"}
           </Button>
         </div>
-        {runtimeConfigForm ? (
+        {runtimeConfigLoadError ? (
+          <div
+            role="status"
+            className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200"
+          >
+            {runtimeConfigLoadError}
+          </div>
+        ) : runtimeConfigForm ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-1">
               <Label className="text-xs">YASA超时(秒)</Label>
@@ -644,6 +672,15 @@ export default function YasaRules({
         )}
       </div>
 
+      {customConfigsLoadError ? (
+        <div
+          role="status"
+          className="cyber-card border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200"
+        >
+          {customConfigsLoadError}
+        </div>
+      ) : null}
+
       <div className="cyber-card relative z-10 overflow-hidden">
         <DataTable
           data={rows}
@@ -651,24 +688,17 @@ export default function YasaRules({
           state={tableState}
           onStateChange={setTableState}
           loading={loading}
+          error={rulesLoadError || undefined}
           emptyState={{
-            title: loadFailed ? "加载失败，请检查 YASA 资源目录配置" : "暂无符合条件的规则",
+            title: "暂无符合条件的规则",
+            description:
+              rules.length === 0 && customRuleConfigs.length === 0
+                ? "当前没有可展示的 YASA 规则"
+                : "调整筛选条件尝试",
           }}
           toolbar={{
             searchPlaceholder: "搜索规则名称或ID...",
-            leadingActions: (
-              <div className="flex items-center gap-2">
-                {engineSelector}
-                <Button
-                  type="button"
-                  size="sm"
-                  className="cyber-btn-primary h-9"
-                  onClick={() => setShowImportDialog(true)}
-                >
-                  导入自定义规则
-                </Button>
-              </div>
-            ),
+            leadingActions: engineSelector,
             showGlobalSearch: false,
             showColumnVisibility: false,
 						showDensityToggle: false,
@@ -693,6 +723,14 @@ export default function YasaRules({
                 </Button>
                 <Button type="button" size="sm" variant="ghost" className="h-8 text-muted-foreground" disabled>
                   取消操作
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="cyber-btn-primary h-9"
+                  onClick={() => setShowImportDialog(true)}
+                >
+                  导入自定义规则
                 </Button>
               </>
             ),

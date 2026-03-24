@@ -1,8 +1,6 @@
 from app.api.v1.endpoints.projects_shared import *
-from app.api.v1.endpoints.static_tasks_yasa import (
-    _extract_yasa_rules_from_resource_dir,
-    _resolve_resource_dir,
-)
+from app.services.yasa_rules_snapshot import extract_yasa_snapshot_rules
+from app.models.project_management_metrics import ProjectManagementMetrics
 from urllib.parse import urlencode
 
 router = APIRouter()
@@ -239,11 +237,8 @@ def _build_dashboard_static_recent_tasks(
 
 
 async def _get_yasa_rule_total() -> int:
-    resource_dir = _resolve_resource_dir()
-    if resource_dir is None:
-        return 0
     try:
-        return len(_extract_yasa_rules_from_resource_dir(resource_dir))
+        return len(extract_yasa_snapshot_rules())
     except Exception:
         return 0
 
@@ -415,6 +410,28 @@ async def get_dashboard_snapshot(
     project_source_type_map: Dict[str, str] = {
         str(project_id): str(source_type or "")
         for project_id, _project_name, source_type in project_rows
+        if project_id
+    }
+    management_metrics_result = await db.execute(
+        select(
+            ProjectManagementMetrics.project_id,
+            ProjectManagementMetrics.status,
+            ProjectManagementMetrics.critical,
+            ProjectManagementMetrics.high,
+            ProjectManagementMetrics.medium,
+            ProjectManagementMetrics.low,
+        )
+    )
+    management_metrics_rows = management_metrics_result.all()
+    project_management_metrics_map: Dict[str, Dict[str, Any]] = {
+        str(project_id): {
+            "status": str(status or ""),
+            "critical": _to_non_negative_int(critical),
+            "high": _to_non_negative_int(high),
+            "medium": _to_non_negative_int(medium),
+            "low": _to_non_negative_int(low),
+        }
+        for project_id, status, critical, high, medium, low in management_metrics_rows
         if project_id
     }
 
@@ -849,6 +866,8 @@ async def get_dashboard_snapshot(
         status: Any,
         timestamp: Optional[datetime],
         duration_ms: int,
+        *,
+        include_in_task_breakdown: bool = True,
     ) -> None:
         hotspot = ensure_hotspot(project_id)
         _update_project_hotspot_scan_meta(
@@ -860,9 +879,10 @@ async def get_dashboard_snapshot(
         )
 
         status_bucket = _bucket_dashboard_task_status(status)
-        task_status_breakdown[status_bucket] = _to_non_negative_int(
-            task_status_breakdown.get(status_bucket, 0)
-        ) + 1
+        if include_in_task_breakdown:
+            task_status_breakdown[status_bucket] = _to_non_negative_int(
+                task_status_breakdown.get(status_bucket, 0)
+            ) + 1
 
         if status_bucket == "completed":
             success_totals["completed"] += 1
@@ -968,7 +988,14 @@ async def get_dashboard_snapshot(
         if _normalize_status_token(status) == "completed":
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         opengrep_duration_ms += duration_ms
-        register_task("opengrep", normalized_project_id, status, task_timestamp, duration_ms)
+        register_task(
+            "opengrep",
+            normalized_project_id,
+            status,
+            task_timestamp,
+            duration_ms,
+            include_in_task_breakdown=False,
+        )
         static_recent_task_records.append(
             {
                 "task_id": normalized_task_id,
@@ -1003,7 +1030,14 @@ async def get_dashboard_snapshot(
         if _normalize_status_token(status) == "completed":
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         gitleaks_duration_ms += duration_ms
-        register_task("gitleaks", normalized_project_id, status, task_timestamp, duration_ms)
+        register_task(
+            "gitleaks",
+            normalized_project_id,
+            status,
+            task_timestamp,
+            duration_ms,
+            include_in_task_breakdown=False,
+        )
         static_recent_task_records.append(
             {
                 "task_id": normalized_task_id,
@@ -1044,7 +1078,14 @@ async def get_dashboard_snapshot(
         if _normalize_status_token(status) == "completed":
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         bandit_duration_ms += duration_ms
-        register_task("bandit", normalized_project_id, status, task_timestamp, duration_ms)
+        register_task(
+            "bandit",
+            normalized_project_id,
+            status,
+            task_timestamp,
+            duration_ms,
+            include_in_task_breakdown=False,
+        )
         static_recent_task_records.append(
             {
                 "task_id": normalized_task_id,
@@ -1079,7 +1120,14 @@ async def get_dashboard_snapshot(
         if _normalize_status_token(status) == "completed":
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         phpstan_duration_ms += duration_ms
-        register_task("phpstan", normalized_project_id, status, task_timestamp, duration_ms)
+        register_task(
+            "phpstan",
+            normalized_project_id,
+            status,
+            task_timestamp,
+            duration_ms,
+            include_in_task_breakdown=False,
+        )
         static_recent_task_records.append(
             {
                 "task_id": normalized_task_id,
@@ -1114,7 +1162,14 @@ async def get_dashboard_snapshot(
         if _normalize_status_token(status) == "completed":
             ensure_scan_runs(normalized_project_id)["static_runs"] += 1
         yasa_duration_ms += duration_ms
-        register_task("yasa", normalized_project_id, status, task_timestamp, duration_ms)
+        register_task(
+            "yasa",
+            normalized_project_id,
+            status,
+            task_timestamp,
+            duration_ms,
+            include_in_task_breakdown=False,
+        )
         static_recent_task_records.append(
             {
                 "task_id": normalized_task_id,
@@ -1177,9 +1232,16 @@ async def get_dashboard_snapshot(
             detail_path=f"/agent-audit/{normalized_task_id}",
         )
 
-    recent_task_items.extend(
-        _build_dashboard_static_recent_tasks(static_recent_task_records, project_name_map)
+    static_recent_tasks = _build_dashboard_static_recent_tasks(
+        static_recent_task_records,
+        project_name_map,
     )
+    for item in static_recent_tasks:
+        status_bucket = _bucket_dashboard_task_status(item.get("status"))
+        task_status_breakdown[status_bucket] = _to_non_negative_int(
+            task_status_breakdown.get(status_bucket, 0)
+        ) + 1
+    recent_task_items.extend(static_recent_tasks)
 
     severe_rule_rows: List[tuple[Any, Any, Any, Any, Any, Any]] = [
         row for row in rule_rows if str(row[2] or "").strip().upper() == "ERROR"
@@ -1688,42 +1750,49 @@ async def get_dashboard_snapshot(
             -(item["created_at"].timestamp() if item.get("created_at") else 0.0),
             item["task_id"],
         ),
-    )[:5]
+    )
 
     project_risk_distribution = [
         DashboardProjectRiskDistributionItem(
             project_id=project_id,
-            project_name=str(hotspot.get("project_name") or "未知项目"),
-            critical_count=_to_non_negative_int(hotspot.get("critical_count", 0)),
-            high_count=_to_non_negative_int(hotspot.get("high_count", 0)),
-            medium_count=_to_non_negative_int(hotspot.get("medium_count", 0)),
-            low_count=_to_non_negative_int(hotspot.get("low_count", 0)),
+            project_name=project_name_map.get(project_id, "未知项目"),
+            critical_count=_to_non_negative_int(metrics.get("critical", 0)),
+            high_count=_to_non_negative_int(metrics.get("high", 0)),
+            medium_count=_to_non_negative_int(metrics.get("medium", 0)),
+            low_count=_to_non_negative_int(metrics.get("low", 0)),
             total_findings=(
-                _to_non_negative_int(hotspot.get("critical_count", 0))
-                + _to_non_negative_int(hotspot.get("high_count", 0))
-                + _to_non_negative_int(hotspot.get("medium_count", 0))
-                + _to_non_negative_int(hotspot.get("low_count", 0))
+                _to_non_negative_int(metrics.get("critical", 0))
+                + _to_non_negative_int(metrics.get("high", 0))
+                + _to_non_negative_int(metrics.get("medium", 0))
+                + _to_non_negative_int(metrics.get("low", 0))
             ),
         )
-        for project_id, hotspot in sorted(
-            hotspots_map.items(),
+        for project_id, metrics in sorted(
+            (
+                (
+                    project_id,
+                    metrics,
+                )
+                for project_id, metrics in project_management_metrics_map.items()
+                if _normalize_status_token(metrics.get("status")) == "ready"
+                and (
+                    _to_non_negative_int(metrics.get("critical", 0))
+                    + _to_non_negative_int(metrics.get("high", 0))
+                    + _to_non_negative_int(metrics.get("medium", 0))
+                    + _to_non_negative_int(metrics.get("low", 0))
+                )
+                > 0
+            ),
             key=lambda item: (
                 -(
-                    _to_non_negative_int(item[1].get("critical_count", 0))
-                    + _to_non_negative_int(item[1].get("high_count", 0))
-                    + _to_non_negative_int(item[1].get("medium_count", 0))
-                    + _to_non_negative_int(item[1].get("low_count", 0))
+                    _to_non_negative_int(item[1].get("critical", 0))
+                    + _to_non_negative_int(item[1].get("high", 0))
+                    + _to_non_negative_int(item[1].get("medium", 0))
+                    + _to_non_negative_int(item[1].get("low", 0))
                 ),
-                item[1].get("project_name") or "",
+                project_name_map.get(item[0], "未知项目"),
             ),
         )[:top_n]
-        if (
-            _to_non_negative_int(hotspot.get("critical_count", 0))
-            + _to_non_negative_int(hotspot.get("high_count", 0))
-            + _to_non_negative_int(hotspot.get("medium_count", 0))
-            + _to_non_negative_int(hotspot.get("low_count", 0))
-        )
-        > 0
     ]
 
     verified_vulnerability_types = [
