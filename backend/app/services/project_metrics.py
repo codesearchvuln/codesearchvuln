@@ -3,11 +3,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session_factory
 from app.models import (
+    AgentFinding,
     AgentTask,
     BanditScanTask,
     GitleaksScanTask,
@@ -19,6 +20,9 @@ from app.models import (
 from app.services.zip_storage import get_project_zip_meta
 
 logger = logging.getLogger(__name__)
+
+HYBRID_TASK_NAME_MARKER = "[HYBRID]"
+INTELLIGENT_TASK_NAME_MARKER = "[INTELLIGENT]"
 
 
 class ProjectMetricsService:
@@ -41,6 +45,10 @@ class ProjectMetricsService:
         "high",
         "medium",
         "low",
+        "verified_critical",
+        "verified_high",
+        "verified_medium",
+        "verified_low",
     )
 
     @classmethod
@@ -199,6 +207,9 @@ class ProjectMetricsService:
         project_id: str,
     ) -> None:
         stmt = select(
+            AgentTask.id,
+            AgentTask.name,
+            AgentTask.description,
             AgentTask.status,
             AgentTask.completed_at,
             AgentTask.critical_count,
@@ -217,6 +228,32 @@ class ProjectMetricsService:
         payload["high"] = (payload.get("high") or 0) + high
         payload["medium"] = (payload.get("medium") or 0) + medium
         payload["low"] = (payload.get("low") or 0) + low
+
+        task_ids = [str(row.id) for row in rows]
+        verified_counts_by_task = await cls._load_verified_severity_counts(db, task_ids)
+        for row in rows:
+            if cls._resolve_agent_source_mode(row.name, row.description) not in {
+                "intelligent",
+                "hybrid",
+            }:
+                continue
+            verified_counts = verified_counts_by_task.get(str(row.id), {})
+            payload["verified_critical"] = (
+                (payload.get("verified_critical") or 0)
+                + int(verified_counts.get("critical", 0) or 0)
+            )
+            payload["verified_high"] = (
+                (payload.get("verified_high") or 0)
+                + int(verified_counts.get("high", 0) or 0)
+            )
+            payload["verified_medium"] = (
+                (payload.get("verified_medium") or 0)
+                + int(verified_counts.get("medium", 0) or 0)
+            )
+            payload["verified_low"] = (
+                (payload.get("verified_low") or 0)
+                + int(verified_counts.get("low", 0) or 0)
+            )
 
     @classmethod
     async def _apply_opengrep_tasks(
@@ -337,6 +374,70 @@ class ProjectMetricsService:
     @staticmethod
     def _normalize_status(value: Optional[str]) -> str:
         return str(value or "").strip().lower()
+
+    @staticmethod
+    def _resolve_agent_source_mode(
+        name: Optional[str],
+        description: Optional[str],
+    ) -> str:
+        normalized_name = str(name or "").strip().lower()
+        normalized_description = str(description or "").strip().lower()
+        normalized_combined = f"{normalized_name} {normalized_description}"
+        if (
+            HYBRID_TASK_NAME_MARKER.lower() in normalized_combined
+            or "混合扫描" in normalized_combined
+        ):
+            return "hybrid"
+        if INTELLIGENT_TASK_NAME_MARKER.lower() in normalized_combined:
+            return "intelligent"
+        return "hybrid"
+
+    @classmethod
+    async def _load_verified_severity_counts(
+        cls,
+        db: AsyncSession,
+        task_ids: Sequence[str],
+    ) -> Dict[str, Dict[str, int]]:
+        normalized_task_ids = [str(task_id).strip() for task_id in task_ids if str(task_id).strip()]
+        if not normalized_task_ids:
+            return {}
+
+        normalized_status = func.lower(func.coalesce(AgentFinding.status, ""))
+        normalized_verdict = func.lower(func.coalesce(AgentFinding.verdict, ""))
+        rows = await db.execute(
+            select(
+                AgentFinding.task_id,
+                func.sum(
+                    case((func.lower(AgentFinding.severity) == "critical", 1), else_=0)
+                ).label("critical"),
+                func.sum(
+                    case((func.lower(AgentFinding.severity) == "high", 1), else_=0)
+                ).label("high"),
+                func.sum(
+                    case((func.lower(AgentFinding.severity) == "medium", 1), else_=0)
+                ).label("medium"),
+                func.sum(
+                    case((func.lower(AgentFinding.severity) == "low", 1), else_=0)
+                ).label("low"),
+            )
+            .where(
+                AgentFinding.task_id.in_(normalized_task_ids),
+                AgentFinding.is_verified.is_(True),
+                normalized_status != "false_positive",
+                normalized_verdict != "false_positive",
+            )
+            .group_by(AgentFinding.task_id)
+        )
+
+        counts_by_task: Dict[str, Dict[str, int]] = {}
+        for task_id, critical, high, medium, low in rows.fetchall():
+            counts_by_task[str(task_id)] = {
+                "critical": int(critical or 0),
+                "high": int(high or 0),
+                "medium": int(medium or 0),
+                "low": int(low or 0),
+            }
+        return counts_by_task
 
 
 class ProjectMetricsRefresher:

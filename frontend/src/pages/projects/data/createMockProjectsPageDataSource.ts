@@ -34,6 +34,10 @@ function createMockMetrics(
 		high: overrides.high ?? 3,
 		medium: overrides.medium ?? 5,
 		low: overrides.low ?? 4,
+		verified_critical: overrides.verified_critical ?? 1,
+		verified_high: overrides.verified_high ?? 2,
+		verified_medium: overrides.verified_medium ?? 1,
+		verified_low: overrides.verified_low ?? 0,
 		last_completed_task_at:
 			overrides.last_completed_task_at ?? new Date().toISOString(),
 		status: overrides.status ?? "ready",

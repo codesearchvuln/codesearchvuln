@@ -1,8 +1,10 @@
+import * as React from "react";
 import { Link } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/data-table";
 import type { AppColumnDef } from "@/components/data-table";
+import type { ProjectSeverityBreakdown } from "@/features/projects/services/projectCardPreview";
 import type { ProjectsPageRowViewModel } from "../types";
 import { PROJECT_ACTION_BTN_SUBTLE } from "../constants";
 
@@ -65,13 +67,33 @@ const BODY_CELL_CLASSNAME = "border-b-2 border-border/95";
 const DIVIDER_CELL_CLASSNAME = "border-r-2 border-border/90";
 const SECTION_DIVIDER_CLASSNAME = "border-l-2 border-border/95";
 const METRIC_GROUP_CLASSNAME =
-  "flex items-center justify-center gap-2.5 whitespace-nowrap";
-const METRIC_GROUP_ITEM_CLASSNAME =
-  "inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/40 px-2 py-1";
-const METRIC_GROUP_LABEL_CLASSNAME =
-  "text-[14px] font-medium tracking-[0.08em] text-muted-foreground";
-const METRIC_EMPTY_TEXT_CLASSNAME =
-  "text-[14px] font-medium tracking-[0.08em] text-muted-foreground";
+  "flex items-center justify-center";
+const METRIC_TRIGGER_CLASSNAME =
+  "group relative inline-flex min-w-[4.5rem] items-center justify-center rounded-full border border-border/60 bg-background/40 p-1 text-center transition-all duration-200 hover:border-primary/40 hover:bg-background/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-default disabled:hover:border-border/60 disabled:hover:bg-background/40";
+const METRIC_POPOVER_CLASSNAME =
+  "absolute left-1/2 top-[calc(100%+0.75rem)] z-30 w-[19rem] -translate-x-1/2 rounded-2xl border border-border/80 bg-background/95 p-4 text-left shadow-[0_24px_80px_rgba(15,23,42,0.42)] backdrop-blur-sm transition-all duration-150";
+const METRIC_POPOVER_HIDDEN_CLASSNAME =
+  "pointer-events-none translate-y-1 opacity-0";
+const METRIC_POPOVER_VISIBLE_CLASSNAME =
+  "translate-y-0 opacity-100";
+const METRIC_POPOVER_HEADER_CLASSNAME =
+  "mb-3 text-[12px] font-semibold uppercase tracking-[0.18em] text-foreground/55";
+const METRIC_POPOVER_GRID_CLASSNAME = "grid grid-cols-2 gap-2";
+const METRIC_POPOVER_ITEM_CLASSNAME =
+  "rounded-2xl border border-border/70 bg-muted/20 px-3 py-2";
+const METRIC_POPOVER_ITEM_LABEL_CLASSNAME =
+  "mb-2 block text-[12px] font-medium tracking-[0.08em] text-muted-foreground";
+
+type MetricGroupKey = "vulnerabilities" | "ai-verified";
+
+interface MetricSummaryCellProps {
+  groupKey: MetricGroupKey;
+  label: string;
+  stats: ProjectSeverityBreakdown;
+  metricsStatus: ProjectsPageRowViewModel["metricsStatus"];
+  metricsStatusMessage: string | null;
+  toneClassName: string;
+}
 
 function renderMetricChip(value: number, tone: string, chipClassName: string) {
   return (
@@ -81,6 +103,139 @@ function renderMetricChip(value: number, tone: string, chipClassName: string) {
     >
       <span className={METRIC_CHIP_VALUE_CLASSNAME}>{value}</span>
     </span>
+  );
+}
+
+function MetricSummaryCell({
+  groupKey,
+  label,
+  stats,
+  metricsStatus,
+  metricsStatusMessage,
+  toneClassName,
+}: MetricSummaryCellProps) {
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = React.useState(false);
+  const canInteract = metricsStatus === "ready";
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+
+    function handlePointerDown(event: MouseEvent | TouchEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!wrapperRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  function openPopover() {
+    if (canInteract) {
+      setOpen(true);
+    }
+  }
+
+  function closePopover() {
+    setOpen(false);
+  }
+
+  function togglePopover() {
+    if (canInteract) {
+      setOpen((current) => !current);
+    }
+  }
+
+  function handleBlur(event: React.FocusEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && wrapperRef.current?.contains(nextTarget)) {
+      return;
+    }
+    closePopover();
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (!canInteract) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      togglePopover();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePopover();
+    }
+  }
+
+  return (
+    <div
+      ref={wrapperRef}
+      data-project-metric-group={groupKey}
+      className={`${METRIC_GROUP_CLASSNAME} relative`}
+      title={!canInteract ? metricsStatusMessage ?? undefined : undefined}
+      onMouseEnter={openPopover}
+      onMouseLeave={closePopover}
+      onBlur={handleBlur}
+    >
+      <button
+        type="button"
+        data-project-metric-trigger={groupKey}
+        className={METRIC_TRIGGER_CLASSNAME}
+        aria-label={`${label} ${stats.total}`}
+        aria-expanded={canInteract ? open : false}
+        aria-haspopup={canInteract ? "dialog" : undefined}
+        onClick={togglePopover}
+        onFocus={openPopover}
+        onKeyDown={handleKeyDown}
+        disabled={!canInteract}
+      >
+        {renderMetricChip(stats.total, groupKey, toneClassName)}
+      </button>
+      <div
+        data-project-metric-popover={groupKey}
+        data-state={open && canInteract ? "open" : "closed"}
+        aria-hidden={!open || !canInteract}
+        className={`${METRIC_POPOVER_CLASSNAME} ${
+          open && canInteract
+            ? METRIC_POPOVER_VISIBLE_CLASSNAME
+            : METRIC_POPOVER_HIDDEN_CLASSNAME
+        }`}
+      >
+        <div className={METRIC_POPOVER_HEADER_CLASSNAME}>{label}</div>
+        <div className={METRIC_POPOVER_GRID_CLASSNAME}>
+          {VULNERABILITY_COLUMNS.map((column) => (
+            <div
+              key={`${groupKey}-${column.key}`}
+              data-project-metric-item={column.key}
+              className={METRIC_POPOVER_ITEM_CLASSNAME}
+            >
+              <span className={METRIC_POPOVER_ITEM_LABEL_CLASSNAME}>
+                {column.label}
+              </span>
+              {renderMetricChip(
+                stats[column.key],
+                column.key,
+                VULNERABILITY_METRIC_CHIP_CLASSNAMES[column.key],
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -169,46 +324,41 @@ function buildColumns(
       meta: {
         label: "发现漏洞",
         plainHeader: true,
-        minWidth: 420,
+        minWidth: 186,
         headerClassName: `${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
         cellClassName: `${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
       },
-      cell: ({ row }) => {
-        const visibleColumns = VULNERABILITY_COLUMNS.filter(
-          (column) => row.original.vulnerabilityStats[column.key] > 0,
-        );
-
-        return (
-          <div
-            data-project-metric-group="vulnerabilities"
-            className={METRIC_GROUP_CLASSNAME}
-            title={
-              row.original.metricsStatus !== "ready"
-                ? row.original.metricsStatusMessage ?? undefined
-                : undefined
-            }
-          >
-            {visibleColumns.length > 0 ? (
-              visibleColumns.map((column) => (
-                <span
-                  key={column.key}
-                  data-project-metric-item={column.key}
-                  className={METRIC_GROUP_ITEM_CLASSNAME}
-                >
-                  <span className={METRIC_GROUP_LABEL_CLASSNAME}>{column.label}</span>
-                  {renderMetricChip(
-                    row.original.vulnerabilityStats[column.key],
-                    column.key,
-                    VULNERABILITY_METRIC_CHIP_CLASSNAMES[column.key],
-                  )}
-                </span>
-              ))
-            ) : (
-              <span className={METRIC_EMPTY_TEXT_CLASSNAME}>暂未发现漏洞</span>
-            )}
-          </div>
-        );
+      cell: ({ row }) => (
+        <MetricSummaryCell
+          groupKey="vulnerabilities"
+          label="发现潜在漏洞"
+          stats={row.original.vulnerabilityStats}
+          metricsStatus={row.original.metricsStatus}
+          metricsStatusMessage={row.original.metricsStatusMessage}
+          toneClassName="border-amber-500/30 bg-amber-500/12 text-amber-100"
+        />
+      ),
+    },
+    {
+      id: "aiVerified",
+      header: "AI验证漏洞",
+      meta: {
+        label: "AI验证",
+        plainHeader: true,
+        minWidth: 186,
+        headerClassName: `${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
+        cellClassName: `${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
       },
+      cell: ({ row }) => (
+        <MetricSummaryCell
+          groupKey="ai-verified"
+          label="AI验证漏洞"
+          stats={row.original.aiVerifiedStats}
+          metricsStatus={row.original.metricsStatus}
+          metricsStatusMessage={row.original.metricsStatusMessage}
+          toneClassName="border-sky-500/30 bg-sky-500/12 text-sky-100"
+        />
+      ),
     },
     {
       id: "actions",
@@ -285,7 +435,8 @@ export default function ProjectsTable({
       columns={columns}
       toolbar={false}
       pagination={false}
-      tableClassName="min-w-[1280px]"
+      className="overflow-visible"
+      tableClassName="min-w-[1360px]"
       emptyState={{
         title: "暂无项目",
       }}

@@ -21,6 +21,7 @@ EXPECTED_LINEAR_REVISIONS = [
     "a8f1c2d3e4b5",
     "b9d8e7f6a5b4",
     "f6a7b8c9d0e1",
+    "1f2e3d4c5b6a",
 ]
 
 OBSOLETE_MIGRATION_FILES = {
@@ -101,7 +102,7 @@ def test_alembic_versions_directory_is_linear():
         assert len(parents) <= 1, (revision, parents)
 
     actual_order = []
-    current_revision = "f6a7b8c9d0e1"
+    current_revision = "1f2e3d4c5b6a"
     while current_revision:
         actual_order.append(current_revision)
         parents = down_revisions[current_revision]

@@ -36,6 +36,7 @@ export interface ProjectsPageRowViewModel {
 	detailState: { from: string };
 	sizeText: string;
 	vulnerabilityStats: ProjectSeverityBreakdown;
+	aiVerifiedStats: ProjectSeverityBreakdown;
 	executionStats: {
 		completed: number;
 		running: number;

@@ -133,3 +133,21 @@ test("StaticAnalysisFindingsTable only disables status actions for the updating 
     2,
   );
 });
+
+test("StaticAnalysisFindingsTable keeps severity and confidence columns non-hideable", async () => {
+  const tableModule = await import(
+    "../src/pages/static-analysis/StaticAnalysisFindingsTable.tsx"
+  );
+
+  const columns = tableModule.getColumns({
+    currentRoute: "/static-analysis/task-1",
+    updatingKey: null,
+    onToggleStatus: () => {},
+  });
+
+  const severityColumn = columns.find((column: { id: string }) => column.id === "severity");
+  const confidenceColumn = columns.find((column: { id: string }) => column.id === "confidence");
+
+  assert.equal(severityColumn?.enableHiding, false);
+  assert.equal(confidenceColumn?.enableHiding, false);
+});

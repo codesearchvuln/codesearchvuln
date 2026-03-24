@@ -286,7 +286,15 @@ test("DashboardCommandCenter renders the live single-page dashboard layout", asy
 	assert.match(markup, /data-panel="trend"/);
 	assert.match(markup, /aria-pressed="true"/);
 	assert.match(markup, /混合扫描 · Alpha Gateway/);
+	assert.match(markup, /智能扫描 · Beta API/);
+	assert.match(markup, /静态扫描 · Gamma Portal/);
+	assert.doesNotMatch(markup, /静态扫描 · Delta PHP/);
+	assert.doesNotMatch(markup, /静态扫描 · Echo Console/);
 	assert.match(markup, /查看详情/);
+	assert.match(markup, /共 5 条/);
+	assert.match(markup, /第 1 \/ 2 页/);
+	assert.match(markup, /上一页/);
+	assert.match(markup, /下一页/);
 	assert.doesNotMatch(markup, /排行榜/);
 	assert.doesNotMatch(markup, /等待中/);
 });
@@ -443,4 +451,56 @@ test("formatCumulativeDuration formats scan durations with zh units", async () =
 	assert.equal(module.formatCumulativeDuration(61000), "1分 1秒");
 	assert.equal(module.formatCumulativeDuration(3605000), "1时 0分 5秒");
 	assert.equal(module.formatCumulativeDuration(90061000), "1天 1时 1分 1秒");
+});
+
+test("recent task pagination uses three items per page and clamps invalid pages", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+	const tasks = createSnapshotFixture().recent_tasks;
+
+	assert.equal(module.DASHBOARD_RECENT_TASKS_PAGE_SIZE, 3);
+
+	assert.deepEqual(module.paginateRecentTasks([], 1), {
+		items: [],
+		currentPage: 1,
+		totalPages: 1,
+		totalCount: 0,
+	});
+	assert.deepEqual(
+		module.paginateRecentTasks(tasks.slice(0, 1), 99),
+		{
+			items: tasks.slice(0, 1),
+			currentPage: 1,
+			totalPages: 1,
+			totalCount: 1,
+		},
+	);
+	assert.deepEqual(
+		module.paginateRecentTasks(tasks.slice(0, 3), 0),
+		{
+			items: tasks.slice(0, 3),
+			currentPage: 1,
+			totalPages: 1,
+			totalCount: 3,
+		},
+	);
+	assert.deepEqual(
+		module.paginateRecentTasks(tasks.slice(0, 4), 2),
+		{
+			items: tasks.slice(3, 4),
+			currentPage: 2,
+			totalPages: 2,
+			totalCount: 4,
+		},
+	);
+	assert.deepEqual(
+		module.paginateRecentTasks(tasks, 999),
+		{
+			items: tasks.slice(3, 5),
+			currentPage: 2,
+			totalPages: 2,
+			totalCount: 5,
+		},
+	);
 });

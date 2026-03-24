@@ -55,7 +55,7 @@ function getEngineBadgeClass(engine: UnifiedFindingRow["engine"]) {
   return "bg-cyan-500/20 text-cyan-300 border-cyan-500/30";
 }
 
-function getColumns(input: {
+export function getColumns(input: {
   currentRoute: string;
   updatingKey: string | null;
   onToggleStatus: (row: UnifiedFindingRow, target: FindingStatus) => void;
@@ -133,12 +133,12 @@ function getColumns(input: {
       id: "severity",
       accessorFn: (row) => row.severity,
       header: "危害",
-      enableSorting: false,
+      // enableSorting: false,
       enableHiding: false,
       sortingFn: (left, right) => right.original.severityScore - left.original.severityScore,
       meta: {
         label: "漏洞危害",
-        width: 100,
+        width: 150,
         filterVariant: "select",
         filterOptions: [
           { label: "严重", value: "CRITICAL" },
@@ -157,12 +157,12 @@ function getColumns(input: {
       id: "confidence",
       accessorFn: (row) => row.confidence,
       header: "置信度",
-      enableSorting: false,
+      // enableSorting: false,
       enableHiding: false,
       sortingFn: (left, right) => right.original.confidenceScore - left.original.confidenceScore,
       meta: {
         label: "置信度",
-        width: 150,
+        width: 180,
         filterVariant: "select",
         filterOptions: [
           { label: "高", value: "HIGH" },

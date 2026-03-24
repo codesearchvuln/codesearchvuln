@@ -39,6 +39,10 @@ class ProjectManagementMetrics(Base):
     high = Column(Integer, default=0)
     medium = Column(Integer, default=0)
     low = Column(Integer, default=0)
+    verified_critical = Column(Integer, default=0)
+    verified_high = Column(Integer, default=0)
+    verified_medium = Column(Integer, default=0)
+    verified_low = Column(Integer, default=0)
 
     last_completed_task_at = Column(DateTime(timezone=True), nullable=True)
 

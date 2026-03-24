@@ -43,6 +43,10 @@ export interface ProjectManagementMetrics {
   high: number;
   medium: number;
   low: number;
+  verified_critical?: number;
+  verified_high?: number;
+  verified_medium?: number;
+  verified_low?: number;
   last_completed_task_at?: string | null;
   status: "pending" | "ready" | "failed";
   error_message?: string | null;

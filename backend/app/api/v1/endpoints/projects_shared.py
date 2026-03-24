@@ -917,6 +917,10 @@ class ProjectManagementMetricsResponse(BaseModel):
     high: int
     medium: int
     low: int
+    verified_critical: int
+    verified_high: int
+    verified_medium: int
+    verified_low: int
     last_completed_task_at: Optional[datetime] = None
     status: Literal["pending", "ready", "failed"]
     error_message: Optional[str] = None

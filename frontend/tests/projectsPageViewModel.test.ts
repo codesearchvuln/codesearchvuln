@@ -131,6 +131,8 @@ test("projects view model renders archive size and zero stats when metrics pendi
 	assert.equal(viewModel.rows[0].executionStats.running, 0);
 	assert.equal(viewModel.rows[0].vulnerabilityStats.critical, 0);
 	assert.equal(viewModel.rows[0].vulnerabilityStats.low, 0);
+	assert.equal(viewModel.rows[0].aiVerifiedStats.total, 0);
+	assert.equal(viewModel.rows[0].aiVerifiedStats.high, 0);
 });
 
 test("projects view model exposes metrics when ready", async () => {
@@ -167,6 +169,10 @@ test("projects view model exposes metrics when ready", async () => {
 				high: 3,
 				medium: 4,
 				low: 1,
+				verified_critical: 1,
+				verified_high: 2,
+				verified_medium: 3,
+				verified_low: 4,
 				created_at: "2024-01-01T00:00:00Z",
 				updated_at: "2024-01-01T00:00:00Z",
 			},
@@ -187,6 +193,8 @@ test("projects view model exposes metrics when ready", async () => {
 	assert.equal(row.sizeText, "2.50 Mb");
 	assert.equal(row.executionStats.completed, 5);
 	assert.equal(row.vulnerabilityStats.critical, 2);
+	assert.equal(row.aiVerifiedStats.total, 10);
+	assert.equal(row.aiVerifiedStats.medium, 3);
 	assert.equal(row.metricsStatus, "ready");
 });
 
@@ -224,6 +232,10 @@ test("projects view model exposes vulnerability stats and browse guards", async 
 				high: 1,
 				medium: 2,
 				low: 3,
+				verified_critical: 0,
+				verified_high: 0,
+				verified_medium: 1,
+				verified_low: 0,
 				created_at: "2024-01-01T00:00:00Z",
 				updated_at: "2024-01-01T00:00:00Z",
 			},
@@ -245,9 +257,70 @@ test("projects view model exposes vulnerability stats and browse guards", async 
 	assert.equal(row.vulnerabilityStats.high, 1);
 	assert.equal(row.vulnerabilityStats.medium, 2);
 	assert.equal(row.vulnerabilityStats.low, 3);
+	assert.equal(row.aiVerifiedStats.medium, 1);
+	assert.equal(row.aiVerifiedStats.total, 1);
 	assert.equal(row.actions.canBrowseCode, false);
 	assert.equal(
 		row.actions.browseCodeDisabledReason,
 		"仅 ZIP 类型项目支持代码浏览",
 	);
+});
+
+test("projects view model falls back missing AI verified severities to zero", async () => {
+	const builder = await importOrFail<any>(
+		"../src/pages/projects/lib/buildProjectsPageViewModel.ts",
+	);
+
+	const projects = [
+		{
+			id: "p-legacy-ai",
+			name: "Legacy Metrics Project",
+			description: "",
+			source_type: "zip",
+			repository_url: undefined,
+			repository_type: "other",
+			default_branch: "main",
+			programming_languages: "ts",
+			owner_id: "u1",
+			is_active: true,
+			created_at: "2024-01-01T00:00:00Z",
+			updated_at: "2024-01-01T00:00:00Z",
+			management_metrics: {
+				status: "ready",
+				archive_size_bytes: 1_024,
+				completed_tasks: 1,
+				running_tasks: 0,
+				total_tasks: 1,
+				agent_tasks: 1,
+				opengrep_tasks: 0,
+				gitleaks_tasks: 0,
+				bandit_tasks: 0,
+				phpstan_tasks: 0,
+				critical: 1,
+				high: 0,
+				medium: 0,
+				low: 0,
+				created_at: "2024-01-01T00:00:00Z",
+				updated_at: "2024-01-01T00:00:00Z",
+			},
+		},
+	];
+
+	const viewModel = builder.buildProjectsPageViewModel({
+		loading: false,
+		filteredProjects: projects,
+		pagedProjects: projects,
+		projectPage: 1,
+		totalProjectPages: 1,
+		projectDetailFrom: "/",
+		searchTerm: "",
+		searchPlaceholder: "Search",
+	});
+	const row = viewModel.rows[0];
+
+	assert.equal(row.aiVerifiedStats.total, 0);
+	assert.equal(row.aiVerifiedStats.critical, 0);
+	assert.equal(row.aiVerifiedStats.high, 0);
+	assert.equal(row.aiVerifiedStats.medium, 0);
+	assert.equal(row.aiVerifiedStats.low, 0);
 });

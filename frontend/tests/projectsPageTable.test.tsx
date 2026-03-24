@@ -39,6 +39,13 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 						low: 13,
 						total: 29,
 					},
+					aiVerifiedStats: {
+						critical: 1,
+						high: 4,
+						medium: 4,
+						low: 2,
+						total: 11,
+					},
 					executionStats: { completed: 2, running: 1 },
 					metricsStatus: "ready",
 					metricsStatusMessage: null,
@@ -63,6 +70,13 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 						low: 3,
 						total: 6,
 					},
+					aiVerifiedStats: {
+						critical: 0,
+						high: 0,
+						medium: 0,
+						low: 0,
+						total: 0,
+					},
 					executionStats: { completed: 0, running: 0 },
 					metricsStatus: "pending",
 					metricsStatusMessage: "指标同步中...",
@@ -86,19 +100,14 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 	assert.match(markup, /操作/);
 	// assert.match(markup, /执行任务/);
 	assert.match(markup, /发现潜在漏洞/);
-	assert.match(markup, /严重/);
-	assert.match(markup, /高危/);
-	assert.match(markup, /中危/);
-	assert.match(markup, /低危/);
+	assert.match(markup, /AI验证漏洞/);
 	assert.match(markup, /查看详情/);
 	assert.match(markup, /代码浏览/);
 	assert.match(markup, /创建扫描/);
-	assert.match(markup, />3</);
-	assert.match(markup, />5</);
-	assert.match(markup, />8</);
-	assert.match(markup, />13</);
-	assert.match(markup, />2</);
-	assert.match(markup, />1</);
+	assert.match(markup, />29</);
+	assert.match(markup, />11</);
+	assert.match(markup, />6</);
+	assert.match(markup, />0</);
 	assert.match(markup, /仅 ZIP 类型项目支持代码浏览/);
 	assert.match(markup, /指标同步中\.\.\./);
 	assert.doesNotMatch(markup, /序号/);
@@ -109,6 +118,7 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 	assert.match(markup, /<th[^>]*>项目大小<\/th>/);
 	// assert.match(markup, /<th[^>]*>执行任务<\/th>/);
 	assert.match(markup, /<th[^>]*>发现潜在漏洞<\/th>/);
+	assert.match(markup, /<th[^>]*>AI验证漏洞<\/th>/);
 	assert.match(markup, /<th[^>]*>操作<\/th>/);
 	assert.doesNotMatch(markup, /项目概览|体量概览|快捷操作|任务概览|风险概览/);
 	assert.doesNotMatch(markup, /名称与入口|规模与体量|详情 \/ 浏览 \/ 扫描|完成 \/ 运行中|按风险等级分布/);
@@ -119,19 +129,16 @@ test("ProjectsTable renders compact grouped headers and browse-state actions", a
 	assert.doesNotMatch(markup, /data-project-group-header=/);
 	assert.doesNotMatch(markup, /data-project-group-label=/);
 	assert.match(markup, /data-project-metric-group="vulnerabilities"/);
-	assert.match(markup, /data-project-metric-item="critical"/);
-	assert.match(markup, /data-project-metric-item="high"/);
-	assert.match(markup, /data-project-metric-item="medium"/);
-	assert.match(markup, /data-project-metric-item="low"/);
-	assert.match(markup, /data-project-metric-tone="critical"/);
-	assert.match(markup, /data-project-metric-tone="high"/);
-	assert.match(markup, /data-project-metric-tone="medium"/);
-	assert.match(markup, /data-project-metric-tone="low"/);
+	assert.match(markup, /data-project-metric-group="ai-verified"/);
+	assert.match(markup, /data-project-metric-trigger="vulnerabilities"/);
+	assert.match(markup, /data-project-metric-trigger="ai-verified"/);
+	assert.match(markup, /data-project-metric-popover="vulnerabilities"/);
+	assert.match(markup, /data-project-metric-popover="ai-verified"/);
 	assert.match(markup, /inline-flex min-w-\[3\.25rem\] items-center justify-center rounded-full border px-3 py-1/);
-	assert.match(markup, /flex items-center justify-center gap-2\.5 whitespace-nowrap/);
-	assert.match(markup, /inline-flex items-center gap-2 rounded-full border border-border\/60 bg-background\/40 px-2 py-1/);
+	assert.match(markup, /flex items-center justify-center/);
 	assert.match(markup, /font-semibold tabular-nums text-\[18px\]/);
 	assert.doesNotMatch(markup, /inline-flex min-w-\[5\.5rem\] items-center justify-center rounded-md border px-3 py-1\.5/);
+	assert.doesNotMatch(markup, /暂未发现漏洞/);
 	assert.match(markup, /border-b-2/);
 	assert.match(markup, /border-r-2 border-border\/90/);
 	assert.match(markup, /border-l-2 border-border\/95/);
@@ -166,6 +173,13 @@ test("ProjectsTable hides zero-count vulnerability severities and shows empty pl
 						low: 1,
 						total: 3,
 					},
+					aiVerifiedStats: {
+						critical: 0,
+						high: 1,
+						medium: 0,
+						low: 0,
+						total: 1,
+					},
 					executionStats: { completed: 0, running: 0 },
 					metricsStatus: "ready",
 					metricsStatusMessage: null,
@@ -190,6 +204,13 @@ test("ProjectsTable hides zero-count vulnerability severities and shows empty pl
 						low: 0,
 						total: 0,
 					},
+					aiVerifiedStats: {
+						critical: 0,
+						high: 0,
+						medium: 0,
+						low: 0,
+						total: 0,
+					},
 					executionStats: { completed: 0, running: 0 },
 					metricsStatus: "ready",
 					metricsStatusMessage: null,
@@ -206,13 +227,56 @@ test("ProjectsTable hides zero-count vulnerability severities and shows empty pl
 		})),
 	);
 
-	assert.match(markup, /Mixed Risk Project[\s\S]*?高危[\s\S]*?>2</);
-	assert.match(markup, /Mixed Risk Project[\s\S]*?低危[\s\S]*?>1</);
-	assert.doesNotMatch(markup, /Mixed Risk Project[\s\S]*?严重[\s\S]*?>0</);
-	assert.doesNotMatch(markup, /Mixed Risk Project[\s\S]*?中危[\s\S]*?>0</);
-	assert.match(markup, /Empty Risk Project[\s\S]*?暂未发现漏洞/);
-	assert.doesNotMatch(markup, /Empty Risk Project[\s\S]*?严重/);
-	assert.doesNotMatch(markup, /Empty Risk Project[\s\S]*?高危/);
-	assert.doesNotMatch(markup, /Empty Risk Project[\s\S]*?中危/);
-	assert.doesNotMatch(markup, /Empty Risk Project[\s\S]*?低危/);
+	assert.match(markup, /Mixed Risk Project[\s\S]*?data-project-metric-trigger="vulnerabilities"[\s\S]*?>3</);
+	assert.match(markup, /Mixed Risk Project[\s\S]*?data-project-metric-trigger="ai-verified"[\s\S]*?>1</);
+	assert.match(markup, /Empty Risk Project[\s\S]*?data-project-metric-trigger="vulnerabilities"[\s\S]*?>0</);
+	assert.match(markup, /Empty Risk Project[\s\S]*?data-project-metric-trigger="ai-verified"[\s\S]*?>0</);
+	assert.doesNotMatch(markup, /暂未发现漏洞/);
+});
+
+test("ProjectsTable lets metric popovers escape the table frame", async () => {
+	const tableModule = await importOrFail<any>(
+		"../src/pages/projects/components/ProjectsTable.tsx",
+	);
+
+	const markup = renderToStaticMarkup(
+		createElement(MemoryRouter, {}, createElement(tableModule.default, {
+			rows: [
+				{
+					id: "p1",
+					name: "Portal Metrics Project",
+					detailPath: "/projects/p1",
+					detailState: { from: "/projects" },
+					sizeText: "1.00 Mb",
+					vulnerabilityStats: {
+						critical: 1,
+						high: 2,
+						medium: 3,
+						low: 4,
+						total: 10,
+					},
+					aiVerifiedStats: {
+						critical: 1,
+						high: 1,
+						medium: 1,
+						low: 1,
+						total: 4,
+					},
+					executionStats: { completed: 1, running: 0 },
+					metricsStatus: "ready",
+					metricsStatusMessage: null,
+					actions: {
+						canCreateScan: true,
+						canBrowseCode: true,
+						browseCodePath: "/projects/p1/code-browser",
+						browseCodeState: { from: "/projects" },
+						browseCodeDisabledReason: null,
+					},
+				},
+			],
+			onCreateScan: () => {},
+		})),
+	);
+
+	assert.match(markup, /class="[^"]*overflow-visible[^"]*"/);
 });

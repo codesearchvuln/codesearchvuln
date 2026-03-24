@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.security import get_password_hash
 from app.db.base import Base
+from app.models.agent_task import AgentFinding
 from app.models.agent_task import AgentTask
 from app.models.bandit import BanditScanTask
 from app.models.gitleaks import GitleaksScanTask
@@ -200,7 +201,7 @@ async def test_recalc_project_uses_updated_at_for_static_scan_tasks_without_comp
                 AgentTask(
                     project_id=project.id,
                     created_by=user.id,
-                    name="agent",
+                    name="[INTELLIGENT]agent",
                     status="running",
                     high_count=2,
                     medium_count=1,
@@ -226,7 +227,144 @@ async def test_recalc_project_uses_updated_at_for_static_scan_tasks_without_comp
     assert metrics.high == 3
     assert metrics.medium == 6
     assert metrics.low == 16
+    assert metrics.verified_critical == 0
+    assert metrics.verified_high == 0
+    assert metrics.verified_medium == 0
+    assert metrics.verified_low == 0
     assert metrics.last_completed_task_at is not None
     assert metrics.last_completed_task_at.replace(tzinfo=timezone.utc) == (
         base_time + timedelta(minutes=4)
     )
+
+
+@pytest.mark.asyncio
+async def test_recalc_project_aggregates_verified_findings_from_intelligent_and_hybrid_tasks(
+    session_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.project_metrics.get_project_zip_meta",
+        AsyncMock(return_value=None),
+    )
+
+    async with session_factory() as session:
+        user = User(
+            email="verified-metrics@example.com",
+            full_name="Verified Metrics",
+            hashed_password=get_password_hash("password123"),
+            is_active=True,
+            role="admin",
+        )
+        session.add(user)
+        await session.flush()
+
+        project = Project(
+            name="Verified Metrics Fixture",
+            description="verified metrics regression fixture",
+            source_type="zip",
+            repository_url=None,
+            repository_type="other",
+            default_branch="main",
+            programming_languages='["python"]',
+            owner_id=user.id,
+            is_active=True,
+        )
+        session.add(project)
+        await session.flush()
+
+        intelligent_task = AgentTask(
+            project_id=project.id,
+            created_by=user.id,
+            name="[INTELLIGENT] intelligent task",
+            description="智能扫描任务",
+            status="completed",
+            completed_at=datetime(2026, 3, 17, 9, 0, tzinfo=timezone.utc),
+            critical_count=1,
+            high_count=1,
+            medium_count=1,
+            low_count=1,
+        )
+        hybrid_task = AgentTask(
+            project_id=project.id,
+            created_by=user.id,
+            name="[HYBRID] hybrid task",
+            description="混合扫描任务",
+            status="completed",
+            completed_at=datetime(2026, 3, 17, 10, 0, tzinfo=timezone.utc),
+            high_count=1,
+            medium_count=1,
+        )
+        session.add_all([intelligent_task, hybrid_task])
+        await session.flush()
+
+        session.add_all(
+            [
+                AgentFinding(
+                    task_id=intelligent_task.id,
+                    vulnerability_type="sql_injection",
+                    severity="critical",
+                    title="Verified critical",
+                    status="verified",
+                    is_verified=True,
+                    verdict="confirmed",
+                ),
+                AgentFinding(
+                    task_id=intelligent_task.id,
+                    vulnerability_type="xss",
+                    severity="high",
+                    title="Verified high",
+                    status="verified",
+                    is_verified=True,
+                    verdict="likely",
+                ),
+                AgentFinding(
+                    task_id=hybrid_task.id,
+                    vulnerability_type="idor",
+                    severity="medium",
+                    title="Verified medium",
+                    status="verified",
+                    is_verified=True,
+                    verdict="confirmed",
+                ),
+                AgentFinding(
+                    task_id=hybrid_task.id,
+                    vulnerability_type="hardcoded_secret",
+                    severity="low",
+                    title="Verified low",
+                    status="verified",
+                    is_verified=True,
+                    verdict="confirmed",
+                ),
+                AgentFinding(
+                    task_id=hybrid_task.id,
+                    vulnerability_type="xss",
+                    severity="high",
+                    title="False positive excluded",
+                    status="false_positive",
+                    is_verified=True,
+                    verdict="false_positive",
+                ),
+                AgentFinding(
+                    task_id=intelligent_task.id,
+                    vulnerability_type="ssrf",
+                    severity="medium",
+                    title="Unverified excluded",
+                    status="new",
+                    is_verified=False,
+                    verdict="uncertain",
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        metrics = await ProjectMetricsService.recalc_project(session, project.id)
+
+    assert metrics.status == "ready"
+    assert metrics.total_tasks == 2
+    assert metrics.completed_tasks == 2
+    assert metrics.agent_tasks == 2
+    assert metrics.verified_critical == 1
+    assert metrics.verified_high == 1
+    assert metrics.verified_medium == 1
+    assert metrics.verified_low == 1

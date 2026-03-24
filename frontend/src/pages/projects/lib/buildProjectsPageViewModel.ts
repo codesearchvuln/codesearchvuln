@@ -55,6 +55,30 @@ function buildVulnerabilityStats(metrics?: ProjectManagementMetrics | null) {
 	};
 }
 
+function buildAiVerifiedStats(metrics?: ProjectManagementMetrics | null) {
+	if (!metrics || metrics.status !== "ready") {
+		return {
+			critical: 0,
+			high: 0,
+			medium: 0,
+			low: 0,
+			total: 0,
+		};
+	}
+	const total =
+		(metrics.verified_critical ?? 0) +
+		(metrics.verified_high ?? 0) +
+		(metrics.verified_medium ?? 0) +
+		(metrics.verified_low ?? 0);
+	return {
+		critical: metrics.verified_critical ?? 0,
+		high: metrics.verified_high ?? 0,
+		medium: metrics.verified_medium ?? 0,
+		low: metrics.verified_low ?? 0,
+		total,
+	};
+}
+
 function getMetricsStatusMessage(metrics?: ProjectManagementMetrics | null) {
 	if (!metrics || metrics.status === "pending") {
 		return "指标同步中...";
@@ -103,6 +127,7 @@ export function buildProjectsPageViewModel(
 				detailState: { from: projectDetailFrom },
 				sizeText: formatArchiveSize(metrics?.archive_size_bytes),
 				vulnerabilityStats: buildVulnerabilityStats(metrics),
+				aiVerifiedStats: buildAiVerifiedStats(metrics),
 				executionStats: buildExecutionStats(metrics),
 				metricsStatus,
 				metricsStatusMessage,

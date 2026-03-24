@@ -94,7 +94,7 @@ function PreviewHeader() {
 				{ label: "累计发现漏洞总数", value: "49" },
 				{ label: "AI累计验证漏洞总数", value: "22" },
 				{ label: "累计执行扫描任务次数", value: "126" },
-				{ label: "累计消耗模型token", value: "1,482,360" },
+				{ label: "累计消耗模型token", value: "1.482M" },
 			].map((item) => (
 				<div
 					key={item.label}

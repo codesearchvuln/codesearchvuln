@@ -202,7 +202,7 @@ export default function Dashboard() {
 	});
 
 	return (
-		<div className="min-h-screen space-y-6 bg-background p-6 font-mono relative">
+		<div className="min-h-screen space-y-6 bg-background p-6 font-mono relative xl:flex xl:h-[100dvh] xl:min-h-0 xl:flex-col xl:overflow-hidden">
 			<div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
 			{loading ? (
 				<div className="relative z-10 text-xs text-muted-foreground">
@@ -210,29 +210,35 @@ export default function Dashboard() {
 				</div>
 			) : null}
 
-			<DeferredSection minHeight={1600} priority>
+			<DeferredSection className="xl:min-h-0 xl:flex-1" minHeight={960} priority>
 				{pageState.showFallback ? (
-					<DashboardFallback />
+					<div className="xl:h-full xl:min-h-0">
+						<DashboardFallback />
+					</div>
 				) : pageState.variant === "blocking-error" ? (
-					<DashboardPageFeedback
-						state={pageState}
-						onRetry={handleRetry}
-						retrying={loading}
-					/>
-				) : (
-					<div className="space-y-4">
+					<div className="xl:flex xl:min-h-0 xl:h-full xl:flex-col">
 						<DashboardPageFeedback
 							state={pageState}
 							onRetry={handleRetry}
 							retrying={loading}
 						/>
-						<Suspense fallback={<DashboardFallback />}>
-							<DashboardCommandCenter
-								snapshot={snapshot}
-								rangeDays={rangeDays}
-								onRangeDaysChange={handleRangeDaysChange}
-							/>
-						</Suspense>
+					</div>
+				) : (
+					<div className="space-y-4 xl:flex xl:h-full xl:min-h-0 xl:flex-col">
+						<DashboardPageFeedback
+							state={pageState}
+							onRetry={handleRetry}
+							retrying={loading}
+						/>
+						<div className="xl:min-h-0 xl:flex-1">
+							<Suspense fallback={<DashboardFallback />}>
+								<DashboardCommandCenter
+									snapshot={snapshot}
+									rangeDays={rangeDays}
+									onRangeDaysChange={handleRangeDaysChange}
+								/>
+							</Suspense>
+						</div>
 					</div>
 				)}
 			</DeferredSection>

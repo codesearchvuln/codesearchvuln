@@ -91,6 +91,10 @@ async def _create_ready_metrics(
             high=2,
             medium=3,
             low=4,
+            verified_critical=5,
+            verified_high=6,
+            verified_medium=7,
+            verified_low=8,
             status="ready",
         )
         session.add(metrics)
@@ -227,6 +231,10 @@ async def test_read_projects_with_metrics_includes_loaded_metrics(project_api_en
     payload = response.json()
     assert payload[0]["management_metrics"]["status"] == "ready"
     assert payload[0]["management_metrics"]["total_tasks"] == 8
+    assert payload[0]["management_metrics"]["verified_critical"] == 5
+    assert payload[0]["management_metrics"]["verified_high"] == 6
+    assert payload[0]["management_metrics"]["verified_medium"] == 7
+    assert payload[0]["management_metrics"]["verified_low"] == 8
     assert "audit_tasks" not in payload[0]["management_metrics"]
 
 
@@ -265,6 +273,8 @@ async def test_read_projects_with_metrics_builds_pending_fallback_for_legacy_pro
     assert payload[0]["management_metrics"]["running_tasks"] == 0
     assert payload[0]["management_metrics"]["critical"] == 0
     assert payload[0]["management_metrics"]["low"] == 0
+    assert payload[0]["management_metrics"]["verified_critical"] == 0
+    assert payload[0]["management_metrics"]["verified_low"] == 0
 
 
 @pytest.mark.asyncio
@@ -310,6 +320,10 @@ async def test_read_projects_with_metrics_recalculates_metrics_from_task_history
     assert payload[0]["management_metrics"]["high"] == 1
     assert payload[0]["management_metrics"]["medium"] == 2
     assert payload[0]["management_metrics"]["low"] == 3
+    assert payload[0]["management_metrics"]["verified_critical"] == 0
+    assert payload[0]["management_metrics"]["verified_high"] == 0
+    assert payload[0]["management_metrics"]["verified_medium"] == 0
+    assert payload[0]["management_metrics"]["verified_low"] == 0
 
 
 @pytest.mark.asyncio
@@ -330,6 +344,7 @@ async def test_read_project_detail_includes_metrics(project_api_env):
     payload = response.json()
     assert payload["id"] == project.id
     assert payload["management_metrics"]["status"] == "ready"
+    assert payload["management_metrics"]["verified_critical"] == 5
 
 
 @pytest.mark.asyncio
@@ -361,6 +376,7 @@ async def test_read_project_detail_builds_pending_fallback_when_metrics_missing(
     assert payload["management_metrics"]["archive_size_bytes"] == 1024
     assert payload["management_metrics"]["total_tasks"] == 0
     assert payload["management_metrics"]["high"] == 0
+    assert payload["management_metrics"]["verified_high"] == 0
 
 
 @pytest.mark.asyncio
@@ -402,6 +418,10 @@ async def test_read_project_detail_recalculates_metrics_from_task_history(
     assert payload["management_metrics"]["high"] == 1
     assert payload["management_metrics"]["medium"] == 2
     assert payload["management_metrics"]["low"] == 3
+    assert payload["management_metrics"]["verified_critical"] == 0
+    assert payload["management_metrics"]["verified_high"] == 0
+    assert payload["management_metrics"]["verified_medium"] == 0
+    assert payload["management_metrics"]["verified_low"] == 0
 
 
 @pytest.mark.asyncio
@@ -478,3 +498,4 @@ async def test_create_project_with_zip_serializes_without_loading_metrics(
     assert list_payload[0]["management_metrics"]["status"] == "pending"
     assert list_payload[0]["management_metrics"]["archive_size_bytes"] == 0
     assert list_payload[0]["management_metrics"]["total_tasks"] == 0
+    assert list_payload[0]["management_metrics"]["verified_critical"] == 0

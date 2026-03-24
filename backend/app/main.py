@@ -323,7 +323,7 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 50)
 
     app.state.mcp_daemon_status = {}
-    logger.info("MCP 已切换为任务内按需 stdio 调用，跳过启动期常驻守护进程")
+    # logger.info("MCP 已切换为任务内按需 stdio 调用，跳过启动期常驻守护进程")
 
     # 启动每日定时清理任务
     stop_event = asyncio.Event()
