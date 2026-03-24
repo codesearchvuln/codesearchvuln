@@ -95,8 +95,21 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
     scanner_name = "bandit"
     source = "bandit_bootstrap"
 
-    def __init__(self, *, timeout_seconds: int = 900) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: int = 900,
+        rule_ids: Optional[List[str]] = None,
+    ) -> None:
         self.timeout_seconds = max(1, int(timeout_seconds))
+        normalized_rule_ids: List[str] = []
+        for raw in rule_ids or []:
+            normalized = str(raw or "").strip().upper()
+            if not normalized:
+                continue
+            if normalized not in normalized_rule_ids:
+                normalized_rule_ids.append(normalized)
+        self.rule_ids = normalized_rule_ids
 
     def _normalize_findings(
         self,
@@ -168,6 +181,8 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
                 "/scan/output/report.json",
                 "-q",
             ]
+            if self.rule_ids:
+                cmd.extend(["-t", ",".join(self.rule_ids)])
             process_result = await run_scanner_container(
                 ScannerRunSpec(
                     scanner_type="bandit-bootstrap",

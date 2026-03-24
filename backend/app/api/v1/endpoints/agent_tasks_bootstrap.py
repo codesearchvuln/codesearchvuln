@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import yaml
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -30,7 +30,9 @@ from app.api.v1.endpoints.static_tasks_shared import (
 from app.core.config import settings
 from app.db.static_finding_paths import normalize_static_scan_file_path
 from app.models.agent_task import AgentTask
+from app.models.bandit import BanditRuleState
 from app.models.opengrep import OpengrepRule
+from app.services.bandit_rules_snapshot import load_bandit_builtin_snapshot
 from app.services.agent.bootstrap import (
     BanditBootstrapScanner,
     OpenGrepBootstrapScanner,
@@ -61,6 +63,75 @@ _VERIFICATION_LEVEL_ALIASES = {
 
 HYBRID_TASK_NAME_MARKER = "[HYBRID]"
 INTELLIGENT_TASK_NAME_MARKER = "[INTELLIGENT]"
+
+
+def _normalize_bandit_rule_id(raw_rule_id: Any) -> str:
+    return str(raw_rule_id or "").strip().upper()
+
+
+def _extract_bandit_snapshot_test_ids_for_bootstrap() -> List[str]:
+    try:
+        payload = load_bandit_builtin_snapshot()
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Bandit 预处理失败：Bandit 内置规则快照不存在: {exc}") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"Bandit 预处理失败：Bandit 内置规则快照格式错误: {exc}") from exc
+    raw_rules = payload.get("rules")
+    if not isinstance(raw_rules, list):
+        return []
+
+    test_ids: List[str] = []
+    for raw in raw_rules:
+        if not isinstance(raw, dict):
+            continue
+        test_id = _normalize_bandit_rule_id(raw.get("test_id"))
+        if not test_id:
+            continue
+        if test_id in test_ids:
+            continue
+        test_ids.append(test_id)
+    return test_ids
+
+
+def _resolve_bandit_effective_rule_ids_for_bootstrap(
+    *,
+    snapshot_test_ids: List[str],
+    states_by_test_id: Dict[str, BanditRuleState],
+) -> List[str]:
+    return [
+        test_id
+        for test_id in snapshot_test_ids
+        if (
+            (states_by_test_id.get(test_id) is None)
+            or (
+                bool(getattr(states_by_test_id.get(test_id), "is_active", True))
+                and not bool(getattr(states_by_test_id.get(test_id), "is_deleted", False))
+            )
+        )
+    ]
+
+
+async def _resolve_bandit_bootstrap_rule_ids(db: AsyncSession) -> List[str]:
+    snapshot_test_ids = _extract_bandit_snapshot_test_ids_for_bootstrap()
+    try:
+        result = await db.execute(select(BanditRuleState))
+    except ProgrammingError as exc:
+        if "bandit_rule_states" in str(exc):
+            raise RuntimeError("Bandit 预处理失败：数据库缺少 bandit_rule_states 表，请先运行 alembic upgrade head") from exc
+        raise RuntimeError(f"Bandit 预处理失败：读取规则状态失败: {exc}") from exc
+
+    rows = result.scalars().all()
+    states_by_test_id = {
+        _normalize_bandit_rule_id(getattr(row, "test_id", None)): row
+        for row in rows
+    }
+    rule_ids = _resolve_bandit_effective_rule_ids_for_bootstrap(
+        snapshot_test_ids=snapshot_test_ids,
+        states_by_test_id=states_by_test_id,
+    )
+    if not rule_ids:
+        raise RuntimeError("无可执行 Bandit 规则，请先在规则页启用至少 1 条规则")
+    return rule_ids
 
 
 def _to_int(value: Any) -> Optional[int]:
@@ -612,7 +683,14 @@ async def _prepare_embedded_bootstrap_findings(
                 },
             )
         try:
-            scanner = BanditBootstrapScanner()
+            bandit_rule_ids = await _resolve_bandit_bootstrap_rule_ids(db)
+        except Exception as exc:
+            message = str(exc)[:200]
+            if event_emitter:
+                await event_emitter.emit_error(message)
+            raise RuntimeError(message) from exc
+        try:
+            scanner = BanditBootstrapScanner(rule_ids=bandit_rule_ids)
             scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
             if event_emitter:

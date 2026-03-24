@@ -112,7 +112,7 @@ async def test_bandit_bootstrap_scanner_uses_runner_and_normalizes_findings(monk
         raising=False,
     )
 
-    scanner = BanditBootstrapScanner(timeout_seconds=30)
+    scanner = BanditBootstrapScanner(timeout_seconds=30, rule_ids=["B105", "B101"])
     result = await scanner.scan(str(tmp_path))
 
     assert result.scanner_name == "bandit"
@@ -128,6 +128,8 @@ async def test_bandit_bootstrap_scanner_uses_runner_and_normalizes_findings(monk
     assert seen["spec"].workspace_dir == str(workspace_dir)
     assert seen["spec"].command[0] == "bandit"
     assert seen["spec"].command[seen["spec"].command.index("-o") + 1] == "/scan/output/report.json"
+    assert "-t" in seen["spec"].command
+    assert seen["spec"].command[seen["spec"].command.index("-t") + 1] == "B105,B101"
 
 
 @pytest.mark.asyncio
@@ -240,3 +242,40 @@ async def test_bandit_bootstrap_scanner_supports_stderr_payload_fallback(monkeyp
     assert len(result.findings) == 1
     assert result.findings[0].severity == "ERROR"
     assert result.findings[0].confidence == "MEDIUM"
+
+
+@pytest.mark.asyncio
+async def test_bandit_bootstrap_scanner_without_rule_ids_keeps_original_command(monkeypatch, tmp_path):
+    workspace_dir, _project_dir, output_dir, logs_dir = _prepare_bandit_workspace(
+        monkeypatch,
+        tmp_path,
+    )
+    seen = {}
+
+    async def _fake_run_scanner_container(spec, **_kwargs):
+        seen["spec"] = spec
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "report.json").write_text('{"results":[]}', encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            container_id="bandit-bootstrap-5",
+            exit_code=0,
+            stdout_path=str(logs_dir / "stdout.log"),
+            stderr_path=str(logs_dir / "stderr.log"),
+            error=None,
+        )
+
+    monkeypatch.setattr(
+        bandit_bootstrap,
+        "run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
+    )
+
+    scanner = BanditBootstrapScanner()
+    result = await scanner.scan(str(tmp_path))
+
+    assert result.total_findings == 0
+    assert seen["spec"].workspace_dir == str(workspace_dir)
+    assert "-t" not in seen["spec"].command

@@ -9,6 +9,8 @@ from fastapi import HTTPException
 from app.api.v1.endpoints.agent_tasks import (
     _filter_bootstrap_findings,
     _prepare_embedded_bootstrap_findings,
+    _resolve_bandit_bootstrap_rule_ids,
+    _resolve_bandit_effective_rule_ids_for_bootstrap,
     _run_bootstrap_gitleaks_scan,
     _resolve_static_bootstrap_config,
 )
@@ -415,6 +417,10 @@ async def test_prepare_embedded_bootstrap_with_bandit_only(monkeypatch):
             )
         ),
     )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap._resolve_bandit_bootstrap_rule_ids",
+        AsyncMock(return_value=["B105", "B101"]),
+    )
 
     candidates, bootstrap_task_id, source = await _prepare_embedded_bootstrap_findings(
         db=db,
@@ -511,6 +517,107 @@ async def test_prepare_embedded_bootstrap_with_opengrep_and_bandit(monkeypatch):
         "opengrep_bootstrap",
         "bandit_bootstrap",
     }
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedded_bootstrap_bandit_uses_resolved_rule_ids(monkeypatch):
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult([]))
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    captured = {}
+
+    class _FakeBanditScanner:
+        def __init__(self, *, timeout_seconds=900, rule_ids=None):
+            captured["rule_ids"] = list(rule_ids or [])
+
+        async def scan(self, _project_root):
+            return SimpleNamespace(total_findings=0, findings=[])
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.BanditBootstrapScanner",
+        _FakeBanditScanner,
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap._resolve_bandit_bootstrap_rule_ids",
+        AsyncMock(return_value=["B105", "B602"]),
+    )
+
+    candidates, bootstrap_task_id, source = await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        opengrep_enabled=False,
+        bandit_enabled=True,
+        gitleaks_enabled=False,
+    )
+
+    assert candidates == []
+    assert bootstrap_task_id is None
+    assert source == "embedded_bandit"
+    assert captured["rule_ids"] == ["B105", "B602"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedded_bootstrap_bandit_zero_rules_raises_and_emits_error(monkeypatch):
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult([]))
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap._resolve_bandit_bootstrap_rule_ids",
+        AsyncMock(side_effect=RuntimeError("无可执行 Bandit 规则，请先在规则页启用至少 1 条规则")),
+    )
+
+    with pytest.raises(RuntimeError, match="无可执行 Bandit 规则"):
+        await _prepare_embedded_bootstrap_findings(
+            db=db,
+            project_root="/tmp/project",
+            event_emitter=event_emitter,
+            opengrep_enabled=False,
+            bandit_enabled=True,
+            gitleaks_enabled=False,
+        )
+
+    event_emitter.emit_error.assert_awaited_once_with(
+        "无可执行 Bandit 规则，请先在规则页启用至少 1 条规则"
+    )
+
+
+def test_resolve_bandit_effective_rule_ids_for_bootstrap_filters_inactive_and_deleted():
+    snapshot_test_ids = ["B101", "B102", "B103", "B104"]
+    states_by_test_id = {
+        "B102": SimpleNamespace(test_id="B102", is_active=False, is_deleted=False),
+        "B103": SimpleNamespace(test_id="B103", is_active=True, is_deleted=True),
+        "B104": SimpleNamespace(test_id="B104", is_active=True, is_deleted=False),
+    }
+    assert _resolve_bandit_effective_rule_ids_for_bootstrap(
+        snapshot_test_ids=snapshot_test_ids,
+        states_by_test_id=states_by_test_id,
+    ) == ["B101", "B104"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_bandit_bootstrap_rule_ids_raises_when_all_disabled(monkeypatch):
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        return_value=_ScalarListResult(
+            [SimpleNamespace(test_id="B101", is_active=False, is_deleted=False)]
+        )
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap._extract_bandit_snapshot_test_ids_for_bootstrap",
+        lambda: ["B101"],
+    )
+
+    with pytest.raises(RuntimeError, match="无可执行 Bandit 规则"):
+        await _resolve_bandit_bootstrap_rule_ids(db)
 
 
 @pytest.mark.asyncio
