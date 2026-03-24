@@ -75,6 +75,65 @@ def test_merge_bandit_rule_payload_defaults_to_active_true():
     assert merged[0]["updated_at"] is None
 
 
+def test_resolve_bandit_effective_rule_ids_respects_state_filters():
+    snapshot_rules = [
+        {
+            "id": "B101",
+            "test_id": "B101",
+            "name": "assert_used",
+            "description": "",
+            "description_summary": "",
+            "checks": ["Assert"],
+            "source": "builtin",
+            "bandit_version": "1.9.4",
+        },
+        {
+            "id": "B102",
+            "test_id": "B102",
+            "name": "exec_used",
+            "description": "",
+            "description_summary": "",
+            "checks": ["Exec"],
+            "source": "builtin",
+            "bandit_version": "1.9.4",
+        },
+        {
+            "id": "B103",
+            "test_id": "B103",
+            "name": "set_bad_file_permissions",
+            "description": "",
+            "description_summary": "",
+            "checks": ["Call"],
+            "source": "builtin",
+            "bandit_version": "1.9.4",
+        },
+    ]
+    states_by_test_id = {
+        "B102": SimpleNamespace(is_active=False, is_deleted=False),
+        "B103": SimpleNamespace(is_active=True, is_deleted=True),
+    }
+
+    rule_ids = static_tasks_bandit._resolve_bandit_effective_rule_ids(
+        snapshot_rules=snapshot_rules,
+        states_by_test_id=states_by_test_id,
+    )
+
+    assert rule_ids == ["B101"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_bandit_scan_rule_ids_raises_when_empty(monkeypatch):
+    monkeypatch.setattr(static_tasks_bandit, "_extract_bandit_snapshot_rules", lambda: [{"test_id": "B101"}])
+    monkeypatch.setattr(
+        static_tasks_bandit,
+        "_load_bandit_rule_states",
+        AsyncMock(return_value={"B101": SimpleNamespace(is_active=False, is_deleted=False)}),
+    )
+
+    with pytest.raises(RuntimeError, match="无可执行 Bandit 规则"):
+        await static_tasks_bandit._resolve_bandit_scan_rule_ids(AsyncMock())
+
+
 @pytest.mark.asyncio
 async def test_update_bandit_rule_enabled_creates_state_when_missing(monkeypatch):
     monkeypatch.setattr(

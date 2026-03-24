@@ -169,6 +169,11 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch, tmp_pat
         lambda *_args, **_kwargs: tmp_path / "scans" / "bandit" / task.id / "meta",
         raising=False,
     )
+    monkeypatch.setattr(
+        static_tasks._bandit,
+        "_resolve_bandit_scan_rule_ids",
+        AsyncMock(return_value=["B602", "B101"]),
+    )
 
     seen = {}
 
@@ -223,3 +228,5 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch, tmp_pat
     assert seen["spec"].image == "vulhunter/bandit-runner:test"
     assert seen["spec"].command[0] == "bandit"
     assert seen["spec"].command[seen["spec"].command.index("-o") + 1] == "/scan/output/report.json"
+    assert "-t" in seen["spec"].command
+    assert seen["spec"].command[seen["spec"].command.index("-t") + 1] == "B602,B101"

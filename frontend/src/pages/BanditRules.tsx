@@ -2,7 +2,7 @@
  * Bandit Rules Management Page
  *
  * 用途：在不改变现有页面布局的前提下，展示 Bandit 内置规则并提供启停/删除管理。
- * 说明：此处启停与删除仅影响规则页展示状态，不影响 Bandit 扫描执行命令。
+ * 说明：此处启停与删除状态会影响静态 Bandit 扫描执行规则集。
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -84,6 +84,12 @@ function getStringColumnFilter(
   return typeof value === "string" ? value : fallback;
 }
 
+function resolveBanditRuleIds(rows: BanditRule[]): string[] {
+  return rows
+    .map((row) => String(row.test_id || row.id || "").trim())
+    .filter((value) => value.length > 0);
+}
+
 function buildSelectionSummary({
   selectedCount,
   filteredCount,
@@ -132,7 +138,7 @@ export default function BanditRules({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [isEditingRule, setIsEditingRule] = useState(false);
   const [savingRule, setSavingRule] = useState(false);
-  // Bandit integration: 规则编辑表单仅用于规则页展示态，不影响扫描执行。
+  // Bandit integration: 规则编辑用于维护规则页字段，启停/删除状态会影响静态扫描执行。
   const [editRuleForm, setEditRuleForm] = useState({
     name: "",
     description_summary: "",
@@ -437,10 +443,15 @@ export default function BanditRules({
     try {
       setBatchOperating(true);
       const currentActiveFilter = getStringColumnFilter(tableState, "status");
+      const selectableRows = selectedRows.filter((row) => !row.is_deleted);
+      if (selectedRows.length > 0 && selectableRows.length === 0) {
+        toast.error("所选规则均已删除，请先恢复后再执行批量启用/禁用");
+        return;
+      }
       const payload =
         selectedRows.length > 0
           ? {
-              rule_ids: selectedRows.map((row) => row.id),
+              rule_ids: resolveBanditRuleIds(selectableRows),
               is_active: isActive,
             }
           : {
@@ -468,7 +479,7 @@ export default function BanditRules({
       setBatchOperating(true);
       const payload =
         selectedRows.length > 0
-          ? { rule_ids: selectedRows.map((row) => row.id) }
+          ? { rule_ids: resolveBanditRuleIds(selectedRows) }
           : {
               source: undefined,
               keyword: tableState.globalFilter.trim() || undefined,
@@ -490,7 +501,7 @@ export default function BanditRules({
       setBatchOperating(true);
       const payload =
         selectedRows.length > 0
-          ? { rule_ids: selectedRows.map((row) => row.id) }
+          ? { rule_ids: resolveBanditRuleIds(selectedRows) }
           : {
               source: undefined,
               keyword: tableState.globalFilter.trim() || undefined,

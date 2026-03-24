@@ -197,7 +197,7 @@ export async function batchUpdateBanditRulesEnabled(params: {
   current_is_active?: boolean;
   is_active: boolean;
 }): Promise<{ message: string; updated_count: number; is_active: boolean }> {
-  const response = await apiClient.post(`/static-tasks/bandit/rules/batch/enabled`, params);
+  const response = await apiClient.post(`/static-tasks/bandit/rules/batch-enabled`, params);
   return response.data;
 }
 
@@ -225,7 +225,7 @@ export async function batchDeleteBanditRules(params: {
   keyword?: string;
   current_is_deleted?: boolean;
 }): Promise<{ message: string; updated_count: number; is_deleted: boolean }> {
-  const response = await apiClient.post(`/static-tasks/bandit/rules/batch/delete`, params);
+  const response = await apiClient.post(`/static-tasks/bandit/rules/batch-delete`, params);
   return response.data;
 }
 
@@ -235,6 +235,6 @@ export async function batchRestoreBanditRules(params: {
   keyword?: string;
   current_is_deleted?: boolean;
 }): Promise<{ message: string; updated_count: number; is_deleted: boolean }> {
-  const response = await apiClient.post(`/static-tasks/bandit/rules/batch/restore`, params);
+  const response = await apiClient.post(`/static-tasks/bandit/rules/batch-restore`, params);
   return response.data;
 }

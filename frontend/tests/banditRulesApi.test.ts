@@ -58,11 +58,11 @@ test("bandit rules api client maps rules endpoints", async () => {
       "get:/static-tasks/bandit/rules/B101",
       "patch:/static-tasks/bandit/rules/B101",
       "post:/static-tasks/bandit/rules/B101/enabled",
-      "post:/static-tasks/bandit/rules/batch/enabled",
+      "post:/static-tasks/bandit/rules/batch-enabled",
       "post:/static-tasks/bandit/rules/B101/delete",
       "post:/static-tasks/bandit/rules/B101/restore",
-      "post:/static-tasks/bandit/rules/batch/delete",
-      "post:/static-tasks/bandit/rules/batch/restore",
+      "post:/static-tasks/bandit/rules/batch-delete",
+      "post:/static-tasks/bandit/rules/batch-restore",
     ],
   );
 });

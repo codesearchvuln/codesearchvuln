@@ -168,7 +168,7 @@ def _build_bandit_scan_task_response(task: BanditScanTask) -> BanditScanTaskResp
     )
 
 
-# Bandit integration: 规则页响应与更新请求模型（仅用于前端展示/启停状态持久化）。
+# Bandit integration: 规则页响应与更新请求模型（启停/删除状态会影响静态扫描执行）。
 class BanditRuleResponse(BaseModel):
     id: str = Field(..., description="规则唯一键（Bandit test_id）")
     test_id: str
@@ -317,6 +317,36 @@ def _merge_bandit_rule_payload(
             }
         )
     return merged
+
+
+def _resolve_bandit_effective_rule_ids(
+    *,
+    snapshot_rules: List[Dict[str, Any]],
+    states_by_test_id: Dict[str, BanditRuleState],
+) -> List[str]:
+    merged_rules = _merge_bandit_rule_payload(
+        snapshot_rules=snapshot_rules,
+        states_by_test_id=states_by_test_id,
+    )
+    return [
+        str(item["test_id"])
+        for item in merged_rules
+        if not bool(item.get("is_deleted")) and bool(item.get("is_active"))
+    ]
+
+
+async def _resolve_bandit_scan_rule_ids(db: AsyncSession) -> List[str]:
+    snapshot_rules = _extract_bandit_snapshot_rules()
+    states_by_test_id = await _load_bandit_rule_states(db)
+    rule_ids = _resolve_bandit_effective_rule_ids(
+        snapshot_rules=snapshot_rules,
+        states_by_test_id=states_by_test_id,
+    )
+    if not rule_ids:
+        raise RuntimeError("无可执行 Bandit 规则，请先在规则页启用至少 1 条规则")
+    return rule_ids
+
+
 def _normalize_bandit_level(value: Any, *, fallback: str = "medium") -> str:
     """规范化 bandit 等级参数，统一为 low/medium/high。"""
     normalized = str(value or "").strip().lower()
@@ -437,6 +467,8 @@ async def _execute_bandit_scan(
         normalized_target_path = str(target_path or ".").strip()
         if normalized_target_path not in {"", "."}:
             runner_target_path = runner_target_path / normalized_target_path
+        async with async_session_factory() as db:
+            executable_rule_ids = await _resolve_bandit_scan_rule_ids(db)
 
         findings_to_persist: List[Dict[str, Any]] = []
         high_count = 0
@@ -463,6 +495,8 @@ async def _execute_bandit_scan(
                 normalized_severity,
                 "--confidence-level",
                 normalized_confidence,
+                "-t",
+                ",".join(executable_rule_ids),
                 "-q",
             ]
             logger.info(f"Executing bandit for task {task_id}: {' '.join(cmd)}")
@@ -641,7 +675,7 @@ async def update_bandit_rule(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
-    # Bandit integration: 规则编辑仅影响规则页展示，不参与 bandit 扫描命令构建。
+    # Bandit integration: 规则编辑用于维护快照字段，扫描命令仍按 test_id 执行。
     normalized_rule_id = _normalize_bandit_rule_id(rule_id)
     known_rule_ids = {item["test_id"] for item in _extract_bandit_snapshot_rules()}
     if normalized_rule_id not in known_rule_ids:
@@ -727,6 +761,7 @@ async def update_bandit_rule_enabled(
     }
 
 
+@router.post("/bandit/rules/batch-enabled")
 @router.post("/bandit/rules/batch/enabled")
 async def batch_update_bandit_rules_enabled(
     request: BanditRuleBatchEnabledUpdateRequest,
@@ -877,6 +912,7 @@ async def restore_bandit_rule(
     return {"message": "规则已恢复", "rule_id": normalized_rule_id, "is_deleted": False}
 
 
+@router.post("/bandit/rules/batch-delete")
 @router.post("/bandit/rules/batch/delete")
 async def batch_delete_bandit_rules(
     request: BanditRuleBatchDeletedUpdateRequest,
@@ -893,6 +929,7 @@ async def batch_delete_bandit_rules(
     return await _batch_update_bandit_rules_deleted(payload, db)
 
 
+@router.post("/bandit/rules/batch-restore")
 @router.post("/bandit/rules/batch/restore")
 async def batch_restore_bandit_rules(
     request: BanditRuleBatchDeletedUpdateRequest,
