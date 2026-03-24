@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import signal
 import sys
 import types
 
@@ -32,6 +33,8 @@ from app.main import (
     RECOVERABLE_OPENGREP_TASK_STATUSES,
     RECOVERABLE_PHPSTAN_TASK_STATUSES,
     RECOVERABLE_YASA_TASK_STATUSES,
+    _collect_stale_yasa_pids,
+    cleanup_stale_yasa_processes,
     recover_interrupted_tasks,
 )
 from app.models.agent_task import AgentTask, AgentTaskStatus
@@ -244,3 +247,49 @@ async def test_recover_interrupted_tasks_preserves_terminal_statuses_and_existin
 
     assert gitleaks_failed.status == "failed"
     assert gitleaks_failed.error_message == "已存在的失败原因"
+
+
+def test_collect_stale_yasa_pids_filters_by_report_pattern(monkeypatch):
+    sample = "\n".join(
+        [
+            "1001 /home/jy/.local/bin/yasa-engine.real --report /tmp/yasa_report_abc",
+            "1002 /opt/yasa/bin/yasa --report /tmp/yasa_report_def",
+            "1003 /opt/yasa/bin/yasa --help",
+            "1004 python app.py",
+        ]
+    )
+    monkeypatch.setattr("app.main.subprocess.check_output", lambda *args, **kwargs: sample)
+    monkeypatch.setattr("app.main.os.getpid", lambda: 9999)
+
+    assert _collect_stale_yasa_pids() == [1001, 1002]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_yasa_processes_terms_and_kills(monkeypatch):
+    monkeypatch.setattr("app.main._collect_stale_yasa_pids", lambda: [2001, 2002])
+    monkeypatch.setattr("app.main.settings.YASA_STARTUP_FORCE_CLEANUP", True)
+    monkeypatch.setattr("app.main.settings.YASA_PROCESS_KILL_GRACE_SECONDS", 1)
+
+    async def _fast_sleep(_n):
+        return None
+
+    monkeypatch.setattr("app.main.asyncio.sleep", _fast_sleep)
+
+    alive = {2001, 2002}
+    signals: list[tuple[int, int]] = []
+
+    def _fake_kill(pid: int, sig: int):
+        signals.append((pid, sig))
+        if sig == 0:
+            if pid in alive:
+                return
+            raise ProcessLookupError
+        if sig == signal.SIGKILL and pid in alive:
+            alive.remove(pid)
+
+    monkeypatch.setattr("app.main.os.kill", _fake_kill)
+
+    result = await cleanup_stale_yasa_processes()
+    assert result["matched"] == 2
+    assert result["terminated"] == 2
+    assert result["killed"] == 2

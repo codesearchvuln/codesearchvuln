@@ -18,7 +18,11 @@ import {
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { createBanditScanTask } from "@/shared/api/bandit";
 import { createPhpstanScanTask } from "@/shared/api/phpstan";
-import { createYasaScanTask } from "@/shared/api/yasa";
+import {
+	createYasaScanTask,
+	getYasaRuleConfigs,
+	type YasaRuleConfig,
+} from "@/shared/api/yasa";
 import { getZipFileInfo, uploadZipFile } from "@/shared/utils/zipStorage";
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import {
@@ -36,7 +40,9 @@ import {
 	type LLMProviderItem,
 } from "@/shared/llm/providerCatalog";
 import {
+	getYasaBlockedProjectMessage,
 	getYasaUnsupportedLanguageMessage,
+	isYasaBlockedProjectLanguage,
 	parseYasaLanguageOption,
 	resolveYasaLanguageFromProgrammingLanguages,
 	type YasaLanguageOption,
@@ -121,6 +127,8 @@ export default function CreateProjectScanDialog({
 	const [phpstanEnabled, setPhpstanEnabled] = useState(false);
 	const [yasaEnabled, setYasaEnabled] = useState(false);
 	const [yasaLanguage, setYasaLanguage] = useState<YasaLanguageOption>("auto");
+	const [yasaRuleConfigs, setYasaRuleConfigs] = useState<YasaRuleConfig[]>([]);
+	const [selectedYasaRuleConfigId, setSelectedYasaRuleConfigId] = useState<string>("default");
 	const [activeRules, setActiveRules] = useState<OpengrepRule[]>([]);
 	const [loadingRules, setLoadingRules] = useState(false);
 
@@ -265,6 +273,7 @@ export default function CreateProjectScanDialog({
 		setPhpstanEnabled(false);
 		setYasaEnabled(false);
 		setYasaLanguage("auto");
+		setSelectedYasaRuleConfigId("default");
 		setShowLlmQuickFixPanel(false);
 		setLlmProviderOptions(
 			buildLlmProviderOptions({ backendProviders: [], currentProviderId: "openai" }),
@@ -308,8 +317,19 @@ export default function CreateProjectScanDialog({
 			}
 		};
 
+		const loadYasaRuleConfigs = async () => {
+			try {
+				const rows = await getYasaRuleConfigs({ isActive: true, limit: 200 });
+				setYasaRuleConfigs(rows);
+			} catch (error) {
+				console.error("加载 YASA 自定义规则配置失败:", error);
+				setYasaRuleConfigs([]);
+			}
+		};
+
 		void loadProjects();
 		void loadRules();
+		void loadYasaRuleConfigs();
 	}, [open, preselectedProjectId, initialMode]);
 
 	useEffect(() => {
@@ -450,6 +470,18 @@ export default function CreateProjectScanDialog({
 		return undefined;
 	}, [sourceMode, selectedProject?.programming_languages]);
 
+	const isYasaBlockedProject = useMemo(
+		() => isYasaBlockedProjectLanguage(selectedOrUploadedProjectLanguages),
+		[selectedOrUploadedProjectLanguages],
+	);
+
+	useEffect(() => {
+		if (isYasaBlockedProject && yasaEnabled) {
+			setYasaEnabled(false);
+			toast.info(getYasaBlockedProjectMessage());
+		}
+	}, [isYasaBlockedProject, yasaEnabled]);
+
 	const resolvedAutoYasaLanguage = useMemo(
 		() =>
 			resolveYasaLanguageFromProgrammingLanguages(
@@ -459,9 +491,13 @@ export default function CreateProjectScanDialog({
 	);
 
 	const resolvedRequestedYasaLanguage = useMemo(() => {
+		const selectedRuleConfig = yasaRuleConfigs.find(
+			(item) => item.id === selectedYasaRuleConfigId,
+		);
+		if (selectedRuleConfig) return parseYasaLanguageOption(selectedRuleConfig.language);
 		if (yasaLanguage !== "auto") return yasaLanguage;
 		return resolvedAutoYasaLanguage;
-	}, [yasaLanguage, resolvedAutoYasaLanguage]);
+	}, [yasaLanguage, resolvedAutoYasaLanguage, yasaRuleConfigs, selectedYasaRuleConfigId]);
 
 	const showYasaAutoSkipHint =
 		Boolean(yasaEnabled) && yasaLanguage === "auto" && !resolvedRequestedYasaLanguage;
@@ -474,12 +510,20 @@ export default function CreateProjectScanDialog({
 		let banditTask: { id: string } | null = null;
 		let phpstanTask: { id: string } | null = null;
 		let yasaTask: { id: string } | null = null;
+		const selectedRuleConfig = yasaRuleConfigs.find(
+			(item) => item.id === selectedYasaRuleConfigId,
+		);
 		const autoResolvedYasaLanguage = resolveYasaLanguageFromProgrammingLanguages(
 			project.programming_languages,
 		);
 		const requestedYasaLanguage =
-			yasaLanguage !== "auto" ? yasaLanguage : autoResolvedYasaLanguage;
+			selectedRuleConfig?.language ||
+			(yasaLanguage !== "auto" ? yasaLanguage : autoResolvedYasaLanguage);
 		let shouldRunYasa = yasaEnabled;
+		if (isYasaBlockedProjectLanguage(project.programming_languages)) {
+			shouldRunYasa = false;
+			toast.info(getYasaBlockedProjectMessage());
+		}
 		if (shouldRunYasa && !requestedYasaLanguage) {
 			shouldRunYasa = false;
 			toast.info(
@@ -564,7 +608,8 @@ export default function CreateProjectScanDialog({
 					staticBatchId,
 				),
 				target_path: ".",
-				language: requestedYasaLanguage || undefined,
+				language: selectedRuleConfig ? undefined : requestedYasaLanguage || undefined,
+				rule_config_id: selectedRuleConfig?.id,
 			});
 		}
 		const primaryTaskId =
@@ -1119,6 +1164,11 @@ export default function CreateProjectScanDialog({
 			setYasaEnabled={setYasaEnabled}
 			yasaLanguage={yasaLanguage}
 			setYasaLanguage={(value) => setYasaLanguage(parseYasaLanguageOption(value))}
+			yasaRuleConfigs={yasaRuleConfigs}
+			selectedYasaRuleConfigId={selectedYasaRuleConfigId}
+			setSelectedYasaRuleConfigId={setSelectedYasaRuleConfigId}
+			isYasaBlockedProject={isYasaBlockedProject}
+			yasaBlockedMessage={getYasaBlockedProjectMessage()}
 			showYasaAutoSkipHint={showYasaAutoSkipHint}
 			showLlmQuickFixPanel={showLlmQuickFixPanel}
 			openLlmQuickFixPanelManual={openLlmQuickFixPanelManual}

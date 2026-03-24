@@ -213,6 +213,10 @@ class Settings(BaseSettings):
     YASA_BIN_PATH: str = "yasa"
     YASA_RESOURCE_DIR: Optional[str] = None
     YASA_TIMEOUT_SECONDS: int = 600
+    YASA_ORPHAN_STALE_SECONDS: int = 120
+    YASA_PROCESS_KILL_GRACE_SECONDS: int = 2
+    YASA_EXEC_HEARTBEAT_SECONDS: int = 15
+    YASA_STARTUP_FORCE_CLEANUP: bool = True
 
     model_config = SettingsConfigDict(
         case_sensitive=True,

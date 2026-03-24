@@ -45,6 +45,12 @@ type LlmQuickConfig = {
   apiKey: string;
 };
 
+type YasaRuleConfigItem = {
+  id: string;
+  name: string;
+  language: string;
+};
+
 export default function CreateProjectScanDialogContent({
   open,
   onOpenChange,
@@ -86,6 +92,11 @@ export default function CreateProjectScanDialogContent({
   setYasaEnabled,
   yasaLanguage,
   setYasaLanguage,
+  yasaRuleConfigs,
+  selectedYasaRuleConfigId,
+  setSelectedYasaRuleConfigId,
+  isYasaBlockedProject,
+  yasaBlockedMessage,
   showYasaAutoSkipHint,
   showLlmQuickFixPanel,
   openLlmQuickFixPanelManual,
@@ -151,6 +162,11 @@ export default function CreateProjectScanDialogContent({
   setYasaEnabled: (enabled: boolean) => void;
   yasaLanguage: "auto" | "python" | "javascript" | "typescript" | "golang" | "java";
   setYasaLanguage: (language: string) => void;
+  yasaRuleConfigs: YasaRuleConfigItem[];
+  selectedYasaRuleConfigId: string;
+  setSelectedYasaRuleConfigId: (id: string) => void;
+  isYasaBlockedProject: boolean;
+  yasaBlockedMessage: string;
   showYasaAutoSkipHint: boolean;
   showLlmQuickFixPanel: boolean;
   openLlmQuickFixPanelManual: () => void | Promise<void>;
@@ -518,7 +534,7 @@ export default function CreateProjectScanDialogContent({
                   <Checkbox
                     checked={yasaEnabled}
                     onCheckedChange={(checked) => setYasaEnabled(Boolean(checked))}
-                    disabled={creating}
+                    disabled={creating || isYasaBlockedProject}
                     className="data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                   />
                   <div>
@@ -530,8 +546,31 @@ export default function CreateProjectScanDialogContent({
               {yasaEnabled && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
+                    <p className="text-xs text-muted-foreground">YASA 规则配置</p>
+                    <Select
+                      value={selectedYasaRuleConfigId}
+                      onValueChange={setSelectedYasaRuleConfigId}
+                    >
+                      <SelectTrigger className="h-8 w-[300px] cyber-input">
+                        <SelectValue placeholder="选择规则配置" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">内置默认</SelectItem>
+                        {yasaRuleConfigs.map((config) => (
+                          <SelectItem key={config.id} value={config.id}>
+                            {config.name} ({config.language})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <p className="text-xs text-muted-foreground">YASA 语言</p>
-                    <Select value={yasaLanguage} onValueChange={setYasaLanguage}>
+                    <Select
+                      value={yasaLanguage}
+                      onValueChange={setYasaLanguage}
+                      disabled={selectedYasaRuleConfigId !== "default"}
+                    >
                       <SelectTrigger className="h-8 w-[220px] cyber-input">
                         <SelectValue placeholder="选择语言" />
                       </SelectTrigger>
@@ -551,6 +590,9 @@ export default function CreateProjectScanDialogContent({
                     </p>
                   )}
                 </div>
+              )}
+              {isYasaBlockedProject && (
+                <p className="text-xs text-amber-300">{yasaBlockedMessage}</p>
               )}
               {mode === "hybrid" && selectedProject && !isZipProject(selectedProject) && (
                 <p className="text-xs text-rose-300">

@@ -10,6 +10,9 @@ export interface YasaScanTask {
   checker_pack_ids?: string | null;
   checker_ids?: string | null;
   rule_config_file?: string | null;
+  rule_config_id?: string | null;
+  rule_config_name?: string | null;
+  rule_config_source?: string | null;
   total_findings: number;
   scan_duration_ms: number;
   files_scanned: number;
@@ -42,6 +45,35 @@ export interface YasaRule {
   source: string;
 }
 
+export interface YasaRuleConfig {
+  id: string;
+  name: string;
+  description?: string | null;
+  language: string;
+  checker_pack_ids?: string | null;
+  checker_ids: string;
+  rule_config_json: string;
+  is_active: boolean;
+  source: string;
+  created_by?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface YasaRuntimeConfig {
+  yasa_timeout_seconds: number;
+  yasa_orphan_stale_seconds: number;
+  yasa_exec_heartbeat_seconds: number;
+  yasa_process_kill_grace_seconds: number;
+}
+
+export interface UpdateYasaRuntimeConfigPayload {
+  yasa_timeout_seconds: number;
+  yasa_orphan_stale_seconds: number;
+  yasa_exec_heartbeat_seconds: number;
+  yasa_process_kill_grace_seconds: number;
+}
+
 export async function createYasaScanTask(params: {
   project_id: string;
   name?: string;
@@ -50,8 +82,94 @@ export async function createYasaScanTask(params: {
   checker_pack_ids?: string[];
   checker_ids?: string[];
   rule_config_file?: string;
+  rule_config_id?: string;
 }): Promise<YasaScanTask> {
   const response = await apiClient.post("/static-tasks/yasa/scan", params);
+  return response.data;
+}
+
+export async function getYasaRuntimeConfig(): Promise<YasaRuntimeConfig> {
+  const response = await apiClient.get("/static-tasks/yasa/runtime-config");
+  return response.data;
+}
+
+export async function updateYasaRuntimeConfig(
+  payload: UpdateYasaRuntimeConfigPayload,
+): Promise<YasaRuntimeConfig> {
+  const response = await apiClient.put("/static-tasks/yasa/runtime-config", payload);
+  return response.data;
+}
+
+export async function importYasaRuleConfig(params: {
+  name: string;
+  description?: string;
+  language: string;
+  checker_pack_ids?: string[];
+  checker_ids?: string[];
+  rule_config_json?: string;
+  rule_config_file?: File;
+}): Promise<YasaRuleConfig> {
+  const formData = new FormData();
+  formData.append("name", params.name);
+  formData.append("language", params.language);
+  if (params.description) formData.append("description", params.description);
+  if (params.checker_pack_ids?.length) {
+    formData.append("checker_pack_ids", params.checker_pack_ids.join(","));
+  }
+  if (params.checker_ids?.length) {
+    formData.append("checker_ids", params.checker_ids.join(","));
+  }
+  if (params.rule_config_json) {
+    formData.append("rule_config_json", params.rule_config_json);
+  }
+  if (params.rule_config_file) {
+    formData.append("rule_config_file", params.rule_config_file);
+  }
+  const response = await apiClient.post("/static-tasks/yasa/rule-configs/import", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+}
+
+export async function getYasaRuleConfigs(params?: {
+  language?: string;
+  isActive?: boolean;
+  keyword?: string;
+  skip?: number;
+  limit?: number;
+}): Promise<YasaRuleConfig[]> {
+  const searchParams = new URLSearchParams();
+  if (params?.language) searchParams.set("language", params.language);
+  if (params?.isActive !== undefined) searchParams.set("is_active", String(params.isActive));
+  if (params?.keyword) searchParams.set("keyword", params.keyword);
+  if (params?.skip !== undefined) searchParams.set("skip", String(params.skip));
+  if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  const response = await apiClient.get(
+    `/static-tasks/yasa/rule-configs${query ? `?${query}` : ""}`,
+  );
+  return response.data;
+}
+
+export async function updateYasaRuleConfig(
+  ruleConfigId: string,
+  payload: {
+    name?: string;
+    description?: string;
+    language?: string;
+    checker_pack_ids?: string[];
+    checker_ids?: string[];
+    is_active?: boolean;
+  },
+): Promise<YasaRuleConfig> {
+  const response = await apiClient.patch(`/static-tasks/yasa/rule-configs/${ruleConfigId}`, payload);
+  return response.data;
+}
+
+export async function deleteYasaRuleConfig(
+  ruleConfigId: string,
+): Promise<{ message: string; id: string }> {
+  const response = await apiClient.delete(`/static-tasks/yasa/rule-configs/${ruleConfigId}`);
   return response.data;
 }
 

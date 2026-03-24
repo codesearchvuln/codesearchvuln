@@ -184,6 +184,14 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
     ],
   );
 
+  const timeoutOnlyFailure = useMemo(
+    () =>
+      statusSummary.aggregateStatus === "failed" &&
+      statusSummary.failureReasons.length > 0 &&
+      statusSummary.failureReasons.every((reason) => reason.isTimeout),
+    [statusSummary.aggregateStatus, statusSummary.failureReasons],
+  );
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
@@ -277,7 +285,9 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
             <div className="space-y-2">
               <p className="text-sm font-semibold text-foreground">
                 {statusSummary.aggregateStatus === "failed"
-                  ? "扫描已结束，但存在失败引擎"
+                  ? timeoutOnlyFailure
+                    ? "扫描已结束，但存在超时引擎"
+                    : "扫描已结束，但存在异常引擎"
                   : "扫描已结束，任务被中断"}
               </p>
               <div className="space-y-2">

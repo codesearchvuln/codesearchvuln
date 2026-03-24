@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.yasa_language import (
+    is_yasa_blocked_project_language,
     normalize_yasa_language,
     resolve_yasa_language_from_programming_languages,
     resolve_yasa_language_with_preference,
@@ -46,6 +47,23 @@ def test_resolve_yasa_language_with_preference_allows_manual_override_for_php_li
             programming_languages='["php"]',
         )
         == "python"
+    )
+
+
+def test_is_yasa_blocked_project_language_detects_c_cpp_aliases():
+    assert is_yasa_blocked_project_language('["cpp"]') is True
+    assert is_yasa_blocked_project_language("c++,java") is True
+    assert is_yasa_blocked_project_language(["cc", "python"]) is True
+    assert is_yasa_blocked_project_language('["java","python"]') is False
+
+
+def test_resolve_yasa_language_with_preference_skips_c_cpp_projects_even_with_manual_override():
+    assert (
+        resolve_yasa_language_with_preference(
+            preferred_language="java",
+            programming_languages='["cpp","java"]',
+        )
+        is None
     )
 
 

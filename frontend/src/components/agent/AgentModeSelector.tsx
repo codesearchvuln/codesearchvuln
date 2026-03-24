@@ -25,6 +25,7 @@ interface AgentModeSelectorProps {
   disabled?: boolean;
   staticTools?: StaticToolSelection;
   onStaticToolsChange?: (next: StaticToolSelection) => void;
+  disabledStaticTools?: Partial<Record<StaticTool, boolean>>;
 }
 
 export default function AgentModeSelector({
@@ -33,6 +34,7 @@ export default function AgentModeSelector({
   disabled = false,
   staticTools,
   onStaticToolsChange,
+  disabledStaticTools,
 }: AgentModeSelectorProps) {
   const isStaticSelected = value === "static";
   const isAgentSelected = value === "agent";
@@ -141,7 +143,7 @@ export default function AgentModeSelector({
                   onCheckedChange={(checked) =>
                     updateStaticTool("opengrep", Boolean(checked))
                   }
-                  disabled={disabled}
+                  disabled={disabled || Boolean(disabledStaticTools?.opengrep)}
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">规则扫描</span>
@@ -152,7 +154,7 @@ export default function AgentModeSelector({
                   onCheckedChange={(checked) =>
                     updateStaticTool("gitleaks", Boolean(checked))
                   }
-                  disabled={disabled}
+                  disabled={disabled || Boolean(disabledStaticTools?.gitleaks)}
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">密钥泄露扫描</span>
@@ -163,7 +165,7 @@ export default function AgentModeSelector({
                   onCheckedChange={(checked) =>
                     updateStaticTool("bandit", Boolean(checked))
                   }
-                  disabled={disabled}
+                  disabled={disabled || Boolean(disabledStaticTools?.bandit)}
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">Python 安全扫描</span>
@@ -175,7 +177,7 @@ export default function AgentModeSelector({
                   onCheckedChange={(checked) =>
                     updateStaticTool("phpstan", Boolean(checked))
                   }
-                  disabled={disabled}
+                  disabled={disabled || Boolean(disabledStaticTools?.phpstan)}
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">PHP 规则扫描</span>
@@ -186,7 +188,7 @@ export default function AgentModeSelector({
                   onCheckedChange={(checked) =>
                     updateStaticTool("yasa", Boolean(checked))
                   }
-                  disabled={disabled}
+                  disabled={disabled || Boolean(disabledStaticTools?.yasa)}
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
                 <span className="tracking-wider">YASA 扫描</span>

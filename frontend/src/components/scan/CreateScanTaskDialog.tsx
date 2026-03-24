@@ -43,7 +43,11 @@ import {
 import { createGitleaksScanTask } from "@/shared/api/gitleaks";
 import { createBanditScanTask } from "@/shared/api/bandit";
 import { createPhpstanScanTask } from "@/shared/api/phpstan";
-import { createYasaScanTask } from "@/shared/api/yasa";
+import {
+	createYasaScanTask,
+	getYasaRuleConfigs,
+	type YasaRuleConfig,
+} from "@/shared/api/yasa";
 import {
 	getOpengrepActiveRules,
 	setOpengrepActiveRules,
@@ -66,7 +70,9 @@ import {
 	stripScanArchiveSuffix,
 } from "./create-scan-task/utils";
 import {
+	getYasaBlockedProjectMessage,
 	getYasaUnsupportedLanguageMessage,
+	isYasaBlockedProjectLanguage,
 	parseYasaLanguageOption,
 	resolveYasaLanguageFromProgrammingLanguages,
 	type YasaLanguageOption,
@@ -134,11 +140,20 @@ export default function CreateScanTaskDialog({
 		yasa: false,
 	});
 	const [yasaLanguage, setYasaLanguage] = useState<YasaLanguageOption>("auto");
+	const [yasaRuleConfigs, setYasaRuleConfigs] = useState<YasaRuleConfig[]>([]);
+	const [selectedYasaRuleConfigId, setSelectedYasaRuleConfigId] = useState<string>("default");
 	const [staticRules, setStaticRules] = useState<OpengrepRule[]>([]);
 	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
 
 	const { projects, loading, loadProjects } = useProjects();
 	const selectedProject = projects.find((p) => p.id === selectedProjectId);
+	const isYasaBlockedProject = useMemo(
+		() =>
+			sourceMode === "existing"
+				? isYasaBlockedProjectLanguage(selectedProject?.programming_languages)
+				: false,
+		[sourceMode, selectedProject?.programming_languages],
+	);
 	const zipState = useZipFile(selectedProject, projects);
 
 	const filteredProjects = useMemo(() => {
@@ -196,12 +211,34 @@ export default function CreateScanTaskDialog({
 			setScanMode(initialScanMode || "agent");
 			setStaticTools({ opengrep: true, gitleaks: false, bandit: false, phpstan: false, yasa: false });
 			setYasaLanguage("auto");
+			setSelectedYasaRuleConfigId("default");
 			setSourceMode("existing");
 			setNewProjectName("");
 			setNewProjectFile(null);
 			zipState.reset();
 			}
 		}, [open, preselectedProjectId, initialScanMode, loadProjects]);
+
+	useEffect(() => {
+		if (!open) return;
+		const loadYasaConfigs = async () => {
+			try {
+				const rows = await getYasaRuleConfigs({ isActive: true, limit: 200 });
+				setYasaRuleConfigs(rows);
+			} catch (error) {
+				console.error("加载 YASA 自定义规则配置失败:", error);
+				setYasaRuleConfigs([]);
+			}
+		};
+		void loadYasaConfigs();
+	}, [open]);
+
+	useEffect(() => {
+		if (isYasaBlockedProject && staticTools.yasa) {
+			setStaticTools((prev) => ({ ...prev, yasa: false }));
+			toast.info(getYasaBlockedProjectMessage());
+		}
+	}, [isYasaBlockedProject, staticTools.yasa]);
 
 	useEffect(() => {
 		if (!open || sourceMode !== "existing") return;
@@ -288,12 +325,20 @@ export default function CreateScanTaskDialog({
 		let banditTask: { id: string } | null = null;
 		let phpstanTask: { id: string } | null = null;
 		let yasaTask: { id: string } | null = null;
+		const selectedRuleConfig = yasaRuleConfigs.find(
+			(item) => item.id === selectedYasaRuleConfigId,
+		);
 		const autoResolvedYasaLanguage = resolveYasaLanguageFromProgrammingLanguages(
 			programmingLanguages,
 		);
 		const requestedYasaLanguage =
-			yasaLanguage !== "auto" ? yasaLanguage : autoResolvedYasaLanguage;
+			selectedRuleConfig?.language ||
+			(yasaLanguage !== "auto" ? yasaLanguage : autoResolvedYasaLanguage);
 		let shouldRunYasa = staticTools.yasa;
+		if (isYasaBlockedProjectLanguage(programmingLanguages)) {
+			shouldRunYasa = false;
+			toast.info(getYasaBlockedProjectMessage());
+		}
 		if (shouldRunYasa && !requestedYasaLanguage) {
 			shouldRunYasa = false;
 			toast.info(
@@ -409,7 +454,8 @@ export default function CreateScanTaskDialog({
 					staticBatchId,
 				),
 				target_path: ".",
-				language: requestedYasaLanguage || undefined,
+				language: selectedRuleConfig ? undefined : requestedYasaLanguage || undefined,
+				rule_config_id: selectedRuleConfig?.id,
 			});
 		}
 
@@ -820,10 +866,30 @@ export default function CreateScanTaskDialog({
 								disabled={creating}
 								staticTools={staticTools}
 								onStaticToolsChange={setStaticTools}
+								disabledStaticTools={{ yasa: isYasaBlockedProject }}
 							/>
 						)}
 						{scanMode === "static" && staticTools.yasa && (
 							<div className="space-y-2 border border-border rounded p-3 bg-muted/30">
+								<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+									YASA 规则配置
+								</Label>
+								<Select
+									value={selectedYasaRuleConfigId}
+									onValueChange={setSelectedYasaRuleConfigId}
+								>
+									<SelectTrigger className="h-9 cyber-input max-w-[340px]">
+										<SelectValue placeholder="选择规则配置" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="default">内置默认</SelectItem>
+										{yasaRuleConfigs.map((config) => (
+											<SelectItem key={config.id} value={config.id}>
+												{config.name} ({config.language})
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 								<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
 									YASA 语言
 								</Label>
@@ -832,6 +898,7 @@ export default function CreateScanTaskDialog({
 									onValueChange={(value) =>
 										setYasaLanguage(parseYasaLanguageOption(value))
 									}
+									disabled={selectedYasaRuleConfigId !== "default"}
 								>
 									<SelectTrigger className="h-9 cyber-input max-w-[240px]">
 										<SelectValue placeholder="选择语言" />
@@ -845,7 +912,8 @@ export default function CreateScanTaskDialog({
 										<SelectItem value="java">java</SelectItem>
 									</SelectContent>
 								</Select>
-								{yasaLanguage === "auto" &&
+								{selectedYasaRuleConfigId === "default" &&
+									yasaLanguage === "auto" &&
 									!resolveYasaLanguageFromProgrammingLanguages(
 										sourceMode === "existing"
 											? selectedProject?.programming_languages
@@ -855,6 +923,11 @@ export default function CreateScanTaskDialog({
 											YASA 将自动跳过（不影响其它引擎）：未检测到可支持语言
 										</p>
 									)}
+								{isYasaBlockedProject && (
+									<p className="text-xs text-amber-300">
+										{getYasaBlockedProjectMessage()}
+									</p>
+								)}
 							</div>
 						)}
 

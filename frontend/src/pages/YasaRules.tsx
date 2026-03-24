@@ -10,6 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -25,7 +28,16 @@ import {
   type DataTableSelectionContext,
   useDataTableUrlState,
 } from "@/components/data-table";
-import { getYasaRules, type YasaRule } from "@/shared/api/yasa";
+import {
+  getYasaRuntimeConfig,
+  getYasaRuleConfigs,
+  getYasaRules,
+  importYasaRuleConfig,
+  updateYasaRuntimeConfig,
+  type YasaRule,
+  type YasaRuleConfig,
+  type YasaRuntimeConfig,
+} from "@/shared/api/yasa";
 
 type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
 
@@ -39,15 +51,16 @@ interface YasaRuleRowViewModel {
   id: string;
   ruleName: string;
   languages: string[];
-  source: "内置规则";
+  source: "内置规则" | "自定义规则";
   confidence: "低";
-  activeStatus: "已启用";
+  activeStatus: "已启用" | "已禁用";
   verifyStatus: "✓ 可用";
   createdAt: "-";
   checkerPacks: string[];
   checkerPath: string;
   demoRuleConfigPath: string;
   description: string;
+  ruleConfigJson?: string;
 }
 
 function toViewModel(rule: YasaRule): YasaRuleRowViewModel {
@@ -64,6 +77,27 @@ function toViewModel(rule: YasaRule): YasaRuleRowViewModel {
     checkerPath: rule.checker_path || "-",
     demoRuleConfigPath: rule.demo_rule_config_path || "-",
     description: rule.description || "-",
+  };
+}
+
+function toViewModelFromConfig(config: YasaRuleConfig): YasaRuleRowViewModel {
+  return {
+    id: config.id,
+    ruleName: config.name,
+    languages: [config.language],
+    source: "自定义规则",
+    confidence: "低",
+    activeStatus: config.is_active ? "已启用" : "已禁用",
+    verifyStatus: "✓ 可用",
+    createdAt: "-",
+    checkerPacks: (config.checker_pack_ids || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    checkerPath: "-",
+    demoRuleConfigPath: "-",
+    description: config.description || "-",
+    ruleConfigJson: config.rule_config_json,
   };
 }
 
@@ -140,7 +174,10 @@ function buildColumns(
       meta: {
         label: "规则来源",
         filterVariant: "select",
-        filterOptions: [{ label: "内置规则", value: "内置规则" }],
+        filterOptions: [
+          { label: "内置规则", value: "内置规则" },
+          { label: "自定义规则", value: "自定义规则" },
+        ],
       },
       cell: ({ row }) => <Badge className="cyber-badge-info">{row.original.source}</Badge>,
     },
@@ -164,9 +201,16 @@ function buildColumns(
       meta: {
         label: "启用状态",
         filterVariant: "select",
-        filterOptions: [{ label: "已启用", value: "已启用" }],
+        filterOptions: [
+          { label: "已启用", value: "已启用" },
+          { label: "已禁用", value: "已禁用" },
+        ],
       },
-      cell: ({ row }) => <Badge className="cyber-badge-success">{row.original.activeStatus}</Badge>,
+      cell: ({ row }) => (
+        <Badge className={row.original.activeStatus === "已启用" ? "cyber-badge-success" : "cyber-badge-muted"}>
+          {row.original.activeStatus}
+        </Badge>
+      ),
     },
     {
       accessorKey: "verifyStatus",
@@ -264,10 +308,21 @@ export default function YasaRules({
   onEngineChange,
 }: YasaRulesProps) {
   const [rules, setRules] = useState<YasaRule[]>([]);
+  const [customRuleConfigs, setCustomRuleConfigs] = useState<YasaRuleConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [detailRule, setDetailRule] = useState<YasaRuleRowViewModel | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importName, setImportName] = useState("");
+  const [importLanguage, setImportLanguage] = useState("golang");
+  const [importDescription, setImportDescription] = useState("");
+  const [importRuleConfigJson, setImportRuleConfigJson] = useState("");
+  const [importRuleConfigFile, setImportRuleConfigFile] = useState<File | null>(null);
+  const [runtimeConfig, setRuntimeConfig] = useState<YasaRuntimeConfig | null>(null);
+  const [runtimeConfigForm, setRuntimeConfigForm] = useState<YasaRuntimeConfig | null>(null);
+  const [savingRuntimeConfig, setSavingRuntimeConfig] = useState(false);
   const { initialState, syncStateToUrl } = useDataTableUrlState(true);
   const [tableState, setTableState] = useState<DataTableQueryState>(() =>
     createInitialTableState(initialState),
@@ -281,8 +336,15 @@ export default function YasaRules({
     try {
       setLoading(true);
       setLoadFailed(false);
-      const data = await getYasaRules({ limit: 2000 });
-      setRules(data);
+      const [builtinRules, customConfigs, runtime] = await Promise.all([
+        getYasaRules({ limit: 2000 }),
+        getYasaRuleConfigs({ limit: 500 }),
+        getYasaRuntimeConfig(),
+      ]);
+      setRules(builtinRules);
+      setCustomRuleConfigs(customConfigs);
+      setRuntimeConfig(runtime);
+      setRuntimeConfigForm(runtime);
     } catch (error: any) {
       setLoadFailed(true);
       const detail =
@@ -308,7 +370,10 @@ export default function YasaRules({
     syncStateToUrl(tableState);
   }, [syncStateToUrl, tableState]);
 
-  const rows = useMemo(() => rules.map(toViewModel), [rules]);
+  const rows = useMemo(
+    () => [...rules.map(toViewModel), ...customRuleConfigs.map(toViewModelFromConfig)],
+    [rules, customRuleConfigs],
+  );
   const checkerPackOptions = useMemo(
     () =>
       Array.from(
@@ -321,9 +386,10 @@ export default function YasaRules({
 
   const stats = useMemo(() => {
     const languageCount = new Set(rows.flatMap((item) => item.languages)).size;
+    const activeCount = rows.filter((item) => item.activeStatus === "已启用").length;
     return {
       total: rows.length,
-      active: rows.length,
+      active: activeCount,
       checkerPackCount: checkerPackOptions.length,
       languageCount,
     };
@@ -345,10 +411,12 @@ export default function YasaRules({
           const text = JSON.stringify(
             {
               checker_id: row.id,
+              source: row.source,
               checker_packs: row.checkerPacks,
               languages: row.languages,
               checker_path: row.checkerPath,
               demo_rule_config_path: row.demoRuleConfigPath,
+              rule_config_json: row.ruleConfigJson,
             },
             null,
             2,
@@ -363,6 +431,37 @@ export default function YasaRules({
     ),
     [checkerPackFilterOptions],
   );
+  const isRuntimeConfigDirty = useMemo(() => {
+    if (!runtimeConfig || !runtimeConfigForm) return false;
+    return JSON.stringify(runtimeConfig) !== JSON.stringify(runtimeConfigForm);
+  }, [runtimeConfig, runtimeConfigForm]);
+
+  const updateRuntimeField = (key: keyof YasaRuntimeConfig, value: string) => {
+    setRuntimeConfigForm((current) => {
+      if (!current) return current;
+      const parsed = Number(value);
+      return {
+        ...current,
+        [key]: Number.isFinite(parsed) ? parsed : 0,
+      };
+    });
+  };
+
+  const handleSaveRuntimeConfig = async () => {
+    if (!runtimeConfigForm) return;
+    try {
+      setSavingRuntimeConfig(true);
+      const saved = await updateYasaRuntimeConfig(runtimeConfigForm);
+      setRuntimeConfig(saved);
+      setRuntimeConfigForm(saved);
+      toast.success("全语言统一超时已生效（对后续新任务）");
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || "保存 YASA 运行配置失败";
+      toast.error(String(detail));
+    } finally {
+      setSavingRuntimeConfig(false);
+    }
+  };
 
   const engineSelector = showEngineSelector ? (
     <div className="min-w-[150px]">
@@ -393,6 +492,39 @@ export default function YasaRules({
       </Select>
     </div>
   ) : null;
+
+  const handleImportCustomRuleConfig = async () => {
+    if (!importName.trim()) {
+      toast.error("请输入规则名称");
+      return;
+    }
+    if (!importRuleConfigJson.trim() && !importRuleConfigFile) {
+      toast.error("请填写 rule-config JSON 或上传文件");
+      return;
+    }
+    try {
+      setImporting(true);
+      await importYasaRuleConfig({
+        name: importName.trim(),
+        description: importDescription.trim() || undefined,
+        language: importLanguage,
+        rule_config_json: importRuleConfigJson.trim() || undefined,
+        rule_config_file: importRuleConfigFile || undefined,
+      });
+      toast.success("YASA 自定义规则导入成功");
+      setShowImportDialog(false);
+      setImportName("");
+      setImportDescription("");
+      setImportRuleConfigJson("");
+      setImportRuleConfigFile(null);
+      await loadRules();
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || "导入失败";
+      toast.error(String(detail));
+    } finally {
+      setImporting(false);
+    }
+  };
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -440,6 +572,78 @@ export default function YasaRules({
         </div>
       </div>
 
+      <div className="cyber-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">YASA 运行配置</p>
+            <p className="text-xs text-muted-foreground">修改后对后续新建任务全局生效</p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            className="cyber-btn-primary h-8"
+            onClick={() => void handleSaveRuntimeConfig()}
+            disabled={!runtimeConfigForm || savingRuntimeConfig || !isRuntimeConfigDirty}
+          >
+            {savingRuntimeConfig ? "保存中..." : "保存配置"}
+          </Button>
+        </div>
+        {runtimeConfigForm ? (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1">
+              <Label className="text-xs">YASA超时(秒)</Label>
+              <Input
+                type="number"
+                min={30}
+                max={86400}
+                value={runtimeConfigForm.yasa_timeout_seconds}
+                onChange={(event) =>
+                  updateRuntimeField("yasa_timeout_seconds", event.target.value)
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Orphan判定阈值(秒)</Label>
+              <Input
+                type="number"
+                min={30}
+                max={86400}
+                value={runtimeConfigForm.yasa_orphan_stale_seconds}
+                onChange={(event) =>
+                  updateRuntimeField("yasa_orphan_stale_seconds", event.target.value)
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">心跳间隔(秒)</Label>
+              <Input
+                type="number"
+                min={1}
+                max={3600}
+                value={runtimeConfigForm.yasa_exec_heartbeat_seconds}
+                onChange={(event) =>
+                  updateRuntimeField("yasa_exec_heartbeat_seconds", event.target.value)
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">进程回收宽限(秒)</Label>
+              <Input
+                type="number"
+                min={1}
+                max={60}
+                value={runtimeConfigForm.yasa_process_kill_grace_seconds}
+                onChange={(event) =>
+                  updateRuntimeField("yasa_process_kill_grace_seconds", event.target.value)
+                }
+              />
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">正在加载运行配置...</p>
+        )}
+      </div>
+
       <div className="cyber-card relative z-10 overflow-hidden">
         <DataTable
           data={rows}
@@ -452,7 +656,19 @@ export default function YasaRules({
           }}
           toolbar={{
             searchPlaceholder: "搜索规则名称或ID...",
-            leadingActions: engineSelector,
+            leadingActions: (
+              <div className="flex items-center gap-2">
+                {engineSelector}
+                <Button
+                  type="button"
+                  size="sm"
+                  className="cyber-btn-primary h-9"
+                  onClick={() => setShowImportDialog(true)}
+                >
+                  导入自定义规则
+                </Button>
+              </div>
+            ),
             showGlobalSearch: false,
             showColumnVisibility: false,
 						showDensityToggle: false,
@@ -548,6 +764,68 @@ export default function YasaRules({
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <DialogContent className="cyber-dialog max-w-3xl border border-border">
+          <DialogHeader>
+            <DialogTitle>导入 YASA 自定义规则配置</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="space-y-1">
+              <Label>规则名称</Label>
+              <Input value={importName} onChange={(e) => setImportName(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>语言</Label>
+              <Select value={importLanguage} onValueChange={setImportLanguage}>
+                <SelectTrigger className="h-9 cyber-input max-w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="python">python</SelectItem>
+                  <SelectItem value="javascript">javascript</SelectItem>
+                  <SelectItem value="typescript">typescript</SelectItem>
+                  <SelectItem value="golang">golang</SelectItem>
+                  <SelectItem value="java">java</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>描述（可选）</Label>
+              <Input
+                value={importDescription}
+                onChange={(e) => setImportDescription(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>rule-config JSON（可粘贴）</Label>
+              <Textarea
+                rows={8}
+                value={importRuleConfigJson}
+                onChange={(e) => setImportRuleConfigJson(e.target.value)}
+                placeholder='例如: [{"checkerIds":["taint_flow_go_input"],"...":"..."}]'
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>或上传 JSON 文件</Label>
+              <Input
+                type="file"
+                accept=".json,application/json"
+                onChange={(event) => setImportRuleConfigFile(event.target.files?.[0] || null)}
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                className="cyber-btn-primary"
+                disabled={importing}
+                onClick={() => void handleImportCustomRuleConfig()}
+              >
+                {importing ? "导入中..." : "确认导入"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

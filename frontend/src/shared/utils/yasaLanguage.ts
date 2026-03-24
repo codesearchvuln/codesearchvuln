@@ -14,6 +14,14 @@ const YASA_LANGUAGE_ALIAS: Record<string, string> = {
   scala: "java",
 };
 
+const YASA_BLOCKED_LANGUAGE_ALIASES = new Set([
+  "c",
+  "cpp",
+  "c++",
+  "cc",
+  "cxx",
+]);
+
 const YASA_LANGUAGE_PRIORITY = [
   "java",
   "golang",
@@ -63,6 +71,11 @@ function parseProgrammingLanguages(value: unknown): string[] {
     .filter(Boolean);
 }
 
+export function isYasaBlockedProjectLanguage(programmingLanguages: unknown): boolean {
+  const parsed = parseProgrammingLanguages(programmingLanguages);
+  return parsed.some((item) => YASA_BLOCKED_LANGUAGE_ALIASES.has(String(item || "").trim().toLowerCase()));
+}
+
 export function parseYasaLanguageOption(value: unknown): YasaLanguageOption {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "python") return "python";
@@ -77,6 +90,7 @@ export function resolveYasaLanguageFromProgrammingLanguages(
   programmingLanguages: unknown,
 ): string | null {
   const parsedLanguages = parseProgrammingLanguages(programmingLanguages);
+  if (isYasaBlockedProjectLanguage(parsedLanguages)) return null;
   // YASA auto policy: PHP-like projects should be skipped even if other
   // supported languages are also detected.
   const hasPhpLikeLanguage = parsedLanguages.some((item) =>
@@ -102,4 +116,8 @@ export function getYasaUnsupportedLanguageMessage(language?: string): string {
     return `不支持语言: ${language.trim().toLowerCase()}，YASA 仅支持 python/javascript/typescript/golang/java`;
   }
   return "未检测到可用于 YASA 的项目语言，请在创建时手动指定支持语言";
+}
+
+export function getYasaBlockedProjectMessage(): string {
+  return "YASA 引擎暂不支持 C/C++ 项目";
 }

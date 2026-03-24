@@ -49,6 +49,7 @@ export interface StaticAnalysisFailureReason {
   engine: Engine;
   engineLabel: string;
   message: string;
+  isTimeout: boolean;
 }
 
 export interface StaticAnalysisEngineStatus {
@@ -323,6 +324,17 @@ function getStaticAnalysisFailureFallbackMessage(status: string): string {
     : "任务已中断。";
 }
 
+function isTimeoutLikeText(text?: string | null): boolean {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized.includes("超时") ||
+    normalized.includes("timeout") ||
+    normalized.includes("timed out") ||
+    normalized.includes("超出设定时间")
+  );
+}
+
 function normalizeReasonText(value?: string | null): string | null {
   const text = String(value || "").trim();
   return text || null;
@@ -430,14 +442,7 @@ export function buildStaticAnalysisTaskStatusSummary(input: {
         })
       : "failed";
 
-  const engineStatuses = engineEntries.map(({ engine, task }) => ({
-    engine,
-    engineLabel: getEngineLabel(engine),
-    status: normalizeStaticAnalysisStatus(task.status),
-    statusLabel: getStaticAnalysisStatusLabel(task.status),
-  }));
-
-  const failureReasons = engineEntries
+  const failureReasons: StaticAnalysisFailureReason[] = engineEntries
     .filter(({ task }) => {
       const normalized = normalizeStaticAnalysisStatus(task.status);
       return (
@@ -447,16 +452,51 @@ export function buildStaticAnalysisTaskStatusSummary(input: {
         normalized === "aborted"
       );
     })
-    .map(({ engine, task }) => ({
+    .map(({ engine, task }) => {
+      const message = resolveTaskFailureReason(engine, task);
+      return {
+        engine,
+        engineLabel: getEngineLabel(engine),
+        message,
+        isTimeout: isTimeoutLikeText(message),
+      };
+    });
+
+  const failureReasonByEngine = new Map(
+    failureReasons.map((reason) => [reason.engine, reason]),
+  );
+
+  const engineStatuses = engineEntries.map(({ engine, task }) => {
+    const failureReason = failureReasonByEngine.get(engine);
+    const normalizedStatus = normalizeStaticAnalysisStatus(task.status);
+    const timeoutFailed =
+      normalizedStatus === "failed" && Boolean(failureReason?.isTimeout);
+    return {
       engine,
       engineLabel: getEngineLabel(engine),
-      message: resolveTaskFailureReason(engine, task),
-    }));
+      status: normalizedStatus,
+      statusLabel: timeoutFailed
+        ? "超出设定时间"
+        : getStaticAnalysisStatusLabel(task.status),
+    };
+  });
+
+  const hasTimeoutFailure = failureReasons.some((reason) => reason.isTimeout);
+  const hasNonTimeoutFailure = failureReasons.some((reason) => !reason.isTimeout);
+  const timeoutOnlyFailure =
+    aggregateStatus === "failed" && hasTimeoutFailure && !hasNonTimeoutFailure;
+
+  const aggregateLabel = timeoutOnlyFailure
+    ? "超出设定时间"
+    : getStaticAnalysisStatusLabel(aggregateStatus);
+  const progressHint = timeoutOnlyFailure
+    ? "扫描已结束，至少一个引擎超出设定时间"
+    : buildStaticAnalysisProgressHint(aggregateStatus);
 
   return {
     aggregateStatus,
-    aggregateLabel: getStaticAnalysisStatusLabel(aggregateStatus),
-    progressHint: buildStaticAnalysisProgressHint(aggregateStatus),
+    aggregateLabel,
+    progressHint,
     engineStatuses,
     failureReasons,
   };

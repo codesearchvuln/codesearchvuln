@@ -61,6 +61,14 @@ _YASA_LANGUAGE_ALIAS: Dict[str, str] = {
     "scala": "java",
 }
 
+_YASA_BLOCKED_LANGUAGE_ALIASES: set[str] = {
+    "c",
+    "cpp",
+    "c++",
+    "cc",
+    "cxx",
+}
+
 _YASA_LANGUAGE_PRIORITY: tuple[str, ...] = (
     "java",
     "golang",
@@ -95,6 +103,15 @@ def parse_programming_languages(raw_languages: Any) -> List[str]:
     return []
 
 
+def is_yasa_blocked_project_language(raw_languages: Any) -> bool:
+    project_languages = parse_programming_languages(raw_languages)
+    for item in project_languages:
+        normalized = str(item or "").strip().lower()
+        if normalized in _YASA_BLOCKED_LANGUAGE_ALIASES:
+            return True
+    return False
+
+
 def normalize_yasa_language(
     language: Optional[str],
     *,
@@ -115,6 +132,9 @@ def normalize_yasa_language(
 
 
 def resolve_yasa_language_from_programming_languages(raw_languages: Any) -> Optional[str]:
+    if is_yasa_blocked_project_language(raw_languages):
+        return None
+
     candidates = parse_programming_languages(raw_languages)
     mapped: List[str] = []
     for item in candidates:
@@ -138,6 +158,8 @@ def resolve_yasa_language_with_preference(
     programming_languages: Any,
 ) -> Optional[str]:
     normalized_preference = normalize_yasa_language(preferred_language, allow_auto=True)
+    if is_yasa_blocked_project_language(programming_languages):
+        return None
     if normalized_preference and normalized_preference != "auto":
         return normalized_preference
     # YASA auto policy: PHP-like projects should be skipped even if other

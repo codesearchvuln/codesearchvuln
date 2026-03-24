@@ -29,6 +29,7 @@ from app.services.agent.utils.vulnerability_naming import (
 )
 from app.services.yasa_language import (
     YASA_SUPPORTED_LANGUAGES_TEXT,
+    is_yasa_blocked_project_language,
     normalize_yasa_language,
     resolve_yasa_language_with_preference,
 )
@@ -676,14 +677,8 @@ async def _prepare_embedded_bootstrap_findings(
         )
 
     if yasa_enabled:
-        resolved_yasa_language = resolve_yasa_language_with_preference(
-            preferred_language=yasa_language,
-            programming_languages=programming_languages,
-        )
-        if not resolved_yasa_language:
-            skip_reason = (
-                f"YASA 已跳过：未检测到可支持语言（支持 {YASA_SUPPORTED_LANGUAGES_TEXT}）"
-            )
+        if is_yasa_blocked_project_language(programming_languages):
+            skip_reason = "YASA 引擎暂不支持 C/C++ 项目"
             if event_emitter:
                 await event_emitter.emit_info(
                     skip_reason,
@@ -693,50 +688,73 @@ async def _prepare_embedded_bootstrap_findings(
                         "bootstrap_source": "embedded_yasa_skipped",
                         "bootstrap_yasa_skipped_reason": skip_reason,
                         "bootstrap_yasa_requested_language": yasa_language or "auto",
+                        "blocked_reason": "c_cpp_unsupported",
                     },
                 )
             yasa_candidates = []
             yasa_total_findings = 0
         else:
-            if event_emitter:
-                await event_emitter.emit_info(
-                    "🧪 YASA 内嵌预扫开始",
-                    metadata={
-                        "bootstrap": True,
-                        "bootstrap_task_id": None,
-                        "bootstrap_source": "embedded_yasa",
-                        "bootstrap_total_findings": 0,
-                        "bootstrap_candidate_count": 0,
-                        "bootstrap_yasa_requested_language": yasa_language or "auto",
-                        "bootstrap_yasa_resolved_language": resolved_yasa_language,
-                    },
-                )
-            try:
-                scanner = YasaBootstrapScanner(language=resolved_yasa_language)
-                scan_result = await scanner.scan(project_root)
-            except FileNotFoundError as exc:
-                if event_emitter:
-                    await event_emitter.emit_error("YASA 预处理失败：未安装 yasa")
-                raise RuntimeError("YASA 预处理失败：未安装 yasa") from exc
-            except Exception as exc:
-                if event_emitter:
-                    await event_emitter.emit_error(f"YASA 预处理失败：{str(exc)[:160]}")
-                raise RuntimeError(f"YASA 预处理失败：{str(exc)[:200]}") from exc
-
-            yasa_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
-            normalized_yasa_findings = []
-            for finding in getattr(scan_result, "findings", []) or []:
-                if hasattr(finding, "to_dict"):
-                    finding_payload = finding.to_dict()
-                elif isinstance(finding, dict):
-                    finding_payload = dict(finding)
-                else:
-                    continue
-                normalized_yasa_findings.append(finding_payload)
-            yasa_candidates = _filter_bootstrap_findings(
-                normalized_yasa_findings,
-                exclude_patterns=exclude_patterns,
+            resolved_yasa_language = resolve_yasa_language_with_preference(
+                preferred_language=yasa_language,
+                programming_languages=programming_languages,
             )
+            if not resolved_yasa_language:
+                skip_reason = (
+                    f"YASA 已跳过：未检测到可支持语言（支持 {YASA_SUPPORTED_LANGUAGES_TEXT}）"
+                )
+                if event_emitter:
+                    await event_emitter.emit_info(
+                        skip_reason,
+                        metadata={
+                            "bootstrap": True,
+                            "bootstrap_task_id": None,
+                            "bootstrap_source": "embedded_yasa_skipped",
+                            "bootstrap_yasa_skipped_reason": skip_reason,
+                            "bootstrap_yasa_requested_language": yasa_language or "auto",
+                        },
+                    )
+                yasa_candidates = []
+                yasa_total_findings = 0
+            else:
+                if event_emitter:
+                    await event_emitter.emit_info(
+                        "🧪 YASA 内嵌预扫开始",
+                        metadata={
+                            "bootstrap": True,
+                            "bootstrap_task_id": None,
+                            "bootstrap_source": "embedded_yasa",
+                            "bootstrap_total_findings": 0,
+                            "bootstrap_candidate_count": 0,
+                            "bootstrap_yasa_requested_language": yasa_language or "auto",
+                            "bootstrap_yasa_resolved_language": resolved_yasa_language,
+                        },
+                    )
+                try:
+                    scanner = YasaBootstrapScanner(language=resolved_yasa_language)
+                    scan_result = await scanner.scan(project_root)
+                except FileNotFoundError as exc:
+                    if event_emitter:
+                        await event_emitter.emit_error("YASA 预处理失败：未安装 yasa")
+                    raise RuntimeError("YASA 预处理失败：未安装 yasa") from exc
+                except Exception as exc:
+                    if event_emitter:
+                        await event_emitter.emit_error(f"YASA 预处理失败：{str(exc)[:160]}")
+                    raise RuntimeError(f"YASA 预处理失败：{str(exc)[:200]}") from exc
+
+                yasa_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
+                normalized_yasa_findings = []
+                for finding in getattr(scan_result, "findings", []) or []:
+                    if hasattr(finding, "to_dict"):
+                        finding_payload = finding.to_dict()
+                    elif isinstance(finding, dict):
+                        finding_payload = dict(finding)
+                    else:
+                        continue
+                    normalized_yasa_findings.append(finding_payload)
+                yasa_candidates = _filter_bootstrap_findings(
+                    normalized_yasa_findings,
+                    exclude_patterns=exclude_patterns,
+                )
 
     merged_candidates = _dedupe_bootstrap_findings(
         [*opengrep_candidates, *bandit_candidates, *gitleaks_candidates, *phpstan_candidates, *yasa_candidates]

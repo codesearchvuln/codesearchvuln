@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import signal
 import subprocess
 import warnings
 from datetime import datetime, timezone
@@ -253,6 +255,86 @@ async def recover_interrupted_tasks() -> dict[str, int]:
         return counts
 
 
+def _collect_stale_yasa_pids() -> list[int]:
+    """识别命中 /tmp/yasa_report_ 的遗留 YASA 进程。"""
+    try:
+        output = subprocess.check_output(
+            ["ps", "-eo", "pid=,cmd="],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+
+    stale_pids: list[int] = []
+    for line in output.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        parts = raw.split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        pid_text, cmd = parts
+        lower_cmd = cmd.lower()
+        if (
+            "yasa" not in lower_cmd
+            and "yasa-engine.real" not in lower_cmd
+            and "yasa-engine" not in lower_cmd
+        ):
+            continue
+        if "/tmp/yasa_report_" not in cmd:
+            continue
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        if pid > 1 and pid != os.getpid():
+            stale_pids.append(pid)
+    return stale_pids
+
+
+async def cleanup_stale_yasa_processes() -> dict[str, int]:
+    if not bool(getattr(settings, "YASA_STARTUP_FORCE_CLEANUP", True)):
+        return {"matched": 0, "terminated": 0, "killed": 0}
+
+    grace_seconds = max(
+        1, int(getattr(settings, "YASA_PROCESS_KILL_GRACE_SECONDS", 2) or 2)
+    )
+    pids = _collect_stale_yasa_pids()
+    if not pids:
+        return {"matched": 0, "terminated": 0, "killed": 0}
+
+    terminated = 0
+    killed = 0
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            terminated += 1
+        except ProcessLookupError:
+            continue
+        except Exception:
+            continue
+
+    await asyncio.sleep(grace_seconds)
+
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        except Exception:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed += 1
+        except ProcessLookupError:
+            continue
+        except Exception:
+            continue
+
+    return {"matched": len(pids), "terminated": terminated, "killed": killed}
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -295,6 +377,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
         raise
+
+    try:
+        cleanup_summary = await cleanup_stale_yasa_processes()
+        if cleanup_summary["matched"] > 0:
+            logger.warning(
+                "启动时已清理遗留 YASA 进程：matched=%s, terminated=%s, killed=%s",
+                cleanup_summary["matched"],
+                cleanup_summary["terminated"],
+                cleanup_summary["killed"],
+            )
+    except Exception as e:
+        logger.warning(f"清理遗留 YASA 进程失败: {e}")
 
     try:
         await recover_interrupted_tasks()
