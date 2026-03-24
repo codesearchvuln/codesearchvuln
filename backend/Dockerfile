@@ -16,7 +16,8 @@ ARG YASA_VERSION=v0.2.33
 ARG YASA_UAST_VERSION=v0.2.8
 ARG YASA_BUILD_FROM_SOURCE=1
 FROM ${UV_IMAGE} AS uvbin
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS builder
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS python-base
+FROM python-base AS builder
 
 WORKDIR /app
 ARG BACKEND_APT_MIRROR_PRIMARY
@@ -183,7 +184,7 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
 # ============================================
 # 多阶段构建 - 运行时基础阶段
 # ============================================
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS runtime-base
+FROM python-base AS runtime-base
 
 WORKDIR /app
 ARG BACKEND_APT_MIRROR_PRIMARY
@@ -572,7 +573,6 @@ COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
 COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
 COPY --from=scanner-tools-base /opt/phpstan /opt/phpstan
-COPY --from=scanner-tools-base /opt/yasa /opt/yasa
 COPY --chmod=755 scripts/dev-entrypoint.sh /usr/local/bin/backend-dev-entrypoint.sh
 
 RUN set -eux; \
@@ -581,12 +581,6 @@ RUN set -eux; \
     opengrep --version; \
     ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
     phpstan --version; \
-    if [ -x "${YASA_WRAPPER_BIN}" ]; then \
-      ln -sf "${YASA_ENGINE_WRAPPER_BIN}" /usr/local/bin/yasa-engine; \
-      ln -sf "${YASA_WRAPPER_BIN}" /usr/local/bin/yasa; \
-      /usr/local/bin/yasa --version; \
-      test -d /opt/yasa/resource; \
-    fi; \
     for site_packages_dir in $(python3 -c 'import site; [print(path) for path in site.getsitepackages() if "site-packages" in path]'); do \
       find "${site_packages_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +; \
     done; \
@@ -611,7 +605,6 @@ COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks
 COPY --from=scanner-tools-base /opt/opengrep /opt/opengrep
 COPY --from=scanner-tools-base /opt/phpstan /opt/phpstan
-COPY --from=scanner-tools-base /opt/yasa /opt/yasa
 
 # 复制共享扫描工具并安装 PMD
 RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhunter-tools \
@@ -661,12 +654,6 @@ RUN --mount=type=cache,id=vulhunter-backend-tool-archive,target=/var/cache/vulhu
     opengrep --version; \
     ln -sf "${PHPSTAN_HOME}/phpstan" /usr/local/bin/phpstan; \
     phpstan --version; \
-    if [ -x "${YASA_WRAPPER_BIN}" ]; then \
-      ln -sf "${YASA_ENGINE_WRAPPER_BIN}" /usr/local/bin/yasa-engine; \
-      ln -sf "${YASA_WRAPPER_BIN}" /usr/local/bin/yasa; \
-      /usr/local/bin/yasa --version; \
-      test -d /opt/yasa/resource; \
-    fi; \
     PMD_CACHE="/var/cache/vulhunter-tools/pmd-dist-7.0.0-bin.zip"; \
     if [ ! -s "${PMD_CACHE}" ]; then \
       download_with_fallback \

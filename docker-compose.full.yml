@@ -33,7 +33,7 @@ services:
     volumes: !override
       - backend_uploads:/app/uploads
       - mcp_data:/app/data/mcp
-      - /tmp/vulhunter:/tmp/vulhunter
+      - /tmp/vulhunter/scans:/tmp/vulhunter/scans
       - /var/run/docker.sock:/var/run/docker.sock
     environment: !override
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
@@ -44,8 +44,8 @@ services:
       SANDBOX_ENABLED: "true"
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-vulhunter/sandbox:latest}
       YASA_ENABLED: ${YASA_ENABLED:-true}
-      YASA_BIN_PATH: ${YASA_BIN_PATH:-/opt/yasa/bin/yasa}
-      YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}
+      SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}
+      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}
       YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}
       MCP_ENABLED: "true"
       MCP_REQUIRE_ALL_READY_ON_STARTUP: "true"
@@ -62,6 +62,25 @@ services:
       http_proxy: ""
       https_proxy: ""
       NO_PROXY: "*"
+
+  yasa-runner:
+    image: vulhunter/yasa-runner-local:latest
+    build:
+      context: ./backend
+      dockerfile: ./docker/yasa-runner.Dockerfile
+      args:
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}
+        - YASA_VERSION=${YASA_VERSION:-v0.2.33}
+        - http_proxy=
+        - https_proxy=
+        - HTTP_PROXY=
+        - HTTPS_PROXY=
+        - all_proxy=
+        - ALL_PROXY=
+    restart: "no"
+    profiles: ["build"]
+    command: ["/bin/sh", "-lc", "/opt/yasa/bin/yasa --version >/dev/null 2>&1 || true"]
 
   frontend:
     image: vulhunter/frontend-local:latest

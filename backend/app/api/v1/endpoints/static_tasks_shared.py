@@ -24,10 +24,49 @@ from app.models.opengrep import OpengrepRule
 from app.models.user_config import UserConfig
 from app.services.yasa_runtime_config import get_cached_global_yasa_runtime_config
 from app.services.llm.service import LLMConfigError, LLMService
+from app.services.scanner_runner import stop_scanner_container_sync
 
 logger = logging.getLogger(__name__)
 SCAN_PROGRESS_MAX_LOGS = 120
 _scan_progress_store: Dict[str, Dict[str, Any]] = {}
+
+
+def _scan_workspace_root() -> Path:
+    configured = str(getattr(settings, "SCAN_WORKSPACE_ROOT", "/tmp/vulhunter/scans") or "").strip()
+    return Path(configured or "/tmp/vulhunter/scans")
+
+
+def ensure_scan_workspace(scan_type: str, task_id: str) -> Path:
+    workspace = _scan_workspace_root() / str(scan_type).strip() / str(task_id).strip()
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
+
+
+def _ensure_scan_subdir(scan_type: str, task_id: str, name: str) -> Path:
+    path = ensure_scan_workspace(scan_type, task_id) / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def ensure_scan_project_dir(scan_type: str, task_id: str) -> Path:
+    return _ensure_scan_subdir(scan_type, task_id, "project")
+
+
+def ensure_scan_output_dir(scan_type: str, task_id: str) -> Path:
+    return _ensure_scan_subdir(scan_type, task_id, "output")
+
+
+def ensure_scan_logs_dir(scan_type: str, task_id: str) -> Path:
+    return _ensure_scan_subdir(scan_type, task_id, "logs")
+
+
+def ensure_scan_meta_dir(scan_type: str, task_id: str) -> Path:
+    return _ensure_scan_subdir(scan_type, task_id, "meta")
+
+
+def cleanup_scan_workspace(scan_type: str, task_id: str) -> None:
+    workspace = _scan_workspace_root() / str(scan_type).strip() / str(task_id).strip()
+    shutil.rmtree(workspace, ignore_errors=True)
 
 def _is_test_like_directory(name: str) -> bool:
     return "test" in (name or "").lower()
@@ -136,6 +175,7 @@ async def _get_project_root(project_id: str) -> Optional[str]:
         return None
 _static_scan_process_lock = threading.Lock()
 _static_running_scan_processes: Dict[str, subprocess.Popen] = {}
+_static_running_scan_containers: Dict[str, str] = {}
 _static_cancelled_scan_tasks: set[str] = set()
 _static_background_jobs: Dict[str, asyncio.Task] = {}
 
@@ -238,13 +278,47 @@ def _clear_scan_task_cancel(scan_type: str, task_id: str) -> None:
         _static_cancelled_scan_tasks.discard(key)
 
 
+def _register_scan_container(scan_type: str, task_id: str, container_id: str) -> None:
+    key = _scan_task_key(scan_type, task_id)
+    with _static_scan_process_lock:
+        _static_running_scan_containers[key] = container_id
+
+
+def _pop_scan_container(scan_type: str, task_id: str) -> Optional[str]:
+    key = _scan_task_key(scan_type, task_id)
+    with _static_scan_process_lock:
+        return _static_running_scan_containers.pop(key, None)
+
+
+async def _stop_scan_container(scan_type: str, task_id: str) -> bool:
+    container_id = _pop_scan_container(scan_type, task_id)
+    if not container_id:
+        return False
+    return await asyncio.to_thread(stop_scanner_container_sync, container_id)
+
+
 def _request_scan_task_cancel(scan_type: str, task_id: str) -> bool:
     """请求取消扫描任务并尝试结束对应进程。"""
     key = _scan_task_key(scan_type, task_id)
     process = None
+    container_id = None
     with _static_scan_process_lock:
         _static_cancelled_scan_tasks.add(key)
         process = _static_running_scan_processes.get(key)
+        container_id = _static_running_scan_containers.get(key)
+
+    if container_id:
+        try:
+            stop_scanner_container_sync(container_id)
+        except Exception as e:
+            logger.warning("Failed to stop %s scan container for task %s: %s", scan_type, task_id, e)
+        finally:
+            with _static_scan_process_lock:
+                _static_running_scan_containers.pop(key, None)
+        job = _get_static_background_job(scan_type, task_id)
+        if job and not job.done():
+            job.cancel()
+        return True
 
     if not process:
         job = _get_static_background_job(scan_type, task_id)

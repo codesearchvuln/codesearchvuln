@@ -4,51 +4,29 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
+from app.api.v1.endpoints.static_tasks_shared import (
+    cleanup_scan_workspace,
+    ensure_scan_logs_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
+)
 from app.core.config import settings
-from app.services.yasa_runtime import build_yasa_scan_command
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
+from app.services.yasa_runtime import (
+    YASA_RUNNER_BINARY,
+    YASA_RUNNER_RESOURCE_DIR,
+    build_yasa_rule_config_path,
+    build_yasa_scan_command,
+)
 from app.services.yasa_language import resolve_yasa_language_profile
 
 from .base import StaticBootstrapFinding, StaticBootstrapScanResult, StaticBootstrapScanner
-
-
-def _resolve_yasa_binary() -> str:
-    configured = str(getattr(settings, "YASA_BIN_PATH", "yasa") or "yasa").strip()
-    if os.path.isabs(configured):
-        if os.path.exists(configured) and os.access(configured, os.X_OK):
-            return configured
-        raise FileNotFoundError(f"yasa executable not found: {configured}")
-
-    resolved = shutil.which(configured)
-    if resolved:
-        return resolved
-    raise FileNotFoundError(
-        f"无法找到 yasa 可执行文件，请确认 YASA_BIN_PATH 配置（当前: {configured}）"
-    )
-
-
-def _resolve_resource_dir() -> Optional[Path]:
-    configured = str(getattr(settings, "YASA_RESOURCE_DIR", "") or "").strip()
-    if configured:
-        resource_dir = Path(configured).expanduser()
-        if resource_dir.exists():
-            return resource_dir
-
-    candidates = [
-        Path.home() / ".local" / "share" / "yasa-engine" / "resource",
-        Path("/usr/local/share/yasa-engine/resource"),
-        Path("/usr/share/yasa-engine/resource"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
 
 
 def _parse_sarif(payload: Any) -> List[Dict[str, Any]]:
@@ -128,13 +106,13 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         self.timeout_seconds = max(1, int(timeout_seconds or configured_timeout))
 
     def _build_rule_config(self) -> Optional[str]:
-        resource_dir = _resolve_resource_dir()
-        if resource_dir is None:
+        try:
+            return build_yasa_rule_config_path(
+                self.profile["rule_config"],
+                resource_dir=YASA_RUNNER_RESOURCE_DIR,
+            )
+        except Exception:
             return None
-        candidate = resource_dir / "example-rule-config" / self.profile["rule_config"]
-        if candidate.exists():
-            return str(candidate)
-        return None
 
     def _normalize_findings(self, findings: List[Dict[str, Any]]) -> List[StaticBootstrapFinding]:
         normalized: List[StaticBootstrapFinding] = []
@@ -169,27 +147,36 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
                 metadata={"enabled": False},
             )
 
-        binary = _resolve_yasa_binary()
         rule_config_file = self._build_rule_config()
-        report_dir = tempfile.mkdtemp(prefix="yasa_bootstrap_")
+        task_id = f"bootstrap-{uuid4().hex}"
+        workspace_dir = ensure_scan_workspace("yasa-bootstrap", task_id)
+        project_dir = ensure_scan_project_dir("yasa-bootstrap", task_id)
+        output_dir = ensure_scan_output_dir("yasa-bootstrap", task_id)
+        ensure_scan_logs_dir("yasa-bootstrap", task_id)
+        shutil.rmtree(project_dir, ignore_errors=True)
+        shutil.copytree(project_root, project_dir, dirs_exist_ok=True)
         cmd = build_yasa_scan_command(
-            binary=binary,
-            source_path=project_root,
+            binary=YASA_RUNNER_BINARY,
+            source_path="/scan/project",
             language=self.profile["language"],
-            report_dir=report_dir,
+            report_dir="/scan/output",
             checker_pack_ids=[self.profile["checker_pack"]],
             rule_config_file=rule_config_file,
+            use_runner_paths=True,
         )
 
         try:
-            process_result = await asyncio.to_thread(
-                subprocess.run,
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
+            process_result = await run_scanner_container(
+                ScannerRunSpec(
+                    scanner_type="yasa-bootstrap",
+                    image=str(getattr(settings, "SCANNER_YASA_IMAGE", "vulhunter/yasa-runner:latest")),
+                    workspace_dir=str(workspace_dir),
+                    command=cmd,
+                    timeout_seconds=self.timeout_seconds,
+                    env={"YASA_RESOURCE_DIR": YASA_RUNNER_RESOURCE_DIR},
+                )
             )
-            sarif_path = Path(report_dir) / "report.sarif"
+            sarif_path = output_dir / "report.sarif"
             findings: List[Dict[str, Any]] = []
             if sarif_path.exists():
                 try:
@@ -198,10 +185,10 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
                 except Exception as exc:  # noqa: BLE001
                     raise RuntimeError(f"yasa output parse failed: {exc}") from exc
 
-            if process_result.returncode != 0 and not findings:
-                stderr_text = str(process_result.stderr or "").strip()
-                stdout_text = str(process_result.stdout or "").strip()
-                raise RuntimeError(f"yasa failed: {(stderr_text or stdout_text or 'unknown error')[:300]}")
+            if (not process_result.success or process_result.exit_code != 0) and not findings:
+                raise RuntimeError(
+                    f"yasa failed: {str(process_result.error or 'unknown error')[:300]}"
+                )
 
             normalized = self._normalize_findings(findings)
             return StaticBootstrapScanResult(
@@ -215,4 +202,4 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
                 },
             )
         finally:
-            shutil.rmtree(report_dir, ignore_errors=True)
+            cleanup_scan_workspace("yasa-bootstrap", task_id)

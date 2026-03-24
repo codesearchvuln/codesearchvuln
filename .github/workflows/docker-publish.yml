@@ -19,6 +19,11 @@ on:
         required: false
         type: boolean
         default: true
+      build_yasa_runner:
+        description: '构建 YASA runner 镜像'
+        required: false
+        type: boolean
+        default: true
       build_sandbox:
         description: '构建沙箱镜像'
         required: false
@@ -101,6 +106,19 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
+      - name: 构建并推送 YASA runner Docker 镜像
+        if: ${{ github.event.inputs.build_yasa_runner == 'true' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/docker/yasa-runner.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/vulhunter-yasa-runner:${{ github.event.inputs.tag }}
+          cache-from: type=gha,scope=yasa-runner
+          cache-to: type=gha,mode=max,scope=yasa-runner
+
       - name: 构建并推送沙箱 Docker 镜像
         if: ${{ github.event.inputs.build_sandbox == 'true' }}
         uses: docker/build-push-action@v5
@@ -123,6 +141,9 @@ jobs:
           fi
           if [ "${{ github.event.inputs.build_backend }}" == "true" ]; then
             echo "- \`ghcr.io/${{ github.repository_owner }}/vulhunter-backend:${{ github.event.inputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ github.event.inputs.build_yasa_runner }}" == "true" ]; then
+            echo "- \`ghcr.io/${{ github.repository_owner }}/vulhunter-yasa-runner:${{ github.event.inputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
           fi
           if [ "${{ github.event.inputs.build_sandbox }}" == "true" ]; then
             echo "- \`ghcr.io/${{ github.repository_owner }}/vulhunter-sandbox:${{ github.event.inputs.tag }}\`" >> $GITHUB_STEP_SUMMARY

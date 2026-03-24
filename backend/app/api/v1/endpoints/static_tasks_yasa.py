@@ -1,28 +1,38 @@
 import asyncio
+import docker
 import json
 import os
 import shutil
 import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api.v1.endpoints.static_tasks_shared import (
+    _launch_static_background_job,
     _clear_scan_task_cancel,
     _force_cleanup_yasa_processes,
     _get_project_root,
     _is_scan_task_cancelled,
-    _is_scan_process_active,
+    _pop_scan_container,
+    _register_scan_container,
+    _release_request_db_session,
     _request_scan_task_cancel,
-    _run_subprocess_with_tracking,
+    _stop_scan_container,
     _sync_task_scan_duration,
+    async_session_factory,
+    cleanup_scan_workspace,
     deps,
+    ensure_scan_logs_dir,
+    ensure_scan_meta_dir,
+    ensure_scan_output_dir,
+    ensure_scan_project_dir,
+    ensure_scan_workspace,
     get_db,
     logger,
     settings,
@@ -30,7 +40,14 @@ from app.api.v1.endpoints.static_tasks_shared import (
 from app.models.project import Project
 from app.models.user import User
 from app.models.yasa import YasaFinding, YasaRuleConfig, YasaScanTask
-from app.services.yasa_runtime import build_yasa_scan_command
+from app.services.project_metrics import project_metrics_refresher
+from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
+from app.services.yasa_runtime import (
+    YASA_RUNNER_BINARY,
+    YASA_RUNNER_RESOURCE_DIR,
+    build_yasa_rule_config_path,
+    build_yasa_scan_command,
+)
 from app.services.yasa_runtime_config import (
     load_global_yasa_runtime_config,
     save_global_yasa_runtime_config,
@@ -147,6 +164,30 @@ class YasaRuntimeConfigUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+def _build_yasa_scan_task_response(task: YasaScanTask) -> YasaScanTaskResponse:
+    return YasaScanTaskResponse(
+        id=str(task.id),
+        project_id=str(task.project_id),
+        name=str(task.name or ""),
+        status=str(task.status or "pending"),
+        target_path=str(task.target_path or "."),
+        language=str(task.language or ""),
+        checker_pack_ids=task.checker_pack_ids,
+        checker_ids=task.checker_ids,
+        rule_config_file=task.rule_config_file,
+        rule_config_id=task.rule_config_id,
+        rule_config_name=task.rule_config_name,
+        rule_config_source=task.rule_config_source,
+        total_findings=int(task.total_findings or 0),
+        scan_duration_ms=int(task.scan_duration_ms or 0),
+        files_scanned=int(task.files_scanned or 0),
+        diagnostics_summary=task.diagnostics_summary,
+        error_message=task.error_message,
+        created_at=task.created_at or datetime.now(),
+        updated_at=task.updated_at,
+    )
+
+
 _SUPPORTED_YASA_LANGUAGES = YASA_SUPPORTED_LANGUAGES
 
 
@@ -221,13 +262,13 @@ def _resolve_resource_dir() -> Optional[Path]:
 
 
 def _build_default_rule_config_path(profile: Dict[str, str]) -> Optional[str]:
-    resource_dir = _resolve_resource_dir()
-    if resource_dir is None:
+    try:
+        return build_yasa_rule_config_path(
+            profile["rule_config"],
+            resource_dir=YASA_RUNNER_RESOURCE_DIR,
+        )
+    except Exception:
         return None
-    candidate = resource_dir / "example-rule-config" / profile["rule_config"]
-    if candidate.exists():
-        return str(candidate)
-    return None
 
 
 def _safe_json_load(path: Path) -> Any:
@@ -608,6 +649,88 @@ async def _handle_yasa_interrupted(
     return True
 
 
+def _is_yasa_scan_container_active(container_id: Optional[str]) -> bool:
+    normalized = str(container_id or "").strip()
+    if not normalized:
+        return False
+    try:
+        client = docker.from_env()
+        container = client.containers.get(normalized)
+        container.reload()
+        status = str(getattr(container, "status", "") or "").strip().lower()
+        return status in {"created", "running", "restarting"}
+    except docker.errors.NotFound:
+        return False
+    except docker.errors.DockerException as exc:
+        logger.warning("Failed to inspect YASA container %s: %s", normalized, exc)
+        return True
+
+
+def _stage_runner_rule_config_file(
+    *,
+    raw_rule_config_file: Optional[str],
+    project_root: str,
+    project_dir: Path,
+    meta_dir: Path,
+) -> Optional[str]:
+    normalized = str(raw_rule_config_file or "").strip()
+    if not normalized:
+        return None
+
+    if normalized.startswith("/scan/") or normalized.startswith(YASA_RUNNER_RESOURCE_DIR):
+        return normalized
+
+    project_root_path = Path(project_root).expanduser().resolve()
+    project_dir_path = project_dir.expanduser().resolve()
+    raw_path = Path(normalized).expanduser()
+
+    if raw_path.is_absolute():
+        try:
+            resolved_raw = raw_path.resolve()
+        except Exception:
+            resolved_raw = raw_path
+
+        for base_path, runner_base in (
+            (project_root_path, Path("/scan/project")),
+            (project_dir_path, Path("/scan/project")),
+        ):
+            try:
+                relative = resolved_raw.relative_to(base_path)
+            except ValueError:
+                continue
+            candidate = project_dir_path / relative
+            if candidate.is_file():
+                return str(runner_base / relative)
+
+        if resolved_raw.is_file():
+            staged_path = meta_dir / resolved_raw.name
+            shutil.copyfile(resolved_raw, staged_path)
+            return str(Path("/scan/meta") / staged_path.name)
+
+        return normalized
+
+    for base_path in (project_dir_path, project_root_path):
+        candidate = (base_path / raw_path).resolve()
+        if candidate.is_file():
+            try:
+                relative = candidate.relative_to(project_dir_path)
+            except ValueError:
+                try:
+                    relative = candidate.relative_to(project_root_path)
+                except ValueError:
+                    relative = None
+            if relative is not None:
+                return str(Path("/scan/project") / relative)
+
+    candidate = raw_path.resolve()
+    if candidate.is_file():
+        staged_path = meta_dir / candidate.name
+        shutil.copyfile(candidate, staged_path)
+        return str(Path("/scan/meta") / staged_path.name)
+
+    raise FileNotFoundError(f"rule config file not found: {normalized}")
+
+
 async def _execute_yasa_scan(
     task_id: str,
     project_root: str,
@@ -618,11 +741,93 @@ async def _execute_yasa_scan(
     rule_config_file: Optional[str],
     rule_config_id: Optional[str],
 ) -> None:
-    from app.db.session import async_session_factory
+    workspace_dir: Optional[Path] = None
+    output_dir: Optional[Path] = None
+    full_target_path: Optional[str] = None
+    runner_source_path = Path("/scan/project")
+    active_container_id: Optional[str] = None
+    runtime_config: Dict[str, int] = {}
 
-    async with async_session_factory() as db:
-        report_dir: Optional[str] = None
-        try:
+    async def _touch_running_task() -> None:
+        async with async_session_factory() as touch_db:
+            result = await touch_db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
+            task = result.scalar_one_or_none()
+            if not task or task.status != "running":
+                return
+            task.updated_at = datetime.utcnow()
+            _sync_task_scan_duration(task)
+            await touch_db.commit()
+
+    async def _update_task_state(
+        status: str,
+        *,
+        error_message: Optional[str] = None,
+        diagnostics_summary: Optional[str] = None,
+        diagnostics_metadata: Optional[Dict[str, Any]] = None,
+        findings: Optional[List[Dict[str, Any]]] = None,
+        language_value: Optional[str] = None,
+        checker_pack_ids_value: Optional[str] = None,
+        checker_ids_value: Optional[str] = None,
+        rule_config_file_value: Optional[str] = None,
+        rule_config_id_value: Optional[str] = None,
+        rule_config_name_value: Optional[str] = None,
+        rule_config_source_value: Optional[str] = None,
+        files_scanned_count: int = 0,
+    ) -> Optional[YasaScanTask]:
+        async with async_session_factory() as update_db:
+            result = await update_db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
+            task = result.scalar_one_or_none()
+            if not task:
+                return None
+
+            current_status = str(task.status or "").strip().lower()
+            if current_status in {"completed", "failed", "interrupted"} and current_status != status:
+                return task
+
+            if findings:
+                for finding_item in findings:
+                    update_db.add(
+                        YasaFinding(
+                            scan_task_id=task_id,
+                            rule_id=finding_item.get("rule_id"),
+                            rule_name=finding_item.get("rule_name"),
+                            level=str(finding_item.get("level") or "warning")[:32],
+                            message=str(finding_item.get("message") or "")[:4000],
+                            file_path=str(finding_item.get("file_path") or "unknown")[:1200],
+                            start_line=finding_item.get("start_line"),
+                            end_line=finding_item.get("end_line"),
+                            status="open",
+                            raw_payload=finding_item.get("raw_payload"),
+                        )
+                    )
+
+            task.status = status
+            if error_message is not None:
+                task.error_message = error_message[:500] if error_message else None
+            if diagnostics_summary is not None:
+                task.diagnostics_summary = diagnostics_summary
+            if diagnostics_metadata:
+                task.diagnostics_summary = _merge_task_diagnostics_summary(
+                    task.diagnostics_summary,
+                    diagnostics_metadata,
+                )
+            if status == "completed":
+                task.language = language_value or task.language
+                task.checker_pack_ids = checker_pack_ids_value
+                task.checker_ids = checker_ids_value
+                task.rule_config_file = rule_config_file_value
+                task.rule_config_id = rule_config_id_value
+                task.rule_config_name = rule_config_name_value
+                task.rule_config_source = rule_config_source_value
+                task.total_findings = len(findings or [])
+                task.files_scanned = files_scanned_count
+
+            _sync_task_scan_duration(task)
+            await update_db.commit()
+            return task
+
+    try:
+        async with async_session_factory() as db:
             result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
             task = result.scalar_one_or_none()
             if not task:
@@ -643,150 +848,196 @@ async def _execute_yasa_scan(
                 await db.commit()
                 return
 
+            runtime_config = await load_global_yasa_runtime_config(db)
             task.status = "running"
             await db.commit()
 
-            full_target_path = os.path.join(project_root, target_path)
-            if not os.path.exists(full_target_path):
-                task.status = "failed"
-                task.error_message = f"Target path {full_target_path} not found"
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
+        timeout_seconds = max(1, int(runtime_config["yasa_timeout_seconds"]))
+        heartbeat_seconds = max(1, int(runtime_config["yasa_exec_heartbeat_seconds"]))
+        orphan_stale_seconds = max(30, int(runtime_config["yasa_orphan_stale_seconds"]))
 
-            resolved_bin = _resolve_yasa_binary()
-            try:
-                profile = _resolve_language_profile(language)
-            except ValueError as exc:
-                task.status = "failed"
-                task.error_message = str(exc)[:500]
-                task.diagnostics_summary = json.dumps(
+        workspace_dir = ensure_scan_workspace("yasa", task_id)
+        project_dir = ensure_scan_project_dir("yasa", task_id)
+        output_dir = ensure_scan_output_dir("yasa", task_id)
+        meta_dir = ensure_scan_meta_dir("yasa", task_id)
+        ensure_scan_logs_dir("yasa", task_id)
+
+        shutil.rmtree(project_dir, ignore_errors=True)
+        shutil.copytree(project_root, project_dir, dirs_exist_ok=True)
+
+        full_target_path = os.path.join(str(project_dir), target_path)
+        if not os.path.exists(full_target_path):
+            await _update_task_state(
+                "failed",
+                error_message=f"Target path {full_target_path} not found",
+                diagnostics_metadata={
+                    "termination_reason": "invalid_target_path",
+                    "runner_mode": "container",
+                },
+            )
+            return
+
+        try:
+            profile = _resolve_language_profile(language)
+        except ValueError as exc:
+            await _update_task_state(
+                "failed",
+                error_message=str(exc),
+                diagnostics_summary=json.dumps(
                     {
                         "failure_type": "unsupported_or_missing_language",
                         "language": str(language or "").strip(),
                         "supported_languages": list(_SUPPORTED_YASA_LANGUAGES),
                     },
                     ensure_ascii=False,
-                )[:3000]
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-            normalized_language = profile["language"]
-            packs = _split_csv(checker_pack_ids)
-            checker_values = _split_csv(checker_ids)
-            resolved_rule_config = str(rule_config_file or "").strip()
-            task_rule_config_name: Optional[str] = None
-            task_rule_config_source = "builtin"
-            report_dir = tempfile.mkdtemp(prefix=f"yasa_report_{task_id}_")
+                )[:3000],
+                diagnostics_metadata={"runner_mode": "container"},
+            )
+            return
 
-            if rule_config_id:
-                custom_rule_result = await db.execute(
+        normalized_language = profile["language"]
+        packs = _split_csv(checker_pack_ids)
+        checker_values = _split_csv(checker_ids)
+        resolved_rule_config = str(rule_config_file or "").strip()
+        task_rule_config_name: Optional[str] = None
+        task_rule_config_source = "builtin"
+
+        if rule_config_id:
+            async with async_session_factory() as rule_db:
+                custom_rule_result = await rule_db.execute(
                     select(YasaRuleConfig).where(YasaRuleConfig.id == rule_config_id)
                 )
                 custom_rule_config = custom_rule_result.scalar_one_or_none()
-                if custom_rule_config is None:
-                    task.status = "failed"
-                    task.error_message = "自定义 YASA 规则配置不存在"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    return
-                if not bool(custom_rule_config.is_active):
-                    task.status = "failed"
-                    task.error_message = "自定义 YASA 规则配置已禁用"
-                    _sync_task_scan_duration(task)
-                    await db.commit()
-                    return
-                normalized_language = str(custom_rule_config.language or "").strip().lower()
-                packs = _split_csv(custom_rule_config.checker_pack_ids)
-                checker_values = _split_csv(custom_rule_config.checker_ids)
-                resolved_rule_config = os.path.join(report_dir, "custom-rule-config.json")
-                Path(resolved_rule_config).write_text(
-                    str(custom_rule_config.rule_config_json or ""),
-                    encoding="utf-8",
+            if custom_rule_config is None:
+                await _update_task_state("failed", error_message="自定义 YASA 规则配置不存在")
+                return
+            if not bool(custom_rule_config.is_active):
+                await _update_task_state("failed", error_message="自定义 YASA 规则配置已禁用")
+                return
+            normalized_language = str(custom_rule_config.language or "").strip().lower()
+            packs = _split_csv(custom_rule_config.checker_pack_ids)
+            checker_values = _split_csv(custom_rule_config.checker_ids)
+            staged_rule_config = meta_dir / "custom-rule-config.json"
+            staged_rule_config.write_text(
+                str(custom_rule_config.rule_config_json or ""),
+                encoding="utf-8",
+            )
+            resolved_rule_config = str(Path("/scan/meta") / staged_rule_config.name)
+            task_rule_config_name = str(custom_rule_config.name or "").strip() or None
+            task_rule_config_source = str(custom_rule_config.source or "custom").strip() or "custom"
+        else:
+            if not packs:
+                packs = [profile["checker_pack"]]
+            if resolved_rule_config:
+                resolved_rule_config = (
+                    _stage_runner_rule_config_file(
+                        raw_rule_config_file=resolved_rule_config,
+                        project_root=project_root,
+                        project_dir=project_dir,
+                        meta_dir=meta_dir,
+                    )
+                    or ""
                 )
-                task_rule_config_name = str(custom_rule_config.name or "").strip() or None
-                task_rule_config_source = str(custom_rule_config.source or "custom").strip() or "custom"
             else:
-                if not packs:
-                    packs = [profile["checker_pack"]]
-                if not resolved_rule_config:
-                    default_rule_config = _build_default_rule_config_path(profile)
-                    if default_rule_config:
-                        resolved_rule_config = default_rule_config
+                default_rule_config = _build_default_rule_config_path(profile)
+                if default_rule_config:
+                    resolved_rule_config = default_rule_config
 
-            cmd = build_yasa_scan_command(
-                binary=resolved_bin,
-                source_path=full_target_path,
-                language=normalized_language,
-                report_dir=report_dir,
-                checker_pack_ids=packs,
-                checker_ids=checker_values,
-                rule_config_file=resolved_rule_config or None,
-            )
+        normalized_target_path = str(target_path or ".").strip()
+        if normalized_target_path not in {"", "."}:
+            runner_source_path = runner_source_path / normalized_target_path
 
-            runtime_config = await load_global_yasa_runtime_config(db)
-            timeout_seconds = max(1, int(runtime_config["yasa_timeout_seconds"]))
-            heartbeat_seconds = max(1, int(runtime_config["yasa_exec_heartbeat_seconds"]))
-            orphan_stale_seconds = max(30, int(runtime_config["yasa_orphan_stale_seconds"]))
-            loop = asyncio.get_event_loop()
-            scan_started_at = datetime.utcnow()
-            process_future = loop.run_in_executor(
-                None,
-                lambda: _run_subprocess_with_tracking(
-                    "yasa",
-                    task_id,
-                    cmd,
-                    timeout=timeout_seconds,
+        cmd = build_yasa_scan_command(
+            binary=YASA_RUNNER_BINARY,
+            source_path=str(runner_source_path),
+            language=normalized_language,
+            report_dir="/scan/output",
+            checker_pack_ids=packs,
+            checker_ids=checker_values,
+            rule_config_file=resolved_rule_config or None,
+            use_runner_paths=True,
+        )
+
+        scan_started_at = datetime.utcnow()
+        orphan_since: Optional[datetime] = None
+
+        def _on_container_started(container_id: str) -> None:
+            nonlocal active_container_id
+            active_container_id = container_id
+            _register_scan_container("yasa", task_id, container_id)
+
+        process_future = asyncio.create_task(
+            run_scanner_container(
+                ScannerRunSpec(
+                    scanner_type="yasa",
+                    image=str(
+                        getattr(settings, "SCANNER_YASA_IMAGE", "vulhunter/yasa-runner:latest")
+                    ),
+                    workspace_dir=str(workspace_dir),
+                    command=cmd,
+                    timeout_seconds=timeout_seconds,
+                    env={"YASA_RESOURCE_DIR": YASA_RUNNER_RESOURCE_DIR},
                 ),
+                on_container_started=_on_container_started,
             )
-            process_result: Optional[subprocess.CompletedProcess[str]] = None
-            orphan_since: Optional[datetime] = None
+        )
 
-            while True:
-                if process_future.done():
-                    process_result = await process_future
-                    break
+        process_result = None
+        while True:
+            if process_future.done():
+                process_result = await process_future
+                break
 
-                if _is_scan_task_cancelled("yasa", task_id):
-                    _request_scan_task_cancel("yasa", task_id)
-                    cleanup_stats = _force_cleanup_yasa_processes(
-                        task_id=task_id,
-                        report_dir=report_dir,
-                        source_path=full_target_path,
-                    )
-                    await _handle_yasa_interrupted(
-                        db,
-                        task_id,
-                        message="扫描任务已中止（用户操作）",
-                        diagnostics={
-                            "termination_reason": "manual_interrupt",
-                            "process_cleanup_applied": bool(cleanup_stats["matched"]),
-                            "cleanup_matched": cleanup_stats["matched"],
-                            "cleanup_terminated": cleanup_stats["terminated"],
-                            "cleanup_killed": cleanup_stats["killed"],
-                        },
-                    )
-                    return
+            if _is_scan_task_cancelled("yasa", task_id):
+                await _stop_scan_container("yasa", task_id)
+                cleanup_stats = _force_cleanup_yasa_processes(
+                    task_id=task_id,
+                    report_dir=str(output_dir) if output_dir is not None else None,
+                    source_path=full_target_path,
+                )
+                if not process_future.done():
+                    process_future.cancel()
+                await _update_task_state(
+                    "interrupted",
+                    error_message="扫描任务已中止（用户操作）",
+                    diagnostics_metadata={
+                        "termination_reason": "manual_interrupt",
+                        "runner_mode": "container",
+                        "container_id": active_container_id or "",
+                        "process_cleanup_applied": bool(cleanup_stats["matched"]),
+                        "cleanup_matched": cleanup_stats["matched"],
+                        "cleanup_terminated": cleanup_stats["terminated"],
+                        "cleanup_killed": cleanup_stats["killed"],
+                    },
+                )
+                return
 
-                is_active = _is_scan_process_active("yasa", task_id)
+            if active_container_id:
+                is_active = await asyncio.to_thread(
+                    _is_yasa_scan_container_active,
+                    active_container_id,
+                )
                 if not is_active:
                     if orphan_since is None:
                         orphan_since = datetime.utcnow()
                     orphan_elapsed = int((datetime.utcnow() - orphan_since).total_seconds())
                     if orphan_elapsed >= orphan_stale_seconds:
-                        _request_scan_task_cancel("yasa", task_id)
+                        await _stop_scan_container("yasa", task_id)
                         cleanup_stats = _force_cleanup_yasa_processes(
                             task_id=task_id,
-                            report_dir=report_dir,
+                            report_dir=str(output_dir) if output_dir is not None else None,
                             source_path=full_target_path,
                         )
-                        await _handle_yasa_interrupted(
-                            db,
-                            task_id,
-                            message="任务进程丢失，已自动标记为中止",
-                            diagnostics={
+                        if not process_future.done():
+                            process_future.cancel()
+                        await _update_task_state(
+                            "interrupted",
+                            error_message="扫描容器丢失，已自动标记为中止",
+                            diagnostics_metadata={
                                 "termination_reason": "orphan_recovery",
+                                "runner_mode": "container",
                                 "orphan_recovered": True,
+                                "container_id": active_container_id,
                                 "process_cleanup_applied": bool(cleanup_stats["matched"]),
                                 "cleanup_matched": cleanup_stats["matched"],
                                 "cleanup_terminated": cleanup_stats["terminated"],
@@ -796,225 +1047,201 @@ async def _execute_yasa_scan(
                         return
                 else:
                     orphan_since = None
-
-                task.updated_at = datetime.utcnow()
-                _sync_task_scan_duration(task)
-                await db.commit()
-                await asyncio.sleep(heartbeat_seconds)
-
-            if process_result is None:
-                raise RuntimeError("YASA 执行结果为空")
-
-            if _is_scan_task_cancelled("yasa", task_id):
-                task.status = "interrupted"
-                task.error_message = task.error_message or "扫描任务已中止（用户操作）"
-                task.diagnostics_summary = _merge_task_diagnostics_summary(
-                    task.diagnostics_summary,
-                    {"termination_reason": "manual_interrupt"},
-                )
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
-
-            sarif_path = Path(report_dir) / "report.sarif"
-            findings_payload: List[Dict[str, Any]] = []
-            if sarif_path.exists():
-                try:
-                    sarif_data = json.loads(
-                        sarif_path.read_text(encoding="utf-8", errors="ignore")
+            else:
+                startup_elapsed = int((datetime.utcnow() - scan_started_at).total_seconds())
+                if startup_elapsed >= orphan_stale_seconds:
+                    await _stop_scan_container("yasa", task_id)
+                    if not process_future.done():
+                        process_future.cancel()
+                    await _update_task_state(
+                        "interrupted",
+                        error_message="扫描容器未在预期时间内启动，已自动标记为中止",
+                        diagnostics_metadata={
+                            "termination_reason": "container_start_timeout",
+                            "runner_mode": "container",
+                            "orphan_recovered": True,
+                        },
                     )
-                    findings_payload = _parse_yasa_sarif_output(sarif_data)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to parse YASA SARIF for task %s: %s", task_id, exc)
+                    return
 
-            if process_result.returncode != 0 and not findings_payload:
-                stderr_text = str(process_result.stderr or "").strip()
-                stdout_text = str(process_result.stdout or "").strip()
-                diagnostics_log = _read_diagnostics_summary(report_dir)
+            await _touch_running_task()
+            await asyncio.sleep(heartbeat_seconds)
 
-                short_message = (
-                    stderr_text
-                    or stdout_text
-                    or "YASA 扫描失败，请检查 YASA_BIN_PATH 或规则参数"
-                )
+        if process_result is None:
+            raise RuntimeError("YASA 执行结果为空")
 
-                task.status = "failed"
-                task.error_message = short_message[:500]
-                task.diagnostics_summary = _build_failure_diagnostics_summary(
+        if _is_scan_task_cancelled("yasa", task_id):
+            await _update_task_state(
+                "interrupted",
+                error_message="扫描任务已中止（用户操作）",
+                diagnostics_metadata={
+                    "termination_reason": "manual_interrupt",
+                    "runner_mode": "container",
+                    "container_id": active_container_id or "",
+                },
+            )
+            return
+
+        sarif_path = output_dir / "report.sarif"
+        findings_payload: List[Dict[str, Any]] = []
+        if sarif_path.exists():
+            try:
+                sarif_data = json.loads(sarif_path.read_text(encoding="utf-8", errors="ignore"))
+                findings_payload = _parse_yasa_sarif_output(sarif_data)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to parse YASA SARIF for task %s: %s", task_id, exc)
+
+        if (not process_result.success or process_result.exit_code != 0) and not findings_payload:
+            stderr_text = ""
+            stdout_text = ""
+            if process_result.stderr_path:
+                stderr_text = Path(process_result.stderr_path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                ).strip()
+            if process_result.stdout_path:
+                stdout_text = Path(process_result.stdout_path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                ).strip()
+            diagnostics_log = _read_diagnostics_summary(str(output_dir))
+            short_message = (
+                str(process_result.error or "").strip()
+                or stderr_text
+                or stdout_text
+                or "YASA runner 执行失败"
+            )
+            await _update_task_state(
+                "failed",
+                error_message=short_message,
+                diagnostics_summary=_build_failure_diagnostics_summary(
                     language=normalized_language,
                     checker_packs=packs,
                     rule_config_file=resolved_rule_config or None,
-                    source_path=full_target_path,
-                    report_dir=report_dir,
+                    source_path=str(runner_source_path),
+                    report_dir=str(output_dir),
                     stderr_text=stderr_text,
                     stdout_text=stdout_text,
                     diagnostics_log=diagnostics_log,
-                )
-                _sync_task_scan_duration(task)
-                await db.commit()
-                return
+                ),
+                diagnostics_metadata={
+                    "termination_reason": "runner_failed",
+                    "runner_mode": "container",
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+            return
 
-            for finding_item in findings_payload:
-                db.add(
-                    YasaFinding(
-                        scan_task_id=task_id,
-                        rule_id=finding_item.get("rule_id"),
-                        rule_name=finding_item.get("rule_name"),
-                        level=str(finding_item.get("level") or "warning")[:32],
-                        message=str(finding_item.get("message") or "")[:4000],
-                        file_path=str(finding_item.get("file_path") or "unknown")[:1200],
-                        start_line=finding_item.get("start_line"),
-                        end_line=finding_item.get("end_line"),
-                        status="open",
-                        raw_payload=finding_item.get("raw_payload"),
-                    )
-                )
+        completion_log = _read_diagnostics_summary(str(output_dir))
+        metadata_summary = {
+            "rule_config_id": rule_config_id or "",
+            "rule_config_name": task_rule_config_name or "",
+            "rule_config_source": task_rule_config_source,
+        }
+        completion_payload: Dict[str, Any] = {"rule_config": metadata_summary}
+        if completion_log:
+            completion_payload["summary"] = completion_log
+        elif not findings_payload:
+            completion_payload["summary"] = "YASA 扫描完成，未发现 SARIF 结果"
 
-            task.status = "completed"
-            task.language = normalized_language
-            task.checker_pack_ids = ",".join(packs)
-            task.checker_ids = ",".join(checker_values) if checker_values else None
-            task.rule_config_file = resolved_rule_config or None
-            task.rule_config_id = rule_config_id or None
-            task.rule_config_name = task_rule_config_name
-            task.rule_config_source = task_rule_config_source
-            task.total_findings = len(findings_payload)
-            task.files_scanned = len(
+        updated_task = await _update_task_state(
+            "completed",
+            findings=findings_payload,
+            diagnostics_summary=json.dumps(completion_payload, ensure_ascii=False)[:3000],
+            diagnostics_metadata={
+                "termination_reason": "completed",
+                "runner_mode": "container",
+                "timeout_seconds": timeout_seconds,
+                "orphan_recovered": False,
+            },
+            language_value=normalized_language,
+            checker_pack_ids_value=",".join(packs),
+            checker_ids_value=",".join(checker_values) if checker_values else None,
+            rule_config_file_value=resolved_rule_config or None,
+            rule_config_id_value=rule_config_id or None,
+            rule_config_name_value=task_rule_config_name,
+            rule_config_source_value=task_rule_config_source,
+            files_scanned_count=len(
                 {
                     str(item.get("file_path") or "").strip()
                     for item in findings_payload
                     if str(item.get("file_path") or "").strip()
                 }
-            )
-            task.diagnostics_summary = _read_diagnostics_summary(report_dir)
-            metadata_summary = {
-                "rule_config_id": rule_config_id or "",
-                "rule_config_name": task_rule_config_name or "",
-                "rule_config_source": task_rule_config_source,
-            }
-            if task.diagnostics_summary:
-                task.diagnostics_summary = json.dumps(
-                    {
-                        "summary": task.diagnostics_summary,
-                        "rule_config": metadata_summary,
-                    },
-                    ensure_ascii=False,
-                )[:3000]
-            else:
-                task.diagnostics_summary = json.dumps(
-                    {"rule_config": metadata_summary},
-                    ensure_ascii=False,
-                )[:3000]
-            if task.total_findings == 0 and not task.diagnostics_summary:
-                task.diagnostics_summary = "YASA 扫描完成，未发现 SARIF 结果"
-            task.diagnostics_summary = _merge_task_diagnostics_summary(
-                task.diagnostics_summary,
-                {
-                    "termination_reason": "completed",
-                    "timeout_seconds": timeout_seconds,
-                    "orphan_recovered": False,
-                },
-            )
-            _sync_task_scan_duration(task)
-            await db.commit()
-        except subprocess.TimeoutExpired:
-            await db.rollback()
-            cleanup_stats = _force_cleanup_yasa_processes(
-                task_id=task_id,
-                report_dir=report_dir,
-                source_path=(
-                    os.path.join(project_root, target_path)
-                    if project_root and target_path
-                    else None
-                ),
-            )
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = "failed"
-                task.error_message = "YASA 扫描超时"
-                task.diagnostics_summary = _merge_task_diagnostics_summary(
-                    task.diagnostics_summary,
-                    {
-                        "termination_reason": "hard_timeout",
-                        "process_cleanup_applied": bool(cleanup_stats["matched"]),
-                        "cleanup_matched": cleanup_stats["matched"],
-                        "cleanup_terminated": cleanup_stats["terminated"],
-                        "cleanup_killed": cleanup_stats["killed"],
-                    },
-                )
-                _sync_task_scan_duration(task)
-                await db.commit()
-        except FileNotFoundError as exc:
-            await db.rollback()
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = "failed"
-                task.error_message = str(exc)[:500]
-                _sync_task_scan_duration(task)
-                await db.commit()
-        except asyncio.CancelledError:
-            await db.rollback()
-            cleanup_stats = _force_cleanup_yasa_processes(
-                task_id=task_id,
-                report_dir=report_dir,
-                source_path=(
-                    os.path.join(project_root, target_path)
-                    if project_root and target_path
-                    else None
-                ),
-            )
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task and task.status in {"pending", "running"}:
-                task.status = "interrupted"
-                task.error_message = task.error_message or "扫描任务因服务中断被标记为中止"
-                task.diagnostics_summary = _merge_task_diagnostics_summary(
-                    task.diagnostics_summary,
-                    {
-                        "termination_reason": "service_cancelled",
-                        "process_cleanup_applied": bool(cleanup_stats["matched"]),
-                        "cleanup_matched": cleanup_stats["matched"],
-                        "cleanup_terminated": cleanup_stats["terminated"],
-                        "cleanup_killed": cleanup_stats["killed"],
-                    },
-                )
-                _sync_task_scan_duration(task)
-                await db.commit()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Error executing YASA task %s: %s", task_id, exc)
-            await db.rollback()
-            cleanup_stats = _force_cleanup_yasa_processes(
-                task_id=task_id,
-                report_dir=report_dir,
-                source_path=(
-                    os.path.join(project_root, target_path)
-                    if project_root and target_path
-                    else None
-                ),
-            )
-            result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = "failed"
-                task.error_message = str(exc)[:500]
-                task.diagnostics_summary = _merge_task_diagnostics_summary(
-                    task.diagnostics_summary,
-                    {
-                        "termination_reason": "unexpected_exception",
-                        "process_cleanup_applied": bool(cleanup_stats["matched"]),
-                        "cleanup_matched": cleanup_stats["matched"],
-                        "cleanup_terminated": cleanup_stats["terminated"],
-                        "cleanup_killed": cleanup_stats["killed"],
-                    },
-                )
-                _sync_task_scan_duration(task)
-                await db.commit()
-        finally:
-            if report_dir:
-                shutil.rmtree(report_dir, ignore_errors=True)
-            _clear_scan_task_cancel("yasa", task_id)
+            ),
+        )
+        if updated_task is not None:
+            project_metrics_refresher.enqueue(updated_task.project_id)
+    except subprocess.TimeoutExpired:
+        cleanup_stats = _force_cleanup_yasa_processes(
+            task_id=task_id,
+            report_dir=str(output_dir) if output_dir is not None else None,
+            source_path=full_target_path,
+        )
+        await _update_task_state(
+            "failed",
+            error_message="YASA 扫描超时",
+            diagnostics_metadata={
+                "termination_reason": "hard_timeout",
+                "runner_mode": "container",
+                "process_cleanup_applied": bool(cleanup_stats["matched"]),
+                "cleanup_matched": cleanup_stats["matched"],
+                "cleanup_terminated": cleanup_stats["terminated"],
+                "cleanup_killed": cleanup_stats["killed"],
+            },
+        )
+    except FileNotFoundError as exc:
+        await _update_task_state(
+            "failed",
+            error_message=str(exc),
+            diagnostics_metadata={
+                "termination_reason": "missing_dependency",
+                "runner_mode": "container",
+            },
+        )
+    except asyncio.CancelledError:
+        await _stop_scan_container("yasa", task_id)
+        cleanup_stats = _force_cleanup_yasa_processes(
+            task_id=task_id,
+            report_dir=str(output_dir) if output_dir is not None else None,
+            source_path=full_target_path,
+        )
+        await _update_task_state(
+            "interrupted",
+            error_message="扫描任务因服务中断被标记为中止",
+            diagnostics_metadata={
+                "termination_reason": "service_cancelled",
+                "runner_mode": "container",
+                "process_cleanup_applied": bool(cleanup_stats["matched"]),
+                "cleanup_matched": cleanup_stats["matched"],
+                "cleanup_terminated": cleanup_stats["terminated"],
+                "cleanup_killed": cleanup_stats["killed"],
+            },
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error executing YASA task %s: %s", task_id, exc)
+        cleanup_stats = _force_cleanup_yasa_processes(
+            task_id=task_id,
+            report_dir=str(output_dir) if output_dir is not None else None,
+            source_path=full_target_path,
+        )
+        await _update_task_state(
+            "failed",
+            error_message=str(exc),
+            diagnostics_metadata={
+                "termination_reason": "unexpected_exception",
+                "runner_mode": "container",
+                "process_cleanup_applied": bool(cleanup_stats["matched"]),
+                "cleanup_matched": cleanup_stats["matched"],
+                "cleanup_terminated": cleanup_stats["terminated"],
+                "cleanup_killed": cleanup_stats["killed"],
+            },
+        )
+    finally:
+        _pop_scan_container("yasa", task_id)
+        if workspace_dir is not None:
+            cleanup_scan_workspace("yasa", task_id)
+        _clear_scan_task_cancel("yasa", task_id)
 
 
 @router.get("/yasa/runtime-config", response_model=YasaRuntimeConfigResponse)
@@ -1043,7 +1270,6 @@ async def update_yasa_runtime_config(
 @router.post("/yasa/scan", response_model=YasaScanTaskResponse)
 async def create_yasa_scan(
     request: YasaScanTaskCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -1107,19 +1333,30 @@ async def create_yasa_scan(
     db.add(scan_task)
     await db.commit()
     await db.refresh(scan_task)
+    response = _build_yasa_scan_task_response(scan_task)
+    task_id = response.id
+    language_value = scan_task.language
+    checker_pack_ids_value = scan_task.checker_pack_ids
+    checker_ids_value = scan_task.checker_ids
+    rule_config_file_value = scan_task.rule_config_file
+    rule_config_id_value = scan_task.rule_config_id
 
-    background_tasks.add_task(
-        _execute_yasa_scan,
-        scan_task.id,
-        project_root,
-        request.target_path,
-        scan_task.language,
-        scan_task.checker_pack_ids,
-        scan_task.checker_ids,
-        scan_task.rule_config_file,
-        scan_task.rule_config_id,
+    await _release_request_db_session(db)
+    _launch_static_background_job(
+        "yasa",
+        task_id,
+        _execute_yasa_scan(
+            task_id,
+            project_root,
+            request.target_path,
+            language_value,
+            checker_pack_ids_value,
+            checker_ids_value,
+            rule_config_file_value,
+            rule_config_id_value,
+        ),
     )
-    return scan_task
+    return response
 
 
 @router.get("/yasa/tasks", response_model=List[YasaScanTaskResponse])

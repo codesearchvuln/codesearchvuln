@@ -21,7 +21,7 @@ def test_build_yasa_scan_command_appends_uast_sdk_path_for_golang(monkeypatch):
     monkeypatch.setattr(
         yasa_runtime,
         "resolve_yasa_uast_sdk_path",
-        lambda language: "/opt/yasa/engine/deps/uast4go/uast4go",
+        lambda language, **_kwargs: "/opt/yasa/engine/deps/uast4go/uast4go",
     )
 
     cmd = yasa_runtime.build_yasa_scan_command(
@@ -54,7 +54,7 @@ def test_build_yasa_scan_command_appends_uast_sdk_path_for_golang(monkeypatch):
 
 
 def test_build_yasa_scan_command_skips_uast_sdk_path_when_not_needed(monkeypatch):
-    monkeypatch.setattr(yasa_runtime, "resolve_yasa_uast_sdk_path", lambda language: None)
+    monkeypatch.setattr(yasa_runtime, "resolve_yasa_uast_sdk_path", lambda language, **_kwargs: None)
 
     cmd = yasa_runtime.build_yasa_scan_command(
         binary="/opt/yasa/bin/yasa",

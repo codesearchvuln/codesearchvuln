@@ -45,9 +45,11 @@ def test_default_compose_is_dev_first_layout() -> None:
         "https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"
     ) in compose_text
     assert "YASA_ENABLED: ${YASA_ENABLED:-true}" in compose_text
-    assert "YASA_BIN_PATH: ${YASA_BIN_PATH:-/opt/yasa/bin/yasa}" in compose_text
-    assert "YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}" in compose_text
+    assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in compose_text
+    assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner:latest}" in compose_text
     assert "YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}" in compose_text
+    assert "/tmp/vulhunter/scans:/tmp/vulhunter/scans" in compose_text
+    assert "/var/run/docker.sock:/var/run/docker.sock" in compose_text
     assert 'MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"' in compose_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in compose_text
     assert "BACKEND_NPM_REGISTRY_FALLBACK" not in compose_text
@@ -63,6 +65,8 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert "adminer:" in compose_text
     assert "YASA_HOST_BIN_PATH" not in compose_text
     assert "YASA_HOST_RESOURCE_DIR" not in compose_text
+    assert "YASA_BIN_PATH:" not in compose_text
+    assert "YASA_RESOURCE_DIR:" not in compose_text
     assert "\n  frontend-dev:" not in compose_text
 
     backend_text = backend_dockerfile.read_text(encoding="utf-8")
@@ -72,7 +76,6 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert "ARG BACKEND_INSTALL_YASA=1" in backend_text
     assert "ARG YASA_VERSION=v0.2.33" in backend_text
     assert "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" in backend_text
-    assert "/opt/yasa/bin/yasa" in backend_text
     assert 'ordered_indexes="$(order_indexes "${pypi_index_candidates}")"' in backend_text
     assert 'while IFS= read -r index_url; do' in backend_text
     assert 'sync_with_index "${BACKEND_PYPI_INDEX_PRIMARY}" || sync_with_index "${BACKEND_PYPI_INDEX_FALLBACK}"' not in backend_text
@@ -116,8 +119,11 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert 'CODEX_SKILLS_AUTO_INSTALL: "false"' in full_overlay_text
     assert "- BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}" in full_overlay_text
     assert "- YASA_VERSION=${YASA_VERSION:-v0.2.33}" in full_overlay_text
-    assert "YASA_BIN_PATH: ${YASA_BIN_PATH:-/opt/yasa/bin/yasa}" in full_overlay_text
-    assert "YASA_RESOURCE_DIR: ${YASA_RESOURCE_DIR:-/opt/yasa/resource}" in full_overlay_text
+    assert "\n  yasa-runner:" in full_overlay_text
+    assert "image: vulhunter/yasa-runner-local:latest" in full_overlay_text
+    assert "dockerfile: ./docker/yasa-runner.Dockerfile" in full_overlay_text
+    assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}" in full_overlay_text
+    assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_FALLBACK" not in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_CANDIDATES" not in full_overlay_text
@@ -236,6 +242,9 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     backend_text = (REPO_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
     pyproject_text = (REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
     entrypoint_text = (REPO_ROOT / "backend" / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    yasa_runner_text = (REPO_ROOT / "backend" / "docker" / "yasa-runner.Dockerfile").read_text(
+        encoding="utf-8"
+    )
 
     assert '"code2flow>=' in pyproject_text
     assert '"bandit>=' in pyproject_text
@@ -246,9 +255,30 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     assert 'uv sync --active --frozen --no-dev' in backend_text
     assert "COPY --from=builder /app/.venv /opt/backend-venv" not in backend_text
     assert "COPY --from=builder /opt/backend-venv /opt/backend-venv" in backend_text
+    assert "COPY --from=scanner-tools-base /opt/yasa /opt/yasa" not in backend_text
+    assert 'if [ -x "${YASA_WRAPPER_BIN}" ]; then' not in backend_text
     assert 'ln -sfn /opt/backend-venv /app/.venv' not in backend_text
     assert 'rm -rf /root/.cache/pip' in backend_text
     assert 'rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11' in backend_text
     assert "python3 -m pip install" not in entrypoint_text
     assert 'BACKEND_VENV_DIR="${BACKEND_VENV_PATH:-/opt/backend-venv}"' in entrypoint_text
     assert '"${BACKEND_VENV_DIR}/bin/code2flow"' in entrypoint_text
+    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim" in yasa_runner_text
+    assert "AS yasa-builder" in yasa_runner_text
+    assert "AS yasa-runner" in yasa_runner_text
+    assert "/opt/yasa/bin/yasa" in yasa_runner_text
+    assert "/opt/yasa-runtime" in yasa_runner_text
+    assert "COPY --from=yasa-builder /opt/yasa-runtime /opt/yasa" in yasa_runner_text
+    assert "YASA runner placeholder" not in yasa_runner_text
+    assert "node_modules" not in yasa_runner_text
+    assert "WORKDIR /scan" in yasa_runner_text
+
+
+def test_docker_publish_pushes_yasa_runner_image() -> None:
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "build_yasa_runner" in workflow_text
+    assert "./backend/docker/yasa-runner.Dockerfile" in workflow_text
+    assert "ghcr.io/${{ github.repository_owner }}/vulhunter-yasa-runner:${{ github.event.inputs.tag }}" in workflow_text

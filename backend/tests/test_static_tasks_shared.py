@@ -8,6 +8,46 @@ from app.api.v1.endpoints import static_tasks_shared
 from app.api.v1.endpoints.static_tasks_opengrep import get_static_task_progress
 
 
+def test_ensure_scan_workspace_under_configured_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(static_tasks_shared.settings, "SCAN_WORKSPACE_ROOT", str(tmp_path))
+
+    workspace = static_tasks_shared.ensure_scan_workspace("yasa", "task-123")
+
+    assert workspace == tmp_path / "yasa" / "task-123"
+    assert workspace.is_dir()
+
+
+def test_ensure_scan_project_and_output_dirs_are_stable(tmp_path, monkeypatch):
+    monkeypatch.setattr(static_tasks_shared.settings, "SCAN_WORKSPACE_ROOT", str(tmp_path))
+
+    project_dir = static_tasks_shared.ensure_scan_project_dir("yasa", "task-456")
+    output_dir = static_tasks_shared.ensure_scan_output_dir("yasa", "task-456")
+    logs_dir = static_tasks_shared.ensure_scan_logs_dir("yasa", "task-456")
+    meta_dir = static_tasks_shared.ensure_scan_meta_dir("yasa", "task-456")
+
+    assert project_dir == tmp_path / "yasa" / "task-456" / "project"
+    assert output_dir == tmp_path / "yasa" / "task-456" / "output"
+    assert logs_dir == tmp_path / "yasa" / "task-456" / "logs"
+    assert meta_dir == tmp_path / "yasa" / "task-456" / "meta"
+    assert project_dir.is_dir()
+    assert output_dir.is_dir()
+    assert logs_dir.is_dir()
+    assert meta_dir.is_dir()
+
+
+def test_cleanup_scan_workspace_removes_task_tree(tmp_path, monkeypatch):
+    monkeypatch.setattr(static_tasks_shared.settings, "SCAN_WORKSPACE_ROOT", str(tmp_path))
+
+    workspace = static_tasks_shared.ensure_scan_workspace("yasa", "task-cleanup")
+    marker = workspace / "output" / "report.sarif"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("{}", encoding="utf-8")
+
+    static_tasks_shared.cleanup_scan_workspace("yasa", "task-cleanup")
+
+    assert not workspace.exists()
+
+
 def test_build_backend_venv_env_prefixes_backend_venv_bin(monkeypatch):
     monkeypatch.setattr(static_tasks_shared.settings, "BACKEND_VENV_PATH", "/opt/backend-venv")
 
@@ -30,6 +70,20 @@ def test_resolve_backend_venv_executable_uses_configured_dir(tmp_path, monkeypat
     resolved = static_tasks_shared._resolve_backend_venv_executable("bandit")
 
     assert resolved == str(bandit_bin)
+
+
+def test_scan_container_registry_tracks_container_id():
+    static_tasks_shared._static_running_scan_containers.clear()
+
+    static_tasks_shared._register_scan_container("yasa", "task-container", "container-123")
+
+    assert (
+        static_tasks_shared._static_running_scan_containers[
+            static_tasks_shared._scan_task_key("yasa", "task-container")
+        ]
+        == "container-123"
+    )
+    assert static_tasks_shared._pop_scan_container("yasa", "task-container") == "container-123"
 
 
 def test_record_scan_progress_initializes_shared_store():

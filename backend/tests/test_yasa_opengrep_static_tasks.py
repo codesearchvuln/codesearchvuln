@@ -132,8 +132,6 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
     monkeypatch.setattr(static_tasks_yasa, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks_yasa, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks_yasa, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(static_tasks_yasa, "_resolve_yasa_binary", lambda: "/usr/bin/yasa")
-
     captured = {}
 
     def _fake_build_yasa_scan_command(**kwargs):
@@ -141,12 +139,17 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
         return ["yasa", kwargs["source_path"]]
 
     monkeypatch.setattr(static_tasks_yasa, "build_yasa_scan_command", _fake_build_yasa_scan_command)
+    monkeypatch.setattr(static_tasks_yasa.settings, "SCANNER_YASA_IMAGE", "vulhunter/yasa-runner:test")
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_workspace", lambda *_args, **_kwargs: tmp_path / "workspace", raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_project_dir", lambda *_args, **_kwargs: tmp_path / "workspace" / "project", raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_output_dir", lambda *_args, **_kwargs: tmp_path / "workspace" / "output", raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_logs_dir", lambda *_args, **_kwargs: tmp_path / "workspace" / "logs", raising=False)
 
-    def _fake_run_subprocess_with_tracking(scan_type, task_id, cmd, timeout):
-        assert scan_type == "yasa"
-        assert task_id == "yasa-task-1"
-        assert timeout == 600
-        report_dir = Path(captured["report_dir"])
+    async def _fake_run_scanner_container(spec, **kwargs):
+        assert spec.scanner_type == "yasa"
+        assert spec.image == "vulhunter/yasa-runner:test"
+        assert spec.timeout_seconds == 600
+        report_dir = tmp_path / "workspace" / "output"
         report_dir.mkdir(parents=True, exist_ok=True)
         (report_dir / "report.sarif").write_text(
             """
@@ -176,10 +179,16 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
             % str(tmp_path / "src" / "main.js"),
             encoding="utf-8",
         )
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return SimpleNamespace(
+            success=True,
+            container_id="container-1",
+            exit_code=0,
+            stdout_path=str(tmp_path / "workspace" / "logs" / "stdout.log"),
+            stderr_path=str(tmp_path / "workspace" / "logs" / "stderr.log"),
+            error=None,
+        )
 
-    monkeypatch.setattr(static_tasks_yasa, "_run_subprocess_with_tracking", _fake_run_subprocess_with_tracking)
-    monkeypatch.setattr(static_tasks_yasa.asyncio, "get_event_loop", lambda: _FakeLoop())
+    monkeypatch.setattr(static_tasks_yasa, "run_scanner_container", _fake_run_scanner_container, raising=False)
 
     source_root = tmp_path / "src"
     source_root.mkdir()
@@ -201,6 +210,157 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
     assert session_factory.calls >= 2
     assert len(persist_session.findings) == 1
     assert persist_session.findings[0].file_path.endswith("main.js")
+
+
+@pytest.mark.asyncio
+async def test_execute_yasa_scan_uses_scanner_runner_and_shared_workspace(
+    monkeypatch,
+    tmp_path,
+):
+    task = YasaScanTask(
+        id="yasa-task-runner-1",
+        project_id="project-1",
+        name="yasa",
+        status="pending",
+        target_path=".",
+        language="javascript",
+    )
+    load_session = _FakeYasaSession(task)
+    persist_session = _FakeYasaSession(task)
+    session_factory = _SessionFactory(load_session, persist_session)
+    output_dir = tmp_path / "scans" / "yasa" / task.id / "output"
+    logs_dir = tmp_path / "scans" / "yasa" / task.id / "logs"
+    project_dir = tmp_path / "scans" / "yasa" / task.id / "project"
+    project_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
+    logs_dir.mkdir(parents=True)
+    repo_root = tmp_path / "repo"
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "src" / "main.js").write_text("console.log('ok');", encoding="utf-8")
+
+    monkeypatch.setattr(static_tasks_yasa, "async_session_factory", session_factory)
+    monkeypatch.setattr(static_tasks_yasa, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(static_tasks_yasa, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(static_tasks_yasa.settings, "SCANNER_YASA_IMAGE", "vulhunter/yasa-runner:test")
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_workspace", lambda *_args, **_kwargs: project_dir.parent, raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_project_dir", lambda *_args, **_kwargs: project_dir, raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_output_dir", lambda *_args, **_kwargs: output_dir, raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_logs_dir", lambda *_args, **_kwargs: logs_dir, raising=False)
+
+    seen = {}
+
+    async def _fake_run_scanner_container(spec, **_kwargs):
+        seen["spec"] = spec
+        (output_dir / "report.sarif").write_text(
+            """
+            {
+              "runs": [
+                {
+                  "results": [
+                    {
+                      "ruleId": "demo.rule",
+                      "message": {"text": "runner finding"},
+                      "level": "warning",
+                      "locations": [
+                        {
+                          "physicalLocation": {
+                            "artifactLocation": {"uri": "src/main.js"},
+                            "region": {"startLine": 5, "endLine": 5}
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            """,
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            success=True,
+            container_id="container-yasa-1",
+            exit_code=0,
+            stdout_path=str(logs_dir / "stdout.log"),
+            stderr_path=str(logs_dir / "stderr.log"),
+            error=None,
+        )
+
+    monkeypatch.setattr(static_tasks_yasa, "run_scanner_container", _fake_run_scanner_container, raising=False)
+
+    await static_tasks_yasa._execute_yasa_scan(
+        task_id=task.id,
+        project_root=str(repo_root),
+        target_path=".",
+        language="javascript",
+        checker_pack_ids=None,
+        checker_ids=None,
+        rule_config_file=None,
+    )
+
+    assert seen["spec"].image == "vulhunter/yasa-runner:test"
+    assert task.status == "completed"
+    assert task.total_findings == 1
+    assert len(persist_session.findings) == 1
+    assert persist_session.findings[0].message == "runner finding"
+
+
+@pytest.mark.asyncio
+async def test_execute_yasa_scan_marks_failed_when_runner_fails_without_local_fallback(
+    monkeypatch,
+    tmp_path,
+):
+    task = YasaScanTask(
+        id="yasa-task-runner-fail",
+        project_id="project-1",
+        name="yasa",
+        status="pending",
+        target_path=".",
+        language="javascript",
+    )
+    load_session = _FakeYasaSession(task)
+    persist_session = _FakeYasaSession(task)
+    session_factory = _SessionFactory(load_session, persist_session)
+    output_dir = tmp_path / "scans" / "yasa" / task.id / "output"
+    project_dir = tmp_path / "scans" / "yasa" / task.id / "project"
+    project_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
+    repo_root = tmp_path / "repo"
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "src" / "main.js").write_text("console.log('ok');", encoding="utf-8")
+
+    monkeypatch.setattr(static_tasks_yasa, "async_session_factory", session_factory)
+    monkeypatch.setattr(static_tasks_yasa, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(static_tasks_yasa, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_workspace", lambda *_args, **_kwargs: project_dir.parent, raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_project_dir", lambda *_args, **_kwargs: project_dir, raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_output_dir", lambda *_args, **_kwargs: output_dir, raising=False)
+    monkeypatch.setattr(static_tasks_yasa, "ensure_scan_logs_dir", lambda *_args, **_kwargs: tmp_path / "scans" / "yasa" / task.id / "logs", raising=False)
+
+    async def _fake_run_scanner_container(_spec, **_kwargs):
+        return SimpleNamespace(
+            success=False,
+            container_id="container-yasa-fail",
+            exit_code=127,
+            stdout_path=None,
+            stderr_path=None,
+            error="runner image missing",
+        )
+
+    monkeypatch.setattr(static_tasks_yasa, "run_scanner_container", _fake_run_scanner_container, raising=False)
+
+    await static_tasks_yasa._execute_yasa_scan(
+        task_id=task.id,
+        project_root=str(repo_root),
+        target_path=".",
+        language="javascript",
+        checker_pack_ids=None,
+        checker_ids=None,
+        rule_config_file=None,
+    )
+
+    assert task.status == "failed"
+    assert "runner image missing" in str(task.error_message)
 
 
 @pytest.mark.asyncio
