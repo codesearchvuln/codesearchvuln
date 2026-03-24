@@ -263,29 +263,6 @@ Action Input: {"directory": "."}
 Action Input: {"keyword": "order_id|user_id|status", "file_pattern": "*.py", "is_regex": true}
 ```
 
-```json
-Action Input: {
-  "risk_points": [
-    {
-      "file_path": "app/api/orders.py",
-      "line_start": 42,
-      "description": "update_order 未验证订单归属，存在 IDOR 风险",
-      "severity": "high",
-      "vulnerability_type": "idor",
-      "confidence": 0.85
-    },
-    {
-      "file_path": "app/api/orders.py",
-      "line_start": 98,
-      "description": "cancel_order 未验证前置状态，存在状态机绕过风险",
-      "severity": "high",
-      "vulnerability_type": "state_machine_bypass",
-      "confidence": 0.8
-    }
-  ]
-}
-```
-
 ═══════════════════════════════════════════════════════════════
 
 ## 工具调用失败处理（关键）
