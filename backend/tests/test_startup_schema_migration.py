@@ -107,10 +107,11 @@ async def test_assert_database_schema_is_latest_raises_when_schema_still_mismatc
 
 
 @pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_rejects_multiple_alembic_heads(
+async def test_assert_database_schema_is_latest_reports_mismatch_for_multiple_alembic_heads(
     monkeypatch,
 ):
     fake_session = _FakeSession([[LATEST_REVISION]])
+    upgrade_calls = []
 
     monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
     monkeypatch.setattr(
@@ -118,5 +119,11 @@ async def test_assert_database_schema_is_latest_rejects_multiple_alembic_heads(
         lambda _cfg: _FakeScriptDirectory(["head_a", "head_b"]),
     )
 
-    with pytest.raises(RuntimeError, match="Alembic migration graph is not linear"):
+    async def _fake_run_upgrade():
+        upgrade_calls.append("called")
+
+    monkeypatch.setattr("app.main.run_pending_database_migrations", _fake_run_upgrade)
+
+    with pytest.raises(RuntimeError, match="expected=\\['head_a', 'head_b'\\]"):
         await assert_database_schema_is_latest()
+    assert upgrade_calls == ["called"]

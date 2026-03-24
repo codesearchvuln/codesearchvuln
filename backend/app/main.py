@@ -86,7 +86,7 @@ async def run_pending_database_migrations() -> None:
 
     def _run_upgrade() -> None:
         subprocess.run(
-            ["alembic", "upgrade", "head"],
+            ["alembic", "upgrade", "heads"],
             cwd=str(backend_root),
             check=True,
         )
@@ -94,7 +94,7 @@ async def run_pending_database_migrations() -> None:
     try:
         await asyncio.to_thread(_run_upgrade)
     except subprocess.CalledProcessError as exc:
-        raise RuntimeError("自动执行 alembic upgrade head 失败") from exc
+        raise RuntimeError("自动执行 alembic upgrade heads 失败") from exc
 
 
 async def _read_current_database_versions() -> set[str]:
@@ -103,7 +103,7 @@ async def _read_current_database_versions() -> set[str]:
             result = await db.execute(text("SELECT version_num FROM alembic_version"))
         except Exception as exc:
             raise RuntimeError(
-                "数据库缺少迁移版本元数据（alembic_version），请先运行 alembic upgrade head"
+                "数据库缺少迁移版本元数据（alembic_version），请先运行 alembic upgrade heads"
             ) from exc
 
         return {str(item).strip() for item in result.scalars().all() if str(item).strip()}
@@ -112,9 +112,7 @@ async def _read_current_database_versions() -> set[str]:
 def _get_expected_database_heads(script: ScriptDirectory) -> set[str]:
     heads = [str(item).strip() for item in script.get_heads() if str(item).strip()]
     if len(heads) > 1:
-        raise RuntimeError(
-            f"Alembic migration graph is not linear: heads={sorted(heads)}"
-        )
+        logger.warning("检测到多个 Alembic heads：%s", sorted(heads))
     return set(heads)
 
 
@@ -128,7 +126,7 @@ async def assert_database_schema_is_latest() -> None:
     current_versions = await _read_current_database_versions()
 
     if not current_versions:
-        raise RuntimeError("数据库未记录迁移版本，请先运行 alembic upgrade head")
+        raise RuntimeError("数据库未记录迁移版本，请先运行 alembic upgrade heads")
 
     if expected_heads and current_versions != expected_heads:
         logger.warning(
@@ -143,7 +141,7 @@ async def assert_database_schema_is_latest() -> None:
         raise RuntimeError(
             "数据库迁移版本与代码不一致："
             f"current={sorted(current_versions)} expected={sorted(expected_heads)}。"
-            "请运行 alembic upgrade head"
+            "请运行 alembic upgrade heads"
         )
 
 async def _run_daily_cache_cleanup(stop_event: asyncio.Event) -> None:

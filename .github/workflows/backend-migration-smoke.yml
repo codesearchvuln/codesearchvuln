@@ -43,7 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Alembic upgrade head
+      - name: Run Alembic upgrade heads
         working-directory: backend
         env:
           POSTGRES_SERVER: 127.0.0.1
@@ -51,7 +51,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: vulhunter
         run: |
-          alembic upgrade head
+          alembic upgrade heads
 
       - name: Verify Alembic current equals heads
         working-directory: backend
