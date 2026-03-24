@@ -4,7 +4,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_default_compose_is_dev_first_layout() -> None:
+def test_default_compose_uses_local_images_by_default() -> None:
     compose_path = REPO_ROOT / "docker-compose.yml"
     full_overlay_path = REPO_ROOT / "docker-compose.full.yml"
     yasa_host_overlay_path = REPO_ROOT / "docker-compose.yasa-host.yml"
@@ -22,6 +22,10 @@ def test_default_compose_is_dev_first_layout() -> None:
     assert not (REPO_ROOT / "docker-compose.prod.cn.yml").exists()
 
     compose_text = compose_path.read_text(encoding="utf-8")
+    assert "image: vulhunter/backend-local:latest" in compose_text
+    assert "image: vulhunter/frontend-local:latest" in compose_text
+    assert "vulhunter/backend-dev:latest" not in compose_text
+    assert "vulhunter/frontend-dev:latest" not in compose_text
     assert "target: dev-runtime" in compose_text
     assert "target: dev" in compose_text
     assert "./backend:/app" in compose_text
@@ -46,11 +50,15 @@ def test_default_compose_is_dev_first_layout() -> None:
     ) in compose_text
     assert "YASA_ENABLED: ${YASA_ENABLED:-true}" in compose_text
     assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in compose_text
-    assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner:latest}" in compose_text
+    assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}" in compose_text
     assert "YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}" in compose_text
     assert "/tmp/vulhunter/scans:/tmp/vulhunter/scans" in compose_text
     assert "/var/run/docker.sock:/var/run/docker.sock" in compose_text
     assert 'MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"' in compose_text
+    assert "\n  yasa-runner:" in compose_text
+    assert "image: vulhunter/yasa-runner-local:latest" in compose_text
+    assert "dockerfile: ./docker/yasa-runner.Dockerfile" in compose_text
+    assert 'condition: service_completed_successfully' in compose_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in compose_text
     assert "BACKEND_NPM_REGISTRY_FALLBACK" not in compose_text
     assert "BACKEND_NPM_REGISTRY_CANDIDATES" not in compose_text
@@ -236,6 +244,15 @@ def test_backend_dev_entrypoint_validates_seeded_venv_before_skipping_sync() -> 
     assert 'expected_version="$(python3 - <<' in entrypoint_text
     assert 'import sqlalchemy, alembic, uvicorn' in entrypoint_text
     assert 'uv venv --clear "${VENV_DIR}"' in entrypoint_text
+
+
+def test_backend_dev_entrypoint_runs_single_alembic_head() -> None:
+    entrypoint_text = (
+        REPO_ROOT / "backend" / "scripts" / "dev-entrypoint.sh"
+    ).read_text(encoding="utf-8")
+
+    assert '"${VENV_DIR}/bin/alembic" upgrade heads' not in entrypoint_text
+    assert '"${VENV_DIR}/bin/alembic" upgrade head\n' in entrypoint_text
 
 
 def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:

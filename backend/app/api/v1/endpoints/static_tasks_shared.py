@@ -22,6 +22,10 @@ from app.core.config import settings
 from app.db.session import async_session_factory, get_db
 from app.models.opengrep import OpengrepRule
 from app.models.user_config import UserConfig
+from app.services.backend_venv import (
+    build_backend_venv_env,
+    resolve_backend_venv_executable,
+)
 from app.services.yasa_runtime_config import get_cached_global_yasa_runtime_config
 from app.services.llm.service import LLMConfigError, LLMService
 from app.services.scanner_runner import stop_scanner_container_sync
@@ -34,6 +38,14 @@ _scan_progress_store: Dict[str, Dict[str, Any]] = {}
 def _scan_workspace_root() -> Path:
     configured = str(getattr(settings, "SCAN_WORKSPACE_ROOT", "/tmp/vulhunter/scans") or "").strip()
     return Path(configured or "/tmp/vulhunter/scans")
+
+
+def _build_backend_venv_env(base_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    return build_backend_venv_env(base_env)
+
+
+def _resolve_backend_venv_executable(name: str, *, required: bool = True) -> Optional[str]:
+    return resolve_backend_venv_executable(name, required=required)
 
 
 def ensure_scan_workspace(scan_type: str, task_id: str) -> Path:

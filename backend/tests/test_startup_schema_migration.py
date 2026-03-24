@@ -51,11 +51,11 @@ class _FakeSession:
 
 
 class _FakeScriptDirectory:
-    def __init__(self, heads):
-        self._heads = list(heads)
+    def __init__(self, head):
+        self._head = head
 
-    def get_heads(self):
-        return list(self._heads)
+    def get_current_head(self):
+        return self._head
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def test_assert_database_schema_is_latest_runs_alembic_upgrade_on_revision
     monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
     monkeypatch.setattr(
         "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory([LATEST_REVISION]),
+        lambda _cfg: _FakeScriptDirectory(LATEST_REVISION),
     )
 
     async def _fake_run_upgrade():
@@ -91,7 +91,7 @@ async def test_assert_database_schema_is_latest_raises_when_schema_still_mismatc
     monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
     monkeypatch.setattr(
         "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory([LATEST_REVISION]),
+        lambda _cfg: _FakeScriptDirectory(LATEST_REVISION),
     )
 
     async def _fake_run_upgrade():
@@ -107,16 +107,16 @@ async def test_assert_database_schema_is_latest_raises_when_schema_still_mismatc
 
 
 @pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_reports_mismatch_for_multiple_alembic_heads(
+async def test_assert_database_schema_is_latest_rejects_database_with_multiple_recorded_versions(
     monkeypatch,
 ):
-    fake_session = _FakeSession([[LATEST_REVISION]])
+    fake_session = _FakeSession([["old_head_a", "old_head_b"], ["old_head_a", "old_head_b"]])
     upgrade_calls = []
 
     monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
     monkeypatch.setattr(
         "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory(["head_a", "head_b"]),
+        lambda _cfg: _FakeScriptDirectory(LATEST_REVISION),
     )
 
     async def _fake_run_upgrade():
@@ -124,6 +124,9 @@ async def test_assert_database_schema_is_latest_reports_mismatch_for_multiple_al
 
     monkeypatch.setattr("app.main.run_pending_database_migrations", _fake_run_upgrade)
 
-    with pytest.raises(RuntimeError, match="expected=\\['head_a', 'head_b'\\]"):
+    with pytest.raises(
+        RuntimeError,
+        match="current=\\['old_head_a', 'old_head_b'\\] expected=\\['linear_head_revision'\\]",
+    ):
         await assert_database_schema_is_latest()
     assert upgrade_calls == ["called"]

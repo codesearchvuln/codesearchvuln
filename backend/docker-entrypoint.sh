@@ -88,7 +88,7 @@ fi
 
 # 运行数据库迁移
 echo "执行数据库迁移..."
-.venv/bin/alembic upgrade heads
+.venv/bin/alembic upgrade head
 
 echo "数据库迁移完成"
 

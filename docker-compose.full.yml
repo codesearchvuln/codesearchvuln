@@ -79,7 +79,6 @@ services:
         - all_proxy=
         - ALL_PROXY=
     restart: "no"
-    profiles: ["build"]
     command: ["/bin/sh", "-lc", "/opt/yasa/bin/yasa --version >/dev/null 2>&1 || true"]
 
   frontend:

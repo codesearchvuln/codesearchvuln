@@ -20,7 +20,7 @@ fi
 
 # 运行数据库迁移
 echo "🔄 运行数据库迁移..."
-uv run alembic upgrade heads
+uv run alembic upgrade head
 
 # 启动服务
 echo "启动后端服务..."

@@ -43,7 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Alembic upgrade heads
+      - name: Run Alembic upgrade head
         working-directory: backend
         env:
           POSTGRES_SERVER: 127.0.0.1
@@ -51,9 +51,9 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: vulhunter
         run: |
-          alembic upgrade heads
+          alembic upgrade head
 
-      - name: Verify Alembic current equals heads
+      - name: Verify Alembic current equals single head
         working-directory: backend
         env:
           POSTGRES_SERVER: 127.0.0.1
@@ -80,6 +80,8 @@ jobs:
 
           print("current:", sorted(current_revs))
           print("heads:", sorted(head_revs))
+          if len(head_revs) != 1:
+              raise SystemExit(f"Expected exactly one Alembic head, got {sorted(head_revs)}")
           if current_revs != head_revs:
               raise SystemExit("Alembic current does not match heads")
           PY

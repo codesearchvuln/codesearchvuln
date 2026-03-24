@@ -48,7 +48,7 @@ services:
         - HTTPS_PROXY=
         - all_proxy=
         - ALL_PROXY=
-    image: vulhunter/backend-dev:latest
+    image: vulhunter/backend-local:latest
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -73,7 +73,7 @@ services:
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-vulhunter/sandbox:latest}
       YASA_ENABLED: ${YASA_ENABLED:-true}
       SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}
-      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner:latest}
+      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}
       YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}
       MCP_ENABLED: "true"
       MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"
@@ -102,6 +102,28 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      yasa-runner:
+        condition: service_completed_successfully
+    networks:
+      - vulhunter-network
+
+  yasa-runner:
+    image: vulhunter/yasa-runner-local:latest
+    build:
+      context: ./backend
+      dockerfile: ./docker/yasa-runner.Dockerfile
+      args:
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}
+        - YASA_VERSION=${YASA_VERSION:-v0.2.33}
+        - http_proxy=
+        - https_proxy=
+        - HTTP_PROXY=
+        - HTTPS_PROXY=
+        - all_proxy=
+        - ALL_PROXY=
+    restart: "no"
+    command: ["/bin/sh", "-lc", "/opt/yasa/bin/yasa --version >/dev/null 2>&1 || true"]
     networks:
       - vulhunter-network
 
@@ -123,7 +145,7 @@ services:
         - HTTPS_PROXY=
         - all_proxy=
         - ALL_PROXY=
-    image: vulhunter/frontend-dev:latest
+    image: vulhunter/frontend-local:latest
     restart: unless-stopped
     working_dir: /app
     command:
