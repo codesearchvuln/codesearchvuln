@@ -1031,7 +1031,7 @@ class AuditWorkflowEngine:
         if not isinstance(verification_result, dict):
             verification_result = {}
         confidence = verification_result.get("confidence", finding.get("confidence", "N/A"))
-        verdict = verification_result.get("verdict", finding.get("verdict", "unknown"))
+        status = AuditWorkflowEngine._resolve_finding_status(finding) or "unknown"
         dataflow_path = finding.get("dataflow_path")
         if isinstance(dataflow_path, list) and dataflow_path:
             flow_text = " -> ".join([str(item) for item in dataflow_path if str(item).strip()])
@@ -1051,7 +1051,7 @@ class AuditWorkflowEngine:
                     f"- CVSS3.1：{cvss_score if cvss_score is not None else 'N/A'} ({cvss_vector})\n"
                     f"- 受影响组件：`{file_path}`\n"
                     f"- 位置：{file_path}:{line_start}-{line_end}\n"
-                    f"- 结论：{verdict}（confidence={confidence}）"
+                    f"- 状态：{status}（confidence={confidence}）"
                 ),
                 "",
                 "## 2. 触发条件",
@@ -1098,6 +1098,45 @@ class AuditWorkflowEngine:
             ]
         )
 
+
+    @staticmethod
+    def _normalize_finding_status(value: Any) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"verified", "true_positive", "exists", "vulnerable", "confirmed", "likely"}:
+            return "verified"
+        if normalized in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
+            return "false_positive"
+        if normalized in {"uncertain", "unknown", "needs_review", "needs-review"}:
+            return "uncertain"
+        if normalized in {"blocked"}:
+            return "blocked"
+        return ""
+
+    @classmethod
+    def _resolve_finding_status(cls, finding: Dict[str, Any]) -> str:
+        """解析发现状态：优先 status，再回退兼容历史 verdict/authenticity。"""
+        if not isinstance(finding, dict):
+            return ""
+
+        candidates: List[Any] = [finding.get("status")]
+        verification_payload = finding.get("verification_result")
+        if isinstance(verification_payload, dict):
+            candidates.append(verification_payload.get("status"))
+
+        # backward compatibility for historical findings
+        candidates.extend([
+            finding.get("verdict"),
+            finding.get("authenticity"),
+            verification_payload.get("verdict") if isinstance(verification_payload, dict) else None,
+            verification_payload.get("authenticity") if isinstance(verification_payload, dict) else None,
+        ])
+
+        for candidate in candidates:
+            resolved = cls._normalize_finding_status(candidate)
+            if resolved:
+                return resolved
+        return ""
+
     async def _run_report_phase(
         self,
         state: WorkflowState,
@@ -1122,17 +1161,18 @@ class AuditWorkflowEngine:
             await orc.emit_event("info", " [Workflow] 未配置 Report Agent，跳过报告生成阶段")
             return
 
-        # 只为 confirmed 或 likely 的 findings 生成报告
-        valid_verdicts = {"confirmed", "likely"}
+        # 只为已验证（verified）的 findings 生成报告
+        valid_statuses = {"verified"}
         reportable = [
-            f for f in orc._all_findings
-            if isinstance(f, dict) and str(f.get("verdict") or "").lower() in valid_verdicts
+            f
+            for f in orc._all_findings
+            if isinstance(f, dict) and self._resolve_finding_status(f) in valid_statuses
         ]
 
         if not reportable:
             await orc.emit_event(
                 "info",
-                " [Workflow] 无 confirmed/likely 漏洞，跳过报告生成阶段",
+                " [Workflow] 无 verified 漏洞，跳过报告生成阶段",
             )
             logger.info("[WorkflowEngine] Report phase skipped: no reportable findings")
         else:
@@ -1194,7 +1234,7 @@ class AuditWorkflowEngine:
             item
             for item in (orc._all_findings or [])
             if isinstance(item, dict)
-            and str(item.get("verdict") or "").strip().lower() != "false_positive"
+            and self._resolve_finding_status(item) != "false_positive"
         ]
         if not candidate_findings:
             await orc.emit_event(
@@ -1525,7 +1565,7 @@ class AuditWorkflowEngine:
                 WorkflowStepRecord(
                     phase=WorkflowPhase.REPORT,
                     agent=f"report_worker_{worker_id}" if worker_id is not None else "report",
-                    injected_context={"title": title, "verdict": finding.get("verdict")},
+                    injected_context={"title": title, "status": self._resolve_finding_status(finding)},
                     success=success,
                     error=error_msg,
                     findings_count=len(orc._all_findings),

@@ -388,7 +388,7 @@ class VerificationTodoItem:
     file_path: str
     line_start: int
     title: str
-    status: str = "pending"  # pending|running|verified|false_positive
+    status: str = "pending"  # pending|running|verified|false_positive|uncertain|blocked
     attempts: int = 0
     max_attempts: int = 2
     blocked_reason: Optional[str] = None
@@ -565,11 +565,16 @@ class VerificationAgent(BaseAgent):
                 if finding.get(field_name) in (None, "", []):
                     return False, f"第 {index} 条 finding 缺少字段: {field_name}"
 
-            has_authenticity = finding.get("authenticity") or finding.get("verdict")
-            if not has_authenticity:
-                return False, f"第 {index} 条 finding 缺少 authenticity/verdict"
-            if str(has_authenticity).strip().lower() not in {"confirmed", "likely", "false_positive"}:
-                return False, f"第 {index} 条 finding authenticity/verdict 非法: {has_authenticity}"
+            normalized_status = self._normalize_verification_status(
+                finding.get("status")
+                or (finding.get("verification_result") or {}).get("status")
+            )
+            if not normalized_status:
+                has_authenticity = finding.get("authenticity") or finding.get("verdict")
+                if not has_authenticity:
+                    return False, f"第 {index} 条 finding 缺少 status（或兼容字段 authenticity/verdict）"
+                if str(has_authenticity).strip().lower() not in {"confirmed", "likely", "uncertain", "false_positive"}:
+                    return False, f"第 {index} 条 finding authenticity/verdict 非法: {has_authenticity}"
 
             if finding.get("reachability") in (None, "", []):
                 return False, f"第 {index} 条 finding 缺少 reachability"
@@ -603,61 +608,64 @@ class VerificationAgent(BaseAgent):
         ]
         return any(pattern in normalized for pattern in patterns)
 
+    @staticmethod
+    def _normalize_verification_status(value: Any) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"verified", "true_positive", "exists", "vulnerable", "confirmed", "likely"}:
+            return "verified"
+        if normalized in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
+            return "false_positive"
+        if normalized in {"uncertain", "unknown", "needs_review", "needs-review"}:
+            return "uncertain"
+        if normalized in {"blocked"}:
+            return "blocked"
+        return ""
+
+    @staticmethod
+    def _status_to_verdict(status: str) -> str:
+        normalized_status = str(status or "").strip().lower()
+        if normalized_status == "verified":
+            return "likely"
+        if normalized_status == "false_positive":
+            return "false_positive"
+        return "uncertain"
+
     def _normalize_verdict(self, finding: Dict[str, Any]) -> str:
-        """改进的真实性判定方法
-        
-        规则：
-        1. 如果有明确的verdict字段，直接返回（confirmed/likely/false_positive）
-        2. 如果有明确的status字段，按 status 推断
-        3. 如果有有效的confidence值，按阈值判定
-        4. 如果confidence缺失，保留原始LLM的verdict而非强制降级
-        """
+        """兼容性方法：优先按 status 判定，再回退到历史 verdict。"""
+        normalized_status = self._normalize_verification_status(finding.get("status"))
+        if normalized_status:
+            return self._status_to_verdict(normalized_status)
+
         verdict = finding.get("verdict") or finding.get("authenticity")
         if isinstance(verdict, str):
             verdict = verdict.strip().lower()
         else:
             verdict = None
-        if verdict in {"confirmed", "likely", "false_positive"}:
+        if verdict in {"confirmed", "likely", "uncertain", "false_positive"}:
             return verdict
 
-        status_value = str(finding.get("status") or "").strip().lower()
-        if status_value in {"verified", "true_positive", "exists", "vulnerable", "confirmed", "likely"}:
-            return "likely"
-        if status_value in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
-            return "false_positive"
-        if status_value in {"uncertain", "unknown", "needs_review", "needs-review"}:
-            return "likely"
-        
-        # === 改进：缺失confidence时保留LLM原始verdict ===
         confidence_raw = finding.get("confidence")
         confidence = None
-        confidence_source = "missing"
-        
         if confidence_raw is not None:
             try:
                 confidence = float(confidence_raw)
-                confidence_source = "direct"
             except Exception:
                 logger.warning(
                     f"[Verification] confidence 类型转换失败: {confidence_raw} (type: {type(confidence_raw).__name__})"
                 )
-        
-        # 规则2: 有有效的confidence值时按阈值判定
+
         if confidence is not None:
             if confidence >= CONFIDENCE_THRESHOLD_LIKELY:
                 return "likely"
             if confidence <= CONFIDENCE_THRESHOLD_FALSE_POSITIVE:
                 return "false_positive"
-            # 0.3 < confidence < 0.7 的灰色地带
-            return "likely"
-        
-        # 规则3: 缺失confidence且无明确verdict时的兜底策略
-        # 不再强制降级为false_positive，而是保守估计为likely
+            return "uncertain"
+
         logger.debug(
-            f"[Verification] confidence缺失且无明确verdict，保留为likely: "
+            f"[Verification] status/verdict 均缺失，保守设为uncertain: "
             f"{finding.get('file_path')}:{finding.get('line_start')}"
         )
-        return "likely"
+        return "uncertain"
 
     def _normalize_reachability_value(self, value: Any, verdict: str) -> str:
         """规范化可达性判定
@@ -1898,6 +1906,7 @@ class VerificationAgent(BaseAgent):
         total = len(todo_items)
         verified = len([item for item in todo_items if item.status == "verified"])
         false_positive = len([item for item in todo_items if item.status == "false_positive"])
+        uncertain = len([item for item in todo_items if item.status == "uncertain"])
         blocked = len([item for item in todo_items if item.status == "blocked"])
         pending = len([item for item in todo_items if item.status in {"pending", "running"}])
         blocked_reasons: Dict[str, int] = {}
@@ -1915,6 +1924,7 @@ class VerificationAgent(BaseAgent):
             "total": total,
             "verified": verified,
             "false_positive": false_positive,
+            "uncertain": uncertain,
             "blocked": blocked,
             "pending": pending,
             "blocked_reasons_top": [
@@ -1925,7 +1935,7 @@ class VerificationAgent(BaseAgent):
                 {
                     "id": item.id,
                     "status": item.status,
-                    "verdict": item.final_verdict,
+                    "final_status": item.status,
                     "reason": item.blocked_reason,
                 }
                 for item in todo_items
@@ -2202,6 +2212,7 @@ class VerificationAgent(BaseAgent):
                         "total": 0,
                         "verified": 0,
                         "false_positive": 0,
+                        "uncertain": 0,
                         "blocked": 0,
                         "pending": 0,
                         "blocked_reasons_top": [],
@@ -2282,9 +2293,9 @@ class VerificationAgent(BaseAgent):
 
 ## 验证要求
 - 验证级别: {config.get('verification_level', 'standard')}
-- 必须提供明确的验证结论: `confirmed` (确认) / `likely` (可能) / `false_positive` (误报)
+- 必须提供明确的验证结论: `confirmed` (确认) / `likely` (可能) / `uncertain` (待复核) / `false_positive` (误报)
 - 必须提供置信度 (0-1)
-- 必须提供可达性分析: `reachable` / `likely_reachable` / `unreachable`
+- 必须提供可达性分析: `reachable` / `likely_reachable` / `unknown` / `unreachable`
 
 ## 可用工具
 {self.get_tools_description()}
@@ -2471,8 +2482,14 @@ class VerificationAgent(BaseAgent):
                     final_result = step.final_answer
 
                     if final_result and "findings" in final_result:
-                        verified_count = len([item for item in final_result["findings"] if item.get("is_verified")])
-                        fp_count = len([item for item in final_result["findings"] if item.get("verdict") == "false_positive"])
+                        verified_count = len([
+                            item for item in final_result["findings"]
+                            if self._normalize_verification_status(item.get("status") or item.get("verdict")) == "verified"
+                        ])
+                        fp_count = len([
+                            item for item in final_result["findings"]
+                            if self._normalize_verification_status(item.get("status") or item.get("verdict")) == "false_positive"
+                        ])
                         self.add_insight(
                             f"验证了 {len(final_result['findings'])} 个发现，{verified_count} 个确认，{fp_count} 个误报"
                         )
@@ -2597,6 +2614,7 @@ class VerificationAgent(BaseAgent):
                 completed_count = (
                     todo_summary.get("verified", 0)
                     + todo_summary.get("false_positive", 0)
+                    + todo_summary.get("uncertain", 0)
                     + todo_summary.get("blocked", 0)
                 )
                 pending_count = todo_summary.get("pending", 0)
@@ -2661,12 +2679,10 @@ class VerificationAgent(BaseAgent):
                     except Exception:
                         return CONFIDENCE_DEFAULT_FALLBACK
 
-                def _default_reachability(verdict_value: str) -> str:
-                    if verdict_value == "confirmed":
-                        return "reachable"
-                    if verdict_value == "likely":
+                def _default_reachability(status_value: str) -> str:
+                    if status_value == "verified":
                         return "likely_reachable"
-                    if verdict_value == "false_positive":
+                    if status_value == "false_positive":
                         return "unreachable"
                     return "unknown"
 
@@ -2677,63 +2693,71 @@ class VerificationAgent(BaseAgent):
                     if not isinstance(verification_result, dict):
                         verification_result = {}
                     
+                    status_value = self._normalize_verification_status(
+                        verification_result.get("status") or finding.get("status")
+                    )
                     verdict = verification_result.get("verdict") or finding.get("verdict")
+                    if isinstance(verdict, str):
+                        verdict = verdict.strip().lower()
                     confidence = verification_result.get("confidence") or finding.get("confidence")
                     reachability = verification_result.get("reachability") or finding.get("reachability")
                     verification_evidence = verification_result.get("verification_evidence") or finding.get("verification_evidence")
-                    
-                    if not verdict or verdict not in ["confirmed", "likely", "uncertain", "false_positive"]:
-                        # === 使用全局阈值常量统一判定 ===
+
+                    if not status_value:
                         if finding.get("is_verified") is True:
-                            verdict = "confirmed"
+                            status_value = "verified"
                         else:
                             if confidence is None:
-                                # confidence缺失时保存原始值用于诊断
-                                verdict = "likely"  # 保守估计为likely而非false_positive
+                                status_value = "uncertain"
                                 logger.debug(
-                                    f"[{self.name}] confidence缺失，保留为likely: {finding.get('file_path', '?')}"
+                                    f"[{self.name}] confidence缺失，status设为uncertain: {finding.get('file_path', '?')}"
                                 )
                             else:
                                 try:
                                     confidence_val = float(confidence)
                                 except Exception:
                                     confidence_val = CONFIDENCE_DEFAULT_FALLBACK
-                                
+
                                 if confidence_val >= CONFIDENCE_THRESHOLD_LIKELY:
-                                    verdict = "likely"
+                                    status_value = "verified"
                                 elif confidence_val <= CONFIDENCE_THRESHOLD_FALSE_POSITIVE:
-                                    verdict = "false_positive"
+                                    status_value = "false_positive"
                                 else:
-                                    verdict = "likely"
-                        
+                                    status_value = "uncertain"
+
                         logger.warning(
-                            f"[{self.name}] Missing/invalid verdict for {finding.get('file_path', '?')}, inferred as: {verdict}"
+                            f"[{self.name}] Missing/invalid status for {finding.get('file_path', '?')}, inferred as: {status_value}"
                         )
+
+                    if not verdict or verdict not in ["confirmed", "likely", "uncertain", "false_positive"]:
+                        verdict = self._status_to_verdict(status_value)
 
                     confidence_value = _coerce_confidence(confidence)
                     if not reachability:
-                        reachability = _default_reachability(verdict)
+                        reachability = _default_reachability(status_value)
                     if not verification_evidence:
                         verification_evidence = (
                             f"verifier={self.name}; mode=llm_or_fallback; "
-                            f"verdict={verdict}; confidence={confidence_value:.2f}; "
+                            f"status={status_value}; confidence={confidence_value:.2f}; "
                             f"file={finding.get('file_path') or 'unknown'}"
                         )
 
                     verified = {
                         **finding,
+                        "status": status_value,
                         "verdict": verdict,
                         "confidence": confidence_value,
                         "reachability": reachability,
                         "verification_result": {
                             **(verification_result or {}),
+                            "status": status_value,
                             "verdict": verdict,
                             "confidence": confidence_value,
                             "reachability": reachability,
                             "verification_evidence": verification_evidence,
                         },
-                        "is_verified": verdict == "confirmed" or (verdict == "likely" and confidence_value >= CONFIDENCE_THRESHOLD_LIKELY),
-                        "verified_at": datetime.now(timezone.utc).isoformat() if verdict in ["confirmed", "likely"] else None,
+                        "is_verified": status_value == "verified",
+                        "verified_at": datetime.now(timezone.utc).isoformat() if status_value == "verified" else None,
                     }
 
                     if not verified.get("recommendation"):
@@ -2747,11 +2771,12 @@ class VerificationAgent(BaseAgent):
                     fallback_confidence = CONFIDENCE_DEFAULT_FALLBACK
                     fallback_verified = {
                         **finding,
+                        "status": "uncertain",
                         "verdict": "uncertain",
                         "confidence": fallback_confidence,
                         "reachability": "unknown",
                         "verification_result": {
-                            "verdict": "uncertain",
+                            "status": "uncertain",
                             "confidence": fallback_confidence,
                             "reachability": "unknown",
                             "verification_evidence": (
@@ -2769,17 +2794,24 @@ class VerificationAgent(BaseAgent):
                 current_todo_index = idx + 1
                 current_todo_id = todo_item.id
                 if idx >= len(verified_findings):
-                    todo_item.status = "false_positive"
-                    todo_item.final_verdict = "false_positive"
+                    todo_item.status = "blocked"
+                    todo_item.final_verdict = "uncertain"
                     todo_item.blocked_reason = "missing_verification_output"
                     continue
-                verdict = str(verified_findings[idx].get("verdict") or "uncertain").strip().lower()
-                if verdict in {"confirmed", "likely"}:
+                finding_status = self._normalize_verification_status(
+                    verified_findings[idx].get("status")
+                    or (verified_findings[idx].get("verification_result") or {}).get("status")
+                    or verified_findings[idx].get("verdict")
+                )
+                if finding_status == "verified":
                     todo_item.status = "verified"
-                    todo_item.final_verdict = verdict
-                else:
+                    todo_item.final_verdict = "likely"
+                elif finding_status == "false_positive":
                     todo_item.status = "false_positive"
                     todo_item.final_verdict = "false_positive"
+                else:
+                    todo_item.status = "uncertain"
+                    todo_item.final_verdict = "uncertain"
                 meta_title = str(verified_findings[idx].get("title") or todo_item.title)
                 meta_vuln = str(verified_findings[idx].get("vulnerability_type") or "unknown")
                 meta_sev = str(verified_findings[idx].get("severity") or "medium")
@@ -2795,16 +2827,12 @@ class VerificationAgent(BaseAgent):
                 verification_payload = verified_findings[idx].get("verification_result")
                 if not isinstance(verification_payload, dict):
                     verification_payload = {}
-                meta_verdict = str(
-                    verification_payload.get("verdict")
-                    or verified_findings[idx].get("verdict")
-                    or ("false_positive" if todo_item.status != "verified" else "confirmed")
-                ).strip().lower()
-                meta_authenticity = str(
-                    verification_payload.get("authenticity")
-                    or verified_findings[idx].get("authenticity")
-                    or meta_verdict
-                ).strip().lower()
+                meta_status = self._normalize_verification_status(
+                    verification_payload.get("status")
+                    or verified_findings[idx].get("status")
+                    or todo_item.status
+                ) or todo_item.status
+                meta_authenticity = self._status_to_verdict(meta_status)
                 meta_evidence = str(
                     verification_payload.get("verification_evidence")
                     or verified_findings[idx].get("verification_evidence")
@@ -2830,21 +2858,20 @@ class VerificationAgent(BaseAgent):
                             "file_path": meta_file,
                             "line_start": meta_line_start,
                             "line_end": meta_line_end,
-                            "is_verified": True,
+                            "is_verified": normalized_status == "verified",
                             "finding_scope": "verification_queue",
                             "verification_todo_id": todo_item.id,
                             "verification_fingerprint": todo_item.fingerprint,
                             "verification_status": "verified",
                             "status": "verified",
                             "authenticity": meta_authenticity,
-                            "verdict": meta_verdict,
                             "verification_evidence": meta_evidence,
                             "description": meta_description,
                             "description_markdown": meta_description_markdown,
                             "code_snippet": meta_code_snippet,
                         },
                     )
-                else:
+                elif todo_item.status == "false_positive":
                     await self.emit_event(
                         "finding_update",
                         f"[Verification] 标记误报: {meta_title}",
@@ -2863,7 +2890,32 @@ class VerificationAgent(BaseAgent):
                             "verification_status": "false_positive",
                             "status": "false_positive",
                             "authenticity": meta_authenticity,
-                            "verdict": meta_verdict,
+                            "verification_evidence": meta_evidence,
+                            "description": meta_description,
+                            "description_markdown": meta_description_markdown,
+                            "code_snippet": meta_code_snippet,
+                        },
+                    )
+                else:
+                    uncertain_status = "blocked" if todo_item.status == "blocked" else "uncertain"
+                    await self.emit_event(
+                        "finding_update",
+                        f"[Verification] 待复核: {meta_title}",
+                        metadata={
+                            "title": meta_title,
+                            "display_title": meta_title,
+                            "severity": meta_sev,
+                            "vulnerability_type": meta_vuln,
+                            "file_path": meta_file,
+                            "line_start": meta_line_start,
+                            "line_end": meta_line_end,
+                            "is_verified": False,
+                            "finding_scope": "verification_queue",
+                            "verification_todo_id": todo_item.id,
+                            "verification_fingerprint": todo_item.fingerprint,
+                            "verification_status": uncertain_status,
+                            "status": uncertain_status,
+                            "authenticity": "uncertain",
                             "verification_evidence": meta_evidence,
                             "description": meta_description,
                             "description_markdown": meta_description_markdown,
@@ -2871,14 +2923,25 @@ class VerificationAgent(BaseAgent):
                         },
                     )
 
-            confirmed_count = len([item for item in verified_findings if item.get("verdict") == "confirmed"])
-            likely_count = len([item for item in verified_findings if item.get("verdict") == "likely"])
-            false_positive_count = len([item for item in verified_findings if item.get("verdict") == "false_positive"])
+            status_values = [
+                self._normalize_verification_status(
+                    item.get("status")
+                    or (item.get("verification_result") or {}).get("status")
+                    or item.get("verdict")
+                )
+                for item in verified_findings
+            ]
+            verified_count = len([s for s in status_values if s == "verified"])
+            likely_count = 0
+            uncertain_count = len([s for s in status_values if s == "uncertain"])
+            false_positive_count = len([s for s in status_values if s == "false_positive"])
+            confirmed_count = verified_count
             self._trace(
                 "run_completed",
                 findings=len(verified_findings),
                 confirmed=confirmed_count,
                 likely=likely_count,
+                uncertain=uncertain_count,
                 false_positive=false_positive_count,
                 duration_ms=duration_ms,
                 tool_calls=self._tool_calls,
@@ -2894,7 +2957,7 @@ class VerificationAgent(BaseAgent):
 
             await self.emit_event(
                 "info",
-                f"Verification Agent 完成: {confirmed_count} 确认, {likely_count} 可能, {false_positive_count} 误报",
+                f"Verification Agent 完成: {verified_count} 已验证, {uncertain_count} 待复核, {false_positive_count} 误报",
             )
 
             logger.info(f"[{self.name}] Returning {len(verified_findings)} verified findings")
@@ -2906,11 +2969,11 @@ class VerificationAgent(BaseAgent):
             if "save_verification_result" in self.tools and verified_findings:
                 logger.info(
                     "[%s] save_verification_result 工具可用，验证过程中应已逐个保存 %d 条结果 "
-                    "(confirmed=%d, likely=%d, false_positive=%d)",
+                    "(verified=%d, uncertain=%d, false_positive=%d)",
                     self.name,
                     len(verified_findings),
-                    confirmed_count,
-                    likely_count,
+                    verified_count,
+                    uncertain_count,
                     false_positive_count,
                 )
                 if not self._has_successful_save_verification_call():
@@ -2963,6 +3026,7 @@ class VerificationAgent(BaseAgent):
                     "findings": verified_findings,
                     "verified_count": confirmed_count,
                     "likely_count": likely_count,
+                    "uncertain_count": uncertain_count,
                     "false_positive_count": false_positive_count,
                     "candidate_count": len(findings_to_verify),
                     "verification_todo_summary": todo_summary,
@@ -3031,14 +3095,24 @@ class VerificationAgent(BaseAgent):
         if not function_name:
             function_name = f"<function_at_line_{line_start}>"
 
+        normalized_status = self._normalize_verification_status(
+            verification_payload.get("status")
+            or finding.get("status")
+        )
+
         verdict = str(
             verification_payload.get("verdict")
             or finding.get("verdict")
             or finding.get("authenticity")
-            or "uncertain"
+            or ""
         ).strip().lower()
         if verdict not in {"confirmed", "likely", "uncertain", "false_positive"}:
-            verdict = "uncertain"
+            verdict = ""
+
+        if not normalized_status:
+            normalized_status = self._normalize_verification_status(verdict) or "uncertain"
+        if not verdict:
+            verdict = self._status_to_verdict(normalized_status)
 
         raw_confidence = verification_payload.get("confidence", finding.get("confidence", 0.5))
         try:
@@ -3052,11 +3126,9 @@ class VerificationAgent(BaseAgent):
             or ""
         ).strip().lower()
         if reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
-            if verdict == "confirmed":
-                reachability = "reachable"
-            elif verdict == "likely":
+            if normalized_status == "verified":
                 reachability = "likely_reachable"
-            elif verdict == "false_positive":
+            elif normalized_status == "false_positive":
                 reachability = "unreachable"
             else:
                 reachability = "unknown"
@@ -3069,16 +3141,9 @@ class VerificationAgent(BaseAgent):
         ).strip()
         if len(verification_evidence) < 10:
             verification_evidence = (
-                f"auto_rescue_save_evidence: verdict={verdict}; "
+                f"auto_rescue_save_evidence: status={normalized_status}; "
                 f"confidence={confidence:.2f}; file={finding.get('file_path') or 'unknown'}"
             )
-
-        if verdict in {"confirmed", "likely"}:
-            normalized_status = "verified"
-        elif verdict == "false_positive":
-            normalized_status = "false_positive"
-        else:
-            normalized_status = "uncertain"
 
         return {
             "finding_identity": finding.get("finding_identity"),
@@ -3232,19 +3297,25 @@ class VerificationAgent(BaseAgent):
         Returns:
             TaskHandoff 对象，供 Orchestrator 汇总
         """
-        # 按验证结果分类
-        confirmed = [f for f in verified_findings if f.get("verdict") == "confirmed"]
-        likely = [f for f in verified_findings if f.get("verdict") == "likely"]
-        false_positives = [f for f in verified_findings if f.get("verdict") == "false_positive"]
+        # 按状态分类（status-first）
+        def _finding_status(item: Dict[str, Any]) -> str:
+            vr = item.get("verification_result")
+            vr_status = vr.get("status") if isinstance(vr, dict) else None
+            return self._normalize_verification_status(
+                item.get("status") or vr_status or item.get("verdict")
+            )
 
-        # 提取关键发现（已确认的高危漏洞）
+        verified = [f for f in verified_findings if _finding_status(f) == "verified"]
+        uncertain = [f for f in verified_findings if _finding_status(f) == "uncertain"]
+        false_positives = [f for f in verified_findings if _finding_status(f) == "false_positive"]
+
+        # 提取关键发现（已验证的高危漏洞）
         key_findings = []
-        for f in confirmed:
+        for f in verified:
             if f.get("severity") in ["critical", "high"]:
                 key_findings.append(f)
-        # 如果高危不够，添加其他确认的漏洞
         if len(key_findings) < 10:
-            for f in confirmed:
+            for f in verified:
                 if f not in key_findings:
                     key_findings.append(f)
                     if len(key_findings) >= 10:
@@ -3252,7 +3323,7 @@ class VerificationAgent(BaseAgent):
 
         # 构建建议行动 - 修复建议
         suggested_actions = []
-        for f in confirmed[:10]:
+        for f in verified[:10]:
             suggestion = f.get("suggestion", "") or f.get("recommendation", "")
             suggested_actions.append({
                 "action": "fix_vulnerability",
@@ -3265,32 +3336,32 @@ class VerificationAgent(BaseAgent):
 
         # 构建洞察
         insights = [
-            f"验证完成: {confirmed_count}个确认, {likely_count}个可能, {false_positive_count}个误报",
-            f"验证准确率: {(confirmed_count + likely_count) / len(verified_findings) * 100:.1f}%" if verified_findings else "无数据",
+            f"验证完成: {confirmed_count}个已验证, {len(uncertain)}个待复核, {false_positive_count}个误报",
+            f"验证准确率: {confirmed_count / len(verified_findings) * 100:.1f}%" if verified_findings else "无数据",
         ]
 
         # 统计各类型漏洞
         type_counts = {}
-        for f in confirmed + likely:
+        for f in verified:
             vtype = f.get("vulnerability_type", "unknown")
             type_counts[vtype] = type_counts.get(vtype, 0) + 1
         if type_counts:
             top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
             insights.append(f"主要漏洞类型: {', '.join([f'{t}({c})' for t, c in top_types])}")
 
-        # 需要关注的文件（有确认漏洞的文件）
+        # 需要关注的文件（有已验证漏洞的文件）
         attention_points = []
         files_with_confirmed = {}
-        for f in confirmed:
+        for f in verified:
             fp = f.get("file_path", "")
             if fp:
                 files_with_confirmed[fp] = files_with_confirmed.get(fp, 0) + 1
         for fp, count in sorted(files_with_confirmed.items(), key=lambda x: x[1], reverse=True)[:10]:
-            attention_points.append(f"{fp} ({count}个确认漏洞)")
+            attention_points.append(f"{fp} ({count}个已验证漏洞)")
 
         # 优先修复的区域
         priority_areas = []
-        for f in confirmed:
+        for f in verified:
             if f.get("severity") in ["critical", "high"]:
                 fp = f.get("file_path", "")
                 if fp and fp not in priority_areas:
@@ -3301,6 +3372,7 @@ class VerificationAgent(BaseAgent):
             "confirmed_count": confirmed_count,
             "likely_count": likely_count,
             "false_positive_count": false_positive_count,
+            "uncertain_count": len(uncertain),
             "candidate_count": int(candidate_count or len(verified_findings)),
             "verified_output_count": len(verified_findings),
             "vulnerability_types": type_counts,
@@ -3309,9 +3381,9 @@ class VerificationAgent(BaseAgent):
         }
 
         # 构建摘要
-        summary = f"验证完成: {confirmed_count}个确认漏洞, {likely_count}个可能漏洞"
+        summary = f"验证完成: {confirmed_count}个已验证漏洞, {len(uncertain)}个待复核漏洞"
         if confirmed_count > 0:
-            high_count = len([f for f in confirmed if f.get("severity") in ["critical", "high"]])
+            high_count = len([f for f in verified if f.get("severity") in ["critical", "high"]])
             if high_count > 0:
                 summary += f", 其中{high_count}个高危"
 
