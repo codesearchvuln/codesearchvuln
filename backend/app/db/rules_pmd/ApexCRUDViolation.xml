@@ -50,8 +50,9 @@ authorize each type of CRUD operation. These pattern are configured via the foll
 The following example shows how the rule can be configured for the
 [sirono-common](https://github.com/SCWells72/sirono-common)
 [`AuthorizationUtil`](https://github.com/SCWells72/sirono-common#authorization-utilities) class:
-
-```xml
+        ]]></description>
+        <priority>3</priority>
+        <example><![CDATA[
 <rule ref="category/apex/security.xml/ApexCRUDViolation" message="Validate CRUD permission before SOQL/DML operation">
     <priority>3</priority>
     <properties>
@@ -63,5 +64,7 @@ The following example shows how the rule can be configured for the
         <property name="mergeAuthMethodPattern" value="AuthorizationUtil\.(is|assert)Mergeable"/>
     </properties>
 </rule>
+        ]]></example>
+    </rule>
 
 </ruleset>

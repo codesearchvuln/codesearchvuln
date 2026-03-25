@@ -1,13 +1,12 @@
-import type { ReactNode } from "react";
-import React, { createElement } from "react";
+import type { PropsWithChildren } from "react";
+import { createElement } from "react";
 import { StaticRouter } from "react-router-dom/server";
 
 export function SsrRouter({
   children,
   location = "/",
-}: {
-  children: ReactNode;
+}: PropsWithChildren<{
   location?: string;
-}) {
+}>) {
   return createElement(StaticRouter, { location }, children);
 }

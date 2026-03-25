@@ -15,5 +15,5 @@ from .gitleaks import GitleaksScanTask, GitleaksFinding, GitleaksRule
 from .opengrep import OpengrepScanTask, OpengrepFinding, OpengrepRule
 from .bandit import BanditScanTask, BanditFinding, BanditRuleState
 from .phpstan import PhpstanScanTask, PhpstanFinding, PhpstanRuleState
+from .pmd import PmdRuleConfig
 from .yasa import YasaScanTask, YasaFinding, YasaRuleConfig
-from .prompt_skill import PromptSkill

@@ -145,8 +145,8 @@ test("StaticAnalysisFindingsTable keeps severity and confidence columns non-hide
     onToggleStatus: () => {},
   });
 
-  const severityColumn = columns.find((column: { id: string }) => column.id === "severity");
-  const confidenceColumn = columns.find((column: { id: string }) => column.id === "confidence");
+  const severityColumn = columns.find((column) => column.id === "severity");
+  const confidenceColumn = columns.find((column) => column.id === "confidence");
 
   assert.equal(severityColumn?.enableHiding, false);
   assert.equal(confidenceColumn?.enableHiding, false);

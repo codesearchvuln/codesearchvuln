@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from app.core.config import settings
+from app.services.pmd_rulesets import PMD_RULESET_ALIASES
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 from .base import AgentTool, ToolResult
 from .sandbox_tool import SandboxManager
@@ -1170,21 +1171,6 @@ Google 开源的漏洞扫描工具。
             return ToolResult(success=False, data=error_msg, error=error_msg)
 
 # ============ PMD 工具 (Java 源码分析) ============
-
-PMD_RULESET_ALIASES = {
-    "security": "category/java/security.xml,category/java/errorprone.xml,category/apex/security.xml",
-    "quickstart": "category/java/security.xml,category/jsp/security.xml,category/javascript/security.xml",
-    "all": (
-        "category/java/security.xml,"
-        "category/jsp/security.xml,"
-        "category/javascript/security.xml,"
-        "category/html/security.xml,"
-        "category/xml/security.xml,"
-        "category/plsql/security.xml,"
-        "category/apex/security.xml,"
-        "category/visualforce/security.xml"
-    ),
-}
 
 
 def _normalize_pmd_target_path(target_path: str, project_root: str) -> str:

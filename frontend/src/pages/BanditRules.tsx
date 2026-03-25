@@ -54,14 +54,17 @@ import {
   type BanditRule,
 } from "@/shared/api/bandit";
 import { resolveDeletedFilterValue } from "@/pages/rulesTableState";
-
-type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
+import {
+  SCAN_ENGINE_SELECTOR_OPTIONS,
+  type ScanEngineTab,
+  isScanEngineTab,
+} from "@/shared/constants/scanEngines";
 // type DeletedFilterValue = "false" | "true" | "all";
 
 interface BanditRulesProps {
   showEngineSelector?: boolean;
-  engineValue?: EngineTab;
-  onEngineChange?: (value: EngineTab) => void;
+  engineValue?: ScanEngineTab;
+  onEngineChange?: (value: ScanEngineTab) => void;
 }
 
 const getSourceLabel = () => "内置规则";
@@ -523,13 +526,7 @@ export default function BanditRules({
       <Select
         value={engineValue}
         onValueChange={(val) => {
-          if (
-            val === "opengrep" ||
-            val === "gitleaks" ||
-            val === "bandit" ||
-            val === "phpstan" ||
-            val === "yasa"
-          ) {
+          if (isScanEngineTab(val)) {
             onEngineChange?.(val);
           }
         }}
@@ -538,11 +535,11 @@ export default function BanditRules({
           <SelectValue placeholder="选择引擎" />
         </SelectTrigger>
         <SelectContent className="cyber-dialog border-border">
-          <SelectItem value="opengrep">opengrep</SelectItem>
-          <SelectItem value="gitleaks">gitleaks</SelectItem>
-          <SelectItem value="bandit">bandit</SelectItem>
-          <SelectItem value="phpstan">phpstan</SelectItem>
-          <SelectItem value="yasa">yasa</SelectItem>
+          {SCAN_ENGINE_SELECTOR_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>

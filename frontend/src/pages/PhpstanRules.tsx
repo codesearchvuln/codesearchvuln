@@ -54,14 +54,17 @@ import {
   type PhpstanRule,
 } from "@/shared/api/phpstan";
 import { resolveDeletedFilterValue } from "@/pages/rulesTableState";
-
-type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
+import {
+  SCAN_ENGINE_SELECTOR_OPTIONS,
+  type ScanEngineTab,
+  isScanEngineTab,
+} from "@/shared/constants/scanEngines";
 // type DeletedFilterValue = "false" | "true" | "all";
 
 interface PhpstanRulesProps {
   showEngineSelector?: boolean;
-  engineValue?: EngineTab;
-  onEngineChange?: (value: EngineTab) => void;
+  engineValue?: ScanEngineTab;
+  onEngineChange?: (value: ScanEngineTab) => void;
 }
 
 const SOURCE_LABEL_MAP: Record<string, string> = {
@@ -599,13 +602,7 @@ export default function PhpstanRules({
       <Select
         value={engineValue}
         onValueChange={(val) => {
-          if (
-            val === "opengrep" ||
-            val === "gitleaks" ||
-            val === "bandit" ||
-            val === "phpstan" ||
-            val === "yasa"
-          ) {
+          if (isScanEngineTab(val)) {
             onEngineChange?.(val);
           }
         }}
@@ -614,11 +611,11 @@ export default function PhpstanRules({
           <SelectValue placeholder="选择引擎" />
         </SelectTrigger>
         <SelectContent className="cyber-dialog border-border">
-          <SelectItem value="opengrep">opengrep</SelectItem>
-          <SelectItem value="gitleaks">gitleaks</SelectItem>
-          <SelectItem value="bandit">bandit</SelectItem>
-          <SelectItem value="phpstan">phpstan</SelectItem>
-          <SelectItem value="yasa">yasa</SelectItem>
+          {SCAN_ENGINE_SELECTOR_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>

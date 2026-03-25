@@ -4,11 +4,13 @@ import OpengrepRules from "@/pages/OpengrepRules";
 import GitleaksRules from "@/pages/GitleaksRules";
 import BanditRules from "@/pages/BanditRules";
 import PhpstanRules from "@/pages/PhpstanRules";
+import PmdRules from "@/pages/PmdRules";
 import YasaRules from "@/pages/YasaRules";
-
-type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
-
-const ENGINE_TABS: EngineTab[] = ["opengrep", "gitleaks", "bandit", "phpstan", "yasa"];
+import {
+  DEFAULT_SCAN_ENGINE_TAB,
+  isScanEngineTab,
+  type ScanEngineTab,
+} from "@/shared/constants/scanEngines";
 
 export default function ScanConfigEngines() {
 	const [searchParams, setSearchParams] = useSearchParams();
@@ -17,16 +19,12 @@ export default function ScanConfigEngines() {
 		return <Navigate to="/scan-config/intelligent-engine" replace />;
 	}
 
-	const currentTab = useMemo<EngineTab>(() => {
-		return ENGINE_TABS.includes(rawTab as EngineTab)
-			? (rawTab as EngineTab)
-			: "opengrep";
+	const currentTab = useMemo<ScanEngineTab>(() => {
+		return isScanEngineTab(rawTab) ? rawTab : DEFAULT_SCAN_ENGINE_TAB;
 	}, [rawTab]);
 
 	const handleEngineChange = (value: string) => {
-		const next = ENGINE_TABS.includes(value as EngineTab)
-			? (value as EngineTab)
-			: "opengrep";
+		const next = isScanEngineTab(value) ? value : DEFAULT_SCAN_ENGINE_TAB;
 		const nextParams = new URLSearchParams(searchParams);
 		nextParams.set("tab", next);
 		setSearchParams(nextParams, { replace: true });
@@ -58,6 +56,12 @@ export default function ScanConfigEngines() {
 						/>
 					) : currentTab === "phpstan" ? (
 						<PhpstanRules
+							showEngineSelector
+							engineValue={currentTab}
+							onEngineChange={handleEngineChange}
+						/>
+					) : currentTab === "pmd" ? (
+						<PmdRules
 							showEngineSelector
 							engineValue={currentTab}
 							onEngineChange={handleEngineChange}

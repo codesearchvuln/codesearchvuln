@@ -131,6 +131,54 @@ export default function ToolEvidencePreview({
     );
   }
 
+  if (payload.renderType === "outline_summary") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [
+      `role=${first.fileRole}`,
+      ...first.entrypoints.slice(0, 3),
+      ...first.keySymbols.slice(0, 3),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return (
+      <FindingCodeWindow
+        code={content || first.filePath}
+        filePath={first.filePath}
+        lineStart={1}
+        lineEnd={Math.max(1, content.split("\n").length)}
+        focusLine={1}
+        title="文件概览"
+        density="compact"
+        badges={[parsed.state]}
+      />
+    );
+  }
+
+  if (payload.renderType === "function_summary") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [
+      first.signature || first.resolvedFunction,
+      first.purpose,
+      ...first.keyCalls.slice(0, 3),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return (
+      <FindingCodeWindow
+        code={content || first.resolvedFunction}
+        filePath={first.filePath}
+        lineStart={1}
+        lineEnd={Math.max(1, content.split("\n").length)}
+        focusLine={1}
+        title={first.resolvedFunction}
+        density="compact"
+        badges={[parsed.state]}
+      />
+    );
+  }
+
   if (payload.renderType === "flow_analysis") {
     const first = payload.entries[0];
     if (!first) return null;
@@ -171,19 +219,23 @@ export default function ToolEvidencePreview({
     );
   }
 
-  const first = payload.entries[0];
-  if (!first) return null;
-  const content = [first.location, first.recommendation].filter(Boolean).join("\n");
-  return (
-    <FindingCodeWindow
-      code={content}
-      filePath={first.title}
-      lineStart={1}
-      lineEnd={Math.max(1, content.split("\n").length)}
-      focusLine={1}
-      title={first.severity}
-      density="compact"
-      badges={[parsed.state]}
-    />
-  );
+  if (payload.renderType === "report_summary") {
+    const first = payload.entries[0];
+    if (!first) return null;
+    const content = [first.location, first.recommendation].filter(Boolean).join("\n");
+    return (
+      <FindingCodeWindow
+        code={content}
+        filePath={first.title}
+        lineStart={1}
+        lineEnd={Math.max(1, content.split("\n").length)}
+        focusLine={1}
+        title={first.severity}
+        density="compact"
+        badges={[parsed.state]}
+      />
+    );
+  }
+
+  return null;
 }

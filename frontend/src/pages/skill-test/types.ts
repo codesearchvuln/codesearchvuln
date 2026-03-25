@@ -1,4 +1,4 @@
-export interface ToolTestPreset {
+export interface ToolTestPreset extends Record<string, unknown> {
   project_name: "libplist";
   file_path: string;
   function_name: string;

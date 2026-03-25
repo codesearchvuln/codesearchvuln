@@ -37,13 +37,16 @@ import {
   type GitleaksRule,
   updateGitleaksRule,
 } from "@/shared/api/gitleaks";
-
-type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
+import {
+  SCAN_ENGINE_SELECTOR_OPTIONS,
+  type ScanEngineTab,
+  isScanEngineTab,
+} from "@/shared/constants/scanEngines";
 
 interface GitleaksRulesProps {
   showEngineSelector?: boolean;
-  engineValue?: EngineTab;
-  onEngineChange?: (value: EngineTab) => void;
+  engineValue?: ScanEngineTab;
+  onEngineChange?: (value: ScanEngineTab) => void;
 }
 
 const SOURCE_LABEL_MAP: Record<string, string> = {
@@ -554,13 +557,7 @@ export default function GitleaksRules({
       <Select
         value={engineValue}
         onValueChange={(value) => {
-          if (
-            value === "opengrep" ||
-            value === "gitleaks" ||
-            value === "bandit" ||
-            value === "phpstan" ||
-            value === "yasa"
-          ) {
+          if (isScanEngineTab(value)) {
             onEngineChange?.(value);
           }
         }}
@@ -569,11 +566,11 @@ export default function GitleaksRules({
           <SelectValue placeholder="选择引擎" />
         </SelectTrigger>
         <SelectContent className="cyber-dialog border-border">
-          <SelectItem value="opengrep">opengrep</SelectItem>
-          <SelectItem value="gitleaks">gitleaks</SelectItem>
-          <SelectItem value="bandit">bandit</SelectItem>
-          <SelectItem value="phpstan">phpstan</SelectItem>
-          <SelectItem value="yasa">yasa</SelectItem>
+          {SCAN_ENGINE_SELECTOR_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>

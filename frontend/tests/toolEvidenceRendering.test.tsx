@@ -95,6 +95,42 @@ const analysisSummaryEvidence: ToolEvidencePayload = {
   ],
 };
 
+const outlineSummaryEvidence: ToolEvidencePayload = {
+  renderType: "outline_summary",
+  commandChain: ["get_file_outline"],
+  displayCommand: "get_file_outline",
+  entries: [
+    {
+      filePath: "src/parser.ts",
+      fileRole: "parser-entry",
+      keySymbols: ["parseXml", "buildNode"],
+      imports: ["fs"],
+      entrypoints: ["parseRequest"],
+      riskMarkers: ["xml entity expansion"],
+      frameworkHints: ["express"],
+    },
+  ],
+};
+
+const functionSummaryEvidence: ToolEvidencePayload = {
+  renderType: "function_summary",
+  commandChain: ["get_function_summary"],
+  displayCommand: "get_function_summary",
+  entries: [
+    {
+      filePath: "src/parser.ts",
+      resolvedFunction: "parseXml",
+      signature: "function parseXml(input: string): Node",
+      purpose: "Parse XML input into an AST node tree.",
+      inputs: ["input"],
+      outputs: ["Node"],
+      keyCalls: ["decodeEntities", "buildNode"],
+      riskPoints: ["untrusted XML"],
+      relatedSymbols: ["buildNode"],
+    },
+  ],
+};
+
 const verificationSummaryEvidence: ToolEvidencePayload = {
   renderType: "verification_summary",
   commandChain: ["verify_vulnerability"],
@@ -156,6 +192,28 @@ test("ToolEvidencePreview 渲染 analysis_summary 摘要卡", () => {
 
   assert.match(markup, /Smart Scan Summary/);
   assert.match(markup, /Scanned 6 files and found 3 potential issues/);
+});
+
+test("ToolEvidencePreview 渲染 outline_summary 摘要卡", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ToolEvidencePreview, { evidence: outlineSummaryEvidence }),
+  );
+
+  assert.match(markup, /src\/parser\.ts/);
+  assert.match(markup, /role=parser-entry/);
+  assert.match(markup, /parseRequest/);
+  assert.match(markup, /parseXml/);
+});
+
+test("ToolEvidencePreview 渲染 function_summary 摘要卡", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ToolEvidencePreview, { evidence: functionSummaryEvidence }),
+  );
+
+  assert.match(markup, /src\/parser\.ts/);
+  assert.match(markup, /function parseXml\(input: string\): Node/);
+  assert.match(markup, /Parse XML input into an AST node tree/);
+  assert.match(markup, /decodeEntities/);
 });
 
 test("ToolEvidenceDetail 渲染 execution_result 详情", () => {

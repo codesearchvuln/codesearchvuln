@@ -78,6 +78,11 @@ import {
 } from "@/shared/security/cweCatalog";
 import { setOpengrepActiveRules } from "@/shared/stores/opengrepRulesStore";
 import { useI18n } from "@/shared/i18n";
+import {
+	SCAN_ENGINE_SELECTOR_OPTIONS,
+	type ScanEngineTab,
+	isScanEngineTab,
+} from "@/shared/constants/scanEngines";
 
 export function formatRuleCweDisplayLabel(cwe?: string) {
 	return formatCweDisplayLabel(cwe);
@@ -91,8 +96,8 @@ function formatRuleCweDisplayTitle(cwe?: string) {
 interface OpengrepRulesProps {
 	embedded?: boolean;
 	showEngineSelector?: boolean;
-	engineValue?: "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
-	onEngineChange?: (value: "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa") => void;
+	engineValue?: ScanEngineTab;
+	onEngineChange?: (value: ScanEngineTab) => void;
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -1525,13 +1530,7 @@ export default function OpengrepRules({
 										<Select
 											value={engineValue}
 											onValueChange={(value) => {
-												if (
-													value === "opengrep" ||
-													value === "gitleaks" ||
-													value === "bandit" ||
-													value === "phpstan" ||
-													value === "yasa"
-												) {
+												if (isScanEngineTab(value)) {
 													onEngineChange?.(value);
 												}
 											}}
@@ -1540,11 +1539,11 @@ export default function OpengrepRules({
 												<SelectValue placeholder="选择引擎" />
 											</SelectTrigger>
 											<SelectContent className="cyber-dialog border-border">
-												<SelectItem value="opengrep">opengrep</SelectItem>
-												<SelectItem value="gitleaks">gitleaks</SelectItem>
-												<SelectItem value="bandit">bandit</SelectItem>
-												<SelectItem value="phpstan">phpstan</SelectItem>
-												<SelectItem value="yasa">yasa</SelectItem>
+												{SCAN_ENGINE_SELECTOR_OPTIONS.map((option) => (
+													<SelectItem key={option.value} value={option.value}>
+														{option.label}
+													</SelectItem>
+												))}
 											</SelectContent>
 										</Select>
 									</div>

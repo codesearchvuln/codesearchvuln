@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
-import { Copy, Database, Shield, Tag } from "lucide-react";
+import { Code2, Copy, Database, Shield, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,16 +41,19 @@ import {
   YASA_RUNTIME_CONFIG_LOAD_ERROR_FALLBACK,
   type YasaRulesLoaderResult,
 } from "@/pages/yasaRulesLoader";
-
-type EngineTab = "opengrep" | "gitleaks" | "bandit" | "phpstan" | "yasa";
+import {
+  SCAN_ENGINE_SELECTOR_OPTIONS,
+  type ScanEngineTab,
+  isScanEngineTab,
+} from "@/shared/constants/scanEngines";
 
 interface YasaRulesProps {
   showEngineSelector?: boolean;
-  engineValue?: EngineTab;
-  onEngineChange?: (value: EngineTab) => void;
+  engineValue?: ScanEngineTab;
+  onEngineChange?: (value: ScanEngineTab) => void;
 }
 
-interface YasaRuleRowViewModel {
+export interface YasaRuleRowViewModel {
   id: string;
   ruleName: string;
   languages: string[];
@@ -64,6 +67,175 @@ interface YasaRuleRowViewModel {
   demoRuleConfigPath: string;
   description: string;
   ruleConfigJson?: string;
+}
+
+function DetailSectionTitle({ children }: { children: string }) {
+  return (
+    <h3 className="font-mono font-bold uppercase text-sm text-muted-foreground border-b border-border pb-2">
+      {children}
+    </h3>
+  );
+}
+
+function DetailInfoCard({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-border/60 bg-muted/30 p-3">
+      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+      <p className={`mt-2 text-sm text-foreground break-all ${mono ? "font-mono" : ""}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function formatYasaBadgeItems(items: string[]) {
+  return items.filter((item) => item && item.trim());
+}
+
+export function YasaRuleDetailPanel({
+  rule,
+  onCopyRawContent,
+}: {
+  rule: YasaRuleRowViewModel;
+  onCopyRawContent: () => void | Promise<void>;
+}) {
+  const languages = formatYasaBadgeItems(rule.languages);
+  const checkerPacks = formatYasaBadgeItems(rule.checkerPacks);
+  const rawRuleConfig = rule.ruleConfigJson?.trim() || "";
+  const hasRawRuleConfig = rawRuleConfig.length > 0;
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="space-y-6">
+        <div className="rounded-md border border-border/60 bg-muted/30 p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <p className="font-mono text-xs uppercase tracking-[0.22em] text-primary">
+                Rule Overview
+              </p>
+              <div>
+                <h3 className="text-xl font-semibold break-all text-foreground">
+                  {rule.ruleName}
+                </h3>
+                <p className="mt-1 font-mono text-xs text-muted-foreground break-all">
+                  {rule.id}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge className="cyber-badge cyber-badge-info">{rule.source}</Badge>
+              <Badge
+                className={
+                  rule.activeStatus === "已启用"
+                    ? "cyber-badge cyber-badge-success"
+                    : "cyber-badge cyber-badge-muted"
+                }
+              >
+                {rule.activeStatus}
+              </Badge>
+              <Badge className="cyber-badge cyber-badge-info">{rule.confidence}</Badge>
+              <Badge className="cyber-badge cyber-badge-success">{rule.verifyStatus}</Badge>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <DetailSectionTitle>基本信息</DetailSectionTitle>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <DetailInfoCard label="规则名称" value={rule.ruleName || "-"} mono />
+            <DetailInfoCard label="规则 ID" value={rule.id || "-"} mono />
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                编程语言
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {languages.length > 0 ? (
+                  languages.map((language) => (
+                    <Badge key={`${rule.id}-${language}`} className="cyber-badge cyber-badge-info">
+                      {language}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">未标注</span>
+                )}
+              </div>
+            </div>
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                CheckerPack
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {checkerPacks.length > 0 ? (
+                  checkerPacks.map((pack) => (
+                    <Badge key={`${rule.id}-${pack}`} className="cyber-badge cyber-badge-muted">
+                      {pack}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">未配置</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <DetailSectionTitle>说明信息</DetailSectionTitle>
+          <div className="rounded-md border border-border/60 bg-muted/20 p-4">
+            <p className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
+              {rule.description?.trim() || "暂无规则说明"}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <DetailSectionTitle>技术路径</DetailSectionTitle>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <DetailInfoCard
+              label="规则路径"
+              value={rule.checkerPath?.trim() || "暂无规则路径"}
+              mono
+            />
+            <DetailInfoCard
+              label="Demo Rule Config 路径"
+              value={rule.demoRuleConfigPath?.trim() || "暂无 demo 配置路径"}
+              mono
+            />
+          </div>
+        </div>
+
+        {hasRawRuleConfig ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <DetailSectionTitle>规则配置</DetailSectionTitle>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void onCopyRawContent()}
+                className="cyber-btn-ghost h-7 text-xs"
+              >
+                <Copy className="mr-1 h-3 w-3" />
+                复制配置
+              </Button>
+            </div>
+            <div className="rounded-md border border-border bg-background/70 p-4 shadow-inner">
+              <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground">
+                {rawRuleConfig}
+              </pre>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function toViewModel(rule: YasaRule): YasaRuleRowViewModel {
@@ -484,13 +656,7 @@ export default function YasaRules({
       <Select
         value={engineValue}
         onValueChange={(val) => {
-          if (
-            val === "opengrep" ||
-            val === "gitleaks" ||
-            val === "bandit" ||
-            val === "phpstan" ||
-            val === "yasa"
-          ) {
+          if (isScanEngineTab(val)) {
             onEngineChange?.(val);
           }
         }}
@@ -499,11 +665,11 @@ export default function YasaRules({
           <SelectValue placeholder="选择引擎" />
         </SelectTrigger>
         <SelectContent className="cyber-dialog border-border">
-          <SelectItem value="opengrep">opengrep</SelectItem>
-          <SelectItem value="gitleaks">gitleaks</SelectItem>
-          <SelectItem value="bandit">bandit</SelectItem>
-          <SelectItem value="phpstan">phpstan</SelectItem>
-          <SelectItem value="yasa">yasa</SelectItem>
+          {SCAN_ENGINE_SELECTOR_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>
@@ -744,64 +910,40 @@ export default function YasaRules({
       </div>
 
       <Dialog open={showDetail} onOpenChange={setShowDetail}>
-        <DialogContent className="cyber-dialog max-w-3xl border border-border">
-          <DialogHeader>
-            <DialogTitle>YASA 规则详情</DialogTitle>
+        <DialogContent className="!w-[min(92vw,980px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
+          <DialogHeader className="px-6 pt-4 flex-shrink-0 border-b border-border bg-muted/30">
+            <DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
+              <Code2 className="w-5 h-5 text-primary" />
+              YASA 规则详情
+            </DialogTitle>
           </DialogHeader>
           {detailRule ? (
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div>
-                  <p className="text-muted-foreground">规则名称</p>
-                  <p className="font-mono break-all">{detailRule.ruleName}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">规则来源</p>
-                  <p>{detailRule.source}</p>
-                </div>
-              </div>
-              <div>
-                <p className="text-muted-foreground">语言映射</p>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  {detailRule.languages.length > 0 ? (
-                    detailRule.languages.map((language) => (
-                      <Badge key={`detail-${detailRule.id}-${language}`} className="cyber-badge-info">
-                        {language}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-muted-foreground">未标注</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                <p className="text-muted-foreground">CheckerPack</p>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  {detailRule.checkerPacks.length > 0 ? (
-                    detailRule.checkerPacks.map((pack) => (
-                      <Badge key={`detail-${detailRule.id}-${pack}`} className="cyber-badge-muted">
-                        {pack}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-muted-foreground">-</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                <p className="text-muted-foreground">规则路径</p>
-                <p className="font-mono break-all">{detailRule.checkerPath}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">demo rule config 路径</p>
-                <p className="font-mono break-all">{detailRule.demoRuleConfigPath}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">规则描述</p>
-                <p className="whitespace-pre-wrap">{detailRule.description}</p>
-              </div>
-            </div>
+            <YasaRuleDetailPanel
+              rule={detailRule}
+              onCopyRawContent={async () => {
+                if (!detailRule.ruleConfigJson?.trim()) {
+                  toast.error("当前规则没有可复制的配置内容");
+                  return;
+                }
+                try {
+                  await navigator.clipboard.writeText(detailRule.ruleConfigJson);
+                  toast.success("已复制规则配置");
+                } catch {
+                  toast.error("复制失败，请手动复制");
+                }
+              }}
+            />
           ) : null}
+          <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 bg-muted border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowDetail(false)}
+              className="cyber-btn-outline"
+            >
+              关闭
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>

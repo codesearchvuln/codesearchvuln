@@ -7,6 +7,7 @@ from app.api.v1.endpoints import static_tasks_cache as _cache
 from app.api.v1.endpoints import static_tasks_gitleaks as _gitleaks
 from app.api.v1.endpoints import static_tasks_opengrep as _opengrep
 from app.api.v1.endpoints import static_tasks_opengrep_rules as _opengrep_rules
+from app.api.v1.endpoints import static_tasks_pmd as _pmd
 from app.api.v1.endpoints import static_tasks_phpstan as _phpstan
 from app.api.v1.endpoints import static_tasks_yasa as _yasa
 from app.api.v1.endpoints.static_tasks_shared import (
@@ -29,6 +30,7 @@ router = APIRouter()
 router.include_router(_opengrep.router)
 router.include_router(_opengrep_rules.router)
 router.include_router(_bandit.router)
+router.include_router(_pmd.router)
 router.include_router(_phpstan.router)
 router.include_router(_gitleaks.router)
 router.include_router(_yasa.router)
@@ -220,6 +222,15 @@ delete_yasa_task = _yasa.delete_yasa_task
 get_yasa_findings = _yasa.get_yasa_findings
 get_yasa_finding = _yasa.get_yasa_finding
 update_yasa_finding_status = _yasa.update_yasa_finding_status
+
+list_pmd_presets = _pmd.list_pmd_presets
+list_builtin_pmd_rulesets = _pmd.list_builtin_pmd_rulesets
+get_builtin_pmd_ruleset = _pmd.get_builtin_pmd_ruleset
+import_pmd_rule_config = _pmd.import_pmd_rule_config
+list_pmd_rule_configs = _pmd.list_pmd_rule_configs
+get_pmd_rule_config = _pmd.get_pmd_rule_config
+update_pmd_rule_config = _pmd.update_pmd_rule_config
+delete_pmd_rule_config = _pmd.delete_pmd_rule_config
 
 get_repo_cache_stats = _cache.get_repo_cache_stats
 cleanup_unused_cache = _cache.cleanup_unused_cache
