@@ -275,7 +275,13 @@ async def test_osv_scanner(project_root: str):
     return result.success
 
 async def test_pmd(project_root: str):
-    """测试 PMD 工具"""
+    """测试 PMD 工具。
+
+    说明:
+    - PMD 现在依赖 SCANNER_PMD_IMAGE 提供扫描镜像
+    - 执行方式是按需启动的一次性 runner 容器，不是 backend 常驻服务
+    - 这里只是可选的手工 smoke test，不属于默认自动验收
+    """
     print("\n" + "="*60)
     print(" 测试 PMD Java 源码扫描工具")
     print("="*60)
@@ -289,6 +295,7 @@ async def test_pmd(project_root: str):
     print(f"工具描述: {tool.description[:200]}...")
     
     print("\n执行扫描...")
+    print("提示: 该 PMD 手工 smoke test 依赖 SCANNER_PMD_IMAGE，并通过按需 runner 容器执行。")
     # 使用本仓库内提供的 PMD 规则文件进行测试
     result = await tool.execute(
         target_path=".",

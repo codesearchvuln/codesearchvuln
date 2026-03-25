@@ -1320,16 +1320,64 @@ def _build_pmd_runner_command(runner_target_path: str, selected_ruleset: str) ->
 def _read_pmd_report(workspace_dir: Path, process_result: Any) -> dict[str, Any]:
     report_path = workspace_dir / "output" / "report.json"
     if not report_path.exists():
-        if getattr(process_result, "success", False):
-            return {}
-        error_detail = getattr(process_result, "error", None) or "PMD runner 未生成报告"
-        raise RuntimeError(error_detail)
+        logger.warning("[PMD] report.json 缺失: %s", report_path)
+        raise RuntimeError("PMD 报告缺失: report.json")
 
     raw_output = report_path.read_text(encoding="utf-8")
-    json_start = raw_output.find("{")
-    if json_start < 0:
-        return {}
-    return json.loads(raw_output[json_start:])
+    try:
+        return json.loads(raw_output)
+    except json.JSONDecodeError as exc:
+        logger.warning("[PMD] report.json JSON 无法解析: %s (%s)", report_path, exc)
+        raise ValueError(f"PMD 报告 JSON 解析失败: {exc.msg}") from exc
+
+
+def _read_pmd_log_excerpt(log_path: Optional[str], limit: int = 240) -> Optional[str]:
+    if not log_path:
+        return None
+
+    try:
+        raw_text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.warning("[PMD] 无法读取 runner 日志 %s: %s", log_path, exc)
+        return None
+
+    cleaned = " ".join(line.strip() for line in raw_text.splitlines() if line.strip())
+    if not cleaned:
+        return None
+    if len(cleaned) > limit:
+        return cleaned[:limit].rstrip() + "..."
+    return cleaned
+
+
+def _build_pmd_failure_summary(process_result: Any) -> str:
+    exit_code = getattr(process_result, "exit_code", None)
+    summary = f"PMD 扫描失败 (exit_code={exit_code})"
+
+    details: list[str] = []
+    for candidate in (
+        getattr(process_result, "error", None),
+        _read_pmd_log_excerpt(getattr(process_result, "stderr_path", None)),
+        _read_pmd_log_excerpt(getattr(process_result, "stdout_path", None)),
+    ):
+        detail = str(candidate or "").strip()
+        if detail and detail not in details:
+            details.append(detail)
+
+    if not details:
+        details.append("PMD runner 执行未成功")
+
+    return f"{summary}: {'；'.join(details)}"
+
+
+def _cleanup_pmd_workspace(workspace_dir: Optional[Path]) -> None:
+    if workspace_dir is None:
+        return
+    try:
+        shutil.rmtree(workspace_dir, ignore_errors=False)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning("[PMD] 清理 workspace 失败 %s: %s", workspace_dir, exc)
 
 
 def _normalize_pmd_violation_path(file_path: str) -> str:
@@ -1412,6 +1460,7 @@ PMD 直接分析源代码，无需编译！
         **kwargs
     ) -> ToolResult:
         """执行 PMD 扫描"""
+        workspace_dir: Optional[Path] = None
         try:
             normalized_target_path = _normalize_pmd_target_path(target_path, self.project_root)
             workspace_dir, _project_dir, _output_dir, _logs_dir, meta_dir = _prepare_pmd_workspace(self.project_root)
@@ -1432,6 +1481,10 @@ PMD 直接分析源代码，无需编译！
                     artifact_paths=["output/report.json"],
                 )
             )
+
+            if process_result.exit_code not in {0, 4}:
+                error_msg = _build_pmd_failure_summary(process_result)
+                return ToolResult(success=False, data=error_msg, error=error_msg)
 
             pmd_result = _read_pmd_report(workspace_dir, process_result)
             
@@ -1455,7 +1508,14 @@ PMD 直接分析源代码，无需编译！
                 return ToolResult(
                     success=True,
                     data=" PMD 扫描完成，未发现安全问题",
-                    metadata={"findings_count": 0}
+                    metadata={
+                        "findings_count": 0,
+                        "high_count": 0,
+                        "medium_count": 0,
+                        "low_count": 0,
+                        "findings": [],
+                        "raw_result": pmd_result,
+                    }
                 )
             
             # 按优先级排序
@@ -1508,6 +1568,8 @@ PMD 直接分析源代码，无需编译！
             error_msg = f"PMD 执行错误: {str(e)}"
             logger.error(f"[PMD] {error_msg}", exc_info=True)
             return ToolResult(success=False, data=error_msg, error=error_msg)
+        finally:
+            _cleanup_pmd_workspace(workspace_dir)
 
 # ============ PHPStan 工具 (PHP 静态分析) ============
 

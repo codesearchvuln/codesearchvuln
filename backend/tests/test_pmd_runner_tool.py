@@ -67,9 +67,30 @@ def _build_report(file_path: str = "/scan/project/src/main/java/App.java") -> di
     }
 
 
+_REPORT_UNSET = object()
+
+
 def _runner_option(command: list[str], flag: str) -> str:
     index = command.index(flag)
     return command[index + 1]
+
+
+def _build_runner_result(
+    *,
+    success: bool,
+    exit_code: int,
+    stdout_path: str | None = None,
+    stderr_path: str | None = None,
+    error: str | None = None,
+):
+    return SimpleNamespace(
+        success=success,
+        container_id="pmd-tool-1",
+        exit_code=exit_code,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        error=error,
+    )
 
 
 def test_prepare_pmd_workspace_only_ignores_nested_workspace_subtree(monkeypatch, tmp_path):
@@ -131,7 +152,15 @@ async def _run_pmd_tool(
     target_path: str = ".",
     ruleset: str = "security",
     scan_workspace_root: Path | None = None,
-    report_payload: dict | None = None,
+    report_payload: object = _REPORT_UNSET,
+    report_text: str | None = None,
+    create_report: bool | None = None,
+    exit_code: int = 4,
+    runner_success: bool | None = None,
+    runner_error: str | None = None,
+    stdout_text: str | None = None,
+    stderr_text: str | None = None,
+    observe_workspace=None,
 ):
     project_root = tmp_path / "project"
     project_root.mkdir(parents=True, exist_ok=True)
@@ -158,19 +187,45 @@ async def _run_pmd_tool(
 
     async def _fake_run_scanner_container(spec, **_kwargs):
         seen["spec"] = spec
-        output_dir = Path(spec.workspace_dir) / "output"
+        workspace_dir = Path(spec.workspace_dir)
+        output_dir = workspace_dir / "output"
+        logs_dir = workspace_dir / "logs"
         output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "report.json").write_text(
-            json.dumps(report_payload or _build_report()),
-            encoding="utf-8",
-        )
-        return SimpleNamespace(
-            success=True,
-            container_id="pmd-tool-1",
-            exit_code=4,
-            stdout_path=None,
-            stderr_path=None,
-            error=None,
+        logs_dir.mkdir(parents=True, exist_ok=True)
+
+        effective_success = runner_success if runner_success is not None else exit_code in {0, 4}
+        should_create_report = create_report
+        if should_create_report is None:
+            should_create_report = (
+                report_payload is not _REPORT_UNSET or report_text is not None or exit_code in {0, 4}
+            )
+
+        if should_create_report:
+            effective_report = report_payload
+            if effective_report is _REPORT_UNSET:
+                effective_report = {"files": []} if exit_code == 0 else _build_report()
+            effective_report_text = report_text or json.dumps(effective_report)
+            (output_dir / "report.json").write_text(effective_report_text, encoding="utf-8")
+
+        stdout_path = None
+        if stdout_text is not None:
+            stdout_path = str(logs_dir / "stdout.log")
+            Path(stdout_path).write_text(stdout_text, encoding="utf-8")
+
+        stderr_path = None
+        if stderr_text is not None:
+            stderr_path = str(logs_dir / "stderr.log")
+            Path(stderr_path).write_text(stderr_text, encoding="utf-8")
+
+        if observe_workspace is not None:
+            observe_workspace(workspace_dir, spec)
+
+        return _build_runner_result(
+            success=effective_success,
+            exit_code=exit_code,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            error=runner_error,
         )
 
     monkeypatch.setattr(
@@ -213,62 +268,42 @@ async def test_pmd_tool_does_not_initialize_sandbox(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_pmd_tool_creates_workspace_under_scan_workspace_root(monkeypatch, tmp_path):
-    project_root = tmp_path / "project"
-    project_root.mkdir(parents=True, exist_ok=True)
-    _create_project(project_root)
-
-    scan_workspace_root = project_root / "scans"
-    monkeypatch.setattr(
-        external_tools,
-        "settings",
-        SimpleNamespace(
-            SCAN_WORKSPACE_ROOT=str(scan_workspace_root),
-            SCANNER_PMD_IMAGE="vulhunter/pmd-runner:test",
+    scan_workspace_root = tmp_path / "project" / "scans"
+    observed: dict[str, bool] = {}
+    result, spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path,
+        scan_workspace_root=scan_workspace_root,
+        observe_workspace=lambda workspace_dir, _spec: observed.update(
+            {
+                "project_dir": (workspace_dir / "project").is_dir(),
+                "output_dir": (workspace_dir / "output").is_dir(),
+                "logs_dir": (workspace_dir / "logs").is_dir(),
+                "meta_dir": (workspace_dir / "meta").is_dir(),
+                "app_file": (workspace_dir / "project" / "src" / "main" / "java" / "App.java").is_file(),
+                "recursive_workspace": (
+                    workspace_dir
+                    / "project"
+                    / "scans"
+                    / "pmd-tool"
+                    / "feedfacefeedfacefeedfacefeedface"
+                ).exists(),
+            }
         ),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        external_tools,
-        "uuid4",
-        lambda: SimpleNamespace(hex="feedfacefeedfacefeedfacefeedface"),
-        raising=False,
     )
 
-    seen: dict[str, object] = {}
-
-    async def _fake_run_scanner_container(spec, **_kwargs):
-        seen["spec"] = spec
-        output_dir = Path(spec.workspace_dir) / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "report.json").write_text(json.dumps(_build_report()), encoding="utf-8")
-        return SimpleNamespace(
-            success=True,
-            container_id="pmd-tool-1",
-            exit_code=4,
-            stdout_path=None,
-            stderr_path=None,
-            error=None,
-        )
-
-    monkeypatch.setattr(
-        external_tools,
-        "run_scanner_container",
-        _fake_run_scanner_container,
-        raising=False,
-    )
-
-    tool = PMDTool(str(project_root), sandbox_manager=_SandboxProbe())
-    result = await tool._execute()
-
-    workspace_dir = Path(seen["spec"].workspace_dir)
+    workspace_dir = Path(spec.workspace_dir)
     assert result.success is True
     assert workspace_dir == scan_workspace_root / "pmd-tool" / "feedfacefeedfacefeedfacefeedface"
-    assert (workspace_dir / "project").is_dir()
-    assert (workspace_dir / "output").is_dir()
-    assert (workspace_dir / "logs").is_dir()
-    assert (workspace_dir / "meta").is_dir()
-    assert (workspace_dir / "project" / "src" / "main" / "java" / "App.java").is_file()
-    assert not (workspace_dir / "project" / "scans" / "pmd-tool" / "feedfacefeedfacefeedfacefeedface").exists()
+    assert observed == {
+        "project_dir": True,
+        "output_dir": True,
+        "logs_dir": True,
+        "meta_dir": True,
+        "app_file": True,
+        "recursive_workspace": False,
+    }
+    assert not workspace_dir.exists()
 
 
 @pytest.mark.asyncio
@@ -315,55 +350,21 @@ async def test_pmd_tool_maps_all_alias_to_exact_rulesets(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_pmd_tool_uses_project_local_ruleset_path_without_staging(monkeypatch, tmp_path):
-    project_root = tmp_path / "project"
-    project_root.mkdir(parents=True, exist_ok=True)
-    _source_dir, local_ruleset = _create_project(project_root)
-    monkeypatch.setattr(
-        external_tools,
-        "settings",
-        SimpleNamespace(
-            SCAN_WORKSPACE_ROOT=str(tmp_path / "scan-root"),
-            SCANNER_PMD_IMAGE="vulhunter/pmd-runner:test",
+    observed: dict[str, bool] = {}
+    result, spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path,
+        ruleset="config/pmd/custom.xml",
+        observe_workspace=lambda workspace_dir, _spec: observed.update(
+            {"staged_local_ruleset": (workspace_dir / "meta" / "rules" / "custom.xml").exists()}
         ),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        external_tools,
-        "uuid4",
-        lambda: SimpleNamespace(hex="feedfacefeedfacefeedfacefeedface"),
-        raising=False,
     )
 
-    seen: dict[str, object] = {}
-
-    async def _fake_run_scanner_container(spec, **_kwargs):
-        seen["spec"] = spec
-        output_dir = Path(spec.workspace_dir) / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "report.json").write_text(json.dumps(_build_report()), encoding="utf-8")
-        return SimpleNamespace(
-            success=True,
-            container_id="pmd-tool-1",
-            exit_code=4,
-            stdout_path=None,
-            stderr_path=None,
-            error=None,
-        )
-
-    monkeypatch.setattr(
-        external_tools,
-        "run_scanner_container",
-        _fake_run_scanner_container,
-        raising=False,
-    )
-
-    tool = PMDTool(str(project_root), sandbox_manager=_SandboxProbe())
-    result = await tool._execute(ruleset=str(local_ruleset.relative_to(project_root)))
-
-    workspace_dir = Path(seen["spec"].workspace_dir)
+    workspace_dir = Path(spec.workspace_dir)
     assert result.success is True
-    assert _runner_option(seen["spec"].command, "--rulesets") == "/scan/project/config/pmd/custom.xml"
-    assert not (workspace_dir / "meta" / "rules" / "custom.xml").exists()
+    assert _runner_option(spec.command, "--rulesets") == "/scan/project/config/pmd/custom.xml"
+    assert observed == {"staged_local_ruleset": False}
+    assert not workspace_dir.exists()
 
 
 @pytest.mark.asyncio
@@ -371,17 +372,29 @@ async def test_pmd_tool_stages_external_ruleset_into_meta_rules(monkeypatch, tmp
     external_ruleset = tmp_path / "external-rules.xml"
     external_ruleset.write_text("<ruleset name='external'/>\n", encoding="utf-8")
 
+    observed: dict[str, object] = {}
     result, spec, _project_root = await _run_pmd_tool(
         monkeypatch,
         tmp_path,
         ruleset=str(external_ruleset),
+        observe_workspace=lambda workspace_dir, _spec: observed.update(
+            {
+                "staged_ruleset_exists": (workspace_dir / "meta" / "rules" / "external-rules.xml").exists(),
+                "staged_ruleset_text": (workspace_dir / "meta" / "rules" / "external-rules.xml").read_text(
+                    encoding="utf-8"
+                ),
+            }
+        ),
     )
 
     workspace_dir = Path(spec.workspace_dir)
-    staged_ruleset = workspace_dir / "meta" / "rules" / "external-rules.xml"
     assert result.success is True
     assert _runner_option(spec.command, "--rulesets") == "/scan/meta/rules/external-rules.xml"
-    assert staged_ruleset.read_text(encoding="utf-8") == "<ruleset name='external'/>\n"
+    assert observed == {
+        "staged_ruleset_exists": True,
+        "staged_ruleset_text": "<ruleset name='external'/>\n",
+    }
+    assert not workspace_dir.exists()
 
 
 @pytest.mark.asyncio
@@ -490,4 +503,217 @@ async def test_pmd_tool_rejects_missing_project_subpath(monkeypatch, tmp_path):
     assert result.success is False
     assert "不存在" in str(result.error or result.data)
     assert "src/missing" in str(result.error or result.data)
+    assert called["runner"] is False
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_accepts_exit_code_4_and_parses_report(monkeypatch, tmp_path):
+    result, spec, _project_root = await _run_pmd_tool(monkeypatch, tmp_path, exit_code=4)
+
+    assert result.success is True
+    assert result.metadata["findings_count"] == 1
+    assert result.metadata["high_count"] == 1
+    assert result.metadata["medium_count"] == 0
+    assert result.metadata["low_count"] == 0
+    assert result.metadata["findings"][0]["file"] == "src/main/java/App.java"
+    assert result.metadata["raw_result"]["files"][0]["filename"] == "/scan/project/src/main/java/App.java"
+    assert "发现 1 个问题" in result.data
+    assert "/scan/project" not in result.data
+    assert spec.workspace_dir not in result.data
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_fails_on_unexpected_exit_code(monkeypatch, tmp_path):
+    result, spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path,
+        exit_code=2,
+        runner_success=False,
+        runner_error="PMD runner exited unexpectedly",
+        stderr_text="java.lang.IllegalStateException: boom",
+        report_payload={"files": []},
+    )
+
+    error_text = str(result.error or result.data)
+    assert result.success is False
+    assert "exit_code=2" in error_text
+    assert "PMD runner exited unexpectedly" in error_text
+    assert "boom" in error_text
+    assert spec.workspace_dir not in error_text
+    assert "stderr.log" not in error_text
+    assert "stdout.log" not in error_text
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_fails_when_report_missing_for_success_exit(monkeypatch, tmp_path):
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        external_tools.logger,
+        "warning",
+        lambda message, *args, **_kwargs: warnings.append(message % args if args else message),
+    )
+
+    result, spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path,
+        exit_code=0,
+        create_report=False,
+    )
+
+    error_text = str(result.error or result.data)
+    assert result.success is False
+    assert "报告" in error_text
+    assert "缺失" in error_text or "不存在" in error_text
+    assert any("report.json" in warning for warning in warnings)
+    assert not Path(spec.workspace_dir).exists()
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_fails_when_report_json_is_invalid(monkeypatch, tmp_path):
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        external_tools.logger,
+        "warning",
+        lambda message, *args, **_kwargs: warnings.append(message % args if args else message),
+    )
+
+    result, spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path,
+        exit_code=4,
+        report_text="{not-valid-json",
+    )
+
+    error_text = str(result.error or result.data)
+    assert result.success is False
+    assert "JSON" in error_text or "解析" in error_text
+    assert any("report.json" in warning for warning in warnings)
+    assert not Path(spec.workspace_dir).exists()
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_fails_when_ruleset_file_cannot_be_resolved(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    _create_project(project_root)
+    monkeypatch.setattr(
+        external_tools,
+        "settings",
+        SimpleNamespace(
+            SCAN_WORKSPACE_ROOT=str(tmp_path / "scan-root"),
+            SCANNER_PMD_IMAGE="vulhunter/pmd-runner:test",
+        ),
+        raising=False,
+    )
+
+    called = {"runner": False}
+
+    async def _fake_run_scanner_container(_spec, **_kwargs):
+        called["runner"] = True
+        raise AssertionError("runner should not be called when ruleset file is missing")
+
+    monkeypatch.setattr(
+        external_tools,
+        "run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
+    )
+
+    tool = PMDTool(str(project_root), sandbox_manager=_SandboxProbe())
+    result = await tool._execute(ruleset="config/pmd/missing.xml")
+
+    assert result.success is False
+    assert "ruleset" in str(result.error or result.data)
+    assert "不存在" in str(result.error or result.data)
+    assert called["runner"] is False
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_normalizes_scan_project_paths(monkeypatch, tmp_path):
+    result, _spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path,
+        report_payload=_build_report("/scan/project/src\\main\\java\\App.java"),
+    )
+
+    assert result.success is True
+    assert result.metadata["findings"][0]["file"] == "src/main/java/App.java"
+    assert "文件: src/main/java/App.java" in result.data
+    assert "/scan/project" not in result.data
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_cleans_workspace_after_success_and_failure(monkeypatch, tmp_path):
+    observed: dict[str, bool] = {}
+    success_result, success_spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path / "success",
+        observe_workspace=lambda workspace_dir, _spec: observed.update(
+            {
+                "success_workspace_exists_during_run": workspace_dir.is_dir(),
+                "success_report_exists_during_run": (workspace_dir / "output" / "report.json").exists(),
+            }
+        ),
+    )
+
+    failure_result, failure_spec, _project_root = await _run_pmd_tool(
+        monkeypatch,
+        tmp_path / "failure",
+        exit_code=2,
+        runner_success=False,
+        runner_error="container failed",
+        stderr_text="permission denied",
+        report_payload={"files": []},
+        observe_workspace=lambda workspace_dir, _spec: observed.update(
+            {"failure_workspace_exists_during_run": workspace_dir.is_dir()}
+        ),
+    )
+
+    assert success_result.success is True
+    assert failure_result.success is False
+    assert observed == {
+        "success_workspace_exists_during_run": True,
+        "success_report_exists_during_run": True,
+        "failure_workspace_exists_during_run": True,
+    }
+    assert not Path(success_spec.workspace_dir).exists()
+    assert not Path(failure_spec.workspace_dir).exists()
+
+
+@pytest.mark.asyncio
+async def test_pmd_tool_fails_explicitly_for_unknown_non_xml_ruleset(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    _create_project(project_root)
+    monkeypatch.setattr(
+        external_tools,
+        "settings",
+        SimpleNamespace(
+            SCAN_WORKSPACE_ROOT=str(tmp_path / "scan-root"),
+            SCANNER_PMD_IMAGE="vulhunter/pmd-runner:test",
+        ),
+        raising=False,
+    )
+
+    called = {"runner": False}
+
+    async def _fake_run_scanner_container(_spec, **_kwargs):
+        called["runner"] = True
+        raise AssertionError("runner should not be called for unsupported ruleset aliases")
+
+    monkeypatch.setattr(
+        external_tools,
+        "run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
+    )
+
+    tool = PMDTool(str(project_root), sandbox_manager=_SandboxProbe())
+    result = await tool._execute(ruleset="custom-security-pack")
+
+    error_text = str(result.error or result.data)
+    assert result.success is False
+    assert "不支持" in error_text
+    assert "custom-security-pack" in error_text
+    assert SECURITY_RULESET not in error_text
     assert called["runner"] is False

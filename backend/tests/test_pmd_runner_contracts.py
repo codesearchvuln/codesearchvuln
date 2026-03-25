@@ -63,3 +63,14 @@ def test_full_overlay_exposes_scanner_pmd_image_without_pmd_runner_service() -> 
     assert "\n  pmd-runner:\n" not in compose_text
 
     _assert_backend_depends_on_has_no_pmd_runner(compose_text, "yasa-runner")
+
+
+def test_external_tools_manual_pmd_section_documents_runner_requirements() -> None:
+    manual_test_path = _repo_root() / "backend" / "tests" / "test_external_tools_manual.py"
+    manual_text = manual_test_path.read_text(encoding="utf-8")
+
+    assert "SCANNER_PMD_IMAGE" in manual_text
+    assert "按需" in manual_text
+    assert "runner 容器" in manual_text
+    assert "手工 smoke test" in manual_text
+    assert "默认自动验收" in manual_text
