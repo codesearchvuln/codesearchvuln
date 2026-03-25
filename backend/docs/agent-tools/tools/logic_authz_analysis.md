@@ -3,6 +3,19 @@
 ## Tool Purpose
 逻辑漏洞图规则分析：检查 route/handler 到资源访问路径上的认证、授权、对象级权限(IDOR)与作用域一致性。
 
+输入:
+- file_path: 可选，目标文件路径
+- line_start: 可选，目标行号
+- vulnerability_type: 可选，漏洞类型（用于提示规则引擎聚焦）
+
+执行模式:
+- 单点分析: 同时提供 file_path 与 line_start 时，调用 analyze_finding 对单个可疑点做授权逻辑分析
+- 全项目分析: 未同时提供 file_path + line_start 时，调用 analyze_project 做项目级扫描
+
+输出:
+- data: 规则引擎分析结果（命中规则、风险结论、证据摘要等）
+- metadata.engine: 固定为 logic_graph
+
 ## Goal
 判断漏洞是否可达、是否受逻辑/授权路径约束。
 

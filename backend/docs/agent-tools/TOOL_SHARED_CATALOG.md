@@ -3,15 +3,11 @@
 该目录按“目标 -> 推荐工具 -> 可完成任务 -> 反例/误用”汇总运行时工具能力。
 
 ## 代码读取与定位
-- 工具: `extract_function`
+- 工具: `get_symbol_body`
   - 目标: 定位目标代码、函数上下文与证据位置。
   - 推荐任务: 读取代码文件并定位行号上下文。；快速检索关键词并筛选有效命中。；提取函数级上下文供后续验证链路使用。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
 - 工具: `list_files`
-  - 目标: 定位目标代码、函数上下文与证据位置。
-  - 推荐任务: 读取代码文件并定位行号上下文。；快速检索关键词并筛选有效命中。；提取函数级上下文供后续验证链路使用。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `read_file`
   - 目标: 定位目标代码、函数上下文与证据位置。
   - 推荐任务: 读取代码文件并定位行号上下文。；快速检索关键词并筛选有效命中。；提取函数级上下文供后续验证链路使用。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
@@ -52,15 +48,19 @@
 - 暂无工具映射。
 
 ## 报告与协作编排
-- 工具: `create_vulnerability_report`
-  - 目标: 在 verification 阶段支撑审计编排和结果产出。
+- 工具: `get_code_window`
+  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/report/verification 阶段支撑审计编排和结果产出。
+  - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
+  - 反例/误用: 在无有效输入或无证据时直接下结论。
+- 工具: `get_file_outline`
+  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/report/verification 阶段支撑审计编排和结果产出。
+  - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
+  - 反例/误用: 在无有效输入或无证据时直接下结论。
+- 工具: `get_function_summary`
+  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/report/verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
 - 工具: `locate_enclosing_function`
-  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
-  - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `reflect`
   - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
@@ -72,10 +72,6 @@
   - 目标: 在 verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
   - 反例/误用: 在无有效输入或无证据时直接下结论。
-- 工具: `think`
-  - 目标: 在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
-  - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
-  - 反例/误用: 在无有效输入或无证据时直接下结论。
 - 工具: `verify_vulnerability`
   - 目标: 在 verification 阶段支撑审计编排和结果产出。
   - 推荐任务: 协助 Agent 制定下一步行动。；沉淀中间结论与可追溯信息。；保障任务收敛与结果可交付性。
@@ -83,19 +79,18 @@
 
 ## 工具全量索引
 - `controlflow_analysis_light`
-- `create_vulnerability_report`
 - `dataflow_analysis`
-- `extract_function`
+- `get_code_window`
+- `get_file_outline`
+- `get_function_summary`
+- `get_symbol_body`
 - `list_files`
 - `locate_enclosing_function`
 - `logic_authz_analysis`
 - `pattern_match`
 - `quick_audit`
-- `read_file`
-- `reflect`
 - `run_code`
 - `sandbox_exec`
 - `search_code`
 - `smart_scan`
-- `think`
 - `verify_vulnerability`

@@ -51,6 +51,7 @@ const supportedDetail: SkillDetailResponse = {
   test_mode: "single_skill_strict",
   test_reason: null,
   default_test_project_name: "libplist",
+  tool_test_preset: null,
 };
 
 const disabledDetail: SkillDetailResponse = {
@@ -62,6 +63,26 @@ const disabledDetail: SkillDetailResponse = {
   test_supported: false,
   test_mode: "disabled",
   test_reason: "首版仅开放可直接基于 libplist 自然语言提问的 skill；数据流分析依赖更复杂的上下文建模。",
+};
+
+const structuredDetail: SkillDetailResponse = {
+  ...supportedDetail,
+  skill_id: "dataflow_analysis",
+  name: "dataflow_analysis",
+  summary: "分析 Source 到 Sink 的传播链与污点证据。",
+  entrypoint: "scan-core/dataflow_analysis",
+  test_mode: "structured_tool",
+  tool_test_preset: {
+    project_name: "libplist",
+    file_path: "src/xplist.c",
+    function_name: "plist_from_xml",
+    line_start: null,
+    line_end: null,
+    tool_input: {
+      variable_name: "plist_xml",
+      sink_hints: ["xmlReadMemory", "xmlParseMemory", "xml_to_node"],
+    },
+  },
 };
 
 const streamEvents: SkillTestEvent[] = [
@@ -130,6 +151,13 @@ const finalResult: SkillTestResult = {
   test_mode: "single_skill_strict",
   default_test_project_name: "libplist",
   project_root: "/tmp/skill-test-get_code_window-1234/libplist-2.7.0",
+  tool_name: null,
+  target_function: null,
+  resolved_file_path: null,
+  resolved_line_start: null,
+  resolved_line_end: null,
+  runner_image: null,
+  input_payload: null,
   cleanup: {
     success: true,
     temp_dir: "/tmp/skill-test-get_code_window-1234",
@@ -195,4 +223,40 @@ test("ScanConfigExternalToolDetailContent 渲染 skill 概览、事件流、结�
   assert.match(markup, /主解析入口位于/);
   assert.match(markup, /临时目录已清理/);
   assert.match(markup, /\/tmp\/skill-test-get_code_window-1234/);
+});
+
+test("ScanConfigExternalToolDetailContent 对 structured_tool 渲染结构化参数表单", () => {
+  const markup = renderContent({
+    toolId: "dataflow_analysis",
+    toolName: "dataflow_analysis",
+    skillCatalogItem: {
+      ...codeWindowCatalog,
+      id: "dataflow_analysis",
+      category: "可达性与逻辑分析",
+      taskList: ["识别 source/sink", "输出传播步骤", "标记风险等级"],
+    },
+    skillDetail: structuredDetail,
+    prompt: "",
+    examplePrompts: [],
+    events: [],
+    result: {
+      ...finalResult,
+      test_mode: "structured_tool",
+      tool_name: "dataflow_analysis",
+      target_function: "plist_from_xml",
+      resolved_file_path: "src/xplist.c",
+      resolved_line_start: 42,
+      resolved_line_end: 58,
+      runner_image: "vulhunter/flow-parser-runner-local:latest",
+      input_payload: structuredDetail.tool_test_preset,
+    },
+  });
+
+  assert.match(markup, /结构化工具测试/);
+  assert.match(markup, /src\/xplist\.c/);
+  assert.match(markup, /plist_from_xml/);
+  assert.match(markup, /variable_name/);
+  assert.match(markup, /sink_hints/);
+  assert.match(markup, /flow-parser-runner-local:latest/);
+  assert.doesNotMatch(markup, /请输入基于 libplist 的自然语言测试问题/);
 });

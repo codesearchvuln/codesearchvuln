@@ -152,3 +152,131 @@ async def test_run_skill_test_endpoint_streams_expected_events_and_result(monkey
     result_event = next(event for event in events if event["type"] == "result")
     assert result_event["data"]["final_text"] == "已基于 libplist 回答用户问题。"
     assert result_event["data"]["cleanup"]["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_structured_tool_test_endpoint_streams_expected_events_and_result(monkeypatch):
+    class _FakeRunner:
+        def __init__(self, **kwargs):
+            self.event_emitter = kwargs["event_emitter"]
+            self.skill_id = kwargs["skill_id"]
+            self.request_payload = kwargs["request_payload"]
+
+        async def run(self):
+            await self.event_emitter.emit_event(
+                "project_prepare",
+                "默认测试项目命中 libplist",
+                {
+                    "project_name": "libplist",
+                    "temp_dir": "/tmp/structured-tool-test-1234",
+                },
+            )
+            await self.event_emitter.emit_event(
+                "runner_prepare",
+                "flow parser runner 已定位目标函数",
+                {
+                    "runner_image": "vulhunter/flow-parser-runner-local:latest",
+                    "resolved_file_path": "src/xplist.c",
+                    "resolved_line_start": 42,
+                    "resolved_line_end": 58,
+                    "target_function": "plist_from_xml",
+                },
+            )
+            await self.event_emitter.emit(
+                _build_agent_event(
+                    "tool_call",
+                    tool_name=self.skill_id,
+                    tool_input=self.request_payload["tool_input"],
+                )
+            )
+            await self.event_emitter.emit(
+                _build_agent_event(
+                    "tool_result",
+                    tool_name=self.skill_id,
+                    tool_output='{"summary":"ok"}',
+                    metadata={
+                        "render_type": "flow_analysis",
+                        "display_command": self.skill_id,
+                        "command_chain": [self.skill_id],
+                        "entries": [
+                            {
+                                "file_path": "src/xplist.c",
+                                "source_nodes": ["plist_xml"],
+                                "sink_nodes": ["xmlParseMemory"],
+                                "taint_steps": ["plist_xml -> xmlParseMemory"],
+                                "call_chain": ["plist_from_xml -> xmlParseMemory"],
+                                "blocked_reasons": [],
+                                "reachability": "reachable",
+                                "path_found": True,
+                                "path_score": 0.91,
+                                "confidence": 0.91,
+                                "engine": "rules",
+                                "next_actions": [],
+                            }
+                        ],
+                    },
+                )
+            )
+            await self.event_emitter.emit_event(
+                "project_cleanup",
+                "临时目录清理完成",
+                {
+                    "temp_dir": "/tmp/structured-tool-test-1234",
+                    "cleanup_success": True,
+                },
+            )
+            return {
+                "tool_name": self.skill_id,
+                "project_name": "libplist",
+                "project_root": "/tmp/structured-tool-test-1234/libplist-2.7.0",
+                "target_function": "plist_from_xml",
+                "resolved_file_path": "src/xplist.c",
+                "resolved_line_start": 42,
+                "resolved_line_end": 58,
+                "runner_image": "vulhunter/flow-parser-runner-local:latest",
+                "input_payload": self.request_payload,
+                "cleanup": {
+                    "success": True,
+                    "temp_dir": "/tmp/structured-tool-test-1234",
+                    "error": None,
+                },
+            }
+
+    monkeypatch.setattr(
+        skills_module,
+        "_get_user_config",
+        AsyncMock(return_value={"llmConfig": {}}),
+        raising=False,
+    )
+    monkeypatch.setattr(skills_module, "_init_llm_service", AsyncMock(return_value=object()), raising=False)
+    monkeypatch.setattr(skills_module, "StructuredToolTestRunner", _FakeRunner, raising=False)
+
+    response = await skills_module.run_structured_tool_test(
+        skill_id="dataflow_analysis",
+        request=skills_module.StructuredToolTestRequest(
+            file_path="src/xplist.c",
+            function_name="plist_from_xml",
+            tool_input={
+                "variable_name": "plist_xml",
+                "sink_hints": ["xmlReadMemory", "xmlParseMemory", "xml_to_node"],
+            },
+        ),
+        db=AsyncMock(),
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    events = await _collect_sse_events(response)
+    event_types = [event["type"] for event in events]
+
+    assert "project_prepare" in event_types
+    assert "runner_prepare" in event_types
+    assert "tool_call" in event_types
+    assert "tool_result" in event_types
+    assert "result" in event_types
+    assert "project_cleanup" in event_types
+    assert event_types[-1] == "done"
+
+    result_event = next(event for event in events if event["type"] == "result")
+    assert result_event["data"]["tool_name"] == "dataflow_analysis"
+    assert result_event["data"]["runner_image"] == "vulhunter/flow-parser-runner-local:latest"
+    assert result_event["data"]["target_function"] == "plist_from_xml"

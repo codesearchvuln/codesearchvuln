@@ -64,15 +64,15 @@ FILE_TOOL_SKILL_SPECS: Dict[str, Dict[str, Any]] = {
             "必要时补 `locate_enclosing_function`。",
         ],
     },
-    "extract_function": {
+    "get_symbol_body": {
         "goal": "提取函数体，支撑漏洞根因与修复分析。",
         "contracts": [
-            "必填: `path`, `symbol_name`。",
+            "必填: `file_path`, `symbol_name`。",
         ],
         "workflow": [
             "`search_code` 定位函数符号。",
             "`locate_enclosing_function` 确认范围。",
-            "`extract_function` 提取函数体。",
+            "`get_symbol_body` 提取函数体。",
         ],
     },
     "locate_enclosing_function": {
@@ -92,7 +92,7 @@ FILE_TOOL_SKILL_SPECS: Dict[str, Dict[str, Any]] = {
         "goal": "保留函数上下文技能规范，执行时改用标准 MCP 工具名。",
         "contracts": [
             "兼容参数: `file_path`, `line_start`, `function_name`。",
-            "建议路径: `locate_enclosing_function + extract_function`。",
+            "建议路径: `locate_enclosing_function + get_symbol_body`。",
         ],
         "workflow": [
             "先定位函数归属。",
@@ -203,7 +203,7 @@ def _example_value(field_schema: Dict[str, Any]) -> Any:
 def _infer_goal_and_tasks(runtime_key: str, description: str, phases: Iterable[str]) -> Tuple[str, List[str], str]:
     key = runtime_key.lower()
     phase_text = "/".join(sorted({str(p) for p in phases}))
-    if key in {"read_file", "list_files", "search_code", "extract_function", "function_context"}:
+    if key in {"read_file", "list_files", "search_code", "get_symbol_body", "function_context"}:
         return (
             "定位目标代码、函数上下文与证据位置。",
             [
@@ -441,13 +441,13 @@ def _build_mcp_tool_playbook() -> str:
 | `read_file` | `local` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |
 | `list_files` | `local` | `ListFilesTool` | `directory/path` | 文件列表 |
 | `locate_enclosing_function` | `local` | `LocateEnclosingFunctionTool` | `file_path/path` + `line_start/line`（或 `file_path:line`） | 所属函数、范围与诊断 |
-| `extract_function` | `local` | `ExtractFunctionTool` | `path`, `symbol_name` | 函数代码 |
+| `get_symbol_body` | `local` | `SymbolBodyTool` | `file_path`, `symbol_name` | 函数代码 |
 
 ## 2) 文件读取链路（强约束）
 
 1. 先 `search_code` 定位：拿到 `file_path:line`。
 2. 再 `read_file` 窗口读取：优先 `line-60 ~ line+99`（最多 200 行）。
-3. 需要函数级证据时：调用 `locate_enclosing_function`，再按需 `extract_function`。
+3. 需要函数级证据时：调用 `locate_enclosing_function`，再按需 `get_symbol_body`。
 
 ## 3) 最小调用模板
 
@@ -505,6 +505,13 @@ def generate_runtime_tool_docs() -> Dict[str, Any]:
     DOCS_ROOT.mkdir(parents=True, exist_ok=True)
     TOOLS_DOC_DIR.mkdir(parents=True, exist_ok=True)
     SKILLS_DOC_DIR.mkdir(parents=True, exist_ok=True)
+
+    stale_tool_doc = TOOLS_DOC_DIR / "extract_function.md"
+    if stale_tool_doc.exists():
+        stale_tool_doc.unlink()
+    stale_skill_doc = SKILLS_DOC_DIR / "extract_function.skill.md"
+    if stale_skill_doc.exists():
+        stale_skill_doc.unlink()
 
     tool_categories: Dict[str, str] = {}
     for runtime_key in sorted(registry):

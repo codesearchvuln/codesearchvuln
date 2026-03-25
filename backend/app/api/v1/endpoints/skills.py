@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import asyncio
 
@@ -18,7 +18,7 @@ from app.api.v1.endpoints.agent_test import (
 )
 from app.db.session import get_db
 from app.models.user import User
-from app.services.agent.skill_test_runner import SkillTestRunner
+from app.services.agent.skill_test_runner import SkillTestRunner, StructuredToolTestRunner
 from app.services.agent.skills.scan_core import (
     get_scan_core_skill_detail,
     search_scan_core_skills,
@@ -69,14 +69,35 @@ class SkillDetailResponse(BaseModel):
     workflow_truncated: Optional[bool] = None
     workflow_error: Optional[str] = None
     test_supported: bool = False
-    test_mode: Literal["single_skill_strict", "disabled"] = "disabled"
+    test_mode: Literal["single_skill_strict", "structured_tool", "disabled"] = "disabled"
     test_reason: Optional[str] = None
     default_test_project_name: Literal["libplist"] = "libplist"
+    tool_test_preset: Optional["ToolTestPreset"] = None
 
 
 class SkillTestRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=4000, description="自然语言测试输入")
     max_iterations: int = Field(default=4, ge=1, le=20)
+
+
+class ToolTestPreset(BaseModel):
+    project_name: Literal["libplist"] = "libplist"
+    file_path: str = Field(..., min_length=1, description="目标文件路径")
+    function_name: str = Field(..., min_length=1, description="目标函数名")
+    line_start: Optional[int] = Field(default=None, ge=1, description="目标起始行")
+    line_end: Optional[int] = Field(default=None, ge=1, description="目标结束行")
+    tool_input: Dict[str, Any] = Field(default_factory=dict, description="工具输入预置")
+
+
+class StructuredToolTestRequest(BaseModel):
+    file_path: str = Field(..., min_length=1, description="目标文件路径")
+    function_name: str = Field(..., min_length=1, description="目标函数名")
+    line_start: Optional[int] = Field(default=None, ge=1, description="目标起始行")
+    line_end: Optional[int] = Field(default=None, ge=1, description="目标结束行")
+    tool_input: Dict[str, Any] = Field(default_factory=dict, description="工具执行参数")
+
+
+SkillDetailResponse.model_rebuild()
 
 
 @router.get("/catalog", response_model=SkillCatalogResponse)
@@ -129,6 +150,39 @@ async def run_skill_test(
         skill_id=skill_id,
         prompt=request.prompt,
         max_iterations=request.max_iterations,
+        llm_service=llm_service,
+        db=db,
+        current_user=current_user,
+        event_emitter=emitter,
+    )
+
+    return StreamingResponse(
+        _run_agent_streaming(runner.run(), queue),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/{skill_id}/tool-test")
+async def run_structured_tool_test(
+    skill_id: str,
+    request: StructuredToolTestRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    detail = get_scan_core_skill_detail(skill_id=skill_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+    if str(detail.get("test_mode") or "") != "structured_tool":
+        raise HTTPException(status_code=400, detail="当前 skill 未开放结构化工具测试入口")
+
+    user_config = await _get_user_config(db, str(current_user.id))
+    llm_service = await _init_llm_service(user_config)
+    queue: asyncio.Queue = asyncio.Queue()
+    emitter = QueueEventEmitter(queue)
+    runner = StructuredToolTestRunner(
+        skill_id=skill_id,
+        request_payload=request.model_dump(),
         llm_service=llm_service,
         db=db,
         current_user=current_user,

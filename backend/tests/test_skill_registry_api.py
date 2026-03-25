@@ -39,7 +39,7 @@ async def test_skill_detail_endpoint_returns_static_scan_core_detail():
 @pytest.mark.asyncio
 async def test_skill_detail_endpoint_exposes_supported_test_metadata():
     response = await skills_module.get_skill_detail(
-        skill_id="read_file",
+        skill_id="get_code_window",
         include_workflow=False,
         current_user=SimpleNamespace(id="user-1"),
     )
@@ -58,10 +58,33 @@ async def test_skill_detail_endpoint_exposes_disabled_test_metadata():
         current_user=SimpleNamespace(id="user-1"),
     )
 
-    assert response.test_supported is False
-    assert response.test_mode == "disabled"
+    assert response.test_supported is True
+    assert response.test_mode == "structured_tool"
     assert response.default_test_project_name == "libplist"
-    assert "首版" in str(response.test_reason)
+    assert response.test_reason in (None, "")
+    assert response.tool_test_preset is not None
+    assert response.tool_test_preset.project_name == "libplist"
+    assert response.tool_test_preset.file_path == "src/xplist.c"
+    assert response.tool_test_preset.function_name == "plist_from_xml"
+    assert response.tool_test_preset.tool_input["variable_name"] == "plist_xml"
+
+
+@pytest.mark.asyncio
+async def test_skill_detail_endpoint_exposes_controlflow_structured_test_metadata():
+    response = await skills_module.get_skill_detail(
+        skill_id="controlflow_analysis_light",
+        include_workflow=False,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert response.test_supported is True
+    assert response.test_mode == "structured_tool"
+    assert response.test_reason in (None, "")
+    assert response.tool_test_preset is not None
+    assert response.tool_test_preset.project_name == "libplist"
+    assert response.tool_test_preset.file_path == "src/xplist.c"
+    assert response.tool_test_preset.function_name == "plist_from_xml"
+    assert response.tool_test_preset.tool_input["vulnerability_type"] == "xxe"
 
 
 @pytest.mark.asyncio

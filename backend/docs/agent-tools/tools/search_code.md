@@ -10,17 +10,19 @@
 
 输入:
 - keyword: 搜索关键字或正则表达式
+- file_path: 可选，限定到单个文件（相对于项目根目录）
+- path: 可选，file_path 的兼容别名
 - file_pattern: 可选，文件名模式（如 *.py）
 - directory: 可选，搜索目录 (相对于项目根目录)
 - case_sensitive: 是否区分大小写（默认 false）
 - is_regex: 是否使用正则表达式（默认 false）
-- max_results: 最大返回结果数（默认50，最大200）
+- max_results: 最大返回结果数（默认10，最多10）
 
 注意:
 - test / tests 目录默认被排除在搜索范围之外
 - 若指定的 directory 中无结果，会自动回退到整个项目根目录重新搜索
 
-这是一个快速搜索工具，结果包含匹配行和上下文。
+这是一个纯定位工具，只返回命中位置和摘要，不返回上下文窗口。
 
 ## Goal
 定位目标代码、函数上下文与证据位置。
@@ -38,7 +40,7 @@
 - `file_pattern` (any, optional): 文件名模式，如 *.py, *.js
 - `directory` (any, optional): 搜索目录（相对路径）
 - `case_sensitive` (boolean, optional): 是否区分大小写
-- `max_results` (integer, optional): 最大结果数
+- `max_results` (integer, optional): 最大结果数，默认不超过 10 条
 - `is_regex` (boolean, optional): 是否使用正则表达式
 
 

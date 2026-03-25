@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import type { SkillTestEvent, SkillTestResult } from "./types";
+import type { SkillTestEvent, SkillTestResult, ToolTestPreset } from "./types";
 
 export function useSkillTestStream(skillId: string) {
   const [events, setEvents] = useState<SkillTestEvent[]>([]);
@@ -10,8 +10,8 @@ export function useSkillTestStream(skillId: string) {
   const abortRef = useRef<AbortController | null>(null);
   const idRef = useRef(0);
 
-  const run = useCallback(
-    async (prompt: string, maxIterations = 4) => {
+  const streamRequest = useCallback(
+    async (url: string, body: Record<string, unknown>) => {
       if (running || !skillId.trim()) return;
 
       setEvents([]);
@@ -22,10 +22,10 @@ export function useSkillTestStream(skillId: string) {
       abortRef.current = ctrl;
 
       try {
-        const response = await fetch(`/api/v1/skills/${encodeURIComponent(skillId)}/test`, {
+        const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, max_iterations: maxIterations }),
+          body: JSON.stringify(body),
           signal: ctrl.signal,
         });
 
@@ -89,10 +89,27 @@ export function useSkillTestStream(skillId: string) {
     [running, skillId],
   );
 
+  const runPrompt = useCallback(
+    async (prompt: string, maxIterations = 4) => {
+      return streamRequest(`/api/v1/skills/${encodeURIComponent(skillId)}/test`, {
+        prompt,
+        max_iterations: maxIterations,
+      });
+    },
+    [skillId, streamRequest],
+  );
+
+  const runStructured = useCallback(
+    async (requestPayload: ToolTestPreset) => {
+      return streamRequest(`/api/v1/skills/${encodeURIComponent(skillId)}/tool-test`, requestPayload);
+    },
+    [skillId, streamRequest],
+  );
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
     setRunning(false);
   }, []);
 
-  return { events, running, result, run, stop };
+  return { events, running, result, runPrompt, runStructured, stop };
 }

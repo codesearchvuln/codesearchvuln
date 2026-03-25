@@ -7,6 +7,8 @@ from app.services.flow_parser_runner import FlowParserRunnerClient
 
 def test_flow_parser_runner_client_writes_request_and_reads_response(monkeypatch, tmp_path):
     seen = {}
+    shared_root = tmp_path / "shared-scans"
+    shared_root.mkdir()
 
     async def _fake_run(spec, **kwargs):
         seen["spec"] = spec
@@ -32,6 +34,7 @@ def test_flow_parser_runner_client_writes_request_and_reads_response(monkeypatch
         "app.services.flow_parser_runner.run_scanner_container",
         _fake_run,
     )
+    monkeypatch.setattr(settings, "SCAN_WORKSPACE_ROOT", str(shared_root))
 
     client = FlowParserRunnerClient(
         image="vulhunter/flow-parser-runner-local:latest",
@@ -94,3 +97,63 @@ def test_flow_parser_runner_client_uses_scan_workspace_root_for_bind_mount(monke
     )
 
     assert Path(seen["spec"].workspace_dir).is_relative_to(shared_root)
+
+
+def test_flow_parser_runner_client_falls_back_to_system_tempdir_when_workspace_root_unwritable(
+    monkeypatch,
+    tmp_path,
+):
+    seen = {}
+    original_tempdir = __import__("tempfile").TemporaryDirectory
+    shared_root = tmp_path / "shared-scans"
+    shared_root.mkdir()
+
+    class _TemporaryDirectoryWithPermissionFallback:
+        def __init__(self, *args, **kwargs):
+            if kwargs.get("dir"):
+                raise PermissionError("workspace root not writable")
+            self._wrapped = original_tempdir(*args, **kwargs)
+
+        def __enter__(self):
+            return self._wrapped.__enter__()
+
+        def __exit__(self, exc_type, exc, tb):
+            return self._wrapped.__exit__(exc_type, exc, tb)
+
+    async def _fake_run(spec, **kwargs):
+        seen["spec"] = spec
+        workspace = Path(spec.workspace_dir)
+        response_path = workspace / "response.json"
+        response_path.write_text('{"items":[]}', encoding="utf-8")
+        return SimpleNamespace(
+            success=True,
+            container_id="runner-789",
+            exit_code=0,
+            stdout_path=None,
+            stderr_path=None,
+            error=None,
+        )
+
+    monkeypatch.setattr(settings, "SCAN_WORKSPACE_ROOT", str(shared_root))
+    monkeypatch.setattr(
+        "app.services.flow_parser_runner.tempfile.TemporaryDirectory",
+        _TemporaryDirectoryWithPermissionFallback,
+    )
+    monkeypatch.setattr(
+        "app.services.flow_parser_runner.run_scanner_container",
+        _fake_run,
+    )
+
+    client = FlowParserRunnerClient(enabled=True)
+    results = client.extract_definitions_batch(
+        [
+            {
+                "file_path": "demo.py",
+                "language": "python",
+                "content": "def target(value):\n    return value + 1\n",
+            }
+        ]
+    )
+
+    assert results == {}
+    assert Path(seen["spec"].workspace_dir).is_relative_to(shared_root) is False

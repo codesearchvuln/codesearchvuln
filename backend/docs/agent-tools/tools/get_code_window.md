@@ -1,14 +1,16 @@
-# Tool: `locate_enclosing_function`
+# Tool: `get_code_window`
 
 ## Tool Purpose
-根据 file_path + line 定位包含该行的函数/方法，并返回符号范围与签名事实。
+围绕锚点返回极小代码窗口，用于取证和前端代码展示。
 
 输入:
 - file_path: 文件路径（相对于项目根目录）
-- line: 目标行号（从1开始）
+- anchor_line: 锚点行号（从1开始）
+- before_lines: 可选，向前读取的行数（默认2）
+- after_lines: 可选，向后读取的行数（默认2）
 
 ## Goal
-在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。
+在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/report/verification 阶段支撑审计编排和结果产出。
 
 ## Task List
 - 协助 Agent 制定下一步行动。
@@ -18,14 +20,17 @@
 
 ## Inputs
 - `file_path` (string, required): 文件路径（相对于项目根目录）
-- `line` (integer, required): 目标行号（从1开始）
+- `anchor_line` (integer, required): 锚点行号（从1开始）
+- `before_lines` (integer, optional): 向前读取的行数
+- `after_lines` (integer, optional): 向后读取的行数
 
 
 ### Example Input
 ```json
 {
   "file_path": "<text>",
-  "line": 1
+  "anchor_line": 1,
+  "before_lines": 2
 }
 ```
 
@@ -37,8 +42,8 @@
 - `metadata` (object): 补充上下文信息。
 
 ## Typical Triggers
-- 当 Agent 需要完成“在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/verification 阶段支撑审计编排和结果产出。”时触发。
-- 常见阶段: `analysis, business_logic_analysis, business_logic_recon, orchestrator, recon, verification`。
+- 当 Agent 需要完成“在 analysis/business_logic_analysis/business_logic_recon/orchestrator/recon/report/verification 阶段支撑审计编排和结果产出。”时触发。
+- 常见阶段: `analysis, business_logic_analysis, business_logic_recon, orchestrator, recon, report, verification`。
 - 分类: `报告与协作编排`。
 - 可选工具: `否`。
 

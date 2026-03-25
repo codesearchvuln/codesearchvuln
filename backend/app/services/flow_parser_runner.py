@@ -86,7 +86,12 @@ class FlowParserRunnerClient:
         except Exception:
             pass
 
-        with tempfile.TemporaryDirectory(**tempdir_kwargs) as workspace_dir:
+        try:
+            workspace_context = tempfile.TemporaryDirectory(**tempdir_kwargs)
+        except OSError:
+            workspace_context = tempfile.TemporaryDirectory(prefix=str(tempdir_kwargs.get("prefix") or "flow-parser-runner-"))
+
+        with workspace_context as workspace_dir:
             workspace = Path(workspace_dir)
             request_path = workspace / "request.json"
             response_path = workspace / "response.json"

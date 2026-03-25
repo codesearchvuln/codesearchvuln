@@ -34,6 +34,30 @@ SCAN_CORE_LOCAL_SKILL_IDS = frozenset(
     skill_id for skill_id in SCAN_CORE_SKILL_IDS if skill_id not in SCAN_CORE_MCP_BOUND_SKILL_IDS
 )
 SCAN_CORE_DEFAULT_TEST_PROJECT_NAME = "libplist"
+SCAN_CORE_STRUCTURED_TOOL_PRESETS: Dict[str, Dict[str, Any]] = {
+    "dataflow_analysis": {
+        "project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+        "file_path": "src/xplist.c",
+        "function_name": "plist_from_xml",
+        "line_start": None,
+        "line_end": None,
+        "tool_input": {
+            "variable_name": "plist_xml",
+            "sink_hints": ["xmlReadMemory", "xmlParseMemory", "xml_to_node"],
+        },
+    },
+    "controlflow_analysis_light": {
+        "project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+        "file_path": "src/xplist.c",
+        "function_name": "plist_from_xml",
+        "line_start": None,
+        "line_end": None,
+        "tool_input": {
+            "entry_points": ["plist_from_xml"],
+            "vulnerability_type": "xxe",
+        },
+    },
+}
 SCAN_CORE_SKILL_TEST_SUPPORTED_IDS = frozenset(
     {
         "list_files",
@@ -60,12 +84,22 @@ SCAN_CORE_SKILL_TEST_DISABLED_REASONS: Dict[str, str] = {
 
 def get_scan_core_skill_test_policy(skill_id: str) -> Dict[str, Any]:
     normalized = str(skill_id or "").strip()
+    structured_preset = SCAN_CORE_STRUCTURED_TOOL_PRESETS.get(normalized)
+    if structured_preset is not None:
+        return {
+            "test_supported": True,
+            "test_mode": "structured_tool",
+            "test_reason": None,
+            "default_test_project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+            "tool_test_preset": structured_preset,
+        }
     if normalized in SCAN_CORE_SKILL_TEST_SUPPORTED_IDS:
         return {
             "test_supported": True,
             "test_mode": "single_skill_strict",
             "test_reason": None,
             "default_test_project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+            "tool_test_preset": None,
         }
 
     disabled_reason = SCAN_CORE_SKILL_TEST_DISABLED_REASONS.get(
@@ -77,6 +111,7 @@ def get_scan_core_skill_test_policy(skill_id: str) -> Dict[str, Any]:
         "test_mode": "disabled",
         "test_reason": disabled_reason,
         "default_test_project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+        "tool_test_preset": None,
     }
 
 

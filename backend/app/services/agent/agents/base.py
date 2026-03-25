@@ -66,6 +66,7 @@ TOOL_INPUT_REPAIR_MAP: Dict[str, str] = {
     "pattern": "keyword",
     "glob": "file_pattern",
     "path": "file_path",
+    "function_name": "symbol_name",
     "filepath": "file_path",
     "file": "file_path",
     "dir": "directory",
@@ -3733,6 +3734,28 @@ class BaseAgent(ABC):
                 repaired["pattern_types"] = normalized_pattern_types
                 repaired_changes["pattern_types"] = "pattern_types(normalized)"
 
+        if tool_name == "get_symbol_body":
+            positional_items: List[Any] = []
+            if isinstance(items_payload, list):
+                if len(items_payload) == 1 and isinstance(items_payload[0], (list, tuple)):
+                    positional_items = list(items_payload[0])
+                elif items_payload and all(not isinstance(item, dict) for item in items_payload):
+                    positional_items = list(items_payload)
+
+            positional_targets = ("file_path", "symbol_name")
+            for index, target_key in enumerate(positional_targets):
+                if target_key not in schema_fields:
+                    continue
+                if repaired.get(target_key) not in (None, "", []):
+                    continue
+                if index >= len(positional_items):
+                    continue
+                candidate_value = positional_items[index]
+                if candidate_value in (None, "", []):
+                    continue
+                repaired[target_key] = candidate_value
+                repaired_changes[f"__items[{index}]"] = target_key
+
         context_texts = [text for text in self._recent_thought_texts if isinstance(text, str) and text.strip()]
         if tool_name == "read_file" and "file_path" in schema_fields:
             def _safe_positive_int(value: Any) -> Optional[int]:
@@ -3841,6 +3864,22 @@ class BaseAgent(ABC):
                 repaired["max_lines"] = int(max_lines_value)
 
         if tool_name == "controlflow_analysis_light":
+            for source_key, target_key in (
+                ("path", "file_path"),
+                ("entry_point", "entry_points"),
+                ("condition_hint", "control_conditions_hint"),
+                ("condition_hints", "control_conditions_hint"),
+            ):
+                if target_key not in schema_fields:
+                    continue
+                if repaired.get(target_key) not in (None, "", []):
+                    continue
+                source_value = repaired.get(source_key)
+                if source_value in (None, "", []):
+                    continue
+                repaired[target_key] = source_value
+                repaired_changes[source_key] = target_key
+
             for hint_field in (
                 "call_chain_hint",
                 "control_conditions_hint",
@@ -3899,6 +3938,28 @@ class BaseAgent(ABC):
                     repaired_changes["__sanitize.file_path_line"] = "line_end"
 
         if tool_name == "dataflow_analysis":
+            for source_key, target_key in (
+                ("code", "source_code"),
+                ("source", "source_code"),
+                ("code_snippet", "source_code"),
+                ("sink", "sink_code"),
+                ("sink_snippet", "sink_code"),
+                ("path", "file_path"),
+                ("line", "start_line"),
+                ("end", "end_line"),
+                ("source_hint", "source_hints"),
+                ("sink_hint", "sink_hints"),
+            ):
+                if target_key not in schema_fields:
+                    continue
+                if repaired.get(target_key) not in (None, "", []):
+                    continue
+                source_value = repaired.get(source_key)
+                if source_value in (None, "", []):
+                    continue
+                repaired[target_key] = source_value
+                repaired_changes[source_key] = target_key
+
             for hint_field in ("source_hints", "sink_hints"):
                 if hint_field not in schema_fields or hint_field not in repaired:
                     continue

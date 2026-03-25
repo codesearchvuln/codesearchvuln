@@ -13,6 +13,8 @@
 - pattern: 可选，文件名模式
 - recursive: 是否递归
 - max_files: 最大文件数
+- recursive_mode: 可选，shallow/deep，兼容更明确的递归模式
+- max_entries: 可选，最大返回条目数（优先覆盖 max_files）
 
 ## Goal
 定位目标代码、函数上下文与证据位置。
@@ -28,6 +30,8 @@
 - `pattern` (any, optional): 文件名模式，如 *.py
 - `recursive` (boolean, optional): 是否递归列出子目录
 - `max_files` (integer, optional): 最大文件数
+- `recursive_mode` (any, optional): shallow/deep，兼容更明确的递归模式
+- `max_entries` (any, optional): 最大返回条目数
 
 
 ### Example Input

@@ -64,6 +64,27 @@ class _PatternTool:
         return SimpleNamespace(success=True, data={"scan_file": kwargs.get("scan_file")}, error=None, metadata={})
 
 
+class _SymbolBodySchema(BaseModel):
+    file_path: str
+    symbol_name: str
+
+
+class _SymbolBodyTool:
+    args_schema = _SymbolBodySchema
+    name = "get_symbol_body"
+
+    async def execute(self, **kwargs):
+        return SimpleNamespace(
+            success=True,
+            data={
+                "file_path": kwargs.get("file_path"),
+                "symbol_name": kwargs.get("symbol_name"),
+            },
+            error=None,
+            metadata={},
+        )
+
+
 class _ReadSchema(BaseModel):
     file_path: str
     start_line: Optional[int] = None
@@ -172,6 +193,26 @@ class _ControlFlowTool:
 
     async def execute(self, **kwargs):
         validated = _ControlFlowSchema(**kwargs)
+        return SimpleNamespace(success=True, data=validated.model_dump(), error=None, metadata={})
+
+
+class _DataFlowSchema(BaseModel):
+    source_code: Optional[str] = None
+    sink_code: Optional[str] = None
+    variable_name: str = "user_input"
+    file_path: str = "unknown"
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    source_hints: Optional[List[str]] = None
+    sink_hints: Optional[List[str]] = None
+
+
+class _DataFlowTool:
+    args_schema = _DataFlowSchema
+    name = "dataflow_analysis"
+
+    async def execute(self, **kwargs):
+        validated = _DataFlowSchema(**kwargs)
         return SimpleNamespace(success=True, data=validated.model_dump(), error=None, metadata={})
 
 
@@ -312,6 +353,44 @@ async def test_execute_tool_repairs_pattern_match_file_path_to_scan_file():
     metadata = tool_call_events[0].metadata or {}
     repaired = metadata.get("input_repaired") or {}
     assert repaired.get("file_path") == "scan_file"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_get_symbol_body_legacy_extract_function_contract():
+    agent, emitter = _make_agent(tools={"get_symbol_body": _SymbolBodyTool()})
+
+    output = await agent.execute_tool(
+        "get_symbol_body",
+        {"path": "src/demo.c", "function_name": "parse_demo"},
+    )
+
+    assert "src/demo.c" in output
+    assert "parse_demo" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("path") == "file_path"
+    assert repaired.get("function_name") == "symbol_name"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_get_symbol_body_positional_items_payload():
+    agent, emitter = _make_agent(tools={"get_symbol_body": _SymbolBodyTool()})
+
+    output = await agent.execute_tool(
+        "get_symbol_body",
+        {"items": [["src/demo.c", "parse_demo"]]},
+    )
+
+    assert "src/demo.c" in output
+    assert "parse_demo" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__items[0]") == "file_path"
+    assert repaired.get("__items[1]") == "symbol_name"
 
 
 @pytest.mark.asyncio
@@ -685,6 +764,103 @@ async def test_execute_tool_repairs_controlflow_string_hints_to_lists():
     assert repaired.get("__normalize.call_chain_hint") == "call_chain_hint"
     assert repaired.get("__normalize.control_conditions_hint") == "control_conditions_hint"
     assert repaired.get("__normalize.entry_points_hint") == "entry_points_hint"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_controlflow_legacy_alias_fields():
+    agent, emitter = _make_agent(tools={"controlflow_analysis_light": _ControlFlowTool()})
+
+    output = await agent.execute_tool(
+        "controlflow_analysis_light",
+        {
+            "path": "src/login.py:123",
+            "entry_point": "main",
+            "condition_hint": "requires authenticated user",
+        },
+    )
+
+    assert "src/login.py" in output
+    assert "123" in output
+    assert "main" in output
+    assert "requires authenticated user" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("path") == "file_path"
+    assert repaired.get("entry_point") == "entry_points"
+    assert repaired.get("condition_hint") == "control_conditions_hint"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_dataflow_legacy_alias_fields():
+    agent, emitter = _make_agent(tools={"dataflow_analysis": _DataFlowTool()})
+
+    output = await agent.execute_tool(
+        "dataflow_analysis",
+        {
+            "code": "dangerous(user_input)",
+            "sink": "eval(user_input)",
+            "path": "src/login.py",
+            "line": 41,
+            "end": 52,
+            "source_hint": "request.body",
+            "sink_hint": "eval",
+        },
+    )
+
+    assert "dangerous(user_input)" in output
+    assert "eval(user_input)" in output
+    assert "src/login.py" in output
+    assert "41" in output
+    assert "52" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("code") == "source_code"
+    assert repaired.get("sink") == "sink_code"
+    assert repaired.get("path") == "file_path"
+    assert repaired.get("line") == "start_line"
+    assert repaired.get("end") == "end_line"
+    assert repaired.get("source_hint") == "source_hints"
+    assert repaired.get("sink_hint") == "sink_hints"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_keeps_canonical_dataflow_fields_over_aliases():
+    agent, emitter = _make_agent(tools={"dataflow_analysis": _DataFlowTool()})
+
+    output = await agent.execute_tool(
+        "dataflow_analysis",
+        {
+            "source_code": "safe(user_input)",
+            "code": "dangerous(user_input)",
+            "sink_code": "exec(safe_input)",
+            "sink": "eval(user_input)",
+            "file_path": "src/canonical.py",
+            "path": "src/legacy.py",
+            "start_line": 8,
+            "line": 99,
+        },
+    )
+
+    assert "safe(user_input)" in output
+    assert "dangerous(user_input)" not in output
+    assert "exec(safe_input)" in output
+    assert "eval(user_input)" not in output
+    assert "src/canonical.py" in output
+    assert "src/legacy.py" not in output
+    assert "8" in output
+    assert "99" not in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert "code" not in repaired
+    assert "sink" not in repaired
+    assert "path" not in repaired
+    assert "line" not in repaired
 
 
 @pytest.mark.asyncio

@@ -1,22 +1,11 @@
-# Tool: `extract_function`
+# Tool: `get_symbol_body`
 
 ## Tool Purpose
-从源文件中提取指定函数的代码
+提取函数/方法主体源码，只负责源码提取，不负责语义解释。
 
-用于构建 Fuzzing Harness 时获取目标函数代码。
-
-输入：
-- path: 源文件路径
-- symbol_name: 要提取的符号名
-- include_imports: 是否包含文件开头的 import 语句（默认 true）
-
-返回：
-- 函数代码
-- 相关的 import 语句
-- 函数参数列表
-
-示例：
-{"path": "app/api.py", "symbol_name": "process_command"}
+输入:
+- file_path: 文件路径（相对于项目根目录）
+- symbol_name: 目标符号名（函数/方法名）
 
 ## Goal
 定位目标代码、函数上下文与证据位置。
@@ -28,17 +17,15 @@
 
 
 ## Inputs
-- `path` (string, required): 源文件路径
-- `symbol_name` (string, required): 要提取的符号名
-- `include_imports` (boolean, optional): 是否包含 import 语句
+- `file_path` (string, required): 文件路径（相对于项目根目录）
+- `symbol_name` (string, required): 目标符号名
 
 
 ### Example Input
 ```json
 {
-  "path": "<text>",
-  "symbol_name": "<text>",
-  "include_imports": true
+  "file_path": "<text>",
+  "symbol_name": "<text>"
 }
 ```
 
@@ -51,7 +38,7 @@
 
 ## Typical Triggers
 - 当 Agent 需要完成“定位目标代码、函数上下文与证据位置。”时触发。
-- 常见阶段: `analysis, report, verification`。
+- 常见阶段: `analysis, business_logic_analysis, business_logic_recon, orchestrator, recon, report, verification`。
 - 分类: `代码读取与定位`。
 - 可选工具: `否`。
 

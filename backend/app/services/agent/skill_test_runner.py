@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import zipfile
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, Tuple
 
 from fastapi import HTTPException
@@ -18,6 +21,8 @@ from app.services.agent.skills.scan_core import (
 )
 from app.services.agent.tools import (
     CodeWindowTool,
+    ControlFlowAnalysisLightTool,
+    DataFlowAnalysisTool,
     FileOutlineTool,
     FileSearchTool,
     FunctionSummaryTool,
@@ -27,6 +32,8 @@ from app.services.agent.tools import (
     SmartScanTool,
     SymbolBodyTool,
 )
+from app.services.agent.tools.base import ToolResult
+from app.services.flow_parser_runner import get_flow_parser_runner_client
 
 
 _SUPPORTED_TOOL_BUILDERS = {
@@ -61,6 +68,313 @@ def build_skill_test_tools(skill_id: str, project_root: str, llm_service: Any) -
             raise HTTPException(status_code=400, detail=f"当前 skill 暂未接入测试 runner: {tool_name}")
         tools[tool_name] = builder(project_root, llm_service)
     return tools
+
+
+def build_structured_tool_test_tool(skill_id: str, project_root: str, llm_service: Any) -> Any:
+    normalized = str(skill_id or "").strip()
+    if normalized == "dataflow_analysis":
+        return DataFlowAnalysisTool(llm_service=llm_service, project_root=project_root)
+    if normalized == "controlflow_analysis_light":
+        return ControlFlowAnalysisLightTool(project_root=project_root)
+    raise HTTPException(status_code=400, detail=f"当前 skill 暂未接入结构化测试 runner: {normalized}")
+
+
+def _extract_summary_from_tool_result(result: ToolResult) -> str:
+    metadata = result.metadata if isinstance(result.metadata, dict) else {}
+    if metadata.get("summary"):
+        return str(metadata["summary"])
+    data = result.data
+    if isinstance(data, dict):
+        for key in ("summary", "message"):
+            if data.get(key):
+                return str(data[key])
+    if isinstance(data, str) and data.strip():
+        return data.strip()
+    return result.to_string(max_length=800)
+
+
+def _infer_language(file_path: str) -> str:
+    suffix = Path(str(file_path or "")).suffix.lower()
+    if suffix in {".c", ".h"}:
+        return "c"
+    if suffix in {".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"}:
+        return "cpp"
+    if suffix == ".py":
+        return "python"
+    return "text"
+
+
+def _safe_relative_file_content(project_root: str, file_path: str) -> str:
+    root = Path(project_root).resolve()
+    candidate = (root / str(file_path or "")).resolve()
+    if not candidate.is_relative_to(root):
+        raise HTTPException(status_code=400, detail=f"非法文件路径: {file_path}")
+    if not candidate.is_file():
+        raise HTTPException(status_code=400, detail=f"目标文件不存在: {file_path}")
+    return candidate.read_text(encoding="utf-8", errors="replace")
+
+
+def _resolve_function_via_flow_parser_runner(
+    *,
+    project_root: str,
+    file_path: str,
+    function_name: str,
+    line_start: int | None = None,
+    line_end: int | None = None,
+) -> Dict[str, Any]:
+    normalized_file_path = str(file_path or "").replace("\\", "/").lstrip("./")
+    normalized_function_name = str(function_name or "").strip()
+    if not normalized_file_path or not normalized_function_name:
+        raise HTTPException(status_code=400, detail="结构化工具测试必须提供 file_path 和 function_name")
+
+    content = _safe_relative_file_content(project_root, normalized_file_path)
+    runner_client = get_flow_parser_runner_client()
+    runner_image = str(getattr(runner_client, "image", "") or "")
+    payload = runner_client.extract_definitions_batch(
+        [
+            {
+                "file_path": normalized_file_path,
+                "language": _infer_language(normalized_file_path),
+                "content": content,
+            }
+        ]
+    )
+    result = payload.get(normalized_file_path) if isinstance(payload, dict) else None
+    if not isinstance(result, dict) or not bool(result.get("ok")):
+        raise HTTPException(status_code=400, detail=f"flow parser runner 无法解析目标文件: {normalized_file_path}")
+
+    diagnostics = list(result.get("diagnostics") or [])
+    definitions = list(result.get("definitions") or [])
+    matching_definition = None
+    for item in definitions:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("name") or "").strip() == normalized_function_name:
+            matching_definition = item
+            break
+    if matching_definition is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"flow parser runner 未在 {normalized_file_path} 中定位到函数: {normalized_function_name}",
+        )
+
+    start_point = matching_definition.get("start_point") or [0, 0]
+    end_point = matching_definition.get("end_point") or start_point
+    resolved_line_start = int(line_start) if line_start else int(start_point[0]) + 1
+    resolved_line_end = int(line_end) if line_end else int(end_point[0]) + 1
+    if resolved_line_end < resolved_line_start:
+        resolved_line_end = resolved_line_start
+
+    return {
+        "runner_image": runner_image,
+        "diagnostics": diagnostics,
+        "file_path": normalized_file_path,
+        "function_name": normalized_function_name,
+        "line_start": resolved_line_start,
+        "line_end": resolved_line_end,
+    }
+
+
+def _build_structured_tool_execution_payload(
+    *,
+    skill_id: str,
+    request_payload: Dict[str, Any],
+    resolution: Dict[str, Any],
+) -> Dict[str, Any]:
+    tool_input = dict(request_payload.get("tool_input") or {})
+    normalized_skill_id = str(skill_id or "").strip()
+    if normalized_skill_id == "dataflow_analysis":
+        tool_input.setdefault("variable_name", "plist_xml")
+        tool_input.setdefault("sink_hints", ["xmlReadMemory", "xmlParseMemory", "xml_to_node"])
+        tool_input["file_path"] = resolution["file_path"]
+        tool_input["start_line"] = resolution["line_start"]
+        tool_input["end_line"] = resolution["line_end"]
+        return tool_input
+    if normalized_skill_id == "controlflow_analysis_light":
+        tool_input.setdefault("vulnerability_type", "xxe")
+        tool_input["file_path"] = resolution["file_path"]
+        tool_input["function_name"] = resolution["function_name"]
+        tool_input["line_start"] = resolution["line_start"]
+        tool_input["line_end"] = resolution["line_end"]
+        return tool_input
+    raise HTTPException(status_code=400, detail=f"当前 skill 不支持结构化工具测试: {normalized_skill_id}")
+
+
+class StructuredToolTestRunner:
+    def __init__(
+        self,
+        *,
+        skill_id: str,
+        request_payload: Dict[str, Any],
+        llm_service: Any | None = None,
+        db: Any,
+        current_user: Any,
+        event_emitter: Any,
+    ):
+        self.skill_id = str(skill_id or "").strip()
+        self.request_payload = dict(request_payload or {})
+        self.llm_service = llm_service
+        self.db = db
+        self.current_user = current_user
+        self.event_emitter = event_emitter
+
+    async def run(self) -> Dict[str, Any]:
+        policy = get_scan_core_skill_test_policy(self.skill_id)
+        if str(policy.get("test_mode") or "") != "structured_tool":
+            raise HTTPException(status_code=400, detail="当前 skill 暂不支持结构化工具测试")
+
+        project, zip_path, fallback_used = await _resolve_verify_project(
+            db=self.db,
+            current_user=self.current_user,
+        )
+        project_name = str(getattr(project, "name", "") or "").strip()
+        if fallback_used or project_name != SCAN_CORE_DEFAULT_TEST_PROJECT_NAME:
+            raise HTTPException(
+                status_code=400,
+                detail="未找到可用于技能测试的默认 libplist ZIP 项目，请先修复默认 libplist 资源。",
+            )
+
+        temp_dir = ""
+        cleanup_success = True
+        cleanup_error = None
+        pending_error: Exception | None = None
+        result_payload: Dict[str, Any] | None = None
+
+        await self.event_emitter.emit_event(
+            "project_prepare",
+            "默认测试项目命中 libplist",
+            {
+                "project_name": project_name,
+                "default_test_project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+                "zip_path": zip_path,
+            },
+        )
+
+        try:
+            temp_dir = tempfile.mkdtemp(prefix=f"structured-tool-test-{self.skill_id}-", dir="/tmp")
+            await self.event_emitter.emit_event(
+                "project_prepare",
+                "临时目录已创建，开始解压测试项目",
+                {
+                    "project_name": project_name,
+                    "temp_dir": temp_dir,
+                },
+            )
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(temp_dir)
+            project_root = _normalize_extracted_project_root(temp_dir)
+            await self.event_emitter.emit_event(
+                "project_prepare",
+                "测试项目准备完成",
+                {
+                    "project_name": project_name,
+                    "temp_dir": temp_dir,
+                    "project_root": project_root,
+                },
+            )
+
+            resolution = _resolve_function_via_flow_parser_runner(
+                project_root=project_root,
+                file_path=str(self.request_payload.get("file_path") or ""),
+                function_name=str(self.request_payload.get("function_name") or ""),
+                line_start=self.request_payload.get("line_start"),
+                line_end=self.request_payload.get("line_end"),
+            )
+            await self.event_emitter.emit_event(
+                "runner_prepare",
+                "flow parser runner 已定位目标函数",
+                {
+                    "runner_image": resolution["runner_image"],
+                    "resolved_file_path": resolution["file_path"],
+                    "resolved_line_start": resolution["line_start"],
+                    "resolved_line_end": resolution["line_end"],
+                    "target_function": resolution["function_name"],
+                    "diagnostics": resolution["diagnostics"],
+                },
+            )
+
+            execution_payload = _build_structured_tool_execution_payload(
+                skill_id=self.skill_id,
+                request_payload=self.request_payload,
+                resolution=resolution,
+            )
+            tool = build_structured_tool_test_tool(self.skill_id, project_root, self.llm_service)
+            await self.event_emitter.emit(
+                SimpleNamespace(
+                    event_type="tool_call",
+                    message=f"结构化测试调用 {self.skill_id}",
+                    tool_name=self.skill_id,
+                    tool_input=execution_payload,
+                    tool_output=None,
+                    metadata={},
+                )
+            )
+            tool_result = await tool.execute(**execution_payload)
+            await self.event_emitter.emit(
+                SimpleNamespace(
+                    event_type="tool_result",
+                    message=f"{self.skill_id} 执行完成" if tool_result.success else f"{self.skill_id} 执行失败",
+                    tool_name=self.skill_id,
+                    tool_input=execution_payload,
+                    tool_output=tool_result.data,
+                    metadata=tool_result.metadata,
+                )
+            )
+            if not tool_result.success:
+                raise RuntimeError(str(tool_result.error or f"{self.skill_id} 执行失败"))
+
+            result_payload = {
+                "skill_id": self.skill_id,
+                "tool_name": self.skill_id,
+                "final_text": _extract_summary_from_tool_result(tool_result),
+                "project_name": project_name,
+                "test_mode": "structured_tool",
+                "default_test_project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
+                "project_root": project_root,
+                "target_function": resolution["function_name"],
+                "resolved_file_path": resolution["file_path"],
+                "resolved_line_start": resolution["line_start"],
+                "resolved_line_end": resolution["line_end"],
+                "runner_image": resolution["runner_image"],
+                "input_payload": {
+                    "file_path": resolution["file_path"],
+                    "function_name": resolution["function_name"],
+                    "line_start": resolution["line_start"],
+                    "line_end": resolution["line_end"],
+                    "tool_input": dict(self.request_payload.get("tool_input") or {}),
+                },
+            }
+        except Exception as exc:
+            pending_error = exc
+        finally:
+            if temp_dir:
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as exc:
+                    cleanup_success = False
+                    cleanup_error = str(exc)
+            await self.event_emitter.emit_event(
+                "project_cleanup",
+                "临时目录清理完成" if cleanup_success else "临时目录清理失败",
+                {
+                    "project_name": project_name,
+                    "temp_dir": temp_dir,
+                    "cleanup_success": cleanup_success,
+                    "cleanup_error": cleanup_error,
+                },
+            )
+
+        cleanup_payload = {
+            "success": cleanup_success,
+            "temp_dir": temp_dir,
+            "error": cleanup_error,
+        }
+        if result_payload is not None:
+            result_payload["cleanup"] = cleanup_payload
+            return result_payload
+        if pending_error is not None:
+            raise pending_error
+        raise RuntimeError("structured_tool_test_runner_failed_without_result")
 
 
 class SkillTestRunner:

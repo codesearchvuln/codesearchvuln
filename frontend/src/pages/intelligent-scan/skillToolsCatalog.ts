@@ -139,9 +139,22 @@ export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] = [
     summary: "分析 Source -> Sink 的传播链。",
     goal: "沉淀结构化流证据，支撑真实性判断。",
     taskList: ["识别 source/sink", "输出传播步骤", "标记风险等级"],
-    inputChecklist: ["`file_path` (string, required): 文件路径", "`start_line` (number, optional): 起始行"],
-    exampleInput: "```json\n{\n  \"file_path\": \"src/time64.c\",\n  \"start_line\": 120\n}\n```",
-    pitfalls: ["不要把数据流结果直接当成最终确认。"],
+    inputChecklist: [
+      "`source_code` (string, optional): 包含 source 的代码片段（与 variable_name 配合）",
+      "`file_path` (string, optional): 直接从文件读取源码（source_code 为空时推荐）",
+      "`start_line` / `end_line` (number, optional): 限定 file_path 读取的行范围",
+      "`variable_name` (string, optional): 要追踪的变量名（默认 user_input）",
+      "`source_hints` / `sink_hints` (string[], optional): Source/Sink 语义提示（可选）",
+      "`sink_code` (string, optional): 包含 sink 的代码片段（可选）",
+      "`language` (string, optional): 语言标记",
+      "`max_hops` (number, optional): 最大传播步数",
+    ],
+    exampleInput:
+      "```json\n{\n  \"file_path\": \"src/time64.c\",\n  \"start_line\": 120,\n  \"end_line\": 180,\n  \"variable_name\": \"result\",\n  \"sink_hints\": [\"sprintf\"],\n  \"max_hops\": 8\n}\n```",
+    pitfalls: [
+      "必须提供 source_code，或提供可读取的 file_path（可选 start_line/end_line）。",
+      "不要把数据流结果直接当成最终确认，通常需要结合 controlflow_analysis_light 复核可达性。",
+    ],
   },
   {
     id: "controlflow_analysis_light",
@@ -149,9 +162,21 @@ export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] = [
     summary: "分析控制流、条件分支与可达性。",
     goal: "验证候选漏洞是否真实可触达。",
     taskList: ["定位目标函数", "分析调用链", "输出 blocked reasons"],
-    inputChecklist: ["`file_path` (string, required): 文件路径", "`function_name` (string, optional): 函数名"],
-    exampleInput: "```json\n{\n  \"file_path\": \"src/time64.c\",\n  \"function_name\": \"asctime64_r\"\n}\n```",
-    pitfalls: ["path_found=false 不等于漏洞不存在。"],
+    inputChecklist: [
+      "`file_path` (string, required): 目标文件路径；推荐使用 `path/to/file:line` 形式内嵌行号",
+      "`line_start` / `line_end` (number, optional): 目标行范围（缺失时可从 file_path:line 推断）",
+      "`function_name` (string, optional): 目标函数名（无行号时用于回退定位）",
+      "`vulnerability_type` (string, optional): 漏洞类型（用于辅助评分）",
+      "`entry_points` / `entry_points_hint` (string[], optional): 候选入口函数（或回退提示）",
+      "`call_chain_hint` (string[], optional): 已知调用链提示",
+      "`control_conditions_hint` (string[], optional): 已知控制条件提示",
+    ],
+    exampleInput:
+      "```json\n{\n  \"file_path\": \"src/time64.c:120\",\n  \"vulnerability_type\": \"buffer_overflow\",\n  \"call_chain_hint\": [\"main\"]\n}\n```",
+    pitfalls: [
+      "优先提供 file_path:line 或 line_start 以确保可定位；缺少行号时可提供 function_name 作为回退。",
+      "path_found=false 不等于漏洞不存在，可能是入口点不足或解析不完整导致。",
+    ],
   },
   {
     id: "logic_authz_analysis",

@@ -16,6 +16,7 @@ import type {
   SkillDetailResponse,
   SkillTestEvent,
   SkillTestResult,
+  ToolTestPreset,
 } from "@/pages/skill-test/types";
 import { useSkillTestStream } from "@/pages/skill-test/useSkillTestStream";
 
@@ -49,6 +50,12 @@ function resolveToolName(toolId: string): string {
   return SKILL_TOOLS_CATALOG.find((item) => item.id === toolId)?.id || toolId || "外部工具";
 }
 
+function formatTestModeLabel(testMode: SkillDetailResponse["test_mode"], testSupported: boolean) {
+  if (!testSupported) return "测试已禁用";
+  if (testMode === "structured_tool") return "结构化工具测试";
+  return "单技能严格模式";
+}
+
 function resolveCleanupSummary(result: SkillTestResult | null, events: SkillTestEvent[]) {
   if (result?.cleanup) {
     return result.cleanup;
@@ -62,6 +69,31 @@ function resolveCleanupSummary(result: SkillTestResult | null, events: SkillTest
       ? String(cleanupEvent.metadata?.cleanup_error ?? "")
       : null,
   };
+}
+
+function updateToolPresetField(
+  preset: ToolTestPreset,
+  field: keyof Omit<ToolTestPreset, "tool_input" | "project_name">,
+  value: string,
+): ToolTestPreset {
+  if (field === "line_start" || field === "line_end") {
+    const normalized = value.trim();
+    return {
+      ...preset,
+      [field]: normalized ? Number(normalized) : null,
+    };
+  }
+  return {
+    ...preset,
+    [field]: value,
+  };
+}
+
+function toolInputListValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join("\n");
+  }
+  return String(value ?? "");
 }
 
 export interface ExternalToolDetailContentProps {
@@ -78,6 +110,9 @@ export interface ExternalToolDetailContentProps {
   onPromptChange: (nextPrompt: string) => void;
   onRun: () => void;
   onStop: () => void;
+  toolTestPreset?: ToolTestPreset | null;
+  onToolTestPresetChange?: (next: ToolTestPreset) => void;
+  onRunStructured?: () => void;
   loading?: boolean;
   error?: string | null;
 }
@@ -123,7 +158,7 @@ function SkillOverview({
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">{skillCatalogItem?.category ?? "未分类"}</Badge>
         <Badge variant="outline">
-          {skillDetail.test_supported ? "单技能严格模式" : "测试已禁用"}
+          {formatTestModeLabel(skillDetail.test_mode, skillDetail.test_supported)}
         </Badge>
         <Badge variant="outline">默认数据集 {skillDetail.default_test_project_name}</Badge>
       </div>
@@ -184,13 +219,19 @@ function SkillTestBench({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">测试台</div>
-          <div className="mt-1 text-sm text-muted-foreground">默认项目固定为 {skillDetail.default_test_project_name}，仅允许当前 skill + think / reflect。</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            默认项目固定为 {skillDetail.default_test_project_name}，仅允许当前 skill + think / reflect。
+          </div>
         </div>
         <Badge variant="outline">{running ? "运行中" : skillDetail.test_supported ? "可运行" : "已禁用"}</Badge>
       </div>
       {skillDetail.test_supported ? (
         <>
-          <Textarea value={prompt} onChange={(event) => onPromptChange(event.target.value)} placeholder="请输入基于 libplist 的自然语言测试问题" />
+          <Textarea
+            value={prompt}
+            onChange={(event) => onPromptChange(event.target.value)}
+            placeholder="请输入基于 libplist 的自然语言测试问题"
+          />
           <div className="space-y-2">
             <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">示例提问</div>
             <div className="flex flex-wrap gap-2">
@@ -218,6 +259,189 @@ function SkillTestBench({
           <div className="mt-2">{skillDetail.test_reason ?? "当前 skill 暂未开放测试入口。"}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+function StructuredToolTestBench({
+  toolId,
+  skillDetail,
+  toolTestPreset,
+  running,
+  onToolTestPresetChange,
+  onRun,
+  onStop,
+}: {
+  toolId: string;
+  skillDetail: SkillDetailResponse;
+  toolTestPreset: ToolTestPreset | null;
+  running: boolean;
+  onToolTestPresetChange: (next: ToolTestPreset) => void;
+  onRun: () => void;
+  onStop: () => void;
+}) {
+  const preset = toolTestPreset ?? skillDetail.tool_test_preset;
+  if (!preset) {
+    return (
+      <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+        当前 skill 缺少结构化测试预置参数。
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 rounded border border-border/40 bg-background/30 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">
+            结构化工具测试
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            默认项目固定为 {skillDetail.default_test_project_name}，运行前会先通过 flow parser runner
+            解析 `{preset.function_name}` 的函数范围。
+          </div>
+        </div>
+        <Badge variant="outline">{running ? "运行中" : "可运行"}</Badge>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="space-y-1">
+          <div className="text-xs font-mono text-muted-foreground">file_path</div>
+          <input
+            value={preset.file_path}
+            onChange={(event) =>
+              onToolTestPresetChange(updateToolPresetField(preset, "file_path", event.target.value))
+            }
+            className="cyber-input h-9 w-full rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:shadow-focus"
+          />
+        </label>
+        <label className="space-y-1">
+          <div className="text-xs font-mono text-muted-foreground">function_name</div>
+          <input
+            value={preset.function_name}
+            onChange={(event) =>
+              onToolTestPresetChange(updateToolPresetField(preset, "function_name", event.target.value))
+            }
+            className="cyber-input h-9 w-full rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:shadow-focus"
+          />
+        </label>
+        <label className="space-y-1">
+          <div className="text-xs font-mono text-muted-foreground">line_start</div>
+          <input
+            value={preset.line_start ?? ""}
+            onChange={(event) =>
+              onToolTestPresetChange(updateToolPresetField(preset, "line_start", event.target.value))
+            }
+            className="cyber-input h-9 w-full rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:shadow-focus"
+          />
+        </label>
+        <label className="space-y-1">
+          <div className="text-xs font-mono text-muted-foreground">line_end</div>
+          <input
+            value={preset.line_end ?? ""}
+            onChange={(event) =>
+              onToolTestPresetChange(updateToolPresetField(preset, "line_end", event.target.value))
+            }
+            className="cyber-input h-9 w-full rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:shadow-focus"
+          />
+        </label>
+      </div>
+
+      {toolId === "dataflow_analysis" ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="space-y-1">
+            <div className="text-xs font-mono text-muted-foreground">variable_name</div>
+            <input
+              value={String(preset.tool_input.variable_name ?? "")}
+              onChange={(event) =>
+                onToolTestPresetChange({
+                  ...preset,
+                  tool_input: {
+                    ...preset.tool_input,
+                    variable_name: event.target.value,
+                  },
+                })
+              }
+              className="cyber-input h-9 w-full rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:shadow-focus"
+            />
+          </label>
+          <label className="space-y-1">
+            <div className="text-xs font-mono text-muted-foreground">sink_hints</div>
+            <Textarea
+              value={toolInputListValue(preset.tool_input.sink_hints)}
+              onChange={(event) =>
+                onToolTestPresetChange({
+                  ...preset,
+                  tool_input: {
+                    ...preset.tool_input,
+                    sink_hints: event.target.value
+                      .split(/\r?\n|,/)
+                      .map((item) => item.trim())
+                      .filter(Boolean),
+                  },
+                })
+              }
+              placeholder="每行一个 sink hint"
+            />
+          </label>
+        </div>
+      ) : null}
+
+      {toolId === "controlflow_analysis_light" ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="space-y-1">
+            <div className="text-xs font-mono text-muted-foreground">entry_points</div>
+            <Textarea
+              value={toolInputListValue(preset.tool_input.entry_points)}
+              onChange={(event) =>
+                onToolTestPresetChange({
+                  ...preset,
+                  tool_input: {
+                    ...preset.tool_input,
+                    entry_points: event.target.value
+                      .split(/\r?\n|,/)
+                      .map((item) => item.trim())
+                      .filter(Boolean),
+                  },
+                })
+              }
+              placeholder="每行一个 entry point"
+            />
+          </label>
+          <label className="space-y-1">
+            <div className="text-xs font-mono text-muted-foreground">vulnerability_type</div>
+            <input
+              value={String(preset.tool_input.vulnerability_type ?? "")}
+              onChange={(event) =>
+                onToolTestPresetChange({
+                  ...preset,
+                  tool_input: {
+                    ...preset.tool_input,
+                    vulnerability_type: event.target.value,
+                  },
+                })
+              }
+              className="cyber-input h-9 w-full rounded-sm border border-input bg-background px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-primary focus:shadow-focus"
+            />
+          </label>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={onRun}
+          disabled={running || !preset.file_path.trim() || !preset.function_name.trim()}
+        >
+          {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+          运行测试
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={onStop} disabled={!running}>
+          <Square className="w-4 h-4" />
+          停止
+        </Button>
+      </div>
     </div>
   );
 }
@@ -258,6 +482,17 @@ function SkillFinalResult({
             <span>测试项目 {result.project_name}</span>
             <span>模式 {result.test_mode}</span>
           </div>
+          {result.test_mode === "structured_tool" ? (
+            <div className="rounded border border-border/30 bg-black/20 p-3 text-xs font-mono text-muted-foreground">
+              <div>tool_name: {result.tool_name ?? "-"}</div>
+              <div>target_function: {result.target_function ?? "-"}</div>
+              <div>resolved_file_path: {result.resolved_file_path ?? "-"}</div>
+              <div>
+                resolved_lines: {result.resolved_line_start ?? "-"} - {result.resolved_line_end ?? "-"}
+              </div>
+              <div>runner_image: {result.runner_image ?? "-"}</div>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="text-sm text-muted-foreground">暂无最终结果，运行测试后会在这里展示 `final_text` 与清理状态。</div>
@@ -288,6 +523,9 @@ export function ScanConfigExternalToolDetailContent({
   onPromptChange,
   onRun,
   onStop,
+  toolTestPreset = null,
+  onToolTestPresetChange = () => {},
+  onRunStructured = () => {},
   loading = false,
   error = null,
 }: ExternalToolDetailContentProps) {
@@ -304,15 +542,27 @@ export function ScanConfigExternalToolDetailContent({
           ) : skillDetail ? (
             <div className="space-y-6 border-t border-border/50 pt-6">
               <SkillOverview skillCatalogItem={skillCatalogItem} skillDetail={skillDetail} />
-              <SkillTestBench
-                skillDetail={skillDetail}
-                prompt={prompt}
-                examplePrompts={examplePrompts}
-                running={running}
-                onPromptChange={onPromptChange}
-                onRun={onRun}
-                onStop={onStop}
-              />
+              {skillDetail.test_mode === "structured_tool" ? (
+                <StructuredToolTestBench
+                  toolId={toolId}
+                  skillDetail={skillDetail}
+                  toolTestPreset={toolTestPreset}
+                  running={running}
+                  onToolTestPresetChange={onToolTestPresetChange}
+                  onRun={onRunStructured}
+                  onStop={onStop}
+                />
+              ) : (
+                <SkillTestBench
+                  skillDetail={skillDetail}
+                  prompt={prompt}
+                  examplePrompts={examplePrompts}
+                  running={running}
+                  onPromptChange={onPromptChange}
+                  onRun={onRun}
+                  onStop={onStop}
+                />
+              )}
               <div className="space-y-3">
                 <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">事件流</div>
                 <SkillTestEventLog events={events} running={running} />
@@ -337,6 +587,7 @@ export default function ScanConfigExternalToolDetail() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [toolTestPreset, setToolTestPreset] = useState<ToolTestPreset | null>(null);
 
   const skillCatalogItem = useMemo(
     () => SKILL_TOOLS_CATALOG.find((item) => item.id === toolId) ?? null,
@@ -344,11 +595,15 @@ export default function ScanConfigExternalToolDetail() {
   );
   const toolName = useMemo(() => resolveToolName(toolId), [toolId]);
   const examplePrompts = useMemo(() => buildSkillExamplePrompts(toolId), [toolId]);
-  const { events, running, result, run, stop } = useSkillTestStream(toolId);
+  const { events, running, result, runPrompt, runStructured, stop } = useSkillTestStream(toolId);
 
   useEffect(() => {
     setPrompt((previous) => previous || examplePrompts[0] || "");
   }, [examplePrompts]);
+
+  useEffect(() => {
+    setToolTestPreset(skillDetail?.tool_test_preset ?? null);
+  }, [skillDetail]);
 
   useEffect(() => {
     if (!toolId) return;
@@ -401,8 +656,15 @@ export default function ScanConfigExternalToolDetail() {
       result={result}
       running={running}
       onPromptChange={setPrompt}
-      onRun={() => void run(prompt)}
+      onRun={() => void runPrompt(prompt)}
       onStop={stop}
+      toolTestPreset={toolTestPreset}
+      onToolTestPresetChange={setToolTestPreset}
+      onRunStructured={() => {
+        if (toolTestPreset) {
+          void runStructured(toolTestPreset);
+        }
+      }}
       loading={loading}
       error={error}
     />

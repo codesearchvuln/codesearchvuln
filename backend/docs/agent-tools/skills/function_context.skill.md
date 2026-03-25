@@ -5,7 +5,7 @@
 
 ## 输入契约
 - 兼容参数: `file_path`, `line_start`, `function_name`。
-- 建议路径: `locate_enclosing_function + extract_function`。
+- 建议路径: `locate_enclosing_function + get_symbol_body`。
 
 ## 推荐调用链
 1. 先定位函数归属。

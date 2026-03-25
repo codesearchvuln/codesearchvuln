@@ -9,10 +9,10 @@
 - 识别污点传播路径
 
 输入:
-- source_code: 包含数据源的代码
+- source_code: 包含数据源的代码（与 file_path 二选一）
 - sink_code: 包含数据汇的代码（可选）
 - variable_name: 要追踪的变量名
-- file_path: 文件路径
+- file_path: 文件路径（source_code 为空时可直接读取文件）
 - start_line/end_line: 可选，限定分析片段
 - source_hints/sink_hints: 可选，补充语义提示
 
@@ -41,9 +41,12 @@
 ### Example Input
 ```json
 {
-  "source_code": null,
-  "sink_code": null,
-  "variable_name": "user_input"
+  "file_path": "src/time64.c",
+  "start_line": 120,
+  "end_line": 180,
+  "variable_name": "result",
+  "sink_hints": ["sprintf"],
+  "max_hops": 8
 }
 ```
 
@@ -62,5 +65,6 @@
 
 ## Pitfalls And Forbidden Use
 - 不要在输入缺失关键参数时盲目调用。
+- 必须提供 `source_code`，或提供可读取的 `file_path`（可选 `start_line/end_line`）。
 - 不要将该工具输出直接当作最终结论，必须结合上下文复核。
 - 不要在权限不足或路径不合法时重复重试同一输入。
