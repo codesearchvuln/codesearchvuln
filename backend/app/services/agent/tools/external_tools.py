@@ -1331,22 +1331,51 @@ def _read_pmd_report(workspace_dir: Path, process_result: Any) -> dict[str, Any]
         raise ValueError(f"PMD 报告 JSON 解析失败: {exc.msg}") from exc
 
 
-def _read_pmd_log_excerpt(log_path: Optional[str], limit: int = 240) -> Optional[str]:
+_PMD_FAILURE_DETAIL_LIMIT = 240
+_PMD_LOG_READ_BYTES = 4096
+_PMD_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?:(?:[A-Za-z]:)?[\\/](?:[^\s:;,'\"()<>]+[\\/])*[^\s:;,'\"()<>]+)"
+)
+
+
+def _sanitize_pmd_failure_detail(detail: Optional[str], limit: int = _PMD_FAILURE_DETAIL_LIMIT) -> Optional[str]:
+    if not detail:
+        return None
+
+    cleaned = " ".join(str(detail).split())
+    if not cleaned:
+        return None
+
+    cleaned = _PMD_ABSOLUTE_PATH_PATTERN.sub("[path]", cleaned)
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit].rstrip() + "..."
+    return cleaned
+
+
+def _read_pmd_log_excerpt(
+    log_path: Optional[str],
+    limit: int = _PMD_FAILURE_DETAIL_LIMIT,
+    read_bytes: int = _PMD_LOG_READ_BYTES,
+) -> Optional[str]:
     if not log_path:
         return None
 
     try:
-        raw_text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+        with Path(log_path).open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            file_size = handle.tell()
+            start = max(0, file_size - max(read_bytes, limit))
+            handle.seek(start)
+            raw_bytes = handle.read(max(read_bytes, limit))
     except OSError as exc:
         logger.warning("[PMD] 无法读取 runner 日志 %s: %s", log_path, exc)
         return None
 
-    cleaned = " ".join(line.strip() for line in raw_text.splitlines() if line.strip())
-    if not cleaned:
-        return None
-    if len(cleaned) > limit:
-        return cleaned[:limit].rstrip() + "..."
-    return cleaned
+    raw_text = raw_bytes.decode("utf-8", errors="replace")
+    if start > 0 and "\n" in raw_text:
+        raw_text = raw_text.split("\n", 1)[1]
+
+    return _sanitize_pmd_failure_detail(raw_text, limit=limit)
 
 
 def _build_pmd_failure_summary(process_result: Any) -> str:
@@ -1359,7 +1388,7 @@ def _build_pmd_failure_summary(process_result: Any) -> str:
         _read_pmd_log_excerpt(getattr(process_result, "stderr_path", None)),
         _read_pmd_log_excerpt(getattr(process_result, "stdout_path", None)),
     ):
-        detail = str(candidate or "").strip()
+        detail = _sanitize_pmd_failure_detail(candidate)
         if detail and detail not in details:
             details.append(detail)
 
@@ -1564,6 +1593,10 @@ PMD 直接分析源代码，无需编译！
                 }
             )
             
+        except (ValueError, FileNotFoundError) as e:
+            error_msg = f"PMD 执行错误: {str(e)}"
+            logger.warning("[PMD] %s", error_msg)
+            return ToolResult(success=False, data=error_msg, error=error_msg)
         except Exception as e:
             error_msg = f"PMD 执行错误: {str(e)}"
             logger.error(f"[PMD] {error_msg}", exc_info=True)

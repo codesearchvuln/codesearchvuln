@@ -93,6 +93,41 @@ def _build_runner_result(
     )
 
 
+def test_read_pmd_log_excerpt_reads_bounded_tail_excerpt(tmp_path):
+    log_path = tmp_path / "stderr.log"
+    log_path.write_text(("HEAD " * 2000) + "\nfinal tail marker /tmp/secret/workspace/logs/stderr.log\n", encoding="utf-8")
+
+    excerpt = external_tools._read_pmd_log_excerpt(str(log_path), read_bytes=128, limit=120)
+
+    assert excerpt is not None
+    assert "tail marker" in excerpt
+    assert "HEAD HEAD HEAD" not in excerpt
+    assert "/tmp/secret/workspace/logs/stderr.log" not in excerpt
+
+
+def test_build_pmd_failure_summary_truncates_and_redacts_details(tmp_path):
+    stderr_path = tmp_path / "stderr.log"
+    stderr_path.write_text(
+        ("prefix " * 2000) + "\njava.lang.IllegalStateException at /tmp/secret/workspace/logs/stderr.log tail\n",
+        encoding="utf-8",
+    )
+    process_result = _build_runner_result(
+        success=False,
+        exit_code=2,
+        error="runner exploded in /tmp/secret/workspace/output/report.json " + ("X" * 800),
+        stderr_path=str(stderr_path),
+    )
+
+    summary = external_tools._build_pmd_failure_summary(process_result)
+
+    assert "exit_code=2" in summary
+    assert "/tmp/secret/workspace" not in summary
+    assert "stdout.log" not in summary
+    assert "report.json" not in summary
+    assert "..." in summary
+    assert len(summary) < 700
+
+
 def test_prepare_pmd_workspace_only_ignores_nested_workspace_subtree(monkeypatch, tmp_path):
     project_root = tmp_path / "project"
     nested_source_dir = project_root / "src" / "main" / "java"
@@ -618,6 +653,12 @@ async def test_pmd_tool_fails_when_ruleset_file_cannot_be_resolved(monkeypatch, 
         _fake_run_scanner_container,
         raising=False,
     )
+    errors: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        external_tools.logger,
+        "error",
+        lambda message, *args, **kwargs: errors.append((message, args, kwargs)),
+    )
 
     tool = PMDTool(str(project_root), sandbox_manager=_SandboxProbe())
     result = await tool._execute(ruleset="config/pmd/missing.xml")
@@ -626,6 +667,7 @@ async def test_pmd_tool_fails_when_ruleset_file_cannot_be_resolved(monkeypatch, 
     assert "ruleset" in str(result.error or result.data)
     assert "不存在" in str(result.error or result.data)
     assert called["runner"] is False
+    assert errors == []
 
 
 @pytest.mark.asyncio
