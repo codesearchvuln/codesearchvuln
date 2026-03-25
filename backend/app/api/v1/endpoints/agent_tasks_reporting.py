@@ -1,6 +1,8 @@
 """Report rendering helpers for agent tasks."""
 
+import html
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -35,17 +37,413 @@ def _escape_markdown_table_cell(text: Optional[str]) -> str:
     return _escape_markdown_inline(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
 
 
+def _normalize_severity(sev: Optional[str]) -> str:
+    return str(sev).lower().strip() if sev else ""
+
+
+def _finding_sort_key(finding: AgentFinding) -> Tuple[int, float]:
+    severity_rank = {
+        "critical": 1,
+        "high": 2,
+        "medium": 3,
+        "low": 4,
+    }
+    rank = severity_rank.get(_normalize_severity(getattr(finding, "severity", None)), 5)
+    created_at = getattr(finding, "created_at", None)
+    created_ts = 0.0
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        created_ts = created_at.timestamp()
+    return rank, -created_ts
+
+
+def _build_finding_markdown_report(
+    *,
+    task: AgentTask,
+    project: Project,
+    finding_id: str,
+    finding_data: Dict[str, Any],
+) -> str:
+    sections: List[str] = []
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    title = str(finding_data.get("display_title") or finding_data.get("title") or "未命名漏洞")
+    severity = str(finding_data.get("severity") or "unknown").upper()
+    vuln_type = str(finding_data.get("vulnerability_type") or "unknown")
+    authenticity = str(finding_data.get("authenticity") or "unknown")
+    reachability = str(finding_data.get("reachability") or "unknown")
+
+    sections.append(f"# 漏洞详情报告：{_escape_markdown_inline(title)}")
+    sections.append("")
+    sections.append("---")
+    sections.append("")
+    sections.append("## 报告信息")
+    sections.append("")
+    sections.append("| 属性 | 内容 |")
+    sections.append("|----------|-------|")
+    sections.append(f"| **项目名称** | {_escape_markdown_table_cell(project.name)} |")
+    sections.append(f"| **任务 ID** | `{task.id[:8]}...` |")
+    sections.append(f"| **漏洞 ID** | `{finding_id}` |")
+    sections.append(f"| **生成时间** | {timestamp} |")
+    sections.append("")
+
+    sections.append("## 漏洞概览")
+    sections.append("")
+    sections.append(f"- **严重程度:** {severity}")
+    sections.append(f"- **漏洞类型:** `{_escape_markdown_inline(vuln_type)}`")
+    sections.append(f"- **真实性判定:** {_escape_markdown_inline(authenticity)}")
+    sections.append(f"- **可达性:** {_escape_markdown_inline(reachability)}")
+
+    confidence = finding_data.get("confidence")
+    if isinstance(confidence, (int, float)):
+        sections.append(f"- **AI 置信度:** {float(confidence) * 100:.1f}%")
+
+    file_path = finding_data.get("file_path")
+    line_start = finding_data.get("line_start")
+    line_end = finding_data.get("line_end")
+    if file_path:
+        location = _escape_markdown_inline(str(file_path))
+        if line_start:
+            location += f":{line_start}"
+            if line_end and line_end != line_start:
+                location += f"-{line_end}"
+        sections.append(f"- **位置:** {location}")
+    sections.append("")
+
+    description_markdown = finding_data.get("description_markdown") or finding_data.get("description")
+    if description_markdown:
+        sections.append("## 漏洞描述")
+        sections.append("")
+        sections.append(str(description_markdown))
+        sections.append("")
+
+    code_snippet = finding_data.get("code_snippet")
+    if code_snippet:
+        lang = infer_code_fence_language(str(file_path or ""))
+        sections.append("## 漏洞代码")
+        sections.append("")
+        sections.append(f"```{lang}")
+        sections.append(str(code_snippet).strip())
+        sections.append("```")
+        sections.append("")
+
+    verification_evidence = finding_data.get("verification_evidence")
+    if verification_evidence:
+        sections.append("## 验证证据")
+        sections.append("")
+        sections.append(str(verification_evidence))
+        sections.append("")
+
+    suggestion = finding_data.get("suggestion")
+    if suggestion:
+        sections.append("## 修复建议")
+        sections.append("")
+        sections.append(str(suggestion))
+        sections.append("")
+
+    fix_code = finding_data.get("fix_code")
+    if fix_code:
+        lang = infer_code_fence_language(str(file_path or ""))
+        sections.append("## 参考修复代码")
+        sections.append("")
+        sections.append(f"```{lang if file_path else 'text'}")
+        sections.append(str(fix_code).strip())
+        sections.append("```")
+        sections.append("")
+
+    if bool(finding_data.get("has_poc")):
+        sections.append("## 概念验证 (PoC)")
+        sections.append("")
+        poc_description = finding_data.get("poc_description")
+        if poc_description:
+            sections.append(str(poc_description))
+            sections.append("")
+
+        poc_steps = finding_data.get("poc_steps")
+        if isinstance(poc_steps, list) and poc_steps:
+            sections.append("### 复现步骤")
+            sections.append("")
+            for index, step in enumerate(poc_steps, start=1):
+                sections.append(f"{index}. {step}")
+            sections.append("")
+
+        poc_code = finding_data.get("poc_code")
+        if poc_code:
+            sections.append("### PoC 代码")
+            sections.append("")
+            sections.append("```")
+            sections.append(str(poc_code).strip())
+            sections.append("```")
+            sections.append("")
+
+    sections.append("---")
+    sections.append("")
+    sections.append("*本报告由自动化安全审计系统生成*")
+    sections.append("")
+    return "\n".join(sections)
+
+
+def _build_finding_payload_from_row(
+    finding_row: AgentFinding,
+    report_descriptions: Dict[str, Dict[str, Optional[str]]],
+) -> Dict[str, Any]:
+    finding_id = str(getattr(finding_row, "id", "") or "")
+    verification_payload = (
+        getattr(finding_row, "verification_result", None)
+        if isinstance(getattr(finding_row, "verification_result", None), dict)
+        else {}
+    )
+    evidence = (
+        getattr(finding_row, "verification_evidence", None)
+        or verification_payload.get("evidence")
+        or verification_payload.get("verification_evidence")
+        or verification_payload.get("verification_details")
+        or verification_payload.get("details")
+    )
+    description_markdown = (
+        report_descriptions.get(finding_id, {}).get("description_markdown")
+        or report_descriptions.get(finding_id, {}).get("description")
+        or getattr(finding_row, "description", None)
+    )
+    confidence = getattr(finding_row, "confidence", None)
+    if confidence is None:
+        confidence = getattr(finding_row, "ai_confidence", None)
+    authenticity = getattr(finding_row, "verdict", None)
+    if not authenticity:
+        authenticity = "verified" if bool(getattr(finding_row, "is_verified", False)) else "unknown"
+
+    return {
+        "display_title": getattr(finding_row, "title", None),
+        "title": getattr(finding_row, "title", None),
+        "severity": getattr(finding_row, "severity", None),
+        "vulnerability_type": getattr(finding_row, "vulnerability_type", None),
+        "authenticity": authenticity,
+        "reachability": getattr(finding_row, "reachability", None) or "unknown",
+        "confidence": confidence,
+        "file_path": getattr(finding_row, "file_path", None),
+        "line_start": getattr(finding_row, "line_start", None),
+        "line_end": getattr(finding_row, "line_end", None),
+        "description_markdown": description_markdown,
+        "description": getattr(finding_row, "description", None),
+        "code_snippet": getattr(finding_row, "code_snippet", None),
+        "verification_evidence": evidence,
+        "suggestion": getattr(finding_row, "suggestion", None),
+        "fix_code": getattr(finding_row, "fix_code", None),
+        "has_poc": bool(getattr(finding_row, "has_poc", False)),
+        "poc_description": getattr(finding_row, "poc_description", None),
+        "poc_steps": getattr(finding_row, "poc_steps", None),
+        "poc_code": getattr(finding_row, "poc_code", None),
+    }
+
+
+def _render_inline_markdown(text: str) -> str:
+    escaped = html.escape(text)
+    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", escaped)
+    return escaped
+
+
+def _markdown_to_html(markdown_text: str) -> str:
+    lines = markdown_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    html_parts: List[str] = []
+    paragraph_lines: List[str] = []
+    code_lines: List[str] = []
+    in_code_block = False
+    in_ul = False
+    in_ol = False
+
+    def _flush_paragraph() -> None:
+        if not paragraph_lines:
+            return
+        rendered = "<br/>".join(_render_inline_markdown(line) for line in paragraph_lines)
+        html_parts.append(f"<p>{rendered}</p>")
+        paragraph_lines.clear()
+
+    def _close_lists() -> None:
+        nonlocal in_ul, in_ol
+        if in_ul:
+            html_parts.append("</ul>")
+            in_ul = False
+        if in_ol:
+            html_parts.append("</ol>")
+            in_ol = False
+
+    for raw_line in lines:
+        line = raw_line.rstrip("\n")
+        stripped = line.strip()
+
+        if line.startswith("```"):
+            _flush_paragraph()
+            _close_lists()
+            if in_code_block:
+                code_html = html.escape("\n".join(code_lines))
+                html_parts.append(f"<pre><code>{code_html}</code></pre>")
+                code_lines.clear()
+                in_code_block = False
+            else:
+                in_code_block = True
+            continue
+
+        if in_code_block:
+            code_lines.append(line)
+            continue
+
+        if not stripped:
+            _flush_paragraph()
+            _close_lists()
+            continue
+
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if heading_match:
+            _flush_paragraph()
+            _close_lists()
+            level = len(heading_match.group(1))
+            title = _render_inline_markdown(heading_match.group(2))
+            html_parts.append(f"<h{level}>{title}</h{level}>")
+            continue
+
+        if stripped in {"---", "***", "___"}:
+            _flush_paragraph()
+            _close_lists()
+            html_parts.append("<hr/>")
+            continue
+
+        ul_match = re.match(r"^[-*]\s+(.+)$", stripped)
+        if ul_match:
+            _flush_paragraph()
+            if in_ol:
+                html_parts.append("</ol>")
+                in_ol = False
+            if not in_ul:
+                html_parts.append("<ul>")
+                in_ul = True
+            html_parts.append(f"<li>{_render_inline_markdown(ul_match.group(1))}</li>")
+            continue
+
+        ol_match = re.match(r"^\d+\.\s+(.+)$", stripped)
+        if ol_match:
+            _flush_paragraph()
+            if in_ul:
+                html_parts.append("</ul>")
+                in_ul = False
+            if not in_ol:
+                html_parts.append("<ol>")
+                in_ol = True
+            html_parts.append(f"<li>{_render_inline_markdown(ol_match.group(1))}</li>")
+            continue
+
+        _close_lists()
+        paragraph_lines.append(line)
+
+    _flush_paragraph()
+    _close_lists()
+    if in_code_block:
+        code_html = html.escape("\n".join(code_lines))
+        html_parts.append(f"<pre><code>{code_html}</code></pre>")
+
+    return "\n".join(html_parts)
+
+
+def _render_markdown_to_pdf_bytes(markdown_text: str) -> bytes:
+    try:
+        from weasyprint import HTML
+    except Exception as exc:
+        logger.exception("PDF export unavailable: failed to import WeasyPrint")
+        raise HTTPException(status_code=500, detail="PDF 导出不可用，请检查 weasyprint 依赖") from exc
+
+    html_body = _markdown_to_html(markdown_text)
+    html_document = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    @page {{ size: A4; margin: 20mm 15mm; }}
+    body {{ font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; line-height: 1.6; color: #111827; }}
+    h1, h2, h3, h4, h5, h6 {{ color: #111827; margin-top: 16px; margin-bottom: 8px; }}
+    h1 {{ font-size: 22px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }}
+    h2 {{ font-size: 18px; }}
+    h3 {{ font-size: 15px; }}
+    p {{ margin: 8px 0; word-break: break-word; }}
+    hr {{ border: none; border-top: 1px solid #e5e7eb; margin: 14px 0; }}
+    pre {{ background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 10px; overflow-wrap: anywhere; white-space: pre-wrap; }}
+    code {{ font-family: "Menlo", "Consolas", monospace; }}
+    ul, ol {{ margin: 8px 0 8px 22px; }}
+    li {{ margin: 4px 0; }}
+  </style>
+</head>
+<body>
+{html_body}
+</body>
+</html>"""
+
+    try:
+        return HTML(string=html_document).write_pdf()
+    except Exception as exc:
+        logger.exception("PDF export failed while rendering report")
+        raise HTTPException(status_code=500, detail="PDF 报告生成失败") from exc
+
+
+def _build_task_export_markdown(
+    *,
+    task: AgentTask,
+    project: Project,
+    findings: List[AgentFinding],
+    report_descriptions: Dict[str, Dict[str, Optional[str]]],
+    project_report_fallback: str,
+) -> str:
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    project_report = _normalize_optional_text(getattr(task, "report", None)) or project_report_fallback
+
+    lines: List[str] = []
+    lines.append("# 安全审计导出报告")
+    lines.append("")
+    lines.append(f"- **项目名称:** {_escape_markdown_inline(project.name)}")
+    lines.append(f"- **任务 ID:** `{str(task.id)[:8]}...`")
+    lines.append(f"- **导出时间:** {generated_at}")
+    lines.append("")
+    lines.append("## 项目报告")
+    lines.append("")
+    lines.append(str(project_report).strip() if project_report else "_无项目报告内容_")
+    lines.append("")
+
+    if not findings:
+        lines.append("## 漏洞报告")
+        lines.append("")
+        lines.append("_本任务无漏洞报告_")
+        lines.append("")
+        return "\n".join(lines)
+
+    for index, finding_row in enumerate(findings, start=1):
+        finding_report = _normalize_optional_text(getattr(finding_row, "report", None))
+        if not finding_report:
+            finding_payload = _build_finding_payload_from_row(finding_row, report_descriptions)
+            finding_report = _build_finding_markdown_report(
+                task=task,
+                project=project,
+                finding_id=str(getattr(finding_row, "id", "") or ""),
+                finding_data=finding_payload,
+            )
+        lines.append(f"## 漏洞报告 {index}")
+        lines.append("")
+        lines.append(str(finding_report).strip())
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 @router.get("/{task_id}/report")
 async def generate_audit_report(
     task_id: str,
-    format: str = Query("markdown", pattern="^(markdown|json)$"),
+    format: str = Query("markdown", pattern="^(markdown|json|pdf)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
     """
     生成审计报告
     
-    支持 Markdown 和 JSON 格式
+    支持 Markdown / JSON / PDF 格式
     """
     task = await db.get(AgentTask, task_id)
     if not task:
@@ -71,6 +469,7 @@ async def generate_audit_report(
         )
     )
     findings = findings.scalars().all()
+    findings = sorted(findings, key=_finding_sort_key)
     
     #  Helper function to normalize severity for comparison (case-insensitive)
     def normalize_severity(sev: str) -> str:
@@ -526,13 +925,29 @@ async def generate_audit_report(
     md_lines.append("")
     md_lines.append("*本报告由自动化安全审计系统生成*")
     md_lines.append("")
-    content = "\n".join(md_lines)
-    
+    legacy_content = "\n".join(md_lines)
+    export_markdown = _build_task_export_markdown(
+        task=task,
+        project=project,
+        findings=findings,
+        report_descriptions=report_descriptions,
+        project_report_fallback=legacy_content,
+    )
+
+    if format == "pdf":
+        pdf_content = _render_markdown_to_pdf_bytes(export_markdown)
+        filename = f"audit_report_{task.id[:8]}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            },
+        )
+
     filename = f"audit_report_{task.id[:8]}_{datetime.now().strftime('%Y%m%d')}.md"
-    
-    from fastapi.responses import Response
     return Response(
-        content=content,
+        content=export_markdown,
         media_type="text/markdown; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename={filename}"
@@ -601,127 +1016,13 @@ async def get_finding_report(
             },
         )
 
-    md_lines: List[str] = []
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    title = str(finding_data.get("display_title") or finding_data.get("title") or "未命名漏洞")
-    severity = str(finding_data.get("severity") or "unknown").upper()
-    vuln_type = str(finding_data.get("vulnerability_type") or "unknown")
-    authenticity = str(finding_data.get("authenticity") or "unknown")
-    reachability = str(finding_data.get("reachability") or "unknown")
-
-    md_lines.append(f"# 漏洞详情报告：{_escape_markdown_inline(title)}")
-    md_lines.append("")
-    md_lines.append("---")
-    md_lines.append("")
-    md_lines.append("## 报告信息")
-    md_lines.append("")
-    md_lines.append("| 属性 | 内容 |")
-    md_lines.append("|----------|-------|")
-    md_lines.append(f"| **项目名称** | {_escape_markdown_table_cell(project.name)} |")
-    md_lines.append(f"| **任务 ID** | `{task.id[:8]}...` |")
-    md_lines.append(f"| **漏洞 ID** | `{finding.id}` |")
-    md_lines.append(f"| **生成时间** | {timestamp} |")
-    md_lines.append("")
-
-    md_lines.append("## 漏洞概览")
-    md_lines.append("")
-    md_lines.append(f"- **严重程度:** {severity}")
-    md_lines.append(f"- **漏洞类型:** `{_escape_markdown_inline(vuln_type)}`")
-    md_lines.append(f"- **真实性判定:** {_escape_markdown_inline(authenticity)}")
-    md_lines.append(f"- **可达性:** {_escape_markdown_inline(reachability)}")
-
-    confidence = finding_data.get("confidence")
-    if isinstance(confidence, (int, float)):
-        md_lines.append(f"- **AI 置信度:** {float(confidence) * 100:.1f}%")
-
-    file_path = finding_data.get("file_path")
-    line_start = finding_data.get("line_start")
-    line_end = finding_data.get("line_end")
-    if file_path:
-        location = _escape_markdown_inline(str(file_path))
-        if line_start:
-            location += f":{line_start}"
-            if line_end and line_end != line_start:
-                location += f"-{line_end}"
-        md_lines.append(f"- **位置:** {location}")
-    md_lines.append("")
-
-    description_markdown = finding_data.get("description_markdown") or finding_data.get("description")
-    if description_markdown:
-        md_lines.append("## 漏洞描述")
-        md_lines.append("")
-        md_lines.append(str(description_markdown))
-        md_lines.append("")
-
-    code_snippet = finding_data.get("code_snippet")
-    if code_snippet:
-        lang = infer_code_fence_language(str(file_path or ""))
-        md_lines.append("## 漏洞代码")
-        md_lines.append("")
-        md_lines.append(f"```{lang}")
-        md_lines.append(str(code_snippet).strip())
-        md_lines.append("```")
-        md_lines.append("")
-
-    verification_evidence = finding_data.get("verification_evidence")
-    if verification_evidence:
-        md_lines.append("## 验证证据")
-        md_lines.append("")
-        md_lines.append(str(verification_evidence))
-        md_lines.append("")
-
-    suggestion = finding_data.get("suggestion")
-    if suggestion:
-        md_lines.append("## 修复建议")
-        md_lines.append("")
-        md_lines.append(str(suggestion))
-        md_lines.append("")
-
-    fix_code = finding_data.get("fix_code")
-    if fix_code:
-        lang = infer_code_fence_language(str(file_path or ""))
-        md_lines.append("## 参考修复代码")
-        md_lines.append("")
-        md_lines.append(f"```{lang if file_path else 'text'}")
-        md_lines.append(str(fix_code).strip())
-        md_lines.append("```")
-        md_lines.append("")
-
-    if bool(finding_data.get("has_poc")):
-        md_lines.append("## 概念验证 (PoC)")
-        md_lines.append("")
-        poc_description = finding_data.get("poc_description")
-        if poc_description:
-            md_lines.append(str(poc_description))
-            md_lines.append("")
-
-        poc_steps = finding_data.get("poc_steps")
-        if isinstance(poc_steps, list) and poc_steps:
-            md_lines.append("### 复现步骤")
-            md_lines.append("")
-            for index, step in enumerate(poc_steps, start=1):
-                md_lines.append(f"{index}. {step}")
-            md_lines.append("")
-
-        poc_code = finding_data.get("poc_code")
-        if poc_code:
-            md_lines.append("### PoC 代码")
-            md_lines.append("")
-            md_lines.append("```")
-            md_lines.append(str(poc_code).strip())
-            md_lines.append("```")
-            md_lines.append("")
-
-    md_lines.append("---")
-    md_lines.append("")
-    md_lines.append("*本报告由自动化安全审计系统生成*")
-    md_lines.append("")
-
-    content = "\n".join(md_lines)
+    content = _build_finding_markdown_report(
+        task=task,
+        project=project,
+        finding_id=str(finding.id),
+        finding_data=finding_data,
+    )
     filename = f"finding_report_{task.id[:8]}_{finding.id[:8]}.md"
-
-    from fastapi.responses import Response
 
     return Response(
         content=content,

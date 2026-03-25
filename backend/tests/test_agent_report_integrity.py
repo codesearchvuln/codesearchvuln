@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.api.v1.endpoints import agent_tasks_reporting as reporting_endpoint
 from app.api.v1.endpoints.agent_tasks import generate_audit_report
 
 
@@ -18,35 +19,8 @@ class _ScalarListResult:
         return self._rows
 
 
-@pytest.mark.asyncio
-async def test_generate_report_keeps_long_text_and_escapes_markdown_fields():
-    task_id = "task-1"
-    long_description = "这是一段很长的漏洞描述。" * 600
-    long_path = "src/security/[core](module)#file.py"
-    title_with_markdown = "Unsafe [link](x) #1 | critical"
-
-    finding = SimpleNamespace(
-        id="finding-1",
-        severity="high",
-        title=title_with_markdown,
-        vulnerability_type="xss",
-        description=long_description,
-        file_path=long_path,
-        line_start=12,
-        line_end=15,
-        code_snippet=None,
-        is_verified=False,
-        has_poc=False,
-        poc_code=None,
-        poc_description=None,
-        poc_steps=None,
-        ai_confidence=0.92,
-        suggestion=None,
-        fix_code=None,
-        created_at=datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc),
-    )
-
-    task = SimpleNamespace(
+def _make_task(task_id: str = "task-1", report: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
         id=task_id,
         project_id="project-1",
         status="completed",
@@ -58,7 +32,60 @@ async def test_generate_report_keeps_long_text_and_escapes_markdown_fields():
         total_iterations=20,
         tool_calls_count=30,
         tokens_used=2048,
+        report=report,
     )
+
+
+def _make_finding(**overrides) -> SimpleNamespace:
+    payload = {
+        "id": "finding-1",
+        "severity": "high",
+        "title": "Sample Finding",
+        "vulnerability_type": "xss",
+        "description": "description",
+        "file_path": "src/app.py",
+        "line_start": 12,
+        "line_end": 15,
+        "code_snippet": None,
+        "code_context": None,
+        "function_name": None,
+        "references": None,
+        "is_verified": False,
+        "has_poc": False,
+        "poc_code": None,
+        "poc_description": None,
+        "poc_steps": None,
+        "ai_confidence": 0.92,
+        "confidence": None,
+        "suggestion": None,
+        "fix_code": None,
+        "report": None,
+        "finding_identity": None,
+        "verification_result": None,
+        "verification_evidence": None,
+        "reachability": None,
+        "verdict": None,
+        "created_at": datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc),
+    }
+    payload.update(overrides)
+    return SimpleNamespace(**payload)
+
+
+@pytest.mark.asyncio
+async def test_generate_report_keeps_long_text_and_escapes_markdown_fields():
+    task_id = "task-1"
+    long_description = "这是一段很长的漏洞描述。" * 600
+    long_path = "src/security/[core](module)#file.py"
+    title_with_markdown = "Unsafe [link](x) #1 | critical"
+
+    finding = _make_finding(
+        id="finding-1",
+        title=title_with_markdown,
+        description=long_description,
+        file_path=long_path,
+    )
+
+    task = _make_task(task_id=task_id)
     project = SimpleNamespace(id="project-1", name="Demo [Project] #1")
 
     db = AsyncMock()
@@ -79,4 +106,124 @@ async def test_generate_report_keeps_long_text_and_escapes_markdown_fields():
     assert "src/security/\\[core\\]\\(module\\)\\#file.py:12-15" in body
     assert long_description in body
     assert "VulHunter" not in body
-    assert "VulHunter" not in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_exports_project_then_each_finding_report_in_order():
+    task = _make_task(report="## 项目级风险评估\n\n项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+
+    low = _make_finding(
+        id="finding-low",
+        severity="low",
+        title="low title",
+        report="# LOW report",
+        created_at=datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc),
+    )
+    high = _make_finding(
+        id="finding-high",
+        severity="high",
+        title="high title",
+        report="# HIGH report",
+        created_at=datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc),
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([low, high]))
+
+    response = await generate_audit_report(
+        task_id="task-1",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    project_idx = body.find("项目报告正文")
+    high_idx = body.find("# HIGH report")
+    low_idx = body.find("# LOW report")
+
+    assert project_idx != -1
+    assert high_idx != -1
+    assert low_idx != -1
+    assert project_idx < high_idx < low_idx
+
+
+@pytest.mark.asyncio
+async def test_generate_report_falls_back_to_generated_finding_report_when_missing_stored_report():
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-1",
+        title="Fallback Finding",
+        report=None,
+        description="fallback detail",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await generate_audit_report(
+        task_id="task-1",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "## 漏洞报告 1" in body
+    assert "# 漏洞详情报告：Fallback Finding" in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_supports_pdf_export(monkeypatch):
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(report="# FINDING report")
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    monkeypatch.setattr(
+        reporting_endpoint,
+        "_render_markdown_to_pdf_bytes",
+        lambda markdown_text: b"%PDF-1.4\nmock",
+    )
+
+    response = await generate_audit_report(
+        task_id="task-1",
+        format="pdf",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert response.media_type == "application/pdf"
+    assert response.body.startswith(b"%PDF-1.4")
+    assert response.headers["content-disposition"].endswith(".pdf")
+
+
+@pytest.mark.asyncio
+async def test_generate_report_json_shape_compatible():
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(id="finding-1")
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    payload = await generate_audit_report(
+        task_id="task-1",
+        format="json",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert "report_metadata" in payload
+    assert "summary" in payload
+    assert "findings" in payload
+    assert payload["summary"]["total_findings"] == 1
+    assert payload["report_metadata"]["project_name"] == "Demo"
