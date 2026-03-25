@@ -60,6 +60,9 @@ on:
         type: boolean
         default: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build-and-push:
     name: 构建并推送镜像
@@ -71,17 +74,17 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 设置 Node.js
         if: ${{ github.event.inputs.build_frontend == 'true' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
       - name: 安装 pnpm
         if: ${{ github.event.inputs.build_frontend == 'true' }}
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 9
 
@@ -98,21 +101,21 @@ jobs:
           VITE_USE_LOCAL_DB: 'true'
 
       - name: 登录到 GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置 QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: 构建并推送前端 Docker 镜像
         if: ${{ github.event.inputs.build_frontend == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
@@ -125,7 +128,7 @@ jobs:
 
       - name: 构建并推送后端 Docker 镜像
         if: ${{ github.event.inputs.build_backend == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/Dockerfile
@@ -138,7 +141,7 @@ jobs:
 
       - name: 构建并推送 YASA runner Docker 镜像
         if: ${{ github.event.inputs.build_yasa_runner == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/docker/yasa-runner.Dockerfile
@@ -151,7 +154,7 @@ jobs:
 
       - name: 构建并推送 OpenGrep runner Docker 镜像
         if: ${{ github.event.inputs.build_opengrep_runner == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/docker/opengrep-runner.Dockerfile
@@ -164,7 +167,7 @@ jobs:
 
       - name: 构建并推送 Bandit runner Docker 镜像
         if: ${{ github.event.inputs.build_bandit_runner == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/docker/bandit-runner.Dockerfile
@@ -177,7 +180,7 @@ jobs:
 
       - name: 构建并推送 Gitleaks runner Docker 镜像
         if: ${{ github.event.inputs.build_gitleaks_runner == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/docker/gitleaks-runner.Dockerfile
@@ -190,7 +193,7 @@ jobs:
 
       - name: 构建并推送 PHPStan runner Docker 镜像
         if: ${{ github.event.inputs.build_phpstan_runner == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/docker/phpstan-runner.Dockerfile
@@ -203,7 +206,7 @@ jobs:
 
       - name: 构建并推送 flow/parser runner Docker 镜像
         if: ${{ github.event.inputs.build_flow_parser_runner == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/docker/flow-parser-runner.Dockerfile
@@ -216,7 +219,7 @@ jobs:
 
       - name: 构建并推送 PMD runner Docker 镜像
         if: ${{ github.event.inputs.build_pmd_runner == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           file: ./backend/docker/pmd-runner.Dockerfile
@@ -229,7 +232,7 @@ jobs:
 
       - name: 构建并推送沙箱 Docker 镜像
         if: ${{ github.event.inputs.build_sandbox == 'true' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./docker/sandbox
           file: ./docker/sandbox/Dockerfile
