@@ -72,6 +72,58 @@ def _runner_option(command: list[str], flag: str) -> str:
     return command[index + 1]
 
 
+def test_prepare_pmd_workspace_only_ignores_nested_workspace_subtree(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    nested_source_dir = project_root / "src" / "main" / "java"
+    nested_source_dir.mkdir(parents=True, exist_ok=True)
+    (nested_source_dir / "App.java").write_text("class App {}\n", encoding="utf-8")
+    (project_root / "src" / "shared.txt").write_text("keep me\n", encoding="utf-8")
+
+    scan_workspace_root = project_root / "src" / "scans"
+    monkeypatch.setattr(
+        external_tools,
+        "settings",
+        SimpleNamespace(
+            SCAN_WORKSPACE_ROOT=str(scan_workspace_root),
+            SCANNER_PMD_IMAGE="vulhunter/pmd-runner:test",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        external_tools,
+        "uuid4",
+        lambda: SimpleNamespace(hex="feedfacefeedfacefeedfacefeedface"),
+        raising=False,
+    )
+
+    workspace_dir, project_dir, output_dir, logs_dir, meta_dir = external_tools._prepare_pmd_workspace(
+        str(project_root)
+    )
+
+    assert workspace_dir == scan_workspace_root / "pmd-tool" / "feedfacefeedfacefeedfacefeedface"
+    assert project_dir == workspace_dir / "project"
+    assert output_dir.is_dir()
+    assert logs_dir.is_dir()
+    assert meta_dir.is_dir()
+    assert (project_dir / "src" / "main" / "java" / "App.java").read_text(encoding="utf-8") == "class App {}\n"
+    assert (project_dir / "src" / "shared.txt").read_text(encoding="utf-8") == "keep me\n"
+    assert not (project_dir / "src" / "scans").exists()
+
+
+def test_resolve_pmd_ruleset_does_not_fallback_to_repo_root_or_cwd(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    meta_dir = tmp_path / "workspace" / "meta"
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    repo_only_ruleset = tmp_path / "repo-only.xml"
+    repo_only_ruleset.write_text("<ruleset name='cwd-only'/>\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(FileNotFoundError, match="repo-only.xml"):
+        external_tools._resolve_pmd_ruleset("repo-only.xml", str(project_root), meta_dir)
+
+
 async def _run_pmd_tool(
     monkeypatch,
     tmp_path: Path,
@@ -216,7 +268,7 @@ async def test_pmd_tool_creates_workspace_under_scan_workspace_root(monkeypatch,
     assert (workspace_dir / "logs").is_dir()
     assert (workspace_dir / "meta").is_dir()
     assert (workspace_dir / "project" / "src" / "main" / "java" / "App.java").is_file()
-    assert not (workspace_dir / "project" / "scans").exists()
+    assert not (workspace_dir / "project" / "scans" / "pmd-tool" / "feedfacefeedfacefeedfacefeedface").exists()
 
 
 @pytest.mark.asyncio

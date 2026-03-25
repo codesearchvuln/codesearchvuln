@@ -1223,20 +1223,34 @@ def _prepare_pmd_workspace(project_root: str) -> tuple[Path, Path, Path, Path, P
     meta_dir.mkdir(parents=True, exist_ok=True)
 
     project_root_path = Path(project_root)
-    ignore_names: set[str] = set()
+    workspace_parts: tuple[str, ...] = ()
     try:
         rel_workspace = os.path.relpath(workspace_dir.resolve(), project_root_path.resolve())
         if rel_workspace != "." and not rel_workspace.startswith(".."):
-            top_level_name = rel_workspace.split(os.sep, 1)[0]
-            if top_level_name and top_level_name != ".":
-                ignore_names.add(top_level_name)
+            workspace_parts = tuple(
+                part for part in Path(rel_workspace).parts if part not in {"", "."}
+            )
     except ValueError:
-        ignore_names.clear()
+        workspace_parts = ()
 
     ignore = None
-    if ignore_names:
-        def _ignore_workspace_prefix(_src: str, names: list[str]) -> set[str]:
-            return {name for name in names if name in ignore_names}
+    if workspace_parts:
+        def _ignore_workspace_prefix(src: str, names: list[str]) -> set[str]:
+            try:
+                rel_src = os.path.relpath(Path(src).resolve(), project_root_path.resolve())
+            except ValueError:
+                return set()
+
+            src_parts = tuple(part for part in Path(rel_src).parts if part not in {"", "."})
+            if not src_parts:
+                return set()
+            if len(src_parts) >= len(workspace_parts):
+                return set()
+            if src_parts != workspace_parts[:len(src_parts)]:
+                return set()
+
+            next_part = workspace_parts[len(src_parts)]
+            return {next_part} if next_part in names else set()
 
         ignore = _ignore_workspace_prefix
 
@@ -1268,20 +1282,13 @@ def _resolve_pmd_ruleset(ruleset: str, project_root: str, meta_dir: Path) -> str
         raise ValueError(f"PMD ruleset 不支持: {ruleset}")
 
     project_root_path = Path(project_root)
-    module_dir = Path(__file__).resolve().parent
-    repo_root = module_dir.parents[4]
-
-    candidate_paths: list[Path] = []
     candidate_path = Path(normalized_ruleset)
     if candidate_path.is_absolute():
-        candidate_paths.append(candidate_path)
+        host_ruleset_path = candidate_path
     else:
-        candidate_paths.append(project_root_path / normalized_ruleset)
-        candidate_paths.append(repo_root / normalized_ruleset)
-        candidate_paths.append(Path(normalized_ruleset).resolve())
+        host_ruleset_path = project_root_path / normalized_ruleset
 
-    host_ruleset_path = next((path for path in candidate_paths if path.exists()), None)
-    if host_ruleset_path is None:
+    if not host_ruleset_path.exists():
         raise FileNotFoundError(f"PMD ruleset 文件不存在: {normalized_ruleset}")
 
     try:
