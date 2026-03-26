@@ -452,10 +452,37 @@ def test_runner_dockerfiles_exist_for_all_migrated_scanners() -> None:
     assert "/opt/bandit-venv" in bandit_runner_text
     assert "WORKDIR /scan" in gitleaks_runner_text
     assert "gitleaks" in gitleaks_runner_text
+    assert "download_with_fallback() {" in gitleaks_runner_text
+    assert (
+        "https://gh-proxy.com/https://github.com/gitleaks/gitleaks/releases/download/"
+        in gitleaks_runner_text
+    )
+    assert (
+        "https://v6.gh-proxy.org/https://github.com/gitleaks/gitleaks/releases/download/"
+        in gitleaks_runner_text
+    )
     assert "WORKDIR /scan" in phpstan_runner_text
     assert "phpstan" in phpstan_runner_text
+    assert "download_with_fallback() {" in phpstan_runner_text
+    assert (
+        "https://gh-proxy.com/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"
+        in phpstan_runner_text
+    )
+    assert (
+        "https://v6.gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"
+        in phpstan_runner_text
+    )
     assert "WORKDIR /scan" in pmd_runner_text
     assert "pmd" in pmd_runner_text
+    assert "download_with_fallback() {" in pmd_runner_text
+    assert (
+        "https://gh-proxy.com/https://github.com/pmd/pmd/releases/download/pmd_releases%2F"
+        in pmd_runner_text
+    )
+    assert (
+        "https://v6.gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F"
+        in pmd_runner_text
+    )
     assert "WORKDIR /scan" in flow_parser_runner_text
     assert "flow_parser_runner.py" in flow_parser_runner_text
 

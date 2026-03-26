@@ -44,11 +44,26 @@ RUN --mount=type=cache,id=vulhunter-phpstan-runner-apt-lists,target=/var/lib/apt
     fi; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /var/cache/vulhunter-tools "${PHPSTAN_HOME}" /scan; \
+    download_with_fallback() { \
+      output="$1"; \
+      shift; \
+      for url in "$@"; do \
+        if curl -fL --connect-timeout 8 --max-time 60 "${url}" -o "${output}.tmp"; then \
+          mv "${output}.tmp" "${output}"; \
+          return 0; \
+        fi; \
+        rm -f "${output}.tmp"; \
+      done; \
+      return 1; \
+    }; \
     PHPSTAN_CACHE="/var/cache/vulhunter-tools/phpstan.phar"; \
     if [ ! -s "${PHPSTAN_CACHE}" ]; then \
-      curl -fL --connect-timeout 8 --max-time 60 \
-        "https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
-        -o "${PHPSTAN_CACHE}"; \
+      download_with_fallback \
+        "${PHPSTAN_CACHE}" \
+        "https://gh-proxy.com/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
+        "https://v6.gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
+        "https://gh-proxy.org/https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar" \
+        "https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar"; \
     fi; \
     cp "${PHPSTAN_CACHE}" "${PHPSTAN_HOME}/phpstan"; \
     chmod +x "${PHPSTAN_HOME}/phpstan"; \

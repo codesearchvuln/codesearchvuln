@@ -51,11 +51,26 @@ RUN --mount=type=cache,id=vulhunter-gitleaks-runner-apt-lists,target=/var/lib/ap
       aarch64|arm64) GITLEAKS_ARCH="arm64" ;; \
       *) echo "unsupported arch: ${ARCH}" >&2; exit 1 ;; \
     esac; \
+    download_with_fallback() { \
+      output="$1"; \
+      shift; \
+      for url in "$@"; do \
+        if curl -fL --connect-timeout 8 --max-time 60 "${url}" -o "${output}.tmp"; then \
+          mv "${output}.tmp" "${output}"; \
+          return 0; \
+        fi; \
+        rm -f "${output}.tmp"; \
+      done; \
+      return 1; \
+    }; \
     GITLEAKS_CACHE="/var/cache/vulhunter-tools/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz"; \
     if [ ! -s "${GITLEAKS_CACHE}" ]; then \
-      curl -fL --connect-timeout 8 --max-time 60 \
-        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
-        -o "${GITLEAKS_CACHE}"; \
+      download_with_fallback \
+        "${GITLEAKS_CACHE}" \
+        "https://gh-proxy.com/https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
+        "https://v6.gh-proxy.org/https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
+        "https://gh-proxy.org/https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz"; \
     fi; \
     tar -xzf "${GITLEAKS_CACHE}" -C /usr/local/bin gitleaks; \
     chmod +x /usr/local/bin/gitleaks; \

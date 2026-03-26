@@ -48,11 +48,26 @@ RUN --mount=type=cache,id=vulhunter-pmd-runner-apt-lists,target=/var/lib/apt/lis
     fi; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /var/cache/vulhunter-tools /scan; \
+    download_with_fallback() { \
+      output="$1"; \
+      shift; \
+      for url in "$@"; do \
+        if curl -fL --connect-timeout 8 --max-time 60 "${url}" -o "${output}.tmp"; then \
+          mv "${output}.tmp" "${output}"; \
+          return 0; \
+        fi; \
+        rm -f "${output}.tmp"; \
+      done; \
+      return 1; \
+    }; \
     PMD_CACHE="/var/cache/vulhunter-tools/pmd-dist-${PMD_VERSION}-bin.zip"; \
     if [ ! -s "${PMD_CACHE}" ]; then \
-      curl -fL --connect-timeout 8 --max-time 60 \
-        "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
-        -o "${PMD_CACHE}"; \
+      download_with_fallback \
+        "${PMD_CACHE}" \
+        "https://gh-proxy.com/https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
+        "https://v6.gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
+        "https://gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
+        "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip"; \
     fi; \
     rm -rf "${PMD_HOME}"; \
     unzip -q "${PMD_CACHE}" -d /opt; \
