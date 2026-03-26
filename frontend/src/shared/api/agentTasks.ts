@@ -159,6 +159,7 @@ export interface AgentFinding {
 
   suggestion: string | null;
   fix_code: string | null;
+  report?: string | null;
   ai_explanation: string | null;
   ai_confidence: number | null;
   confidence?: number | null;

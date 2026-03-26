@@ -239,6 +239,11 @@ export default function FindingDetailCodePanel({
 			aria-label={title}
 			className="order-2 xl:order-2 cyber-card p-5 min-h-0 flex flex-col gap-4"
 		>
+			<div>
+				<p className="text-[0.975rem] font-mono uppercase tracking-[0.24em] text-muted-foreground">
+					{title}
+				</p>
+			</div>
 			<div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar-dark space-y-4 pr-1">
 				{sections.length === 0 ? (
 					<div className="rounded-2xl border border-dashed border-slate-700/80 bg-slate-950/60 p-5 text-[1.1375rem] leading-[1.7] text-slate-400">
@@ -275,7 +280,7 @@ export default function FindingDetailCodePanel({
 										{section.locationLabel || "行号未提供"}
 									</span>
 									<span className="inline-flex items-center rounded-full border border-red-500/30 bg-red-950/45 px-3 py-1.5 font-mono text-[0.89375rem] text-red-200">
-										核心漏洞代码
+										{section.title}
 									</span>
 								</div>
 
