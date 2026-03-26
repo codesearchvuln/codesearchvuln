@@ -49,55 +49,54 @@
 @layer base {
 	/* ====== Light Mode ====== */
 	:root {
-		--background: 0 0% 100%;
-		--foreground: 0 0% 5%;
-		--card: 210 40% 98%;
-		--card-foreground: 0 0% 5%;
-		--popover: 0 0% 100%;
-		--popover-foreground: 0 0% 5%;
+			--background: 0 0% 100%;
+			--foreground: 0 0% 5%;            /* 保持，和 dark 的 98% 对称 */
+			--card: 210 40% 98%;
+			--card-foreground: 0 0% 5%;
+			--popover: 0 0% 100%;
+			--popover-foreground: 0 0% 5%;
 
-		--primary: 199 89% 48%;
-		--primary-foreground: 0 0% 100%;
+			--primary: 205 100% 40%;          /* ← 与 dark 统一，原来 199 89% 48% */
+			--primary-foreground: 0 0% 100%;
 
-		--secondary: 199 89% 48%;
-		--secondary-foreground: 0 0% 100%;
-		--success: 142 71% 45%;
-		--success-foreground: 0 0% 100%;
-		--muted: 210 40% 96%;
-		--muted-foreground: 215 35% 18%;
-		--accent: 262 83% 58%;
-		--accent-foreground: 0 0% 100%;
-		--destructive: 0 72% 51%;
-		--destructive-foreground: 0 0% 100%;
-		--warning: 32 95% 44%;
-		--warning-foreground: 0 0% 100%;
-		--border: 214 32% 70%;
-		--input: 214 32% 88%;
+			--secondary: 205 85% 36%;         /* ← 与 dark 统一 */
+			--secondary-foreground: 0 0% 100%;
+			--success: 142 60% 40%;           /* ← 与 dark 统一，原来 142 71% 45% */
+			--success-foreground: 0 0% 100%;
+			--muted: 210 20% 93%;             /* ← 更中性，原来 210 40% 96% 偏蓝 */
+			--muted-foreground: 210 15% 35%;  /* ← 核心改动：原 215 35% 18% 太深，现在更接近 dark 的 80% 亮度感 */
+			--accent: 205 90% 45%;            /* ← 与 dark 统一，原来 262 83% 58% 是紫色 */
+			--accent-foreground: 0 0% 100%;
+			--destructive: 0 80% 55%;         /* ← 与 dark 统一 */
+			--destructive-foreground: 0 0% 100%;
+			--warning: 38 85% 48%;            /* ← 与 dark 接近，原来 32 95% 44% */
+			--warning-foreground: 0 0% 100%;
+			--border: 210 25% 78%;            /* ← 稍微降饱和，原来 214 32% 70% */
+			--input: 210 20% 90%;             /* ← 与 border 统一风格 */
 
-		--ring: 199 89% 48%;
-		--radius: 4px;
+			--ring: 205 100% 40%;             /* ← 与 dark 统一 */
+			--radius: 4px;
 
-		/* Light mode specific */
-		--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-		--shadow-md: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
-		--shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
+			/* Light mode specific */
+			--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+			--shadow-md: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+			--shadow-lg: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
 
-		--shadow-focus: 0 0 0 3px rgba(14, 165, 233, 0.25);
-		--glow-primary: 0 2px 8px rgba(14, 165, 233, 0.15);
+			--shadow-focus: 0 0 0 3px rgba(14, 165, 233, 0.25);
+			--glow-primary: 0 2px 8px rgba(14, 165, 233, 0.15);
+			--glow-success: 0 2px 8px rgba(22, 163, 74, 0.15);
+			--glow-accent: 0 2px 8px rgba(14, 165, 233, 0.15);  /* ← 与 dark 统一，原来是紫色 */
+			--glow-cyan: 0 2px 8px rgba(2, 132, 199, 0.15);
+			--glow-red: 0 2px 8px rgba(220, 38, 38, 0.15);
 
-		--glow-success: 0 2px 8px rgba(22, 163, 74, 0.15);
-		--glow-accent: 0 2px 8px rgba(124, 58, 237, 0.15);
-		--glow-cyan: 0 2px 8px rgba(2, 132, 199, 0.15);
-		--glow-red: 0 2px 8px rgba(220, 38, 38, 0.15);
-
-		/* Theme-specific colors for utilities - 高对比度深色字体 */
-		--cyber-bg: #ffffff;
-		--cyber-bg-elevated: #f8fafc;
-		--cyber-border: #94a3b8;
-		--cyber-border-accent: rgba(14, 165, 233, 0.4);
-		--cyber-text: #0a0a0a;
-		--cyber-text-muted: #334155;
-		--cyber-hover-bg: #f1f5f9;
+			/* Theme-specific */
+			--cyber-bg: #ffffff;
+			--cyber-bg-elevated: #f8fafc;
+			--cyber-border: #94a3b8;
+			--cyber-border-accent: rgba(14, 165, 233, 0.4);
+			--cyber-text: #0a0a0a;
+			--cyber-text-muted: #4b6280;      /* ← 核心改动：原 #334155 太深，现在亮度更接近 dark 的 #cbd5f5 的对称感 */
+			--cyber-hover-bg: #f1f5f9;
 	}
 
 	/* ====== Dark Mode ====== */
