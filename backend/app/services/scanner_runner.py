@@ -27,6 +27,8 @@ class ScannerRunSpec:
     env: Dict[str, str]
     expected_exit_codes: list[int] = field(default_factory=lambda: [0])
     artifact_paths: list[str] = field(default_factory=list)
+    capture_stdout_path: str | None = None
+    capture_stderr_path: str | None = None
 
 
 @dataclass
@@ -55,6 +57,12 @@ def _write_retained_log(path: Path, text: str) -> str | None:
         return None
 
     path.write_text(content, encoding="utf-8")
+    return str(path)
+
+
+def _write_full_text(path: Path, text: str) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(text or ""), encoding="utf-8")
     return str(path)
 
 
@@ -139,12 +147,22 @@ def run_scanner_container_sync(
             on_container_started(container_id)
         wait_result = container.wait(timeout=max(1, int(spec.timeout_seconds)))
         exit_code = int((wait_result or {}).get("StatusCode", 1))
+        stdout_text = ""
+        stderr_text = ""
+        if spec.capture_stdout_path is not None or exit_code != 0:
+            stdout_text = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
+        if spec.capture_stderr_path is not None or exit_code != 0:
+            stderr_text = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
         retained_stdout_path: str | None = None
         retained_stderr_path: str | None = None
+        captured_stdout_path: str | None = None
+        captured_stderr_path: str | None = None
+        if spec.capture_stdout_path:
+            captured_stdout_path = _write_full_text(workspace / spec.capture_stdout_path, stdout_text)
+        if spec.capture_stderr_path:
+            captured_stderr_path = _write_full_text(workspace / spec.capture_stderr_path, stderr_text)
         keep_logs = exit_code != 0
         if keep_logs:
-            stdout_text = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
-            stderr_text = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
             retained_stdout_path = _write_retained_log(stdout_log_path, stdout_text)
             retained_stderr_path = _write_retained_log(stderr_log_path, stderr_text)
         log_retention = "nonzero_exit" if keep_logs else "dropped"
@@ -159,8 +177,8 @@ def run_scanner_container_sync(
                     "container_id": container_id,
                     "exit_code": exit_code,
                     "success": exit_code in expected_exit_codes,
-                    "stdout_path": retained_stdout_path,
-                    "stderr_path": retained_stderr_path,
+                    "stdout_path": captured_stdout_path or retained_stdout_path,
+                    "stderr_path": captured_stderr_path or retained_stderr_path,
                     "log_retention": log_retention,
                 },
                 ensure_ascii=False,
@@ -172,8 +190,8 @@ def run_scanner_container_sync(
             success=exit_code in expected_exit_codes,
             container_id=container_id,
             exit_code=exit_code,
-            stdout_path=retained_stdout_path,
-            stderr_path=retained_stderr_path,
+            stdout_path=captured_stdout_path or retained_stdout_path,
+            stderr_path=captured_stderr_path or retained_stderr_path,
             error=None if exit_code in expected_exit_codes else f"scanner container exited with code {exit_code}",
         )
     except DOCKER_EXCEPTION as exc:

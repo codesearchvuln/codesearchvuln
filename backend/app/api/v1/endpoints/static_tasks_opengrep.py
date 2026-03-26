@@ -680,7 +680,6 @@ async def _execute_opengrep_scan(
                 if use_jobs_option:
                     cmd.extend(["--jobs", str(jobs)])
                 cmd.append(str(runner_target_path))
-                shell_cmd = f"{shlex.join(cmd)} > /scan/output/report.json"
                 if report_file.exists():
                     report_file.unlink()
 
@@ -696,10 +695,11 @@ async def _execute_opengrep_scan(
                             getattr(settings, "SCANNER_OPENGREP_IMAGE", "vulhunter/opengrep-runner:latest")
                         ),
                         workspace_dir=str(workspace_dir),
-                        command=["/bin/sh", "-lc", shell_cmd],
+                        command=cmd,
                         timeout_seconds=timeout_seconds,
                         env=scan_env,
                         artifact_paths=["output/report.json"],
+                        capture_stdout_path="output/report.json",
                     ),
                     on_container_started=_on_container_started,
                 )
@@ -726,7 +726,6 @@ async def _execute_opengrep_scan(
                     )
                     use_jobs_option = False
                     cmd = ["opengrep", "--config", runner_rule_file, "--json", str(runner_target_path)]
-                    shell_cmd = f"{shlex.join(cmd)} > /scan/output/report.json"
                     if report_file.exists():
                         report_file.unlink()
                     result = await run_scanner_container(
@@ -736,10 +735,11 @@ async def _execute_opengrep_scan(
                                 getattr(settings, "SCANNER_OPENGREP_IMAGE", "vulhunter/opengrep-runner:latest")
                             ),
                             workspace_dir=str(workspace_dir),
-                            command=["/bin/sh", "-lc", shell_cmd],
+                            command=cmd,
                             timeout_seconds=timeout_seconds,
                             env=scan_env,
                             artifact_paths=["output/report.json"],
+                            capture_stdout_path="output/report.json",
                         ),
                         on_container_started=_on_container_started,
                     )

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -239,7 +238,6 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
 
             runner_rule_path = str(Path("/scan/meta") / Path(merged_rule_path).name)
             cmd = ["opengrep", "--config", runner_rule_path, "--json", "/scan/project"]
-            shell_cmd = f"{shlex.join(cmd)} > /scan/output/report.json"
             if report_file.exists():
                 report_file.unlink()
             process_result = await run_scanner_container(
@@ -249,13 +247,14 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
                         getattr(settings, "SCANNER_OPENGREP_IMAGE", "vulhunter/opengrep-runner:latest")
                     ),
                     workspace_dir=str(workspace_dir),
-                    command=["/bin/sh", "-lc", shell_cmd],
+                    command=cmd,
                     timeout_seconds=self.timeout_seconds,
                     env={
                         "NO_PROXY": "*",
                         "no_proxy": "*",
                     },
                     artifact_paths=["output/report.json"],
+                    capture_stdout_path="output/report.json",
                 )
             )
 

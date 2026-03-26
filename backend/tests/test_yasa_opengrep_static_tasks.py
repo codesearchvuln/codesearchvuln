@@ -513,5 +513,8 @@ async def test_execute_opengrep_scan_uses_short_lived_sessions_and_persists_find
     assert persist_session.findings[0].file_path == "src/app.py"
     assert metric_enqueues == ["project-1"]
     assert seen["spec"].image == "vulhunter/opengrep-runner:test"
-    assert seen["spec"].command[:2] == ["/bin/sh", "-lc"]
-    assert "/scan/output/report.json" in seen["spec"].command[2]
+    assert seen["spec"].command[:2] == ["opengrep", "--config"]
+    assert "--json" in seen["spec"].command
+    assert seen["spec"].command[-1] == "/scan/project"
+    assert seen["spec"].command[2].startswith("/scan/meta/")
+    assert seen["spec"].capture_stdout_path == "output/report.json"

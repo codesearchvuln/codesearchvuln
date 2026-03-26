@@ -252,8 +252,8 @@ async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch, tmp_pa
     assert session_factory.calls >= 2
     assert len(persist_session.findings) == 1
     assert seen["spec"].image == "vulhunter/phpstan-runner:test"
-    assert seen["spec"].command[:2] == ["/bin/sh", "-lc"]
-    assert "/scan/output/report.json" in seen["spec"].command[2]
+    assert seen["spec"].command[:3] == ["php", "/opt/phpstan/phpstan", "analyse"]
+    assert seen["spec"].capture_stdout_path == "output/report.json"
 
 
 @pytest.mark.asyncio

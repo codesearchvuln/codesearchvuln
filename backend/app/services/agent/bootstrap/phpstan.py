@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -235,7 +234,6 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
                 "--no-interaction",
                 f"--level={self.level}",
             ]
-            shell_cmd = f"{shlex.join(cmd)} > /scan/output/report.json"
             if report_file.exists():
                 report_file.unlink()
             process_result = await run_scanner_container(
@@ -245,11 +243,12 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
                         getattr(settings, "SCANNER_PHPSTAN_IMAGE", "vulhunter/phpstan-runner:latest")
                     ),
                     workspace_dir=str(workspace_dir),
-                    command=["/bin/sh", "-lc", shell_cmd],
+                    command=["php", "/opt/phpstan/phpstan", *cmd[1:]],
                     timeout_seconds=self.timeout_seconds,
                     env={},
                     expected_exit_codes=[0, 1],
                     artifact_paths=["output/report.json"],
+                    capture_stdout_path="output/report.json",
                 )
             )
 

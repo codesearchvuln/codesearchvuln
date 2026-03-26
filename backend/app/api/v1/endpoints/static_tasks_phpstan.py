@@ -3,7 +3,6 @@ import hashlib
 import json
 import logging
 import os
-import shlex
 import uuid
 import shutil
 import subprocess
@@ -587,12 +586,17 @@ async def _execute_phpstan_scan(
         report_file = output_dir / "report.json"
         if report_file.exists():
             report_file.unlink()
-        shell_cmd = (
-            f"phpstan analyse {shlex.quote(str(runner_target_path))} "
-            f"--error-format=json --no-progress --no-interaction "
-            f"--level={normalized_level} > /scan/output/report.json"
-        )
-        logger.info(f"Executing phpstan for task {task_id}: {shell_cmd}")
+        runner_command = [
+            "php",
+            "/opt/phpstan/phpstan",
+            "analyse",
+            str(runner_target_path),
+            "--error-format=json",
+            "--no-progress",
+            "--no-interaction",
+            f"--level={normalized_level}",
+        ]
+        logger.info("Executing phpstan for task %s: %s", task_id, runner_command)
 
         def _on_container_started(container_id: str) -> None:
             nonlocal active_container_id
@@ -606,11 +610,12 @@ async def _execute_phpstan_scan(
                     getattr(settings, "SCANNER_PHPSTAN_IMAGE", "vulhunter/phpstan-runner:latest")
                 ),
                 workspace_dir=str(workspace_dir),
-                command=["/bin/sh", "-lc", shell_cmd],
+                command=runner_command,
                 timeout_seconds=600,
                 env={},
                 expected_exit_codes=[0, 1],
                 artifact_paths=["output/report.json"],
+                capture_stdout_path="output/report.json",
             ),
             on_container_started=_on_container_started,
         )

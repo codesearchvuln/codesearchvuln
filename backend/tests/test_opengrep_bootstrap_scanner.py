@@ -125,9 +125,10 @@ async def test_opengrep_bootstrap_scanner_uses_runner_and_normalizes_findings(mo
     assert finding.severity == "ERROR"
     assert seen["spec"].image == "vulhunter/opengrep-runner:test"
     assert seen["spec"].workspace_dir == str(workspace_dir)
-    assert seen["spec"].command[:2] == ["/bin/sh", "-lc"]
-    assert "/scan/output/report.json" in seen["spec"].command[2]
-    assert "/scan/meta/" in seen["spec"].command[2]
+    assert seen["spec"].command[:2] == ["opengrep", "--config"]
+    assert seen["spec"].command[-2:] == ["--json", "/scan/project"]
+    assert seen["spec"].command[2].startswith("/scan/meta/")
+    assert seen["spec"].capture_stdout_path == "output/report.json"
 
 
 @pytest.mark.asyncio

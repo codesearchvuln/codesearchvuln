@@ -126,8 +126,8 @@ async def test_phpstan_bootstrap_scanner_parses_and_filters_security_findings(mo
     assert finding.extra.get("phpstan_identifier") == "security.eval"
     assert seen["spec"].image == "vulhunter/phpstan-runner:test"
     assert seen["spec"].workspace_dir == str(workspace_dir)
-    assert seen["spec"].command[:2] == ["/bin/sh", "-lc"]
-    assert "/scan/output/report.json" in seen["spec"].command[2]
+    assert seen["spec"].command[:3] == ["php", "/opt/phpstan/phpstan", "analyse"]
+    assert seen["spec"].capture_stdout_path == "output/report.json"
 
 
 @pytest.mark.asyncio
