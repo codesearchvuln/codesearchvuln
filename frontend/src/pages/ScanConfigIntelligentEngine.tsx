@@ -1,7 +1,6 @@
 import { Brain, KeyRound, Settings, Zap } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import EmbeddingConfig from "@/components/agent/EmbeddingConfig";
 import type {
 	LlmModelStatsSource,
 	LlmModelStatsStatus,

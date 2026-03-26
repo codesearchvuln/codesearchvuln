@@ -285,8 +285,10 @@ async def test_pmd(project_root: str):
 
     说明:
     - PMD 现在依赖 SCANNER_PMD_IMAGE 提供扫描镜像
-    - 本地 `docker compose up --build` 会先构建并一次性运行 pmd-runner 进行镜像预热
-    - 执行方式是按需启动的一次性 runner 容器，不是 backend 常驻服务
+    - 本地 `docker compose up --build` 会先构建并一次性运行 `pmd-runner` 做启动期 preflight / warmup，确认镜像和命令可用
+    - 该 compose service 完成检查后退出是预期行为，`restart: "no"` 不是故障
+    - 真正执行扫描时，backend 会通过 Docker SDK 基于 SCANNER_PMD_IMAGE 动态拉起临时 runner 容器
+    - 执行方式是运行期按需启动的一次性 runner 容器，不是 `pmd-runner` compose service 常驻参与扫描
     - 这里只是可选的手工 smoke test，不属于默认自动验收
     """
     print("\n" + "="*60)
@@ -302,7 +304,7 @@ async def test_pmd(project_root: str):
     print(f"工具描述: {tool.description[:200]}...")
     
     print("\n执行扫描...")
-    print("提示: 该 PMD 手工 smoke test 依赖 SCANNER_PMD_IMAGE，并通过按需 runner 容器执行。")
+    print("提示: 该 PMD 手工 smoke test 依赖 SCANNER_PMD_IMAGE，运行期会由 backend 通过 Docker SDK 动态拉起临时 runner 容器执行。")
     # 使用本仓库内提供的 PMD 规则文件进行测试
     result = await tool.execute(
         target_path=".",

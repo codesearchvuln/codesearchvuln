@@ -22,6 +22,12 @@ def test_default_compose_uses_local_images_by_default() -> None:
     assert not (REPO_ROOT / "docker-compose.prod.cn.yml").exists()
 
     compose_text = compose_path.read_text(encoding="utf-8")
+    assert "runner preflight / warmup" in compose_text
+    assert "一次性预热/自检容器" in compose_text
+    assert 'restart: "no"' in compose_text
+    assert "执行完检查后按预期退出" in compose_text
+    assert "Docker SDK" in compose_text
+    assert "动态拉起临时 runner 容器" in compose_text
     assert "image: vulhunter/backend-dev-local:latest" in compose_text
     assert "image: vulhunter/frontend-local:latest" in compose_text
     assert "vulhunter/backend-local:latest" not in compose_text
@@ -140,6 +146,11 @@ def test_default_compose_uses_local_images_by_default() -> None:
 def test_full_overlay_restores_full_local_build_defaults() -> None:
     full_overlay_text = (REPO_ROOT / "docker-compose.full.yml").read_text(encoding="utf-8")
 
+    assert "runner preflight / warmup" in full_overlay_text
+    assert "一次性预热/自检容器" in full_overlay_text
+    assert "执行完检查后按预期退出" in full_overlay_text
+    assert "Docker SDK" in full_overlay_text
+    assert "动态拉起临时 runner 容器" in full_overlay_text
     assert "vulhunter/backend-local:latest" in full_overlay_text
     assert "vulhunter/backend-dev-local:latest" not in full_overlay_text
     assert "vulhunter/frontend-local:latest" in full_overlay_text
@@ -269,6 +280,20 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
         assert 'cp "$ROOT_DIR/deploy/compose/docker-compose.prod.cn.yml"' in deb_build_script
     assert "https://pypi.tuna.tsinghua.edu.cn/simple" in compose_wrapper_script
     assert "https://pypi.tuna.tsinghua.edu.cn/simple" in compose_wrapper_ps1
+
+
+def test_readmes_document_runner_preflight_behavior() -> None:
+    root_readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    root_readme_en = (REPO_ROOT / "README_EN.md").read_text(encoding="utf-8")
+    backend_readme = (REPO_ROOT / "backend" / "README.md").read_text(encoding="utf-8")
+
+    assert "runner 预热 / 自检容器" in root_readme
+    assert "启动后退出属于预期行为" in root_readme
+    assert "runner preflight / warmup containers" in root_readme_en
+    assert "exiting after the check is expected" in root_readme_en
+    assert "one-shot runner preflight / warmup containers" in backend_readme
+    assert "Docker SDK" in backend_readme
+    assert "SCANNER_*_IMAGE" in backend_readme
 
 
 def test_backend_dev_entrypoint_validates_seeded_venv_before_skipping_sync() -> None:

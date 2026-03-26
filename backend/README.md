@@ -17,6 +17,8 @@ docker compose up -d --build
 
 Frontend is exposed at `http://localhost:3000`, backend at `http://localhost:8000`.
 If either host port is already in use, start Compose with `VULHUNTER_FRONTEND_PORT` / `VULHUNTER_BACKEND_PORT`, for example `VULHUNTER_BACKEND_PORT=18000 docker compose up -d --build`.
+The default startup also runs one-shot runner preflight / warmup containers for local scanner images; exiting after the check is expected and does not indicate a failure.
+Those compose services are not the runtime scan workers. During actual scans, backend uses the Docker SDK and `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE` to start temporary runner containers on demand.
 
 ### Default seed projects (persistent)
 

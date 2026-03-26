@@ -68,6 +68,9 @@ If you prefer plain Docker Compose:
 docker compose up -d --build
 ```
 
+This command also builds and runs a set of runner preflight / warmup containers so local scanner images are verified before backend starts.
+Those runner preflight / warmup containers are expected to stop after the check; exiting after the check is expected, and actual scan execution still happens in temporary runner containers started on demand by backend.
+
 ### 4. Open the application
 
 - Frontend: `http://localhost:3000`

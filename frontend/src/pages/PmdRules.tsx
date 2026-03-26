@@ -75,10 +75,6 @@ function createInitialTableState(initialState: DataTableQueryState): DataTableQu
   });
 }
 
-function formatPriorityList(priorities: number[]) {
-  if (priorities.length === 0) return "-";
-  return priorities.join(", ");
-}
 
 function getSourceLabel(source: string) {
   return source === "custom" ? "自定义 ruleset" : "内置 ruleset";
@@ -109,10 +105,6 @@ function DetailInfoCard({
       </p>
     </div>
   );
-}
-
-function formatPriorityBadgeItems(priorities: number[]) {
-  return priorities.filter((priority) => Number.isFinite(priority));
 }
 
 function buildSelectionSummary({
@@ -193,12 +185,6 @@ export function PmdRulesetDetailPanel({
   onCopyRawXml: () => void | Promise<void>;
 }) {
   const languages = (ruleset.languages || []).filter((language) => language && language.trim());
-  const priorities = formatPriorityBadgeItems(ruleset.priorities || []);
-  const externalInfoUrls = (ruleset.external_info_urls || []).filter(
-    (url) => url && url.trim(),
-  );
-  const description = ruleset.description?.trim() || "暂无 ruleset 说明";
-
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="space-y-6">

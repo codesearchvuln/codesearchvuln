@@ -68,6 +68,9 @@ scripts\compose-up-with-fallback.bat
 docker compose up -d --build
 ```
 
+该命令会同时预构建并运行一组 runner 预热 / 自检容器，用来确认本地扫描镜像已经可用。
+这些容器启动后退出属于预期行为，并非故障；真正执行扫描时，backend 会再按镜像名动态拉起临时 runner 容器。
+
 ### 4. 访问服务
 
 - 前端：`http://localhost:3000`

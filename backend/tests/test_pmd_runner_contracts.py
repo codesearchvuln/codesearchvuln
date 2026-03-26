@@ -72,6 +72,10 @@ def test_external_tools_manual_pmd_section_documents_runner_requirements() -> No
     assert "SCANNER_PMD_IMAGE" in manual_text
     assert "按需" in manual_text
     assert "runner 容器" in manual_text
+    assert "启动期 preflight / warmup" in manual_text
+    assert 'restart: "no"' in manual_text
+    assert "Docker SDK" in manual_text
+    assert "动态拉起临时 runner 容器" in manual_text
     assert "手工 smoke test" in manual_text
     assert "默认自动验收" in manual_text
     assert "docker compose up --build" in manual_text

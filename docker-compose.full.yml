@@ -3,6 +3,11 @@
 # =============================================
 # 用法:
 # docker compose -f docker-compose.yml -f docker-compose.full.yml up -d --build
+# 注意: backend 依赖下方 runner services 进行启动期 runner preflight / warmup。
+# 这些 runner 是一次性预热/自检容器，不是常驻服务；执行完检查后按预期退出。
+# `restart: "no"` 与 `condition: service_completed_successfully` 共同构成本地默认可用性的启动门禁。
+# 真正执行扫描时，backend 会通过 Docker SDK 按 `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE`
+# 动态拉起临时 runner 容器；下方 compose services 仅负责本地镜像预热与可执行性校验。
 
 services:
   backend:
@@ -92,6 +97,9 @@ services:
       flow-parser-runner:
         condition: service_completed_successfully
 
+  # One-shot runner preflight / warmup services for local development.
+  # They build local scanner images and verify the command is runnable.
+  # `restart: "no"` is intentional because these checks are expected to exit after completion.
   yasa-runner:
     image: vulhunter/yasa-runner-local:latest
     build:
