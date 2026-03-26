@@ -72,6 +72,64 @@ async def test_save_verification_result_generates_finding_identity():
 
 
 @pytest.mark.asyncio
+async def test_save_verification_result_accepts_legacy_batch_findings_payload():
+    buffered: List[Dict[str, Any]] = []
+
+    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+        buffered.extend(findings)
+        return len(findings)
+
+    tool = SaveVerificationResultTool(task_id="task-legacy", save_callback=_save_callback)
+    result = await tool.execute(
+        findings=[
+            {
+                "file_path": "src/auth.py",
+                "line_start": 42,
+                "line_end": 45,
+                "function_name": "login",
+                "title": "src/auth.py中login函数SQL注入漏洞",
+                "vulnerability_type": "sql_injection",
+                "severity": "high",
+                "description": "用户输入拼接 SQL",
+                "verification_result": {
+                    "verdict": "confirmed",
+                    "confidence": 0.91,
+                    "reachability": "reachable",
+                    "verification_evidence": "harness 触发了注入路径",
+                },
+            }
+        ]
+    )
+
+    assert result.success is True
+    assert isinstance(result.data, dict)
+    assert result.data.get("saved_count") == 1
+    assert buffered and buffered[0]["finding_identity"].startswith("fid:")
+
+
+def test_report_project_fallback_handles_non_numeric_confidence_text():
+    agent = ReportAgent(llm_service=_SequenceLLM([]), tools={}, event_emitter=None)
+    markdown = agent._build_project_report_fallback(
+        project_name="demo",
+        findings=[
+            {
+                "title": "命令注入风险",
+                "severity": "high",
+                "confidence": "高危",
+                "file_path": "MagickCore/delegate.c",
+                "line_start": 439,
+            }
+        ],
+        severity_stats={"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+        verdict_stats={"confirmed": 1, "likely": 0, "uncertain": 0, "false_positive": 0},
+        vuln_type_stats={"command_injection": 1},
+    )
+
+    assert "Top 风险条目" in markdown
+    assert "MagickCore/delegate.c:439" in markdown
+
+
+@pytest.mark.asyncio
 async def test_update_vulnerability_finding_rejects_verdict_patch():
     async def _update_callback(identity: str, patch: Dict[str, Any], reason: str) -> Dict[str, Any]:
         return {"finding_identity": identity, **patch}

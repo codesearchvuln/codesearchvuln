@@ -78,6 +78,27 @@ async def test_structured_description_markdown_contains_required_sections_and_co
 
 
 @pytest.mark.asyncio
+async def test_structured_description_markdown_filters_verifier_prefix_from_root_cause():
+    markdown = build_cn_structured_description_markdown(
+        file_path="src/delegate.c",
+        function_name="run_delegate",
+        vulnerability_type="command_injection",
+        title="delegate command injection",
+        description="命令参数进入危险调用点。",
+        code_snippet='system(sanitize_command);',
+        verification_evidence=(
+            "verifier=security-path-checker\n"
+            "用户可控参数在缺少白名单校验时进入 system 调用。"
+        ),
+        line_start=439,
+        line_end=443,
+    )
+
+    assert "verifier=" not in markdown
+    assert "用户可控参数在缺少白名单校验时进入 system 调用。" in markdown
+
+
+@pytest.mark.asyncio
 async def test_list_agent_findings_includes_description_markdown():
     task_id = "task-description-markdown"
     now = datetime(2026, 2, 25, 9, 0, 0, tzinfo=timezone.utc)

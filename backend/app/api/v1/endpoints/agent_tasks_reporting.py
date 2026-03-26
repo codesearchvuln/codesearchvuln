@@ -245,6 +245,23 @@ def _render_inline_markdown(text: str) -> str:
     return escaped
 
 
+def _split_markdown_table_row(line: str) -> List[str]:
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    cells = re.split(r"(?<!\\)\|", stripped)
+    return [cell.replace("\\|", "|").strip() for cell in cells]
+
+
+def _is_markdown_table_separator(line: str) -> bool:
+    cells = _split_markdown_table_row(line)
+    if not cells:
+        return False
+    return all(re.match(r"^:?-{3,}:?$", cell) for cell in cells)
+
+
 def _markdown_to_html(markdown_text: str) -> str:
     lines = markdown_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     html_parts: List[str] = []
@@ -287,14 +304,16 @@ def _markdown_to_html(markdown_text: str) -> str:
                 list_stack.append((indent, list_type))
         # else: 同级同类型，无需操作
 
-    for raw_line in lines:
-        line = raw_line.rstrip("\n")
+    index = 0
+    while index < len(lines):
+        line = lines[index].rstrip("\n")
         stripped = line.strip()
 
         if line.lstrip().startswith("```") and not in_code_block:
             _flush_paragraph()
             _close_all_lists()
             in_code_block = True
+            index += 1
             continue
 
         if in_code_block:
@@ -305,11 +324,50 @@ def _markdown_to_html(markdown_text: str) -> str:
                 in_code_block = False
             else:
                 code_lines.append(line)
+            index += 1
             continue
 
         if not stripped:
             _flush_paragraph()
             _close_all_lists()
+            index += 1
+            continue
+
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        if "|" in stripped and next_line and _is_markdown_table_separator(next_line):
+            _flush_paragraph()
+            _close_all_lists()
+            headers = _split_markdown_table_row(stripped)
+            separators = _split_markdown_table_row(next_line)
+            column_count = min(len(headers), len(separators))
+            if column_count == 0:
+                paragraph_lines.append(line)
+                index += 1
+                continue
+
+            html_parts.append("<table>")
+            html_parts.append("<thead><tr>")
+            for header in headers[:column_count]:
+                html_parts.append(f"<th>{_render_inline_markdown(header)}</th>")
+            html_parts.append("</tr></thead>")
+            html_parts.append("<tbody>")
+
+            index += 2
+            while index < len(lines):
+                row_line = lines[index]
+                row_stripped = row_line.strip()
+                if not row_stripped or "|" not in row_stripped:
+                    break
+                row_cells = _split_markdown_table_row(row_stripped)
+                if len(row_cells) < column_count:
+                    break
+                html_parts.append("<tr>")
+                for cell in row_cells[:column_count]:
+                    html_parts.append(f"<td>{_render_inline_markdown(cell)}</td>")
+                html_parts.append("</tr>")
+                index += 1
+
+            html_parts.append("</tbody></table>")
             continue
 
         heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
@@ -319,12 +377,14 @@ def _markdown_to_html(markdown_text: str) -> str:
             level = len(heading_match.group(1))
             title = _render_inline_markdown(heading_match.group(2))
             html_parts.append(f"<h{level}>{title}</h{level}>")
+            index += 1
             continue
 
         if stripped in {"---", "***", "___"}:
             _flush_paragraph()
             _close_all_lists()
             html_parts.append("<hr/>")
+            index += 1
             continue
 
         # 计算缩进级别（以2空格为1级，tab=4空格）
@@ -336,17 +396,20 @@ def _markdown_to_html(markdown_text: str) -> str:
             _flush_paragraph()
             _adjust_list_stack(indent_level, "ul")
             html_parts.append(f"<li>{_render_inline_markdown(ul_match.group(1))}</li>")
+            index += 1
             continue
 
-        ol_match = re.match(r"^\d+\.\s+(.+)$", stripped)
+        ol_match = re.match(r"^\d+[.)）]\s*(.+)$", stripped)
         if ol_match:
             _flush_paragraph()
             _adjust_list_stack(indent_level, "ol")
             html_parts.append(f"<li>{_render_inline_markdown(ol_match.group(1))}</li>")
+            index += 1
             continue
 
         _close_all_lists()
         paragraph_lines.append(line)
+        index += 1
 
     _flush_paragraph()
     _close_all_lists()
@@ -355,6 +418,82 @@ def _markdown_to_html(markdown_text: str) -> str:
         html_parts.append(f"<pre><code>{code_html}</code></pre>")
 
     return "\n".join(html_parts)
+
+
+def _strip_leading_markdown_heading(markdown_text: str, title_patterns: List[str]) -> str:
+    lines = markdown_text.split("\n")
+    index = 0
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    if index >= len(lines):
+        return ""
+
+    heading_match = re.match(r"^(#{1,6})\s+(.+)$", lines[index].strip())
+    if not heading_match:
+        return markdown_text
+
+    heading_text = heading_match.group(2).strip()
+    if not any(re.search(pattern, heading_text, re.IGNORECASE) for pattern in title_patterns):
+        return markdown_text
+
+    index += 1
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    return "\n".join(lines[index:])
+
+
+def _strip_leading_markdown_rules(markdown_text: str) -> str:
+    lines = markdown_text.split("\n")
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped:
+            index += 1
+            continue
+        if stripped in {"---", "***", "___"}:
+            index += 1
+            while index < len(lines) and not lines[index].strip():
+                index += 1
+            continue
+        break
+    return "\n".join(lines[index:])
+
+
+def _shift_markdown_headings(markdown_text: str, level_offset: int = 1) -> str:
+    if not markdown_text:
+        return markdown_text
+    shifted_lines: List[str] = []
+    in_code_block = False
+    for raw_line in markdown_text.split("\n"):
+        stripped = raw_line.lstrip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            shifted_lines.append(raw_line)
+            continue
+        if not in_code_block:
+            heading_match = re.match(r"^(#{1,6})(\s+.+)$", raw_line)
+            if heading_match:
+                level = min(6, len(heading_match.group(1)) + level_offset)
+                shifted_lines.append(f"{'#' * level}{heading_match.group(2)}")
+                continue
+        shifted_lines.append(raw_line)
+    return "\n".join(shifted_lines)
+
+
+def _normalize_embedded_markdown(
+    markdown_text: Optional[str],
+    *,
+    title_patterns: List[str],
+    level_offset: int = 1,
+) -> str:
+    content = _normalize_optional_text(markdown_text)
+    if not content:
+        return ""
+    content = str(content).strip()
+    content = _strip_leading_markdown_heading(content, title_patterns)
+    content = _strip_leading_markdown_rules(content)
+    content = _shift_markdown_headings(content, level_offset=level_offset)
+    return content.strip()
 
 
 def _render_markdown_to_pdf_bytes(markdown_text: str) -> bytes:
@@ -382,6 +521,10 @@ def _render_markdown_to_pdf_bytes(markdown_text: str) -> bytes:
     code {{ font-family: "Menlo", "Consolas", monospace; }}
     ul, ol {{ margin: 8px 0 8px 22px; }}
     li {{ margin: 4px 0; }}
+    table {{ width: 100%; border-collapse: collapse; margin: 12px 0; table-layout: fixed; }}
+    thead th {{ background: #f9fafb; }}
+    th, td {{ border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; vertical-align: top; word-break: break-word; }}
+    tr {{ break-inside: avoid; }}
   </style>
 </head>
 <body>
@@ -404,15 +547,19 @@ def _build_task_export_markdown(
     report_descriptions: Dict[str, Dict[str, Optional[str]]],
     project_report_fallback: str,
 ) -> str:
-    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    project_report = _normalize_optional_text(getattr(task, "report", None)) or project_report_fallback
+    project_report_raw = _normalize_optional_text(getattr(task, "report", None)) or project_report_fallback
+    project_report = _normalize_embedded_markdown(
+        project_report_raw,
+        title_patterns=[
+            r"安全审计.*报告",
+            r"安全扫描.*报告",
+            r"审计导出报告",
+        ],
+        level_offset=1,
+    )
 
     lines: List[str] = []
     lines.append("# 安全审计导出报告")
-    lines.append("")
-    lines.append(f"- **项目名称:** {_escape_markdown_inline(project.name)}")
-    lines.append(f"- **任务 ID:** `{str(task.id)[:8]}...`")
-    lines.append(f"- **导出时间:** {generated_at}")
     lines.append("")
     lines.append("## 项目报告")
     lines.append("")
@@ -436,9 +583,21 @@ def _build_task_export_markdown(
                 finding_id=str(getattr(finding_row, "id", "") or ""),
                 finding_data=finding_payload,
             )
-        lines.append(f"## 漏洞报告 {index}")
+        finding_report = _normalize_embedded_markdown(
+            finding_report,
+            title_patterns=[
+                r"漏洞详情报告",
+                r"漏洞报告",
+            ],
+            level_offset=1,
+        )
+        finding_title = _normalize_optional_text(getattr(finding_row, "title", None))
+        if finding_title:
+            lines.append(f"## 漏洞报告 {index}: {_escape_markdown_inline(finding_title)}")
+        else:
+            lines.append(f"## 漏洞报告 {index}")
         lines.append("")
-        lines.append(str(finding_report).strip())
+        lines.append(str(finding_report).strip() if finding_report else "_无漏洞报告内容_")
         lines.append("")
 
     return "\n".join(lines)

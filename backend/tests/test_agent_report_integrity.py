@@ -174,7 +174,67 @@ async def test_generate_report_falls_back_to_generated_finding_report_when_missi
 
     body = response.body.decode("utf-8")
     assert "## 漏洞报告 1" in body
-    assert "# 漏洞详情报告：Fallback Finding" in body
+    assert "漏洞详情报告：Fallback Finding" not in body
+    assert "### 报告信息" in body
+    assert "Fallback Finding" in body
+
+
+def test_markdown_to_html_renders_markdown_tables():
+    markdown = """# 标题
+
+| 属性 | 内容 |
+|------|------|
+| 项目 | ImageMagick |
+| 风险 | 高 |
+"""
+
+    html = reporting_endpoint._markdown_to_html(markdown)
+
+    assert "<table>" in html
+    assert "<thead><tr>" in html
+    assert "<th>属性</th>" in html
+    assert "<td>ImageMagick</td>" in html
+
+
+def test_markdown_to_html_supports_parenthesized_ordered_list():
+    markdown = """漏洞描述：
+1) 代码证据：MagickCore/delegate.c lines 408-422
+2）危险调用：system(sanitize_command)
+"""
+    html = reporting_endpoint._markdown_to_html(markdown)
+
+    assert "<ol>" in html
+    assert "<li>代码证据：MagickCore/delegate.c lines 408-422</li>" in html
+    assert "<li>危险调用：system(sanitize_command)</li>" in html
+
+
+@pytest.mark.asyncio
+async def test_generate_report_strips_redundant_embedded_titles():
+    task = _make_task(
+        report="# 安全审计报告\n\n## 报告信息\n\n| 字段 | 值 |\n|---|---|\n| 项目 | Demo |"
+    )
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-1",
+        report="# 漏洞详情报告：XSS\n\n## 报告信息\n\n- 位置: src/app.py:1",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await generate_audit_report(
+        task_id="task-1",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert body.count("# 安全审计导出报告") == 1
+    assert "# 安全审计报告" not in body
+    assert "漏洞详情报告：XSS" not in body
+    assert "### 报告信息" in body
 
 
 @pytest.mark.asyncio

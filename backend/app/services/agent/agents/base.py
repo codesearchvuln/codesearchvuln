@@ -53,6 +53,7 @@ TOOL_ALIAS_CANDIDATES: Dict[str, List[str]] = {
     "list": ["list_files"],
     "smart_scan": ["smart_scan", "quick_audit", "pattern_match", "search_code", "get_code_window"],
     "quick_audit": ["quick_audit", "smart_scan", "pattern_match", "search_code", "get_code_window"],
+    "save_verification_results": ["save_verification_result"],
 }
 VIRTUAL_TOOL_NAMES: Set[str] = set()
 
@@ -5381,7 +5382,7 @@ class BaseAgent(ABC):
         
         Args:
             conversation_history: 对话记录
-            expected_tool: 预期的工具名称 (push_finding_to_queue | save_verification_results)
+            expected_tool: 预期的工具名称 (push_finding_to_queue | save_verification_result)
             agent_type: Agent 类型 (analysis | verification)
         
         Returns:
@@ -5722,9 +5723,8 @@ user: Observation: 数据库连接失败
                         # 成功判断：工具未返回错误，且有"已保存"/"成功"/"buffered"等成功标志
                         tool_succeeded = (
                             result
-                            and not result_str.startswith("")
-                            and not result_str.startswith("")
                             and not result_str.startswith("Error:")
+                            and not result_str.startswith("错误:")
                             and (
                                 "已保存" in result_str
                                 or "成功" in result_str

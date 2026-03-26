@@ -597,6 +597,33 @@ class ReportAgent(BaseAgent):
     ) -> str:
         """LLM 失败时的项目级风险报告兜底模板。"""
         total = len(findings)
+
+        def _coerce_confidence(value: Any) -> float:
+            if value is None:
+                return 0.0
+            if isinstance(value, (int, float)):
+                return float(value)
+            text = str(value).strip().lower()
+            if not text:
+                return 0.0
+            try:
+                return float(text.rstrip("%"))
+            except Exception:
+                pass
+            severity_alias = {
+                "critical": 0.95,
+                "严重": 0.95,
+                "high": 0.85,
+                "高危": 0.85,
+                "medium": 0.6,
+                "中危": 0.6,
+                "low": 0.35,
+                "低危": 0.35,
+                "info": 0.2,
+                "信息": 0.2,
+            }
+            return severity_alias.get(text, 0.0)
+
         top_findings = sorted(
             [item for item in findings if isinstance(item, dict)],
             key=lambda item: (
@@ -604,7 +631,7 @@ class ReportAgent(BaseAgent):
                     str(item.get("severity") or "").strip().lower(),
                     9,
                 ),
-                -(float(item.get("confidence") or 0) if str(item.get("confidence") or "").strip() else 0),
+                -_coerce_confidence(item.get("confidence")),
             ),
         )[:10]
 

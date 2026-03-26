@@ -685,13 +685,13 @@ class SaveVerificationResultTool(AgentTool):
 
     async def _execute(
         self,
-        file_path: str,
-        line_start: int,
-        function_name: str,
-        title: str,
-        vulnerability_type: str,
-        severity: str,
-        confidence: float,
+        file_path: Optional[str] = None,
+        line_start: Optional[int] = None,
+        function_name: Optional[str] = None,
+        title: Optional[str] = None,
+        vulnerability_type: Optional[str] = None,
+        severity: Optional[str] = None,
+        confidence: Optional[float] = None,
         status: Optional[str] = None,
         description: Optional[str] = None,
         finding_identity: Optional[str] = None,
@@ -736,6 +736,109 @@ class SaveVerificationResultTool(AgentTool):
             ToolResult，包含 saved、total_saved、message
         """
         task_id = self.task_id
+
+        # 兼容旧版批量入参：{"findings": [{...}, {...}]}
+        # 新规范仍推荐单条调用；这里仅做鲁棒性兜底，避免因历史提示词导致整批失败。
+        findings_payload = kwargs.get("findings")
+        if isinstance(findings_payload, list):
+            candidate_findings = [item for item in findings_payload if isinstance(item, dict)]
+            if not candidate_findings:
+                return ToolResult(
+                    success=False,
+                    error="findings 为空或格式无效",
+                    data={"saved": False, "total_saved": int(self._saved_count or 0)},
+                )
+            attempted_count = 0
+            saved_count = 0
+            failed_count = 0
+            for item in candidate_findings:
+                attempted_count += 1
+                verification_payload = (
+                    item.get("verification_result")
+                    if isinstance(item.get("verification_result"), dict)
+                    else {}
+                )
+                result = await self._execute(
+                    file_path=item.get("file_path"),
+                    line_start=item.get("line_start"),
+                    line_end=item.get("line_end"),
+                    function_name=item.get("function_name"),
+                    title=item.get("title"),
+                    vulnerability_type=item.get("vulnerability_type"),
+                    severity=item.get("severity"),
+                    confidence=verification_payload.get("confidence", item.get("confidence")),
+                    status=verification_payload.get("status", item.get("status")),
+                    description=item.get("description"),
+                    finding_identity=item.get("finding_identity"),
+                    source=item.get("source"),
+                    sink=item.get("sink"),
+                    dataflow_path=item.get("dataflow_path"),
+                    is_verified=item.get("is_verified"),
+                    cvss_score=item.get("cvss_score"),
+                    cvss_vector=item.get("cvss_vector"),
+                    poc_code=item.get("poc_code"),
+                    suggestion=item.get("suggestion"),
+                    verdict=verification_payload.get("verdict", item.get("verdict")),
+                    reachability=verification_payload.get("reachability", item.get("reachability")),
+                    verification_evidence=verification_payload.get(
+                        "verification_evidence",
+                        item.get("verification_evidence"),
+                    ),
+                    cwe_id=item.get("cwe_id"),
+                    poc_plan=verification_payload.get("poc_plan", item.get("poc_plan")),
+                    code_snippet=item.get("code_snippet"),
+                    function_trigger_flow=verification_payload.get(
+                        "function_trigger_flow",
+                        item.get("function_trigger_flow"),
+                    ),
+                    code_context=verification_payload.get("code_context", item.get("code_context")),
+                    localization_status=verification_payload.get(
+                        "localization_status",
+                        item.get("localization_status"),
+                    ),
+                )
+                if result.success and isinstance(result.data, dict) and (
+                    bool(result.data.get("saved")) or bool(result.data.get("already_saved"))
+                ):
+                    saved_count += 1
+                elif result.success:
+                    # buffered 也算执行成功，只是不一定已落库
+                    saved_count += 0
+                else:
+                    failed_count += 1
+
+            return ToolResult(
+                success=failed_count == 0,
+                data={
+                    "saved": saved_count > 0,
+                    "attempted_count": attempted_count,
+                    "saved_count": saved_count,
+                    "failed_count": failed_count,
+                    "total_saved": int(self._saved_count or 0),
+                    "message": (
+                        f"批量保存完成：saved={saved_count}, failed={failed_count}, "
+                        f"attempted={attempted_count}"
+                    ),
+                },
+            )
+
+        file_path = str(file_path or kwargs.get("path") or "unknown").strip() or "unknown"
+        try:
+            line_start = max(1, int(line_start if line_start is not None else 1))
+        except Exception:
+            line_start = 1
+        try:
+            line_end = int(line_end) if line_end is not None else line_start
+        except Exception:
+            line_end = line_start
+        line_end = max(line_start, line_end)
+
+        function_name = str(function_name or "").strip() or f"<function_at_line_{line_start}>"
+        title = str(title or "").strip() or f"{file_path}中{function_name}函数漏洞"
+        vulnerability_type = str(vulnerability_type or "unknown").strip() or "unknown"
+        severity = str(severity or "medium").strip() or "medium"
+        if confidence is None:
+            confidence = kwargs.get("ai_confidence", 0.5)
 
         try:
             normalized_confidence = max(0.0, min(float(confidence), 1.0))

@@ -337,7 +337,7 @@ for current_user, from_user, to_user, amount in payloads:
     └─> 构造 finding 对象（含 verification_result）
 
 步骤6: 持久化（必须）
-    └─> save_verification_results 保存结果
+    └─> save_verification_result 保存结果
     └─> 输出 Final Answer（仅摘要，无详情）
 ```
 
