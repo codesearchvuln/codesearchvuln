@@ -1,33 +1,53 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function loadTsconfig(configPath: string) {
-  const configText = execFileSync(
-    process.execPath,
-    ["./node_modules/typescript/bin/tsc", "--showConfig", "-p", configPath],
-    {
-      cwd: frontendDir,
-      encoding: "utf8",
-    },
+function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]) {
+  return ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+    getCanonicalFileName: (fileName) =>
+      ts.sys.useCaseSensitiveFileNames ? fileName : fileName.toLowerCase(),
+    getCurrentDirectory: () => frontendDir,
+    getNewLine: () => ts.sys.newLine,
+  });
+}
+
+function loadRawTsconfig(configPath: string) {
+  const result = ts.readConfigFile(
+    path.join(frontendDir, configPath),
+    ts.sys.readFile,
   );
 
-  return JSON.parse(configText) as {
-    compilerOptions?: {
-      allowImportingTsExtensions?: boolean;
-      types?: string[];
-    };
+  if (result.error) {
+    throw new Error(formatDiagnostics([result.error]));
+  }
+
+  return result.config as {
     references?: Array<{ path?: string }>;
-    files?: string[];
   };
 }
 
+function loadResolvedTsconfig(configPath: string) {
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    path.join(frontendDir, configPath),
+    {},
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+        throw new Error(formatDiagnostics([diagnostic]));
+      },
+    },
+  );
+
+  assert.ok(parsed, `Unable to load ${configPath}`);
+  return parsed;
+}
+
 test("root tsconfig references the dedicated test project", () => {
-  const rootConfig = loadTsconfig("tsconfig.json");
+  const rootConfig = loadRawTsconfig("tsconfig.json");
 
   assert.ok(
     rootConfig.references?.some((reference) => reference.path === "./tsconfig.test.json"),
@@ -35,24 +55,24 @@ test("root tsconfig references the dedicated test project", () => {
 });
 
 test("test project includes staticAnalysisViewModel.test.ts with node types enabled", () => {
-  const testConfig = loadTsconfig("tsconfig.test.json");
-  const typecheck = spawnSync(
-    process.execPath,
-    ["./node_modules/typescript/bin/tsc", "-p", "tsconfig.test.json", "--noEmit"],
-    {
-      cwd: frontendDir,
-      encoding: "utf8",
-    },
-  );
-  const combinedOutput = `${typecheck.stdout}${typecheck.stderr}`;
+  const testConfig = loadResolvedTsconfig("tsconfig.test.json");
+  const program = ts.createProgram({
+    rootNames: testConfig.fileNames,
+    options: testConfig.options,
+    projectReferences: testConfig.projectReferences,
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(program);
 
-  assert.equal(testConfig.compilerOptions?.allowImportingTsExtensions, true);
-  assert.deepEqual(testConfig.compilerOptions?.types, ["node"]);
+  assert.equal(testConfig.options.allowImportingTsExtensions, true);
+  assert.deepEqual(testConfig.options.types, ["node"]);
   assert.ok(
-    testConfig.files?.includes("./tests/staticAnalysisViewModel.test.ts"),
+    testConfig.fileNames.includes(
+      path.join(frontendDir, "tests/staticAnalysisViewModel.test.ts"),
+    ),
   );
-  assert.doesNotMatch(
-    combinedOutput,
-    /Cannot find type definition file for 'node'/,
+  assert.equal(
+    diagnostics.length,
+    0,
+    formatDiagnostics(diagnostics),
   );
 });

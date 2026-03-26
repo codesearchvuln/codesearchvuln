@@ -105,6 +105,7 @@ test("fetchTaskActivities maps verified severity stats for intelligent and hybri
       url.startsWith("/static-tasks/gitleaks/tasks") ||
       url.startsWith("/static-tasks/bandit/tasks") ||
       url.startsWith("/static-tasks/phpstan/tasks") ||
+      url.startsWith("/static-tasks/pmd/tasks") ||
       url.startsWith("/static-tasks/yasa/tasks")
     ) {
       return { data: [] };

@@ -467,6 +467,7 @@ test("buildStaticAnalysisTaskStatusSummary marks mixed completed and failed engi
     {
       engine: "yasa",
       engineLabel: "YASA",
+      isTimeout: false,
       message: "YASA process failed",
     },
   ]);
@@ -495,6 +496,7 @@ test("buildStaticAnalysisTaskStatusSummary falls back to diagnostics summary for
     {
       engine: "yasa",
       engineLabel: "YASA",
+      isTimeout: false,
       message: "rule-config parse failed at line 3",
     },
   ]);
@@ -527,6 +529,7 @@ test("buildStaticAnalysisTaskStatusSummary uses a generic fallback when a failed
     {
       engine: "opengrep",
       engineLabel: "Opengrep",
+      isTimeout: false,
       message: "任务已失败，请查看后端日志获取更多信息。",
     },
   ]);

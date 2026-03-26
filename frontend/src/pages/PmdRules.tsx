@@ -185,6 +185,7 @@ export function PmdRulesetDetailPanel({
   onCopyRawXml: () => void | Promise<void>;
 }) {
   const languages = (ruleset.languages || []).filter((language) => language && language.trim());
+  const description = ruleset.description?.trim() || "暂无 ruleset 说明";
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="space-y-6">
@@ -230,6 +231,7 @@ export function PmdRulesetDetailPanel({
               value={ruleset.ruleset_name?.trim() || "未标注 ruleset 标识"}
               mono
             />
+            <DetailInfoCard label="规则数" value={String(ruleset.rule_count ?? 0)} mono />
             <div className="rounded-md border border-border/60 bg-muted/30 p-3">
               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 编程语言
@@ -246,10 +248,17 @@ export function PmdRulesetDetailPanel({
                 )}
               </div>
             </div>
-
           </div>
         </div>
 
+        <div className="space-y-3">
+          <DetailSectionTitle>说明信息</DetailSectionTitle>
+          <div className="rounded-md border border-border/60 bg-muted/20 p-4">
+            <p className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
+              {description}
+            </p>
+          </div>
+        </div>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">

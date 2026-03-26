@@ -29,6 +29,7 @@ test("task activities build phpstan-only static route with tool=phpstan", async 
         ],
       };
     }
+    if (url.startsWith("/static-tasks/pmd/tasks")) return { data: [] };
     if (url.startsWith("/static-tasks/yasa/tasks")) return { data: [] };
     throw new Error(`Unexpected apiClient.get call: ${url}`);
   }) as typeof apiClient.get;
@@ -97,6 +98,7 @@ test("task activities groups phpstan with same batch static tasks", async () => 
         ],
       };
     }
+    if (url.startsWith("/static-tasks/pmd/tasks")) return { data: [] };
     if (url.startsWith("/static-tasks/yasa/tasks")) return { data: [] };
     throw new Error(`Unexpected apiClient.get call: ${url}`);
   }) as typeof apiClient.get;
