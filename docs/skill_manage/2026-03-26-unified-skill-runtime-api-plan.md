@@ -33,6 +33,8 @@
 - `/config.skillAvailability` 为避免破坏旧客户端，保留旧字段语义；新增 `unifiedSkillAvailability` 作为统一新视图。
 - 当前默认开发 compose 不是 unified workflow runtime 的验收环境。
 - 生产/发布环境禁止“启动时从 GitHub `main` 安装 skill”作为正式方案。
+- v1 中 `ReportAgent` 与其他非五个 prompt-agent 不支持 prompt-effective；prompt-effective 的 `agent_key` 闭集固定为 `recon | business_logic_recon | analysis | business_logic_analysis | verification`。
+- v1 中 `/skills/prompt-skills*` 继续作为可编辑管理 API；`prompt-<agent_key>@effective` 只读，不可直接编辑。
 
 ## 支持范围矩阵
 
@@ -183,6 +185,14 @@
 - `SKILL_REGISTRY_REQUIRED: bool`
 - `CODEX_HOME: str`
 
+这些配置必须同步落到以下入口：
+
+- `backend/app/core/config.py`
+- `backend/.env` 与发布环境变量模板
+- `docker-compose.yml`
+- `docker-compose.full.yml`
+- release / deploy 脚本
+
 固定运行时目录约束：
 
 - registry root 默认：`/app/data/mcp/skill-registry`
@@ -199,6 +209,11 @@
 3. `CODEX_SKILLS_AUTO_INSTALL=false`
 4. `SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP=false`
 5. 如 registry 不存在或无效，readiness 失败，不进入“静默继续”
+6. 正式发布只能消费以下其中一种受支持产物：
+   - 预构建镜像 + 预生成 `skill-registry` 快照
+   - 固定镜像摘要 + 固定版本的 `skill-registry` / `codex-home` 快照
+7. 正式部署禁止 `docker compose ... up -d --build`
+8. 正式部署禁止依赖目标机 `SKILL_SOURCE_ROOTS`
 
 ### 开发态默认策略
 
@@ -208,6 +223,22 @@
 2. 未提供 registry 时自动降级为 `scan-core only`
 3. prompt-effective 仍按用户/任务实时计算
 4. workflow runtime 不作为默认开发验收能力
+
+### liveness / readiness 语义
+
+- `liveness`：仅表示进程存活
+- `readiness`：必须覆盖
+  - DB migration 已完成
+  - registry 模式校验通过
+  - registry 完整性满足当前部署模式要求
+  - 若发生降级，降级状态必须对 readiness 可见
+
+正式环境约束：
+
+- registry 异常时，entrypoint 必须非零退出或 readiness fail-close
+- 不允许“`/health` 返回 ok，但 registry 已失效且系统静默降级”
+- `GET /health` 只作为 liveness
+- 必须新增或复用独立 readiness path，例如 `GET /ready`
 
 ### registry 发布与降级规则
 
@@ -247,6 +278,11 @@
 
 - release 升级时执行 registry version 校验，不匹配则强制重建或回滚失败
 - 回滚时必须清理新版本 registry，再恢复旧版本预生成 registry
+- last-known-good registry 必须有独立目录，不允许在原目录上原地覆盖后再尝试回退
+
+### 文档冲突优先级
+
+若与 `docs/delete_mcp/delete_mcp_plan.md` 冲突，本计划在 unified skill runtime 范围内优先；删除脚本、删除卷路径、删除 registry 构建链路等动作在本轮冻结，不得先行落地。
 
 ## Runtime 状态模型
 
@@ -269,6 +305,8 @@
 - 缓存 catalog / detail
 - 不承载 loaded-state
 - 可被 worker 复制为只读视图
+- 由 task runtime context 持有，创建于 `agent_tasks_execution.py`
+- `detail_cache_by_skill_id` 存储不可变快照；worker 只能读取，不能回写共享对象
 
 #### 2. AgentOrWorkerSkillSession
 
@@ -285,6 +323,8 @@ agent / worker 级 runtime state：
 - 记录当前 agent/worker 已加载的 skill
 - 记录当前 agent 可见的 active prompt/workflow state
 - 不和其他 worker 共享 loaded-state
+- 绑定到单个 agent 实例或单个 worker runtime bootstrap
+- worker 启动时由宿主显式注入初始 active state，不允许隐式继承其他 worker 的运行时状态
 
 ### 显式删除的模糊状态
 
@@ -316,6 +356,7 @@ agent / worker 级 runtime state：
 - `get_catalog_entry(skill_id: str) -> dict | None`
 - `get_cached_detail(skill_id: str) -> dict | None`
 - `cache_detail(skill_id: str, detail: dict) -> None`
+- `snapshot_for_worker() -> dict`
 
 #### AgentOrWorkerSkillSession
 
@@ -325,6 +366,7 @@ agent / worker 级 runtime state：
 - `set_active_workflow_skill(skill_id: str | None) -> None`
 - `get_active_prompt_skill(agent_key: str) -> dict | None`
 - `set_active_prompt_skill(agent_key: str, detail: dict | None) -> None`
+- `record_protocol_error(error_code: str, detail: str) -> None`
 
 ## 统一 resolver / loader 契约
 
@@ -347,6 +389,100 @@ agent / worker 级 runtime state：
 ### 失败语义
 
 上述接口必须返回稳定 reason code，不能用自由文本代替 machine-readable 状态。
+
+### 结构体硬约束
+
+#### UnifiedSkillCatalogResponse
+
+- `enabled: bool`
+- `total: int`
+- `limit: int`
+- `offset: int`
+- `items: list[UnifiedSkillCatalogEntry]`
+- `error: str | null`
+
+#### UnifiedSkillCatalogEntry
+
+- `skill_id: str`
+- `name: str`
+- `display_name: str`
+- `kind: "tool" | "workflow" | "prompt"`
+- `namespace: str`
+- `source: "scan_core" | "registry_manifest" | "prompt_effective"`
+- `summary: str`
+- `selection_label: str`
+- `entrypoint: str`
+- `runtime_ready: bool`
+- `reason: str`
+- `load_mode: "summary_only"`
+- `deferred_tools: list[str]`
+- `aliases: list[str]`
+- `has_scripts: bool`
+- `has_bin: bool`
+- `has_assets: bool`
+
+#### UnifiedSkillDetail
+
+- 继承 catalog 公共字段
+- `when_to_use: list[str]`
+- `how_to_apply: list[str]`
+- `constraints: list[str]`
+- `resources: list[ResourceRef]`
+- `resource_refs: list[ResourceRef]`
+- `prompt_sources: list[PromptSourceRef]`
+- `input_constraints: list[str]`
+- `usage_examples: list[str]`
+- `raw_content: str | null`
+- `effective_content: str | null`
+
+#### RegistrySnapshot
+
+- `registry_root: str`
+- `manifest_path: str`
+- `aliases_path: str`
+- `skills_dir: str`
+- `generated_at: str | null`
+- `schema_version: str | null`
+- `skills: list[dict]`
+- `aliases: dict[str, list[str]]`
+- `reason: str | null`
+
+#### GuardDecision
+
+- `allowed: bool`
+- `error_code: str | null`
+- `required_skill_id: str | null`
+- `caller: str`
+- `message: str`
+
+#### UnifiedSkillAvailabilityItem
+
+- `enabled: bool`
+- `startup_ready: bool`
+- `runtime_ready: bool`
+- `reason: str`
+- `source: "scan_core" | "registry_manifest" | "prompt_effective"`
+- `kind: "tool" | "workflow" | "prompt"`
+- `load_mode: "summary_only" | "detail_loaded" | "load_failed"`
+
+#### ResourceRef
+
+- `type: str`
+- `path: str`
+- `label: str`
+- `optional: bool`
+
+#### PromptSourceRef
+
+- `source_type: "builtin" | "custom_global" | "custom_agent"`
+- `label: str`
+- `active: bool`
+
+#### 默认值
+
+- `deferred_tools/resources/resource_refs/prompt_sources/input_constraints/usage_examples` 默认为空数组
+- 所有可选文本字段默认 `null`，不允许用缺字段表达
+- `reason` 必须总是返回稳定枚举值，不允许为空字符串
 
 ## 公共接口设计
 
@@ -397,10 +533,27 @@ agent / worker 级 runtime state：
 - `evidence_render_type`
 - `legacy_visible`
 
+这些字段在 `namespace=scan-core` 时的默认值固定为：
+
+- `display_type`: `"PROMPT" | "CLI"`
+- `category`: 非空字符串
+- `goal`: 非空字符串
+- `task_list`: `list[str]`，默认 `[]`
+- `input_checklist`: `list[str]`，默认 `[]`
+- `example_input`: 字符串，默认 `""`
+- `pitfalls`: `list[str]`，默认 `[]`
+- `sample_prompts`: `list[str]`，默认 `[]`
+- `phase_bindings`: `list[str]`，默认 `[]`
+- `mode_bindings`: `list[str]`，默认 `[]`
+- `evidence_view_support`: `bool`
+- `evidence_render_type`: `str | null`
+- `legacy_visible`: `bool`
+
 结论：
 
 - 本计划包含“从后端提供 scan-core 展示 metadata”
 - 不允许实现后继续默认依赖前端本地 `SKILL_TOOLS_CATALOG`
+- `display_type` 在前端迁移完成后成为唯一真相源，不再允许前端用 `has_scripts/has_bin` + 本地硬编码推断
 
 ### GET /skills/{skill_id}
 
@@ -444,10 +597,15 @@ detail 返回标准化 usage 文档，但必须保留旧客户端仍在消费的
 
 以下旧字段必须继续返回：
 
+- `enabled`
 - `mirror_dir`
 - `source_root`
 - `source_dir`
 - `source_skill_md`
+- `aliases`
+- `has_scripts`
+- `has_bin`
+- `has_assets`
 - `files_count`
 - `workflow_content`
 - `workflow_truncated`
@@ -461,16 +619,59 @@ detail 返回标准化 usage 文档，但必须保留旧客户端仍在消费的
 默认值规则：
 
 - workflow skill：
+  - `enabled=true`
+  - `aliases` 来自 registry manifest
+  - `has_scripts/has_bin/has_assets/files_count` 来自 mirror 实际内容
   - `workflow_content` 仅在 `include_workflow=true` 时返回
+  - `workflow_truncated=false`
+  - `workflow_error=null`
   - `test_supported=false`
   - `test_mode="disabled"`
+  - `test_reason=null`
+  - `default_test_project_name="libplist"`
+  - `tool_test_preset=null`
 - prompt skill：
+  - `enabled=true`
+  - `mirror_dir=""`
+  - `source_root=""`
+  - `source_dir=""`
+  - `source_skill_md=""`
+  - `aliases=[]`
+  - `has_scripts=false`
+  - `has_bin=false`
+  - `has_assets=false`
+  - `files_count=0`
   - `workflow_content=null`
+  - `workflow_truncated=false`
+  - `workflow_error=null`
   - `test_supported=false`
   - `test_mode="disabled"`
+  - `test_reason=null`
+  - `default_test_project_name="libplist"`
+  - `tool_test_preset=null`
 - tool skill：
-  - 保持 scan-core 当前兼容语义
-  - 对不存在的 workflow 文件字段返回空字符串或 `null`
+  - `enabled=true`
+  - `mirror_dir=""`
+  - `source_root=""`
+  - `source_dir=""`
+  - `source_skill_md=""`
+  - `aliases=[]`
+  - `has_scripts=false`
+  - `has_bin=false`
+  - `has_assets=false`
+  - `files_count=0`
+  - `workflow_content=null`
+  - `workflow_truncated=false`
+  - `workflow_error="scan_core_static_catalog"`
+  - 其余 test metadata 保持 scan-core 当前兼容语义
+
+### test metadata 闭集
+
+在前端类型放宽前，以下值不允许扩展：
+
+- `test_mode`: `"single_skill_strict" | "structured_tool" | "disabled"`
+- `default_test_project_name`: `"libplist"`
+- `tool_test_preset.project_name`: `"libplist"`
 
 ### /skills/{id}/test 与 /skills/{id}/tool-test
 
@@ -484,6 +685,39 @@ detail 返回标准化 usage 文档，但必须保留旧客户端仍在消费的
   - `skill_not_found`
 
 `runtime_ready=false` 的 tool skill 不允许测试，返回 `409 skill_not_runnable`。
+
+### 流式事件与结果载荷契约
+
+`/skills/{id}/test` 与 `/skills/{id}/tool-test` 的 SSE envelope 本轮继续保持现有结构，并明确固定为：
+
+- 通用 envelope：
+  - `type: str`
+  - `message: str | null`
+  - `tool_name: str | null`
+  - `tool_input: object | null`
+  - `tool_output: object | str | null`
+  - `metadata: object | null`
+  - `data: object | null`
+
+- 允许的 `event.type` 至少包括：
+  - `llm_thought`
+  - `llm_action`
+  - `tool_call`
+  - `tool_result`
+  - `project_cleanup`
+  - `result`
+  - `error`
+
+- `result.data` 必须继续兼容当前 `SkillTestResult`
+- `project_cleanup.metadata` 必须继续包含：
+  - `temp_dir`
+  - `cleanup_success`
+
+- tool evidence metadata key 集合至少继续兼容：
+  - `render_type`
+  - `display_command`
+  - `command_chain`
+  - `entries`
 
 ## /config 兼容策略
 
@@ -516,6 +750,17 @@ detail 返回标准化 usage 文档，但必须保留旧客户端仍在消费的
 - `source`
 - `kind`
 
+`reason` 枚举闭集至少包括：
+
+- `ready`
+- `no_active_prompt_sources`
+- `registry_not_built`
+- `registry_manifest_missing`
+- `registry_aliases_missing`
+- `registry_mirror_missing`
+- `registry_invalid`
+- `disabled_by_mode`
+
 ### 结论
 
 - 旧客户端继续读 `skillAvailability`
@@ -544,6 +789,12 @@ detail 返回标准化 usage 文档，但必须保留旧客户端仍在消费的
 
 prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 registry source。
 
+### 非五个 prompt-agent 的边界
+
+- `ReportAgent` 在 v1 接入统一 message builder，但不分配 prompt-effective
+- 其他不在五个 `agent_key` 闭集内的 agent 也不分配 prompt-effective
+- `markdown_memory` 的 `report.md` / 其他 memory key 不因为本计划扩展新的 prompt-effective keyspace
+
 ### 空来源行为
 
 当某个 effective prompt skill 没有任何 active source 时：
@@ -564,6 +815,19 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - 当旧注入路径删除后，该字段被忽略但继续接受
 
 不得出现“有时控制 catalog，有时控制 prompt 注入”的混合语义。
+
+额外约束：
+
+- 旧请求继续允许发送 `use_prompt_skills=true`
+- 旧字段被忽略时，不允许 silent behavior flip；必须产生稳定日志或 telemetry 标记
+- 兼容期结束前，不移除该字段的请求 schema
+
+### PromptSkillsPanel 边界
+
+- `/skills/prompt-skills*` 继续作为 CRUD/builtin toggle 管理 API
+- `prompt-<agent_key>@effective` 只读，不可编辑
+- v1 的 `agent_key` 闭集固定就是当前五个值
+- `PromptSkillsPanel` 在前端迁移前继续消费旧管理 API，不切到 unified skill detail
 
 ## 统一 prompt 注入与 memory 迁移
 
@@ -608,6 +872,17 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - 不再把 `shared.md` 中 `tool_catalog_sync` 大段正文整段搬进 prompt
 - `skills.md` / `shared.md` 继续保留给 debug、排障、历史回放
 
+### 旧 runtime input contract
+
+在旧注入路径删除前：
+
+- `config.prompt_skills` 与 `config.markdown_memory` 仍可保留在输入 contract 中
+- 但只能二选一：
+  - legacy path 生效，new builder 关闭
+  - new builder 生效，legacy path 完全忽略
+
+不允许双注入并存。
+
 ## skill_selection 解析与 turn 处理
 
 ### 统一解析位置
@@ -635,6 +910,22 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - skill_test
 
 若无法逐个迁移，则必须引入统一 BaseAgent turn-handler 收敛。
+
+## 系统 Prompt 合同
+
+### 结论
+
+agent-specific system prompt 与 `TOOL_USAGE_GUIDE` 继续保留领域指导作用，但不再作为 skill discovery / skill loading / tool gating 的真相源。
+
+### 明确要求
+
+- 新协议落地同轮，必须同步更新：
+  - `VERIFICATION_SYSTEM_PROMPT`
+  - 其他 agent system prompts
+  - `TOOL_USAGE_GUIDE`
+  - 对应 prompt contract 测试
+
+- 若系统 prompt 中仍保留工具使用示例，只能表达领域策略，不能与 unified runtime protocol 冲突。
 
 ## 工具门禁与统一 enforcement contract
 
@@ -678,6 +969,15 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 
 本轮默认采用方案 1：host/internal-only，不纳入 unified skill catalog。
 
+### model-visible / host-internal 分类
+
+必须新增一份权威分类表：
+
+- `model_visible_tool_skill_ids`
+- `host_internal_tool_names`
+
+所有 guard、parser、tool routing、测试均以这份表为准，避免 virtual tool / 递归执行路径出现误拦或漏拦。
+
 ## 前端兼容与展示迁移
 
 ### 兼容目标
@@ -700,6 +1000,33 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
   - `agent_key`
   - `display_name`
 - 前端不得通过解析 `prompt-analysis@effective` 自行猜测 agent 归属
+- 在满足以下条件前，不得删除前端 `SKILL_TOOLS_CATALOG` fallback：
+  - 后端已返回完整 scan-core 展示字段
+  - `display_type` 已成为唯一真相源
+  - 列表/详情/视图模型相关前端测试已改为以后端字段断言
+
+### 错误体契约
+
+以下接口在失败时必须统一返回 JSON：
+
+- `GET /skills/{id}`
+- `POST /skills/{id}/test`
+- `POST /skills/{id}/tool-test`
+
+结构固定为：
+
+- `error_code: str`
+- `detail: str`
+- `skill_id: str | null`
+- `kind: str | null`
+
+状态码矩阵至少包括：
+
+- `404 skill_not_found`
+- `409 unsupported_skill_kind`
+- `409 skill_not_runnable`
+- `409 skill_not_loaded`
+- `400 invalid_structured_test_payload`
 
 ## 迁移顺序
 
@@ -740,6 +1067,13 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 18. 前端接入 prompt-effective 的 `display_name/agent_key`
 19. 完成前端迁移后，才允许把 workflow / prompt skill 纳入默认 UI 展示面
 
+### Phase G：发布线收口
+
+20. 固化正式发布产物形状，禁止 release deploy `--build`
+21. 为 registry 加入 last-known-good 与 version 校验
+22. 区分 liveness / readiness，并让正式环境 readiness 纳入 registry 状态
+23. 明确本轮与 `docs/delete_mcp/delete_mcp_plan.md` 的优先级关系
+
 ## 禁止的半成品
 
 - API 已切 unified，但 agent 仍然整段注入 `skills.md`。
@@ -751,6 +1085,10 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - prompt-effective 被当作启动期静态 registry 产物。
 - scan-core 展示字段仍依赖前端本地静态 catalog。
 - 旧测试页仍默认 workflow/prompt skill 可调用 `/test` / `/tool-test`。
+- 旧 `config.prompt_skills` 与新 runtime message builder 同时生效造成双注入。
+- 系统 prompt / `TOOL_USAGE_GUIDE` 仍被当作 skill runtime 真相源。
+- 正式发布仍通过源码 + `docker compose up -d --build` 现场构建 workflow registry。
+- readiness 仍只检查 `/health` 且 registry 异常继续启动。
 
 ## 测试计划
 
@@ -761,6 +1099,7 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - `/skills/{id}` 返回统一 detail 与完整旧字段兼容矩阵
 - `/config.skillAvailability` 保持旧语义
 - `/config.unifiedSkillAvailability` 返回统一新视图
+- `/skills/{id}` 失败时返回统一错误 JSON
 
 ### prompt-effective 测试
 
@@ -770,6 +1109,7 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - 仅 agent-specific custom 时，只影响对应 `agent_key`
 - 无 active source 时，catalog 仍可见但 `runtime_ready=false`
 - user-scoped 查询不会串用户数据
+- `PromptSkillsPanel` 继续走旧 CRUD API，effective 视图保持只读
 
 ### runtime / session / worker 测试
 
@@ -777,6 +1117,7 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - worker 继承只读 catalog/detail cache，不继承其他 worker 的 `loaded_skill_ids`
 - `loaded_skill_ids` 只在 agent/worker 级有效
 - 重复选择同一 skill 走 host detail cache
+- `TaskHostSkillCache` 由 task runtime context 持有，worker 只拿快照
 
 ### parser / protocol 测试
 
@@ -784,6 +1125,7 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - `skill_selection` + `Action` 返回协议错误
 - `skill_selection` + `Final Answer` 返回协议错误
 - 所有 parser 调用面行为一致
+- `test_agent_react_parser_action_precedes_final.py` 在迁移后继续通过
 
 ### enforcement 测试
 
@@ -792,6 +1134,7 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - `ReportAgent` 私有工具路径也受 guard 控制
 - 复合工具不会绕过 guard
 - 非 scan-core 内部工具不被误拦截
+- `model_visible_tool_skill_ids` / `host_internal_tool_names` 分类表有测试守护
 
 ### 前端兼容测试
 
@@ -799,6 +1142,7 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - `ScanConfigExternalToolDetail` 可消费 unified detail + 旧字段兼容 shape
 - `PromptSkillsPanel` 可消费 prompt-effective `display_name/agent_key`
 - 任务创建请求继续允许发送 `use_prompt_skills`
+- 详情页 skill test SSE 消费无需修改就能继续运行
 
 ### 部署 / 发布测试
 
@@ -807,6 +1151,14 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - 空 source roots 不会覆盖掉旧 registry
 - 升级 / 回滚时 registry version 校验生效
 - 生产环境禁用从 `main` 自动安装 skill
+- 正式发布脚本不再使用 `docker compose ... --build`
+- readiness 与 liveness 分离，registry 异常时 readiness fail
+
+### 系统 Prompt 合同测试
+
+- `test_agent_prompt_contracts.py` 与 unified runtime contract 同轮迁移
+- 新 contract 明确系统 prompt 不是 skill discovery 真相源
+- 迁移完成前，该测试失败视为“提示词合同仍未收口”
 
 ## 验收标准
 
@@ -818,6 +1170,7 @@ prompt-effective 必须通过 `db + user_id` 解析，不能被当作纯静态 r
 - scan-core 页面不再依赖前端本地静态 catalog 才能正确展示。
 - 旧 `skillAvailability`、scan-core detail 页、skill test 页不被破坏。
 - 正式发布环境不依赖启动时联网拉取 `main` 分支 skill。
+- 正式发布环境的产物、registry、readiness、回滚流程均有唯一规定，不再依赖人工约定。
 
 ## 默认假设
 
