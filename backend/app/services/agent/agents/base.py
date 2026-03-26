@@ -3951,7 +3951,9 @@ class BaseAgent(ABC):
                 ("sink_snippet", "sink_code"),
                 ("path", "file_path"),
                 ("line", "start_line"),
+                ("line_start", "start_line"),
                 ("end", "end_line"),
+                ("line_end", "end_line"),
                 ("source_hint", "source_hints"),
                 ("sink_hint", "sink_hints"),
             ):

@@ -17,12 +17,12 @@
 - source_hints/sink_hints: 可选，补充语义提示
 
 ## Goal
-判断漏洞是否可达、是否受逻辑/授权路径约束。
+追踪污点从 Source 到 Sink 的传播链路，识别净化器与高风险汇点。
 
 ## Task List
 - 分析源到汇的数据流链路。
-- 计算控制流可达路径与关键条件。
-- 验证授权边界和业务逻辑约束。
+- 标记 taint_steps、source_nodes、sink_nodes 与置信度。
+- 判断是否存在有效净化或缺失校验。
 
 
 ## Inputs

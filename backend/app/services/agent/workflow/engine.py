@@ -948,6 +948,14 @@ class AuditWorkflowEngine:
         for item in buffered_findings:
             if not isinstance(item, dict):
                 continue
+            # 最小兜底：在最终入库同步前确保每条 finding 都带有可落库的报告字段，
+            # 避免出现 report 为空（_save_findings 仅识别 vulnerability_report/report）。
+            existing_report = str(
+                item.get("vulnerability_report") or item.get("report") or ""
+            ).strip()
+            if not existing_report:
+                item["vulnerability_report"] = self._build_verification_report_markdown(item)
+
             key = str(item.get("finding_identity") or "").strip()
             if not key:
                 key = (
