@@ -8,6 +8,8 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { LanguageProvider } from "@/shared/i18n";
 import "@/shared/utils/fetchWrapper"; // 初始化fetch拦截器
 
+localStorage.removeItem("theme");
+
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
         <LanguageProvider>
@@ -15,7 +17,7 @@ createRoot(document.getElementById("root")!).render(
                 <ThemeProvider
                     attribute="class"
                     defaultTheme="dark"
-                    enableSystem
+                    enableSystem={false}
                     disableTransitionOnChange={false}
                 >
                     <AppWrapper>
