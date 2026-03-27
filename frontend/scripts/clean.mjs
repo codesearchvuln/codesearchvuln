@@ -14,6 +14,16 @@ function isIgnorableRemovalError(error) {
 	);
 }
 
+function moveAsideTarget(target, options = {}) {
+	const renameSync = options.renameSync || fs.renameSync;
+	const now = options.now || Date.now;
+	const parentDir = path.dirname(target);
+	const baseName = path.basename(target);
+	const fallbackTarget = path.join(parentDir, `${baseName}.stale-${now()}`);
+	renameSync(target, fallbackTarget);
+	return fallbackTarget;
+}
+
 export function cleanTargets(
 	targets,
 	options = {},
@@ -34,6 +44,19 @@ export function cleanTargets(
 			}
 			if (error.code === "ENOENT") {
 				continue;
+			}
+			try {
+				const fallbackTarget = moveAsideTarget(target, options);
+				warn(
+					`Skipping direct cleanup for ${target}: ${error.code || "UNKNOWN"}${
+						error.message ? ` (${error.message})` : ""
+					}; moved aside to ${fallbackTarget}`,
+				);
+				continue;
+			} catch (renameError) {
+				if (!isIgnorableRemovalError(renameError)) {
+					throw renameError;
+				}
 			}
 			warn(
 				`Skipping cleanup for ${target}: ${error.code || "UNKNOWN"}${

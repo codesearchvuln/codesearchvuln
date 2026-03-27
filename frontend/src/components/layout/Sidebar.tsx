@@ -36,22 +36,22 @@ import { useLogoVariant } from "@/shared/branding/useLogoVariant";
 
 // Icon mapping for routes with consistent sizing
 const routeIcons: Record<string, React.ReactNode> = {
-	"/": <Bot className="w-[18px] h-[18px]" />,
-	"/dashboard": <LayoutDashboard className="w-[18px] h-[18px]" />,
-	"/projects": <FolderGit2 className="w-[18px] h-[18px]" />,
-	// "/instant-analysis": <Zap className="w-[18px] h-[18px]" />,
-	// "/audit-tasks": <ListTodo className="w-[18px] h-[18px]" />,
-	"/audit-rules": <Shield className="w-[18px] h-[18px]" />,
-	"/opengrep-rules": <Code className="w-[18px] h-[18px]" />,
-	"/tasks/static": <Shield className="w-[18px] h-[18px]" />,
-	"/tasks/intelligent": <Bot className="w-[18px] h-[18px]" />,
-	"/tasks/hybrid": <ListChecks className="w-[18px] h-[18px]" />,
-	"/scan-config/engines": <Zap className="w-[18px] h-[18px]" />,
-	"/scan-config/intelligent-engine": <Bot className="w-[18px] h-[18px]" />,
-	"/scan-config/external-tools": <Wrench className="w-[18px] h-[18px]" />,
-	"/agent-test": <Bot className="w-[18px] h-[18px]" />,
-	// "/prompts": <MessageSquare className="w-[18px] h-[18px]" />,
-	// "/recycle-bin": <Trash2 className="w-[18px] h-[18px]" />,
+	"/": <Bot className="w-[1.125rem] h-[1.125rem]" />,
+	"/dashboard": <LayoutDashboard className="w-[1.125rem] h-[1.125rem]" />,
+	"/projects": <FolderGit2 className="w-[1.125rem] h-[1.125rem]" />,
+	// "/instant-analysis": <Zap className="w-[1.125rem] h-[1.125rem]" />,
+	// "/audit-tasks": <ListTodo className="w-[1.125rem] h-[1.125rem]" />,
+	"/audit-rules": <Shield className="w-[1.125rem] h-[1.125rem]" />,
+	"/opengrep-rules": <Code className="w-[1.125rem] h-[1.125rem]" />,
+	"/tasks/static": <Shield className="w-[1.125rem] h-[1.125rem]" />,
+	"/tasks/intelligent": <Bot className="w-[1.125rem] h-[1.125rem]" />,
+	"/tasks/hybrid": <ListChecks className="w-[1.125rem] h-[1.125rem]" />,
+	"/scan-config/engines": <Zap className="w-[1.125rem] h-[1.125rem]" />,
+	"/scan-config/intelligent-engine": <Bot className="w-[1.125rem] h-[1.125rem]" />,
+	"/scan-config/external-tools": <Wrench className="w-[1.125rem] h-[1.125rem]" />,
+	"/agent-test": <Bot className="w-[1.125rem] h-[1.125rem]" />,
+	// "/prompts": <MessageSquare className="w-[1.125rem] h-[1.125rem]" />,
+	// "/recycle-bin": <Trash2 className="w-[1.125rem] h-[1.125rem]" />,
 };
 
 interface SidebarProps {
@@ -201,7 +201,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                     `}
 				>
 					{routeIcons[route.path] || (
-						<LayoutDashboard className="w-[18px] h-[18px]" />
+						<LayoutDashboard className="w-[1.125rem] h-[1.125rem]" />
 					)}
 				</span>
 
@@ -381,7 +381,7 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 											<span
 												className={`p-1.5 rounded-md ${isGroupActive ? "bg-primary/20" : "bg-muted/50"}`}
 											>
-												<GroupIcon className="w-[18px] h-[18px]" />
+												<GroupIcon className="w-[1.125rem] h-[1.125rem]" />
 											</span>
 											{!collapsed && (
 												<span

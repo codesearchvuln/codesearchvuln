@@ -149,6 +149,40 @@ const verificationSummaryEvidence: ToolEvidencePayload = {
   ],
 };
 
+function buildSearchHitsEvidence(count: number): ToolEvidencePayload {
+  return {
+    renderType: "search_hits",
+    commandChain: ["rg", "sed"],
+    displayCommand: "rg -> sed",
+    entries: Array.from({ length: count }, (_, index) => ({
+      filePath: `src/hit-${index + 1}.ts`,
+      matchLine: 80 + index,
+      matchText: `if (!guard_${index + 1}(user)) return false;`,
+      language: "typescript",
+    })),
+  };
+}
+
+function buildFileListEvidence(lineCount: number): ToolEvidencePayload {
+  return {
+    renderType: "file_list",
+    commandChain: ["list_files", "find"],
+    displayCommand: "list_files -> find",
+    entries: [
+      {
+        directory: "src",
+        recursive: true,
+        fileCount: lineCount,
+        dirCount: 3,
+        truncated: true,
+        recommendedNextDirectories: ["src/api"],
+        directories: Array.from({ length: 3 }, (_, index) => `src/dir-${index + 1}`),
+        files: Array.from({ length: lineCount }, (_, index) => `src/file-${index + 1}.ts`),
+      },
+    ],
+  };
+}
+
 test("ToolEvidencePreview 渲染搜索命中卡片摘要", () => {
   const markup = renderToStaticMarkup(
     createElement(ToolEvidencePreview, { evidence: searchEvidence }),
@@ -225,11 +259,89 @@ test("ToolEvidenceDetail 渲染 execution_result 详情", () => {
     }),
   );
 
-  assert.match(markup, /输入与目标/);
-  assert.match(markup, /关键证据/);
-  assert.match(markup, /结论与判断/);
-  assert.match(markup, /Harness 执行结果:1-1/);
+  assert.match(markup, /概览/);
+  // assert.match(markup, /关键证据/);
+  assert.match(markup, /查看原始数据/);
+  assert.match(markup, /print\(&#x27;payload detected&#x27;\)/);
   assert.match(markup, /cd \/tmp &amp;&amp; python3 -c/);
+  assert.doesNotMatch(markup, /输入与目标/);
+  assert.doesNotMatch(markup, /结论与判断/);
+});
+
+test("ToolEvidenceDetail 以统一分层视图渲染 search_hits 并仅展示前 8 条命中", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ToolEvidenceDetail, {
+      toolName: "search_code",
+      evidence: buildSearchHitsEvidence(10),
+      rawOutput: { success: true, data: "search-hits" },
+    }),
+  );
+
+  assert.match(markup, /概览/);
+  // assert.match(markup, /关键证据/);
+  assert.match(markup, /查看原始数据/);
+  assert.match(markup, /10 条命中/);
+  assert.match(markup, /仅展示前 8 条/);
+  assert.match(markup, /src\/hit-1\.ts:80 if \(!guard_1\(user\)\) return false;/);
+  assert.match(markup, /src\/hit-8\.ts:87 if \(!guard_8\(user\)\) return false;/);
+  assert.doesNotMatch(markup, /src\/hit-9\.ts/);
+  assert.doesNotMatch(markup, /输入与目标/);
+  assert.doesNotMatch(markup, /结论与判断/);
+});
+
+test("ToolEvidenceDetail 对 execution_result 优先展示结构化代码，其次失败态优先 stderr", () => {
+  const successMarkup = renderToStaticMarkup(
+    createElement(ToolEvidenceDetail, {
+      toolName: "run_code",
+      evidence: executionEvidence,
+      rawOutput: { success: true, data: "执行摘要" },
+    }),
+  );
+  const failedMarkup = renderToStaticMarkup(
+    createElement(ToolEvidenceDetail, {
+      toolName: "sandbox_exec",
+      evidence: {
+        renderType: "execution_result",
+        commandChain: ["sandbox_exec", "bash"],
+        displayCommand: "sandbox_exec -> bash",
+        entries: [
+          {
+            exitCode: 7,
+            status: "failed",
+            title: "沙箱命令执行",
+            executionCommand: "bash -lc 'id'",
+            stdoutPreview: "uid=1000",
+            stderrPreview: "permission denied",
+            artifacts: [],
+          },
+        ],
+      },
+      rawOutput: { success: false, data: "sandbox failure" },
+    }),
+  );
+
+  assert.match(successMarkup, /print\(&#x27;payload detected&#x27;\)/);
+  assert.match(failedMarkup, /permission denied/);
+  assert.doesNotMatch(failedMarkup, /uid=1000/);
+});
+
+test("ToolEvidenceDetail 对 file_list 按目录优先合并展示并限制前 40 行", () => {
+  const markup = renderToStaticMarkup(
+    createElement(ToolEvidenceDetail, {
+      toolName: "list_files",
+      evidence: buildFileListEvidence(42),
+      rawOutput: { success: true, data: "file-list" },
+    }),
+  );
+
+  assert.match(markup, /src/);
+  assert.match(markup, /42 文件/);
+  assert.match(markup, /3 目录/);
+  assert.match(markup, /结果已截断/);
+  assert.match(markup, /仅展示前 40 行/);
+  assert.ok(markup.indexOf("src/dir-1") < markup.indexOf("src/file-1.ts"));
+  assert.match(markup, /src\/file-37\.ts/);
+  assert.doesNotMatch(markup, /src\/file-38\.ts/);
 });
 
 test("parseToolEvidence 支持 analysis_summary 严格解析", () => {
@@ -342,5 +454,5 @@ test("ToolEvidenceDetail 对旧协议显示不可展示提示和原始 JSON 入�
   );
 
   assert.match(markup, /无法安全提炼结构化证据，已回退原始 JSON/);
-  assert.match(markup, /原始数据/);
+  assert.match(markup, /查看原始数据/);
 });

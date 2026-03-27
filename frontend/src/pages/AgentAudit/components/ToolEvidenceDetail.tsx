@@ -1,14 +1,20 @@
 import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import FindingCodeWindow from "./FindingCodeWindow";
 import type { ParsedToolEvidence, ToolEvidencePayload } from "../toolEvidence";
+import { asParsedToolEvidence, isToolEvidenceCapableTool } from "../toolEvidence";
 import {
-  asParsedToolEvidence,
-  isToolEvidenceCapableTool,
-  toolEvidenceLinesToCode,
-} from "../toolEvidence";
+  buildToolEvidenceDetailViewModel,
+  type ToolEvidencePrimaryPanel,
+} from "../toolEvidenceDetailModel";
 
-function TimelineSection({
+function DetailSection({
   title,
   children,
 }: {
@@ -23,167 +29,137 @@ function TimelineSection({
   );
 }
 
+function badgeToneClass(tone?: "default" | "success" | "warning" | "danger") {
+  if (tone === "success") {
+    return "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
+  }
+  if (tone === "warning") {
+    return "border-amber-500/40 bg-amber-500/10 text-amber-100";
+  }
+  if (tone === "danger") {
+    return "border-rose-500/40 bg-rose-500/10 text-rose-100";
+  }
+  return "";
+}
+
+function RawDataSection({
+  content,
+  triggerLabel,
+}: {
+  content: string;
+  triggerLabel: string;
+}) {
+  return (
+    <DetailSection title="原始数据">
+      <Collapsible className="rounded-xl border border-border/70 bg-background/40">
+        <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground">
+          <span>{triggerLabel}</span>
+          <ChevronDown className="h-4 w-4" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-3 pb-3">
+          <pre className="max-h-[60vh] overflow-auto rounded-lg border border-border/70 bg-background px-3 py-3 text-xs whitespace-pre-wrap break-words">
+            {content}
+          </pre>
+        </CollapsibleContent>
+      </Collapsible>
+    </DetailSection>
+  );
+}
+
 function RawOnlyEvidence({ evidence }: { evidence: ParsedToolEvidence }) {
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-100">
         {evidence.notices?.[0] || "仅能展示原始 JSON。"}
       </div>
-      <TimelineSection title="原始数据">
-        <pre className="text-xs whitespace-pre-wrap break-words">
-          {JSON.stringify(evidence.rawOutput ?? null, null, 2)}
-        </pre>
-      </TimelineSection>
+      <RawDataSection
+        content={JSON.stringify(evidence.rawOutput ?? null, null, 2)}
+        triggerLabel="查看原始数据"
+      />
     </div>
   );
 }
 
-function renderInputSection(payload: ToolEvidencePayload) {
-  const first = payload.entries[0] as any;
-  if (!first) return null;
-  if (payload.renderType === "search_hits") {
-    return <div className="font-mono text-sm">{first.filePath}:{first.matchLine}</div>;
+function renderPanel(panel: ToolEvidencePrimaryPanel) {
+  if (panel.kind === "code-window") {
+    return (
+      <FindingCodeWindow
+        code={panel.code}
+        displayLines={panel.displayLines}
+        filePath={panel.filePath}
+        lineStart={panel.lineStart}
+        lineEnd={panel.lineEnd}
+        focusLine={panel.focusLine}
+        highlightStartLine={panel.highlightStartLine}
+        highlightEndLine={panel.highlightEndLine}
+        title={panel.title}
+        density="detail"
+        meta={panel.meta}
+      />
+    );
   }
-  if (payload.renderType === "code_window" || payload.renderType === "symbol_body") {
-    return <div className="font-mono text-sm">{first.filePath}:{first.startLine}-{first.endLine}</div>;
-  }
-  if (payload.renderType === "execution_result") {
-    return <div className="font-mono text-sm">{first.executionCommand || first.description || "执行记录"}</div>;
-  }
-  if (payload.renderType === "file_list") {
-    return <div className="font-mono text-sm">{first.directory}{first.pattern ? ` (${first.pattern})` : ""}</div>;
-  }
-  if (payload.renderType === "locator_result") {
-    return <div className="font-mono text-sm">{first.filePath}:{first.line}</div>;
-  }
-  if (payload.renderType === "analysis_summary") {
-    return <div className="text-sm">{first.title}</div>;
-  }
-  if (payload.renderType === "flow_analysis") {
-    return <div className="text-sm">{first.filePath || first.engine}</div>;
-  }
-  if (payload.renderType === "verification_summary") {
-    return <div className="font-mono text-sm">{first.target}</div>;
-  }
-  return <div className="font-mono text-sm">{first.location}</div>;
-}
 
-function renderEvidenceSection(payload: ToolEvidencePayload) {
-  const first = payload.entries[0] as any;
-  if (!first) return null;
-  if (payload.renderType === "search_hits") {
+  if (panel.kind === "monospace") {
     return (
       <div className="space-y-2">
-        {payload.entries.map((entry) => (
-          <div key={`${entry.filePath}-${entry.matchLine}`} className="rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm">
-            <div className="font-mono text-xs">{entry.filePath}:{entry.matchLine}</div>
-            <div className="mt-1">{entry.matchText}</div>
+        <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-200/80">
+          {panel.title}
+        </div>
+        <div className="overflow-hidden rounded-xl border border-slate-800/90 bg-[#07111c] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words px-4 py-4 font-mono text-[12px] leading-6 text-slate-100">
+            {panel.content}
+          </pre>
+        </div>
+        {panel.note ? (
+          <div className="text-xs text-muted-foreground">{panel.note}</div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (panel.kind === "fact-list") {
+    return (
+      <div className="space-y-3 rounded-xl border border-border/70 bg-background/40 px-4 py-4">
+        <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+          {panel.title}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {panel.items.map((item) => (
+            <div
+              key={`${panel.title}-${item.label}`}
+              className="rounded-lg border border-border/60 bg-background/70 px-3 py-2.5"
+            >
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                {item.label}
+              </div>
+              <div className={item.mono ? "mt-1 break-words font-mono text-sm" : "mt-1 break-words text-sm"}>
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border/70 bg-background/40 px-4 py-4">
+      <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+        {panel.title}
+      </div>
+      <div className="space-y-2">
+        {panel.items.map((item) => (
+          <div
+            key={`${panel.title}-${item}`}
+            className="rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-sm break-words"
+          >
+            {item}
           </div>
         ))}
       </div>
-    );
-  }
-  if (payload.renderType === "code_window" || payload.renderType === "symbol_body") {
-    return (
-      <FindingCodeWindow
-        code={toolEvidenceLinesToCode(first.lines)}
-        filePath={first.filePath}
-        lineStart={first.startLine}
-        lineEnd={first.endLine}
-        highlightStartLine={first.focusLine}
-        highlightEndLine={first.focusLine}
-        focusLine={first.focusLine}
-        title={first.title || "代码窗口"}
-        density="detail"
-      />
-    );
-  }
-  if (payload.renderType === "execution_result") {
-    const content =
-      first.stdoutPreview || first.stderrPreview || first.executionCommand || first.description || "执行证据";
-    return (
-      <FindingCodeWindow
-        code={content}
-        filePath={first.title || "execution"}
-        lineStart={1}
-        lineEnd={content.split("\n").length}
-        focusLine={1}
-        title={first.title || "执行结果"}
-        density="detail"
-      />
-    );
-  }
-  if (payload.renderType === "file_list") {
-    return (
-      <pre className="text-xs whitespace-pre-wrap break-words">
-        {[...first.directories, ...first.files].join("\n") || "暂无可展示条目"}
-      </pre>
-    );
-  }
-  if (payload.renderType === "locator_result") {
-    return (
-      <div className="space-y-2 text-sm">
-        <div className="font-mono">{first.signature || first.symbolName}</div>
-        <div>参数: {first.parameters.join(", ") || "无"}</div>
-      </div>
-    );
-  }
-  if (payload.renderType === "analysis_summary") {
-    return (
-      <div className="space-y-2 text-sm">
-        <div>{first.summary}</div>
-        {first.highlights.map((item: string) => (
-          <div key={item} className="rounded-md border border-border/60 bg-background/60 px-3 py-2">{item}</div>
-        ))}
-      </div>
-    );
-  }
-  if (payload.renderType === "flow_analysis") {
-    return (
-      <div className="space-y-2 text-sm">
-        <div>Source: {first.sourceNodes.join(", ") || "无"}</div>
-        <div>Sink: {first.sinkNodes.join(", ") || "无"}</div>
-        <div>路径: {[...first.callChain, ...first.taintSteps].join(" -> ") || "无"}</div>
-        {first.blockedReasons.length > 0 ? <div>阻塞原因: {first.blockedReasons.join(", ")}</div> : null}
-      </div>
-    );
-  }
-  if (payload.renderType === "verification_summary") {
-    return (
-      <div className="space-y-2 text-sm">
-        <div>Payload: <span className="font-mono">{first.payload}</span></div>
-        <div>{first.evidence || "暂无证据文本"}</div>
-      </div>
-    );
-  }
-  return <div className="text-sm">{first.recommendation}</div>;
-}
-
-function renderConclusionSection(payload: ToolEvidencePayload) {
-  const first = payload.entries[0] as any;
-  if (!first) return null;
-  if (payload.renderType === "execution_result") {
-    return <div className="text-sm">状态 {first.status}，退出码 {first.exitCode}</div>;
-  }
-  if (payload.renderType === "file_list") {
-    return <div className="text-sm">{first.fileCount} 个文件，{first.dirCount} 个目录{first.truncated ? "，结果已截断" : ""}</div>;
-  }
-  if (payload.renderType === "locator_result") {
-    return <div className="text-sm">{first.engine} · confidence {first.confidence.toFixed(2)} · {first.degraded ? "degraded" : "stable"}</div>;
-  }
-  if (payload.renderType === "analysis_summary") {
-    return <div className="text-sm">{first.hitCount} 个发现 · {Object.entries(first.severityStats).map(([k, v]) => `${k}:${v}`).join(" · ")}</div>;
-  }
-  if (payload.renderType === "flow_analysis") {
-    return <div className="text-sm">{first.reachability} · path={String(first.pathFound)} · score {first.pathScore.toFixed(2)}</div>;
-  }
-  if (payload.renderType === "verification_summary") {
-    return <div className="text-sm">{first.verdict}{first.responseStatus ? ` · HTTP ${first.responseStatus}` : ""}</div>;
-  }
-  if (payload.renderType === "report_summary") {
-    return <div className="text-sm">{first.severity} · confidence {first.confidence.toFixed(2)} · CVSS {first.cvssScore.toFixed(1)}</div>;
-  }
-  return <div className="text-sm">{payload.entries.length} 条结构化证据</div>;
+      {panel.note ? <div className="text-xs text-muted-foreground">{panel.note}</div> : null}
+    </div>
+  );
 }
 
 export default function ToolEvidenceDetail({
@@ -213,24 +189,65 @@ export default function ToolEvidenceDetail({
     return <RawOnlyEvidence evidence={parsed} />;
   }
 
+  const viewModel = buildToolEvidenceDetailViewModel({
+    toolName,
+    evidence: parsed,
+    rawOutput,
+  });
+
+  if (!viewModel) {
+    return <RawOnlyEvidence evidence={parsed} />;
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="font-mono">{parsed.payload.displayCommand}</Badge>
-        <Badge variant="outline">{parsed.state}</Badge>
-        {parsed.notices?.map((notice) => (
-          <span key={notice} className="text-xs text-muted-foreground">{notice}</span>
+        {viewModel.headerBadges.map((badge) => (
+          <Badge
+            key={`${badge.label}-${badge.tone || "default"}`}
+            variant="outline"
+            className={`${badge.mono ? "font-mono" : ""} ${badgeToneClass(badge.tone)}`.trim()}
+          >
+            {badge.label}
+          </Badge>
+        ))}
+        {viewModel.notices.map((notice) => (
+          <span key={notice} className="text-xs text-muted-foreground">
+            {notice}
+          </span>
         ))}
       </div>
 
-      <TimelineSection title="输入与目标">{renderInputSection(parsed.payload)}</TimelineSection>
-      <TimelineSection title="关键证据">{renderEvidenceSection(parsed.payload)}</TimelineSection>
-      <TimelineSection title="结论与判断">{renderConclusionSection(parsed.payload)}</TimelineSection>
-      <TimelineSection title="原始数据">
-        <pre className="text-xs whitespace-pre-wrap break-words">
-          {JSON.stringify(parsed.rawOutput ?? rawOutput ?? parsed.payload, null, 2)}
-        </pre>
-      </TimelineSection>
+      <DetailSection title="概览">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {viewModel.overview.chips.map((chip) => (
+            <div
+              key={`${chip.label}-${chip.value}`}
+              className="rounded-xl border border-border/70 bg-background/55 px-3 py-3"
+            >
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                {chip.label}
+              </div>
+              <div className={chip.mono ? "mt-1 break-words font-mono text-sm" : "mt-1 break-words text-sm"}>
+                {chip.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </DetailSection>
+
+      <DetailSection title="">
+        <div className="space-y-0">
+          {viewModel.primaryEvidence.panels.map((panel, index) => (
+            <div key={`${panel.kind}-${index}`}>{renderPanel(panel)}</div>
+          ))}
+        </div>
+      </DetailSection>
+
+      <RawDataSection
+        content={viewModel.rawData.content}
+        triggerLabel={viewModel.rawData.triggerLabel}
+      />
     </div>
   );
 }

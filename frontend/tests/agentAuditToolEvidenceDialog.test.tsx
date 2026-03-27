@@ -52,10 +52,17 @@ test("AuditDetailContent 渲染 search_code 结构化证据详情", () => {
     }),
   );
 
+  const evidenceSectionIndex = markup.indexOf("结构化证据");
+  const firstLocationIndex = markup.indexOf("src/auth.ts:88");
+  const firstHitCountIndex = markup.indexOf("1 条命中");
+
   assert.match(markup, /结构化证据/);
   assert.match(markup, /rg -&gt; sed/);
   assert.match(markup, /src\/auth\.ts:88/);
-  assert.match(markup, /概览/);
+  assert.match(markup, /1 条命中/);
+  assert.ok(evidenceSectionIndex >= 0);
+  assert.ok(firstLocationIndex > evidenceSectionIndex);
+  assert.ok(firstHitCountIndex > evidenceSectionIndex);
   assert.doesNotMatch(markup, /已完成：search_code/);
   assert.doesNotMatch(markup, /命中窗口/);
   assert.doesNotMatch(markup, /<summary[^>]*>原始事件元数据<\/summary>/);
@@ -98,10 +105,14 @@ test("AuditDetailContent 渲染 read_file 结构化代码窗口详情", () => {
     }),
   );
 
+  const evidenceSectionIndex = markup.indexOf("结构化证据");
+  const firstLocationIndex = markup.indexOf("src/auth.ts:80-92");
+
   assert.match(markup, /结构化证据/);
   assert.match(markup, /read_file -&gt; sed/);
   assert.match(markup, /src\/auth\.ts:80-92/);
   assert.match(markup, /工具状态/);
+  assert.ok(firstLocationIndex > evidenceSectionIndex);
   assert.doesNotMatch(markup, /代码窗口/);
 });
 
@@ -225,7 +236,8 @@ test("AuditDetailContent 渲染 extract_function 与 run_code / sandbox_exec 结
   assert.match(extractMarkup, /extract_function/);
   assert.match(extractMarkup, /guard/);
   assert.match(runCodeMarkup, /run_code -&gt; python3/);
-  assert.match(runCodeMarkup, /验证命令注入 harness/);
+  assert.match(runCodeMarkup, /print\(&#x27;payload detected&#x27;\)/);
+  // assert.match(runCodeMarkup, /查看原始数据/);
   assert.match(sandboxExecMarkup, /sandbox_exec -&gt; bash/);
   assert.match(sandboxExecMarkup, /permission denied/);
 });

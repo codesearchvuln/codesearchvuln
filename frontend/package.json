@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/clean.mjs && vite build",
     "preview": "vite preview --strictPort --port 5173",
     "lint": "tsgo -p tsconfig.check.json && biome lint --only=correctness/noUndeclaredDependencies src tests scripts",
     "lint:fix": "biome check --apply .",

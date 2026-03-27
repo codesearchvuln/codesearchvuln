@@ -31,7 +31,7 @@ import FindingCodeWindow from "./FindingCodeWindow";
 import FindingNarrativeMarkdown from "./FindingNarrativeMarkdown";
 import { collectRawEvidenceEntries } from "./findingNarrative";
 import ToolEvidenceDetail from "./ToolEvidenceDetail";
-import { getToolEvidencePayload, isToolEvidenceCapableTool } from "../toolEvidence";
+import { asParsedToolEvidence, isToolEvidenceCapableTool } from "../toolEvidence";
 
 interface AuditDetailDialogProps {
   open: boolean;
@@ -123,91 +123,8 @@ function Section({
   );
 }
 
-function summarizeLogOverview(logItem: LogItem): string[] {
-  const evidence = getToolEvidencePayload(logItem.toolEvidence);
-  if (!evidence) return [];
-
-  if (evidence.renderType === "search_hits") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [
-      `${first.filePath}:${first.matchLine}`,
-      `${evidence.entries.length} 条命中`,
-      first.language,
-    ].filter((item): item is string => Boolean(item));
-  }
-
-  if (evidence.renderType === "code_window") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [
-      `${first.filePath}:${first.startLine}-${first.endLine}`,
-      first.focusLine ? `焦点行 ${first.focusLine}` : "",
-      first.language,
-    ].filter((item): item is string => Boolean(item));
-  }
-
-  if (evidence.renderType === "symbol_body") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [
-      `${first.filePath}:${first.startLine}-${first.endLine}`,
-      first.symbolName ? `${first.symbolKind || "symbol"} ${first.symbolName}` : "",
-      first.language,
-    ].filter((item): item is string => Boolean(item));
-  }
-
-  if (evidence.renderType === "execution_result") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [
-      `退出码 ${first.exitCode}`,
-      first.language || "",
-      first.executionCommand || first.description || "",
-    ].filter((item): item is string => Boolean(item));
-  }
-
-  if (evidence.renderType === "file_list") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [`${first.directory}`, `${first.fileCount} 文件`, `${first.dirCount} 目录`];
-  }
-
-  if (evidence.renderType === "locator_result") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [`${first.filePath}:${first.line}`, first.symbolName, first.engine];
-  }
-
-  if (evidence.renderType === "analysis_summary") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [first.title, `${first.hitCount} 发现`];
-  }
-
-  if (evidence.renderType === "flow_analysis") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [first.engine, first.reachability, `score ${first.pathScore.toFixed(2)}`];
-  }
-
-  if (evidence.renderType === "verification_summary") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [first.vulnerabilityType, first.verdict, first.target];
-  }
-
-  if (evidence.renderType === "report_summary") {
-    const first = evidence.entries[0];
-    if (!first) return [];
-    return [first.title, first.severity, first.location];
-  }
-
-  return [];
-}
-
 export interface AuditDetailContentProps
-  extends Omit<AuditDetailDialogProps, "open" | "onBack" | "onOpenChange"> {}
+  extends Omit<AuditDetailDialogProps, "open" | "onBack" | "onOpenChange"> { }
 
 export function AuditDetailContent({
   detailType,
@@ -215,6 +132,8 @@ export function AuditDetailContent({
   finding,
   agentNode,
 }: AuditDetailContentProps) {
+  const parsedToolEvidence =
+    detailType === "log" && logItem ? asParsedToolEvidence(logItem.toolEvidence) : null;
   return (
     <div className="flex-1 overflow-y-auto custom-scrollbar py-4 space-y-4">
       {detailType === "log" && logItem && (
@@ -234,11 +153,11 @@ export function AuditDetailContent({
               {logItem.tool?.name ? (
                 <Badge variant="outline">{logItem.tool.name}</Badge>
               ) : null}
-              {summarizeLogOverview(logItem).map((item) => (
-                <Badge key={item} variant="outline" className="font-mono normal-case">
-                  {item}
+              {parsedToolEvidence ? (
+                <Badge variant="outline" className="font-mono normal-case">
+                  {parsedToolEvidence.state}
                 </Badge>
-              ))}
+              ) : null}
             </div>
           </Section>
 
