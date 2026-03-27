@@ -122,10 +122,13 @@ export function buildProjectsPageViewModel(
 			const metricsStatusMessage = getMetricsStatusMessage(metrics);
 			return {
 				id: project.id,
+				serialNumber:
+					filteredProjects.findIndex((candidate) => candidate.id === project.id) + 1,
 				name: project.name,
 				detailPath: `/projects/${project.id}`,
 				detailState: { from: projectDetailFrom },
 				sizeText: formatArchiveSize(metrics?.archive_size_bytes),
+				sizeBytes: metrics?.archive_size_bytes ?? 0,
 				vulnerabilityStats: buildVulnerabilityStats(metrics),
 				aiVerifiedStats: buildAiVerifiedStats(metrics),
 				executionStats: buildExecutionStats(metrics),

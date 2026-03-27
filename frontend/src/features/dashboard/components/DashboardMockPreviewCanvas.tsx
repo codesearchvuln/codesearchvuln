@@ -92,13 +92,13 @@ function PreviewHeader() {
 			{[
 				{ label: "项目总数", value: "18" },
 				{ label: "累计发现漏洞总数", value: "49" },
-				{ label: "AI累计验证漏洞总数", value: "22" },
-				{ label: "累计执行扫描任务次数", value: "126" },
-				{ label: "累计消耗模型token", value: "1.482M" },
+				{ label: "AI验证漏洞总数", value: "22" },
+				{ label: "累计执行扫描", value: "126" },
+				{ label: "累计消耗词元", value: "1.482M" },
 			].map((item) => (
 				<div
 					key={item.label}
-					className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 backdrop-blur-sm"
+					className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-sm"
 				>
 					<div className="text-[16px] uppercase tracking-[0.28em] text-slate-400">
 						{item.label}
@@ -131,11 +131,10 @@ function ViewSidebar({
 							type="button"
 							aria-pressed={active}
 							onClick={() => onChange(view.id)}
-							className={`group flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition duration-200 ${
-								active
-									? "border-cyan-300/30 bg-cyan-400/12 text-white shadow-[0_10px_30px_rgba(34,211,238,0.18)]"
-									: "border-transparent bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900"
-							}`}
+							className={`group flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition duration-200 ${active
+								? "border-cyan-300/30 bg-cyan-400/12 text-white shadow-[0_10px_30px_rgba(34,211,238,0.18)]"
+								: "border-transparent bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900"
+								}`}
 						>
 							<div className={`mt-0.5 rounded-xl p-2 ${active ? "bg-cyan-400/20 text-cyan-100" : "bg-slate-800 text-slate-400"}`}>
 								{view.id === "trend" ? (
@@ -147,7 +146,7 @@ function ViewSidebar({
 								) : view.id === "scan-engines" ? (
 									<Cpu className="h-4 w-4" />
 								) : view.id === "static-engine-rules" ||
-									  view.id === "language-lines" ? (
+									view.id === "language-lines" ? (
 									<BarChart3 className="h-4 w-4" />
 								) : (
 									<Bug className="h-4 w-4" />
@@ -374,17 +373,17 @@ function getHorizontalLegendItems(
 ) {
 	return stacked
 		? [
-				{ label: "严重", tone: "critical" as const },
-				{ label: "高危", tone: "high" as const },
-				{ label: "中危", tone: "medium" as const },
-				{ label: "低危", tone: "low" as const },
-			]
+			{ label: "严重", tone: "critical" as const },
+			{ label: "高危", tone: "high" as const },
+			{ label: "中危", tone: "medium" as const },
+			{ label: "低危", tone: "low" as const },
+		]
 		: [
-				{
-					label: rows[0]?.segments[0]?.label ?? "总数",
-					tone: rows[0]?.segments[0]?.tone ?? ("low" as const),
-				},
-			];
+			{
+				label: rows[0]?.segments[0]?.label ?? "总数",
+				tone: rows[0]?.segments[0]?.tone ?? ("low" as const),
+			},
+		];
 }
 
 function HorizontalStatsChart({
@@ -512,7 +511,7 @@ export default function DashboardMockPreviewCanvas() {
 				<div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)_360px]">
 					<ViewSidebar activeView={activeView} onChange={setActiveView} />
 					<section className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.45)]">
-						
+
 						{activeView === "trend" ? (
 							<TrendPanel />
 						) : (
@@ -524,12 +523,12 @@ export default function DashboardMockPreviewCanvas() {
 									activeView === "project-risk"
 										? "项目名称"
 										: activeView === "language-risk" ||
-											  activeView === "language-lines"
+											activeView === "language-lines"
 											? "语言类型"
 											: activeView === "vulnerability-types"
 												? "漏洞类型标号"
 												: activeView === "scan-engines" ||
-													  activeView === "static-engine-rules"
+													activeView === "static-engine-rules"
 													? "引擎名称"
 													: "类别名称"
 								}

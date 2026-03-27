@@ -74,3 +74,52 @@ test("TaskActivitiesListTable renders severity summaries for agent tasks and kee
   assert.match(markup, /严重 0 \/ 高危 2 \/ 中危 3 \/ 低危 5/);
   assert.match(markup, /Demo Hybrid[\s\S]*?">-<\/td>/);
 });
+
+test("TaskActivitiesListTable merges running progress into the status column", async () => {
+  const tableModule = await import(
+    "../src/features/tasks/components/TaskActivitiesListTable.tsx"
+  );
+
+  const markup = renderToStaticMarkup(
+    createElement(
+      SsrRouter,
+      {},
+      createElement(tableModule.default, {
+        activities: [
+          {
+            id: "agent-running",
+            projectName: "Demo Running",
+            kind: "intelligent_audit",
+            sourceMode: "intelligent",
+            status: "running",
+            createdAt: "2026-03-13T12:00:00.000Z",
+            startedAt: "2026-03-13T12:01:00.000Z",
+            completedAt: null,
+            route: "/agent-audit/agent-running",
+          },
+          {
+            id: "static-completed",
+            projectName: "Demo Completed",
+            kind: "rule_scan",
+            sourceMode: "static",
+            status: "completed",
+            createdAt: "2026-03-13T11:00:00.000Z",
+            startedAt: "2026-03-13T11:01:00.000Z",
+            completedAt: "2026-03-13T11:05:00.000Z",
+            route: "/static-analysis/static-completed",
+          },
+        ],
+        loading: false,
+        nowMs: Date.parse("2026-03-13T12:05:00.000Z"),
+      }),
+    ),
+  );
+
+  assert.doesNotMatch(markup, /<span>进度<\/span>/);
+  assert.match(markup, /<span>状态<\/span>/);
+  assert.match(
+    markup,
+    /Demo Running[\s\S]*?<span data-slot="badge"[\s\S]*?<span>任务运行中<\/span>[\s\S]*?<span class="rounded-\[2px\][\s\S]*?>51%<\/span>/,
+  );
+  assert.doesNotMatch(markup, /Demo Completed[\s\S]*?任务完成[\s\S]*?100%/);
+});

@@ -259,6 +259,54 @@ test("buildProjectDetailPotentialTree 按任务时间倒序并保留静态扫描
 	assert.equal(staticSrcDirectory?.name, "src");
 });
 
+test("buildProjectDetailPotentialTree 对 agent 误报保留节点但移除详情入口", () => {
+	const result = buildProjectDetailPotentialTree({
+		projectName: "demo",
+		agentTasks: [
+			{
+				id: "agent-1",
+				project_id: "project-1",
+				name: "智能扫描任务",
+				description: "intelligent",
+				created_at: "2026-03-18T08:00:00Z",
+			},
+		] as any,
+		agentFindings: [
+			{
+				id: "agent-fp",
+				task_id: "agent-1",
+				vulnerability_type: "SQL Injection",
+				severity: "high",
+				title: "误报漏洞",
+				display_title: "误报漏洞",
+				description: "desc",
+				file_path: `/tmp/work/demo/src/service/auth.ts`,
+				line_start: 18,
+				context_start_line: 18,
+				context_end_line: 18,
+				status: "false_positive",
+				authenticity: "false_positive",
+				is_verified: true,
+				ai_confidence: 0.95,
+				confidence: 0.95,
+				created_at: "2026-03-18T08:00:00Z",
+			},
+		] as any,
+	});
+
+	assert.equal(result.totalFindings, 1);
+	const srcDirectory = result.tasks[0]?.children[0];
+	const serviceDirectory =
+		srcDirectory?.type === "directory" ? srcDirectory.children[0] : null;
+	const authFile =
+		serviceDirectory?.type === "directory" ? serviceDirectory.children[0] : null;
+	const falsePositive =
+		authFile?.type === "file" ? authFile.children[0] : null;
+
+	assert.equal(falsePositive?.id, "agent-fp");
+	assert.equal(falsePositive?.route, null);
+});
+
 test("flattenProjectDetailPotentialFindings 输出排序后的平铺列表并保留任务元信息", () => {
 	const tree = buildProjectDetailPotentialTree({
 		projectName: "demo",

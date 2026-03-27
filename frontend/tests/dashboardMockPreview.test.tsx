@@ -34,9 +34,9 @@ test("DashboardMockPreview renders single-page command center with sidebar and t
 	assert.match(markup, /任务状态/);
 	assert.match(markup, /项目总数/);
 	assert.match(markup, /累计发现漏洞总数/);
-	assert.match(markup, /AI累计验证漏洞总数/);
-	assert.match(markup, /累计执行扫描任务次数/);
-	assert.match(markup, /累计消耗模型token/);
+	assert.match(markup, /AI验证漏洞总数/);
+	assert.match(markup, /累计执行扫描/);
+	assert.match(markup, /累计消耗词元/);
 	assert.match(markup, /Alpha Gateway/);
 	assert.match(markup, /TypeScript/);
 	assert.match(markup, /SQL 注入/);

@@ -95,6 +95,13 @@ function toPositiveLine(value: unknown): number | null {
 	return line;
 }
 
+function isFalsePositiveAgentFinding(finding: AgentFinding): boolean {
+	return (
+		String(finding.status || "").trim().toLowerCase() === "false_positive" ||
+		String(finding.authenticity || "").trim().toLowerCase() === "false_positive"
+	);
+}
+
 function resolveAgentFindingTitle(finding: AgentFinding): string {
 	return (
 		String(finding.display_title || "").trim() ||
@@ -238,11 +245,13 @@ function normalizeAgentFindings(
 			confidence: normalizeTaskFindingConfidence(
 				finding.ai_confidence ?? finding.confidence ?? null,
 			),
-			route: buildFindingDetailPath({
-				source: "agent",
-				taskId,
-				findingId: finding.id,
-			}),
+			route: isFalsePositiveAgentFinding(finding)
+				? null
+				: buildFindingDetailPath({
+						source: "agent",
+						taskId,
+						findingId: finding.id,
+					}),
 			createdAt: finding.created_at ?? null,
 		};
 	});
@@ -501,14 +510,26 @@ export default function ProjectTaskFindingsDialog({
 						width: 120,
 					},
 					cell: ({ row }) => (
-						<Button
-							asChild
-							size="sm"
-							variant="outline"
-							className="cyber-btn-ghost h-8 px-3"
-						>
-							<Link to={appendReturnTo(row.original.route, returnTo)}>详情</Link>
-						</Button>
+						row.original.route ? (
+							<Button
+								asChild
+								size="sm"
+								variant="outline"
+								className="cyber-btn-ghost h-8 px-3"
+							>
+								<Link to={appendReturnTo(row.original.route, returnTo)}>详情</Link>
+							</Button>
+						) : (
+							<Button
+								size="sm"
+								variant="outline"
+								className="cyber-btn-ghost h-8 px-3"
+								disabled
+								title="误报不提供统一漏洞详情入口"
+							>
+								详情
+							</Button>
+						)
 					),
 				},
 			] satisfies AppColumnDef<TaskFindingRow, unknown>[],

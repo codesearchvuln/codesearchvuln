@@ -460,7 +460,7 @@ function ProjectCodeBrowserSearchPanel({
 						/>
 					</label>
 				</div>
-				
+
 			</div>
 
 			<div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 custom-scrollbar-dark">
@@ -489,9 +489,6 @@ function ProjectCodeBrowserQuickOpenPanel({
 					打开文件
 				</p>
 				<label className="mt-3 block space-y-1">
-					<span className="text-[11px] uppercase tracking-[0.18em] text-white/30">
-						快速定位
-					</span>
 					<input
 						type="search"
 						value={fileQuickOpenQuery}
@@ -561,10 +558,10 @@ function ProjectCodeBrowserPreview({
 		const lineEnd = selectedFileState.displayLines.length;
 		const meta =
 			selectedFileState.syntaxLanguageLabel &&
-			selectedFileState.syntaxStatus === "highlighted"
+				selectedFileState.syntaxStatus === "highlighted"
 				? [selectedFileState.syntaxLanguageLabel]
 				: selectedFileState.syntaxLanguageLabel &&
-					  selectedFileState.syntaxStatus === "plain-text"
+					selectedFileState.syntaxStatus === "plain-text"
 					? [selectedFileState.syntaxLanguageLabel, "纯文本回退"]
 					: ["纯文本"];
 		return (
@@ -650,8 +647,8 @@ function ProjectCodeBrowserSidePanel({
 				searchResults={searchResults}
 				selectedFilePath={selectedFilePath}
 				onSearchQueryChange={onSearchQueryChange}
-				onIncludeFileQueryChange={onIncludeFileQueryChange ?? (() => {})}
-				onExcludeFileQueryChange={onExcludeFileQueryChange ?? (() => {})}
+				onIncludeFileQueryChange={onIncludeFileQueryChange ?? (() => { })}
+				onExcludeFileQueryChange={onExcludeFileQueryChange ?? (() => { })}
 				onSelectSearchResult={onSelectSearchResult}
 				inputRef={searchInputRef}
 			/>
@@ -666,7 +663,7 @@ function ProjectCodeBrowserSidePanel({
 			fileQuickOpenQuery={fileQuickOpenQuery ?? ""}
 			onToggleFolder={onToggleFolder}
 			onSelectFile={onSelectFile}
-			onFileQuickOpenQueryChange={onFileQuickOpenQueryChange ?? (() => {})}
+			onFileQuickOpenQueryChange={onFileQuickOpenQueryChange ?? (() => { })}
 			appearance={appearance ?? "native-explorer"}
 		/>
 	);
@@ -686,12 +683,12 @@ export function ProjectCodeBrowserWorkspace({
 	searchResults = [],
 	onToggleFolder,
 	onSelectFile,
-	onSelectMode = () => {},
-	onFileQuickOpenQueryChange = () => {},
-	onSearchQueryChange = () => {},
-	onIncludeFileQueryChange = () => {},
-	onExcludeFileQueryChange = () => {},
-	onSelectSearchResult = () => {},
+	onSelectMode = () => { },
+	onFileQuickOpenQueryChange = () => { },
+	onSearchQueryChange = () => { },
+	onIncludeFileQueryChange = () => { },
+	onExcludeFileQueryChange = () => { },
+	onSelectSearchResult = () => { },
 	appearance = "native-explorer",
 	previewDecorations,
 	searchInputRef,
@@ -785,12 +782,12 @@ export function ProjectCodeBrowserContent({
 	onBack,
 	onToggleFolder,
 	onSelectFile,
-	onSelectMode = () => {},
-	onFileQuickOpenQueryChange = () => {},
-	onSearchQueryChange = () => {},
-	onIncludeFileQueryChange = () => {},
-	onExcludeFileQueryChange = () => {},
-	onSelectSearchResult = () => {},
+	onSelectMode = () => { },
+	onFileQuickOpenQueryChange = () => { },
+	onSearchQueryChange = () => { },
+	onIncludeFileQueryChange = () => { },
+	onExcludeFileQueryChange = () => { },
+	onSelectSearchResult = () => { },
 	appearance = "native-explorer",
 	previewDecorations,
 	searchInputRef,
@@ -1231,9 +1228,9 @@ export default function ProjectCodeBrowser() {
 				});
 			});
 
-			return () => {
-				cancelled = true;
-			};
+		return () => {
+			cancelled = true;
+		};
 	}, [filteredProjectFiles, loadSearchFileState, searchQuery]);
 
 	const selectedFileState = useMemo<ProjectCodeBrowserFileViewState>(() => {

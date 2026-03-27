@@ -56,6 +56,7 @@ export interface DataTableColumnMeta<TData = unknown, TValue = unknown> {
   densityClassName?: string;
   mobilePriority?: number;
   headerClassName?: string;
+  headerContentClassName?: string;
   cellClassName?: string;
   filterPlaceholder?: string;
   _row?: TData;

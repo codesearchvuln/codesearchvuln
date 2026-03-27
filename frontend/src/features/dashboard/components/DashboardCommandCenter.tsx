@@ -515,9 +515,9 @@ function PreviewHeader({ snapshot }: { snapshot: DashboardSnapshotResponse }) {
 	const cards = [
 		{ label: "项目总数", value: formatNumber(snapshot.summary.total_projects) },
 		{ label: "累计发现漏洞总数", value: formatNumber(snapshot.summary.current_effective_findings) },
-		{ label: "AI累计验证漏洞总数", value: formatNumber(snapshot.summary.current_verified_findings) },
-		{ label: "累计执行扫描任务次数", value: formatNumber(totalTasks) },
-		{ label: "累计消耗模型token", value: formatTokenValue(snapshot.summary.total_model_tokens) },
+		{ label: "AI验证漏洞总数", value: formatNumber(snapshot.summary.current_verified_findings) },
+		{ label: "累计执行扫描", value: formatNumber(totalTasks) },
+		{ label: "累计消耗词元", value: formatTokenValue(snapshot.summary.total_model_tokens) },
 	];
 
 	return (
@@ -558,16 +558,14 @@ function ViewSidebar({
 							type="button"
 							aria-pressed={active}
 							onClick={() => onChange(view.id)}
-							className={`group flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition duration-200 ${
-								active
-									? "border-cyan-300/30 bg-cyan-400/12 text-white shadow-[0_10px_30px_rgba(34,211,238,0.18)]"
-									: "border-transparent bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900"
-							}`}
+							className={`group flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition duration-200 ${active
+								? "border-cyan-300/30 bg-cyan-400/12 text-white shadow-[0_10px_30px_rgba(34,211,238,0.18)]"
+								: "border-transparent bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900"
+								}`}
 						>
 							<div
-								className={`mt-0.5 rounded-xl p-2 ${
-									active ? "bg-cyan-400/20 text-cyan-100" : "bg-slate-800 text-slate-400"
-								}`}
+								className={`mt-0.5 rounded-xl p-2 ${active ? "bg-cyan-400/20 text-cyan-100" : "bg-slate-800 text-slate-400"
+									}`}
 							>
 								{view.id === "trend" ? (
 									<Activity className="h-4 w-4" />
@@ -587,11 +585,10 @@ function ViewSidebar({
 								<div className="flex items-center justify-between gap-3">
 									<span className="font-medium tracking-[0.02em]">{view.label}</span>
 									<ChevronRight
-										className={`h-4 w-4 transition ${
-											active
-												? "translate-x-0 text-cyan-200"
-												: "-translate-x-1 text-slate-600 group-hover:translate-x-0"
-										}`}
+										className={`h-4 w-4 transition ${active
+											? "translate-x-0 text-cyan-200"
+											: "-translate-x-1 text-slate-600 group-hover:translate-x-0"
+											}`}
 									/>
 								</div>
 								<p className="mt-1 text-xs leading-5 text-slate-400">
@@ -911,11 +908,11 @@ function HorizontalStatsChart({
 	const primaryTone = rows[0]?.tone ?? "low";
 	const legendItems = stacked
 		? [
-				{ label: "严重", tone: "critical" as Tone },
-				{ label: "高危", tone: "high" as Tone },
-				{ label: "中危", tone: "medium" as Tone },
-				{ label: "低危", tone: "low" as Tone },
-			]
+			{ label: "严重", tone: "critical" as Tone },
+			{ label: "高危", tone: "high" as Tone },
+			{ label: "中危", tone: "medium" as Tone },
+			{ label: "低危", tone: "low" as Tone },
+		]
 		: [{ label: "总数", tone: primaryTone }];
 
 	return (
@@ -955,17 +952,17 @@ function HorizontalStatsChart({
 								strokeDasharray="4 4"
 								horizontal={false}
 							/>
-								<XAxis
-									type="number"
-									tick={{ fill: "#94a3b8", fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE }}
-									axisLine={false}
-									tickLine={false}
-									minTickGap={xAxisProps.minTickGap}
-									tickCount={xAxisProps.tickCount}
-									allowDecimals={xAxisProps.allowDecimals}
-									domain={xAxisProps.domain}
-									ticks={xAxisProps.ticks}
-								/>
+							<XAxis
+								type="number"
+								tick={{ fill: "#94a3b8", fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE }}
+								axisLine={false}
+								tickLine={false}
+								minTickGap={xAxisProps.minTickGap}
+								tickCount={xAxisProps.tickCount}
+								allowDecimals={xAxisProps.allowDecimals}
+								domain={xAxisProps.domain}
+								ticks={xAxisProps.ticks}
+							/>
 							<YAxis
 								type="category"
 								dataKey="label"

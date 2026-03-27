@@ -39,7 +39,7 @@ export function getTaskDisplayStatusSummary(
       normalizedStatus: normalized,
       statusLabel: "任务运行中",
       badgeClassName: "cyber-badge-info",
-      progressBarClassName: "bg-sky-400",
+      progressBarClassName: "bg-sky-200",
       progressHint: "扫描进行中，仍有引擎正在执行",
     };
   }

@@ -262,15 +262,15 @@ test("DashboardCommandCenter renders the live single-page dashboard layout", asy
 		createElement(module.default, {
 			snapshot: createSnapshotFixture(),
 			rangeDays: 14,
-			onRangeDaysChange: () => {},
+			onRangeDaysChange: () => { },
 		}),
 	);
 
 	assert.match(markup, /项目总数/);
 	assert.match(markup, /累计发现漏洞总数/);
-	assert.match(markup, /AI累计验证漏洞总数/);
-	assert.match(markup, /累计执行扫描任务次数/);
-	assert.match(markup, /累计消耗模型token/);
+	assert.match(markup, /AI验证漏洞总数/);
+	assert.match(markup, /累计执行扫描/);
+	assert.match(markup, /累计消耗词元/);
 	assert.match(markup, /漏洞态势趋势/);
 	assert.match(markup, /项目风险统计图/);
 	assert.match(markup, /语言风险统计图/);
@@ -321,7 +321,7 @@ test("DashboardCommandCenter recent static task uses the provided aggregated det
 		createElement(module.default, {
 			snapshot,
 			rangeDays: 14,
-			onRangeDaysChange: () => {},
+			onRangeDaysChange: () => { },
 		}),
 	);
 
@@ -343,7 +343,7 @@ test("DashboardCommandCenter shows an empty state when no recent tasks are avail
 		createElement(module.default, {
 			snapshot,
 			rangeDays: 14,
-			onRangeDaysChange: () => {},
+			onRangeDaysChange: () => { },
 		}),
 	);
 

@@ -237,7 +237,7 @@ export default function FindingDetailCodePanel({
 	return (
 		<section
 			aria-label={title}
-			className="order-2 xl:order-2 cyber-card p-5 min-h-0 flex flex-col gap-4"
+			className="order-2 xl:order-2 rounded-[24px] border border-border/70 bg-background p-5 min-h-0 flex flex-col gap-4 shadow-sm"
 		>
 			<div>
 				<p className="text-[0.975rem] font-mono uppercase tracking-[0.24em] text-muted-foreground">
@@ -268,7 +268,7 @@ export default function FindingDetailCodePanel({
 					return (
 						<article
 							key={section.id}
-							className="rounded-xl border border-border/70 bg-card/35 p-5 space-y-4"
+							className="rounded-2xl border border-border/70 bg-card px-5 py-5 space-y-4 shadow-sm"
 						>
 							<p className="break-all font-mono text-[1.05625rem] leading-[1.6] text-foreground">
 								{section.displayFilePath || section.filePath || "未定位文件"}

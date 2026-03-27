@@ -9,7 +9,6 @@ import {
   formatCreatedAt,
   getActivityDurationLabel,
   getRelativeTime,
-  getTaskProgressBarClassName,
   getTaskProgressPercent,
   getTaskStatusBadgeClassName,
   getTaskStatusText,
@@ -76,7 +75,7 @@ function getColumns(
         minWidth: 180,
       },
       cell: ({ row }) => (
-        <div className="text-sm text-muted-foreground">
+        <div className="text-base text-muted-foreground">
           <div>
             {formatCreatedAt(row.original.createdAt)} {getRelativeTime(row.original.createdAt, nowMs)}
           </div>
@@ -98,37 +97,11 @@ function getColumns(
       },
     },
     {
-      id: "progress",
-      accessorFn: (row) => getTaskProgressPercent(row, nowMs),
-      header: "进度",
-      meta: {
-        label: "进度",
-        minWidth: 220,
-      },
-      cell: ({ row }) => {
-        const progress = getTaskProgressPercent(row.original, nowMs);
-        return (
-          <div className="min-w-[210px] space-y-1">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>进度</span>
-              <span className="font-medium text-foreground">{progress}%</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded bg-muted/50">
-              <div
-                className={`h-full transition-all ${getTaskProgressBarClassName(row.original.status)}`}
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-        );
-      },
-    },
-    {
       accessorKey: "status",
       header: "状态",
       meta: {
         label: "状态",
-        minWidth: 140,
+        minWidth: 170,
         filterVariant: "select",
         filterOptions: [
           { label: "等待中", value: "pending" },
@@ -137,11 +110,27 @@ function getColumns(
           { label: "失败", value: "failed" },
         ],
       },
-      cell: ({ row }) => (
-        <Badge className={getTaskStatusBadgeClassName(row.original.status)}>
-          {getTaskStatusText(row.original.status)}
-        </Badge>
-      ),
+      cell: ({ row }) => {
+        const status = String(row.original.status || "").trim().toLowerCase();
+        const progress = getTaskProgressPercent(row.original, nowMs);
+
+        return (
+          <div className="flex items-center">
+            <Badge
+              className={`${getTaskStatusBadgeClassName(
+                row.original.status,
+              )} max-w-full gap-2 px-2.5`}
+            >
+              <span>{getTaskStatusText(row.original.status)}</span>
+              {status === "running" ? (
+                <span className="rounded-[2px] border border-current/20 bg-black/10 px-1.5 py-0.5 text-[13px] leading-none tracking-normal">
+                  {progress}%
+                </span>
+              ) : null}
+            </Badge>
+          </div>
+        );
+      },
     },
     {
       id: "defects",
@@ -149,13 +138,13 @@ function getColumns(
       header: "缺陷摘要",
       meta: {
         label: "缺陷摘要",
-        minWidth: 260,
+        minWidth: 200,
       },
       cell: ({ row }) => {
         const summary = getDefectSummaryLabel(row.original);
         if (summary === "-") return "-";
         return (
-          <span className="whitespace-nowrap text-xs text-muted-foreground">
+          <span className="whitespace-nowrap text-base text-muted-foreground">
             {summary}
           </span>
         );
@@ -222,8 +211,8 @@ export default function TaskActivitiesListTable({
           toolbar={{
             showGlobalSearch: false,
             showColumnVisibility: false,
-						showDensityToggle: false,
-						showReset: false,
+            showDensityToggle: false,
+            showReset: false,
             filters: []
           }}
           pagination={{
@@ -231,7 +220,7 @@ export default function TaskActivitiesListTable({
             pageSizeOptions: [10, 20, 50],
             infoLabel: () => `共 ${activities.length} 条`,
           }}
-          tableClassName="min-w-[1320px]"
+          tableClassName="min-w-[880px]"
         />
       </div>
     </div>

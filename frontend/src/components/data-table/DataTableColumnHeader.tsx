@@ -60,6 +60,8 @@ export function DataTableColumnHeader<TData, TValue>({
     return <span className={cn("inline-flex items-center", className)}>{title}</span>;
   }
 
+  const headerContentClassName = meta?.headerContentClassName;
+
   return (
     <div className={cn("inline-flex items-center gap-1", className)}>
       {column.getCanSort() ? (
@@ -69,6 +71,7 @@ export function DataTableColumnHeader<TData, TValue>({
           size="sm"
           className={cn(
             "h-8 -ml-2 px-2 font-mono text-xs uppercase tracking-[0.16em] text-foreground/80 hover:bg-muted/70",
+            headerContentClassName,
           )}
           onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
         >
@@ -76,7 +79,12 @@ export function DataTableColumnHeader<TData, TValue>({
           <SortIcon state={column.getIsSorted()} />
         </Button>
       ) : (
-        <span className="font-mono text-xs uppercase tracking-[0.16em] text-foreground/80">
+        <span
+          className={cn(
+            "font-mono text-xs uppercase tracking-[0.16em] text-foreground/80",
+            headerContentClassName,
+          )}
+        >
           {title}
         </span>
       )}

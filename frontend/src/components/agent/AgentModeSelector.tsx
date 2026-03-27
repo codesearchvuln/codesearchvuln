@@ -150,7 +150,7 @@ export default function AgentModeSelector({
                   disabled={disabled || Boolean(disabledStaticTools?.opengrep)}
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
-                <span className="tracking-wider">规则扫描</span>
+                {/* <span className="tracking-wider">规则扫描</span> */}
               </label>
               <label className="flex items-center gap-2 text-xs font-mono text-sky-700 dark:text-sky-300 cursor-pointer">
                 <Checkbox
@@ -184,7 +184,6 @@ export default function AgentModeSelector({
                   disabled={disabled || Boolean(disabledStaticTools?.phpstan)}
                   className="border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                 />
-                <span className="tracking-wider">PHP 规则扫描</span>
               </label>
               <label className="flex items-center gap-2 text-xs font-mono text-sky-700 dark:text-sky-300 cursor-pointer">
                 <Checkbox

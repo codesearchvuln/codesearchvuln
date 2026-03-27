@@ -18,9 +18,9 @@ const ELLIPSIS_PLACEHOLDER = "// ....";
 const MISSING_VALUE = "未提供";
 const MISSING_SEVERITY = "未分级";
 const MISSING_DESCRIPTION = "当前来源未提供扫描说明，请结合命中代码与追踪信息复核。";
-const MISSING_REPORT_SECTION = "报告未提供此部分。";
-const MISSING_REPORT_CODE_EVIDENCE = "报告未提供代码证据。";
-const REPORT_SECTION_HEADING_RE = /^##\s+\d+\.\s*(.+?)\s*$/gm;
+const MISSING_MARKDOWN_SECTION = "未提供此部分。";
+const MISSING_AGENT_CODE_EVIDENCE = "暂无可展示的命中代码。";
+const MARKDOWN_SECTION_HEADING_RE = /^###\s+(.+?)\s*$/gm;
 
 type FindingDetailTone = "danger" | "warning" | "info" | "success" | "muted";
 
@@ -269,21 +269,13 @@ function buildStatusLabel(value: unknown): string {
   return raw;
 }
 
-function buildStaticFindingStatusLabel(value: unknown): string {
-  const normalized = normalizeToken(String(value || "").trim()).replace(/[\s-]+/g, "_");
-  if (normalized === "verified") return "确报";
-  if (normalized === "false_positive") return "误报";
-  return "待验证";
-}
-
 function buildOverviewItems(params: {
-  statusLabel: string;
   headlineLabel: string;
   headlineValue: string;
   headlineTitle?: string | null;
   summaryStats: FindingDetailSummaryStat[];
 }): FindingDetailTrackingItem[] {
-  const items: FindingDetailTrackingItem[] = [{ label: "状态", value: params.statusLabel }];
+  const items: FindingDetailTrackingItem[] = [];
 
   const headlineValue = String(params.headlineValue || "").trim();
   if (headlineValue) {
@@ -355,9 +347,9 @@ function resolveAgentConfidenceValue(finding: AgentFinding): number | null {
   return null;
 }
 
-function extractFindingReportSections(report: string): Map<string, string> {
-  const source = String(report || "").replace(/\r\n/g, "\n");
-  const matches = [...source.matchAll(REPORT_SECTION_HEADING_RE)];
+function extractMarkdownSections(sourceText: string): Map<string, string> {
+  const source = String(sourceText || "").replace(/\r\n/g, "\n");
+  const matches = [...source.matchAll(MARKDOWN_SECTION_HEADING_RE)];
   const sections = new Map<string, string>();
 
   matches.forEach((match, index) => {
@@ -373,100 +365,17 @@ function extractFindingReportSections(report: string): Map<string, string> {
   return sections;
 }
 
-function parseReportEvidenceLocation(section: string): {
-  filePath: string | null;
-  lineStart: number | null;
-  lineEnd: number | null;
-} {
-  const locationMatch = section.match(
-    /(?:^|\n)-\s*位置[：:]\s*(?:`([^`]+)`|([^\n`]+?))(?:\s+行\s+(\d+)(?:-(\d+))?)?(?=\n|$)/m,
-  );
-  if (locationMatch) {
-    const filePath = String(locationMatch[1] || locationMatch[2] || "").trim() || null;
-    const lineStart = locationMatch[3] ? Number(locationMatch[3]) : null;
-    const lineEnd = locationMatch[4] ? Number(locationMatch[4]) : lineStart;
-    return {
-      filePath,
-      lineStart: isFiniteLineNumber(lineStart) ? lineStart : null,
-      lineEnd: isFiniteLineNumber(lineEnd) ? lineEnd : null,
-    };
-  }
-
-  const fallbackMatch = section.match(/(?:^|\n)-\s*位置[：:]\s*`?([^`\n]+?)`?(?=\n|$)/m);
-  if (!fallbackMatch) {
-    return { filePath: null, lineStart: null, lineEnd: null };
-  }
-
-  const rawLocation = String(fallbackMatch[1] || "").trim();
-  const rangeMatch = rawLocation.match(/^(.*?):(\d+)(?:-(\d+))?$/);
-  if (!rangeMatch) {
-    return { filePath: rawLocation || null, lineStart: null, lineEnd: null };
-  }
-
-  const lineStart = Number(rangeMatch[2]);
-  const lineEnd = rangeMatch[3] ? Number(rangeMatch[3]) : lineStart;
-  return {
-    filePath: String(rangeMatch[1] || "").trim() || null,
-    lineStart: isFiniteLineNumber(lineStart) ? lineStart : null,
-    lineEnd: isFiniteLineNumber(lineEnd) ? lineEnd : null,
-  };
-}
-
-function buildAgentReportCodeViews(finding: AgentFinding): FindingDetailCodeView[] {
-  const report = String(finding.report || "").trim();
-  if (!report) return [];
-
-  const sections = extractFindingReportSections(report);
-  const codeEvidence = String(sections.get("代码证据") || "").trim();
-  if (!codeEvidence) return [];
-
-  const codeBlocks = [...codeEvidence.matchAll(/```([^\n`]*)\n([\s\S]*?)```/g)];
-  if (codeBlocks.length === 0) return [];
-
-  const location = parseReportEvidenceLocation(codeEvidence);
-  return codeBlocks
-    .map((match, index) => {
-      const code = String(match[2] || "").trim();
-      if (!code) return null;
-
-      return {
-        id: `agent-report:${finding.id}:${index}`,
-        title: index === 0 ? "代码证据" : `代码证据 ${index + 1}`,
-        filePath: location.filePath,
-        code,
-        lineStart: location.lineStart,
-        lineEnd: location.lineEnd,
-        highlightStartLine: location.lineStart,
-        highlightEndLine: location.lineEnd,
-        focusLine: location.lineStart,
-      } satisfies FindingDetailCodeView;
-    })
-    .filter((view): view is FindingDetailCodeView => Boolean(view));
-}
-
-function buildAgentReportNarrativeSections(finding: AgentFinding): FindingDetailNarrativeSection[] {
-  const sections = extractFindingReportSections(String(finding.report || ""));
+function buildAgentMarkdownNarrativeSections(
+  finding: AgentFinding,
+): FindingDetailNarrativeSection[] {
+  const sections = extractMarkdownSections(String(finding.description_markdown || ""));
   return [
     buildNarrativeSection({
-      id: `agent:${finding.id}:principle`,
-      title: "漏洞原理",
+      id: `agent:${finding.id}:root-cause`,
+      title: "根因说明",
       emphasis: "primary",
-      content: sections.get("漏洞原理"),
-      emptyBody: MISSING_REPORT_SECTION,
-    }),
-    buildNarrativeSection({
-      id: `agent:${finding.id}:impact`,
-      title: "业务影响",
-      emphasis: "secondary",
-      content: sections.get("业务影响"),
-      emptyBody: MISSING_REPORT_SECTION,
-    }),
-    buildNarrativeSection({
-      id: `agent:${finding.id}:remediation`,
-      title: "修复建议",
-      emphasis: "success",
-      content: sections.get("修复建议"),
-      emptyBody: MISSING_REPORT_SECTION,
+      content: sections.get("根因解释"),
+      emptyBody: MISSING_MARKDOWN_SECTION,
     }),
   ];
 }
@@ -542,12 +451,12 @@ function finalizeCodeSectionView(
     Array.isArray(view.displayLines) && view.displayLines.length > 0
       ? view.displayLines
       : buildFullFileDisplayLines({
-          content: view.code,
-          lineStart: view.lineStart,
-          focusLine: view.focusLine,
-          highlightStartLine: view.highlightStartLine,
-          highlightEndLine: view.highlightEndLine,
-        });
+        content: view.code,
+        lineStart: view.lineStart,
+        focusLine: view.focusLine,
+        highlightStartLine: view.highlightStartLine,
+        highlightEndLine: view.highlightEndLine,
+      });
   const projectId = String(params.projectId || "").trim();
   const filePath = normalizeFindingDetailFullFilePath(view.filePath);
   const fullFileAvailable =
@@ -561,9 +470,9 @@ function finalizeCodeSectionView(
     fullFileAvailable,
     fullFileRequest: fullFileAvailable
       ? {
-          projectId,
-          filePath,
-        }
+        projectId,
+        filePath,
+      }
       : null,
   };
 }
@@ -876,12 +785,14 @@ export function buildAgentFindingDetailModel(params: {
           String(finding.display_title || "").trim() ||
           String(finding.title || "").trim() ||
           "该问题已在验证阶段判定为误报",
-        overviewItems: buildOverviewItems({
-          statusLabel,
-          headlineLabel: "验证结论",
-          headlineValue: "该问题已在验证阶段判定为误报",
-          summaryStats,
-        }),
+        overviewItems: [
+          { label: "状态", value: statusLabel },
+          ...buildOverviewItems({
+            headlineLabel: "验证结论",
+            headlineValue: "该问题已在验证阶段判定为误报",
+            summaryStats,
+          }),
+        ],
         trackingItems,
       }),
       codeSections,
@@ -891,7 +802,6 @@ export function buildAgentFindingDetailModel(params: {
     });
   }
 
-  const statusLabel = buildStatusLabel(finding.status);
   const summaryStats: FindingDetailSummaryStat[] = [
     { label: "漏洞危害", value: severity.label, tone: severity.tone },
     { label: "漏洞置信度", value: confidence.label, tone: confidence.tone },
@@ -899,9 +809,9 @@ export function buildAgentFindingDetailModel(params: {
 
   return buildBaseModel({
     pageTitle: "统一漏洞详情",
-    codePanelTitle: "代码证据",
-    emptyCodeMessage: MISSING_REPORT_CODE_EVIDENCE,
-    narrativeSections: buildAgentReportNarrativeSections(finding),
+    codePanelTitle: "关联代码",
+    emptyCodeMessage: MISSING_AGENT_CODE_EVIDENCE,
+    narrativeSections: buildAgentMarkdownNarrativeSections(finding),
     trackingItems,
     overviewItems: buildMergedOverviewItems({
       name:
@@ -909,7 +819,6 @@ export function buildAgentFindingDetailModel(params: {
         String(finding.title || "").trim() ||
         typeDisplay.label,
       overviewItems: buildOverviewItems({
-        statusLabel,
         headlineLabel: "漏洞类型",
         headlineValue: typeDisplay.label,
         headlineTitle: typeDisplay.tooltip,
@@ -917,7 +826,7 @@ export function buildAgentFindingDetailModel(params: {
       }),
       trackingItems,
     }),
-    codeSections: buildFindingDetailCodeSections(buildAgentReportCodeViews(finding)),
+    codeSections,
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,
@@ -937,7 +846,6 @@ export function buildOpengrepFindingDetailModel(params: {
   const { finding } = params;
   const severity = resolveSeverityDisplay(finding.severity);
   const confidence = resolveTextConfidenceDisplay(finding.confidence);
-  const statusLabel = buildStaticFindingStatusLabel(finding.status);
   const location = formatLocation({
     filePath: finding.file_path,
     lineStart: finding.start_line,
@@ -978,7 +886,6 @@ export function buildOpengrepFindingDetailModel(params: {
     overviewItems: buildMergedOverviewItems({
       name: typeDisplay.label,
       overviewItems: buildOverviewItems({
-        statusLabel,
         headlineLabel: "漏洞类型",
         headlineValue: typeDisplay.label,
         headlineTitle: typeDisplay.tooltip,
@@ -1010,7 +917,6 @@ export function buildGitleaksFindingDetailModel(params: {
     lineStart: finding.start_line,
     lineEnd: finding.end_line,
   });
-  const statusLabel = buildStaticFindingStatusLabel(finding.status);
   const summaryStats: FindingDetailSummaryStat[] = [
     { label: "漏洞危害", value: MISSING_SEVERITY, tone: "muted" },
     { label: "漏洞置信度", value: MISSING_VALUE, tone: "muted" },
@@ -1039,7 +945,6 @@ export function buildGitleaksFindingDetailModel(params: {
     overviewItems: buildMergedOverviewItems({
       name: headlineValue,
       overviewItems: buildOverviewItems({
-        statusLabel,
         headlineLabel: "漏洞类型",
         headlineValue,
         summaryStats,
@@ -1065,7 +970,6 @@ export function buildBanditFindingDetailModel(params: {
   const { finding } = params;
   const severity = resolveSeverityDisplay(finding.issue_severity);
   const confidence = resolveTextConfidenceDisplay(finding.issue_confidence);
-  const statusLabel = buildStaticFindingStatusLabel(finding.status);
   const location = formatLocation({
     filePath: finding.file_path,
     lineStart: finding.line_number,
@@ -1107,7 +1011,6 @@ export function buildBanditFindingDetailModel(params: {
     overviewItems: buildMergedOverviewItems({
       name: headlineValue || "bandit-rule",
       overviewItems: buildOverviewItems({
-        statusLabel,
         headlineLabel: "漏洞类型",
         headlineValue: headlineValue || "bandit-rule",
         summaryStats,
@@ -1131,7 +1034,6 @@ export function buildPhpstanFindingDetailModel(params: {
   projectName?: string | null;
 }): FindingDetailPageModel {
   const { finding } = params;
-  const statusLabel = buildStaticFindingStatusLabel(finding.status);
   const location = formatLocation({
     filePath: finding.file_path,
     lineStart: finding.line ?? null,
@@ -1171,7 +1073,6 @@ export function buildPhpstanFindingDetailModel(params: {
     overviewItems: buildMergedOverviewItems({
       name: headlineValue,
       overviewItems: buildOverviewItems({
-        statusLabel,
         headlineLabel: "漏洞类型",
         headlineValue,
         summaryStats,
@@ -1196,7 +1097,6 @@ export function buildYasaFindingDetailModel(params: {
   projectName?: string | null;
 }): FindingDetailPageModel {
   const { finding } = params;
-  const statusLabel = buildStatusLabel(finding.status);
   const location = formatLocation({
     filePath: finding.file_path,
     lineStart: finding.start_line ?? null,
@@ -1233,7 +1133,6 @@ export function buildYasaFindingDetailModel(params: {
     overviewItems: buildMergedOverviewItems({
       name: headlineValue,
       overviewItems: buildOverviewItems({
-        statusLabel,
         headlineLabel: "漏洞类型",
         headlineValue,
         summaryStats: [
@@ -1260,7 +1159,6 @@ export function buildPmdFindingDetailModel(params: {
   projectName?: string | null;
 }): FindingDetailPageModel {
   const { finding } = params;
-  const statusLabel = buildStaticFindingStatusLabel(finding.status);
   const location = formatLocation({
     filePath: finding.file_path,
     lineStart: finding.begin_line ?? null,
@@ -1308,7 +1206,6 @@ export function buildPmdFindingDetailModel(params: {
     overviewItems: buildMergedOverviewItems({
       name: headlineValue,
       overviewItems: buildOverviewItems({
-        statusLabel,
         headlineLabel: "漏洞类型",
         headlineValue,
         summaryStats: [

@@ -31,10 +31,12 @@ export type ProjectMetricsStatus = NonNullable<
 
 export interface ProjectsPageRowViewModel {
 	id: string;
+	serialNumber: number;
 	name: string;
 	detailPath: string;
 	detailState: { from: string };
 	sizeText: string;
+	sizeBytes: number;
 	vulnerabilityStats: ProjectSeverityBreakdown;
 	aiVerifiedStats: ProjectSeverityBreakdown;
 	executionStats: {

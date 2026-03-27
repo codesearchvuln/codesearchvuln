@@ -523,7 +523,9 @@ export default function FindingDetail() {
         onBack={handleBack}
         codeBrowserAction={codeBrowserAction}
       >
-        <div className="cyber-card p-8 text-base text-muted-foreground">漏洞详情加载中...</div>
+        <div className="rounded-[24px] border border-border/70 bg-background p-8 text-base text-muted-foreground shadow-sm">
+          漏洞详情加载中...
+        </div>
       </FindingDetailShell>
     );
   }
@@ -535,7 +537,9 @@ export default function FindingDetail() {
         onBack={handleBack}
         codeBrowserAction={codeBrowserAction}
       >
-        <div className="cyber-card p-8 text-base text-rose-400">{error}</div>
+        <div className="rounded-[24px] border border-rose-500/30 bg-rose-500/5 p-8 text-base text-rose-500 shadow-sm">
+          {error}
+        </div>
       </FindingDetailShell>
     );
   }
@@ -547,7 +551,7 @@ export default function FindingDetail() {
         onBack={handleBack}
         codeBrowserAction={codeBrowserAction}
       >
-        <div className="cyber-card p-8 text-base text-muted-foreground">
+        <div className="rounded-[24px] border border-border/70 bg-background p-8 text-base text-muted-foreground shadow-sm">
           {source === "agent" && isAgentFalsePositiveFinding(agentFindingSnapshot)
             ? getAgentFalsePositiveEvidence(agentFindingSnapshot)
             : "暂无漏洞信息"}

@@ -91,6 +91,7 @@ import {
   resolveAgentAuditDetailTitle,
   buildStatsSummary,
   createTokenUsageAccumulator,
+  isFalsePositiveFinding,
   isVisibleVerifiedVulnerability,
   readAgentAuditFindingsPagination,
   writeAgentAuditFindingsPagination,
@@ -460,6 +461,14 @@ function isRealtimeFalsePositive(item: RealtimeMergedFindingItem): boolean {
     item.detailMode === "false_positive_reason" ||
     toSafeTrimmedString(item.authenticity).toLowerCase() === "false_positive" ||
     item.display_severity === "invalid"
+  );
+}
+
+function isAgentFindingFalsePositiveSnapshot(finding: AgentFinding | null | undefined): boolean {
+  if (!finding) return false;
+  return (
+    toSafeTrimmedString(finding.status).toLowerCase() === "false_positive" ||
+    toSafeTrimmedString(finding.authenticity).toLowerCase() === "false_positive"
   );
 }
 
@@ -879,6 +888,8 @@ function AgentAuditPageContent() {
   const openFindingDetailPage = useCallback(
     (findingId: string, snapshot?: AgentFinding | null) => {
       if (!taskId) return;
+      const falsePositive = isAgentFindingFalsePositiveSnapshot(snapshot);
+      if (falsePositive) return;
       const target = buildAgentFindingDetailNavigation({
         taskId,
         findingId,
@@ -1073,7 +1084,7 @@ function AgentAuditPageContent() {
     if (detailType === "finding") {
       if (!taskId) return;
       if (
-        findings.some((item) => item.id === detailId) ||
+        findings.some((item) => !isFalsePositiveFinding(item) && item.id === detailId) ||
         visibleVerifiedFindings.some((item) => item.id === detailId)
       ) {
         navigate(

@@ -192,14 +192,26 @@ export function ProjectPotentialVulnerabilitiesSection({
 						cellClassName: "text-center",
 					},
 					cell: ({ row }) => (
-						<Button
-							asChild
-							size="sm"
-							variant="outline"
-							className="cyber-btn-ghost h-7 px-3"
-						>
-							<Link to={appendReturnTo(row.original.route, currentRoute)}>详情</Link>
-						</Button>
+						row.original.route ? (
+							<Button
+								asChild
+								size="sm"
+								variant="outline"
+								className="cyber-btn-ghost h-7 px-3"
+							>
+								<Link to={appendReturnTo(row.original.route, currentRoute)}>详情</Link>
+							</Button>
+						) : (
+							<Button
+								size="sm"
+								variant="outline"
+								className="cyber-btn-ghost h-7 px-3"
+								disabled
+								title="误报不提供统一漏洞详情入口"
+							>
+								详情
+							</Button>
+						)
 					),
 				},
 			] satisfies AppColumnDef<ProjectDetailPotentialListItem, unknown>[],

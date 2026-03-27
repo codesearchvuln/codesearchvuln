@@ -23,6 +23,8 @@ test("TaskDetailPage 以 visibleVerifiedFindings 作为 verified-only 页面级�
 		source,
 		/getAgentFindings\(taskId,\s*\{\s*is_verified:\s*true,\s*include_false_positive:\s*false,\s*\}\)/,
 	);
+	assert.match(source, /if\s*\(\s*falsePositive\s*\)\s*return;/);
+	assert.match(source, /!isFalsePositiveFinding\(item\)\s*&&\s*item\.id === detailId/);
 	assert.doesNotMatch(source, /hasAnyVerifiedFinding/);
 	assert.doesNotMatch(source, /shouldAutoApplyVerifiedFilter/);
 	assert.doesNotMatch(source, /verification: "all"/);

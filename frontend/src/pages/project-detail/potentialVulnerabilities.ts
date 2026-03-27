@@ -19,7 +19,7 @@ export interface ProjectDetailPotentialFindingNode {
 	severity: ProjectCardVulnerabilitySeverity;
 	confidence: ProjectCardVulnerabilityConfidence;
 	location: string;
-	route: string;
+	route: string | null;
 	taskCategory: ProjectCardTaskFindingCategory;
 	source: "static" | "agent";
 	line: number | null;
@@ -76,7 +76,7 @@ export interface ProjectDetailPotentialListItem {
 	taskLabel: string;
 	taskName: string;
 	taskCreatedAt: string;
-	route: string;
+	route: string | null;
 	source: "static" | "agent";
 }
 
@@ -164,6 +164,13 @@ function confidenceRank(confidence: ProjectCardVulnerabilityConfidence): number 
 	if (confidence === "MEDIUM") return 2;
 	if (confidence === "LOW") return 1;
 	return 0;
+}
+
+function isFalsePositiveAgentFinding(finding: AgentFinding): boolean {
+	return (
+		String(finding.status || "").trim().toLowerCase() === "false_positive" ||
+		String(finding.authenticity || "").trim().toLowerCase() === "false_positive"
+	);
 }
 
 function shouldIncludeFinding(params: {
@@ -558,11 +565,13 @@ export function buildProjectDetailPotentialTree(params: {
 				projectName,
 				source: "agent",
 			}),
-			route: buildFindingDetailPath({
-				source: "agent",
-				taskId: task.taskId,
-				findingId: finding.id,
-			}),
+			route: isFalsePositiveAgentFinding(finding)
+				? null
+				: buildFindingDetailPath({
+						source: "agent",
+						taskId: task.taskId,
+						findingId: finding.id,
+					}),
 			taskCategory: task.taskCategory,
 			source: "agent",
 			line,

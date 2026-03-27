@@ -62,7 +62,8 @@ const VULNERABILITY_METRIC_CHIP_CLASSNAMES = {
 const METRIC_CHIP_VALUE_CLASSNAME =
   "text-center font-semibold tabular-nums text-[18px]";
 const HEADER_CELL_CLASSNAME =
-  "border-b-2 border-border/95 bg-muted/75 text-center font-mono text-[15px] font-semibold uppercase tracking-[0.18em] text-foreground/80";
+  "border-b-2 border-border/95 bg-muted/75 text-center font-mono text-sm font-semibold uppercase tracking-[0.18em] text-foreground/80";
+const HEADER_CONTENT_CLASSNAME = "text-base";
 const BODY_CELL_CLASSNAME = "border-b-2 border-border/95";
 const DIVIDER_CELL_CLASSNAME = "border-r-2 border-border/90";
 const SECTION_DIVIDER_CLASSNAME = "border-l-2 border-border/95";
@@ -209,11 +210,10 @@ function MetricSummaryCell({
         data-project-metric-popover={groupKey}
         data-state={open && canInteract ? "open" : "closed"}
         aria-hidden={!open || !canInteract}
-        className={`${METRIC_POPOVER_CLASSNAME} ${
-          open && canInteract
-            ? METRIC_POPOVER_VISIBLE_CLASSNAME
-            : METRIC_POPOVER_HIDDEN_CLASSNAME
-        }`}
+        className={`${METRIC_POPOVER_CLASSNAME} ${open && canInteract
+          ? METRIC_POPOVER_VISIBLE_CLASSNAME
+          : METRIC_POPOVER_HIDDEN_CLASSNAME
+          }`}
       >
         <div className={METRIC_POPOVER_HEADER_CLASSNAME}>{label}</div>
         <div className={METRIC_POPOVER_GRID_CLASSNAME}>
@@ -244,13 +244,26 @@ function buildColumns(
 ): AppColumnDef<ProjectsPageRowViewModel, unknown>[] {
   return [
     {
+      id: "serialNumber",
+      accessorFn: (row) => row.serialNumber,
+      header: "序号",
+      meta: {
+        label: "序号",
+        minWidth: 76,
+        headerClassName: `${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME}`,
+        headerContentClassName: HEADER_CONTENT_CLASSNAME,
+        cellClassName: `${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center font-mono text-[17px] font-semibold text-foreground/85`,
+      },
+      cell: ({ row }) => row.original.serialNumber,
+    },
+    {
       accessorKey: "name",
       header: "项目名称",
       meta: {
         label: "项目",
-        plainHeader: true,
         minWidth: 148,
         headerClassName: `${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME}`,
+        headerContentClassName: HEADER_CONTENT_CLASSNAME,
         cellClassName: `${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
       },
       cell: ({ row }) => (
@@ -266,13 +279,13 @@ function buildColumns(
     },
     {
       id: "sizeText",
-      accessorFn: (row) => row.sizeText,
+      accessorFn: (row) => row.sizeBytes,
       header: "项目大小",
       meta: {
         label: "大小",
-        plainHeader: true,
         minWidth: 110,
         headerClassName: `${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME}`,
+        headerContentClassName: HEADER_CONTENT_CLASSNAME,
         cellClassName: `${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center text-[17px] text-muted-foreground`,
       },
       cell: ({ row }) => (
@@ -320,18 +333,19 @@ function buildColumns(
     // },
     {
       id: "vulnerabilities",
-      header: "发现潜在漏洞",
+      accessorFn: (row) => row.vulnerabilityStats.total,
+      header: "发现漏洞",
       meta: {
         label: "发现漏洞",
-        plainHeader: true,
         minWidth: 142,
         headerClassName: `${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
+        headerContentClassName: HEADER_CONTENT_CLASSNAME,
         cellClassName: `${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
       },
       cell: ({ row }) => (
         <MetricSummaryCell
           groupKey="vulnerabilities"
-          label="发现潜在漏洞"
+          label="发现漏洞"
           stats={row.original.vulnerabilityStats}
           metricsStatus={row.original.metricsStatus}
           metricsStatusMessage={row.original.metricsStatusMessage}
@@ -341,12 +355,13 @@ function buildColumns(
     },
     {
       id: "aiVerified",
+      accessorFn: (row) => row.aiVerifiedStats.total,
       header: "AI验证漏洞",
       meta: {
         label: "AI验证",
-        plainHeader: true,
         minWidth: 142,
         headerClassName: `${HEADER_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
+        headerContentClassName: HEADER_CONTENT_CLASSNAME,
         cellClassName: `${BODY_CELL_CLASSNAME} ${DIVIDER_CELL_CLASSNAME} text-center`,
       },
       cell: ({ row }) => (
@@ -369,13 +384,14 @@ function buildColumns(
         plainHeader: true,
         minWidth: 244,
         headerClassName: `${HEADER_CELL_CLASSNAME} ${SECTION_DIVIDER_CLASSNAME}`,
+        headerContentClassName: HEADER_CONTENT_CLASSNAME,
         cellClassName: `${BODY_CELL_CLASSNAME} ${SECTION_DIVIDER_CLASSNAME} text-center`,
       },
       cell: ({ row }) => (
         <div className="flex flex-wrap items-center justify-center gap-2 text-[16px]">
           <Button
             asChild
-            size="sm"
+            size="lg"
             variant="outline"
             className="cyber-btn-ghost h-8 px-2.5"
           >
@@ -386,7 +402,7 @@ function buildColumns(
           {row.original.actions.canBrowseCode ? (
             <Button
               asChild
-              size="sm"
+              size="lg"
               variant="outline"
               className="cyber-btn-ghost h-8 px-2.5 hover:bg-sky-500/10 hover:text-sky-200 hover:border-sky-500/30"
             >
@@ -410,7 +426,7 @@ function buildColumns(
             </Button>
           )}
           <Button
-            size="sm"
+            size="lg"
             className={`${PROJECT_ACTION_BTN_SUBTLE} h-8 px-2.5`}
             onClick={() => onCreateScan(row.original.id)}
             disabled={!row.original.actions.canCreateScan}

@@ -18,7 +18,7 @@ export interface TaskFindingRow {
 	line: number | null;
 	severity: TaskFindingSeverity;
 	confidence: TaskFindingConfidence;
-	route: string;
+	route: string | null;
 	createdAt: string | null;
 }
 

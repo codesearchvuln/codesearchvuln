@@ -12,6 +12,21 @@ import {
   type ScanEngineTab,
 } from "@/shared/constants/scanEngines";
 
+const DATA_TABLE_URL_STATE_KEYS = ["q", "sort", "order", "page", "pageSize", "filters"];
+
+export function buildScanConfigEngineSearchParams(
+  currentParams: URLSearchParams,
+  value: string,
+) {
+  const next = isScanEngineTab(value) ? value : DEFAULT_SCAN_ENGINE_TAB;
+  const nextParams = new URLSearchParams(currentParams);
+  for (const key of DATA_TABLE_URL_STATE_KEYS) {
+    nextParams.delete(key);
+  }
+  nextParams.set("tab", next);
+  return nextParams;
+}
+
 export default function ScanConfigEngines() {
 	const [searchParams, setSearchParams] = useSearchParams();
 	const rawTab = (searchParams.get("tab") || "").toLowerCase();
@@ -24,10 +39,7 @@ export default function ScanConfigEngines() {
 	}, [rawTab]);
 
 	const handleEngineChange = (value: string) => {
-		const next = isScanEngineTab(value) ? value : DEFAULT_SCAN_ENGINE_TAB;
-		const nextParams = new URLSearchParams(searchParams);
-		nextParams.set("tab", next);
-		setSearchParams(nextParams, { replace: true });
+		setSearchParams(buildScanConfigEngineSearchParams(searchParams, value), { replace: true });
 	};
 
 	return (

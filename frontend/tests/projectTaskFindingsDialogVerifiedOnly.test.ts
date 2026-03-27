@@ -22,4 +22,6 @@ test("ProjectTaskFindingsDialog 对智能和混合任务只请求已验证漏洞
 	);
 	assert.match(source, /已验证漏洞共 \{allRows\.length\.toLocaleString\(\)\} 条/);
 	assert.match(source, /title: allRows\.length === 0 \? "暂无已验证漏洞" : "暂无符合条件的漏洞"/);
+	assert.match(source, /route: isFalsePositiveAgentFinding\(finding\)\s*\?\s*null\s*:/);
+	assert.match(source, /row\.original\.route \?/);
 });

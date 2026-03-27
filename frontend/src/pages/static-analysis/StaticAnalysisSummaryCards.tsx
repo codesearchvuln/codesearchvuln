@@ -210,7 +210,7 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
         <div className="cyber-card p-4 space-y-2">
-          <p className="text-xs font-semibold uppercase text-muted-foreground">
+          <p className="text-base font-semibold uppercase text-muted-foreground">
             进度比例
           </p>
           <p className="text-xl font-bold text-foreground">{progressPercent}%</p>
@@ -218,17 +218,18 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
             value={progressPercent}
             className={`h-1.5 bg-muted ${getStaticAnalysisProgressAccentClassName(statusSummary.aggregateStatus)}`}
           />
-          <p className="text-xs leading-5 text-muted-foreground">
+          {/* <p className="text-xs leading-5 text-muted-foreground">
             {statusSummary.progressHint}
-          </p>
-        </div>
-        <div className="cyber-card p-4 space-y-3">
-          <p className="text-xs font-semibold uppercase text-muted-foreground">
-            任务状态
-          </p>
+          </p> */}
           <Badge className={getStaticAnalysisStatusBadgeClassName(statusSummary.aggregateStatus)}>
             {statusSummary.aggregateLabel}
           </Badge>
+        </div>
+        <div className="cyber-card p-4 space-y-3">
+          <p className="text-base font-semibold uppercase text-muted-foreground">
+            任务状态
+          </p>
+
           <div className="flex flex-wrap gap-2">
             {statusSummary.engineStatuses.map((engineStatus) => (
               <Badge
@@ -242,7 +243,7 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
           </div>
         </div>
         <div className="cyber-card p-4 space-y-1">
-          <p className="text-xs font-semibold uppercase text-muted-foreground">
+          <p className="text-base font-semibold uppercase text-muted-foreground">
             扫描时间
           </p>
           <p className="text-xl font-bold text-foreground">
@@ -250,7 +251,7 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
           </p>
         </div>
         <div className="cyber-card p-4 space-y-1">
-          <p className="text-xs font-semibold uppercase text-muted-foreground">
+          <p className="text-base font-semibold uppercase text-muted-foreground">
             扫描漏洞数量
           </p>
           <p className="text-xl font-bold text-foreground">
@@ -258,20 +259,20 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
           </p>
         </div>
         <div className="cyber-card p-4 space-y-1">
-          <p className="text-xs font-semibold uppercase text-muted-foreground">
+          <p className="text-base font-semibold uppercase text-muted-foreground">
             使用引擎数量
           </p>
           <p className="text-xl font-bold text-foreground">
             {enabledEngines.length.toLocaleString()}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {enabledEngines
               .map((engine) => getEngineDisplayLabel(engine))
               .join(" / ") || "-"}
           </p>
         </div>
         <div className="cyber-card p-4 space-y-1">
-          <p className="text-xs font-semibold uppercase text-muted-foreground">
+          <p className="text-base font-semibold uppercase text-muted-foreground">
             涉及文件
           </p>
           <p className="text-xl font-bold text-foreground">
@@ -282,19 +283,17 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
 
       {statusSummary.failureReasons.length > 0 ? (
         <div
-          className={`cyber-card border p-4 ${
-            statusSummary.aggregateStatus === "failed"
-              ? "border-rose-500/30 bg-rose-500/5"
-              : "border-amber-500/30 bg-amber-500/5"
-          }`}
+          className={`cyber-card border p-4 ${statusSummary.aggregateStatus === "failed"
+            ? "border-rose-500/30 bg-rose-500/5"
+            : "border-amber-500/30 bg-amber-500/5"
+            }`}
         >
           <div className="flex items-start gap-3">
             <AlertTriangle
-              className={`mt-0.5 h-4 w-4 shrink-0 ${
-                statusSummary.aggregateStatus === "failed"
-                  ? "text-rose-300"
-                  : "text-amber-300"
-              }`}
+              className={`mt-0.5 h-4 w-4 shrink-0 ${statusSummary.aggregateStatus === "failed"
+                ? "text-rose-300"
+                : "text-amber-300"
+                }`}
             />
             <div className="space-y-2">
               <p className="text-sm font-semibold text-foreground">
@@ -309,11 +308,10 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
                   <div key={`${reason.engine}-${reason.message}`} className="space-y-1">
                     <Badge
                       variant="outline"
-                      className={`${
-                        statusSummary.aggregateStatus === "failed"
-                          ? "border-rose-400/40 text-rose-200"
-                          : "border-amber-400/40 text-amber-200"
-                      }`}
+                      className={`${statusSummary.aggregateStatus === "failed"
+                        ? "border-rose-400/40 text-rose-200"
+                        : "border-amber-400/40 text-amber-200"
+                        }`}
                     >
                       {reason.engineLabel}
                     </Badge>
