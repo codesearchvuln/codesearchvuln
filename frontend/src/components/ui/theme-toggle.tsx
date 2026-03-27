@@ -40,38 +40,32 @@ export function ThemeToggle({ collapsed = false, className }: ThemeToggleProps) 
     return <div className={cn("h-9 w-full animate-pulse rounded-lg bg-muted", className)} />;
   }
 
-  const themes = [
-    { value: "dark",  icon: Moon, label: "深色" },
-    { value: "light", icon: Sun,  label: "浅色" },
-    // { value: "system", icon: Monitor, label: "系统" },
-  ];
-
-  const cycleTheme = () => {
-    const currentIndex = themes.findIndex((t) => t.value === theme);
-    const nextIndex = (currentIndex + 1) % themes.length;
-    handleThemeChange(themes[nextIndex].value);
+  const isDark = (resolvedTheme ?? theme) === "dark";
+  const nextTheme = isDark
+    ? { value: "light", icon: Sun, label: "浅色" }
+    : { value: "dark", icon: Moon, label: "深色" };
+  const NextIcon = nextTheme.icon;
+  const toggleTheme = () => {
+    handleThemeChange(nextTheme.value);
   };
-
-  const currentTheme = themes.find((t) => t.value === theme) ?? themes[0];
-  const CurrentIcon = currentTheme.icon;
 
   if (collapsed) {
     return (
       <button
-        onClick={cycleTheme}
+        onClick={toggleTheme}
         className={cn(
           "flex items-center justify-center w-9 h-9 rounded-lg",
-          "bg-muted/60 hover:bg-muted border border-transparent hover:border-border",
+          "bg-muted/50 hover:bg-muted/80 border border-transparent",
           "transition-colors duration-200",
           className
         )}
-        title={`当前：${currentTheme.label}模式`}
+        title={`切换到${nextTheme.label}模式`}
       >
-        <CurrentIcon
+        <NextIcon
           className={cn(
             "w-4 h-4 transition-transform duration-200",
-            resolvedTheme === "light" && "text-orange-500",
-            resolvedTheme === "dark"  && "text-violet-400"
+            nextTheme.value === "light" && "text-orange-500",
+            nextTheme.value === "dark"  && "text-violet-400"
           )}
         />
       </button>
@@ -79,35 +73,25 @@ export function ThemeToggle({ collapsed = false, className }: ThemeToggleProps) 
   }
 
   return (
-    <div className={cn("w-full px-3 pb-2", className)}>
-      <p className="text-xs text-muted-foreground mb-1.5 px-0.5">主题</p>
-      <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/60 border border-border/50">
-        {themes.map(({ value, icon: Icon, label }) => {
-          const isActive = theme === value;
-          return (
-            <button
-              key={value}
-              onClick={() => handleThemeChange(value)}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md",
-                "text-xs font-medium transition-all duration-200",
-                isActive
-                  ? "bg-background text-foreground border border-border shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-background/60"
-              )}
-            >
-              <Icon
-                className={cn(
-                  "w-3.5 h-3.5",
-                  isActive && value === "light" && "text-orange-500",
-                  isActive && value === "dark"  && "text-violet-400"
-                )}
-              />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+    <div className={cn("w-full", className)}>
+      <button
+        onClick={toggleTheme}
+        className={cn(
+          "flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5",
+          "bg-muted/50 text-sm font-medium text-muted-foreground",
+          "transition-colors duration-200 hover:bg-muted/80 hover:text-foreground"
+        )}
+        title={`切换到${nextTheme.label}模式`}
+      >
+        <NextIcon
+          className={cn(
+            "h-4 w-4 transition-transform duration-200",
+            nextTheme.value === "light" && "text-orange-500",
+            nextTheme.value === "dark" && "text-violet-400"
+          )}
+        />
+        <span className="font-mono tracking-wide">{nextTheme.label}</span>
+      </button>
     </div>
   );
 }

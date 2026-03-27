@@ -258,39 +258,19 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
                 `}
 				style={{
 					background: "var(--cyber-bg)",
-					borderRight: "1px solid var(--cyber-border)",
 				}}
 			>
 				<div className="flex flex-col h-full relative">
 					{/* Subtle gradient background */}
 					<div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent pointer-events-none" />
 
-					{/* Subtle grid background */}
-					<div
-						className="absolute inset-0 opacity-20 pointer-events-none"
-						style={{
-							backgroundImage: `
-                                linear-gradient(var(--cyber-border-accent) 1px, transparent 1px),
-                                linear-gradient(90deg, var(--cyber-border-accent) 1px, transparent 1px)
-                            `,
-							backgroundSize: "32px 32px",
-						}}
-					/>
-
-					{/* Right edge glow */}
-					<div className="absolute top-0 right-0 bottom-0 w-px bg-gradient-to-b from-primary/30 via-primary/10 to-primary/30 pointer-events-none" />
-
 					{/* Logo Section */}
 					<div
 						className={`flex-shrink-0 relative flex items-center h-16 ${collapsed ? "px-3 justify-center" : "px-5 pr-6"}`}
 						style={{
 							background: "var(--cyber-bg-elevated)",
-							borderBottom: "1px solid var(--cyber-border)",
 						}}
 					>
-						{/* Bottom accent line */}
-						<div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-primary/40 via-primary/20 to-transparent" />
-
 						<Link
 							to="/"
 							className={`flex items-center gap-3 group transition-all duration-300 ${collapsed ? "justify-center" : "flex-1 min-w-0"}`}
@@ -412,12 +392,8 @@ export default function Sidebar({ collapsed, setCollapsed }: SidebarProps) {
 						className="flex-shrink-0 p-3 space-y-1 relative"
 						style={{
 							background: "var(--cyber-bg-elevated)",
-							borderTop: "1px solid var(--cyber-border)",
 						}}
 					>
-						{/* Top accent line */}
-						<div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
-
 						{/* Theme Toggle */}
 						<ThemeToggle collapsed={collapsed} />
 					</div>

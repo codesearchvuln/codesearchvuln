@@ -122,33 +122,33 @@ const TONE_STYLES: Record<
 	{ bar: string; chip: string; text: string; fill: string }
 > = {
 	critical: {
-		bar: "from-rose-500 to-rose-400",
-		chip: "border-rose-400/30 bg-rose-500/15 text-rose-100",
-		text: "text-rose-200",
-		fill: "#f43f5e",
+		bar: "bg-rose-500/80",
+		chip: "border-rose-500/30 bg-rose-500/10 text-foreground",
+		text: "text-rose-700 dark:text-rose-300",
+		fill: "#e11d48",
 	},
 	high: {
-		bar: "from-orange-400 to-amber-300",
-		chip: "border-orange-300/30 bg-orange-500/15 text-orange-50",
-		text: "text-orange-100",
+		bar: "bg-orange-500/80",
+		chip: "border-orange-500/30 bg-orange-500/10 text-foreground",
+		text: "text-orange-700 dark:text-orange-300",
 		fill: "#fb923c",
 	},
 	medium: {
-		bar: "from-amber-400 to-yellow-300",
-		chip: "border-amber-300/30 bg-amber-500/15 text-amber-50",
-		text: "text-amber-100",
+		bar: "bg-amber-500/80",
+		chip: "border-amber-500/30 bg-amber-500/10 text-foreground",
+		text: "text-amber-700 dark:text-amber-300",
 		fill: "#fbbf24",
 	},
 	low: {
-		bar: "from-cyan-400 to-sky-300",
-		chip: "border-cyan-300/30 bg-cyan-500/15 text-cyan-50",
-		text: "text-cyan-100",
-		fill: "#38bdf8",
+		bar: "bg-sky-500/80",
+		chip: "border-sky-500/30 bg-sky-500/10 text-foreground",
+		text: "text-sky-700 dark:text-sky-300",
+		fill: "#0ea5e9",
 	},
 	neutral: {
-		bar: "from-slate-500 to-slate-300",
-		chip: "border-slate-400/30 bg-slate-500/15 text-slate-100",
-		text: "text-slate-100",
+		bar: "bg-muted-foreground/60",
+		chip: "border-border bg-muted/60 text-foreground",
+		text: "text-muted-foreground",
 		fill: "#94a3b8",
 	},
 };
@@ -172,6 +172,20 @@ export const HORIZONTAL_STATS_META_LEGEND_CLASSNAME =
 	"flex flex-wrap justify-start gap-2 sm:justify-end";
 export const TOP_STATS_GRID_CLASSNAME = "grid grid-cols-2 gap-3 xl:grid-cols-5";
 export const DASHBOARD_RECENT_TASKS_PAGE_SIZE = 4;
+const DASHBOARD_PANEL_CLASSNAME =
+	"rounded-sm border border-border bg-card text-card-foreground shadow-sm";
+const DASHBOARD_PANEL_TITLE_CLASSNAME =
+	"text-xl font-semibold uppercase tracking-[0.12em] text-foreground";
+const DASHBOARD_PANEL_DESCRIPTION_CLASSNAME =
+	"max-w-2xl text-sm leading-6 text-muted-foreground";
+const DASHBOARD_META_LABEL_CLASSNAME =
+	"text-left text-xs uppercase tracking-[0.18em] text-muted-foreground";
+const DASHBOARD_TOOLTIP_STYLE = {
+	backgroundColor: "hsl(var(--card))",
+	borderColor: "hsl(var(--border))",
+	borderRadius: "4px",
+	color: "hsl(var(--foreground))",
+};
 
 function estimateAxisLabelUnits(label: string) {
 	return Array.from(label).reduce((total, char) => {
@@ -193,7 +207,9 @@ export function estimateHorizontalStatsYAxisWidth(rows: HorizontalRow[]) {
 		(maxWidth, row) => Math.max(maxWidth, estimateAxisLabelUnits(row.label)),
 		0,
 	);
-	const estimatedWidth = Math.ceil(widestLabelUnits * HORIZONTAL_STATS_AXIS_FONT_SIZE + 18);
+	const estimatedWidth = Math.ceil(
+		widestLabelUnits * HORIZONTAL_STATS_AXIS_FONT_SIZE + 18,
+	);
 
 	return Math.min(
 		Math.max(estimatedWidth, HORIZONTAL_STATS_Y_AXIS_MIN_WIDTH),
@@ -205,7 +221,10 @@ function buildFiveStepTicks(rows: HorizontalRow[]) {
 	const upperBound = Math.max(
 		5,
 		Math.ceil(
-			rows.reduce((maxValue, row) => Math.max(maxValue, Number(row.total || 0)), 0) / 5,
+			rows.reduce(
+				(maxValue, row) => Math.max(maxValue, Number(row.total || 0)),
+				0,
+			) / 5,
 		) * 5,
 	);
 
@@ -295,7 +314,9 @@ function formatCreatedAt(value: string) {
 	return `${month}-${day} ${hour}:${minute}`;
 }
 
-export function formatCumulativeDuration(durationMs: number | null | undefined) {
+export function formatCumulativeDuration(
+	durationMs: number | null | undefined,
+) {
 	const totalSeconds = Math.max(Math.floor(Number(durationMs || 0) / 1000), 0);
 	if (totalSeconds <= 0) return "0秒";
 
@@ -348,7 +369,9 @@ function buildProjectRiskRows(
 	}));
 }
 
-function buildLanguageRiskRows(items: DashboardLanguageRiskItem[]): HorizontalRow[] {
+function buildLanguageRiskRows(
+	items: DashboardLanguageRiskItem[],
+): HorizontalRow[] {
 	return items.slice(0, 10).map((item) => ({
 		label: item.language,
 		meta: `${formatNumber(item.project_count)} 个项目`,
@@ -376,7 +399,9 @@ function buildVulnerabilityTypeRows(
 	}));
 }
 
-function buildEngineRows(items: DashboardEngineBreakdownItem[]): HorizontalRow[] {
+function buildEngineRows(
+	items: DashboardEngineBreakdownItem[],
+): HorizontalRow[] {
 	const labelMap: Record<string, string> = {
 		llm: "llm",
 		opengrep: "opengrep",
@@ -426,7 +451,9 @@ function buildStaticRuleRows(
 		}));
 }
 
-function buildLanguageLineRows(items: DashboardLanguageLocItem[]): HorizontalRow[] {
+function buildLanguageLineRows(
+	items: DashboardLanguageLocItem[],
+): HorizontalRow[] {
 	return items.slice(0, 10).map((item) => ({
 		label: item.language,
 		meta: `代码行 ${formatNumber(item.loc_number)}`,
@@ -466,9 +493,21 @@ function buildRowsForView(
 
 function buildTaskStatusRows(snapshot: DashboardSnapshotResponse) {
 	return [
-		{ label: "已完成", value: snapshot.task_status_breakdown.completed, tone: "low" as Tone },
-		{ label: "运行中", value: snapshot.task_status_breakdown.running, tone: "neutral" as Tone },
-		{ label: "失败", value: snapshot.task_status_breakdown.failed, tone: "critical" as Tone },
+		{
+			label: "已完成",
+			value: snapshot.task_status_breakdown.completed,
+			tone: "low" as Tone,
+		},
+		{
+			label: "运行中",
+			value: snapshot.task_status_breakdown.running,
+			tone: "neutral" as Tone,
+		},
+		{
+			label: "失败",
+			value: snapshot.task_status_breakdown.failed,
+			tone: "critical" as Tone,
+		},
 		{
 			label: "已中断",
 			value: snapshot.task_status_breakdown.interrupted,
@@ -498,7 +537,10 @@ export function paginateRecentTasks(
 	const startIndex = (currentPage - 1) * DASHBOARD_RECENT_TASKS_PAGE_SIZE;
 
 	return {
-		items: tasks.slice(startIndex, startIndex + DASHBOARD_RECENT_TASKS_PAGE_SIZE),
+		items: tasks.slice(
+			startIndex,
+			startIndex + DASHBOARD_RECENT_TASKS_PAGE_SIZE,
+		),
 		currentPage,
 		totalPages,
 		totalCount,
@@ -514,10 +556,19 @@ function PreviewHeader({ snapshot }: { snapshot: DashboardSnapshotResponse }) {
 		snapshot.task_status_breakdown.cancelled;
 	const cards = [
 		{ label: "项目总数", value: formatNumber(snapshot.summary.total_projects) },
-		{ label: "累计发现漏洞总数", value: formatNumber(snapshot.summary.current_effective_findings) },
-		{ label: "AI验证漏洞总数", value: formatNumber(snapshot.summary.current_verified_findings) },
+		{
+			label: "累计发现漏洞总数",
+			value: formatNumber(snapshot.summary.current_effective_findings),
+		},
+		{
+			label: "AI验证漏洞总数",
+			value: formatNumber(snapshot.summary.current_verified_findings),
+		},
 		{ label: "累计执行扫描", value: formatNumber(totalTasks) },
-		{ label: "累计消耗词元", value: formatTokenValue(snapshot.summary.total_model_tokens) },
+		{
+			label: "累计消耗词元",
+			value: formatTokenValue(snapshot.summary.total_model_tokens),
+		},
 	];
 
 	return (
@@ -525,12 +576,14 @@ function PreviewHeader({ snapshot }: { snapshot: DashboardSnapshotResponse }) {
 			{cards.map((item) => (
 				<div
 					key={item.label}
-					className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 backdrop-blur-sm"
+					className={`${DASHBOARD_PANEL_CLASSNAME} px-4 py-4`}
 				>
-					<div className="text-[16px] uppercase tracking-[0.28em] text-slate-400">
+					<div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
 						{item.label}
 					</div>
-					<div className="mt-2 text-3xl font-semibold text-white">{item.value}</div>
+					<div className="mt-2 text-2xl font-semibold tabular-nums text-foreground">
+						{item.value}
+					</div>
 				</div>
 			))}
 		</div>
@@ -547,7 +600,7 @@ function ViewSidebar({
 	return (
 		<nav
 			aria-label="漏洞态势视图切换"
-			className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.45)]"
+			className={`${DASHBOARD_PANEL_CLASSNAME} p-3`}
 		>
 			<div className="space-y-2">
 				{VIEW_ITEMS.map((view) => {
@@ -558,14 +611,18 @@ function ViewSidebar({
 							type="button"
 							aria-pressed={active}
 							onClick={() => onChange(view.id)}
-							className={`group flex w-full items-start gap-3 rounded-2xl border px-3 py-3 text-left transition duration-200 ${active
-								? "border-cyan-300/30 bg-cyan-400/12 text-white shadow-[0_10px_30px_rgba(34,211,238,0.18)]"
-								: "border-transparent bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:bg-slate-900"
-								}`}
+							className={`group flex w-full items-start gap-3 rounded-sm border px-3 py-3 text-left transition duration-200 ${
+								active
+									? "border-primary/30 bg-muted/70 text-foreground shadow-sm"
+									: "border-transparent bg-background/60 text-muted-foreground hover:border-border hover:bg-muted/40"
+							}`}
 						>
 							<div
-								className={`mt-0.5 rounded-xl p-2 ${active ? "bg-cyan-400/20 text-cyan-100" : "bg-slate-800 text-slate-400"
-									}`}
+								className={`mt-0.5 rounded-sm p-2 ${
+									active
+										? "bg-primary/10 text-primary"
+										: "bg-muted/70 text-muted-foreground"
+								}`}
 							>
 								{view.id === "trend" ? (
 									<Activity className="h-4 w-4" />
@@ -575,7 +632,8 @@ function ViewSidebar({
 									<Boxes className="h-4 w-4" />
 								) : view.id === "scan-engines" ? (
 									<Cpu className="h-4 w-4" />
-								) : view.id === "static-engine-rules" || view.id === "language-lines" ? (
+								) : view.id === "static-engine-rules" ||
+									view.id === "language-lines" ? (
 									<BarChart3 className="h-4 w-4" />
 								) : (
 									<Bug className="h-4 w-4" />
@@ -583,15 +641,18 @@ function ViewSidebar({
 							</div>
 							<div className="min-w-0 flex-1">
 								<div className="flex items-center justify-between gap-3">
-									<span className="font-medium tracking-[0.02em]">{view.label}</span>
+									<span className="font-medium tracking-[0.02em]">
+										{view.label}
+									</span>
 									<ChevronRight
-										className={`h-4 w-4 transition ${active
-											? "translate-x-0 text-cyan-200"
-											: "-translate-x-1 text-slate-600 group-hover:translate-x-0"
-											}`}
+										className={`h-4 w-4 transition ${
+											active
+												? "translate-x-0 text-primary"
+												: "-translate-x-1 text-muted-foreground/70 group-hover:translate-x-0"
+										}`}
 									/>
 								</div>
-								<p className="mt-1 text-xs leading-5 text-slate-400">
+								<p className="mt-1 text-xs leading-5 text-muted-foreground">
 									{view.description}
 								</p>
 							</div>
@@ -623,31 +684,32 @@ function TaskStatusPanel({
 	return (
 		<section
 			data-panel="status"
-			className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.45)] xl:flex xl:min-h-0 xl:flex-col"
+			className={`${DASHBOARD_PANEL_CLASSNAME} p-5 xl:flex xl:min-h-0 xl:flex-col`}
 		>
 			<div className="flex items-start justify-between gap-4">
 				<div>
-					<h2 className="mt-3 text-2xl font-semibold text-white">任务状态</h2>
+					<h2 className={DASHBOARD_PANEL_TITLE_CLASSNAME}>任务状态</h2>
 				</div>
 			</div>
 			<div className="mt-3 space-y-3">
 				{statusRows.length === 0 ? (
-					<p className="text-sm text-slate-400">暂无任务状态数据</p>
+					<p className="text-sm text-muted-foreground">暂无任务状态数据</p>
 				) : (
 					statusRows.map((item) => {
 						const tone = TONE_STYLES[item.tone];
-						const width = total > 0 ? Math.max((item.value / total) * 100, 8) : 0;
+						const width =
+							total > 0 ? Math.max((item.value / total) * 100, 8) : 0;
 						return (
 							<div key={item.label} className="space-y-2">
 								<div className="flex items-center justify-between gap-3 text-sm">
-									<span className="text-slate-200">{item.label}</span>
+									<span className="text-foreground">{item.label}</span>
 									<span className={`font-medium ${tone.text}`}>
 										{formatNumber(item.value)}
 									</span>
 								</div>
-								<div className="h-3 rounded-full bg-slate-900">
+								<div className="h-3 rounded-full bg-muted/70">
 									<div
-										className={`h-3 rounded-full bg-gradient-to-r ${tone.bar}`}
+										className={`h-3 rounded-full ${tone.bar}`}
 										style={{ width: `${width}%` }}
 									/>
 								</div>
@@ -658,13 +720,13 @@ function TaskStatusPanel({
 			</div>
 			<div className="flex items-start justify-between gap-4">
 				<div>
-					<h2 className="mt-3 text-2xl font-semibold text-white">最近任务</h2>
+					<h2 className={DASHBOARD_PANEL_TITLE_CLASSNAME}>最近任务</h2>
 				</div>
 			</div>
-			<div className="mt-1 border-t border-white/10 pt-5 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+			<div className="mt-1 border-t border-border/70 pt-5 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
 				<div className="space-y-3">
 					{recentTasksPagination.items.length === 0 ? (
-						<p className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400">
+						<p className="rounded-sm border border-dashed border-border bg-muted/20 px-4 py-5 text-sm text-muted-foreground">
 							暂无最近任务
 						</p>
 					) : (
@@ -674,13 +736,13 @@ function TaskStatusPanel({
 					)}
 				</div>
 				{recentTasksPagination.totalPages > 1 ? (
-					<div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+					<div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-4">
 						<div className="flex items-center gap-2">
 							<Button
 								type="button"
 								variant="outline"
 								size="sm"
-								className="cyber-btn-outline h-8 border-white/15 bg-white/[0.03] px-3 text-slate-200 hover:bg-white/[0.08]"
+								className="cyber-btn-outline h-8 px-3"
 								onClick={() =>
 									setRecentTasksPage((page) => Math.max(page - 1, 1))
 								}
@@ -693,14 +755,15 @@ function TaskStatusPanel({
 								type="button"
 								variant="outline"
 								size="sm"
-								className="cyber-btn-outline h-8 border-white/15 bg-white/[0.03] px-3 text-slate-200 hover:bg-white/[0.08]"
+								className="cyber-btn-outline h-8 px-3"
 								onClick={() =>
 									setRecentTasksPage((page) =>
 										Math.min(page + 1, recentTasksPagination.totalPages),
 									)
 								}
 								disabled={
-									recentTasksPagination.currentPage >= recentTasksPagination.totalPages
+									recentTasksPagination.currentPage >=
+									recentTasksPagination.totalPages
 								}
 							>
 								下一页
@@ -720,28 +783,30 @@ function RecentTaskCard({ task }: { task: DashboardRecentTaskItem }) {
 		createdAt: task.created_at,
 	});
 	return (
-		<div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4">
+		<div className={`${DASHBOARD_PANEL_CLASSNAME} px-4 py-4`}>
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0">
-					<p className="truncate text-sm font-medium text-slate-100">{task.title}</p>
-					<p className="mt-1 text-xs text-slate-400">
+					<p className="truncate text-sm font-semibold text-foreground">
+						{task.title}
+					</p>
+					<p className="mt-1 text-xs text-muted-foreground">
 						{task.task_type} · {formatCreatedAt(task.created_at)}
 					</p>
 				</div>
 				<a
 					href={task.detail_path || "/tasks/static"}
-					className="shrink-0 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/35 hover:bg-cyan-400/15"
+					className="cyber-btn-outline inline-flex h-8 shrink-0 items-center px-3 text-xs"
 				>
 					查看详情
 				</a>
 			</div>
-			<div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-400">
+			<div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
 				<span>{task.task_type}</span>
 				<span>执行进度 {progress}%</span>
 			</div>
-			<div className="mt-2 h-2 rounded-full bg-slate-900">
+			<div className="mt-2 h-2 rounded-full bg-muted/70">
 				<div
-					className="h-2 rounded-full bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-300"
+					className="h-2 rounded-full bg-primary/80"
 					style={{ width: `${progress}%` }}
 				/>
 			</div>
@@ -749,23 +814,24 @@ function RecentTaskCard({ task }: { task: DashboardRecentTaskItem }) {
 	);
 }
 
-function TrendPanel({
-	snapshot,
-}: {
-	snapshot: DashboardSnapshotResponse;
-}) {
-	const trendRows = useMemo(() => buildTrendRows(snapshot.daily_activity), [snapshot.daily_activity]);
+function TrendPanel({ snapshot }: { snapshot: DashboardSnapshotResponse }) {
+	const trendRows = useMemo(
+		() => buildTrendRows(snapshot.daily_activity),
+		[snapshot.daily_activity],
+	);
 	const peakItem = trendRows.reduce(
 		(result, item) => (item.total > result.total ? item : result),
 		{ date: "-", total: 0, verified: 0 },
 	);
-	const llmTotal = snapshot.engine_breakdown.find((item) => item.engine === "llm");
+	const llmTotal = snapshot.engine_breakdown.find(
+		(item) => item.engine === "llm",
+	);
 
 	if (trendRows.length === 0) {
 		return (
 			<div data-panel="trend" className="space-y-4">
-				<h3 className="text-2xl font-semibold tracking-[0.04em] text-white">漏洞态势趋势</h3>
-				<p className="text-sm text-slate-400">暂无趋势数据</p>
+				<h3 className={DASHBOARD_PANEL_TITLE_CLASSNAME}>漏洞态势趋势</h3>
+				<p className="text-sm text-muted-foreground">暂无趋势数据</p>
 			</div>
 		);
 	}
@@ -773,10 +839,8 @@ function TrendPanel({
 	return (
 		<div data-panel="trend" className="space-y-5">
 			<div className="flex flex-col gap-2">
-				<h3 className="text-2xl font-semibold tracking-[0.04em] text-white">
-					漏洞态势趋势
-				</h3>
-				<p className="max-w-2xl text-sm leading-6 text-slate-400">
+				<h3 className={DASHBOARD_PANEL_TITLE_CLASSNAME}>漏洞态势趋势</h3>
+				<p className={DASHBOARD_PANEL_DESCRIPTION_CLASSNAME}>
 					查看近一段时间新增风险与 AI 已验证漏洞的波动趋势。
 				</p>
 			</div>
@@ -800,19 +864,21 @@ function TrendPanel({
 				].map((item) => (
 					<div
 						key={item.label}
-						className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3"
+						className={`${DASHBOARD_PANEL_CLASSNAME} px-4 py-3`}
 					>
-						<p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+						<p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
 							{item.label}
 						</p>
-						<p className="mt-2 text-2xl font-semibold text-white">{item.value}</p>
-						<p className="mt-1 text-xs text-slate-400">{item.meta}</p>
+						<p className="mt-2 text-xl font-semibold text-foreground">
+							{item.value}
+						</p>
+						<p className="mt-1 text-xs text-muted-foreground">{item.meta}</p>
 					</div>
 				))}
 			</div>
-			<div className="h-[320px] w-full rounded-[24px] border border-cyan-400/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.4),rgba(2,6,23,0.8))] p-4">
+			<div className="h-[320px] w-full rounded-sm border border-border bg-background/70 p-4">
 				<div className={HORIZONTAL_STATS_META_ROW_CLASSNAME}>
-					<div className="text-left text-[14px] uppercase tracking-[0.28em] text-slate-500">
+					<div className={DASHBOARD_META_LABEL_CLASSNAME}>
 						横坐标：日期
 						<br />
 						纵坐标：漏洞数量
@@ -832,42 +898,42 @@ function TrendPanel({
 				</div>
 				<div className="h-[calc(100%-52px)] w-full">
 					<ResponsiveContainer width="100%" height="100%">
-						<AreaChart data={trendRows} margin={{ top: 12, right: 12, left: -10, bottom: 0 }}>
-							<defs>
-								<linearGradient id="dashboardTotal" x1="0" x2="0" y1="0" y2="1">
-									<stop offset="0%" stopColor="#22d3ee" stopOpacity={0.45} />
-									<stop offset="100%" stopColor="#22d3ee" stopOpacity={0.02} />
-								</linearGradient>
-								<linearGradient id="dashboardVerified" x1="0" x2="0" y1="0" y2="1">
-									<stop offset="0%" stopColor="#f97316" stopOpacity={0.38} />
-									<stop offset="100%" stopColor="#f97316" stopOpacity={0.02} />
-								</linearGradient>
-							</defs>
-							<CartesianGrid stroke="rgba(100,116,139,0.15)" strokeDasharray="4 4" />
-							<XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
-							<YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
-							<Tooltip
-								contentStyle={{
-									backgroundColor: "rgba(2, 6, 23, 0.92)",
-									borderColor: "rgba(56, 189, 248, 0.18)",
-									borderRadius: "16px",
-									color: "#e2e8f0",
-								}}
+						<AreaChart
+							data={trendRows}
+							margin={{ top: 12, right: 12, left: -10, bottom: 0 }}
+						>
+							<CartesianGrid
+								stroke="rgba(148,163,184,0.18)"
+								strokeDasharray="4 4"
 							/>
+							<XAxis
+								dataKey="date"
+								tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+								axisLine={false}
+								tickLine={false}
+							/>
+							<YAxis
+								tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+								axisLine={false}
+								tickLine={false}
+							/>
+							<Tooltip contentStyle={DASHBOARD_TOOLTIP_STYLE} />
 							<Area
 								type="monotone"
 								dataKey="total"
 								name="新增风险"
-								stroke="#22d3ee"
-								fill="url(#dashboardTotal)"
+								stroke={TONE_STYLES.low.fill}
+								fill={TONE_STYLES.low.fill}
+								fillOpacity={0.12}
 								strokeWidth={2.4}
 							/>
 							<Area
 								type="monotone"
 								dataKey="verified"
 								name="已验证"
-								stroke="#f97316"
-								fill="url(#dashboardVerified)"
+								stroke={TONE_STYLES.high.fill}
+								fill={TONE_STYLES.high.fill}
+								fillOpacity={0.12}
 								strokeWidth={2.2}
 							/>
 						</AreaChart>
@@ -896,8 +962,8 @@ function HorizontalStatsChart({
 	if (rows.length === 0) {
 		return (
 			<div className="space-y-4">
-				<h3 className="text-2xl font-semibold tracking-[0.04em] text-white">{title}</h3>
-				<p className="text-sm text-slate-400">暂无统计数据</p>
+				<h3 className={DASHBOARD_PANEL_TITLE_CLASSNAME}>{title}</h3>
+				<p className="text-sm text-muted-foreground">暂无统计数据</p>
 			</div>
 		);
 	}
@@ -908,22 +974,22 @@ function HorizontalStatsChart({
 	const primaryTone = rows[0]?.tone ?? "low";
 	const legendItems = stacked
 		? [
-			{ label: "严重", tone: "critical" as Tone },
-			{ label: "高危", tone: "high" as Tone },
-			{ label: "中危", tone: "medium" as Tone },
-			{ label: "低危", tone: "low" as Tone },
-		]
+				{ label: "严重", tone: "critical" as Tone },
+				{ label: "高危", tone: "high" as Tone },
+				{ label: "中危", tone: "medium" as Tone },
+				{ label: "低危", tone: "low" as Tone },
+			]
 		: [{ label: "总数", tone: primaryTone }];
 
 	return (
 		<div className="space-y-5">
 			<div className="flex flex-col gap-2">
-				<h3 className="text-2xl font-semibold tracking-[0.04em] text-white">{title}</h3>
-				<p className="max-w-2xl text-sm leading-6 text-slate-400">{description}</p>
+				<h3 className={DASHBOARD_PANEL_TITLE_CLASSNAME}>{title}</h3>
+				<p className={DASHBOARD_PANEL_DESCRIPTION_CLASSNAME}>{description}</p>
 			</div>
-			<div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+			<div className="rounded-sm border border-border bg-background/70 p-4">
 				<div className={HORIZONTAL_STATS_META_ROW_CLASSNAME}>
-					<div className="text-left text-[14px] uppercase tracking-[0.28em] text-slate-500">
+					<div className={DASHBOARD_META_LABEL_CLASSNAME}>
 						横坐标：数量
 						<br />
 						纵坐标：{yAxisLabel}
@@ -948,13 +1014,16 @@ function HorizontalStatsChart({
 							barCategoryGap={HORIZONTAL_STATS_BAR_CATEGORY_GAP}
 						>
 							<CartesianGrid
-								stroke="rgba(100,116,139,0.15)"
+								stroke="rgba(148,163,184,0.18)"
 								strokeDasharray="4 4"
 								horizontal={false}
 							/>
 							<XAxis
 								type="number"
-								tick={{ fill: "#94a3b8", fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE }}
+								tick={{
+									fill: "hsl(var(--muted-foreground))",
+									fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE,
+								}}
 								axisLine={false}
 								tickLine={false}
 								minTickGap={xAxisProps.minTickGap}
@@ -967,33 +1036,62 @@ function HorizontalStatsChart({
 								type="category"
 								dataKey="label"
 								width={yAxisWidth}
-								tick={{ fill: "#e2e8f0", fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE }}
+								tick={{
+									fill: "hsl(var(--foreground))",
+									fontSize: HORIZONTAL_STATS_AXIS_FONT_SIZE,
+								}}
 								axisLine={false}
 								tickLine={false}
 							/>
 							<Tooltip
-								cursor={{ fill: "rgba(15, 23, 42, 0.45)" }}
-								contentStyle={{
-									backgroundColor: "rgba(2, 6, 23, 0.94)",
-									borderColor: "rgba(56, 189, 248, 0.18)",
-									borderRadius: "16px",
-									color: "#e2e8f0",
-								}}
-								formatter={(value: number) => [formatNumber(Number(value)), "数量"]}
-								labelFormatter={(label: string, payload: Array<{ payload?: HorizontalRow }>) =>
+								cursor={{ fill: "rgba(148, 163, 184, 0.12)" }}
+								contentStyle={DASHBOARD_TOOLTIP_STYLE}
+								formatter={(value: number) => [
+									formatNumber(Number(value)),
+									"数量",
+								]}
+								labelFormatter={(
+									label: string,
+									payload: Array<{ payload?: HorizontalRow }>,
+								) =>
 									`${label}${payload[0]?.payload?.meta ? ` · ${payload[0].payload.meta}` : ""}`
 								}
 							/>
 							{stacked ? (
 								<>
-									<Bar dataKey="critical" stackId="risk" name="严重" fill={TONE_STYLES.critical.fill} barSize={HORIZONTAL_STATS_BAR_SIZE} />
-									<Bar dataKey="high" stackId="risk" name="高危" fill={TONE_STYLES.high.fill} barSize={HORIZONTAL_STATS_BAR_SIZE} />
-									<Bar dataKey="medium" stackId="risk" name="中危" fill={TONE_STYLES.medium.fill} barSize={HORIZONTAL_STATS_BAR_SIZE} />
-									<Bar dataKey="low" stackId="risk" name="低危" fill={TONE_STYLES.low.fill} radius={[0, 10, 10, 0]} barSize={HORIZONTAL_STATS_BAR_SIZE}>
+									<Bar
+										dataKey="critical"
+										stackId="risk"
+										name="严重"
+										fill={TONE_STYLES.critical.fill}
+										barSize={HORIZONTAL_STATS_BAR_SIZE}
+									/>
+									<Bar
+										dataKey="high"
+										stackId="risk"
+										name="高危"
+										fill={TONE_STYLES.high.fill}
+										barSize={HORIZONTAL_STATS_BAR_SIZE}
+									/>
+									<Bar
+										dataKey="medium"
+										stackId="risk"
+										name="中危"
+										fill={TONE_STYLES.medium.fill}
+										barSize={HORIZONTAL_STATS_BAR_SIZE}
+									/>
+									<Bar
+										dataKey="low"
+										stackId="risk"
+										name="低危"
+										fill={TONE_STYLES.low.fill}
+										radius={[0, 10, 10, 0]}
+										barSize={HORIZONTAL_STATS_BAR_SIZE}
+									>
 										<LabelList
 											dataKey="total"
 											position="right"
-											fill="#f8fafc"
+											fill="hsl(var(--foreground))"
 											fontSize={HORIZONTAL_STATS_LABEL_FONT_SIZE}
 											formatter={(value: number) => formatNumber(Number(value))}
 										/>
@@ -1010,7 +1108,7 @@ function HorizontalStatsChart({
 									<LabelList
 										dataKey="total"
 										position="right"
-										fill="#f8fafc"
+										fill="hsl(var(--foreground))"
 										fontSize={HORIZONTAL_STATS_LABEL_FONT_SIZE}
 										formatter={(value: number) => formatNumber(Number(value))}
 									/>
@@ -1032,15 +1130,18 @@ export default function DashboardCommandCenter({
 		() => VIEW_ITEMS.find((item) => item.id === activeView) ?? VIEW_ITEMS[0],
 		[activeView],
 	);
-	const rows = useMemo(() => buildRowsForView(activeView, snapshot), [activeView, snapshot]);
+	const rows = useMemo(
+		() => buildRowsForView(activeView, snapshot),
+		[activeView, snapshot],
+	);
 
 	return (
-		<div className="bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.12),transparent_22%),linear-gradient(180deg,#020617_0%,#020817_52%,#030712_100%)] px-1 py-1 text-slate-100 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden">
+		<div className="px-1 py-1 text-foreground xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden">
 			<div className="space-y-6 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:space-y-4">
 				<PreviewHeader snapshot={snapshot} />
 				<div className="grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-cols-[260px_minmax(0,1fr)_340px] xl:gap-4">
 					<ViewSidebar activeView={activeView} onChange={setActiveView} />
-					<section className="rounded-[28px] border border-slate-800/90 bg-slate-950/88 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.45)] xl:min-h-0">
+					<section className={`${DASHBOARD_PANEL_CLASSNAME} p-5 xl:min-h-0`}>
 						{activeView === "trend" ? (
 							<TrendPanel snapshot={snapshot} />
 						) : (
