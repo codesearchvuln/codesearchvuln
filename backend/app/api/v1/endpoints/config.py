@@ -194,7 +194,7 @@ async def _load_user_config_payload_with_effective_defaults(
     effective_other_config = _sanitize_other_config(
         {
             **default_config["otherConfig"],
-            **_strip_mcp_config(saved_other_config),
+            **_strip_runtime_config(saved_other_config),
         }
     )
     return (
@@ -473,14 +473,14 @@ def _sanitize_other_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
     for retired_key in ("githubToken", "gitlabToken", "giteaToken", "outputLanguage"):
         candidate.pop(retired_key, None)
-    candidate.pop("mcpConfig", None)
+    candidate.pop("toolRuntimeConfig", None)
     return candidate
 
-def _strip_mcp_config(raw_other_config: Any) -> dict:
+def _strip_runtime_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
     for retired_key in ("githubToken", "gitlabToken", "giteaToken", "outputLanguage"):
         candidate.pop(retired_key, None)
-    candidate.pop("mcpConfig", None)
+    candidate.pop("toolRuntimeConfig", None)
     return candidate
 
 def _normalize_extracted_project_root(base_path: str) -> str:
@@ -757,8 +757,8 @@ async def update_my_config(
                 else ""
             )
     if other_data:
-        # MCP runtime config is server-controlled; ignore frontend payload.
-        other_data = _strip_mcp_config(other_data)
+        # Tool runtime config is server-controlled; ignore frontend payload.
+        other_data = _strip_runtime_config(other_data)
     
     # 加密敏感字段
     llm_data_encrypted = encrypt_config(llm_data, SENSITIVE_LLM_FIELDS)
@@ -785,9 +785,9 @@ async def update_my_config(
             existing_other = json.loads(config.other_config) if config.other_config else {}
             # 先解密现有数据，再合并新数据，最后加密
             existing_other = decrypt_config(existing_other, SENSITIVE_OTHER_FIELDS)
-            existing_other = _strip_mcp_config(existing_other)
+            existing_other = _strip_runtime_config(existing_other)
             existing_other.update(other_data)  # 使用未加密的新数据合并
-            existing_other = _strip_mcp_config(existing_other)
+            existing_other = _strip_runtime_config(existing_other)
             config.other_config = json.dumps(encrypt_config(existing_other, SENSITIVE_OTHER_FIELDS))
     
     await db.commit()
@@ -801,7 +801,7 @@ async def update_my_config(
     # 解密后返回给前端
     user_llm_config = decrypt_config(user_llm_config, SENSITIVE_LLM_FIELDS)
     user_other_config = decrypt_config(user_other_config, SENSITIVE_OTHER_FIELDS)
-    user_other_config = _strip_mcp_config(user_other_config)
+    user_other_config = _strip_runtime_config(user_other_config)
     
     merged_llm_config = {**default_config["llmConfig"], **user_llm_config}
     merged_other_config = _sanitize_other_config(

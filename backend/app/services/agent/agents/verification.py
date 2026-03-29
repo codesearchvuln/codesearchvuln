@@ -1056,23 +1056,23 @@ class VerificationAgent(BaseAgent):
         project_root: Optional[str],
     ) -> None:
         """
-        改进的 MCP 函数定位辅助方法：增强容错与诊断日志
-        当 MCP 失败时，不再静默跳过，而是记录原因并标记状态
+        改进的函数定位辅助方法：增强容错与诊断日志
+        当定位失败时，不再静默跳过，而是记录原因并标记状态
         """
         if not findings_to_verify:
             return
 
-        mcp_success_count = 0
-        mcp_fail_count = 0
+        success_count = 0
+        fail_count = 0
         
         for idx, finding in enumerate(findings_to_verify):
             if not isinstance(finding, dict):
-                logger.debug(f"[Verification] MCP enrichment跳过非字典项 #{idx}")
+                logger.debug(f"[Verification] 函数定位 enrichment跳过非字典项 #{idx}")
                 continue
             
             existing_name = str(finding.get("function_name") or "").strip()
             if existing_name and existing_name.lower() not in {"unknown", "未知函数"}:
-                logger.debug(f"[Verification] MCP enrichment跳过已有函数名: {existing_name}")
+                logger.debug(f"[Verification] 函数定位 enrichment跳过已有函数名: {existing_name}")
                 continue
 
             file_path, line_start, _line_end = self._normalize_file_location(finding)
@@ -1080,7 +1080,7 @@ class VerificationAgent(BaseAgent):
             request_path = resolved_file_path or file_path
             
             if not request_path or line_start <= 0:
-                logger.debug(f"[Verification] MCP enrichment跳过无效路径: {request_path}:{line_start}")
+                logger.debug(f"[Verification] 函数定位 enrichment跳过无效路径: {request_path}:{line_start}")
                 continue
 
             locator_input = {
@@ -1097,7 +1097,7 @@ class VerificationAgent(BaseAgent):
                 
                 payload = self._extract_locator_payload(locator_output)
                 if not payload:
-                    mcp_fail_count += 1
+                    fail_count += 1
                     logger.warning(
                         f"[Verification] locate_enclosing_function 返回空 payload: {request_path}:{line_start} | "
                         f"raw_output={str(locator_output)[:200]}"
@@ -1108,7 +1108,7 @@ class VerificationAgent(BaseAgent):
                 
                 located = self._extract_function_from_locator_payload(payload, int(line_start))
                 if not located:
-                    mcp_fail_count += 1
+                    fail_count += 1
                     logger.warning(
                         f"[Verification] locate_enclosing_function payload 解析失败: {request_path}:{line_start} | "
                         f"payload_keys={list(payload.keys())}"
@@ -1118,15 +1118,15 @@ class VerificationAgent(BaseAgent):
 
                 located_name = str(located.get("function") or "").strip()
                 if not located_name:
-                    mcp_fail_count += 1
+                    fail_count += 1
                     logger.warning(
                         f"[Verification] locate_enclosing_function 返回空函数名: {request_path}:{line_start}"
                     )
                     finding["_function_locator_attempt"] = "failed_empty_function_name"
                     continue
                 
-                # MCP 成功
-                mcp_success_count += 1
+                # 函数定位成功
+                success_count += 1
                 finding["function_name"] = located_name
                 finding["function_start_line"] = self._safe_int(located.get("start_line"))
                 finding["function_end_line"] = self._safe_int(located.get("end_line"))
@@ -1138,20 +1138,20 @@ class VerificationAgent(BaseAgent):
                     finding["function_resolution_diagnostics"] = located.get("diagnostics")
                 
                 logger.info(
-                    f"[Verification] MCP定位成功: '{located_name}' @ {request_path}:{line_start}"
+                    f"[Verification] 函数定位成功: '{located_name}' @ {request_path}:{line_start}"
                 )
                 
             except Exception as e:
-                mcp_fail_count += 1
+                fail_count += 1
                 logger.error(
-                    f"[Verification] MCP调用异常: {request_path}:{line_start} | 错误: {e}",
+                    f"[Verification] 工具调用异常: {request_path}:{line_start} | 错误: {e}",
                     exc_info=True
                 )
                 finding["_function_locator_attempt"] = f"exception: {str(e)[:100]}"
                 continue
         
         logger.info(
-            f"[Verification] MCP enrichment 完成: 成功={mcp_success_count}, 失败={mcp_fail_count}, "
+            f"[Verification] 函数定位 enrichment 完成: 成功={success_count}, 失败={fail_count}, "
             f"总数={len(findings_to_verify)}"
         )
 
@@ -1781,12 +1781,12 @@ class VerificationAgent(BaseAgent):
     def _extract_verify_pipeline_blocked_reason(observation: str) -> Optional[str]:
         text = str(observation or "")
         lowered = text.lower()
-        mcp_hints = (
-            "mcp_call_failed:",
-            "mcp_adapter_unavailable:",
+        runtime_hints = (
+            "tool_call_failed:",
+            "tool_adapter_unavailable:",
             "adapter_disabled_after_failures",
-            "mcp runtime 未就绪",
-            "mcp router 未匹配",
+            "runtime 未就绪",
+            "router 未匹配",
             "server disconnected without sending a response",
             "remoteprotocolerror",
             "connecterror",
@@ -1801,10 +1801,10 @@ class VerificationAgent(BaseAgent):
             "gateway timeout",
             "healthcheck_failed",
         )
-        if any(hint in lowered for hint in mcp_hints):
-            return "mcp_unavailable"
+        if any(hint in lowered for hint in runtime_hints):
+            return "tool_unavailable"
         known = {
-            "mcp_unavailable",
+            "tool_unavailable",
             "insufficient_flow_evidence",
             "missing_location",
             "read_budget_exhausted",

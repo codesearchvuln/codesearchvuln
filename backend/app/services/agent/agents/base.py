@@ -103,7 +103,7 @@ NON_CACHEABLE_TOOL_NAMES: Set[str] = {
     "clear_bl_risk_queue",
     "is_bl_risk_point_in_queue",
 }
-STRICT_MCP_LOCAL_ONLY_TOOL_NAMES: Set[str] = {
+STRICT_MODE_LOCAL_ONLY_TOOL_NAMES: Set[str] = {
     "push_risk_point_to_queue",
     "push_risk_points_to_queue",
     "get_recon_risk_queue_status",
@@ -135,7 +135,7 @@ DETERMINISTIC_ERROR_HINTS: Tuple[str, ...] = (
     "参数校验失败",
     "工具参数缺失",
 )
-STRICT_MCP_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
+STRICT_MODE_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
     "timeout",
     "timed out",
     "temporarily unavailable",
@@ -144,8 +144,8 @@ STRICT_MCP_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
     "network",
 )
 if TYPE_CHECKING:
-    from ..mcp.runtime import MCPRuntime
-    from ..mcp.write_scope import TaskWriteScopeGuard, WriteScopeDecision
+    from ..tool_runtime.runtime import ToolRuntime
+    from ..tool_runtime.write_scope import TaskWriteScopeGuard, WriteScopeDecision
 
 
 def _truncate_with_flag(text: str, max_chars: int = MAX_EVENT_PAYLOAD_CHARS) -> Tuple[str, bool]:
@@ -452,6 +452,7 @@ class BaseAgent(ABC):
         self._tool_success_cache: Dict[str, str] = {}
         self._recent_reason_dirs: deque[str] = deque(maxlen=16)
         self._recent_search_directories: deque[str] = deque(maxlen=12)
+        self._tool_runtime: Optional["ToolRuntime"] = None
         self._write_scope_guard: Optional["TaskWriteScopeGuard"] = None
         self._max_history_observation_chars: int = 12000
         
@@ -804,9 +805,39 @@ class BaseAgent(ABC):
             return True
         return False
 
+    def set_tool_runtime(self, runtime: Optional["ToolRuntime"]) -> None:
+        """设置工具运行时（可选）。"""
+        self._tool_runtime = runtime
+        if runtime and hasattr(runtime, "get_write_scope_guard"):
+            try:
+                self._write_scope_guard = runtime.get_write_scope_guard()
+            except Exception:
+                self._write_scope_guard = None
+
     def set_write_scope_guard(self, guard: Optional["TaskWriteScopeGuard"]) -> None:
         """设置写入范围守卫。"""
         self._write_scope_guard = guard
+
+    @staticmethod
+    def _is_strict_mode(runtime: Optional["ToolRuntime"]) -> bool:
+        if not runtime:
+            return False
+        return bool(getattr(runtime, "strict_mode", False))
+
+    def _allow_local_tool_in_strict_mode(
+        self,
+        *,
+        runtime: Optional["ToolRuntime"],
+        tool_name: str,
+        local_tool_available: bool,
+    ) -> bool:
+        if not runtime:
+            return False
+        return self._is_strict_local_tool_allowed(
+            tool_name=tool_name,
+            local_tool_available=local_tool_available,
+            runtime_can_handle=False,
+        )
 
     def _runtime_metadata(self) -> Dict[str, Any]:
         metadata = getattr(self.config, "metadata", None)
@@ -836,8 +867,8 @@ class BaseAgent(ABC):
             default=self._is_smart_audit_mode(),
         )
 
-    def _strict_mcp_local_tool_allowlist(self) -> Set[str]:
-        allowlist = set(STRICT_MCP_LOCAL_ONLY_TOOL_NAMES)
+    def _strict_local_tool_allowlist(self) -> Set[str]:
+        allowlist = set(STRICT_MODE_LOCAL_ONLY_TOOL_NAMES)
         allowlist.update(SCAN_CORE_LOCAL_SKILL_IDS)
         metadata = self._runtime_metadata()
         extra_tools = metadata.get("strict_local_tools_allowed")
@@ -849,19 +880,19 @@ class BaseAgent(ABC):
             )
         return allowlist
 
-    def _is_strict_mcp_local_tool_allowed(
+    def _is_strict_local_tool_allowed(
         self,
         *,
         tool_name: str,
         local_tool_available: bool,
-        mcp_can_handle: bool,
+        runtime_can_handle: bool,
     ) -> bool:
-        if not local_tool_available or mcp_can_handle:
+        if not local_tool_available or runtime_can_handle:
             return False
         normalized = str(tool_name or "").strip().lower()
         if not normalized:
             return False
-        return normalized in self._strict_mcp_local_tool_allowlist()
+        return normalized in self._strict_local_tool_allowlist()
 
     def _read_scope_policy(self) -> str:
         metadata = self._runtime_metadata()
@@ -2034,7 +2065,7 @@ class BaseAgent(ABC):
             "工具参数缺失",
             "工具不可用",
             "写入策略校验失败",
-            "mcp 工具执行失败",
+            "工具运行时执行失败",
             "无本地回退",
         )
         return any(hint in text for hint in failure_hints)
@@ -2065,14 +2096,14 @@ class BaseAgent(ABC):
         ).strip()
         return vuln_type
 
-    def _build_mcp_proxy_fallback_requests(
+    def _build_proxy_fallback_requests(
         self,
         tool_name: str,
         tool_input: Dict[str, Any],
         tool_obj: Optional[Any] = None,
     ) -> List[Tuple[str, Dict[str, Any]]]:
         fallback_names: List[str] = []
-        configured_fallbacks = getattr(tool_obj, "mcp_fallback_tools", None) if tool_obj is not None else None
+        configured_fallbacks = getattr(tool_obj, "runtime_fallback_tools", None) if tool_obj is not None else None
         if isinstance(configured_fallbacks, list):
             fallback_names.extend(
                 [
@@ -2157,7 +2188,7 @@ class BaseAgent(ABC):
             fallback_requests.append((candidate, payload))
         return fallback_requests
 
-    async def _execute_mcp_soft_fallback(
+    async def _execute_soft_fallback(
         self,
         *,
         tool_name: str,
@@ -2168,7 +2199,7 @@ class BaseAgent(ABC):
         if fallback_depth >= 2:
             return None
 
-        fallback_requests = self._build_mcp_proxy_fallback_requests(
+        fallback_requests = self._build_proxy_fallback_requests(
             tool_name=tool_name,
             tool_input=tool_input,
             tool_obj=tool_obj,
@@ -2914,12 +2945,12 @@ class BaseAgent(ABC):
         function_end_line: Optional[int] = None
         flow_observation_text = ""
         round_success = False
-        mcp_failures: List[Dict[str, Any]] = []
+        runtime_failures: List[Dict[str, Any]] = []
 
-        def _record_mcp_failure(stage: str, observation: str) -> None:
-            if len(mcp_failures) >= 12:
+        def _record_runtime_failure(stage: str, observation: str) -> None:
+            if len(runtime_failures) >= 12:
                 return
-            mcp_failures.append(
+            runtime_failures.append(
                 {
                     "stage": stage,
                     "reason": "tool_unavailable",
@@ -2953,7 +2984,7 @@ class BaseAgent(ABC):
                     blocked_reason = self._classify_verify_blocked_reason(search_output) or "missing_location"
                     blocked_stage = "search_code"
                     if blocked_reason == "tool_unavailable":
-                        _record_mcp_failure("search_code", search_output)
+                        _record_runtime_failure("search_code", search_output)
                     break
                 located_file, located_line = self._extract_location_from_search_output(search_output)
                 if located_file:
@@ -3024,7 +3055,7 @@ class BaseAgent(ABC):
                     blocked_reason = "missing_location"
                 blocked_stage = "get_code_window"
                 if blocked_reason == "tool_unavailable":
-                    _record_mcp_failure("get_code_window", read_output)
+                    _record_runtime_failure("get_code_window", read_output)
                 break
 
             locate_input = {
@@ -3042,7 +3073,7 @@ class BaseAgent(ABC):
                 if locate_blocked == "tool_unavailable":
                     blocked_reason = locate_blocked
                     blocked_stage = "locate_enclosing_function"
-                    _record_mcp_failure("locate_enclosing_function", locate_output)
+                    _record_runtime_failure("locate_enclosing_function", locate_output)
                     break
             else:
                 located_function = self._extract_function_locator_result(
@@ -3073,7 +3104,7 @@ class BaseAgent(ABC):
                         if extract_blocked == "tool_unavailable":
                             blocked_reason = extract_blocked
                             blocked_stage = "get_symbol_body"
-                            _record_mcp_failure("get_symbol_body", extract_output)
+                            _record_runtime_failure("get_symbol_body", extract_output)
                             break
 
             analysis_start_line = (
@@ -3111,7 +3142,7 @@ class BaseAgent(ABC):
                     blocked_reason = dataflow_blocked
                     blocked_stage = "dataflow_analysis"
                     if dataflow_blocked == "tool_unavailable":
-                        _record_mcp_failure("dataflow_analysis", dataflow_output)
+                        _record_runtime_failure("dataflow_analysis", dataflow_output)
                     break
             else:
                 flow_observation_text = (
@@ -3140,7 +3171,7 @@ class BaseAgent(ABC):
                     blocked_reason = controlflow_blocked
                     blocked_stage = "controlflow_analysis_light"
                     if controlflow_blocked == "tool_unavailable":
-                        _record_mcp_failure("controlflow_analysis_light", controlflow_output)
+                        _record_runtime_failure("controlflow_analysis_light", controlflow_output)
                     break
             else:
                 flow_observation_text = (
@@ -3184,7 +3215,7 @@ class BaseAgent(ABC):
             "read_scope_ranges": list(read_scope_ranges),
             "flow_tools_used": list(flow_tools_used),
             "location_source": location_source,
-            "mcp_failures": list(mcp_failures),
+            "runtime_failures": list(runtime_failures),
         }
         if blocked_reason:
             pipeline_metadata["verify_pipeline_blocked_reason"] = blocked_reason
@@ -3206,7 +3237,7 @@ class BaseAgent(ABC):
             "read_scope_ranges": pipeline_metadata["read_scope_ranges"],
             "flow_tools_used": pipeline_metadata["flow_tools_used"],
             "location_source": location_source,
-            "mcp_failures": pipeline_metadata["mcp_failures"],
+            "runtime_failures": pipeline_metadata["runtime_failures"],
         }
 
         if blocked_reason:
@@ -3294,13 +3325,13 @@ class BaseAgent(ABC):
 
         return requested_tool_name, None
 
-    def _build_mcp_route_metadata(
+    def _build_route_metadata(
         self,
         *,
         tool_name: str,
         tool_input: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """已废弃：不再使用 MCP 路由元数据。"""
+        """已废弃：不再使用路由元数据。"""
         return {}
 
     @staticmethod
@@ -3371,26 +3402,26 @@ class BaseAgent(ABC):
         return any(hint in text for hint in DETERMINISTIC_ERROR_HINTS)
 
     @staticmethod
-    def _classify_mcp_strict_error(error_text: str) -> str:
+    def _classify_strict_error(error_text: str) -> str:
         normalized = str(error_text or "").strip()
         lowered = normalized.lower()
         if not normalized:
             return "runtime_unknown_error"
         if normalized.startswith("invalid_recon_queue_service_binding"):
             return "invalid_recon_queue_service_binding"
-        if normalized.startswith("tool_runtime_unavailable") or normalized.startswith("mcp_runtime_unavailable"):
+        if normalized.startswith("tool_runtime_unavailable") or normalized.startswith("runtime_unavailable"):
             return "tool_runtime_unavailable"
-        if normalized.startswith("tool_route_missing") or normalized.startswith("mcp_route_missing"):
+        if normalized.startswith("tool_route_missing") or normalized.startswith("route_missing"):
             return "tool_route_missing"
-        if normalized.startswith("tool_adapter_unavailable") or normalized.startswith("mcp_adapter_unavailable"):
+        if normalized.startswith("tool_adapter_unavailable") or normalized.startswith("adapter_unavailable"):
             return "tool_adapter_unavailable"
         if normalized.startswith("skill_not_ready"):
             return "skill_not_ready"
         if "object is not callable" in lowered:
             return "invalid_callable_binding"
-        if normalized.startswith("tool_unhandled_in_strict_mode") or normalized.startswith("mcp_unhandled_in_strict_mode"):
+        if normalized.startswith("tool_unhandled_in_strict_mode") or normalized.startswith("unhandled_in_strict_mode"):
             return "tool_unhandled_in_strict_mode"
-        if any(hint in lowered for hint in STRICT_MCP_TRANSIENT_ERROR_HINTS):
+        if any(hint in lowered for hint in STRICT_MODE_TRANSIENT_ERROR_HINTS):
             return "runtime_transient_error"
         return "runtime_non_transient_error"
 
@@ -4308,15 +4339,32 @@ class BaseAgent(ABC):
         tool = self.tools.get(resolved_tool_name)
         local_tool_available = bool(tool and hasattr(tool, "execute"))
 
-        # MCP runtime 已废弃，相关检查简化
-        mcp_can_handle = False
+        tool_runtime = self._tool_runtime
+        strict_mode = self._is_strict_mode(tool_runtime)
+        route_registered = bool(
+            tool_runtime
+            and hasattr(tool_runtime, "router")
+            and getattr(tool_runtime, "router", None)
+            and hasattr(getattr(tool_runtime, "router", None), "can_route")
+            and getattr(tool_runtime, "router").can_route(resolved_tool_name)
+        )
+        runtime_can_handle = bool(
+            tool_runtime
+            and hasattr(tool_runtime, "can_handle")
+            and tool_runtime.can_handle(resolved_tool_name)
+        )
+        strict_local_fallback_allowed = self._allow_local_tool_in_strict_mode(
+            runtime=tool_runtime,
+            tool_name=resolved_tool_name,
+            local_tool_available=local_tool_available,
+        )
 
         normalized_requested_tool = str(requested_tool_name or "").strip().lower()
         alias_blocked = bool(
             disable_virtual_routing
             and normalized_requested_tool in VIRTUAL_TOOL_NAMES
             and not local_tool_available
-            and not mcp_can_handle
+            and not runtime_can_handle
         )
         if alias_blocked:
             tool_call_id = str(uuid.uuid4())
@@ -4344,7 +4392,7 @@ class BaseAgent(ABC):
             )
             return blocked_message
 
-        if not local_tool_available and not mcp_can_handle:
+        if not local_tool_available and not runtime_can_handle:
             if requested_tool_name in DOWNLINED_TOOL_MESSAGES:
                 return f"{DOWNLINED_TOOL_MESSAGES[requested_tool_name]}"
             return (
@@ -4382,7 +4430,7 @@ class BaseAgent(ABC):
             resolved_tool_name,
             repaired_input,
         )
-        route_metadata = self._build_mcp_route_metadata(
+        route_metadata = self._build_route_metadata(
             tool_name=resolved_tool_name,
             tool_input=repaired_input,
         )
@@ -4488,11 +4536,11 @@ class BaseAgent(ABC):
                     "retry_suppressed": True,
                     "deterministic_failure_count": deterministic_fail_count,
                 }
-                if mcp_strict_mode:
+                if strict_mode:
                     short_circuit_metadata["runtime_error"] = (
                         str(last_error or "deterministic_short_circuit")
                     )
-                    short_circuit_metadata["runtime_error_class"] = self._classify_mcp_strict_error(
+                    short_circuit_metadata["runtime_error_class"] = self._classify_strict_error(
                         str(last_error or "")
                     )
                 await self.emit_tool_result(
@@ -4640,7 +4688,7 @@ class BaseAgent(ABC):
                 return failure_output
 
             strict_local_fallback_metadata: Dict[str, Any] = {}
-            if mcp_strict_mode:
+            if strict_mode:
                 strict_metadata = {
                     **write_scope_metadata,
                     "runtime_strict_mode": True,
@@ -4651,7 +4699,7 @@ class BaseAgent(ABC):
                     strict_error: str,
                     base_metadata: Optional[Dict[str, Any]] = None,
                 ) -> Dict[str, Any]:
-                    error_class = self._classify_mcp_strict_error(strict_error)
+                    error_class = self._classify_strict_error(strict_error)
                     non_transient = self._is_non_transient_runtime_error_class(error_class)
                     current_count = 0
                     if retry_guard_key and non_transient:
@@ -4674,7 +4722,7 @@ class BaseAgent(ABC):
                         merged_failure_meta["deterministic_failure_count"] = int(current_count)
                     return merged_failure_meta
 
-                if not mcp_runtime:
+                if not tool_runtime:
                     strict_error = "工具运行时未就绪，无法执行工具。"
                     strict_failure_metadata = _build_strict_failure_metadata(
                         strict_error=strict_error,
@@ -4692,25 +4740,25 @@ class BaseAgent(ABC):
                     )
                     return strict_error
 
-                if not mcp_can_handle:
+                if not runtime_can_handle:
                     if strict_local_fallback_allowed:
                         strict_local_fallback_metadata = {
                             **strict_metadata,
                             "runtime_local_whitelist_bypass": True,
-                            "runtime_route_registered": bool(mcp_route_registered),
+                            "runtime_route_registered": bool(route_registered),
                             "runtime_local_tool": str(resolved_tool_name or "").strip().lower(),
                         }
                     else:
                         strict_error = (
                             f"标准工具链已匹配工具 {resolved_tool_name}，但当前运行时无可用 adapter，无法执行。"
-                            if mcp_route_registered
+                            if route_registered
                             else f"标准工具链未匹配工具 {resolved_tool_name}，无法执行。"
                         )
                         strict_failure_metadata = _build_strict_failure_metadata(
                             strict_error=strict_error,
                             base_metadata={
                                 **strict_metadata,
-                                "runtime_route_registered": bool(mcp_route_registered),
+                                "runtime_route_registered": bool(route_registered),
                             },
                         )
                         await self.emit_tool_result(
@@ -4726,30 +4774,30 @@ class BaseAgent(ABC):
                         return strict_error
 
                 if not strict_local_fallback_allowed:
-                    mcp_result = await mcp_runtime.execute_tool(
+                    runtime_result = await tool_runtime.execute_tool(
                         tool_name=resolved_tool_name,
                         tool_input=repaired_input,
                         agent_name=self.name,
                         alias_used=alias_used,
                     )
-                    mcp_result_meta = (
-                        dict(mcp_result.metadata)
-                        if isinstance(mcp_result.metadata, dict)
+                    runtime_result_meta = (
+                        dict(runtime_result.metadata)
+                        if isinstance(runtime_result.metadata, dict)
                         else {}
                     )
                     runtime_meta = {**strict_metadata, "runtime_used": True}
-                    mcp_output = str(mcp_result.data or mcp_result.error or "")
+                    runtime_output = str(runtime_result.data or runtime_result.error or "")
 
-                    if mcp_result.handled and mcp_result.success:
+                    if runtime_result.handled and runtime_result.success:
                         await self.emit_tool_result(
                             resolved_tool_name,
-                            mcp_output,
+                            runtime_output,
                             0,
                             tool_call_id=tool_call_id,
                             tool_status="completed",
                             alias_used=alias_used,
                             input_repaired=repaired_changes or None,
-                            evidence_metadata=mcp_result_meta or None,
+                            evidence_metadata=runtime_result_meta or None,
                             extra_metadata=runtime_meta or None,
                         )
                         if retry_guard_key:
@@ -4758,43 +4806,43 @@ class BaseAgent(ABC):
                         self._record_tool_context(
                             tool_name=resolved_tool_name,
                             tool_input=repaired_input,
-                            tool_metadata=mcp_result_meta,
+                            tool_metadata=runtime_result_meta,
                         )
                         if not is_write_tool and not cache_bypass:
-                            self._tool_success_cache[tool_call_key] = mcp_output
+                            self._tool_success_cache[tool_call_key] = runtime_output
                             if len(self._tool_success_cache) > 500:
                                 oldest_key = next(iter(self._tool_success_cache))
                                 self._tool_success_cache.pop(oldest_key, None)
-                        return mcp_output
+                        return runtime_output
 
-                    strict_error = mcp_result.error or "tool_unhandled_in_strict_mode"
+                    strict_error = runtime_result.error or "tool_unhandled_in_strict_mode"
                     strict_failure_metadata = _build_strict_failure_metadata(
                         strict_error=strict_error,
                         base_metadata=runtime_meta,
                     )
                     await self.emit_tool_result(
                         resolved_tool_name,
-                        mcp_output or strict_error,
+                        runtime_output or strict_error,
                         0,
                         tool_call_id=tool_call_id,
                         tool_status="failed",
                         alias_used=alias_used,
                         input_repaired=repaired_changes or None,
-                        evidence_metadata=mcp_result_meta or None,
+                        evidence_metadata=runtime_result_meta or None,
                         error=strict_error,
-                        error_code="mcp_strict_failure",
+                        error_code="strict_mode_failure",
                         extra_metadata=strict_failure_metadata or None,
                     )
                     # 直接返回错误信息给模型，而不是封装成"阻断"消息
-                    failure_output = mcp_output or strict_error
+                    failure_output = runtime_output or strict_error
                     #  修复：移除自动重试提示，因为不再自动修复路径
                     if strict_failure_metadata.get("auto_suggested_path"):
                         failure_output += f"\n\n提示：在 {strict_failure_metadata['auto_suggested_path']} 找到相似文件，请检查路径是否正确。"
                     return failure_output
 
-            is_mcp_proxy_tool = bool(local_tool_available and getattr(tool, "mcp_proxy_only", False))
-            if is_mcp_proxy_tool and not mcp_can_handle:
-                fallback_hit = await self._execute_mcp_soft_fallback(
+            is_runtime_proxy_tool = bool(local_tool_available and getattr(tool, "runtime_proxy_only", False))
+            if is_runtime_proxy_tool and not runtime_can_handle:
+                fallback_hit = await self._execute_soft_fallback(
                     tool_name=resolved_tool_name,
                     tool_input=repaired_input,
                     tool_obj=tool,
@@ -4804,10 +4852,10 @@ class BaseAgent(ABC):
                     fallback_tool_name, fallback_output, fallback_evidence_metadata = fallback_hit
                     proxy_metadata = {
                         **write_scope_metadata,
-                        "mcp_soft_fallback": True,
-                        "mcp_soft_fallback_target": fallback_tool_name,
+                        "runtime_soft_fallback": True,
+                        "runtime_soft_fallback_target": fallback_tool_name,
                         "skill_not_ready": True,
-                        "mcp_used": True,
+                        "runtime_used": True,
                     }
                     await self.emit_tool_result(
                         resolved_tool_name,
@@ -4849,53 +4897,53 @@ class BaseAgent(ABC):
                     "工具运行时未就绪，且未命中本地回退。"
                 )
 
-            use_mcp_first = bool(
-                mcp_can_handle
-                and mcp_runtime
+            use_runtime_first = bool(
+                runtime_can_handle
+                and tool_runtime
                 and (
                     not local_tool_available
                     or (
-                        hasattr(mcp_runtime, "should_prefer_mcp")
-                        and mcp_runtime.should_prefer_mcp()
+                        hasattr(tool_runtime, "should_prefer_runtime")
+                        and tool_runtime.should_prefer_runtime()
                     )
                 )
             )
-            mcp_fallback_metadata: Dict[str, Any] = dict(strict_local_fallback_metadata)
-            if use_mcp_first and mcp_runtime:
-                mcp_result = await mcp_runtime.execute_tool(
+            runtime_fallback_metadata: Dict[str, Any] = dict(strict_local_fallback_metadata)
+            if use_runtime_first and tool_runtime:
+                runtime_result = await tool_runtime.execute_tool(
                     tool_name=resolved_tool_name,
                     tool_input=repaired_input,
                     agent_name=self.name,
                     alias_used=alias_used,
                 )
-                mcp_result_meta = (
-                    dict(mcp_result.metadata)
-                    if isinstance(mcp_result.metadata, dict)
+                runtime_result_meta = (
+                    dict(runtime_result.metadata)
+                    if isinstance(runtime_result.metadata, dict)
                     else {}
                 )
                 runtime_meta = {**write_scope_metadata, "runtime_used": True}
 
-                if mcp_result.handled:
-                    mcp_output = str(mcp_result.data or mcp_result.error or "")
-                    if mcp_result.success:
+                if runtime_result.handled:
+                    runtime_output = str(runtime_result.data or runtime_result.error or "")
+                    if runtime_result.success:
                         await self.emit_tool_result(
                             resolved_tool_name,
-                            mcp_output,
+                            runtime_output,
                             0,
                             tool_call_id=tool_call_id,
                             tool_status="completed",
                             alias_used=alias_used,
                             input_repaired=repaired_changes or None,
-                            evidence_metadata=mcp_result_meta or None,
+                            evidence_metadata=runtime_result_meta or None,
                             extra_metadata=runtime_meta or None,
                         )
                         self._record_tool_context(
                             tool_name=resolved_tool_name,
                             tool_input=repaired_input,
-                            tool_metadata=mcp_result_meta,
+                            tool_metadata=runtime_result_meta,
                         )
                         
-                        #  MCP 工具成功执行后追踪关键工具调用
+                        #  工具运行时成功执行后追踪关键工具调用
                         critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                         if resolved_tool_name in critical_tools:
                             self._critical_tool_called = True
@@ -4910,25 +4958,25 @@ class BaseAgent(ABC):
                             logger.info(f"[{self.name}] 关键工具成功执行 (runtime): {resolved_tool_name}")
                         
                         if not is_write_tool and not cache_bypass:
-                            self._tool_success_cache[tool_call_key] = mcp_output
+                            self._tool_success_cache[tool_call_key] = runtime_output
                             if len(self._tool_success_cache) > 500:
                                 oldest_key = next(iter(self._tool_success_cache))
                                 self._tool_success_cache.pop(oldest_key, None)
-                        return mcp_output
+                        return runtime_output
 
-                    fallback_hit = await self._execute_mcp_soft_fallback(
+                    fallback_hit = await self._execute_soft_fallback(
                         tool_name=resolved_tool_name,
                         tool_input=repaired_input,
                         tool_obj=tool if local_tool_available else None,
                         fallback_depth=_fallback_depth,
                     )
-                    if fallback_hit and mcp_result.should_fallback:
+                    if fallback_hit and runtime_result.should_fallback:
                         fallback_tool_name, fallback_output, fallback_evidence_metadata = fallback_hit
                         merged_fallback_metadata = {
                             **runtime_meta,
                             "runtime_fallback_used": True,
-                            "runtime_fallback_error": mcp_result.error or "unknown",
-                            "runtime_fallback_from": mcp_result_meta.get("runtime_domain"),
+                            "runtime_fallback_error": runtime_result.error or "unknown",
+                            "runtime_fallback_from": runtime_result_meta.get("runtime_domain"),
                             "runtime_soft_fallback": True,
                             "runtime_soft_fallback_target": fallback_tool_name,
                         }
@@ -4944,7 +4992,7 @@ class BaseAgent(ABC):
                             extra_metadata=merged_fallback_metadata or None,
                         )
                         
-                        #  MCP fallback 成功执行后追踪关键工具调用
+                        #  工具运行时 fallback 成功执行后追踪关键工具调用
                         critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                         if resolved_tool_name in critical_tools:
                             self._critical_tool_called = True
@@ -4965,24 +5013,24 @@ class BaseAgent(ABC):
                                 self._tool_success_cache.pop(oldest_key, None)
                         return fallback_output
 
-                    if mcp_result.should_fallback and local_tool_available:
-                        mcp_fallback_metadata = {
+                    if runtime_result.should_fallback and local_tool_available:
+                        runtime_fallback_metadata = {
                             **runtime_meta,
                             "runtime_fallback_used": True,
-                            "runtime_fallback_error": mcp_result.error or "unknown",
-                            "runtime_fallback_from": mcp_result_meta.get("runtime_domain"),
+                            "runtime_fallback_error": runtime_result.error or "unknown",
+                            "runtime_fallback_from": runtime_result_meta.get("runtime_domain"),
                         }
-                    elif not mcp_result.should_fallback:
+                    elif not runtime_result.should_fallback:
                         await self.emit_tool_result(
                             resolved_tool_name,
-                            mcp_output,
+                            runtime_output,
                             0,
                             tool_call_id=tool_call_id,
                             tool_status="failed",
                             alias_used=alias_used,
                             input_repaired=repaired_changes or None,
-                            evidence_metadata=mcp_result_meta or None,
-                            error=mcp_result.error or "unknown",
+                            evidence_metadata=runtime_result_meta or None,
+                            error=runtime_result.error or "unknown",
                             error_code="runtime_execution_failed",
                             extra_metadata=runtime_meta or None,
                         )
@@ -4990,7 +5038,7 @@ class BaseAgent(ABC):
                             "工具运行时执行失败\n\n"
                             f"**请求工具**: {requested_tool_name}\n"
                             f"**实际工具**: {resolved_tool_name}\n"
-                            f"**错误**: {mcp_result.error or 'unknown'}\n"
+                            f"**错误**: {runtime_result.error or 'unknown'}\n"
                             "请调整参数后重试。"
                         )
                         return failure_output
@@ -4998,14 +5046,14 @@ class BaseAgent(ABC):
                     elif not local_tool_available:
                         await self.emit_tool_result(
                             resolved_tool_name,
-                            mcp_output,
+                            runtime_output,
                             0,
                             tool_call_id=tool_call_id,
                             tool_status="failed",
                             alias_used=alias_used,
                             input_repaired=repaired_changes or None,
-                            evidence_metadata=mcp_result_meta or None,
-                            error=mcp_result.error or "unknown",
+                            evidence_metadata=runtime_result_meta or None,
+                            error=runtime_result.error or "unknown",
                             error_code="runtime_no_local_fallback",
                             extra_metadata=runtime_meta or None,
                         )
@@ -5013,7 +5061,7 @@ class BaseAgent(ABC):
                             "工具运行时执行失败且无本地回退\n\n"
                             f"**请求工具**: {requested_tool_name}\n"
                             f"**实际工具**: {resolved_tool_name}\n"
-                            f"**错误**: {mcp_result.error or 'unknown'}"
+                            f"**错误**: {runtime_result.error or 'unknown'}"
                         )
                         return failure_output
 
@@ -5103,8 +5151,8 @@ class BaseAgent(ABC):
                     error=f"超时 ({timeout}s)",
                     error_code="timeout",
                     extra_metadata=(
-                        {**write_scope_metadata, **mcp_fallback_metadata}
-                        if (write_scope_metadata or mcp_fallback_metadata)
+                        {**write_scope_metadata, **runtime_fallback_metadata}
+                        if (write_scope_metadata or runtime_fallback_metadata)
                         else None
                     ),
                 )
@@ -5126,8 +5174,8 @@ class BaseAgent(ABC):
                     error="已取消",
                     error_code="cancelled",
                     extra_metadata=(
-                        {**write_scope_metadata, **mcp_fallback_metadata}
-                        if (write_scope_metadata or mcp_fallback_metadata)
+                        {**write_scope_metadata, **runtime_fallback_metadata}
+                        if (write_scope_metadata or runtime_fallback_metadata)
                         else None
                     ),
                 )
@@ -5149,8 +5197,8 @@ class BaseAgent(ABC):
                 error=str(result.error or "") or None,
                 error_code=str(getattr(result, "error_code", "") or "") or None,
                 extra_metadata=(
-                    {**write_scope_metadata, **mcp_fallback_metadata}
-                    if (write_scope_metadata or mcp_fallback_metadata)
+                    {**write_scope_metadata, **runtime_fallback_metadata}
+                    if (write_scope_metadata or runtime_fallback_metadata)
                     else None
                     ),
             )
@@ -5278,8 +5326,8 @@ class BaseAgent(ABC):
                     error=str(e),
                     error_code=type(e).__name__,
                     extra_metadata=(
-                        {**write_scope_metadata, **mcp_fallback_metadata}
-                        if (write_scope_metadata or mcp_fallback_metadata)
+                        {**write_scope_metadata, **runtime_fallback_metadata}
+                        if (write_scope_metadata or runtime_fallback_metadata)
                         else None
                     ),
                 )

@@ -199,19 +199,19 @@ class Settings(BaseSettings):
     TOOL_DOC_SYNC_ENABLED: bool = True
     TOOL_DOC_SYNC_MAX_CHARS: int = 8000
 
-    # Generic MCP runtime configuration
-    MCP_ENABLED: bool = True
-    MCP_PREFER: bool = True
-    MCP_STRICT_MODE: bool = True
-    MCP_TIMEOUT_SECONDS: int = 150
-    MCP_REQUIRE_ALL_READY_ON_STARTUP: bool = True
+    # Generic tool runtime configuration
+    TOOL_RUNTIME_ENABLED: bool = True
+    TOOL_RUNTIME_PREFER: bool = True
+    TOOL_RUNTIME_STRICT_MODE: bool = True
+    TOOL_RUNTIME_TIMEOUT_SECONDS: int = 150
+    TOOL_RUNTIME_REQUIRE_ALL_READY_ON_STARTUP: bool = True
 
     # Write policy hard constraints (applies to every task)
-    MCP_WRITE_HARD_LIMIT: int = 50
-    MCP_DEFAULT_MAX_WRITABLE_FILES_PER_TASK: int = 50
-    MCP_ALL_AGENTS_WRITABLE: bool = True
-    MCP_REQUIRE_EVIDENCE_BINDING: bool = True
-    MCP_FORBID_PROJECT_WIDE_WRITES: bool = True
+    TOOL_RUNTIME_WRITE_HARD_LIMIT: int = 50
+    TOOL_RUNTIME_DEFAULT_MAX_WRITABLE_FILES_PER_TASK: int = 50
+    TOOL_RUNTIME_ALL_AGENTS_WRITABLE: bool = True
+    TOOL_RUNTIME_REQUIRE_EVIDENCE_BINDING: bool = True
+    TOOL_RUNTIME_FORBID_PROJECT_WIDE_WRITES: bool = True
     AGENT_WRITE_SCOPE_HARD_LIMIT: int = 50
     AGENT_WRITE_SCOPE_DEFAULT_MAX_FILES: int = 50
     AGENT_WRITE_SCOPE_REQUIRE_EVIDENCE_BINDING: bool = True
@@ -228,7 +228,7 @@ class Settings(BaseSettings):
     XDG_CACHE_HOME: str = "/app/data/runtime/xdg-cache"
     XDG_CONFIG_HOME: str = "/app/data/runtime/xdg-config"
 
-    MCP_CATALOG_SOURCE_URL: str = ""
+    TOOL_RUNTIME_CATALOG_SOURCE_URL: str = ""
 
     # PoC trigger chain (source -> sink) extraction
     POC_TRIGGER_CHAIN_ENABLED: bool = True

@@ -1364,8 +1364,8 @@ class AuditWorkflowEngine:
 
         worker_agent.tracer = getattr(base_agent, "tracer", None)
 
-        if hasattr(worker_agent, "set_mcp_runtime"):
-            worker_agent.set_mcp_runtime(getattr(base_agent, "_mcp_runtime", None))
+        if hasattr(worker_agent, "set_tool_runtime"):
+            worker_agent.set_tool_runtime(getattr(base_agent, "_tool_runtime", None))
         if hasattr(worker_agent, "set_write_scope_guard"):
             worker_agent.set_write_scope_guard(getattr(base_agent, "_write_scope_guard", None))
 

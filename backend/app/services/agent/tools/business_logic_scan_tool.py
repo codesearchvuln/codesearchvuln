@@ -124,10 +124,10 @@ class BusinessLogicScanTool(AgentTool):
                 event_emitter=self.event_emitter,
             )
 
-            # 透传 MCP Runtime / WriteScope（如果由外部注入）
-            mcp_runtime = kwargs.get("mcp_runtime")
-            if mcp_runtime is not None and hasattr(sub_agent, "set_mcp_runtime"):
-                sub_agent.set_mcp_runtime(mcp_runtime)
+            # 透传 Tool Runtime / WriteScope（如果由外部注入）
+            tool_runtime = kwargs.get("tool_runtime")
+            if tool_runtime is not None and hasattr(sub_agent, "set_tool_runtime"):
+                sub_agent.set_tool_runtime(tool_runtime)
             write_scope_guard = kwargs.get("write_scope_guard")
             if write_scope_guard is not None and hasattr(sub_agent, "set_write_scope_guard"):
                 sub_agent.set_write_scope_guard(write_scope_guard)
