@@ -246,25 +246,6 @@ async def create_agent_events(db: AsyncSession, task: AgentTask) -> list:
     )
 
     add_event(
-        AgentEventType.TOOL_CALL,
-        "调用 RAG 索引工具，处理源代码文件",
-        phase=AgentTaskPhase.INDEXING,
-        tool_name="rag_index",
-        tool_input={"paths": ["app/", "routes/", "models/", "utils/"], "chunk_size": 1500},
-        time_offset_seconds=30
-    )
-
-    add_event(
-        AgentEventType.RAG_RESULT,
-        "代码索引完成：48 个文件，156 个代码块，向量维度 1536",
-        phase=AgentTaskPhase.INDEXING,
-        tool_name="rag_index",
-        tool_output={"files_indexed": 48, "chunks_created": 156, "vector_dim": 1536},
-        tool_duration_ms=8500,
-        time_offset_seconds=45
-    )
-
-    add_event(
         AgentEventType.PHASE_COMPLETE,
         "索引阶段完成",
         phase=AgentTaskPhase.INDEXING,
@@ -286,15 +267,6 @@ async def create_agent_events(db: AsyncSession, task: AgentTask) -> list:
         phase=AgentTaskPhase.ANALYSIS,
         tokens_used=320,
         time_offset_seconds=60
-    )
-
-    add_event(
-        AgentEventType.RAG_QUERY,
-        "语义检索：查找 SQL 查询和用户输入处理代码",
-        phase=AgentTaskPhase.ANALYSIS,
-        tool_name="rag_search",
-        tool_input={"query": "SQL query user input parameter database execute", "top_k": 10},
-        time_offset_seconds=65
     )
 
     add_event(
@@ -341,15 +313,6 @@ async def create_agent_events(db: AsyncSession, task: AgentTask) -> list:
     )
 
     # 命令注入检测
-    add_event(
-        AgentEventType.RAG_QUERY,
-        "语义检索：查找系统命令执行相关代码",
-        phase=AgentTaskPhase.ANALYSIS,
-        tool_name="rag_search",
-        tool_input={"query": "os.system subprocess shell command execute", "top_k": 10},
-        time_offset_seconds=180
-    )
-
     add_event(
         AgentEventType.FINDING_NEW,
         "发现命令注入漏洞 [Critical]",

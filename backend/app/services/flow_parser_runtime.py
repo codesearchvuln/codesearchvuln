@@ -12,7 +12,7 @@ class DefinitionProvider(Protocol):
 
 class LocalDefinitionProvider:
     def __init__(self) -> None:
-        from app.services.rag.splitter import TreeSitterParser
+        from app.services.parser import TreeSitterParser
 
         self.parser = TreeSitterParser()
 

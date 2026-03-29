@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from app.services.flow_parser_runtime import get_default_definition_provider
-from app.services.rag.splitter import TreeSitterParser
+from app.services.parser import TreeSitterParser
 
 
 SUPPORTED_EXTENSIONS = {

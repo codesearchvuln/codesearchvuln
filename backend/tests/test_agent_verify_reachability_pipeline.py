@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services.agent.agents.base import AgentConfig, AgentResult, AgentType, BaseAgent
-from app.services.agent.mcp import MCPRuntime
 import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
 
@@ -28,7 +27,7 @@ class _LocalTool:
         return SimpleNamespace(success=True, data=self._output, error=None, metadata={})
 
 
-def _make_agent(tools, runtime=None):
+def _make_agent(tools):
     emitter = SimpleNamespace(emit=AsyncMock())
     agent = _DummyAgent(
         config=AgentConfig(name="verify-pipeline", agent_type=AgentType.VERIFICATION),
@@ -36,8 +35,6 @@ def _make_agent(tools, runtime=None):
         tools=tools,
         event_emitter=emitter,
     )
-    if runtime is not None:
-        agent.set_mcp_runtime(runtime)
     return agent
 
 
@@ -45,13 +42,11 @@ def _make_agent(tools, runtime=None):
 async def test_verify_reachability_pipeline_reports_insufficient_flow_without_flow_tools():
     read_tool = _LocalTool("read_file", "local read")
     locate_tool = _LocalTool("locate_enclosing_function", "{'symbols':[]}")
-    runtime = MCPRuntime(enabled=True, prefer_mcp=True, adapters={}, strict_mode=True)
     agent = _make_agent(
         {
             "read_file": read_tool,
             "locate_enclosing_function": locate_tool,
-        },
-        runtime=runtime,
+        }
     )
 
     output = await agent.execute_tool(

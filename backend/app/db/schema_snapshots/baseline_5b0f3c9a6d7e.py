@@ -670,11 +670,7 @@ class AgentEventType:
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     TOOL_ERROR = "tool_error"
-    
-    # RAG 相关
-    RAG_QUERY = "rag_query"
-    RAG_RESULT = "rag_result"
-    
+
     # 发现相关
     FINDING_NEW = "finding_new"
     FINDING_UPDATE = "finding_update"

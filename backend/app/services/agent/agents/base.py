@@ -452,7 +452,6 @@ class BaseAgent(ABC):
         self._tool_success_cache: Dict[str, str] = {}
         self._recent_reason_dirs: deque[str] = deque(maxlen=16)
         self._recent_search_directories: deque[str] = deque(maxlen=12)
-        self._mcp_runtime: Optional["MCPRuntime"] = None
         self._write_scope_guard: Optional["TaskWriteScopeGuard"] = None
         self._max_history_observation_chars: int = 12000
         
@@ -805,35 +804,9 @@ class BaseAgent(ABC):
             return True
         return False
 
-    def set_mcp_runtime(self, runtime: Optional["MCPRuntime"]) -> None:
-        """设置 MCP 运行时（可选）。"""
-        self._mcp_runtime = runtime
-        if runtime and hasattr(runtime, "get_write_scope_guard"):
-            try:
-                self._write_scope_guard = runtime.get_write_scope_guard()
-            except Exception:
-                self._write_scope_guard = None
-
-    @staticmethod
-    def _is_mcp_strict_mode(runtime: Optional["MCPRuntime"]) -> bool:
-        if not runtime:
-            return False
-        return bool(getattr(runtime, "strict_mode", False))
-
-    def _allow_local_tool_in_mcp_strict_mode(
-        self,
-        *,
-        runtime: Optional["MCPRuntime"],
-        tool_name: str,
-        local_tool_available: bool,
-    ) -> bool:
-        if not runtime:
-            return False
-        return self._is_strict_mcp_local_tool_allowed(
-            tool_name=tool_name,
-            local_tool_available=local_tool_available,
-            mcp_can_handle=False,
-        )
+    def set_write_scope_guard(self, guard: Optional["TaskWriteScopeGuard"]) -> None:
+        """设置写入范围守卫。"""
+        self._write_scope_guard = guard
 
     def _runtime_metadata(self) -> Dict[str, Any]:
         metadata = getattr(self.config, "metadata", None)
@@ -2382,12 +2355,6 @@ class BaseAgent(ABC):
                 guard.register_evidence_path(file_path)
             except Exception:
                 pass
-        runtime = self._mcp_runtime
-        if runtime and hasattr(runtime, "register_evidence_path"):
-            try:
-                runtime.register_evidence_path(file_path)
-            except Exception:
-                pass
 
     def _record_evidence_paths_from_tool_context(
         self,
@@ -2867,9 +2834,9 @@ class BaseAgent(ABC):
         lowered = text.lower()
         if not text.strip():
             return "insufficient_flow_evidence"
-        mcp_unavailable_hints = (
-            "mcp_call_failed:",
-            "mcp_adapter_unavailable:",
+        tool_unavailable_hints = (
+            "tool_call_failed:",
+            "tool_adapter_unavailable:",
             "adapter_disabled_after_failures",
             "server disconnected without sending a response",
             "remoteprotocolerror",
@@ -2886,16 +2853,16 @@ class BaseAgent(ABC):
             "service unavailable",
             "gateway timeout",
         )
-        if any(hint in lowered for hint in mcp_unavailable_hints):
-            return "mcp_unavailable"
-        if "mcp runtime 未就绪" in text or "mcp router 未匹配" in text:
-            return "mcp_unavailable"
-        if "mcp 未成功处理" in text or "mcp route" in lowered:
-            return "mcp_unavailable"
-        if "mcp 未处理且本地工具不可用" in text:
-            return "mcp_unavailable"
-        if "verify_pipeline_blocked_reason" in lowered and "mcp_unavailable" in lowered:
-            return "mcp_unavailable"
+        if any(hint in lowered for hint in tool_unavailable_hints):
+            return "tool_unavailable"
+        if "runtime 未就绪" in text or "router 未匹配" in text:
+            return "tool_unavailable"
+        if "工具未成功处理" in text or "tool route" in lowered:
+            return "tool_unavailable"
+        if "工具未处理且本地工具不可用" in text:
+            return "tool_unavailable"
+        if "verify_pipeline_blocked_reason" in lowered and "tool_unavailable" in lowered:
+            return "tool_unavailable"
         if "missing_location" in lowered or "missing_file_or_line" in lowered:
             return "missing_location"
         if "read_budget_exhausted" in lowered:
@@ -2955,7 +2922,7 @@ class BaseAgent(ABC):
             mcp_failures.append(
                 {
                     "stage": stage,
-                    "reason": "mcp_unavailable",
+                    "reason": "tool_unavailable",
                     "observation_excerpt": str(observation or "")[:260],
                 }
             )
@@ -2985,7 +2952,7 @@ class BaseAgent(ABC):
                 if self._looks_like_tool_failure_output(search_output):
                     blocked_reason = self._classify_verify_blocked_reason(search_output) or "missing_location"
                     blocked_stage = "search_code"
-                    if blocked_reason == "mcp_unavailable":
+                    if blocked_reason == "tool_unavailable":
                         _record_mcp_failure("search_code", search_output)
                     break
                 located_file, located_line = self._extract_location_from_search_output(search_output)
@@ -3056,7 +3023,7 @@ class BaseAgent(ABC):
                 if blocked_reason is None:
                     blocked_reason = "missing_location"
                 blocked_stage = "get_code_window"
-                if blocked_reason == "mcp_unavailable":
+                if blocked_reason == "tool_unavailable":
                     _record_mcp_failure("get_code_window", read_output)
                 break
 
@@ -3072,7 +3039,7 @@ class BaseAgent(ABC):
             )
             if self._looks_like_tool_failure_output(locate_output):
                 locate_blocked = self._classify_verify_blocked_reason(locate_output)
-                if locate_blocked == "mcp_unavailable":
+                if locate_blocked == "tool_unavailable":
                     blocked_reason = locate_blocked
                     blocked_stage = "locate_enclosing_function"
                     _record_mcp_failure("locate_enclosing_function", locate_output)
@@ -3103,7 +3070,7 @@ class BaseAgent(ABC):
                     )
                     if self._looks_like_tool_failure_output(extract_output):
                         extract_blocked = self._classify_verify_blocked_reason(extract_output)
-                        if extract_blocked == "mcp_unavailable":
+                        if extract_blocked == "tool_unavailable":
                             blocked_reason = extract_blocked
                             blocked_stage = "get_symbol_body"
                             _record_mcp_failure("get_symbol_body", extract_output)
@@ -3140,10 +3107,10 @@ class BaseAgent(ABC):
             )
             if self._looks_like_tool_failure_output(dataflow_output):
                 dataflow_blocked = self._classify_verify_blocked_reason(dataflow_output)
-                if dataflow_blocked in {"mcp_unavailable", "cancelled"}:
+                if dataflow_blocked in {"tool_unavailable", "cancelled"}:
                     blocked_reason = dataflow_blocked
                     blocked_stage = "dataflow_analysis"
-                    if dataflow_blocked == "mcp_unavailable":
+                    if dataflow_blocked == "tool_unavailable":
                         _record_mcp_failure("dataflow_analysis", dataflow_output)
                     break
             else:
@@ -3169,10 +3136,10 @@ class BaseAgent(ABC):
             )
             if self._looks_like_tool_failure_output(controlflow_output):
                 controlflow_blocked = self._classify_verify_blocked_reason(controlflow_output)
-                if controlflow_blocked in {"mcp_unavailable", "cancelled"}:
+                if controlflow_blocked in {"tool_unavailable", "cancelled"}:
                     blocked_reason = controlflow_blocked
                     blocked_stage = "controlflow_analysis_light"
-                    if controlflow_blocked == "mcp_unavailable":
+                    if controlflow_blocked == "tool_unavailable":
                         _record_mcp_failure("controlflow_analysis_light", controlflow_output)
                     break
             else:
@@ -3333,54 +3300,8 @@ class BaseAgent(ABC):
         tool_name: str,
         tool_input: Dict[str, Any],
     ) -> Dict[str, Any]:
-        runtime = self._mcp_runtime
-        if (
-            not runtime
-            or not bool(getattr(runtime, "enabled", False))
-            or not hasattr(runtime, "router")
-        ):
-            return {}
-        router = getattr(runtime, "router", None)
-        route = None
-        try:
-            if router is not None and hasattr(router, "route"):
-                route = router.route(tool_name, dict(tool_input or {}))
-        except Exception:
-            route = None
-        if not route:
-            return {}
-
-        metadata: Dict[str, Any] = {
-            "runtime_route_enabled": True,
-            "runtime_adapter": str(route.adapter_name or ""),
-            "runtime_tool": str(route.mcp_tool_name or ""),
-        }
-        route_adapter = str(route.adapter_name or "").strip()
-        route_tool = str(route.mcp_tool_name or "").strip()
-        if route_adapter and route_tool:
-            metadata["runtime_route_primary"] = f"{route_adapter}.{route_tool}"
-        get_runtime_mode = getattr(runtime, "_get_runtime_mode", None)
-        runtime_mode = ""
-        if callable(get_runtime_mode):
-            try:
-                runtime_mode = str(get_runtime_mode(route.adapter_name) or "").strip()
-            except Exception:
-                runtime_mode = ""
-        if runtime_mode:
-            metadata["runtime_mode"] = runtime_mode
-        candidate_domains_fn = getattr(runtime, "_candidate_domains_for_mode", None)
-        if runtime_mode and callable(candidate_domains_fn):
-            try:
-                candidate_domains = candidate_domains_fn(runtime_mode)
-            except Exception:
-                candidate_domains = []
-            if isinstance(candidate_domains, list) and candidate_domains:
-                metadata["runtime_candidates"] = [
-                    str(item).strip()
-                    for item in candidate_domains
-                    if str(item).strip()
-                ]
-        return metadata
+        """已废弃：不再使用 MCP 路由元数据。"""
+        return {}
 
     @staticmethod
     def _compact_retry_input(raw_input: Dict[str, Any]) -> Dict[str, Any]:
@@ -3474,7 +3395,7 @@ class BaseAgent(ABC):
         return "runtime_non_transient_error"
 
     @staticmethod
-    def _is_non_transient_mcp_error_class(error_class: str) -> bool:
+    def _is_non_transient_runtime_error_class(error_class: str) -> bool:
         return str(error_class or "") not in {"runtime_transient_error"}
 
     @staticmethod
@@ -4387,25 +4308,8 @@ class BaseAgent(ABC):
         tool = self.tools.get(resolved_tool_name)
         local_tool_available = bool(tool and hasattr(tool, "execute"))
 
-        mcp_runtime = self._mcp_runtime
-        mcp_strict_mode = self._is_mcp_strict_mode(mcp_runtime)
-        mcp_route_registered = bool(
-            mcp_runtime
-            and hasattr(mcp_runtime, "router")
-            and getattr(mcp_runtime, "router", None)
-            and hasattr(getattr(mcp_runtime, "router", None), "can_route")
-            and getattr(mcp_runtime, "router").can_route(resolved_tool_name)
-        )
-        mcp_can_handle = bool(
-            mcp_runtime
-            and hasattr(mcp_runtime, "can_handle")
-            and mcp_runtime.can_handle(resolved_tool_name)
-        )
-        strict_local_fallback_allowed = self._allow_local_tool_in_mcp_strict_mode(
-            runtime=mcp_runtime,
-            tool_name=resolved_tool_name,
-            local_tool_available=local_tool_available,
-        )
+        # MCP runtime 已废弃，相关检查简化
+        mcp_can_handle = False
 
         normalized_requested_tool = str(requested_tool_name or "").strip().lower()
         alias_blocked = bool(
@@ -4748,7 +4652,7 @@ class BaseAgent(ABC):
                     base_metadata: Optional[Dict[str, Any]] = None,
                 ) -> Dict[str, Any]:
                     error_class = self._classify_mcp_strict_error(strict_error)
-                    non_transient = self._is_non_transient_mcp_error_class(error_class)
+                    non_transient = self._is_non_transient_runtime_error_class(error_class)
                     current_count = 0
                     if retry_guard_key and non_transient:
                         self._deterministic_failure_counts[retry_guard_key] = (
