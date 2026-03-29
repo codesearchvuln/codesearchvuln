@@ -215,6 +215,7 @@ def _ensure_runner_image(client, spec: RunnerPreflightSpec) -> None:
             text=True,
             timeout=300,  # 5分钟构建超时
             check=True,
+            cwd=str(build_context),  # Dockerfile 相对路径从构建上下文解析
         )
         logger.info("build completed for %s: %s", spec.name, spec.image)
     except subprocess.CalledProcessError as e:

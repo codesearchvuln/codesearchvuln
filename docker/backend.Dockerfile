@@ -15,7 +15,9 @@ ARG BACKEND_INSTALL_YASA=1
 ARG YASA_VERSION=v0.2.33
 ARG YASA_UAST_VERSION=v0.2.8
 ARG YASA_BUILD_FROM_SOURCE=1
+ARG DOCKER_CLI_IMAGE=docker.m.daocloud.io/docker:cli
 FROM ${UV_IMAGE} AS uvbin
+FROM ${DOCKER_CLI_IMAGE} AS docker-cli-src
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS python-base
 FROM python-base AS builder
 
@@ -274,6 +276,11 @@ RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/ap
     rm -rf /var/lib/apt/lists/*
 
 COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
+
+# 复制 docker CLI 及 buildx 插件，供 runner_preflight 以 subprocess 方式执行 docker build
+# buildx 是 Docker 23+ 执行 BuildKit 构建的必要插件（--mount=type=cache 等特性依赖它）
+COPY --from=docker-cli-src /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli-src /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 
 # ============================================
 # 多阶段构建 - 扫描工具基础阶段

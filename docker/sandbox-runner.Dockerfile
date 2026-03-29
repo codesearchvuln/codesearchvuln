@@ -74,7 +74,6 @@ RUN --mount=type=cache,id=vulhunter-sandbox-runner-pip,target=/root/.cache/pip \
       idx="$1"; \
       PIP_DEFAULT_TIMEOUT=60 /opt/sandbox-runner-venv/bin/pip install \
         --disable-pip-version-check \
-        --no-cache-dir \
         -i "${idx}" \
         requests \
         httpx \

@@ -56,7 +56,8 @@ RUN --mount=type=cache,id=vulhunter-flow-parser-runner-apt-lists,target=/var/lib
 COPY docker/flow-parser-runner.requirements.txt /tmp/flow-parser-runner.requirements.txt
 
 # Runtime deps pinned in requirements: tree-sitter, tree-sitter-language-pack, code2flow
-RUN set -eux; \
+RUN --mount=type=cache,id=vulhunter-flow-parser-runner-pip,target=/root/.cache/pip \
+    set -eux; \
     order_pypi_indexes() { \
       raw_candidates="${PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"; \
       if [ -n "${BACKEND_PYPI_INDEX_PRIMARY}" ]; then \
@@ -66,7 +67,7 @@ RUN set -eux; \
     }; \
     install_runtime_deps() { \
       idx="$1"; \
-      PIP_DEFAULT_TIMEOUT=60 /opt/flow-parser-venv/bin/pip install --disable-pip-version-check --no-cache-dir -i "${idx}" -r /tmp/flow-parser-runner.requirements.txt; \
+      PIP_DEFAULT_TIMEOUT=60 /opt/flow-parser-venv/bin/pip install --disable-pip-version-check -i "${idx}" -r /tmp/flow-parser-runner.requirements.txt; \
     }; \
     ordered_pypi_indexes="$(order_pypi_indexes)"; \
     installed_runtime_deps=0; \

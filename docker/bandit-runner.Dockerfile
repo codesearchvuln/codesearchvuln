@@ -45,12 +45,15 @@ RUN --mount=type=cache,id=vulhunter-bandit-runner-apt-lists,target=/var/lib/apt/
     fi; \
     rm -rf /var/lib/apt/lists/*; \
     python3 -m venv /opt/bandit-venv; \
+    mkdir -p /scan
+
+RUN --mount=type=cache,id=vulhunter-bandit-runner-pip,target=/root/.cache/pip \
+    set -eux; \
     if [ -n "${BACKEND_PYPI_INDEX_PRIMARY}" ]; then \
-      /opt/bandit-venv/bin/pip install --disable-pip-version-check --no-cache-dir -i "${BACKEND_PYPI_INDEX_PRIMARY}" "bandit>=1.7,<2"; \
+      /opt/bandit-venv/bin/pip install --disable-pip-version-check -i "${BACKEND_PYPI_INDEX_PRIMARY}" "bandit>=1.7,<2"; \
     else \
-      /opt/bandit-venv/bin/pip install --disable-pip-version-check --no-cache-dir "bandit>=1.7,<2"; \
+      /opt/bandit-venv/bin/pip install --disable-pip-version-check "bandit>=1.7,<2"; \
     fi; \
-    mkdir -p /scan; \
     bandit --version >/dev/null
 
 WORKDIR /scan
