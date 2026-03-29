@@ -12,15 +12,15 @@ docker-images/
 *.tsbuildinfo
 
 # Environment variables
+
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 .env.me
-!backend/docker/env/backend/.env
-!backend/docker/env/frontend/.env
-
+!docker/env/backend/env.example
+!docker/env/frontend/env.example
 # IDE and editor files
 .vscode/
 .idea/
