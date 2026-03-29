@@ -122,7 +122,7 @@ env/
 !docker/env/backend/
 !docker/env/frontend/
 !docker/env/backend/env.example
-!docker/env/frontend/env.example
+!docker/env/frontend/.env.example
 docker/env/backend/.env
 docker/env/frontend/.env
 
