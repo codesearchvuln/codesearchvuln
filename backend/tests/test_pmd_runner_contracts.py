@@ -4,7 +4,7 @@ from pathlib import Path
 def _repo_root() -> Path:
     current = Path(__file__).resolve()
     for candidate in current.parents:
-        if (candidate / "backend" / "Dockerfile").exists():
+        if (candidate / "backend" / "docker" / "backend.Dockerfile").exists():
             return candidate
     raise AssertionError("failed to locate repository root from test path")
 
@@ -16,18 +16,8 @@ def _stage_block(dockerfile_text: str, stage_header: str) -> str:
     return dockerfile_text[start:] if next_stage == -1 else dockerfile_text[start:next_stage]
 
 
-def _assert_backend_depends_on_has_pmd_runner(compose_text: str, next_service: str) -> None:
-    backend_block = compose_text.split("\n  backend:\n", 1)[1].split(f"\n  {next_service}:\n", 1)[0]
-    if "\n    depends_on:\n" not in backend_block:
-        raise AssertionError("backend service is expected to declare depends_on")
-    depends_on_block = backend_block.split("\n    depends_on:\n", 1)[1]
-    if "\n    networks:\n" in depends_on_block:
-        depends_on_block = depends_on_block.split("\n    networks:\n", 1)[0]
-    assert "\n      pmd-runner:\n" in depends_on_block
-
-
 def test_backend_dockerfile_no_longer_installs_local_pmd_runtime() -> None:
-    dockerfile_path = _repo_root() / "backend" / "Dockerfile"
+    dockerfile_path = _repo_root() / "backend" / "docker" / "backend.Dockerfile"
     dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
 
     runtime_base_block = _stage_block(dockerfile_text, "FROM python-base AS runtime-base")
@@ -45,24 +35,24 @@ def test_backend_dockerfile_no_longer_installs_local_pmd_runtime() -> None:
     assert "/usr/local/bin/pmd" not in runtime_block
 
 
-def test_compose_exposes_scanner_pmd_image_with_pmd_runner_service() -> None:
+def test_compose_exposes_scanner_pmd_image_without_compose_runner_service() -> None:
     compose_path = _repo_root() / "docker-compose.yml"
     compose_text = compose_path.read_text(encoding="utf-8")
 
     assert "SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-vulhunter/pmd-runner-local:latest}" in compose_text
-    assert "\n  pmd-runner:\n" in compose_text
+    assert "\n  pmd-runner:\n" not in compose_text
+    assert "runner preflight / warmup" not in compose_text
+    assert "动态拉起临时 runner 容器" in compose_text
 
-    _assert_backend_depends_on_has_pmd_runner(compose_text, "yasa-runner")
 
-
-def test_full_overlay_exposes_scanner_pmd_image_with_pmd_runner_service() -> None:
+def test_full_overlay_exposes_scanner_pmd_image_without_compose_runner_service() -> None:
     compose_path = _repo_root() / "docker-compose.full.yml"
     compose_text = compose_path.read_text(encoding="utf-8")
 
     assert "SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-vulhunter/pmd-runner-local:latest}" in compose_text
-    assert "\n  pmd-runner:\n" in compose_text
-
-    _assert_backend_depends_on_has_pmd_runner(compose_text, "yasa-runner")
+    assert "\n  pmd-runner:\n" not in compose_text
+    assert "runner preflight / warmup" not in compose_text
+    assert "动态拉起临时 runner 容器" in compose_text
 
 
 def test_external_tools_manual_pmd_section_documents_runner_requirements() -> None:

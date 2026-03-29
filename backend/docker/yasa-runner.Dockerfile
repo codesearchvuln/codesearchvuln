@@ -30,13 +30,13 @@ ENV YASA_REAL_BIN=/opt/yasa/bin/yasa-engine.real
 ENV YASA_ENGINE_WRAPPER_BIN=/opt/yasa/bin/yasa-engine
 ENV YASA_WRAPPER_BIN=/opt/yasa/bin/yasa
 
-COPY --chmod=755 app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
-COPY --chmod=755 app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
-COPY --chmod=755 app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
+COPY --chmod=755 backend/app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
+COPY --chmod=755 backend/app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
+COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
 ENV PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES}
 
-COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
-COPY docker/yasa-engine-overrides /tmp/yasa-engine-overrides
+COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
+COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides
 
 RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-yasa-runner-apt-cache,target=/var/cache/apt,sharing=locked \
@@ -251,9 +251,9 @@ ENV YASA_BIN_DIR=/opt/yasa/bin
 ENV YASA_RESOURCE_DIR=/opt/yasa/resource
 ENV PATH=/opt/yasa/bin:${PATH}
 
-COPY --chmod=755 app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
-COPY --chmod=755 app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
-COPY --chmod=755 app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
+COPY --chmod=755 backend/app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
+COPY --chmod=755 backend/app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
+COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
 
 RUN --mount=type=cache,id=vulhunter-yasa-runner-runtime-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-yasa-runner-runtime-apt-cache,target=/var/cache/apt,sharing=locked \

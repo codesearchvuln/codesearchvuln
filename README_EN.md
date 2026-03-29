@@ -37,10 +37,12 @@ cd AuditTool
 ### 2. Configure backend environment variables
 
 ```bash
-cp backend/env.example backend/.env
+cp backend/docker/env/backend/env.example backend/docker/env/backend/.env
 ```
 
 At minimum, set your model-related configuration such as `LLM_API_KEY`, `LLM_PROVIDER`, and `LLM_MODEL`. Do not commit real secrets into the repository.
+
+All Dockerfiles, runner image build files, and Docker-specific environment files now live under `backend/docker/`.
 
 ### 3. Start the services
 

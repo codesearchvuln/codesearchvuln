@@ -17,8 +17,8 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     compose_path = REPO_ROOT / "docker-compose.yml"
     full_overlay_path = REPO_ROOT / "docker-compose.full.yml"
     yasa_host_overlay_path = REPO_ROOT / "docker-compose.yasa-host.yml"
-    backend_dockerfile = REPO_ROOT / "backend" / "Dockerfile"
-    frontend_dockerfile = REPO_ROOT / "frontend" / "Dockerfile"
+    backend_dockerfile = REPO_ROOT / "backend" / "docker" / "backend.Dockerfile"
+    frontend_dockerfile = REPO_ROOT / "backend" / "docker" / "frontend.Dockerfile"
 
     assert compose_path.exists()
     assert full_overlay_path.exists()
@@ -43,7 +43,10 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "vulhunter/frontend-dev:latest" not in compose_text
     assert "target: dev-runtime" in compose_text
     assert "target: dev" in compose_text
+    assert "context: ." in compose_text
+    assert "dockerfile: backend/docker/backend.Dockerfile" in compose_text
     assert "./backend:/app" in compose_text
+    assert ".:/workspace:ro" in compose_text
     assert "./frontend:/app" in compose_text
     assert "/opt/backend-venv" in compose_text
     assert "/app/.venv" not in compose_text
@@ -79,6 +82,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "/tmp/vulhunter/scans:/tmp/vulhunter/scans" not in compose_text
     assert "scan_workspace:/tmp/vulhunter/scans" in compose_text
     assert "/var/run/docker.sock:/var/run/docker.sock" in compose_text
+    assert "RUNNER_PREFLIGHT_BUILD_CONTEXT: /workspace" in compose_text
     assert 'MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"' in compose_text
     assert '/bin/sh", "-lc"' not in compose_text
     assert (
@@ -106,13 +110,15 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
 
     backend_text = backend_dockerfile.read_text(encoding="utf-8")
     assert "FROM runtime-base AS dev-runtime" in backend_text
-    assert 'COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py' in backend_text
+    assert 'COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py' in backend_text
     assert "ARG BACKEND_INSTALL_YASA=1" in backend_text
     assert "ARG YASA_VERSION=v0.2.33" in backend_text
     assert "backend-dev-entrypoint.sh" not in backend_text
     assert 'CMD ["/bin/sh", "/usr/local/bin/backend-dev-entrypoint.sh"]' not in backend_text
     assert 'CMD ["/bin/sh", "/app/docker-entrypoint.sh"]' not in backend_text
     assert "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" in backend_text
+    assert "COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides" in backend_text
+    assert "COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides" in backend_text
     assert 'ordered_indexes="$(order_indexes "${pypi_index_candidates}")"' in backend_text
     assert 'while IFS= read -r index_url; do' in backend_text
     assert 'sync_with_index "${BACKEND_PYPI_INDEX_PRIMARY}" || sync_with_index "${BACKEND_PYPI_INDEX_FALLBACK}"' not in backend_text
@@ -148,6 +154,8 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "vulhunter/backend-local:latest" in full_overlay_text
     assert "vulhunter/backend-dev-local:latest" not in full_overlay_text
     assert "vulhunter/frontend-local:latest" in full_overlay_text
+    assert "context: ." in full_overlay_text
+    assert "dockerfile: backend/docker/backend.Dockerfile" in full_overlay_text
     assert "working_dir: !reset null" in full_overlay_text
     assert "command: !reset null" in full_overlay_text
     assert "./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" in full_overlay_text
@@ -181,7 +189,9 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
 
 
 def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
-    backend_text = (REPO_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    backend_text = (REPO_ROOT / "backend" / "docker" / "backend.Dockerfile").read_text(
+        encoding="utf-8"
+    )
 
     assert 'ARG YASA_UAST_VERSION=v0.2.8' in backend_text
     assert 'UAST_PLATFORM="linux-arm64"; \\' in backend_text
@@ -189,16 +199,16 @@ def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
     assert 'CGO_ENABLED=0 GOOS=linux GOARCH="${YASA_GO_ARCH}"' in backend_text
     assert 'go build -o "${YASA_ENGINE_DIR}/deps/uast4go/uast4go" .' in backend_text
     assert 'python3 -m venv "${YASA_HOME}/uast4py-venv"; \\' in backend_text
-    assert 'COPY --chmod=755 app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py' in backend_text
+    assert 'COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py' in backend_text
     assert 'cp /tmp/yasa-launchers/uast4py "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \\' in backend_text
 
 
 def test_nexus_web_dockerfile_pins_pnpm_before_nginx_runtime() -> None:
-    nexus_dockerfile = (REPO_ROOT / "nexus-web" / "dockerfile").read_text(
+    nexus_dockerfile = (REPO_ROOT / "backend" / "docker" / "nexus-web.Dockerfile").read_text(
         encoding="utf-8"
     )
 
-    assert 'npm install -g "pnpm@${NEXUS_WEB_PNPM_VERSION}"' in nexus_dockerfile
+    assert 'corepack prepare "pnpm@${NEXUS_WEB_PNPM_VERSION}" --activate' in nexus_dockerfile
     assert 'if (pkg.packageManager) process.exit(0);' in nexus_dockerfile
     assert 'pkg.packageManager = `pnpm@${process.env.NEXUS_WEB_PNPM_VERSION}`;' in nexus_dockerfile
     assert "FROM ${DOCKERHUB_LIBRARY_MIRROR}/nginx:1.27-alpine AS runtime" in nexus_dockerfile
@@ -288,7 +298,9 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
 
 
 def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
-    backend_text = (REPO_ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    backend_text = (REPO_ROOT / "backend" / "docker" / "backend.Dockerfile").read_text(
+        encoding="utf-8"
+    )
     pyproject_text = (REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
     yasa_runner_text = (REPO_ROOT / "backend" / "docker" / "yasa-runner.Dockerfile").read_text(
         encoding="utf-8"
@@ -336,6 +348,7 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     assert "AS yasa-runner" in yasa_runner_text
     assert "/opt/yasa/bin/yasa" in yasa_runner_text
     assert "/opt/yasa-runtime" in yasa_runner_text
+    assert "COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides" in yasa_runner_text
     assert "COPY --from=yasa-builder /opt/yasa-runtime /opt/yasa" in yasa_runner_text
     assert "YASA runner placeholder" not in yasa_runner_text
     assert "node_modules" not in yasa_runner_text
@@ -344,7 +357,7 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     assert "code2flow" in flow_parser_runner_text
     assert "ARG BACKEND_PYPI_INDEX_CANDIDATES=" in flow_parser_runner_text
     assert 'ENV PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES}' in flow_parser_runner_text
-    assert "COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py" in flow_parser_runner_text
+    assert "COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py" in flow_parser_runner_text
     assert 'python3 /usr/local/bin/package_source_selector.py --candidates "${raw_candidates}" --kind pypi --timeout-seconds 2' in flow_parser_runner_text
     assert 'for idx in $(printf \'%s\\n\' "${ordered_pypi_indexes}"); do \\' in flow_parser_runner_text
     assert 'PIP_DEFAULT_TIMEOUT=60 /opt/flow-parser-venv/bin/pip install --disable-pip-version-check --no-cache-dir -i "${idx}" -r /tmp/flow-parser-runner.requirements.txt' in flow_parser_runner_text
@@ -441,6 +454,9 @@ def test_docker_publish_pushes_all_runner_images() -> None:
     assert "build_gitleaks_runner" in workflow_text
     assert "build_phpstan_runner" in workflow_text
     assert "build_flow_parser_runner" in workflow_text
+    assert "./backend/docker/backend.Dockerfile" in workflow_text
+    assert "./backend/docker/frontend.Dockerfile" in workflow_text
+    assert "context: ." in workflow_text
     assert "./backend/docker/yasa-runner.Dockerfile" in workflow_text
     assert "./backend/docker/opengrep-runner.Dockerfile" in workflow_text
     assert "./backend/docker/bandit-runner.Dockerfile" in workflow_text
@@ -453,3 +469,17 @@ def test_docker_publish_pushes_all_runner_images() -> None:
     assert "ghcr.io/${{ github.repository_owner }}/vulhunter-gitleaks-runner:${{ github.event.inputs.tag }}" in workflow_text
     assert "ghcr.io/${{ github.repository_owner }}/vulhunter-phpstan-runner:${{ github.event.inputs.tag }}" in workflow_text
     assert "ghcr.io/${{ github.repository_owner }}/vulhunter-flow-parser-runner:${{ github.event.inputs.tag }}" in workflow_text
+
+
+def test_release_workflow_packages_yasa_override_assets() -> None:
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    package_script = (REPO_ROOT / "deploy" / "package-release-artifacts.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert ".dockerignore" in workflow_text
+    assert "frontend/yasa-engine-overrides/" in workflow_text
+    assert 'cp -R "$ROOT_DIR/backend/docker" "$tmp_root/backend/"' in package_script
+    assert 'cp -R "$ROOT_DIR/frontend/yasa-engine-overrides" "$tmp_root/frontend/"' in package_script

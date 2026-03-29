@@ -23,7 +23,7 @@ ENV PYTHONNOUSERSITE=1
 ENV PYTHONPATH=/opt/flow-parser
 ENV PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES}
 
-COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
+COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
 
 RUN --mount=type=cache,id=vulhunter-flow-parser-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-flow-parser-runner-apt-cache,target=/var/cache/apt,sharing=locked \
@@ -53,7 +53,7 @@ RUN --mount=type=cache,id=vulhunter-flow-parser-runner-apt-lists,target=/var/lib
     rm -rf /var/lib/apt/lists/*; \
     python3 -m venv /opt/flow-parser-venv
 
-COPY docker/flow-parser-runner.requirements.txt /tmp/flow-parser-runner.requirements.txt
+COPY backend/docker/flow-parser-runner.requirements.txt /tmp/flow-parser-runner.requirements.txt
 
 # Runtime deps pinned in requirements: tree-sitter, tree-sitter-language-pack, code2flow
 RUN set -eux; \
@@ -84,8 +84,8 @@ RUN set -eux; \
 
 WORKDIR /opt/flow-parser
 
-COPY app /opt/flow-parser/app
-COPY scripts/flow_parser_runner.py /opt/flow-parser/flow_parser_runner.py
+COPY backend/app /opt/flow-parser/app
+COPY backend/scripts/flow_parser_runner.py /opt/flow-parser/flow_parser_runner.py
 
 RUN set -eux; \
     mkdir -p /scan; \

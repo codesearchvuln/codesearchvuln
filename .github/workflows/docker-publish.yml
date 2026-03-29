@@ -118,7 +118,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ./frontend
-          file: ./frontend/Dockerfile
+          file: ./backend/docker/frontend.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
@@ -130,8 +130,8 @@ jobs:
         if: ${{ github.event.inputs.build_backend == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
+          context: .
+          file: ./backend/docker/backend.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
@@ -143,7 +143,7 @@ jobs:
         if: ${{ github.event.inputs.build_yasa_runner == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
           file: ./backend/docker/yasa-runner.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -156,7 +156,7 @@ jobs:
         if: ${{ github.event.inputs.build_opengrep_runner == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
           file: ./backend/docker/opengrep-runner.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -169,7 +169,7 @@ jobs:
         if: ${{ github.event.inputs.build_bandit_runner == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
           file: ./backend/docker/bandit-runner.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -182,7 +182,7 @@ jobs:
         if: ${{ github.event.inputs.build_gitleaks_runner == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
           file: ./backend/docker/gitleaks-runner.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -195,7 +195,7 @@ jobs:
         if: ${{ github.event.inputs.build_phpstan_runner == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
           file: ./backend/docker/phpstan-runner.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -208,7 +208,7 @@ jobs:
         if: ${{ github.event.inputs.build_flow_parser_runner == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
           file: ./backend/docker/flow-parser-runner.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -221,7 +221,7 @@ jobs:
         if: ${{ github.event.inputs.build_pmd_runner == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./backend
+          context: .
           file: ./backend/docker/pmd-runner.Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
@@ -234,8 +234,8 @@ jobs:
         if: ${{ github.event.inputs.build_sandbox == 'true' }}
         uses: docker/build-push-action@v7
         with:
-          context: ./docker/sandbox
-          file: ./docker/sandbox/Dockerfile
+          context: ./backend/docker/sandbox
+          file: ./backend/docker/sandbox/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |

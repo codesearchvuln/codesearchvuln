@@ -18,6 +18,8 @@ docker-images/
 .env.test.local
 .env.production.local
 .env.me
+!backend/docker/env/backend/.env
+!backend/docker/env/frontend/.env
 
 # IDE and editor files
 .vscode/
@@ -118,6 +120,8 @@ htmlcov/
 venv/
 ENV/
 env/
+!backend/docker/env/
+!backend/docker/env/**
 
 # Backend specific
 backend/.venv/

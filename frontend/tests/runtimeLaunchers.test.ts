@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dockerfilePath = path.join(frontendDir, "Dockerfile");
+const dockerfilePath = path.join(frontendDir, "..", "backend", "docker", "frontend.Dockerfile");
 const devLauncherPath = path.join(frontendDir, "scripts", "dev-launcher.mjs");
 const prodRuntimePath = path.join(frontendDir, "scripts", "prod-runtime.mjs");
 

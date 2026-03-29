@@ -4,10 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd -- "$FRONTEND_DIR/.." && pwd)"
+FRONTEND_ENV_DIR="$REPO_ROOT/backend/docker/env/frontend"
 
-if [ ! -f "$FRONTEND_DIR/.env" ] && [ -f "$FRONTEND_DIR/.env.example" ]; then
-  cp "$FRONTEND_DIR/.env.example" "$FRONTEND_DIR/.env"
-  echo "已从 .env.example 创建 frontend/.env"
+mkdir -p "$FRONTEND_ENV_DIR"
+if [ ! -f "$FRONTEND_ENV_DIR/.env" ] && [ -f "$FRONTEND_ENV_DIR/.env.example" ]; then
+  cp "$FRONTEND_ENV_DIR/.env.example" "$FRONTEND_ENV_DIR/.env"
+  echo "已从 backend/docker/env/frontend/.env.example 创建 backend/docker/env/frontend/.env"
 fi
 
 NODE_OK="0"

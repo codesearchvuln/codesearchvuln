@@ -85,8 +85,8 @@ ENV UV_INDEX_URL=${BACKEND_PYPI_INDEX_PRIMARY}
 ENV PIP_INDEX_URL=${BACKEND_PYPI_INDEX_PRIMARY}
 
 # 复制依赖文件与镜像源测速脚本
-COPY pyproject.toml uv.lock README.md ./
-COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
+COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
 
 # 安装 Python 依赖到虚拟环境
 RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
@@ -218,9 +218,9 @@ ENV YASA_REAL_BIN=/opt/yasa/bin/yasa-engine.real
 ENV YASA_ENGINE_WRAPPER_BIN=/opt/yasa/bin/yasa-engine
 ENV YASA_WRAPPER_BIN=/opt/yasa/bin/yasa
 
-COPY --chmod=755 app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
-COPY --chmod=755 app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
-COPY --chmod=755 app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
+COPY --chmod=755 backend/app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
+COPY --chmod=755 backend/app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
+COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
 
 # 只安装运行时依赖（不需要 gcc）；CJK 字体可通过 BACKEND_INSTALL_CJK_FONTS 控制
 ARG BACKEND_INSTALL_CJK_FONTS
@@ -273,7 +273,7 @@ RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/ap
     fi; \
     rm -rf /var/lib/apt/lists/*
 
-COPY scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
+COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
 
 # ============================================
 # 多阶段构建 - 扫描工具基础阶段
@@ -289,7 +289,7 @@ ARG YASA_VERSION
 ARG YASA_UAST_VERSION
 ARG YASA_BUILD_FROM_SOURCE
 
-COPY docker/yasa-engine-overrides /tmp/yasa-engine-overrides
+COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides
 
 RUN --mount=type=cache,id=vulhunter-backend-scanner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-backend-scanner-apt-cache,target=/var/cache/apt,sharing=locked \
@@ -592,19 +592,20 @@ RUN mkdir -p /app/data/mcp/xdg-data /app/data/mcp/xdg-cache /app/data/mcp/xdg-co
 
 
 # 仅复制运行时所需代码与脚本，避免把测试/文档打进运行镜像
-COPY app /app/app
-COPY static /app/static
-COPY alembic /app/alembic
-COPY alembic.ini /app/alembic.ini
-COPY scripts/build_skill_registry.py /app/scripts/build_skill_registry.py
-COPY scripts/reset_static_scan_tables.py /app/scripts/reset_static_scan_tables.py
-COPY docker /opt/backend-build-context/docker
-COPY app /opt/backend-build-context/app
-COPY scripts/package_source_selector.py /opt/backend-build-context/scripts/package_source_selector.py
-COPY scripts/flow_parser_runner.py /opt/backend-build-context/scripts/flow_parser_runner.py
+COPY backend/app /app/app
+COPY backend/static /app/static
+COPY backend/alembic /app/alembic
+COPY backend/alembic.ini /app/alembic.ini
+COPY backend/scripts/build_skill_registry.py /app/scripts/build_skill_registry.py
+COPY backend/scripts/reset_static_scan_tables.py /app/scripts/reset_static_scan_tables.py
+COPY backend/docker /opt/backend-build-context/backend/docker
+COPY backend/app /opt/backend-build-context/backend/app
+COPY backend/scripts/package_source_selector.py /opt/backend-build-context/backend/scripts/package_source_selector.py
+COPY backend/scripts/flow_parser_runner.py /opt/backend-build-context/backend/scripts/flow_parser_runner.py
+COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides
 
 # 创建运行时持久化目录
-RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/xdg-config /opt/backend-build-context/scripts
+RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/xdg-config /opt/backend-build-context/backend/scripts /opt/backend-build-context/frontend
 
 # 暴露端口
 EXPOSE 8000

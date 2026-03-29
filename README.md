@@ -37,10 +37,12 @@ cd AuditTool
 ### 2. 配置后端环境变量
 
 ```bash
-cp backend/env.example backend/.env
+cp backend/docker/env/backend/env.example backend/docker/env/backend/.env
 ```
 
 至少补充你的模型相关配置，例如 `LLM_API_KEY`、`LLM_PROVIDER`、`LLM_MODEL`。不要把真实密钥提交到仓库。
+
+所有 Dockerfile、runner 镜像构建文件和 Docker 用环境文件现在统一放在 `backend/docker/`。
 
 ### 3. 启动服务
 

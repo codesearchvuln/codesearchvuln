@@ -47,10 +47,10 @@ If all candidates fail during first startup, backend still starts successfully a
 
 ```bash
 cd backend
-cp env.example .env
+cp docker/env/backend/env.example docker/env/backend/.env
 ```
 
-Edit `.env` and set at least:
+Edit `docker/env/backend/.env` and set at least:
 
 - `LLM_PROVIDER`
 - `LLM_API_KEY`
@@ -79,5 +79,5 @@ OpenAPI docs: `http://localhost:8000/docs`.
 See:
 
 - `docs/CONFIGURATION.md`
-- `backend/env.example`
+- `backend/docker/env/backend/env.example`
 - `backend/pyproject.toml`

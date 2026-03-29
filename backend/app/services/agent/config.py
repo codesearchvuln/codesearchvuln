@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +23,9 @@ class LogLevel(str, Enum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
+
+AGENT_ENV_FILE = Path(__file__).resolve().parents[4] / "backend" / "docker" / "env" / "backend" / ".env"
 
 
 class AgentConfig(BaseSettings):
@@ -338,7 +342,7 @@ class AgentConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
-        env_file=".env",
+        env_file=(str(AGENT_ENV_FILE), ".env"),
         case_sensitive=False,
         extra="ignore",
     )

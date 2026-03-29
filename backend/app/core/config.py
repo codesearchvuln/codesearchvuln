@@ -1,7 +1,11 @@
 from __future__ import annotations
+from pathlib import Path
 from typing import List, Union, Optional, Self
 from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[3] / "backend" / "docker" / "env" / "backend" / ".env"
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "VulHunter"
@@ -238,7 +242,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
-        env_file=".env",
+        env_file=(str(BACKEND_ENV_FILE), ".env"),
         extra="ignore",  # 忽略额外的环境变量（如 VITE_* 前端变量）
     )
 
