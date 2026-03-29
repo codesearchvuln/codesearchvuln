@@ -5,7 +5,7 @@ def test_agent_tasks_split_modules_exist():
     module_names = [
         "app.api.v1.endpoints.agent_tasks_contracts",
         "app.api.v1.endpoints.agent_tasks_runtime",
-        "app.api.v1.endpoints.agent_tasks_mcp",
+        "app.api.v1.endpoints.agent_tasks_tool_runtime",
         "app.api.v1.endpoints.agent_tasks_bootstrap",
         "app.api.v1.endpoints.agent_tasks_execution",
         "app.api.v1.endpoints.agent_tasks_findings",
@@ -25,15 +25,22 @@ def test_agent_tasks_facade_re_exports_key_symbols():
     from app.api.v1.endpoints import agent_tasks_contracts
     from app.api.v1.endpoints import agent_tasks_execution
     from app.api.v1.endpoints import agent_tasks_findings
-    from app.api.v1.endpoints import agent_tasks_mcp
     from app.api.v1.endpoints import agent_tasks_reporting
     from app.api.v1.endpoints import agent_tasks_routes_results
     from app.api.v1.endpoints import agent_tasks_routes_tasks
+    from app.api.v1.endpoints import agent_tasks_tool_runtime
     from app.api.v1.endpoints import agent_tasks_runtime
 
     assert agent_tasks.AgentTaskCreate is agent_tasks_contracts.AgentTaskCreate
     assert agent_tasks.StepRetryExceededError is agent_tasks_runtime.StepRetryExceededError
-    assert agent_tasks._build_task_mcp_runtime is agent_tasks_mcp._build_task_mcp_runtime
+    assert (
+        agent_tasks.build_task_write_scope_guard
+        is agent_tasks_tool_runtime.build_task_write_scope_guard
+    )
+    assert (
+        agent_tasks._sync_tool_playbook_to_memory
+        is agent_tasks_tool_runtime._sync_tool_playbook_to_memory
+    )
     assert agent_tasks._resolve_static_bootstrap_config is agent_tasks_bootstrap._resolve_static_bootstrap_config
     assert agent_tasks._execute_agent_task is agent_tasks_execution._execute_agent_task
     assert agent_tasks._save_findings is agent_tasks_findings._save_findings

@@ -29,7 +29,7 @@ export type ToolEvidenceMissingState =
   | 'missing_completed';
 export type TerminalFailureClass =
   | 'timeout'
-  | 'mcp'
+  | 'runtime'
   | 'network'
   | 'validation_repairable'
   | 'cancelled_user'

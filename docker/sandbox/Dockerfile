@@ -111,7 +111,7 @@ RUN --mount=type=cache,id=VulHunter-sandbox-npm,target=/root/.npm \
   pnpm config set registry "${SANDBOX_NPM_REGISTRY_PRIMARY}"; \
   node --version; npm --version; pnpm --version
 
-# 安装 MCP 与 qmd CLI（供沙盒域运行时调用）
+# 预配置 pnpm 全局目录（供沙盒内工具按需使用）
 RUN --mount=type=cache,id=VulHunter-sandbox-pnpm-store,target=/pnpm/store \
   set -eux; \
   mkdir -p /pnpm /pnpm/global /pnpm/store; \
@@ -126,34 +126,7 @@ RUN --mount=type=cache,id=VulHunter-sandbox-pnpm-store,target=/pnpm/store \
   pnpm config set fetch-retry-factor 2; \
   pnpm config set fetch-retry-mintimeout 2000; \
   pnpm config set fetch-retry-maxtimeout 8000; \
-  pnpm config set network-concurrency 4; \
-  install_mcp_packages() { \
-  reg="$1"; \
-  attempt=1; \
-  if ! curl -fsS --max-time 5 "${reg}/-/ping" >/dev/null 2>&1; then \
-  echo "pnpm registry probe failed for ${reg}, continue with direct add attempt." >&2; \
-  fi; \
-  pnpm config set registry "${reg}"; \
-  while [ "${attempt}" -le 2 ]; do \
-  if timeout "${pnpm_step_timeout}" pnpm add -g \
-  @modelcontextprotocol/server-memory \
-  @modelcontextprotocol/server-sequential-thinking \
-  @tobilu/qmd; then \
-  return 0; \
-  fi; \
-  status="$?"; \
-  if [ "${status}" -eq 124 ]; then \
-  echo "pnpm add timed out via ${reg} after ${pnpm_step_timeout}s (attempt ${attempt}/2)." >&2; \
-  else \
-  echo "pnpm add failed via ${reg} (attempt ${attempt}/2, exit ${status})." >&2; \
-  fi; \
-  sleep $((attempt + 1)); \
-  attempt=$((attempt + 1)); \
-  done; \
-  return 1; \
-  }; \
-  install_mcp_packages "${SANDBOX_NPM_REGISTRY_PRIMARY}" || install_mcp_packages "${SANDBOX_NPM_REGISTRY_FALLBACK}"; \
-  command -v qmd
+  pnpm config set network-concurrency 4
 
 # 安装 Python 安全工具（主源失败后回退）
 RUN --mount=type=cache,id=VulHunter-sandbox-pip,target=/root/.cache/pip \
@@ -266,10 +239,9 @@ RUN groupadd -g 1000 sandbox && \
 
 # 创建工作目录
 RUN mkdir -p /workspace /tmp/sandbox \
-  /workspace/.VulHunter/mcp/xdg-data \
-  /workspace/.VulHunter/mcp/xdg-cache \
-  /workspace/.VulHunter/mcp/xdg-config \
-  /workspace/.VulHunter/qmd && \
+  /workspace/.VulHunter/runtime/xdg-data \
+  /workspace/.VulHunter/runtime/xdg-cache \
+  /workspace/.VulHunter/runtime/xdg-config && \
   chown -R sandbox:sandbox /workspace /tmp/sandbox
 
 # 设置环境变量
@@ -277,11 +249,10 @@ ENV HOME=/home/sandbox
 ENV PATH=/home/sandbox/.local/bin:$PATH
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV XDG_DATA_HOME=/workspace/.VulHunter/mcp/xdg-data
-ENV XDG_CACHE_HOME=/workspace/.VulHunter/mcp/xdg-cache
-ENV XDG_CONFIG_HOME=/workspace/.VulHunter/mcp/xdg-config
-RUN mkdir -p /workspace/.VulHunter/mcp/xdg-data /workspace/.VulHunter/mcp/xdg-cache /workspace/.VulHunter/mcp/xdg-config
-ENV QMD_DATA_DIR=/workspace/.VulHunter/qmd
+ENV XDG_DATA_HOME=/workspace/.VulHunter/runtime/xdg-data
+ENV XDG_CACHE_HOME=/workspace/.VulHunter/runtime/xdg-cache
+ENV XDG_CONFIG_HOME=/workspace/.VulHunter/runtime/xdg-config
+RUN mkdir -p /workspace/.VulHunter/runtime/xdg-data /workspace/.VulHunter/runtime/xdg-cache /workspace/.VulHunter/runtime/xdg-config
 
 # 限制 Python 导入路径
 ENV PYTHONPATH=/workspace

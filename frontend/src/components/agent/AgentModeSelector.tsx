@@ -287,7 +287,7 @@ export default function AgentModeSelector({
             </li>
             <li className="flex items-center gap-1">
               <Code className="w-3 h-3" />
-              跨文件关联 + RAG
+              跨文件关联 + 结构化代码分析
             </li>
             <li className={cn(
               "flex items-center gap-1",
@@ -317,7 +317,7 @@ export default function AgentModeSelector({
           <p className="font-bold mb-1 uppercase text-violet-700 dark:text-violet-400">智能扫描模式说明：</p>
           <ul className="list-disc list-inside space-y-0.5 text-violet-600 dark:text-violet-300/80">
             <li>AI Agent 会自主规划扫描策略</li>
-            <li>使用 RAG 技术进行代码语义检索</li>
+            <li>使用跨文件关联与结构化代码分析定位风险</li>
             <li>在 Docker 沙箱中验证发现的漏洞</li>
             <li>可生成可复现的 PoC（概念验证）代码</li>
             <li>扫描时间较长，但结果更全面准确</li>

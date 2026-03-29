@@ -2,14 +2,14 @@ from collections import Counter
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 
-NON_TRANSIENT_MCP_ERROR_CLASSES: Set[str] = {
+NON_TRANSIENT_RUNTIME_ERROR_CLASSES: Set[str] = {
     "invalid_recon_queue_service_binding",
     "invalid_callable_binding",
-    "mcp_route_missing",
-    "mcp_runtime_unavailable",
-    "mcp_adapter_unavailable",
-    "mcp_unhandled_in_strict_mode",
-    "mcp_non_transient_error",
+    "tool_route_missing",
+    "tool_runtime_unavailable",
+    "tool_adapter_unavailable",
+    "tool_unhandled_in_strict_mode",
+    "runtime_non_transient_error",
 }
 
 LIBPLIST_PROJECT_ID = "c157af04-bb37-472f-99f7-914a2a0fc558"
@@ -72,7 +72,7 @@ def build_scan_mode_coverage_matrix(
     retry_suppressed_counter: Counter[str] = Counter()
     deterministic_unsuppressed_counter: Counter[Tuple[str, str, str]] = Counter()
     skill_not_ready_tools: Set[str] = set()
-    mcp_adapter_unavailable_tools: Set[str] = set()
+    runtime_adapter_unavailable_tools: Set[str] = set()
     bootstrap_sources: List[str] = []
 
     for event in events:
@@ -95,12 +95,12 @@ def build_scan_mode_coverage_matrix(
         if metadata.get("skill_not_ready") is True or "skill_not_ready:" in output_text:
             skill_not_ready_tools.add(tool_name)
 
-        mcp_error = str(metadata.get("mcp_error") or "").strip()
+        runtime_error = str(metadata.get("runtime_error") or "").strip()
         if (
-            mcp_error.startswith("mcp_adapter_unavailable:")
-            or "mcp_adapter_unavailable:" in output_text
+            runtime_error.startswith("tool_adapter_unavailable:")
+            or "tool_adapter_unavailable:" in output_text
         ):
-            mcp_adapter_unavailable_tools.add(tool_name)
+            runtime_adapter_unavailable_tools.add(tool_name)
 
         if tool_status != "failed":
             continue
@@ -110,10 +110,10 @@ def build_scan_mode_coverage_matrix(
             retry_suppressed_counter[tool_name] += 1
             continue
 
-        mcp_error_class = str(metadata.get("mcp_error_class") or "").strip()
-        if mcp_error_class in NON_TRANSIENT_MCP_ERROR_CLASSES:
+        runtime_error_class = str(metadata.get("runtime_error_class") or "").strip()
+        if runtime_error_class in NON_TRANSIENT_RUNTIME_ERROR_CLASSES:
             deterministic_unsuppressed_counter[
-                (tool_name, mcp_error_class, mcp_error or output_text)
+                (tool_name, runtime_error_class, runtime_error or output_text)
             ] += 1
 
     all_tools = sorted(available_set | set(called_counter.keys()) | set(failed_counter.keys()))
@@ -129,11 +129,11 @@ def build_scan_mode_coverage_matrix(
     repeated_deterministic_failures = [
         {
             "tool_name": tool_name,
-            "mcp_error_class": error_class,
-            "mcp_error": mcp_error,
+            "runtime_error_class": error_class,
+            "runtime_error": runtime_error,
             "count": count,
         }
-        for (tool_name, error_class, mcp_error), count in deterministic_unsuppressed_counter.items()
+        for (tool_name, error_class, runtime_error), count in deterministic_unsuppressed_counter.items()
         if count > 1
     ]
 
@@ -144,7 +144,7 @@ def build_scan_mode_coverage_matrix(
         "repeated_deterministic_failures": repeated_deterministic_failures,
         "bootstrap_sources": bootstrap_sources,
         "skill_not_ready_tools": sorted(skill_not_ready_tools),
-        "mcp_adapter_unavailable_tools": sorted(mcp_adapter_unavailable_tools),
+        "runtime_adapter_unavailable_tools": sorted(runtime_adapter_unavailable_tools),
     }
 
 
@@ -161,8 +161,8 @@ def assert_scan_mode_coverage(
     )
     bootstrap_sources = list(coverage.get("bootstrap_sources") or [])
     skill_not_ready_tools = list(coverage.get("skill_not_ready_tools") or [])
-    mcp_adapter_unavailable_tools = list(
-        coverage.get("mcp_adapter_unavailable_tools") or []
+    runtime_adapter_unavailable_tools = list(
+        coverage.get("runtime_adapter_unavailable_tools") or []
     )
 
     if normalized_mode == "intelligent":
@@ -184,9 +184,9 @@ def assert_scan_mode_coverage(
     assert not skill_not_ready_tools, (
         f"enabled routes should not report skill_not_ready: {skill_not_ready_tools}"
     )
-    assert not mcp_adapter_unavailable_tools, (
-        "enabled routes should not report mcp_adapter_unavailable: "
-        f"{mcp_adapter_unavailable_tools}"
+    assert not runtime_adapter_unavailable_tools, (
+        "enabled routes should not report tool_adapter_unavailable: "
+        f"{runtime_adapter_unavailable_tools}"
     )
 
 
@@ -239,8 +239,8 @@ def test_build_scan_mode_coverage_matrix_for_hybrid_mode_with_retry_suppression(
             "tool_output": {"result": "strict failure"},
             "metadata": {
                 "tool_status": "failed",
-                "mcp_error": "'dict' object is not callable",
-                "mcp_error_class": "invalid_callable_binding",
+                "runtime_error": "'dict' object is not callable",
+                "runtime_error_class": "invalid_callable_binding",
                 "retry_suppressed": True,
             },
         },
@@ -274,8 +274,8 @@ def test_assert_scan_mode_coverage_detects_hybrid_regressions():
             "tool_output": {"result": "failed#1"},
             "metadata": {
                 "tool_status": "failed",
-                "mcp_error": "'dict' object is not callable",
-                "mcp_error_class": "invalid_callable_binding",
+                "runtime_error": "'dict' object is not callable",
+                "runtime_error_class": "invalid_callable_binding",
                 "retry_suppressed": False,
             },
         },
@@ -286,8 +286,8 @@ def test_assert_scan_mode_coverage_detects_hybrid_regressions():
             "tool_output": {"result": "failed#2"},
             "metadata": {
                 "tool_status": "failed",
-                "mcp_error": "'dict' object is not callable",
-                "mcp_error_class": "invalid_callable_binding",
+                "runtime_error": "'dict' object is not callable",
+                "runtime_error_class": "invalid_callable_binding",
                 "retry_suppressed": False,
             },
         },

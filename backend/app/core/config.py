@@ -212,6 +212,10 @@ class Settings(BaseSettings):
     MCP_ALL_AGENTS_WRITABLE: bool = True
     MCP_REQUIRE_EVIDENCE_BINDING: bool = True
     MCP_FORBID_PROJECT_WIDE_WRITES: bool = True
+    AGENT_WRITE_SCOPE_HARD_LIMIT: int = 50
+    AGENT_WRITE_SCOPE_DEFAULT_MAX_FILES: int = 50
+    AGENT_WRITE_SCOPE_REQUIRE_EVIDENCE_BINDING: bool = True
+    AGENT_WRITE_SCOPE_FORBID_PROJECT_WIDE_WRITES: bool = True
 
     GIT_MIRROR_ENABLED: bool = True
     GIT_MIRROR_PREFIX: str = "https://gh-proxy.org"
@@ -220,7 +224,9 @@ class Settings(BaseSettings):
     GIT_MIRROR_ALLOW_AUTH_URL: bool = False
     GIT_MIRROR_FALLBACK_TO_ORIGIN: bool = False
 
-    XDG_CONFIG_HOME: str = "/app/data/mcp/xdg-config"
+    XDG_DATA_HOME: str = "/app/data/runtime/xdg-data"
+    XDG_CACHE_HOME: str = "/app/data/runtime/xdg-cache"
+    XDG_CONFIG_HOME: str = "/app/data/runtime/xdg-config"
 
     MCP_CATALOG_SOURCE_URL: str = ""
 

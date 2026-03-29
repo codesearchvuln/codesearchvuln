@@ -122,7 +122,7 @@ export default function ScanConfigIntelligentEngine() {
 							搜索增强模块
 						</div>
 					</div>
-					<EmbeddingConfig compact /> */}
+					/* 已移除历史搜索增强配置入口 */}
 
 					<div className="section-header mb-0">
 						<KeyRound className="w-4 h-4 text-primary" />

@@ -335,6 +335,8 @@ for current_user, from_user, to_user, amount in payloads:
 步骤5: 判定与推送
     └─> 根据结果确定 verdict 和 confidence
     └─> 构造 finding 对象（含 verification_result）
+    └─> verification_result.flow 必须概括验证链路
+    └─> function_trigger_flow 必须保留函数级触发路径
 
 步骤6: 持久化（必须）
     └─> save_verification_result 保存结果
@@ -1101,7 +1103,7 @@ class VerificationAgent(BaseAgent):
                         f"raw_output={str(locator_output)[:200]}"
                     )
                     # 标记工具尝试但失败
-                    finding["_mcp_attempt"] = "failed_empty_payload"
+                    finding["_function_locator_attempt"] = "failed_empty_payload"
                     continue
                 
                 located = self._extract_function_from_locator_payload(payload, int(line_start))
@@ -1111,7 +1113,7 @@ class VerificationAgent(BaseAgent):
                         f"[Verification] locate_enclosing_function payload 解析失败: {request_path}:{line_start} | "
                         f"payload_keys={list(payload.keys())}"
                     )
-                    finding["_mcp_attempt"] = "failed_payload_parsing"
+                    finding["_function_locator_attempt"] = "failed_payload_parsing"
                     continue
 
                 located_name = str(located.get("function") or "").strip()
@@ -1120,7 +1122,7 @@ class VerificationAgent(BaseAgent):
                     logger.warning(
                         f"[Verification] locate_enclosing_function 返回空函数名: {request_path}:{line_start}"
                     )
-                    finding["_mcp_attempt"] = "failed_empty_function_name"
+                    finding["_function_locator_attempt"] = "failed_empty_function_name"
                     continue
                 
                 # MCP 成功
@@ -1128,8 +1130,8 @@ class VerificationAgent(BaseAgent):
                 finding["function_name"] = located_name
                 finding["function_start_line"] = self._safe_int(located.get("start_line"))
                 finding["function_end_line"] = self._safe_int(located.get("end_line"))
-                finding["function_resolution_method"] = "mcp_symbol_index"
-                finding["function_resolution_engine"] = "mcp_symbol_index"
+                finding["function_resolution_method"] = "function_locator"
+                finding["function_resolution_engine"] = "function_locator"
                 if located.get("language"):
                     finding["function_language"] = located.get("language")
                 if located.get("diagnostics") is not None:
@@ -1145,7 +1147,7 @@ class VerificationAgent(BaseAgent):
                     f"[Verification] MCP调用异常: {request_path}:{line_start} | 错误: {e}",
                     exc_info=True
                 )
-                finding["_mcp_attempt"] = f"exception: {str(e)[:100]}"
+                finding["_function_locator_attempt"] = f"exception: {str(e)[:100]}"
                 continue
         
         logger.info(

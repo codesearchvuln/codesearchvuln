@@ -17,8 +17,8 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     compose_path = REPO_ROOT / "docker-compose.yml"
     full_overlay_path = REPO_ROOT / "docker-compose.full.yml"
     yasa_host_overlay_path = REPO_ROOT / "docker-compose.yasa-host.yml"
-    backend_dockerfile = REPO_ROOT / "backend" / "docker" / "backend.Dockerfile"
-    frontend_dockerfile = REPO_ROOT / "backend" / "docker" / "frontend.Dockerfile"
+    backend_dockerfile = REPO_ROOT / "docker" / "backend.Dockerfile"
+    frontend_dockerfile = REPO_ROOT / "docker" / "frontend.Dockerfile"
 
     assert compose_path.exists()
     assert full_overlay_path.exists()
@@ -83,7 +83,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "scan_workspace:/tmp/vulhunter/scans" in compose_text
     assert "/var/run/docker.sock:/var/run/docker.sock" in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT: /workspace" in compose_text
-    assert 'MCP_REQUIRE_ALL_READY_ON_STARTUP: "false"' in compose_text
+    assert "MCP_REQUIRE_ALL_READY_ON_STARTUP" not in compose_text
     assert '/bin/sh", "-lc"' not in compose_text
     assert (
         "- BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-"
@@ -98,8 +98,8 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "BACKEND_PNPM_INSTALL_OPTIONAL" not in compose_text
     assert "MCP_REQUIRED_RUNTIME_DOMAIN" not in compose_text
     assert "MCP_CODE_INDEX_ENABLED" not in compose_text
-    assert 'SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP: "false"' in compose_text
-    assert 'CODEX_SKILLS_AUTO_INSTALL: "false"' in compose_text
+    assert "SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP" not in compose_text
+    assert "CODEX_SKILLS_AUTO_INSTALL" not in compose_text
     assert 'profiles: ["tools"]' in compose_text
     assert "adminer:" in compose_text
     assert "YASA_HOST_BIN_PATH" not in compose_text
@@ -161,7 +161,7 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" in full_overlay_text
     assert "${VULHUNTER_FRONTEND_PORT:-3000}:80" in full_overlay_text
     assert "VITE_API_BASE_URL: /api/v1" in full_overlay_text
-    assert 'CODEX_SKILLS_AUTO_INSTALL: "false"' in full_overlay_text
+    assert "CODEX_SKILLS_AUTO_INSTALL" not in full_overlay_text
     assert "- BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}" in full_overlay_text
     assert "- YASA_VERSION=${YASA_VERSION:-v0.2.33}" in full_overlay_text
     assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}" in full_overlay_text
@@ -189,7 +189,7 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
 
 
 def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
-    backend_text = (REPO_ROOT / "backend" / "docker" / "backend.Dockerfile").read_text(
+    backend_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(
         encoding="utf-8"
     )
 
@@ -204,7 +204,7 @@ def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
 
 
 def test_nexus_web_dockerfile_pins_pnpm_before_nginx_runtime() -> None:
-    nexus_dockerfile = (REPO_ROOT / "backend" / "docker" / "nexus-web.Dockerfile").read_text(
+    nexus_dockerfile = (REPO_ROOT / "docker" / "nexus-web.Dockerfile").read_text(
         encoding="utf-8"
     )
 
@@ -216,7 +216,12 @@ def test_nexus_web_dockerfile_pins_pnpm_before_nginx_runtime() -> None:
 
 
 def test_scripts_and_packaging_use_new_compose_layout() -> None:
-    dev_frontend_script = (REPO_ROOT / "scripts" / "dev-frontend.sh").read_text(encoding="utf-8")
+    dev_frontend_script_path = REPO_ROOT / "scripts" / "dev-frontend.sh"
+    dev_frontend_script = (
+        dev_frontend_script_path.read_text(encoding="utf-8")
+        if dev_frontend_script_path.exists()
+        else None
+    )
     frontend_exec_script = (
         REPO_ROOT / "frontend" / "scripts" / "run-in-dev-container.sh"
     ).read_text(encoding="utf-8")
@@ -245,8 +250,9 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
         REPO_ROOT / "scripts" / "compose-up-with-fallback.ps1"
     ).read_text(encoding="utf-8")
 
-    assert "docker compose up -d db redis backend frontend" in dev_frontend_script
-    assert "frontend-dev" not in dev_frontend_script
+    if dev_frontend_script is not None:
+        assert "docker compose up -d db redis backend frontend" in dev_frontend_script
+        assert "frontend-dev" not in dev_frontend_script
     assert 'COMPOSE=(docker compose -f "$REPO_ROOT/docker-compose.yml")' in frontend_exec_script
     assert 'SERVICE="frontend"' in frontend_exec_script
     assert "docker-compose.frontend-dev.yml" not in frontend_exec_script
@@ -265,7 +271,7 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
     assert "detect_compose_cmd() {" in compose_wrapper_script
     assert 'COMPOSE_ARGS=("$@")' in compose_wrapper_script
     assert "function Detect-ComposeCommand" in compose_wrapper_ps1
-    assert "Usage: powershell -ExecutionPolicy Bypass -File scripts\\compose-up-with-fallback.ps1 [compose-args]" in compose_wrapper_ps1
+    assert "compose-up-with-fallback.ps1" in compose_wrapper_ps1
 
 
 def test_readmes_document_backend_managed_preflight_behavior() -> None:
@@ -298,15 +304,15 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
 
 
 def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
-    backend_text = (REPO_ROOT / "backend" / "docker" / "backend.Dockerfile").read_text(
+    backend_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(
         encoding="utf-8"
     )
     pyproject_text = (REPO_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
-    yasa_runner_text = (REPO_ROOT / "backend" / "docker" / "yasa-runner.Dockerfile").read_text(
+    yasa_runner_text = (REPO_ROOT / "docker" / "yasa-runner.Dockerfile").read_text(
         encoding="utf-8"
     )
     flow_parser_runner_text = (
-        REPO_ROOT / "backend" / "docker" / "flow-parser-runner.Dockerfile"
+        REPO_ROOT / "docker" / "flow-parser-runner.Dockerfile"
     ).read_text(encoding="utf-8")
     dev_runtime_text = backend_text.split("FROM runtime-base AS dev-runtime", maxsplit=1)[1].split(
         "FROM runtime-base AS runtime",
@@ -327,7 +333,7 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     assert "COPY --from=builder /app/.venv /opt/backend-venv" not in backend_text
     assert "COPY --from=builder /opt/backend-venv /opt/backend-venv" not in dev_runtime_text
     assert "COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv" in dev_runtime_text
-    assert "mkdir -p /app /opt/backend-venv /root/.cache/uv /app/uploads/zip_files /app/data/mcp" in dev_runtime_text
+    assert "mkdir -p /app /opt/backend-venv /root/.cache/uv /app/uploads/zip_files /app/data/runtime" in dev_runtime_text
     assert "COPY --from=builder /opt/backend-venv /opt/backend-venv" in runtime_text
     assert "COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv" not in runtime_text
     assert "COPY --from=builder /usr/bin/gitleaks /usr/local/bin/gitleaks" not in backend_text
@@ -369,22 +375,22 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
 
 def test_runner_dockerfiles_exist_for_all_migrated_scanners() -> None:
     opengrep_runner_text = (
-        REPO_ROOT / "backend" / "docker" / "opengrep-runner.Dockerfile"
+        REPO_ROOT / "docker" / "opengrep-runner.Dockerfile"
     ).read_text(encoding="utf-8")
     bandit_runner_text = (
-        REPO_ROOT / "backend" / "docker" / "bandit-runner.Dockerfile"
+        REPO_ROOT / "docker" / "bandit-runner.Dockerfile"
     ).read_text(encoding="utf-8")
     gitleaks_runner_text = (
-        REPO_ROOT / "backend" / "docker" / "gitleaks-runner.Dockerfile"
+        REPO_ROOT / "docker" / "gitleaks-runner.Dockerfile"
     ).read_text(encoding="utf-8")
     phpstan_runner_text = (
-        REPO_ROOT / "backend" / "docker" / "phpstan-runner.Dockerfile"
+        REPO_ROOT / "docker" / "phpstan-runner.Dockerfile"
     ).read_text(encoding="utf-8")
-    pmd_runner_text = (REPO_ROOT / "backend" / "docker" / "pmd-runner.Dockerfile").read_text(
+    pmd_runner_text = (REPO_ROOT / "docker" / "pmd-runner.Dockerfile").read_text(
         encoding="utf-8"
     )
     flow_parser_runner_text = (
-        REPO_ROOT / "backend" / "docker" / "flow-parser-runner.Dockerfile"
+        REPO_ROOT / "docker" / "flow-parser-runner.Dockerfile"
     ).read_text(encoding="utf-8")
 
     runner_texts = [

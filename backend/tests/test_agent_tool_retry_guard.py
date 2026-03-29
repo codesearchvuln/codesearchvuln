@@ -81,9 +81,9 @@ class _StrictDeterministicRuntime:
             data="",
             error="'dict' object is not callable",
             metadata={
-                "mcp_used": True,
-                "mcp_adapter": "filesystem",
-                "mcp_runtime_mode": "strict",
+                "runtime_used": True,
+                "runtime_adapter": "filesystem",
+                "runtime_mode": "strict",
             },
         )
 
@@ -106,9 +106,9 @@ class _StrictReadFileAutoRepairRuntime:
                 data="src/main/java/top/whgojp/modules/rce/command/CommandController.java:37",
                 error=None,
                 metadata={
-                    "mcp_used": True,
-                    "mcp_adapter": "filesystem",
-                    "mcp_runtime_mode": "strict",
+                    "runtime_used": True,
+                    "runtime_adapter": "filesystem",
+                    "runtime_mode": "strict",
                 },
             )
         if tool_name == "read_file":
@@ -119,13 +119,13 @@ class _StrictReadFileAutoRepairRuntime:
                     success=False,
                     data="",
                     error=(
-                        "mcp_call_failed:ENOENT: no such file or directory, open "
+                        "tool_call_failed:ENOENT: no such file or directory, open "
                         "'/tmp/VulHunter/task/JavaSecLab-1.4/src/main/java/top/whgojp/modules/rce/command/CeshiController.java'"
                     ),
                     metadata={
-                        "mcp_used": True,
-                        "mcp_adapter": "filesystem",
-                        "mcp_runtime_mode": "strict",
+                        "runtime_used": True,
+                        "runtime_adapter": "filesystem",
+                        "runtime_mode": "strict",
                     },
                 )
             if file_path.endswith("CommandController.java"):
@@ -135,19 +135,19 @@ class _StrictReadFileAutoRepairRuntime:
                     data="public class CommandController { ... }",
                     error=None,
                     metadata={
-                        "mcp_used": True,
-                        "mcp_adapter": "filesystem",
-                        "mcp_runtime_mode": "strict",
+                        "runtime_used": True,
+                        "runtime_adapter": "filesystem",
+                        "runtime_mode": "strict",
                     },
                 )
         return SimpleNamespace(
             handled=True,
             success=False,
             data="",
-            error="mcp_unhandled_in_strict_mode",
+            error="tool_unhandled_in_strict_mode",
             metadata={
-                "mcp_used": True,
-                "mcp_runtime_mode": "strict",
+                "runtime_used": True,
+                "runtime_mode": "strict",
             },
         )
 
@@ -236,8 +236,8 @@ async def test_strict_mcp_deterministic_failure_suppresses_retry_and_short_circu
     assert len(tool_result_events) >= 3
 
     first_metadata = tool_result_events[0].metadata or {}
-    assert first_metadata.get("mcp_error") == "'dict' object is not callable"
-    assert first_metadata.get("mcp_error_class") == "invalid_callable_binding"
+    assert first_metadata.get("runtime_error") == "'dict' object is not callable"
+    assert first_metadata.get("runtime_error_class") == "invalid_callable_binding"
     assert first_metadata.get("retry_suppressed") is True
 
     third_metadata = tool_result_events[2].metadata or {}
@@ -275,8 +275,8 @@ class _StrictNoRouteRuntime:
             handled=False,
             success=False,
             data="",
-            error="mcp_route_missing",
-            metadata={"mcp_runtime_mode": "strict"},
+            error="tool_route_missing",
+            metadata={"runtime_mode": "strict"},
         )
 
 
@@ -343,7 +343,7 @@ async def test_strict_mcp_still_blocks_non_whitelisted_local_tool_without_route(
 
     output = await agent.execute_tool("custom_local_tool", {})
 
-    assert "MCP Router 未匹配工具 custom_local_tool" in output
+    assert "标准工具链未匹配工具 custom_local_tool" in output
     assert runtime.calls == 0
 
 
@@ -359,7 +359,7 @@ async def test_strict_mcp_allows_public_local_scan_core_tools_without_mcp_route(
 
     assert output == f"{tool_name}-ok"
     assert runtime.calls == 0
-    assert "MCP Router 未匹配工具" not in output
+    assert "标准工具链未匹配工具" not in output
 
 
 def test_strict_mcp_local_allowlist_matches_public_local_scan_core_surface():

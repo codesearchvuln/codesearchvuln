@@ -301,26 +301,18 @@ function extractEventTimestamp(
 }
 
 function getMcpRouteLabel(metadata?: Record<string, unknown>): string {
-  const adapter = toSafeTrimmedString(metadata?.mcp_adapter);
-  const mcpTool = toSafeTrimmedString(metadata?.mcp_tool);
-  if (!adapter || !mcpTool) return "";
-  if (adapter.toLowerCase() === "filesystem") {
-    return "";
-  }
-  const domain = toSafeTrimmedString(metadata?.mcp_runtime_domain);
-  return domain ? `${adapter}/${mcpTool}@${domain}` : `${adapter}/${mcpTool}`;
+  void metadata;
+  return "";
 }
 
 function buildToolTitle(statusLabel: string, toolName: string, metadata?: Record<string, unknown>): string {
-  const routeLabel = getMcpRouteLabel(metadata);
-  return routeLabel
-    ? `${statusLabel}：${toolName}（MCP: ${routeLabel}）`
-    : `${statusLabel}：${toolName}`;
+  void metadata;
+  return `${statusLabel}：${toolName}`;
 }
 
 function buildToolRouteContentPrefix(metadata?: Record<string, unknown>): string {
-  const routeLabel = getMcpRouteLabel(metadata);
-  return routeLabel ? `MCP 路由：${routeLabel}` : "";
+  void metadata;
+  return "";
 }
 
 function buildEventDedupKey(
@@ -420,9 +412,9 @@ function classifyTerminalFailure(
       cancelOrigin,
     };
   }
-  if (retryClass === "mcp_runtime_error" || /mcp|adapter|command_not_found/.test(reason)) {
+  if (retryClass === "tool_runtime_error" || /runtime|adapter|command_not_found|tool_unavailable/.test(reason)) {
     return {
-      failureClass: "mcp",
+      failureClass: "runtime",
       retryable: retryableFromMetadata ?? true,
       cancelOrigin,
     };

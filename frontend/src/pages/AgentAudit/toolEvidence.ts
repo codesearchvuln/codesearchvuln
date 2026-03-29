@@ -1020,7 +1020,6 @@ function buildFallbackCommandChain(args: {
   return parseCommandChain([
     args.toolName || "",
     ...(args.extras || []),
-    toStringValue(metadataRecord?.mcp_adapter),
   ]);
 }
 

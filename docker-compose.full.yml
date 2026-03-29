@@ -37,7 +37,7 @@ services:
     command: !reset null
     volumes: !override
       - backend_uploads:/app/uploads
-      - mcp_data:/app/data/mcp
+      - backend_runtime_data:/app/data/runtime
       - scan_workspace:/tmp/vulhunter/scans
       - /var/run/docker.sock:/var/run/docker.sock
     environment: !override
@@ -77,16 +77,15 @@ services:
       FLOW_PARSER_RUNNER_BATCH_MAX_FILES: "${FLOW_PARSER_RUNNER_BATCH_MAX_FILES:-100}"
       FLOW_PARSER_RUNNER_BATCH_MAX_BYTES: "${FLOW_PARSER_RUNNER_BATCH_MAX_BYTES:-8388608}"
       YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}
-      MCP_ENABLED: "true"
-      MCP_REQUIRE_ALL_READY_ON_STARTUP: "true"
       GIT_MIRROR_ENABLED: ${GIT_MIRROR_ENABLED:-true}
       GIT_MIRROR_PREFIX: ${GIT_MIRROR_PREFIX:-https://gh-proxy.org}
       GIT_MIRROR_PREFIXES: ${GIT_MIRROR_PREFIXES:-https://gh-proxy.org,https://v6.gh-proxy.org}
       GIT_MIRROR_HOSTS: ${GIT_MIRROR_HOSTS:-github.com}
       GIT_MIRROR_ALLOW_AUTH_URL: ${GIT_MIRROR_ALLOW_AUTH_URL:-false}
       GIT_MIRROR_FALLBACK_TO_ORIGIN: ${GIT_MIRROR_FALLBACK_TO_ORIGIN:-false}
-      CODEX_SKILLS_AUTO_INSTALL: "false"
-      XDG_CONFIG_HOME: /app/data/mcp/xdg-config
+      XDG_DATA_HOME: /app/data/runtime/xdg-data
+      XDG_CACHE_HOME: /app/data/runtime/xdg-cache
+      XDG_CONFIG_HOME: /app/data/runtime/xdg-config
       HTTP_PROXY: ""
       HTTPS_PROXY: ""
       http_proxy: ""

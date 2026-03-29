@@ -367,16 +367,15 @@ def _classify_retry_error(exc_or_text: Any) -> Dict[str, Any]:
         }
 
     if _contains(
-        "mcp",
         "adapter_unavailable",
         "domain_adapter_missing",
         "command_not_found",
-        "mcp_tool_failed",
-        "missing_mcp_stdio_command",
+        "tool_failed",
+        "missing_stdio_command",
     ):
         return {
-            "code": "mcp_runtime_error",
-            "category": "mcp",
+            "code": "tool_runtime_error",
+            "category": "runtime",
             "retryable": True,
         }
 

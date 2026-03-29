@@ -1,10 +1,10 @@
-# MCP Tool Playbook
+# Tool Playbook
 
-> 目标：让所有 Agent 按需直接调用标准 MCP 工具，避免无效参数和错误路由。
+> 目标：让所有 Agent 按需直接调用标准工具，避免无效参数和错误路由。
 
 ## 1) 工具总览矩阵
 
-| 标准工具名 | MCP Server | MCP Tool | 必填参数 | 典型输出 |
+| 标准工具名 | Tool Provider | Runtime Tool | 必填参数 | 典型输出 |
 | --- | --- | --- | --- | --- |
 | `search_code` | `local` | `FileSearchTool` | 公开输入 `keyword`；优先补充 `directory/file_pattern` 缩小范围 | 命中位置（含 file_path 与 line） |
 | `read_file` | `local` | `read_file` | `file_path + start_line/end_line` | 窗口化代码片段 |

@@ -21,7 +21,7 @@ class _DummyLocatorMiss:
 
 
 @pytest.mark.asyncio
-async def test_enrich_function_metadata_with_mcp_symbol_index(tmp_path: Path):
+async def test_enrich_function_metadata_with_function_locator_engine(tmp_path: Path):
     src_dir = tmp_path / "src"
     src_dir.mkdir(parents=True, exist_ok=True)
     target = src_dir / "time64.c"
@@ -63,7 +63,7 @@ async def test_enrich_function_metadata_with_mcp_symbol_index(tmp_path: Path):
     assert finding.get("function_name") == "asctime64_r"
     assert finding.get("function_start_line") == 2
     assert finding.get("function_end_line") == 4
-    assert finding.get("function_resolution_engine") == "mcp_symbol_index"
+    assert finding.get("function_resolution_engine") == "function_locator"
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ async def test_enrich_function_metadata_marks_invalid_locator_payload(tmp_path: 
     finding = {"file_path": "src/demo.py", "line_start": 2}
     await agent._enrich_function_metadata_with_locator([finding], str(tmp_path))
 
-    assert finding.get("_mcp_attempt") == "failed_empty_payload"
+    assert finding.get("_function_locator_attempt") == "failed_empty_payload"
     assert finding.get("function_name") is None
 
 

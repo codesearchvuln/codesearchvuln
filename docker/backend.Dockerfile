@@ -560,7 +560,7 @@ ENV PATH=/opt/backend-venv/bin:${PATH}
 ENV PYTHONNOUSERSITE=1
 ENV RUNNER_PREFLIGHT_BUILD_CONTEXT=/app
 
-RUN mkdir -p /app /opt/backend-venv /root/.cache/uv /app/uploads/zip_files /app/data/mcp
+RUN mkdir -p /app /opt/backend-venv /root/.cache/uv /app/uploads/zip_files /app/data/runtime
 
 EXPOSE 8000
 
@@ -583,11 +583,11 @@ ENV PATH=/opt/backend-venv/bin:${PATH}
 ENV PYTHONNOUSERSITE=1
 ENV RUNNER_PREFLIGHT_BUILD_CONTEXT=/opt/backend-build-context
 
-# MCP / QMD 持久化目录
-ENV XDG_DATA_HOME=/app/data/mcp/xdg-data
-ENV XDG_CACHE_HOME=/app/data/mcp/xdg-cache
-ENV XDG_CONFIG_HOME=/app/data/mcp/xdg-config
-RUN mkdir -p /app/data/mcp/xdg-data /app/data/mcp/xdg-cache /app/data/mcp/xdg-config
+# Runtime 持久化目录
+ENV XDG_DATA_HOME=/app/data/runtime/xdg-data
+ENV XDG_CACHE_HOME=/app/data/runtime/xdg-cache
+ENV XDG_CONFIG_HOME=/app/data/runtime/xdg-config
+RUN mkdir -p /app/data/runtime/xdg-data /app/data/runtime/xdg-cache /app/data/runtime/xdg-config
 
 
 
@@ -596,7 +596,6 @@ COPY backend/app /app/app
 COPY backend/static /app/static
 COPY backend/alembic /app/alembic
 COPY backend/alembic.ini /app/alembic.ini
-COPY backend/scripts/build_skill_registry.py /app/scripts/build_skill_registry.py
 COPY backend/scripts/reset_static_scan_tables.py /app/scripts/reset_static_scan_tables.py
 COPY docker /opt/backend-build-context/docker
 COPY backend/app /opt/backend-build-context/backend/app
@@ -605,7 +604,7 @@ COPY backend/scripts/flow_parser_runner.py /opt/backend-build-context/backend/sc
 COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides
 
 # 创建运行时持久化目录
-RUN mkdir -p /app/uploads/zip_files /app/data/mcp /app/data/mcp/xdg-config /opt/backend-build-context/backend/scripts /opt/backend-build-context/frontend
+RUN mkdir -p /app/uploads/zip_files /app/data/runtime /app/data/runtime/xdg-config /opt/backend-build-context/backend/scripts /opt/backend-build-context/frontend
 
 # 暴露端口
 EXPOSE 8000

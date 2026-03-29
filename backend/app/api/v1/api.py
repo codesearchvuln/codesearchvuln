@@ -3,7 +3,6 @@ from app.api.v1.endpoints import (
     agent_tasks,
     agent_test,
     config,
-    embedding_config,
     members,
     projects,
     prompts,
@@ -25,5 +24,4 @@ api_router.include_router(rules.router, prefix="/rules", tags=["rules"])
 api_router.include_router(agent_tasks.router, prefix="/agent-tasks", tags=["agent-tasks"])
 api_router.include_router(agent_test.router, prefix="/agent-test", tags=["agent-test"])
 api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
-api_router.include_router(embedding_config.router, prefix="/embedding", tags=["embedding"])
 api_router.include_router(static_tasks.router, prefix="/static-tasks", tags=["static-tasks"])

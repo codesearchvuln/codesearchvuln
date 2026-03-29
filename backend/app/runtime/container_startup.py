@@ -172,16 +172,6 @@ def _run_optional_resets(app_root: Path) -> None:
         subprocess.run([_venv_bin("python"), str(app_root / "scripts" / "reset_static_scan_tables.py")], check=True)
 
 
-def _run_optional_skill_setup(app_root: Path) -> None:
-    install_script = app_root / "scripts" / "install_codex_skills.sh"
-    if install_script.exists() and _is_true(os.environ.get("CODEX_SKILLS_AUTO_INSTALL")):
-        subprocess.run([str(install_script)], check=True)
-
-    registry_script = app_root / "scripts" / "build_skill_registry.py"
-    if registry_script.exists() and _is_true(os.environ.get("SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP", "true")):
-        subprocess.run([_venv_bin("python"), str(registry_script), "--print-json"], check=False)
-
-
 def _exec_uvicorn(reload_enabled: bool) -> None:
     args = [_venv_bin("uvicorn"), "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     if reload_enabled:
@@ -198,7 +188,6 @@ def run(mode: str) -> None:
         _sync_backend_env_if_needed(app_root)
     else:
         print("VulHunter 后端启动中...")
-        _run_optional_skill_setup(app_root)
 
     _wait_for_db()
     _run_database_migrations(app_root)

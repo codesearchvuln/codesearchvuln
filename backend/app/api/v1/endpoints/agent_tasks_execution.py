@@ -26,7 +26,7 @@ from app.models.agent_task import (
 from app.models.project import Project
 from app.models.prompt_skill import PromptSkill
 from app.services.project_metrics import project_metrics_refresher
-from app.services.agent.mcp import MCPRuntime
+from app.services.agent.write_scope import TaskWriteScopeGuard
 from app.services.agent.skills.prompt_skills import (
     PROMPT_SKILL_AGENT_KEYS,
     PROMPT_SKILL_BUILTIN_STATE_CONFIG_KEY,
@@ -39,7 +39,7 @@ from app.services.agent.skills.prompt_skills import (
 from .agent_tasks_bootstrap import *
 from .agent_tasks_contracts import *
 from .agent_tasks_findings import *
-from .agent_tasks_mcp import *
+from .agent_tasks_tool_runtime import *
 from .agent_tasks_runtime import *
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ async def _execute_agent_task(task_id: str):
 
     async with async_session_factory() as db:
         orchestrator = None
-        mcp_runtime: Optional[MCPRuntime] = None
+        write_scope_guard: Optional[TaskWriteScopeGuard] = None
         memory_store = None
         markdown_memory: Dict[str, str] = {}
         start_time = time.time()
@@ -264,7 +264,7 @@ async def _execute_agent_task(task_id: str):
                     verification_level=task.verification_level or "analysis_with_poc_plan",
                     exclude_patterns=task.exclude_patterns,
                     target_files=task.target_files,
-                    project_id=str(project.id),  # 传递 project_id 用于 RAG
+                    project_id=str(project.id),
                     event_emitter=event_emitter,  # 新增
                     task_id=task_id,  # 新增：用于取消检查
                     queue_service=queue_service,  # 新增：漏洞队列服务
@@ -273,7 +273,7 @@ async def _execute_agent_task(task_id: str):
                 )
 
             tools = await _run_with_retries(
-                "RAG_INDEX_AND_TOOLS_INIT",
+                "TOOLS_INIT",
                 task_id,
                 event_emitter,
                 _initialize_tools_once,
@@ -281,96 +281,13 @@ async def _execute_agent_task(task_id: str):
             task.current_step = "索引已完成，进入分析阶段"
             await db.commit()
 
-            await _set_current_step("正在初始化 MCP 运行时")
-            mcp_runtime = _build_task_mcp_runtime(
+            # 注入 write-scope guard
+            await _set_current_step("正在初始化工具运行时")
+            write_scope_guard = build_task_write_scope_guard(
                 project_root=normalized_project_root,
-                user_config=user_config,
                 target_files=task.target_files,
                 bootstrap_findings=None,
-                project_id=str(project.id),
-                prefer_stdio_when_http_unavailable=True,
-                enforce_mcp_only=True,
             )
-
-            required_gate_mcps = [
-                str(item).strip()
-                for item in (getattr(mcp_runtime, "required_mcps", []) or [])
-                if str(item).strip()
-            ] if mcp_runtime else []
-
-            # 已退役的 MCP 不再参与任务启动门禁；仅当仍存在 required MCP 时才执行兼容检查。
-            if (
-                mcp_runtime
-                and required_gate_mcps
-                and bool(getattr(settings, "MCP_REQUIRE_ALL_READY_ON_STARTUP", True))
-            ):
-                required_domain = "backend"
-                readiness = mcp_runtime.ensure_all_mcp_ready(required_domain)
-                if not bool(readiness.get("ready")):
-                    not_ready = readiness.get("not_ready") or []
-                    detail = "; ".join(
-                        f"{item.get('mcp')}@{item.get('runtime_domain')}:{item.get('reason')}"
-                        for item in not_ready[:10]
-                        if isinstance(item, dict)
-                    )
-                    message = (
-                        "MCP 启动检查失败：required MCP 未就绪，任务已阻断。"
-                        + (f" 明细: {detail}" if detail else "")
-                    )
-                    await event_emitter.emit_error(
-                        message,
-                        metadata={
-                            "mcp_ready": False,
-                            "mcp_required_unavailable": True,
-                            "mcp_required_domain": required_domain,
-                            "mcp_not_ready": not_ready,
-                            "required": readiness.get("required_mcps") or [],
-                            "runtime_domain": required_domain,
-                        },
-                    )
-                    raise RuntimeError(message)
-
-                async def _bootstrap_mcp_runtime_once():
-                    return await _bootstrap_task_mcp_runtime(
-                        mcp_runtime,
-                        project_root=normalized_project_root,
-                        event_emitter=event_emitter,
-                    )
-
-                await _run_with_retries(
-                    "MCP_RUNTIME_BOOTSTRAP",
-                    task_id,
-                    event_emitter,
-                    _bootstrap_mcp_runtime_once,
-                )
-
-                probe_result = await _probe_required_mcp_runtime(
-                    mcp_runtime,
-                    runtime_domain=required_domain,
-                )
-                if not bool(probe_result.get("ready")):
-                    probe_not_ready = probe_result.get("not_ready") or []
-                    probe_detail = "; ".join(
-                        f"{item.get('mcp')}@{item.get('runtime_domain')}:{item.get('reason')}"
-                        for item in probe_not_ready[:10]
-                        if isinstance(item, dict)
-                    )
-                    probe_message = (
-                        "MCP 运行时自检失败：required MCP probe 不可用，任务已阻断。"
-                        + (f" 明细: {probe_detail}" if probe_detail else "")
-                    )
-                    await event_emitter.emit_error(
-                        probe_message,
-                        metadata={
-                            "mcp_probe_ready": False,
-                            "mcp_probe_not_ready": probe_not_ready,
-                            "mcp_probe_details": probe_result.get("details") or {},
-                            "required": probe_result.get("required_mcps") or [],
-                            "runtime_domain": required_domain,
-                        },
-                    )
-                    raise RuntimeError(probe_message)
-                await event_emitter.emit_info("MCP 启动检查与运行时自检通过")
 
             # 初始化工具后检查取消
             if is_task_cancelled(task_id):
@@ -424,8 +341,8 @@ async def _execute_agent_task(task_id: str):
             for agent in (recon_agent, analysis_agent, verification_agent, report_agent, bl_recon_agent, bl_analysis_agent):
                 if isinstance(getattr(agent.config, "metadata", None), dict):
                     agent.config.metadata.update(audit_runtime_metadata)
-                if hasattr(agent, "set_mcp_runtime"):
-                    agent.set_mcp_runtime(mcp_runtime)
+                if hasattr(agent, "set_write_scope_guard"):
+                    agent.set_write_scope_guard(write_scope_guard)
 
             # 创建 Workflow 配置（从 settings 读取）
             from app.core.config import settings
@@ -458,8 +375,8 @@ async def _execute_agent_task(task_id: str):
             )
             if isinstance(getattr(orchestrator.config, "metadata", None), dict):
                 orchestrator.config.metadata.update(audit_runtime_metadata)
-            if hasattr(orchestrator, "set_mcp_runtime"):
-                orchestrator.set_mcp_runtime(mcp_runtime)
+            if hasattr(orchestrator, "set_write_scope_guard"):
+                orchestrator.set_write_scope_guard(write_scope_guard)
 
             # 设置外部取消检查回调
             # 这确保即使 runner.cancel() 失败，Agent 也能通过 checking 全局标志感知取消
@@ -596,16 +513,16 @@ async def _execute_agent_task(task_id: str):
                     f"entry_funcs={len(entry_function_names)}，seeds={len(seed_findings)}"
                 )
 
-            if mcp_runtime:
+            if write_scope_guard:
                 seed_paths: List[str] = []
                 for item in seed_findings:
                     if isinstance(item, dict):
                         file_path = item.get("file_path")
                         if isinstance(file_path, str) and file_path.strip():
                             seed_paths.append(file_path.strip())
-                mcp_runtime.register_evidence_paths(seed_paths)
+                write_scope_guard.register_evidence_paths(seed_paths)
 
-            # ============ Markdown 长期记忆（不依赖 embedding/RAG） ============
+            # ============ Markdown 长期记忆（不依赖向量检索） ============
             try:
                 from app.services.agent.memory.markdown_memory import MarkdownMemoryStore
                 from app.core.config import settings
@@ -620,7 +537,7 @@ async def _execute_agent_task(task_id: str):
                         task_id=task_id,
                         max_chars=int(getattr(settings, "TOOL_DOC_SYNC_MAX_CHARS", 8000)),
                     )
-                    _sync_mcp_tool_playbook_to_memory(
+                    _sync_tool_playbook_to_memory(
                         memory_store=memory_store,
                         task_id=task_id,
                         max_chars=int(getattr(settings, "TOOL_DOC_SYNC_MAX_CHARS", 8000)),
@@ -1694,169 +1611,6 @@ async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional
     return None
 
 
-def _sync_tool_catalog_to_memory(
-    *,
-    memory_store: Any,
-    task_id: str,
-    max_chars: int,
-) -> None:
-    """同步共享工具目录到 Markdown memory shared.md（追加式，保留历史）。"""
-    catalog_path = Path(__file__).resolve().parents[4] / "docs" / "agent-tools" / "TOOL_SHARED_CATALOG.md"
-    if not catalog_path.exists():
-        return
-
-    try:
-        content = catalog_path.read_text(encoding="utf-8", errors="replace")
-    except Exception as exc:
-        logger.warning("[ToolDocSync] read catalog failed: %s", exc)
-        return
-
-    clipped = content[: max(0, int(max_chars))]
-    if not clipped.strip():
-        return
-
-    try:
-        memory_store.append_entry(
-            "shared",
-            task_id=task_id,
-            source="tool_catalog_sync",
-            title="工具共享目录同步",
-            summary="将 TOOL_SHARED_CATALOG.md 摘要同步到 shared memory，供各 Agent 提示词检出。",
-            payload={
-                "catalog_path": str(catalog_path),
-                "max_chars": int(max_chars),
-                "content": clipped,
-            },
-        )
-    except Exception as exc:
-        logger.warning("[ToolDocSync] append shared entry failed: %s", exc)
-
-
-def _load_mcp_tool_playbook(*, max_chars: int) -> Tuple[Optional[Path], str]:
-    docs_root = Path(__file__).resolve().parents[4] / "docs" / "agent-tools"
-    playbook_path = docs_root / "MCP_TOOL_PLAYBOOK.md"
-    if not playbook_path.exists():
-        return None, ""
-    try:
-        content = playbook_path.read_text(encoding="utf-8", errors="replace")
-    except Exception as exc:
-        logger.warning("[ToolDocSync] read MCP tool playbook failed: %s", exc)
-        return playbook_path, ""
-    clipped = content[: max(0, int(max_chars))]
-    return playbook_path, clipped
-
-
-def _sync_mcp_tool_playbook_to_memory(
-    *,
-    memory_store: Any,
-    task_id: str,
-    max_chars: int,
-) -> None:
-    playbook_path, playbook_content = _load_mcp_tool_playbook(max_chars=max_chars)
-    if not playbook_path or not playbook_content.strip():
-        return
-    try:
-        memory_store.append_entry(
-            "shared",
-            task_id=task_id,
-            source="mcp_tool_playbook_sync",
-            title="MCP 工具说明同步",
-            summary="将 MCP_TOOL_PLAYBOOK.md 同步到 shared memory，供各 Agent 快速检索标准工具调用方式。",
-            payload={
-                "playbook_path": str(playbook_path),
-                "max_chars": int(max_chars),
-                "content": playbook_content,
-            },
-        )
-    except Exception as exc:
-        logger.warning("[ToolDocSync] append MCP playbook failed: %s", exc)
-
-
-def _build_tool_skills_snapshot(*, max_chars: int) -> str:
-    docs_root = Path(__file__).resolve().parents[4] / "docs" / "agent-tools"
-    index_path = docs_root / "SKILLS_INDEX.md"
-    skills_dir = docs_root / "skills"
-    preferred_skill_order = [
-        "mcp_reliability_workflow.skill.md",
-        "push_finding_to_queue.skill.md",
-        "get_recon_risk_queue_status.skill.md",
-        "search_code.skill.md",
-        "list_files.skill.md",
-        "get_code_window.skill.md",
-        "get_file_outline.skill.md",
-        "get_function_summary.skill.md",
-        "get_symbol_body.skill.md",
-        "locate_enclosing_function.skill.md",
-        "function_context.skill.md",
-    ]
-
-    fragments: List[str] = []
-    if index_path.exists():
-        try:
-            fragments.append(index_path.read_text(encoding="utf-8", errors="replace").strip())
-        except Exception as exc:
-            logger.warning("[ToolDocSync] read skills index failed: %s", exc)
-
-    if skills_dir.exists():
-        all_skill_docs = {doc.name: doc for doc in skills_dir.glob("*.skill.md")}
-        ordered_skill_docs: List[Path] = []
-        for preferred_name in preferred_skill_order:
-            preferred_doc = all_skill_docs.pop(preferred_name, None)
-            if preferred_doc is not None:
-                ordered_skill_docs.append(preferred_doc)
-        ordered_skill_docs.extend(all_skill_docs[name] for name in sorted(all_skill_docs.keys()))
-
-        for skill_doc in ordered_skill_docs:
-            try:
-                fragments.append(skill_doc.read_text(encoding="utf-8", errors="replace").strip())
-            except Exception as exc:
-                logger.warning("[ToolDocSync] read skill doc failed (%s): %s", skill_doc, exc)
-
-    _playbook_path, playbook_content = _load_mcp_tool_playbook(max_chars=max_chars)
-    if playbook_content.strip():
-        fragments.append(playbook_content.strip())
-
-    snapshot = "\n\n---\n\n".join(item for item in fragments if str(item or "").strip())
-    if not snapshot.strip():
-        return ""
-    return snapshot[: max(0, int(max_chars))]
-
-
-def _sync_tool_skills_to_memory(
-    *,
-    memory_store: Any,
-    task_id: str,
-    max_chars: int,
-) -> None:
-    skill_snapshot = _build_tool_skills_snapshot(max_chars=max_chars)
-    if not skill_snapshot:
-        return
-
-    if hasattr(memory_store, "write_skills_snapshot"):
-        try:
-            memory_store.write_skills_snapshot(
-                skill_snapshot,
-                source="tool_skill_sync",
-                task_id=task_id,
-            )
-            return
-        except Exception as exc:
-            logger.warning("[ToolDocSync] write skills snapshot failed: %s", exc)
-
-    # Backward-compatible fallback.
-    try:
-        memory_store.append_entry(
-            "skills",
-            task_id=task_id,
-            source="tool_skill_sync",
-            title="工具 skill 规范同步",
-            summary="将文件读取相关 skill 文档同步到 skills memory。",
-            payload={"content": skill_snapshot},
-        )
-    except Exception as exc:
-        logger.warning("[ToolDocSync] append skills entry failed: %s", exc)
-
-
 async def _initialize_tools(
     project_root: str,
     llm_service,
@@ -1931,8 +1685,8 @@ async def _initialize_tools(
         else:
             logger.warning(f"[EMIT-TOOLS] No event_emitter, skipping: {message[:60]}...")
 
-    # logger.info("RAG 模块已禁用，跳过向量索引初始化")
-    # await emit(" RAG 模块已禁用，跳过向量索引初始化")
+    # logger.info("向量检索模块已禁用，跳过索引初始化")
+    # await emit("向量检索模块已禁用，跳过索引初始化")
 
     base_tools = {
         "list_files": ListFilesTool(project_root, exclude_patterns, target_files),

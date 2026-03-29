@@ -57,7 +57,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/shared/api/database";
-import EmbeddingConfig from "@/components/agent/EmbeddingConfig";
 import { resolveProviderSwitchFieldValue } from "@/components/system/llmProviderSwitch";
 import { runSaveThenTestAction } from "@/components/scan-config/intelligentEngineActionFlow";
 import {
@@ -150,7 +149,7 @@ interface SystemConfigData {
 	llmGapMs: number;
 }
 
-type ConfigSection = "llm" | "embedding" | "analysis";
+type ConfigSection = "llm" | "analysis";
 
 export interface SystemConfigSharedDraftState {
 	config: SystemConfigData | null;
@@ -659,7 +658,7 @@ function AdvancedConfigDialog(props: {
 }
 
 export function SystemConfig({
-	visibleSections = ["llm", "embedding", "analysis"],
+	visibleSections = ["llm", "analysis"],
 	defaultSection = "llm",
 	mergedView = false,
 	showLlmSummaryCards = true,
@@ -1481,14 +1480,6 @@ export function SystemConfig({
 								<Zap className="w-3 h-3" /> LLM 配置
 							</TabsTrigger>
 						)}
-						{sections.includes("embedding") && (
-							<TabsTrigger
-								value="embedding"
-								className="data-[state=active]:bg-primary data-[state=active]:text-foreground font-mono font-bold uppercase py-2.5 text-muted-foreground transition-all rounded text-xs flex items-center gap-2"
-							>
-								<Brain className="w-3 h-3" /> 嵌入模型
-							</TabsTrigger>
-						)}
 						{sections.includes("analysis") && (
 							<TabsTrigger
 								value="analysis"
@@ -1934,16 +1925,6 @@ export function SystemConfig({
 						) : null}
 					</TabsContent>
 				)}
-
-					{!mergedView && sections.includes("embedding") && (
-						<TabsContent
-							value="embedding"
-							className={compactLayout ? "space-y-4" : "space-y-6"}
-						>
-							<EmbeddingConfig compact={compactLayout} />
-						</TabsContent>
-					)}
-
 				{!mergedView && sections.includes("analysis") && (
 					<TabsContent value="analysis" className="space-y-6">
 						<div className="cyber-card p-6 space-y-6">
