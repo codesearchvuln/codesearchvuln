@@ -271,7 +271,7 @@ test("DashboardCommandCenter renders the live single-page dashboard layout", asy
 	assert.match(markup, /AI验证漏洞总数/);
 	assert.match(markup, /累计执行扫描/);
 	assert.match(markup, /累计消耗词元/);
-	assert.match(markup, /漏洞态势趋势/);
+	assert.match(markup, /漏洞态势统计图/);
 	assert.match(markup, /项目风险统计图/);
 	assert.match(markup, /语言风险统计图/);
 	assert.match(markup, /漏洞类型统计图/);
@@ -379,7 +379,47 @@ test("DashboardCommandCenter uses enlarged axes and fixed chart spacing constant
 		module.HORIZONTAL_STATS_META_LEGEND_CLASSNAME,
 		"flex flex-wrap justify-start gap-2 sm:justify-end",
 	);
-	assert.equal(module.TOP_STATS_GRID_CLASSNAME, "grid grid-cols-2 gap-3 xl:grid-cols-5");
+	assert.equal(
+		module.TOP_STATS_GRID_CLASSNAME,
+		"grid grid-cols-2 gap-3 xl:grid-cols-5 xl:gap-4",
+	);
+	assert.equal(module.DASHBOARD_DESKTOP_LEFT_RAIL_WIDTH, "calc((100%-4rem)/5)");
+	assert.equal(module.DASHBOARD_DESKTOP_RIGHT_RAIL_WIDTH, "calc((100%-4rem)/5)");
+	assert.equal(
+		module.DASHBOARD_MAIN_GRID_CLASSNAME,
+		"grid gap-6 xl:min-h-0 xl:flex-1 xl:gap-4 xl:grid-cols-[calc((100%-4rem)/5)_minmax(0,1fr)_calc((100%-4rem)/5)]",
+	);
+});
+
+test("DashboardCommandCenter gives charts more desktop width while shrinking the task rail", async () => {
+	const module = await importOrFail<any>(
+		"../src/features/dashboard/components/DashboardCommandCenter.tsx",
+	);
+
+	const markup = renderToStaticMarkup(
+		createElement(module.default, {
+			snapshot: createSnapshotFixture(),
+			rangeDays: 14,
+			onRangeDaysChange: () => {},
+		}),
+	);
+
+	assert.match(
+		markup,
+		/xl:grid-cols-\[calc\(\(100%-4rem\)\/5\)_minmax\(0,1fr\)_calc\(\(100%-4rem\)\/5\)\]/,
+	);
+	assert.doesNotMatch(
+		markup,
+		/xl:grid-cols-\[260px_minmax\(0,1fr\)_340px\]/,
+	);
+	assert.doesNotMatch(
+		markup,
+		/xl:grid-cols-\[calc\(\(100%-4rem\)\/5\)_minmax\(0,1fr\)_220px\]/,
+	);
+	assert.match(
+		markup,
+		/xl:grid-cols-5 xl:gap-4/,
+	);
 });
 
 test("estimateHorizontalStatsYAxisWidth shrinks short labels while keeping long labels readable", async () => {

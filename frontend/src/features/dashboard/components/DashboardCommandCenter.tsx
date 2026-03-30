@@ -170,7 +170,11 @@ export const HORIZONTAL_STATS_META_ROW_CLASSNAME =
 	"mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between";
 export const HORIZONTAL_STATS_META_LEGEND_CLASSNAME =
 	"flex flex-wrap justify-start gap-2 sm:justify-end";
-export const TOP_STATS_GRID_CLASSNAME = "grid grid-cols-2 gap-3 xl:grid-cols-5";
+export const TOP_STATS_GRID_CLASSNAME = "grid grid-cols-2 gap-3 xl:grid-cols-5 xl:gap-4";
+export const DASHBOARD_DESKTOP_LEFT_RAIL_WIDTH = "calc((100%-4rem)/5)";
+export const DASHBOARD_DESKTOP_RIGHT_RAIL_WIDTH = "calc((100%-4rem)/5)";
+export const DASHBOARD_MAIN_GRID_CLASSNAME =
+	"grid gap-6 xl:min-h-0 xl:flex-1 xl:gap-4 xl:grid-cols-[calc((100%-4rem)/5)_minmax(0,1fr)_calc((100%-4rem)/5)]";
 export const DASHBOARD_RECENT_TASKS_PAGE_SIZE = 4;
 const DASHBOARD_PANEL_CLASSNAME =
 	"rounded-sm border border-border bg-card text-card-foreground shadow-sm";
@@ -787,7 +791,7 @@ function RecentTaskCard({ task }: { task: DashboardRecentTaskItem }) {
 						{task.title}
 					</p>
 					{/* <p className="mt-1 text-xs text-muted-foreground">
-						{task.task_type} · {formatCreatedAt(task.created_at)}
+						{task.task_type}
 					</p> */}
 				</div>
 				<a
@@ -798,7 +802,7 @@ function RecentTaskCard({ task }: { task: DashboardRecentTaskItem }) {
 				</a>
 			</div>
 			<div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-				{/* <span>{task.task_type}</span> */}
+				<span>{task.task_type}</span>
 				<span>执行进度 {progress}%</span>
 			</div>
 			<div className="mt-2 h-2 rounded-full bg-muted/70">
@@ -1132,7 +1136,7 @@ export default function DashboardCommandCenter({
 		<div className="px-1 py-1 text-foreground xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden">
 			<div className="space-y-6 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:space-y-4">
 				<PreviewHeader snapshot={snapshot} />
-				<div className="grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-cols-[260px_minmax(0,1fr)_340px] xl:gap-4">
+				<div className={DASHBOARD_MAIN_GRID_CLASSNAME}>
 					<ViewSidebar activeView={activeView} onChange={setActiveView} />
 					<section className={`${DASHBOARD_PANEL_CLASSNAME} p-5 xl:min-h-0`}>
 						{activeView === "trend" ? (
