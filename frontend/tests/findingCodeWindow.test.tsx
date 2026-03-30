@@ -174,3 +174,35 @@ test("FindingCodeWindow keeps project-browser full-height shell in project-brows
 	assert.match(markup, /flex h-full min-h-0 flex-col/);
 });
 
+test("FindingCodeWindow only auto-scrolls when the focus target changes", async () => {
+	const module = await importOrFail<any>(
+		"../src/pages/AgentAudit/components/FindingCodeWindow.tsx",
+	);
+
+	assert.equal(module.shouldAutoScrollToFocusTarget(null, null), false);
+	assert.equal(
+		module.shouldAutoScrollToFocusTarget(null, "src/auth.ts:80-92::88"),
+		true,
+	);
+	assert.equal(
+		module.shouldAutoScrollToFocusTarget(
+			"src/auth.ts:80-92::88",
+			"src/auth.ts:80-92::88",
+		),
+		false,
+	);
+	assert.equal(
+		module.shouldAutoScrollToFocusTarget(
+			"src/auth.ts:80-92::88",
+			"src/auth.ts:80-92::89",
+		),
+		true,
+	);
+	assert.equal(
+		module.shouldAutoScrollToFocusTarget(
+			"src/auth.ts:80-92::88",
+			"src/other.ts:12-18::12",
+		),
+		true,
+	);
+});

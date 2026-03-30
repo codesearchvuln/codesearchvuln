@@ -188,6 +188,14 @@ function applyLineDecorations(
 	});
 }
 
+export function shouldAutoScrollToFocusTarget(
+	previousTargetKey: string | null,
+	nextTargetKey: string | null,
+): boolean {
+	if (!nextTargetKey) return false;
+	return previousTargetKey !== nextTargetKey;
+}
+
 function renderTokenizedLine(segments: FindingCodeTokenSegment[]) {
 	if (!segments.length) return " ";
 	return segments.map((segment, index) => {
@@ -349,6 +357,7 @@ export default function FindingCodeWindow({
     typeof lineStart === "number" && Number.isFinite(lineStart) ? lineStart : 1;
   const header = formatHeader(filePath, lineStart, lineEnd);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const lastAutoScrolledTargetRef = useRef<string | null>(null);
 
   const normalizedHighlightStart =
     typeof highlightStartLine === "number" && Number.isFinite(highlightStartLine)
@@ -396,14 +405,26 @@ export default function FindingCodeWindow({
     normalizedHighlightStart,
     rawLines,
   ]);
+  const focusTargetKey =
+    normalizedFocusLine !== null ? `${header}::${normalizedFocusLine}` : null;
 
   useEffect(() => {
     if (!containerRef.current || !normalizedFocusLine) return;
+    if (
+      !shouldAutoScrollToFocusTarget(
+        lastAutoScrolledTargetRef.current,
+        focusTargetKey,
+      )
+    ) {
+      return;
+    }
     const target = containerRef.current.querySelector<HTMLElement>(
       `[data-line-number="${normalizedFocusLine}"]`,
     );
-    target?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [displayLines, normalizedFocusLine, code]);
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    lastAutoScrolledTargetRef.current = focusTargetKey;
+  }, [focusTargetKey, normalizedFocusLine, renderedLines]);
 
   return (
     <section
