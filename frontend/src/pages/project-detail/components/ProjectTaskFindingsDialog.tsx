@@ -97,8 +97,12 @@ function toPositiveLine(value: unknown): number | null {
 
 function isFalsePositiveAgentFinding(finding: AgentFinding): boolean {
 	return (
-		String(finding.status || "").trim().toLowerCase() === "false_positive" ||
-		String(finding.authenticity || "").trim().toLowerCase() === "false_positive"
+		String(finding.status || "")
+			.trim()
+			.toLowerCase() === "false_positive" ||
+		String(finding.authenticity || "")
+			.trim()
+			.toLowerCase() === "false_positive"
 	);
 }
 
@@ -412,10 +416,17 @@ export default function ProjectTaskFindingsDialog({
 						align: "center",
 						width: 72,
 					},
-					cell: ({ row, table }) =>
-						table.getState().pagination.pageIndex * table.getState().pagination.pageSize +
-						row.index +
-						1,
+					cell: ({ row, table }) => {
+						const pageRowIndex = table
+							.getRowModel()
+							.rows.findIndex((r) => r.id === row.id);
+						return (
+							table.getState().pagination.pageIndex *
+								table.getState().pagination.pageSize +
+							pageRowIndex +
+							1
+						);
+					},
 				},
 				{
 					id: "typeLabel",
@@ -444,7 +455,10 @@ export default function ProjectTaskFindingsDialog({
 						minWidth: 260,
 					},
 					cell: ({ row }) => {
-						const location = formatLocation(row.original.filePath, row.original.line);
+						const location = formatLocation(
+							row.original.filePath,
+							row.original.line,
+						);
 						return (
 							<div
 								className="text-xs text-muted-foreground break-all"
@@ -495,7 +509,9 @@ export default function ProjectTaskFindingsDialog({
 						],
 					},
 					cell: ({ row }) => (
-						<Badge className={getConfidenceBadgeClassName(row.original.confidence)}>
+						<Badge
+							className={getConfidenceBadgeClassName(row.original.confidence)}
+						>
 							{getConfidenceText(row.original.confidence)}
 						</Badge>
 					),
@@ -509,7 +525,7 @@ export default function ProjectTaskFindingsDialog({
 						align: "center",
 						width: 120,
 					},
-					cell: ({ row }) => (
+					cell: ({ row }) =>
 						row.original.route ? (
 							<Button
 								asChild
@@ -517,7 +533,9 @@ export default function ProjectTaskFindingsDialog({
 								variant="outline"
 								className="cyber-btn-ghost h-8 px-3"
 							>
-								<Link to={appendReturnTo(row.original.route, returnTo)}>详情</Link>
+								<Link to={appendReturnTo(row.original.route, returnTo)}>
+									详情
+								</Link>
 							</Button>
 						) : (
 							<Button
@@ -529,8 +547,7 @@ export default function ProjectTaskFindingsDialog({
 							>
 								详情
 							</Button>
-						)
-					),
+						),
 				},
 			] satisfies AppColumnDef<TaskFindingRow, unknown>[],
 		[formatLocation, returnTo],
@@ -545,19 +562,19 @@ export default function ProjectTaskFindingsDialog({
 				<DialogHeader className="px-6 py-4 border-b border-border flex-shrink-0">
 					<div className="flex items-center justify-between gap-3">
 						<div className="min-w-0 space-y-2 text-left">
-						  <DialogTitle className="flex items-center gap-2 text-base leading-none">
-						    <Bug className="h-4 w-4 shrink-0 text-amber-400" />
-						    <span className="truncate">{taskLabel}漏洞详情</span>
-						  </DialogTitle>
+							<DialogTitle className="flex items-center gap-2 text-base leading-none">
+								<Bug className="h-4 w-4 shrink-0 text-amber-400" />
+								<span className="truncate">{taskLabel}漏洞详情</span>
+							</DialogTitle>
 
-						  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-						    <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/40 px-2.5 py-1">
-						      任务 ID：{taskId}
-						    </span>
-						    <span className="inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
-						      已验证漏洞共 {allRows.length.toLocaleString()} 条
-						    </span>
-						  </div>
+							<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+								<span className="inline-flex items-center rounded-md border border-border/70 bg-muted/40 px-2.5 py-1">
+									任务 ID：{taskId}
+								</span>
+								<span className="inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+									已验证漏洞共 {allRows.length.toLocaleString()} 条
+								</span>
+							</div>
 						</div>
 						<Button
 							type="button"
@@ -581,9 +598,14 @@ export default function ProjectTaskFindingsDialog({
 							state={tableState}
 							onStateChange={setTableState}
 							loading={status === "loading"}
-							error={status === "failed" ? errorMessage || "加载漏洞失败" : undefined}
+							error={
+								status === "failed" ? errorMessage || "加载漏洞失败" : undefined
+							}
 							emptyState={{
-								title: allRows.length === 0 ? "暂无已验证漏洞" : "暂无符合条件的漏洞",
+								title:
+									allRows.length === 0
+										? "暂无已验证漏洞"
+										: "暂无符合条件的漏洞",
 							}}
 							toolbar={{
 								searchPlaceholder: "搜索漏洞类型或位置",

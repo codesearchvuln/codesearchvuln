@@ -1149,11 +1149,17 @@ export default function OpengrepRules({
 				enableSorting: false,
 				enableHiding: false,
 				meta: { label: "序号", align: "center", width: 72 },
-				cell: ({ row, table }) =>
-					table.getState().pagination.pageIndex *
-						table.getState().pagination.pageSize +
-					row.index +
-					1,
+				cell: ({ row, table }) => {
+					const pageRowIndex = table
+						.getRowModel()
+						.rows.findIndex((r) => r.id === row.id);
+					return (
+						table.getState().pagination.pageIndex *
+							table.getState().pagination.pageSize +
+						pageRowIndex +
+						1
+					);
+				},
 			},
 			{
 				id: "ruleName",
