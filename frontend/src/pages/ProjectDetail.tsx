@@ -857,7 +857,15 @@ export default function ProjectDetail() {
 					</Button> */}
 				</div>
 			</div>
-
+			<div className="relative z-10">
+				<iframe
+					ref={iframeRef}
+					src="http://localhost:5175"
+					title="Nexus-itemDetail"
+					className="w-full border-0 rounded-lg"
+					style={{ height: '600px' }}
+				/>
+			</div>
 			<div className="relative z-10 space-y-4 mt-6">
 				<ProjectDescriptionSection
 					description={project.description || ""}
