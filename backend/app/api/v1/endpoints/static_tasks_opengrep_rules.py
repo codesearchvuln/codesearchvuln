@@ -40,6 +40,7 @@ from app.schemas.opengrep import (
     OpengrepRuleUpdateRequest,
 )
 from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
+from app.services.llm.service import LLMConfigError, LLMService
 from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
 from app.services.opengrep_confidence import (
     count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
