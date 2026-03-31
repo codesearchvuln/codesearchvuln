@@ -14,6 +14,7 @@ services:
     build: !override
       context: .
       dockerfile: docker/backend.Dockerfile
+      target: runtime-plain
       args:
         - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
         - UV_IMAGE=${UV_IMAGE:-ghcr.nju.edu.cn/astral-sh/uv:latest}
@@ -26,8 +27,6 @@ services:
         - BACKEND_PYPI_INDEX_FALLBACK=${BACKEND_PYPI_INDEX_FALLBACK:-https://pypi.org/simple}
         - BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}
         - BACKEND_INSTALL_CJK_FONTS=${BACKEND_INSTALL_CJK_FONTS:-0}
-        - BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}
-        - YASA_VERSION=${YASA_VERSION:-v0.2.33}
         - http_proxy=
         - https_proxy=
         - HTTP_PROXY=
@@ -66,8 +65,6 @@ services:
       BACKEND_PYPI_INDEX_PRIMARY: ${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}
       BACKEND_PYPI_INDEX_FALLBACK: ${BACKEND_PYPI_INDEX_FALLBACK:-https://pypi.org/simple}
       BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}
-      BACKEND_INSTALL_YASA: ${BACKEND_INSTALL_YASA:-1}
-      YASA_VERSION: ${YASA_VERSION:-v0.2.33}
       SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}
       SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-vulhunter/opengrep-runner-local:latest}
       SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-vulhunter/bandit-runner-local:latest}

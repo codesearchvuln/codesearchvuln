@@ -1798,13 +1798,6 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python -m pytest \
    - 确保所有环境（dev, docker, deploy）都更新配置
    - 测试缺失配置时的降级行为
 
-### 估算总工时
-
-- **最小实施（仅 scan-core + prompt）**：12-15 天
-- **包含 workflow registry**：增加 3-5 天
-- **包含完整测试和文档**：增加 2-3 天
-
-**总计**：15-23 工作日（取决于范围）
 
 ## 默认假设
 

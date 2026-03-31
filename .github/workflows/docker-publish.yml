@@ -172,8 +172,12 @@ jobs:
           tags: |
             ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ steps.image-tag.outputs.tag }}
             ${{ steps.image-tag.outputs.build_all == 'true' && format('{0}/{1}/vulhunter-backend:latest', env.GHCR_REGISTRY, env.VULHUNTER_IMAGE_NAMESPACE) || '' }}
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
+          build-args: |
+            DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache
+            type=gha,scope=backend
+          cache-to: type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache,mode=max
 
       - name: 签名后端镜像
         if: ${{ steps.image-tag.outputs.build_all == 'true' || github.event.inputs.build_backend == 'true' }}
