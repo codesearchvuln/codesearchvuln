@@ -67,6 +67,13 @@ export const AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT = 56;
 export const AGENT_AUDIT_FINDINGS_PAGE_PARAM = "findingsPage";
 export const AGENT_AUDIT_FINDINGS_PAGE_SIZE_PARAM = "findingsPageSize";
 
+export interface AgentAuditPaginationState {
+  page: number;
+  pageSize: number;
+}
+
+export type AgentAuditPaginationSource = "user" | "layout";
+
 function normalizeReturnToMode(returnTo: string | null | undefined): "intelligent" | "hybrid" | null {
   const normalized = String(returnTo || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -183,6 +190,28 @@ export function readAgentAuditFindingsPagination(
       toPositiveIntegerOrNull(
         params.get(AGENT_AUDIT_FINDINGS_PAGE_SIZE_PARAM),
       ) ?? AGENT_AUDIT_FINDINGS_PAGE_SIZE,
+  };
+}
+
+export function resolveAgentAuditPaginationTransition(input: {
+  current: AgentAuditPaginationState;
+  update: Partial<AgentAuditPaginationState>;
+  source: AgentAuditPaginationSource;
+}): {
+  state: AgentAuditPaginationState;
+  routeSync: AgentAuditPaginationState | null;
+} {
+  const state = {
+    page:
+      toPositiveIntegerOrNull(input.update.page) ?? input.current.page,
+    pageSize:
+      toPositiveIntegerOrNull(input.update.pageSize) ??
+      input.current.pageSize,
+  };
+
+  return {
+    state,
+    routeSync: input.source === "layout" ? null : state,
   };
 }
 

@@ -33,6 +33,7 @@ import {
 	AGENT_AUDIT_FINDINGS_PAGE_SIZE,
 	calculateResponsiveFindingsPageSize,
 	buildFindingTableState,
+	resolveAgentAuditPaginationTransition,
 	shouldSyncFindingPageFromTableState,
 	shouldResetFindingPage,
 } from "../detailViewModel";
@@ -152,46 +153,64 @@ export default function RealtimeFindingsPanel(props: {
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
 	page?: number;
 	pageSize?: number;
-	onPaginationChange?: (next: { page: number; pageSize: number }) => void;
+	onPaginationChange?: (
+		next: { page: number; pageSize: number },
+		source?: "user" | "layout",
+	) => void;
 }) {
 	const [internalPage, setInternalPage] = useState(1);
-	const [internalPageSize, setInternalPageSize] = useState(
-		AGENT_AUDIT_FINDINGS_PAGE_SIZE,
+	const [internalPageSize, setInternalPageSize] = useState(() =>
+		typeof props.pageSize === "number" &&
+		Number.isFinite(props.pageSize) &&
+		props.pageSize > 0
+			? Math.floor(props.pageSize)
+			: AGENT_AUDIT_FINDINGS_PAGE_SIZE,
 	);
 	const previousFiltersRef = useRef<FindingsViewFilters>(props.filters);
+	const previousPropPageSizeRef = useRef<number | null>(null);
 	const viewportRef = useRef<HTMLDivElement | null>(null);
 	const page =
 		typeof props.page === "number" && Number.isFinite(props.page) && props.page > 0
 			? Math.floor(props.page)
 			: internalPage;
-	const pageSize =
-		typeof props.pageSize === "number" &&
-		Number.isFinite(props.pageSize) &&
-		props.pageSize > 0
-			? Math.floor(props.pageSize)
-			: internalPageSize;
+	const pageSize = internalPageSize;
+
+	useEffect(() => {
+		if (
+			typeof props.pageSize !== "number" ||
+			!Number.isFinite(props.pageSize) ||
+			props.pageSize <= 0
+		) {
+			return;
+		}
+		const normalized = Math.floor(props.pageSize);
+		if (previousPropPageSizeRef.current === normalized) {
+			return;
+		}
+		previousPropPageSizeRef.current = normalized;
+		setInternalPageSize(normalized);
+	}, [props.pageSize]);
 
 	const updatePagination = useCallback(
-		(next: { page?: number; pageSize?: number }) => {
-			const resolved = {
-				page:
-					typeof next.page === "number" && Number.isFinite(next.page) && next.page > 0
-						? Math.floor(next.page)
-						: page,
-				pageSize:
-					typeof next.pageSize === "number" &&
-					Number.isFinite(next.pageSize) &&
-					next.pageSize > 0
-						? Math.floor(next.pageSize)
-						: pageSize,
-			};
-			props.onPaginationChange?.(resolved);
+		(
+			next: { page?: number; pageSize?: number },
+			source: "user" | "layout" = "user",
+		) => {
+			const resolved = resolveAgentAuditPaginationTransition({
+				current: {
+					page,
+					pageSize,
+				},
+				update: next,
+				source,
+			});
+			if (resolved.routeSync) {
+				props.onPaginationChange?.(resolved.routeSync, source);
+			}
 			if (typeof props.page !== "number") {
-				setInternalPage(resolved.page);
+				setInternalPage(resolved.state.page);
 			}
-			if (typeof props.pageSize !== "number") {
-				setInternalPageSize(resolved.pageSize);
-			}
+			setInternalPageSize(resolved.state.pageSize);
 		},
 		[page, pageSize, props.onPaginationChange, props.page, props.pageSize],
 	);
@@ -253,7 +272,7 @@ export default function RealtimeFindingsPanel(props: {
 		const updatePageSize = (height: number) => {
 			const next = calculateResponsiveFindingsPageSize(height);
 			if (pageSize !== next) {
-				updatePagination({ pageSize: next });
+				updatePagination({ pageSize: next }, "layout");
 			}
 		};
 
