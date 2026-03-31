@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/lib/compose-env.sh"
 COMPOSE=(
   docker compose
   -f "$REPO_ROOT/docker-compose.yml"
@@ -12,6 +13,8 @@ export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-docker.io/library}"
 export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
+
+ensure_backend_docker_env_file "$REPO_ROOT"
 
 echo "[INFO] Explicit local-build mode"
 echo "[INFO] REPO_ROOT=$REPO_ROOT"

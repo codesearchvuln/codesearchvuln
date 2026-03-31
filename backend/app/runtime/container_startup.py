@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+from shutil import copyfile
 from pathlib import Path
 
 
@@ -161,6 +162,30 @@ def _sync_backend_env_if_needed(app_root: Path) -> None:
     )
 
 
+def _ensure_backend_env_files(app_root: Path) -> None:
+    docker_env_dir = Path(os.environ.get("BACKEND_DOCKER_ENV_DIR", "/docker/env/backend"))
+    docker_env_file = docker_env_dir / ".env"
+    docker_env_example = docker_env_dir / "env.example"
+    app_env_file = app_root / ".env"
+
+    source_for_app_env: Path | None = None
+
+    if docker_env_file.exists():
+        source_for_app_env = docker_env_file
+    elif docker_env_example.exists():
+        docker_env_dir.mkdir(parents=True, exist_ok=True)
+        copyfile(docker_env_example, docker_env_file)
+        print(f"Bootstrapped backend Docker env from template: {docker_env_file}")
+        source_for_app_env = docker_env_file
+
+    if source_for_app_env is None:
+        return
+
+    if not app_env_file.exists():
+        copyfile(source_for_app_env, app_env_file)
+        print(f"Prepared backend app env file: {app_env_file}")
+
+
 def _wait_for_db(max_retries: int = 30, sleep_seconds: int = 2) -> None:
     print("Waiting for PostgreSQL...")
     script = (
@@ -211,6 +236,7 @@ def _exec_uvicorn(reload_enabled: bool) -> None:
 def run(mode: str) -> None:
     app_root = Path(os.environ.get("BACKEND_APP_ROOT", "/app"))
     os.chdir(app_root)
+    _ensure_backend_env_files(app_root)
 
     if mode == "dev":
         print("Starting VulHunter backend dev container...")

@@ -40,6 +40,7 @@ services:
     command: !reset null
     # 本地构建镜像已内置 /app，无需挂载源码；仅保留数据卷和 Docker Socket
     volumes: !override
+      - ./docker/env/backend:/docker/env/backend
       - backend_uploads:/app/uploads
       - backend_runtime_data:/app/data/runtime
       - scan_workspace:/tmp/vulhunter/scans

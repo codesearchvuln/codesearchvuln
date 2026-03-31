@@ -199,6 +199,13 @@ def test_compose_wrapper_defaults_apt_probe_codename_to_trixie() -> None:
     assert 'APT_PROBE_CODENAME="${APT_PROBE_CODENAME:-trixie}"' in script_text
 
 
+def test_compose_wrapper_bootstraps_backend_docker_env_before_compose() -> None:
+    script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert 'source "$REPO_ROOT/scripts/lib/compose-env.sh"' in script_text
+    assert 'ensure_backend_docker_env_file "$REPO_ROOT"' in script_text
+
+
 def test_attached_up_disables_compose_menu_by_default(tmp_path: Path) -> None:
     result = _run_compose_wrapper(tmp_path, ["up"])
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)

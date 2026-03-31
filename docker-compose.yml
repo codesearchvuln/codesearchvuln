@@ -37,6 +37,7 @@ services:
     volumes:
       - ./backend:/app
       - .:/workspace:ro
+      - ./docker/env/backend:/docker/env/backend
       - backend_venv:/opt/backend-venv
       - backend_uv_cache:/root/.cache/uv
       - backend_uploads:/app/uploads
@@ -46,7 +47,8 @@ services:
     ports:
       - "${VULHUNTER_BACKEND_PORT:-8000}:8000"
     env_file:
-      - ./docker/env/backend/.env
+      - path: ./docker/env/backend/.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
       ASYNCPG_DSN: postgresql://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}

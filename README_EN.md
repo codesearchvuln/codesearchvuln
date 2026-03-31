@@ -36,6 +36,9 @@ cd AuditTool
 
 ### 2. Configure backend environment variables
 
+On the first Docker Compose startup, if `docker/env/backend/.env` is missing, the stack now auto-generates it from `docker/env/backend/env.example`.
+You can still pre-create it manually if you prefer:
+
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 ```
@@ -62,6 +65,8 @@ For the full local build path, add the `docker-compose.full.yml` overlay:
 # Or keep the raw compose command
 docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 ```
+
+On a fresh checkout where only `docker/env/backend/env.example` exists, `./scripts/compose-up-local-build.sh` now bootstraps `docker/env/backend/.env` automatically so the local-build entrypoint does not fail early on a missing backend env file.
 
 The default `docker compose up` path is the remote-image path. Adding `--build` to the base compose file does not switch the main services to local builds.
 Use the `docker-compose.full.yml` overlay explicitly when you want local image builds.

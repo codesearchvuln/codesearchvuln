@@ -37,6 +37,7 @@ services:
     working_dir: !reset null
     command: !reset null
     volumes: !override
+      - ./docker/env/backend:/docker/env/backend
       - backend_uploads:/app/uploads
       - backend_runtime_data:/app/data/runtime
       - scan_workspace:/tmp/vulhunter/scans

@@ -36,6 +36,9 @@ cd AuditTool
 
 ### 2. 配置后端环境变量
 
+首次执行 Docker Compose 启动时，如果缺少 `docker/env/backend/.env`，系统会自动基于 `docker/env/backend/env.example` 生成该文件。
+你也可以提前手动复制：
+
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 ```
@@ -62,6 +65,8 @@ Windows 请使用 Docker Desktop + Linux containers。
 # 或保留原始 compose 命令
 docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 ```
+
+首次拉取源码、仅存在 `docker/env/backend/env.example` 时，`./scripts/compose-up-local-build.sh` 会自动生成 `docker/env/backend/.env`，避免本地构建入口因为缺少 backend env 文件而中断。
 
 默认 `docker compose up` 为远程镜像模式，只拉起常驻服务；基础 compose 上追加 `--build` 不会把主服务切成本地构建。
 如需切到本地构建，请显式叠加 `docker-compose.full.yml`。

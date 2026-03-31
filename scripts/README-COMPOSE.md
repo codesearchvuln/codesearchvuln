@@ -13,6 +13,7 @@ docker compose up
 ```
 
 该默认链路是远程镜像模式，只拉起常驻 compose 服务；对基础 compose 追加 `--build` 不会把 `backend` / `frontend` / `nexus-web` 切成本地构建。
+如果首次启动时缺少 `docker/env/backend/.env`，backend 会基于 `docker/env/backend/env.example` 自动生成该文件，避免 compose 因缺少 env 文件直接中断。
 默认远程镜像按 `GHCR_REGISTRY` + namespace + tag 规则解析，支持以下环境变量：
 
 ```bash
@@ -36,6 +37,7 @@ docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 ```
 
 推荐优先使用 `./scripts/compose-up-local-build.sh`。该脚本会按 `backend -> frontend -> nexus-web` 顺序串行构建，再执行 `up -d`，可避开部分 Docker Desktop / Buildx 环境下的并发元数据解析错误。
+如果首次拉取源码后只有 `docker/env/backend/env.example`，该脚本会自动生成 `docker/env/backend/.env`，避免本地构建入口因为缺少 backend env 文件而提前失败。
 原始 compose 命令仍保留，适合已经确认本机并发构建稳定的场景。
 
 ## 平台支持
@@ -57,6 +59,8 @@ docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 ```bash
 ./scripts/compose-up-with-fallback.sh
 ```
+
+legacy Bash helper 同样会在缺少 `docker/env/backend/.env` 时，自动从 `docker/env/backend/env.example` 补出默认 backend Docker 环境文件。
 
 ### PowerShell helper（Windows）
 

@@ -32,6 +32,11 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/lib/compose-env.sh"
+
+ensure_backend_docker_env_file "$REPO_ROOT"
+
 # ─── 日志工具 ─────────────────────────────────────────────────────────────────
 log_info() {
   echo "[INFO] $*"

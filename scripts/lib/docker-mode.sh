@@ -2,6 +2,8 @@
 # scripts/lib/docker-mode.sh — Docker 模式：检查、启动、状态、停止
 # 依赖 common.sh 已被 source。
 
+source "${REPO_ROOT}/scripts/lib/compose-env.sh"
+
 # ─── Docker/Compose 检测 ──────────────────────────────────────────────────────
 _detect_compose() {
   if docker compose version >/dev/null 2>&1; then
@@ -29,18 +31,7 @@ _check_docker() {
 
 # ─── .env 准备 ────────────────────────────────────────────────────────────────
 _prepare_docker_env() {
-  local env_file="${REPO_ROOT}/backend/.env"
-  local example_file="${REPO_ROOT}/docker/env/backend/env.example"
-  if [ ! -f "$env_file" ]; then
-    if [ -f "$example_file" ]; then
-      log_warn "backend/.env 不存在，从 env.example 自动生成..."
-      cp "$example_file" "$env_file"
-      log_warn "请编辑 ${env_file} 填入 LLM_API_KEY 等必要配置后重新运行。"
-    else
-      log_error "未找到 backend/.env 也未找到 env.example，请手动创建配置文件。"
-      exit 1
-    fi
-  fi
+  ensure_backend_docker_env_file "${REPO_ROOT}"
 }
 
 # ─── 端口预检 ─────────────────────────────────────────────────────────────────
