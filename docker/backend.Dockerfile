@@ -585,9 +585,12 @@ CMD ["python3", "-m", "app.runtime.container_startup", "dev"]
 # ============================================================
 FROM builder AS cython-compiler
 
-# 安装 Cython（builder 的 venv 中）
-RUN --mount=type=cache,id=vulhunter-cython-pip,target=/root/.cache/pip \
-    /opt/backend-venv/bin/pip install --quiet "Cython>=3.0.0,<4.0.0"
+# 安装 Cython 和 setuptools（builder 使用 uv 管理 venv，无 pip，用 uv pip install）
+ARG BACKEND_PYPI_INDEX_PRIMARY
+RUN --mount=type=cache,id=vulhunter-cython-uv,target=/root/.cache/uv \
+    VIRTUAL_ENV=/opt/backend-venv \
+    UV_INDEX_URL="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}" \
+    uv pip install "Cython>=3.0.0,<4.0.0" "setuptools>=68"
 
 # 复制源码和编译脚本
 COPY backend/app /build/app

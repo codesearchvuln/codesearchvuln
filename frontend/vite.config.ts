@@ -1,6 +1,7 @@
 import { defineConfig, type ConfigEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
+import javascriptObfuscator from "vite-plugin-javascript-obfuscator";
 import path from "path";
 
 // https://vite.dev/config/
@@ -8,10 +9,8 @@ export default defineConfig(({ mode }: ConfigEnv) => {
   const isProduction = mode === "production";
 
   // 仅在生产构建时加载混淆插件，避免开发模式性能损耗
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const obfuscatorPlugin = isProduction
     ? (() => {
-        const { default: javascriptObfuscator } = require("vite-plugin-javascript-obfuscator");
         return javascriptObfuscator({
           options: {
             // 标识符混淆（低成本高收益）
