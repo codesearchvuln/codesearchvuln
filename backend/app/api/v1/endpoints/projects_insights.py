@@ -1,4 +1,35 @@
 from app.api.v1.endpoints.projects_shared import *
+from app.api.v1.endpoints.projects_shared import (
+    _BANDIT_TEST_ID_TO_CWE,
+    _bucket_dashboard_task_status,
+    _build_static_scan_overview_item_from_row,
+    _coerce_datetime,
+    _dashboard_activity_bucket,
+    _extract_cwe_candidates_from_rule_payload,
+    _is_agent_finding_effective,
+    _is_agent_finding_false_positive,
+    _is_agent_finding_verified,
+    _is_static_finding_effective,
+    _is_static_finding_false_positive,
+    _is_static_finding_verified,
+    _normalize_agent_confidence,
+    _normalize_dashboard_range_days,
+    _normalize_dashboard_rule_confidence,
+    _normalize_status_token,
+    _parse_dashboard_language_info,
+    _record_project_hotspot_finding,
+    _resolve_agent_source_mode,
+    _resolve_dashboard_language_from_path,
+    _risk_multiplier,
+    _risk_weight_for_opengrep,
+    _risk_weight_from_severity,
+    _round_non_negative_int,
+    _sort_dashboard_items_by_total_and_name,
+    _to_non_negative_int,
+    _to_ratio,
+    _update_project_hotspot_scan_meta,
+    _update_window_activity,
+)
 from app.api.v1.endpoints.static_tasks_bandit import _extract_bandit_snapshot_rules
 from app.api.v1.endpoints.static_tasks_phpstan import _extract_phpstan_snapshot_rules
 from app.models.yasa import YasaRuleConfig

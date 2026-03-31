@@ -2895,7 +2895,7 @@ class VerificationAgent(BaseAgent):
                             "file_path": meta_file,
                             "line_start": meta_line_start,
                             "line_end": meta_line_end,
-                            "is_verified": normalized_status == "verified",
+                            "is_verified": meta_status == "verified",
                             "finding_scope": "verification_queue",
                             "verification_todo_id": todo_item.id,
                             "verification_fingerprint": todo_item.fingerprint,

@@ -1,4 +1,12 @@
 from app.api.v1.endpoints.projects_shared import *
+from app.api.v1.endpoints.projects_shared import (
+    _build_zip_project,
+    _get_or_prepare_project_info,
+    _raise_if_project_hidden,
+    _resolve_project_description_bundle,
+    _store_uploaded_archive_for_project,
+    _validate_archive_extension,
+)
 from app.services.project_metrics import ProjectMetricsService, project_metrics_refresher
 
 router = APIRouter()
@@ -198,6 +206,7 @@ async def create_project_with_zip(
         await db.rollback()
         await delete_project_zip(project.id)
         raise HTTPException(status_code=500, detail=f"上传失败: {str(exc)}") from exc
+
 
 @router.get("/{id}/zip", response_model=ZipFileMetaResponse)
 async def get_project_zip_info(
