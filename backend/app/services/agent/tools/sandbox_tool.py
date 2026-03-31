@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import re
 import tempfile
 import os
 import shutil
@@ -639,7 +640,6 @@ class SandboxManager:
             
             # 检查响应
             if expected_pattern:
-                import re
                 if re.search(expected_pattern, body, re.IGNORECASE):
                     verification_result["is_vulnerable"] = True
                     verification_result["evidence"] = f"响应中包含预期模式: {expected_pattern}"
