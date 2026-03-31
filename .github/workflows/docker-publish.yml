@@ -26,47 +26,47 @@ on:
         description: '构建 YASA runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_opengrep_runner:
         description: '构建 OpenGrep runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_bandit_runner:
         description: '构建 Bandit runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_gitleaks_runner:
         description: '构建 Gitleaks runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_phpstan_runner:
         description: '构建 PHPStan runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_flow_parser_runner:
         description: '构建 flow/parser runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_pmd_runner:
         description: '构建 PMD runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_sandbox:
         description: '构建沙箱镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_sandbox_runner:
         description: '构建 sandbox-runner 镜像'
         required: false
         type: boolean
-        default: true
+        default: false
       build_nexus_web:
         description: '构建 nexus-web 镜像'
         required: false

@@ -12,7 +12,10 @@ ARG YASA_UAST_VERSION=v0.2.8
 # 1 = 强制从源码编译
 ARG YASA_BUILD_FROM_SOURCE=0
 
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS yasa-builder
+# ─── Stage 1: yasa-fetcher ────────────────────────────────────────────────────
+# 纯下载/编译阶段。launcher 文件不在此阶段 COPY，因此 launcher 变动不会破坏此层缓存。
+# cache key = 版本 ARG + 基础镜像 + overrides（arm64 编译需要）
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS yasa-fetcher
 
 ARG BACKEND_APT_MIRROR_PRIMARY
 ARG BACKEND_APT_SECURITY_PRIMARY
@@ -31,14 +34,9 @@ ENV YASA_HOME=/opt/yasa
 ENV YASA_BIN_DIR=/opt/yasa/bin
 ENV YASA_ENGINE_DIR=/opt/yasa/engine
 ENV YASA_REAL_BIN=/opt/yasa/bin/yasa-engine.real
-ENV YASA_ENGINE_WRAPPER_BIN=/opt/yasa/bin/yasa-engine
-ENV YASA_WRAPPER_BIN=/opt/yasa/bin/yasa
-
-COPY --chmod=755 backend/app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
-COPY --chmod=755 backend/app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
-COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
 ENV PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES}
 
+# 注意：launcher 文件不在此处 COPY，移至 yasa-builder 阶段
 COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
 COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides
 
@@ -242,8 +240,6 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/li
         echo "failed to install YASA Python parser dependencies" >&2; \
         exit 1; \
       fi; \
-      cp /tmp/yasa-launchers/uast4py "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \
-      chmod +x "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \
     else \
       if [ -z "${YASA_RELEASE_ASSET}" ] || [ -z "${YASA_RELEASE_BIN}" ]; then \
         echo "prebuilt release unavailable for ${ARCH}; set YASA_BUILD_FROM_SOURCE=1 to compile from source" >&2; \
@@ -281,14 +277,8 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/li
       download_uast_bin "uast4py-${UAST_PLATFORM}" "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \
     fi; \
     ln -sfn "${YASA_ENGINE_DIR}/resource" "${YASA_HOME}/resource"; \
-    cp /tmp/yasa-launchers/yasa-engine "${YASA_ENGINE_WRAPPER_BIN}"; \
-    chmod +x "${YASA_ENGINE_WRAPPER_BIN}"; \
-    cp /tmp/yasa-launchers/yasa "${YASA_WRAPPER_BIN}"; \
-    chmod +x "${YASA_WRAPPER_BIN}"; \
     mkdir -p /opt/yasa-runtime/bin /opt/yasa-runtime/engine/deps/uast4go /opt/yasa-runtime/engine/deps/uast4py; \
     cp "${YASA_REAL_BIN}" /opt/yasa-runtime/bin/yasa-engine.real; \
-    cp "${YASA_ENGINE_WRAPPER_BIN}" /opt/yasa-runtime/bin/yasa-engine; \
-    cp "${YASA_WRAPPER_BIN}" /opt/yasa-runtime/bin/yasa; \
     cp -R "${YASA_ENGINE_DIR}/resource" /opt/yasa-runtime/resource; \
     cp -R "${YASA_ENGINE_DIR}/deps/uast4go/." /opt/yasa-runtime/engine/deps/uast4go/; \
     cp -R "${YASA_ENGINE_DIR}/deps/uast4py/." /opt/yasa-runtime/engine/deps/uast4py/; \
@@ -299,8 +289,30 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/li
     if [ -d "${YASA_HOME}/uast4py-venv" ]; then \
       cp -R "${YASA_HOME}/uast4py-venv" /opt/yasa-runtime/uast4py-venv; \
     fi; \
+    test -x /opt/yasa-runtime/bin/yasa-engine.real
+
+# ─── Stage 2: yasa-builder ───────────────────────────────────────────────────
+# 应用 launcher wrapper 脚本。cache key = fetcher 产物 + launcher 文件内容。
+# 当仅 launcher 变动时，fetcher 层命中 GHA 缓存，本阶段仅执行文件复制操作（极快）。
+FROM yasa-fetcher AS yasa-builder
+
+COPY --chmod=755 backend/app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
+COPY --chmod=755 backend/app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
+COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
+
+RUN set -eux; \
+    cp /tmp/yasa-launchers/yasa-engine /opt/yasa-runtime/bin/yasa-engine; \
+    chmod +x /opt/yasa-runtime/bin/yasa-engine; \
+    cp /tmp/yasa-launchers/yasa /opt/yasa-runtime/bin/yasa; \
+    chmod +x /opt/yasa-runtime/bin/yasa; \
+    # arm64 源码构建路径：uast4py-venv 存在时使用 launcher 替换预构建 uast4py 二进制
+    if [ -d /opt/yasa-runtime/uast4py-venv ]; then \
+      cp /tmp/yasa-launchers/uast4py /opt/yasa-runtime/engine/deps/uast4py/uast4py; \
+      chmod +x /opt/yasa-runtime/engine/deps/uast4py/uast4py; \
+    fi; \
     test -x /opt/yasa-runtime/bin/yasa
 
+# ─── Stage 3: yasa-runner (最终运行镜像) ──────────────────────────────────────
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim AS yasa-runner
 
 ARG BACKEND_APT_MIRROR_PRIMARY
@@ -314,10 +326,6 @@ ENV YASA_HOME=/opt/yasa
 ENV YASA_BIN_DIR=/opt/yasa/bin
 ENV YASA_RESOURCE_DIR=/opt/yasa/resource
 ENV PATH=/opt/yasa/bin:${PATH}
-
-COPY --chmod=755 backend/app/runtime/launchers/yasa_engine_launcher.py /tmp/yasa-launchers/yasa-engine
-COPY --chmod=755 backend/app/runtime/launchers/yasa_launcher.py /tmp/yasa-launchers/yasa
-COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py
 
 RUN --mount=type=cache,id=vulhunter-yasa-runner-runtime-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-yasa-runner-runtime-apt-cache,target=/var/cache/apt,sharing=locked \
