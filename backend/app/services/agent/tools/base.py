@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type
 from dataclasses import dataclass, field
 import inspect
+import json
 from pydantic import BaseModel, ValidationError
 import logging
 import time
@@ -43,7 +44,6 @@ class ToolResult:
         if isinstance(self.data, str):
             result = self.data
         elif isinstance(self.data, (dict, list)):
-            import json
             result = json.dumps(self.data, ensure_ascii=False, indent=2)
         else:
             result = str(self.data)

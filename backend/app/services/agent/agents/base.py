@@ -1445,7 +1445,6 @@ class BaseAgent(ABC):
         extra_metadata: Optional[Dict[str, Any]] = None,
     ):
         """发射漏洞发现事件"""
-        import uuid
         finding_id = str(uuid.uuid4())
 
         normalized_line_start: Optional[int] = None

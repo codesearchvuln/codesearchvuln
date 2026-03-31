@@ -1,3 +1,5 @@
+import json
+
 from fastapi import Query
 
 from app.api.v1.endpoints.projects_shared import *
@@ -164,7 +166,6 @@ async def update_project(
     """
     Update project.
     """
-    import json
 
     result = await db.execute(select(Project).where(Project.id == id))
     project = result.scalars().first()

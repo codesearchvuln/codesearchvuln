@@ -1116,7 +1116,6 @@ Final Answer:""",
                     
                     if summary_output and summary_output.strip():
                         # 解析总结输出
-                        import re
                         summary_text = summary_output.strip()
                         summary_text = re.sub(r'```json\s*', '', summary_text)
                         summary_text = re.sub(r'```\s*', '', summary_text)

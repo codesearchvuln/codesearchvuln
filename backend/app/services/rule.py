@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -283,7 +284,6 @@ async def get_rule_by_patch(
     request: OpengrepRuleCreateRequest,
     user_config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    import tempfile
     from .llm_rule.repo_cache_manager import GlobalRepoCacheManager
     
     repo_owner = request.repo_owner

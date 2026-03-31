@@ -15,6 +15,7 @@
 import asyncio
 import logging
 import os
+import re
 import tempfile
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
@@ -408,7 +409,6 @@ for payload in payloads:
             # 切换到 /tmp 目录执行，避免工作目录权限问题
             escaped = escape_for_shell(code).replace("\\", "\\\\")
             # 提取类名
-            import re
             class_match = re.search(r'public\s+class\s+(\w+)', code)
             class_name = class_match.group(1) if class_match else "Test"
             return f"cd /tmp && echo '{escaped}' > {class_name}.java && javac {class_name}.java && java {class_name}"
@@ -620,7 +620,6 @@ class ExtractFunctionTool(AgentTool):
 
     def _extract_php(self, code: str, function_name: str) -> Dict:
         """提取 PHP 函数（支持类方法、独立函数）"""
-        import re
 
         # 支持类方法（访问修饰符 + static/abstract/final）和独立函数
         # 匹配: public static function name(...): returnType { 或 function name(...) {
@@ -677,7 +676,6 @@ class ExtractFunctionTool(AgentTool):
 
     def _extract_javascript(self, code: str, function_name: str) -> Dict:
         """提取 JavaScript / TypeScript 函数与类方法"""
-        import re
 
         patterns = [
             rf'(?:export\s+)?(?:async\s+)?function\s+{re.escape(function_name)}\s*\([^)]*\)\s*\{{',
@@ -816,8 +814,6 @@ class ExtractFunctionTool(AgentTool):
 
     @staticmethod
     def _extract_c_parameters(params_block: str) -> list[str]:
-        import re
-
         params: list[str] = []
         current: list[str] = []
         depth = 0
@@ -851,7 +847,6 @@ class ExtractFunctionTool(AgentTool):
 
     def _extract_c_like(self, code: str, function_name: str, include_imports: bool) -> Dict:
         """提取 C/C++ 风格函数定义。"""
-        import re
 
         function_pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(")
 
@@ -914,7 +909,6 @@ class ExtractFunctionTool(AgentTool):
 
     def _extract_generic(self, code: str, function_name: str) -> Dict:
         """通用函数提取（正则）"""
-        import re
 
         # 尝试多种模式
         patterns = [

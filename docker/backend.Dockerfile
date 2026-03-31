@@ -68,6 +68,7 @@ RUN --mount=type=cache,id=vulhunter-backend-builder-apt-lists,target=/var/lib/ap
   apt-get update && \
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   gcc \
+  libc6-dev \
   libpq-dev \
   libffi-dev; \
   }; \

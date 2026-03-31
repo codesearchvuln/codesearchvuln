@@ -2129,14 +2129,12 @@ class VerificationAgent(BaseAgent):
         queue_finding_from_context = None
         if task_context and isinstance(task_context, str):
             # 尝试从 task_context 中解析 JSON 漏洞信息
-            import json
             try:
                 # task_context 可能是纯文本描述，也可能包含 JSON
                 if task_context.strip().startswith("{"):
                     queue_finding_from_context = json.loads(task_context)
                 elif "finding_from_queue" in task_context or "dequeued_finding" in task_context:
                     # 尝试提取嵌入的 JSON
-                    import re
                     json_match = re.search(r'\{.*\}', task_context, re.DOTALL)
                     if json_match:
                         queue_finding_from_context = json.loads(json_match.group(0))

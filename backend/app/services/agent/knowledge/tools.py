@@ -5,6 +5,7 @@
 """
 
 import logging
+import re
 from typing import Dict, Any, Optional, List, Type
 from pydantic import BaseModel, Field
 
@@ -242,7 +243,6 @@ class GetVulnerabilityKnowledgeTool(AgentTool):
     def _detect_code_language(self, content: str) -> Optional[str]:
         """检测知识内容中的主要代码语言"""
         # 检测代码块中的语言标记
-        import re
         code_blocks = re.findall(r'```(\w+)', content)
         if code_blocks:
             # 统计最常见的语言

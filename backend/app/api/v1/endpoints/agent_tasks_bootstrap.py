@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -1187,7 +1188,6 @@ def _discover_entry_points_deterministic(
     exclude_patterns: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """在 OpenGrep 候选为空时，确定性发现入口点（grep-like + AST 兜底）。"""
-    import re
 
     normalized_project_root = os.path.abspath(project_root)
     root = Path(normalized_project_root)

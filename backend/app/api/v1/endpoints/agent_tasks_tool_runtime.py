@@ -1,6 +1,7 @@
 """Tool runtime helpers, write-scope guard, and tool documentation sync for agent tasks."""
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,7 +21,6 @@ def build_task_write_scope_guard(
     bootstrap_findings: Optional[List[dict]] = None,
 ) -> TaskWriteScopeGuard:
     """Build and seed a TaskWriteScopeGuard for a given task."""
-    import os
     from app.core.config import settings
 
     normalized_project_root = os.path.abspath(project_root)

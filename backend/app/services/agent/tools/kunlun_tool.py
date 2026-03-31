@@ -32,6 +32,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import sys
 import tempfile
 import subprocess
@@ -192,7 +193,6 @@ Kunlun-M 是一款专注于代码安全审计的工具，特别擅长 PHP 和 Ja
         settings_py = os.path.join(self.kunlun_path, "Kunlun_M", "settings.py")
 
         if os.path.exists(settings_bak) and not os.path.exists(settings_py):
-            import shutil
             shutil.copy(settings_bak, settings_py)
 
         # 运行初始化命令

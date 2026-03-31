@@ -4,8 +4,9 @@
 """
 
 import asyncio
-import time
 import logging
+import time
+import uuid
 from typing import Any, Dict, Optional, AsyncGenerator, List, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -101,7 +102,6 @@ class ToolStreamHandler:
     
     def _generate_call_id(self) -> str:
         """生成调用 ID"""
-        import uuid
         return str(uuid.uuid4())[:8]
     
     async def emit_tool_start(

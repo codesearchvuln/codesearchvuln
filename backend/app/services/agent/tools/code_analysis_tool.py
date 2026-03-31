@@ -5,6 +5,8 @@
 
 import json
 import logging
+import os
+import re
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
@@ -380,7 +382,6 @@ class DataFlowAnalysisTool(AgentTool):
         max_hops: int = 5,
     ) -> Dict[str, Any]:
         """基于规则的快速数据流分析（不依赖 LLM）。"""
-        import re
 
         code_to_analyze = f"{source_code}\n{sink_code or ''}"
         lower_code = code_to_analyze.lower()
@@ -471,8 +472,6 @@ class DataFlowAnalysisTool(AgentTool):
         start_line: Optional[int],
         end_line: Optional[int],
     ) -> Dict[str, Any]:
-        import os
-
         normalized = str(file_path or "").strip()
         if not normalized:
             return {"ok": False, "error": "file_path 为空"}

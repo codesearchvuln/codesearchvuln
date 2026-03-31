@@ -15,6 +15,7 @@ import asyncio
 import copy
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -621,7 +622,6 @@ class AuditWorkflowEngine:
             text = response.strip()
             # 如果响应有 markdown 代码块，提取 JSON 部分
             if "```" in text:
-                import re
                 json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
                 if json_match:
                     text = json_match.group(1)

@@ -1270,7 +1270,6 @@ Final Answer:""",
                 for keyword in risk_keywords:
                     if keyword in obs_lower:
                         # 尝试从观察中提取文件路径
-                        import re
                         file_matches = re.findall(r'[\w/]+\.(?:py|js|ts|java|php|go|rb)', step.observation)
                         for file_path in file_matches[:3]:  # 限制数量
                             if file_path not in result["high_risk_areas"]:

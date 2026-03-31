@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
 from typing import List, Union, Optional, Self
@@ -59,8 +60,6 @@ class Settings(BaseSettings):
                 return []
             if text.startswith("[") and text.endswith("]"):
                 try:
-                    import json
-
                     parsed = json.loads(text)
                     if isinstance(parsed, list):
                         return [str(item).strip() for item in parsed if str(item).strip()]

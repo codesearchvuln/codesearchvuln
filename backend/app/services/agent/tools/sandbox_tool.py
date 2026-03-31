@@ -1518,7 +1518,6 @@ class CommandInjectionTestTool(AgentTool):
                 error="沙箱环境不可用 (Docker Unavailable)",
             )
 
-        import os
         full_path = os.path.join(self.project_root, target_file)
 
         if not os.path.exists(full_path):

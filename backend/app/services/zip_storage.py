@@ -3,6 +3,7 @@ ZIP文件存储服务
 用于管理项目的ZIP文件持久化存储
 """
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -57,8 +58,7 @@ async def save_project_zip(project_id: str, file_path: str, original_filename: s
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "project_id": project_id
     }
-    
-    import json
+
     with open(meta_path, 'w') as f:
         json.dump(meta, f)
     
@@ -99,8 +99,7 @@ async def get_project_zip_meta(project_id: str) -> Optional[dict]:
     
     if not meta_path.exists():
         return None
-    
-    import json
+
     with open(meta_path, 'r') as f:
         return json.load(f)
 

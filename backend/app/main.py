@@ -71,8 +71,6 @@ async def check_agent_services():
 
     # 检查 Redis 连接（可选警告）
     try:
-        import os
-
         import redis
 
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")

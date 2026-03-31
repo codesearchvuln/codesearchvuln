@@ -8,7 +8,9 @@ LiteLLM 统一适配器
 - 流式输出: 支持逐 token 返回
 """
 
+import json
 import logging
+import re
 import time
 from typing import Dict, Any, Optional, List
 from ..base_adapter import BaseLLMAdapter
@@ -115,9 +117,6 @@ class LiteLLMAdapter(BaseLLMAdapter):
         error_str = str(error)
 
         # 尝试提取 JSON 格式的错误信息
-        import re
-        import json
-
         # 匹配 {'error': {...}} 或 {"error": {...}} 格式
         json_pattern = r"\{['\"]error['\"]:\s*\{[^}]+\}\}"
         match = re.search(json_pattern, error_str)
@@ -512,7 +511,6 @@ class LiteLLMAdapter(BaseLLMAdapter):
             else:
                 error_type = "rate_limit"
                 # 尝试从错误消息中提取重试时间
-                import re
                 retry_match = re.search(r"retry\s*(?:in|after)\s*(\d+(?:\.\d+)?)\s*s", error_msg, re.IGNORECASE)
                 retry_seconds = float(retry_match.group(1)) if retry_match else 60
                 user_message = f"API 调用频率超限，建议等待 {int(retry_seconds)} 秒后重试"
@@ -574,7 +572,6 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
             if is_rate_limit:
                 # 按速率限制错误处理
-                import re
                 # 检查是否是配额用尽
                 if any(keyword in error_msg.lower() for keyword in ["quota", "exceeded", "billing"]):
                     error_type = "quota_exceeded"

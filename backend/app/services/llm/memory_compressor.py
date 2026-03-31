@@ -11,6 +11,7 @@ Memory Compressor - 对话历史压缩器
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .tokenizer import TokenEstimator
@@ -243,8 +244,6 @@ class MemoryCompressor:
         Returns:
             关键信息字典
         """
-        import re
-        
         key_info = {
             "findings": [],
             "tools_used": [],

@@ -151,7 +151,6 @@ class AgentEventEmitter:
     
     async def emit_llm_action(self, action: str, action_input: Dict):
         """发射 LLM 动作事件"""
-        import json
         input_str = json.dumps(action_input, ensure_ascii=False)[:200]
         await self.emit(AgentEventData(
             event_type="llm_action",
