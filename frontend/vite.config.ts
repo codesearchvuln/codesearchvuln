@@ -52,6 +52,9 @@ export default defineConfig({
     port: 5173,
     host: true,
     open: process.env.VITE_OPEN_BROWSER === "1",
+    hmr: process.env.VITE_HMR_CLIENT_PORT
+      ? { clientPort: parseInt(process.env.VITE_HMR_CLIENT_PORT, 10) }
+      : true,
     cors: {
       origin: true,
       credentials: true,
