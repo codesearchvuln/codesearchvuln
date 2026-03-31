@@ -1,6 +1,12 @@
 from fastapi import Query
 
 from app.api.v1.endpoints.projects_shared import *
+from app.api.v1.endpoints.projects_shared import (
+    _build_zip_project,
+    _filter_public_projects,
+    _hydrate_projects_management_metrics,
+    _raise_if_project_hidden,
+)
 from app.services.project_metrics import project_metrics_refresher
 
 router = APIRouter()
