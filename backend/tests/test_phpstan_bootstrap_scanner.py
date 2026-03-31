@@ -242,6 +242,44 @@ async def test_phpstan_bootstrap_scanner_raises_on_invalid_json(monkeypatch, tmp
         await scanner.scan(str(tmp_path))
 
 
+@pytest.mark.asyncio
+async def test_phpstan_bootstrap_scanner_fallback_parses_plaintext_lines(monkeypatch, tmp_path):
+    _workspace_dir, _project_dir, _output_dir, logs_dir = _prepare_phpstan_workspace(
+        monkeypatch,
+        tmp_path,
+    )
+
+    async def _fake_run_scanner_container(_spec, **_kwargs):
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        Path(logs_dir / "stdout.log").write_text(
+            "src/A.php:12: Potential command execution via system()",
+            encoding="utf-8",
+        )
+        Path(logs_dir / "stderr.log").write_text("", encoding="utf-8")
+        return SimpleNamespace(
+            success=False,
+            container_id="phpstan-bootstrap-6",
+            exit_code=1,
+            stdout_path=str(logs_dir / "stdout.log"),
+            stderr_path=str(logs_dir / "stderr.log"),
+            error="scanner container exited with code 1",
+        )
+
+    monkeypatch.setattr(
+        phpstan_bootstrap,
+        "run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
+    )
+
+    scanner = PhpstanBootstrapScanner()
+    result = await scanner.scan(str(tmp_path))
+    assert result.total_findings == 1
+    assert len(result.findings) == 1
+    assert result.findings[0].file_path == "src/A.php"
+    assert result.findings[0].line_start == 12
+
+
 def test_phpstan_bootstrap_parse_output_supports_bracket_noise_before_json():
     parsed = phpstan_bootstrap._parse_output(
         "[warning] bootstrap log\n{\"files\":{},\"totals\":{}}"

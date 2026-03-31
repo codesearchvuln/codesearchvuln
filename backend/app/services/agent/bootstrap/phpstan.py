@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -145,6 +146,66 @@ def _collect_raw_messages(files_map: Dict[str, Any]) -> List[Dict[str, Any]]:
     return messages
 
 
+def _parse_plaintext_output_fallback(output_text: str) -> Dict[str, Any]:
+    """Best-effort fallback for non-JSON phpstan output.
+
+    Supports common line formats like:
+    - path/to/file.php:12: message
+    - message in path/to/file.php on line 12
+    """
+    text = str(output_text or "")
+    if not text.strip():
+        return {}
+
+    files: Dict[str, Dict[str, Any]] = {}
+
+    def _append(file_path: str, line: int, message: str) -> None:
+        normalized_file = str(file_path or "").strip()
+        normalized_message = str(message or "").strip()
+        if not normalized_file or not normalized_message:
+            return
+        entry = files.setdefault(normalized_file, {"messages": []})
+        entry["messages"].append(
+            {
+                "message": normalized_message,
+                "line": int(line) if int(line) > 0 else None,
+            }
+        )
+
+    colon_pattern = re.compile(
+        r"^(?P<file>[^:\n]+\.php):(?P<line>\d+):\s*(?P<msg>.+)$",
+        re.IGNORECASE,
+    )
+    in_on_line_pattern = re.compile(
+        r"^(?P<msg>.+?)\s+in\s+(?P<file>[^ ]+\.php)\s+on\s+line\s+(?P<line>\d+)\s*$",
+        re.IGNORECASE,
+    )
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        matched = colon_pattern.match(line)
+        if matched:
+            _append(
+                matched.group("file"),
+                int(matched.group("line")),
+                matched.group("msg"),
+            )
+            continue
+        matched = in_on_line_pattern.match(line)
+        if matched:
+            _append(
+                matched.group("file"),
+                int(matched.group("line")),
+                matched.group("msg"),
+            )
+
+    if not files:
+        return {}
+    return {"files": files}
+
+
 class PhpstanBootstrapScanner(StaticBootstrapScanner):
     """PHPStan bootstrap scanner for hybrid embedded static pre-scan."""
 
@@ -254,6 +315,11 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
 
             stderr_text = ""
             stdout_text = report_file.read_text(encoding="utf-8", errors="ignore") if report_file.exists() else ""
+            if (not stdout_text.strip()) and process_result.stdout_path and Path(process_result.stdout_path).exists():
+                stdout_text = Path(process_result.stdout_path).read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                )
             if process_result.stderr_path and Path(process_result.stderr_path).exists():
                 stderr_text = Path(process_result.stderr_path).read_text(
                     encoding="utf-8",
@@ -280,11 +346,22 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
                     parse_error = exc
 
             if parse_error is not None and process_result.exit_code in {0, 1}:
-                raise RuntimeError(f"phpstan output parse failed: {parse_error}") from parse_error
+                fallback_payload = _parse_plaintext_output_fallback(stdout_text)
+                if not fallback_payload and stderr_text.strip():
+                    fallback_payload = _parse_plaintext_output_fallback(stderr_text)
+                if fallback_payload:
+                    payload = fallback_payload
+                    parse_error = None
 
             files_payload = payload.get("files")
             files_map: Dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
             raw_findings = _collect_raw_messages(files_map)
+
+            if parse_error is not None and process_result.exit_code in {0, 1} and not raw_findings:
+                preview = (stderr_text or stdout_text or process_result.error or "").strip()[:300]
+                raise RuntimeError(
+                    f"phpstan output parse failed: {parse_error}. output preview: {preview}"
+                ) from parse_error
 
             if process_result.exit_code > 1 and not raw_findings:
                 error_message = (stderr_text or stdout_text or process_result.error or "unknown error").strip()
@@ -299,6 +376,8 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
                 metadata={
                     "timeout_seconds": self.timeout_seconds,
                     "level": self.level,
+                    "exit_code": process_result.exit_code,
+                    "parse_warning": str(parse_error)[:300] if parse_error is not None else None,
                 },
             )
         finally:
