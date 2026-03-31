@@ -634,6 +634,19 @@ RUN set -eux; \
     if [ -d /build/app/db/patches ]; then \
         cp -r /build/app/db/patches /final/app/db/patches; \
     fi; \
+    # 7. 兜底：将所有无对应 .so 的 .py 文件（即 Cython 排除的模块）复制到 /final/app
+    #    确保未来新增排除文件时无需再修改此 Dockerfile
+    find /build/app -name "*.py" | while IFS= read -r f; do \
+        rel="${f#/build/app/}"; \
+        dir="$(dirname "${rel}")"; \
+        base="$(basename "${rel%.py}")"; \
+        if [ -z "$(find /final/app/"${dir}" -name "${base}.cpython-*.so" 2>/dev/null | head -1)" ] && \
+           [ ! -f "/final/app/${rel}" ]; then \
+            mkdir -p "/final/app/${dir}"; \
+            cp "${f}" "/final/app/${rel}"; \
+            echo "[Assembler] 保留 .py(无对应.so): ${rel}"; \
+        fi; \
+    done; \
     # 验证：核心 .so 文件存在
     echo "[Assembler] 验证关键 .so 文件:"; \
     ls /final/app/core/*.so 2>/dev/null | head -5; \

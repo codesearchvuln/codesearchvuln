@@ -18,3 +18,7 @@ runtime/launchers/yasa_launcher.py
 # Alembic migration baseline（Alembic 框架要求源文件）
 db/schema_snapshots/baseline_5b0f3c9a6d7e.py
 db/patches/
+
+# 含通配符导入（from .agent_tasks_findings import *）及 async 函数内嵌套闭包，
+# Cython 编译期无法解析通配符引入的名称
+api/v1/endpoints/agent_tasks_reporting.py

@@ -1,4 +1,4 @@
-import catalog from "./cweCatalog.generated.json" with { type: "json" };
+import catalog from "./cweCatalog.generated.json";
 
 export type CweCatalogEntry = {
   id: string;

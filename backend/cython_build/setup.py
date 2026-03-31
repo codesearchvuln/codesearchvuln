@@ -34,6 +34,9 @@ EXCLUDE_PATTERNS = [
     "db/schema_snapshots/*.py",
     # 补丁文件（非应用代码）
     "db/patches/*.py",
+    # 含通配符导入（from .agent_tasks_findings import *）及 async 函数内嵌套闭包，
+    # Cython 编译期无法解析通配符引入的名称，保留 .py 运行
+    "api/v1/endpoints/agent_tasks_reporting.py",
 ]
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
