@@ -53,6 +53,7 @@ import ReportExportDialog from "./components/ReportExportDialog";
 import { useAgentAuditState } from "./hooks";
 import {
   EVENT_LOG_GRID_TEMPLATE,
+  EVENT_LOG_TABLE_MIN_WIDTH_PX,
   POLLING_INTERVALS,
   TASK_PHASE_LABELS,
 } from "./constants";
@@ -444,6 +445,26 @@ function classifyTerminalFailure(
     };
   }
   return { failureClass: "unknown", retryable: false, cancelOrigin };
+}
+
+function isTruthyMetadataFlag(value: unknown): boolean {
+  return value === true || String(value || "").trim().toLowerCase() === "true";
+}
+
+function isRetryingTimeoutWarning(
+  eventType: string,
+  metadata?: Record<string, unknown>,
+): boolean {
+  if (eventType !== "warning") {
+    return false;
+  }
+  const retryClass = String(metadata?.retry_error_class || "").trim().toLowerCase();
+  const retryable =
+    typeof metadata?.retryable === "boolean"
+      ? metadata.retryable
+      : isTruthyMetadataFlag(metadata?.retryable);
+  const terminal = isTruthyMetadataFlag(metadata?.is_terminal);
+  return retryClass === "timeout_error" && retryable && !terminal;
 }
 
 function toSafeFilename(value: string): string {
@@ -2277,7 +2298,9 @@ function AgentAuditPageContent() {
         eventType === "warning" ||
         eventType === "error"
       ) {
-        const fallback = message || eventType;
+        const fallback = isRetryingTimeoutWarning(eventType, metadata)
+          ? "LLM 请求超时，重试中"
+          : message || eventType;
         const progressKey = matchProgressKey(fallback);
         if (progressKey) {
           dispatch({
@@ -3425,67 +3448,70 @@ function AgentAuditPageContent() {
             </div>
 
             <div className="pt-2">
-              <div className="hidden border-b border-border/60 px-5 py-2 md:block">
+              <div className="overflow-x-auto custom-scrollbar">
                 <div
-                  className="grid items-center gap-3 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground/80"
-                  style={{ gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE }}
+                  style={{ minWidth: `${EVENT_LOG_TABLE_MIN_WIDTH_PX}px` }}
                 >
-                  <span>时间戳</span>
-                  <span>类型标签</span>
-                  <span>事件概况</span>
-                  <span>阶段</span>
-                  <span>操作</span>
-                </div>
-              </div>
-              <div
-                ref={logsContainerRef}
-                onScroll={handleLogsScroll}
-                className="overflow-y-auto custom-scrollbar-dark"
-                style={{ height: LOG_VIEWPORT_HEIGHT_PX, maxHeight: "30vh" }}
-              >
-                {filteredLogs.length === 0 ? (
-                  <div className="flex h-full items-center justify-center px-3">
-                    <div className="text-center text-muted-foreground">
-                      {isRunning ? (
-                        <div className="flex flex-col items-center gap-3">
-                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                          <span className="text-sm font-mono tracking-wide">
-                            等待活动日志...
-                          </span>
+                  <div
+                    className="grid items-center gap-3 border-b border-border/60 px-5 py-2 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground/80"
+                    style={{ gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE }}
+                  >
+                    <span>时间戳</span>
+                    <span>类型标签</span>
+                    <span>事件概况</span>
+                    <span>阶段</span>
+                    <span>操作</span>
+                  </div>
+                  <div
+                    ref={logsContainerRef}
+                    onScroll={handleLogsScroll}
+                    className="overflow-y-auto custom-scrollbar-dark"
+                    style={{ height: LOG_VIEWPORT_HEIGHT_PX, maxHeight: "30vh" }}
+                  >
+                    {filteredLogs.length === 0 ? (
+                      <div className="flex h-full items-center justify-center px-3">
+                        <div className="text-center text-muted-foreground">
+                          {isRunning ? (
+                            <div className="flex flex-col items-center gap-3">
+                              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                              <span className="text-sm font-mono tracking-wide">
+                                等待活动日志...
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-sm font-mono tracking-wide">
+                              暂无活动日志
+                            </span>
+                          )}
                         </div>
-                      ) : (
-                        <span className="text-sm font-mono tracking-wide">
-                          暂无活动日志
-                        </span>
-                      )}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border/60 px-3">
+                        {filteredLogs.map((item) => (
+                          <LogEntry
+                            key={item.id}
+                            item={item}
+                            anchorId={`log-item-${item.id}`}
+                            highlighted={highlightedLogId === item.id}
+                            onOpenDetail={() =>
+                              openDetailDialog({
+                                type: "log",
+                                id: item.id,
+                                anchorId: `log-item-${item.id}`,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                    )}
+                    <div ref={logEndRef} />
                     </div>
                   </div>
-                ) : (
-                  <div className="divide-y divide-border/60 px-3">
-                    {filteredLogs.map((item) => (
-                      <LogEntry
-                        key={item.id}
-                        item={item}
-                        anchorId={`log-item-${item.id}`}
-                        highlighted={highlightedLogId === item.id}
-                        onOpenDetail={() =>
-                          openDetailDialog({
-                            type: "log",
-                            id: item.id,
-                            anchorId: `log-item-${item.id}`,
-                          })
-                        }
-                      />
-                    ))}
-                  </div>
-                )}
-                <div ref={logEndRef} />
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-
       {/* Export dialog */}
       <ReportExportDialog
         open={showExportDialog}

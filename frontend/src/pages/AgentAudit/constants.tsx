@@ -295,7 +295,9 @@ export const UI_CONFIG = {
 };
 
 export const EVENT_LOG_GRID_TEMPLATE =
-	"72px 84px minmax(0,1fr) 120px 104px";
+	"84px 96px minmax(320px,1fr) 132px 112px";
+export const EVENT_LOG_TABLE_MIN_WIDTH_PX = 760;
+export const FINDINGS_TABLE_MIN_WIDTH_PX = 720;
 
 // ============ Color Palette ============
 

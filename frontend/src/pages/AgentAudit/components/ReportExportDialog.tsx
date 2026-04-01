@@ -104,7 +104,7 @@ const FORMAT_CONFIG: Record<
 
 const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   includeCodeSnippets: true,
-  includeRemediation: true,
+  includeRemediation: false,
   includeMetadata: true,
   compactMode: false,
 };
@@ -550,11 +550,10 @@ export const ReportExportDialog = memo(function ReportExportDialog({
               <Button
                 onClick={() => void handleDownload()}
                 disabled={downloading || preview.loading || !preview.content}
-                className={`h-10 px-6 text-sm font-medium transition-all duration-300 ${
-                  downloadSuccess
+                className={`h-10 px-6 text-sm font-medium transition-all duration-300 ${downloadSuccess
                     ? "bg-emerald-600 hover:bg-emerald-600"
                     : "bg-primary hover:bg-primary/90"
-                }`}
+                  }`}
               >
                 {downloading ? (
                   <>

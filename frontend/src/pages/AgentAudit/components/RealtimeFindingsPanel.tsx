@@ -1,8 +1,4 @@
-import {
-	AlertTriangle,
-	ChevronLeft,
-	ChevronRight,
-} from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import {
 	useCallback,
 	useEffect,
@@ -23,6 +19,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import {
+	Table,
 	TableBody,
 	TableCell,
 	TableHead,
@@ -37,6 +34,7 @@ import {
 	shouldSyncFindingPageFromTableState,
 	shouldResetFindingPage,
 } from "../detailViewModel";
+import { FINDINGS_TABLE_MIN_WIDTH_PX } from "../constants";
 import type {
 	FindingsFiltersChangeOptions,
 	FindingsViewFilters,
@@ -90,7 +88,9 @@ export type RealtimeMergedFindingItem = {
 function isFalsePositiveFinding(item: RealtimeMergedFindingItem): boolean {
 	return (
 		item.detailMode === "false_positive_reason" ||
-		String(item.authenticity || "").trim().toLowerCase() === "false_positive" ||
+		String(item.authenticity || "")
+			.trim()
+			.toLowerCase() === "false_positive" ||
 		item.display_severity === "invalid"
 	);
 }
@@ -128,7 +128,9 @@ function getConfidenceBadgeClass(confidenceLabel: string): string {
 }
 
 function getEmptyStateMessage(currentPhase?: string | null): string {
-	const phase = String(currentPhase || "").trim().toLowerCase();
+	const phase = String(currentPhase || "")
+		.trim()
+		.toLowerCase();
 	if (phase === "verification") {
 		return "验证进行中，扫描结束后可查看漏洞详情";
 	}
@@ -170,7 +172,9 @@ export default function RealtimeFindingsPanel(props: {
 	const previousPropPageSizeRef = useRef<number | null>(null);
 	const viewportRef = useRef<HTMLDivElement | null>(null);
 	const page =
-		typeof props.page === "number" && Number.isFinite(props.page) && props.page > 0
+		typeof props.page === "number" &&
+		Number.isFinite(props.page) &&
+		props.page > 0
 			? Math.floor(props.page)
 			: internalPage;
 	const pageSize = internalPageSize;
@@ -219,8 +223,9 @@ export default function RealtimeFindingsPanel(props: {
 		(node: HTMLDivElement | null) => {
 			viewportRef.current = node;
 			if (props.scrollContainerRef) {
-				(props.scrollContainerRef as MutableRefObject<HTMLDivElement | null>).current =
-					node;
+				(
+					props.scrollContainerRef as MutableRefObject<HTMLDivElement | null>
+				).current = node;
 			}
 		},
 		[props.scrollContainerRef],
@@ -261,7 +266,13 @@ export default function RealtimeFindingsPanel(props: {
 		) {
 			updatePagination({ page: tableState.page });
 		}
-	}, [page, props.isLoading, tableState.page, tableState.totalRows, updatePagination]);
+	}, [
+		page,
+		props.isLoading,
+		tableState.page,
+		tableState.totalRows,
+		updatePagination,
+	]);
 
 	useEffect(() => {
 		if (typeof ResizeObserver === "undefined" || !viewportRef.current) {
@@ -294,20 +305,20 @@ export default function RealtimeFindingsPanel(props: {
 	}
 
 	return (
-		<div
-			className="rounded-xl bg-card/50"
-			style={{ height: "100%" }}
-		>
+		<div className="rounded-xl bg-card/50" style={{ height: "100%" }}>
 			<div className="flex h-full min-h-0 flex-col overflow-hidden">
 				<div className="flex flex-wrap items-center gap-3 border-b border-border/70 px-4 py-3">
 					<div className="relative min-w-0 flex-1 basis-[320px]">
 						<Input
 							value={props.filters.keyword}
 							onChange={(event) =>
-								props.onFiltersChange({
-									...props.filters,
-									keyword: event.target.value,
-								}, { source: "user" })
+								props.onFiltersChange(
+									{
+										...props.filters,
+										keyword: event.target.value,
+									},
+									{ source: "user" },
+								)
 							}
 							placeholder="搜索漏洞类型 / 危害"
 							className="cyber-input h-10 pl-11 pr-3 text-sm"
@@ -316,10 +327,13 @@ export default function RealtimeFindingsPanel(props: {
 					<Select
 						value={props.filters.severity}
 						onValueChange={(value) =>
-							props.onFiltersChange({
-								...props.filters,
-								severity: value,
-							}, { source: "user" })
+							props.onFiltersChange(
+								{
+									...props.filters,
+									severity: value,
+								},
+								{ source: "user" },
+							)
 						}
 					>
 						<SelectTrigger className="cyber-input h-10 w-full sm:w-[180px]">
@@ -346,7 +360,11 @@ export default function RealtimeFindingsPanel(props: {
 								</div>
 							</div>
 						) : (
-							<table className="w-full caption-bottom text-base font-mono">
+							<Table
+								containerClassName="h-full overflow-x-auto overflow-y-hidden rounded-sm border border-border"
+								className="caption-bottom text-base font-mono"
+								style={{ minWidth: `${FINDINGS_TABLE_MIN_WIDTH_PX}px` }}
+							>
 								<TableHeader className="bg-transparent">
 									<TableRow className="border-b border-border/60 hover:bg-transparent">
 										<TableHead className="w-[72px]">序号</TableHead>
@@ -357,7 +375,9 @@ export default function RealtimeFindingsPanel(props: {
 										{tableState.hasVisibleConfidence ? (
 											<TableHead className="w-[110px]">置信度</TableHead>
 										) : null}
-										<TableHead className="w-[160px] text-center">操作</TableHead>
+										<TableHead className="w-[160px] text-center">
+											操作
+										</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
@@ -417,14 +437,14 @@ export default function RealtimeFindingsPanel(props: {
 										);
 									})}
 								</TableBody>
-							</table>
+							</Table>
 						)}
 					</div>
 				</div>
 
 				<div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
 					<div className="text-xs text-muted-foreground">
-						共 {tableState.totalRows.toLocaleString()} 条，当前显示 {" "}
+						共 {tableState.totalRows.toLocaleString()} 条，当前显示{" "}
 						{tableState.rows.length.toLocaleString()} 条
 					</div>
 					<div className="flex items-center gap-2">
