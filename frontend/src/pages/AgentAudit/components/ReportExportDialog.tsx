@@ -45,6 +45,10 @@ import {
   type ExportOptions,
   type ReportFormat,
 } from "../report-export/components";
+import {
+  buildReportExportParams,
+  buildReportPreviewCacheKey,
+} from "../report-export/request";
 import { formatReportExportBytes } from "../report-export/utils";
 
 interface ReportExportDialogProps {
@@ -128,7 +132,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   const [exportOptions, setExportOptions] =
     useState<ExportOptions>(DEFAULT_EXPORT_OPTIONS);
   const [optionsExpanded, setOptionsExpanded] = useState(false);
-  const previewCache = useRef<Map<ReportFormat, string>>(new Map());
+  const previewCache = useRef<Map<string, string>>(new Map());
 
   const searchMatchCount = useMemo(() => {
     if (!searchQuery || !preview.content) return 0;
@@ -142,10 +146,12 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   const fetchPreview = useCallback(
     async (format: ReportFormat, forceRefresh = false) => {
       if (!task) return;
+      const cacheKey = buildReportPreviewCacheKey(format, exportOptions);
+      const requestFormat = format === "pdf" ? "markdown" : format;
 
-      if (!forceRefresh && previewCache.current.has(format)) {
+      if (!forceRefresh && previewCache.current.has(cacheKey)) {
         setPreview({
-          content: previewCache.current.get(format) || "",
+          content: previewCache.current.get(cacheKey) || "",
           format,
           loading: false,
           error: null,
@@ -157,20 +163,20 @@ export const ReportExportDialog = memo(function ReportExportDialog({
 
       try {
         let content = "";
-        if (format === "json") {
+        if (requestFormat === "json") {
           const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-            params: { format: "json" },
+            params: buildReportExportParams(requestFormat, exportOptions),
           });
           content = JSON.stringify(response.data, null, 2);
         } else {
           const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-            params: { format: "markdown" },
+            params: buildReportExportParams(requestFormat, exportOptions),
             responseType: "text",
           });
           content = response.data;
         }
 
-        previewCache.current.set(format, content);
+        previewCache.current.set(cacheKey, content);
         setPreview({ content, format, loading: false, error: null });
       } catch (error) {
         console.error("Failed to fetch report preview:", error);
@@ -181,14 +187,14 @@ export const ReportExportDialog = memo(function ReportExportDialog({
         }));
       }
     },
-    [task],
+    [exportOptions, task],
   );
 
   useEffect(() => {
     if (open && task) {
       void fetchPreview(activeFormat);
     }
-  }, [activeFormat, fetchPreview, open, task]);
+  }, [activeFormat, exportOptions, fetchPreview, open, task]);
 
   useEffect(() => {
     if (!open) {
@@ -251,7 +257,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
 
       if (activeFormat === "pdf") {
         const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-          params: { format: "pdf" },
+          params: buildReportExportParams("pdf", exportOptions),
           responseType: "blob",
         });
         const fallbackFilename = `${baseName}${config.extension}`;
@@ -269,12 +275,12 @@ export const ReportExportDialog = memo(function ReportExportDialog({
         if (!content) {
           if (activeFormat === "json") {
             const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-              params: { format: "json" },
+              params: buildReportExportParams(activeFormat, exportOptions),
             });
             content = JSON.stringify(response.data, null, 2);
           } else {
             const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
-              params: { format: "markdown" },
+              params: buildReportExportParams(activeFormat, exportOptions),
               responseType: "text",
             });
             content = response.data;
@@ -298,6 +304,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
     }
   }, [
     activeFormat,
+    exportOptions,
     onOpenChange,
     preview.content,
     resolveFilenameFromDisposition,

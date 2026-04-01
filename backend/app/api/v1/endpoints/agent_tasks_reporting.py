@@ -5,6 +5,7 @@ import html
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +25,44 @@ from .agent_tasks_findings import *
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ReportExportOptions:
+    include_code_snippets: bool = True
+    include_remediation: bool = True
+    include_metadata: bool = True
+    compact_mode: bool = False
+
+
+DEFAULT_REPORT_EXPORT_OPTIONS = ReportExportOptions()
+
+
+def _uses_default_report_export_options(options: ReportExportOptions) -> bool:
+    return options == DEFAULT_REPORT_EXPORT_OPTIONS
+
+
+def _compact_markdown(markdown_text: str) -> str:
+    normalized = str(markdown_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _resolve_query_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    default_value = getattr(value, "default", None)
+    if isinstance(default_value, bool):
+        return default_value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
 
 def _escape_markdown_inline(text: Optional[str]) -> str:
     """转义 Markdown 行内特殊字符，避免标题/位置等结构被破坏。"""
@@ -475,6 +514,7 @@ def _build_project_report_fallback(
     project: Project,
     findings: List[AgentFinding],
     report_descriptions: Dict[str, Dict[str, Optional[str]]],
+    export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
 ) -> str:
     if not findings:
         return "\n".join(
@@ -535,12 +575,6 @@ def _build_project_report_fallback(
     lines = [
         f"# 项目风险评估报告：{project.name}",
         "",
-        "## 项目概览",
-        "",
-        f"- 漏洞总数：{len(findings)}",
-        f"- confirmed：{verdict_stats.get('confirmed', 0)}",
-        f"- likely：{verdict_stats.get('likely', 0)}",
-        "",
         "## 风险总览",
         "",
         "- 严重程度分布",
@@ -551,6 +585,16 @@ def _build_project_report_fallback(
         f"  - info：{severity_stats.get('info', 0)}",
         "- 漏洞类型分布",
     ]
+
+    if export_options.include_metadata:
+        lines[2:2] = [
+            "## 项目概览",
+            "",
+            f"- 漏洞总数：{len(findings)}",
+            f"- confirmed：{verdict_stats.get('confirmed', 0)}",
+            f"- likely：{verdict_stats.get('likely', 0)}",
+            "",
+        ]
 
     sorted_vuln_types = sorted(
         vuln_type_stats.items(),
@@ -585,16 +629,21 @@ def _build_project_report_fallback(
                 or "未命名漏洞"
             )
             severity = _normalize_severity(getattr(finding_row, "severity", None)) or "unknown"
-            file_path = _normalize_relative_file_path(
-                str(getattr(finding_row, "file_path", "") or ""),
-                None,
-            ) or "-"
-            line_start = getattr(finding_row, "line_start", None) or "-"
-            lines.append(
-                f"{index}. {_escape_markdown_inline(display_title)} | "
-                f"{severity} | "
-                f"{_escape_markdown_inline(file_path)}:{line_start}"
-            )
+            if export_options.include_metadata:
+                file_path = _normalize_relative_file_path(
+                    str(getattr(finding_row, "file_path", "") or ""),
+                    None,
+                ) or "-"
+                line_start = getattr(finding_row, "line_start", None) or "-"
+                lines.append(
+                    f"{index}. {_escape_markdown_inline(display_title)} | "
+                    f"{severity} | "
+                    f"{_escape_markdown_inline(file_path)}:{line_start}"
+                )
+            else:
+                lines.append(
+                    f"{index}. {_escape_markdown_inline(display_title)} | {severity}"
+                )
         lines.append("")
 
     lines.extend(
@@ -603,19 +652,24 @@ def _build_project_report_fallback(
             "",
             "- 高危漏洞可能导致核心数据泄露、权限绕过或远程代码执行，建议优先治理 confirmed/high-risk 项。",
             "",
-            "## 优先级修复计划",
-            "",
-            "- P0：confirmed 且严重程度为 critical/high 的漏洞，立即修复并回归验证。",
-            "- P1：likely 或 medium 风险漏洞，纳入最近迭代修复计划。",
-            "- P2：low 风险项纳入常规加固与基线治理计划。",
-            "",
-            "## 后续治理建议",
-            "",
-            "- 将漏洞类型热点沉淀为编码规范与静态规则。",
-            "- 对关键入口补充单元/集成安全测试和运行时告警。",
-            "- 在发布前执行最小化回归与复测，确保修复不引入新缺陷。",
         ]
     )
+    if export_options.include_remediation:
+        lines.extend(
+            [
+                "## 优先级修复计划",
+                "",
+                "- P0：confirmed 且严重程度为 critical/high 的漏洞，立即修复并回归验证。",
+                "- P1：likely 或 medium 风险漏洞，纳入最近迭代修复计划。",
+                "- P2：low 风险项纳入常规加固与基线治理计划。",
+                "",
+                "## 后续治理建议",
+                "",
+                "- 将漏洞类型热点沉淀为编码规范与静态规则。",
+                "- 对关键入口补充单元/集成安全测试和运行时告警。",
+                "- 在发布前执行最小化回归与复测，确保修复不引入新缺陷。",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -732,6 +786,7 @@ def _build_finding_markdown_report(
     project: Project,
     finding_id: str,
     finding_data: Dict[str, Any],
+    export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
 ) -> str:
     sections: List[str] = []
 
@@ -760,7 +815,7 @@ def _build_finding_markdown_report(
     file_path = finding_data.get("file_path")
     line_start = finding_data.get("line_start")
     line_end = finding_data.get("line_end")
-    if file_path:
+    if export_options.include_metadata and file_path:
         location = _escape_markdown_inline(str(file_path))
         if line_start:
             location += f":{line_start}"
@@ -777,7 +832,7 @@ def _build_finding_markdown_report(
         sections.append("")
 
     code_snippet = finding_data.get("code_snippet")
-    if code_snippet:
+    if export_options.include_code_snippets and code_snippet:
         lang = infer_code_fence_language(str(file_path or ""))
         sections.append("## 漏洞代码")
         sections.append("")
@@ -794,7 +849,7 @@ def _build_finding_markdown_report(
         sections.append("")
 
     suggestion = finding_data.get("suggestion")
-    if suggestion:
+    if export_options.include_remediation and suggestion:
         sections.append("## 修复建议")
         sections.append("")
         sections.append(str(suggestion))
@@ -835,6 +890,7 @@ def _build_finding_markdown_report(
 def _build_finding_payload_from_row(
     finding_row: AgentFinding,
     report_descriptions: Dict[str, Dict[str, Optional[str]]],
+    export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
 ) -> Dict[str, Any]:
     finding_id = str(getattr(finding_row, "id", "") or "")
     verification_payload = (
@@ -872,15 +928,39 @@ def _build_finding_payload_from_row(
         "authenticity": authenticity,
         "reachability": getattr(finding_row, "reachability", None) or "unknown",
         "confidence": confidence,
-        "file_path": getattr(finding_row, "file_path", None),
-        "line_start": getattr(finding_row, "line_start", None),
-        "line_end": getattr(finding_row, "line_end", None),
+        "file_path": (
+            getattr(finding_row, "file_path", None)
+            if export_options.include_metadata
+            else None
+        ),
+        "line_start": (
+            getattr(finding_row, "line_start", None)
+            if export_options.include_metadata
+            else None
+        ),
+        "line_end": (
+            getattr(finding_row, "line_end", None)
+            if export_options.include_metadata
+            else None
+        ),
         "description_markdown": description_markdown,
         "description": getattr(finding_row, "description", None),
-        "code_snippet": getattr(finding_row, "code_snippet", None),
+        "code_snippet": (
+            getattr(finding_row, "code_snippet", None)
+            if export_options.include_code_snippets
+            else None
+        ),
         "verification_evidence": evidence,
-        "suggestion": getattr(finding_row, "suggestion", None),
-        "fix_code": getattr(finding_row, "fix_code", None),
+        "suggestion": (
+            getattr(finding_row, "suggestion", None)
+            if export_options.include_remediation
+            else None
+        ),
+        "fix_code": (
+            getattr(finding_row, "fix_code", None)
+            if export_options.include_remediation
+            else None
+        ),
         "has_poc": bool(getattr(finding_row, "has_poc", False)),
         "poc_description": getattr(finding_row, "poc_description", None),
         "poc_steps": getattr(finding_row, "poc_steps", None),
@@ -1277,11 +1357,14 @@ def _build_task_export_markdown(
     findings: List[AgentFinding],
     report_descriptions: Dict[str, Dict[str, Optional[str]]],
     project_report_fallback: str,
+    export_options: ReportExportOptions,
 ) -> str:
     stored_project_report = _normalize_optional_text(getattr(task, "report", None))
     if not findings:
         # 当导出范围内没有可确认漏洞时，统一使用导出专用项目摘要，
         # 避免沿用包含低置信度条目的历史项目报告。
+        project_report_raw = project_report_fallback
+    elif not _uses_default_report_export_options(export_options):
         project_report_raw = project_report_fallback
     elif _should_use_project_report_fallback(stored_project_report, project_report_fallback):
         project_report_raw = project_report_fallback
@@ -1301,27 +1384,38 @@ def _build_task_export_markdown(
     lines: List[str] = []
     lines.append("# 安全审计导出报告")
     lines.append("")
-    lines.append("## 项目报告")
-    lines.append("")
-    lines.append(str(project_report).strip() if project_report else "_无项目报告内容_")
-    lines.append("")
+    if export_options.include_metadata:
+        lines.append("## 项目报告")
+        lines.append("")
+        lines.append(str(project_report).strip() if project_report else "_无项目报告内容_")
+        lines.append("")
 
     if not findings:
         lines.append("## 漏洞报告")
         lines.append("")
         lines.append("本次导出范围内无可确认漏洞。")
         lines.append("")
-        return "\n".join(lines)
+        content = "\n".join(lines)
+        if export_options.compact_mode:
+            return _compact_markdown(content)
+        return content
 
     for index, finding_row in enumerate(findings, start=1):
-        finding_report = _normalize_optional_text(getattr(finding_row, "report", None))
+        finding_report = None
+        if _uses_default_report_export_options(export_options):
+            finding_report = _normalize_optional_text(getattr(finding_row, "report", None))
         if not finding_report:
-            finding_payload = _build_finding_payload_from_row(finding_row, report_descriptions)
+            finding_payload = _build_finding_payload_from_row(
+                finding_row,
+                report_descriptions,
+                export_options=export_options,
+            )
             finding_report = _build_finding_markdown_report(
                 task=task,
                 project=project,
                 finding_id=str(getattr(finding_row, "id", "") or ""),
                 finding_data=finding_payload,
+                export_options=export_options,
             )
         finding_report = _normalize_embedded_markdown(
             finding_report,
@@ -1344,13 +1438,20 @@ def _build_task_export_markdown(
         lines.append(str(finding_report).strip() if finding_report else "_无漏洞报告内容_")
         lines.append("")
 
-    return "\n".join(lines)
+    content = "\n".join(lines)
+    if export_options.compact_mode:
+        return _compact_markdown(content)
+    return content
 
 
 @router.get("/{task_id}/report")
 async def generate_audit_report(
     task_id: str,
     format: str = Query("markdown", pattern="^(markdown|json|pdf)$"),
+    include_code_snippets: bool = Query(True),
+    include_remediation: bool = Query(True),
+    include_metadata: bool = Query(True),
+    compact_mode: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -1404,6 +1505,13 @@ async def generate_audit_report(
     if findings:
         for i, f in enumerate(findings[:3]):  # Log first 3
             logger.debug(f"[Report] Finding {i+1}: severity='{f.severity}', title='{f.title[:50] if f.title else 'N/A'}'")
+
+    export_options = ReportExportOptions(
+        include_code_snippets=_resolve_query_bool(include_code_snippets, True),
+        include_remediation=_resolve_query_bool(include_remediation, True),
+        include_metadata=_resolve_query_bool(include_metadata, True),
+        compact_mode=_resolve_query_bool(compact_mode, False),
+    )
 
     def _build_report_descriptions(
         finding_row: AgentFinding,
@@ -1498,15 +1606,7 @@ async def generate_audit_report(
     
     if format == "json":
         # Enhanced JSON report with full metadata
-        return {
-            "report_metadata": {
-                "task_id": task.id,
-                "project_id": task.project_id,
-                "project_name": project.name,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "task_status": task.status,
-                "duration_seconds": int((task.completed_at - task.started_at).total_seconds()) if task.completed_at and task.started_at else None,
-            },
+        payload: Dict[str, Any] = {
             "summary": {
                 "security_score": task.security_score,
                 "total_files_analyzed": task.analyzed_files,
@@ -1527,24 +1627,40 @@ async def generate_audit_report(
             "findings": [
                 {
                     "id": f.id,
-                    "finding_identity": getattr(f, "finding_identity", None),
+                    "finding_identity": (
+                        getattr(f, "finding_identity", None)
+                        if export_options.include_metadata
+                        else None
+                    ),
                     "title": f.title,
                     "severity": f.severity,
                     "vulnerability_type": f.vulnerability_type,
                     "description": f.description,
                     "description_markdown": report_descriptions.get(str(f.id), {}).get("description_markdown"),
-                    "file_path": f.file_path,
-                    "line_start": f.line_start,
-                    "line_end": f.line_end,
-                    "code_snippet": f.code_snippet,
+                    "file_path": (
+                        f.file_path if export_options.include_metadata else None
+                    ),
+                    "line_start": (
+                        f.line_start if export_options.include_metadata else None
+                    ),
+                    "line_end": (
+                        f.line_end if export_options.include_metadata else None
+                    ),
+                    "code_snippet": (
+                        f.code_snippet if export_options.include_code_snippets else None
+                    ),
                     "is_verified": f.is_verified,
                     "has_poc": f.has_poc,
                     "poc_code": f.poc_code,
                     "poc_description": f.poc_description,
                     "poc_steps": f.poc_steps,
                     "confidence": f.ai_confidence,
-                    "suggestion": f.suggestion,
-                    "fix_code": f.fix_code,
+                    "suggestion": (
+                        f.suggestion if export_options.include_remediation else None
+                    ),
+                    "fix_code": (
+                        f.fix_code if export_options.include_remediation else None
+                    ),
                     "verification_result": (
                         getattr(f, "verification_result", None)
                         if isinstance(getattr(f, "verification_result", None), dict)
@@ -1560,10 +1676,24 @@ async def generate_audit_report(
                         if isinstance(getattr(f, "verification_result", None), dict)
                         else None
                     ),
-                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                    "created_at": (
+                        f.created_at.isoformat()
+                        if export_options.include_metadata and f.created_at
+                        else None
+                    ),
                 } for f in findings
             ]
         }
+        if export_options.include_metadata:
+            payload["report_metadata"] = {
+                "task_id": task.id,
+                "project_id": task.project_id,
+                "project_name": project.name,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "task_status": task.status,
+                "duration_seconds": int((task.completed_at - task.started_at).total_seconds()) if task.completed_at and task.started_at else None,
+            }
+        return payload
 
     # Generate Enhanced Markdown Report
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1819,6 +1949,7 @@ async def generate_audit_report(
             project=project,
             findings=findings,
             report_descriptions=report_descriptions,
+            export_options=export_options,
         )
         or legacy_content
     )
@@ -1828,6 +1959,7 @@ async def generate_audit_report(
         findings=findings,
         report_descriptions=report_descriptions,
         project_report_fallback=project_report_fallback,
+        export_options=export_options,
     )
 
     if format == "pdf":

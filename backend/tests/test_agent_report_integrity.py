@@ -6,6 +6,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+if "docker" not in sys.modules:
+    docker_stub = types.ModuleType("docker")
+    docker_stub.errors = types.SimpleNamespace(
+        DockerException=Exception,
+        NotFound=Exception,
+    )
+    docker_stub.from_env = lambda: None
+    sys.modules["docker"] = docker_stub
+
 from app.api.v1.endpoints import agent_tasks_reporting as reporting_endpoint
 from app.api.v1.endpoints.agent_tasks import generate_audit_report
 
@@ -471,6 +480,79 @@ async def test_generate_report_json_shape_compatible():
     assert "findings" in payload
     assert payload["summary"]["total_findings"] == 1
     assert payload["report_metadata"]["project_name"] == "Demo"
+
+
+@pytest.mark.asyncio
+async def test_generate_report_markdown_respects_export_options():
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-1",
+        title="Configurable Finding",
+        description="漏洞描述正文",
+        code_snippet="dangerous_call(user_input)",
+        suggestion="请添加输入校验",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await generate_audit_report(
+        task_id="task-export-options",
+        format="markdown",
+        include_code_snippets=False,
+        include_remediation=False,
+        include_metadata=False,
+        compact_mode=True,
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "## 项目报告" not in body
+    assert "### 报告信息" not in body
+    assert "## 漏洞代码" not in body
+    assert "dangerous_call(user_input)" not in body
+    assert "## 修复建议" not in body
+    assert "请添加输入校验" not in body
+    assert "\n\n\n" not in body
+    assert "Configurable Finding" in body
+    assert "漏洞描述正文" in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_json_respects_export_options():
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-1",
+        title="JSON Configurable Finding",
+        code_snippet="dangerous_call(user_input)",
+        suggestion="请添加输入校验",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    payload = await generate_audit_report(
+        task_id="task-export-options-json",
+        format="json",
+        include_code_snippets=False,
+        include_remediation=False,
+        include_metadata=False,
+        compact_mode=False,
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert "report_metadata" not in payload
+    assert "project_report" not in payload
+    assert payload["summary"]["total_findings"] == 1
+    assert payload["findings"][0]["title"] == "JSON Configurable Finding"
+    assert payload["findings"][0]["code_snippet"] is None
+    assert payload["findings"][0]["suggestion"] is None
 
 
 @pytest.mark.asyncio
