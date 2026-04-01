@@ -10,7 +10,7 @@ import {
 	FileText,
 	Loader2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -544,23 +544,42 @@ export default function ProjectDetail() {
 		}
 	}, [project]);
 
-	const handleFetchProjectArchive = useCallback(async () => {
-		if (!project?.id) return;
+	const nexusIframeRef = useRef<HTMLIFrameElement>(null);
+	const iframeReadyRef = useRef(false);
+	const archiveSentRef = useRef(false);  // 新增
 
+	const sendArchiveToIframe = useCallback(async (projectId: string) => {
+		if (archiveSentRef.current) return;  // 已发过，跳过
+		archiveSentRef.current = true;       // 标记已发
 		try {
-			const archive = await api.downloadProjectArchive(project.id);
-
-			// TODO: 后续在这里实现压缩包下载、缓存或传递给后续处理逻辑。
-			console.log("Project archive fetched:", {
-				filename: archive.filename,
-				size: archive.blob.size,
-				type: archive.blob.type,
-			});
+			const archive = await api.downloadProjectArchive(projectId);
+			const arrayBuffer = await archive.blob.arrayBuffer();
+			nexusIframeRef.current?.contentWindow?.postMessage(
+				{ type: 'LOAD_PROJECT_ZIP', filename: archive.filename, buffer: arrayBuffer },
+				'*',
+				[arrayBuffer],
+			);
 		} catch (error) {
-			console.error("Failed to fetch project archive:", error);
-			toast.error("获取项目压缩包失败");
+			archiveSentRef.current = false;    // 失败时重置，允许重试
+			console.error('Failed to fetch project archive:', error);
+			toast.error('获取项目压缩包失败');
 		}
-	}, [project]);
+	}, []);
+
+	// iframe onLoad 时标记 ready，如果 project 已经有了就直接发
+	const handleIframeLoad = useCallback(() => {
+		iframeReadyRef.current = true;
+		if (project?.id) {
+			void sendArchiveToIframe(project.id);
+		}
+	}, [project, sendArchiveToIframe]);
+
+	// project 加载完成后，如果 iframe 已经 ready 就补发
+	useEffect(() => {
+		if (project?.id && iframeReadyRef.current) {
+			void sendArchiveToIframe(project.id);
+		}
+	}, [project?.id, sendArchiveToIframe]);
 
 	useEffect(() => {
 		if (
@@ -877,11 +896,12 @@ export default function ProjectDetail() {
 			</div>
 			<div className="relative z-10">
 				<iframe
-					// ref={iframeRef}
+					ref={nexusIframeRef}
 					src="http://localhost:5175"
 					title="Nexus-itemDetail"
 					className="w-full border-0 rounded-lg"
 					style={{ height: '600px' }}
+					onLoad={handleIframeLoad}
 				/>
 			</div>
 			<div className="relative z-10 space-y-4 mt-6">
