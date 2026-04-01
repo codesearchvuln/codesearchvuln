@@ -130,6 +130,8 @@ export interface AgentFinding {
   file_path: string | null;
   line_start: number | null;
   line_end: number | null;
+  resolved_file_path?: string | null;
+  resolved_line_start?: number | null;
   code_snippet: string | null;
   code_context: string | null;
   cwe_id?: string | null;

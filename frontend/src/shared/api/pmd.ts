@@ -24,6 +24,8 @@ export interface PmdFinding {
   file_path: string;
   begin_line?: number | null;
   end_line?: number | null;
+  resolved_file_path?: string | null;
+  resolved_line_start?: number | null;
   rule?: string | null;
   ruleset?: string | null;
   priority?: number | null;

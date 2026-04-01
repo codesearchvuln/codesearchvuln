@@ -110,6 +110,30 @@ test("resolveProjectCodeBrowserBackTarget prefers history and falls back to proj
 	);
 });
 
+test("resolveProjectCodeBrowserInitialTarget parses file and line from URL search", async () => {
+	const model = await importOrFail<any>(
+		"../src/pages/project-code-browser/model.ts",
+	);
+
+	assert.deepEqual(
+		model.resolveProjectCodeBrowserInitialTarget("?file=src%2Fmain.ts&line=27"),
+		{
+			filePath: "src/main.ts",
+			line: 27,
+			key: "src/main.ts:27",
+		},
+	);
+	assert.deepEqual(
+		model.resolveProjectCodeBrowserInitialTarget("?file=src%2Fmain.ts&line=0"),
+		{
+			filePath: "src/main.ts",
+			line: null,
+			key: "src/main.ts",
+		},
+	);
+	assert.equal(model.resolveProjectCodeBrowserInitialTarget("?line=10"), null);
+});
+
 test("buildProjectCodeBrowserFileSuccessState preserves requested/resolved paths for highlighted files", async () => {
 	const model = await importOrFail<any>(
 		"../src/pages/project-code-browser/model.ts",
@@ -307,6 +331,140 @@ test("resolveProjectCodeBrowserPreviewDecorationForSearchResult maps content hit
 				highlightEndLine: 2,
 			},
 		},
+	);
+});
+
+test("resolveProjectCodeBrowserPreviewDecorationForTarget clamps line into available range", async () => {
+	const model = await importOrFail<any>(
+		"../src/pages/project-code-browser/model.ts",
+	);
+
+	assert.deepEqual(
+		model.resolveProjectCodeBrowserPreviewDecorationForTarget({
+			filePath: "src/main.ts",
+			line: 999,
+			fileState: {
+				status: "ready",
+				displayLines: [
+					{ lineNumber: 10, content: "alpha", kind: "code" },
+					{ lineNumber: 11, content: "beta", kind: "code" },
+				],
+			},
+		}),
+		{
+			"src/main.ts": {
+				focusLine: 11,
+				highlightStartLine: 11,
+				highlightEndLine: 11,
+			},
+		},
+	);
+});
+
+test("parseProjectCodeBrowserNavigationTarget extracts file and line from URL search", async () => {
+	const model = await importOrFail<any>(
+		"../src/pages/project-code-browser/model.ts",
+	);
+
+	assert.deepEqual(
+		model.parseProjectCodeBrowserNavigationTarget("?file=src%2Fmain.ts&line=42"),
+		{
+			filePath: "src/main.ts",
+			line: 42,
+		},
+	);
+	assert.deepEqual(model.parseProjectCodeBrowserNavigationTarget("?line=0"), {
+		filePath: null,
+		line: null,
+	});
+});
+
+test("resolveProjectCodeBrowserNavigationFilePath matches stripped display paths and source paths", async () => {
+	const model = await importOrFail<any>(
+		"../src/pages/project-code-browser/model.ts",
+	);
+
+	const files = [
+		{ path: "src/main.ts", sourcePath: "demo/src/main.ts", size: 10 },
+		{ path: "README.md", sourcePath: "demo/README.md", size: 5 },
+	];
+
+	assert.equal(
+		model.resolveProjectCodeBrowserNavigationFilePath("demo/src/main.ts", files),
+		"demo/src/main.ts",
+	);
+	assert.equal(
+		model.resolveProjectCodeBrowserNavigationFilePath("src/main.ts", files),
+		"demo/src/main.ts",
+	);
+	assert.equal(
+		model.resolveProjectCodeBrowserNavigationFilePath("missing.ts", files),
+		null,
+	);
+});
+
+test("resolveProjectCodeBrowserNavigationFilePath matches normalized paths against raw archive-root file lists", async () => {
+	const model = await importOrFail<any>(
+		"../src/pages/project-code-browser/model.ts",
+	);
+
+	const files = [
+		{ path: "libplist-2.7.0/src/bytearray.c", size: 10 },
+		{ path: "libplist-2.7.0/README.md", size: 5 },
+	];
+
+	assert.equal(
+		model.resolveProjectCodeBrowserNavigationFilePath("src/bytearray.c", files),
+		"libplist-2.7.0/src/bytearray.c",
+	);
+});
+
+test("buildProjectCodeBrowserExpandedFoldersForSelection expands ancestor folders using display path", async () => {
+	const model = await importOrFail<any>(
+		"../src/pages/project-code-browser/model.ts",
+	);
+
+	const tree = model.buildProjectCodeBrowserTree([
+		{ path: "demo/src/pages/main.ts", size: 10 },
+		{ path: "demo/README.md", size: 2 },
+	]);
+
+	assert.deepEqual(
+		Array.from(
+			model.buildProjectCodeBrowserExpandedFoldersForSelection(
+				new Set<string>(["existing"]),
+				tree,
+				"demo/src/pages/main.ts",
+			),
+		).sort(),
+		["existing", "src", "src/pages"],
+	);
+});
+
+test("buildProjectCodeBrowserPreviewDecorationFromLine clamps oversized line numbers", async () => {
+	const model = await importOrFail<any>(
+		"../src/pages/project-code-browser/model.ts",
+	);
+
+	const readyState = await model.buildProjectCodeBrowserFileSuccessState("src/main.ts", {
+		file_path: "src/main.ts",
+		content: "alpha\nbeta\ngamma\n",
+		size: 16,
+		encoding: "utf-8",
+		is_text: true,
+	});
+
+	assert.deepEqual(
+		model.buildProjectCodeBrowserPreviewDecorationFromLine(99, readyState),
+		{
+			focusLine: 4,
+			highlightStartLine: 4,
+			highlightEndLine: 4,
+		},
+	);
+	assert.deepEqual(
+		model.buildProjectCodeBrowserPreviewDecorationFromLine(null, readyState),
+		{},
 	);
 });
 

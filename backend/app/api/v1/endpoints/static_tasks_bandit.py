@@ -22,7 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.bandit import BanditFinding, BanditRuleState, BanditScanTask
-from app.db.static_finding_paths import normalize_static_scan_file_path
+from app.db.static_finding_paths import (
+    normalize_static_scan_file_path,
+    resolve_static_finding_location,
+)
 from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
 from app.models.phpstan import PhpstanFinding, PhpstanScanTask
@@ -139,6 +142,8 @@ class BanditFindingResponse(BaseModel):
     issue_confidence: str
     file_path: str
     line_number: Optional[int]
+    resolved_file_path: Optional[str] = None
+    resolved_line_start: Optional[int] = None
     code_snippet: Optional[str]
     issue_text: Optional[str]
     more_info: Optional[str]
@@ -1168,7 +1173,8 @@ async def get_bandit_findings(
 ):
     """获取 Bandit 扫描发现列表。"""
     task_result = await db.execute(select(BanditScanTask).where(BanditScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     query = select(BanditFinding).where(BanditFinding.scan_task_id == task_id)
@@ -1195,7 +1201,8 @@ async def get_bandit_finding(
 ):
     """获取单条 Bandit 扫描发现详情。"""
     task_result = await db.execute(select(BanditScanTask).where(BanditScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     finding_result = await db.execute(
@@ -1206,7 +1213,19 @@ async def get_bandit_finding(
     finding = finding_result.scalar_one_or_none()
     if not finding:
         raise HTTPException(status_code=404, detail="Bandit 漏洞不存在")
-    return finding
+    project_root = await _get_project_root(task.project_id)
+    resolved_file_path, resolved_line_start = resolve_static_finding_location(
+        finding.file_path,
+        line_start=finding.line_number,
+        project_root=project_root,
+    )
+    return BanditFindingResponse.model_validate(
+        {
+            **finding.__dict__,
+            "resolved_file_path": resolved_file_path,
+            "resolved_line_start": resolved_line_start,
+        }
+    )
 
 
 @router.post("/bandit/findings/{finding_id}/status")

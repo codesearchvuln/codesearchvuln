@@ -29,6 +29,8 @@ export interface BanditFinding {
   issue_confidence: string;
   file_path: string;
   line_number?: number | null;
+  resolved_file_path?: string | null;
+  resolved_line_start?: number | null;
   code_snippet?: string | null;
   more_info?: string | null;
   status: string;

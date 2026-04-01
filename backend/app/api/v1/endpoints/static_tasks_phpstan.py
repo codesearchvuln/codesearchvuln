@@ -84,7 +84,10 @@ from app.api.v1.endpoints.static_tasks_shared import (
     settings,
 )
 from app.services.project_metrics import project_metrics_refresher
-from app.db.static_finding_paths import normalize_static_scan_file_path
+from app.db.static_finding_paths import (
+    normalize_static_scan_file_path,
+    resolve_static_finding_location,
+)
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 router = APIRouter()
@@ -124,6 +127,8 @@ class PhpstanFindingResponse(BaseModel):
     scan_task_id: str
     file_path: str
     line: Optional[int]
+    resolved_file_path: Optional[str] = None
+    resolved_line_start: Optional[int] = None
     message: str
     identifier: Optional[str]
     tip: Optional[str]
@@ -1278,7 +1283,8 @@ async def get_phpstan_findings(
 ):
     """获取 PHPStan 扫描发现列表。"""
     task_result = await db.execute(select(PhpstanScanTask).where(PhpstanScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     query = select(PhpstanFinding).where(PhpstanFinding.scan_task_id == task_id)
@@ -1301,7 +1307,8 @@ async def get_phpstan_finding(
 ):
     """获取单条 PHPStan 扫描发现详情。"""
     task_result = await db.execute(select(PhpstanScanTask).where(PhpstanScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     finding_result = await db.execute(
@@ -1312,7 +1319,19 @@ async def get_phpstan_finding(
     finding = finding_result.scalar_one_or_none()
     if not finding:
         raise HTTPException(status_code=404, detail="PHPStan 问题不存在")
-    return finding
+    project_root = await _get_project_root(task.project_id)
+    resolved_file_path, resolved_line_start = resolve_static_finding_location(
+        finding.file_path,
+        line_start=finding.line,
+        project_root=project_root,
+    )
+    return PhpstanFindingResponse.model_validate(
+        {
+            **finding.__dict__,
+            "resolved_file_path": resolved_file_path,
+            "resolved_line_start": resolved_line_start,
+        }
+    )
 
 
 @router.post("/phpstan/findings/{finding_id}/status")

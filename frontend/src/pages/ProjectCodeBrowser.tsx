@@ -28,18 +28,22 @@ import {
 	buildProjectCodeBrowserContentSearchResults,
 	buildProjectCodeBrowserFileSearchResults,
 	buildProjectCodeBrowserTree,
+	buildProjectCodeBrowserExpandedFoldersForSelection,
 	filterProjectCodeBrowserTreeByQuery,
 	filterProjectCodeBrowserFilesByPath,
 	mergeProjectCodeBrowserSearchResults,
 	normalizeProjectCodeBrowserSearchQuery,
+	parseProjectCodeBrowserNavigationTarget,
 	PROJECT_CODE_BROWSER_EMPTY_MESSAGE,
 	PROJECT_CODE_BROWSER_FAILED_MESSAGE,
 	PROJECT_CODE_BROWSER_SEARCH_EMPTY_MESSAGE,
 	PROJECT_CODE_BROWSER_SEARCH_LOADING_MESSAGE,
 	PROJECT_CODE_BROWSER_SEARCH_NO_RESULTS_MESSAGE,
+	buildProjectCodeBrowserPreviewDecorationFromLine,
 	buildProjectCodeBrowserFileSuccessState,
 	resolveProjectCodeBrowserBackTarget,
 	resolveProjectCodeBrowserFileFailure,
+	resolveProjectCodeBrowserNavigationFilePath,
 	resolveProjectCodeBrowserPreviewDecorationForSearchResult,
 	shouldProjectCodeBrowserSearchContent,
 	toggleProjectCodeBrowserFolder,
@@ -909,11 +913,16 @@ export default function ProjectCodeBrowser() {
 		Record<string, Promise<ProjectCodeBrowserSearchFileLoadState>>
 	>({});
 	const searchSessionRef = useRef(0);
+	const appliedNavigationTargetRef = useRef<string | null>(null);
 
 	const from =
 		typeof (location.state as { from?: unknown } | null)?.from === "string"
 			? ((location.state as { from?: string }).from ?? "")
 			: "";
+	const navigationTarget = useMemo(
+		() => parseProjectCodeBrowserNavigationTarget(location.search),
+		[location.search],
+	);
 
 	const updateFileState = useCallback(
 		(filePath: string, nextState: ProjectCodeBrowserFileViewState) => {
@@ -1074,6 +1083,7 @@ export default function ProjectCodeBrowser() {
 			setSearchStatus({ state: "idle", scanned: 0, total: 0 });
 			setSearchResults([]);
 			setPreviewDecorations({});
+			appliedNavigationTargetRef.current = null;
 
 			if (!id) {
 				setError("项目不存在或已被删除");
@@ -1279,6 +1289,42 @@ export default function ProjectCodeBrowser() {
 		},
 		[loadFileState],
 	);
+
+	useEffect(() => {
+		if (!project || project.source_type !== "zip") return;
+		if (!navigationTarget.filePath) return;
+		if (projectFiles.length === 0 || tree.length === 0) return;
+
+		const navigationKey = `${navigationTarget.filePath}:${navigationTarget.line ?? ""}`;
+		if (appliedNavigationTargetRef.current === navigationKey) return;
+
+		const resolvedFilePath = resolveProjectCodeBrowserNavigationFilePath(
+			navigationTarget.filePath,
+			projectFiles,
+		);
+		if (!resolvedFilePath) {
+			appliedNavigationTargetRef.current = navigationKey;
+			return;
+		}
+
+		appliedNavigationTargetRef.current = navigationKey;
+		setExpandedFolders((current) =>
+			buildProjectCodeBrowserExpandedFoldersForSelection(
+				current,
+				tree,
+				resolvedFilePath,
+			),
+		);
+
+		void loadFileState(resolvedFilePath, { selectFile: true }).then((nextState) => {
+			setPreviewDecorations({
+				[resolvedFilePath]: buildProjectCodeBrowserPreviewDecorationFromLine(
+					navigationTarget.line,
+					nextState,
+				),
+			});
+		});
+	}, [loadFileState, navigationTarget, project, projectFiles, tree]);
 
 	return (
 		<ProjectCodeBrowserContent

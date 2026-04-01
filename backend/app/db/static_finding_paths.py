@@ -67,6 +67,69 @@ def normalize_static_scan_file_path(
     return _normalize_relative_path(normalized)
 
 
+def normalize_resolved_line_start(line_value: object) -> Optional[int]:
+    if isinstance(line_value, bool) or line_value is None:
+        return None
+    if isinstance(line_value, (int, float)):
+        normalized = int(line_value)
+        return normalized if normalized > 0 else None
+    if isinstance(line_value, str):
+        stripped = line_value.strip()
+        if stripped.isdigit():
+            normalized = int(stripped)
+            return normalized if normalized > 0 else None
+    return None
+
+
+def resolve_static_finding_location(
+    file_path: Optional[str],
+    *,
+    line_start: object = None,
+    project_root: Optional[str] = None,
+    known_relative_paths: Optional[Iterable[str]] = None,
+) -> tuple[Optional[str], Optional[int]]:
+    normalized_line = normalize_resolved_line_start(line_start)
+    raw_file_path = str(file_path or "").strip()
+    if not raw_file_path:
+        return None, normalized_line
+
+    normalized_root = _normalize_path_text(project_root or "")
+    normalized_path = _normalize_path_text(raw_file_path)
+    if normalized_root and normalized_path:
+        try:
+            relative = os.path.relpath(normalized_path, normalized_root)
+            normalized_relative = _normalize_relative_path(relative)
+            if normalized_relative and not normalized_relative.startswith("../"):
+                return normalized_relative, normalized_line
+        except Exception:
+            pass
+
+    if known_relative_paths is not None:
+        resolved_from_archive = resolve_zip_member_path(raw_file_path, known_relative_paths)
+        if resolved_from_archive:
+            return resolved_from_archive, normalized_line
+
+    for candidate in build_zip_member_path_candidates(raw_file_path):
+        if candidate.startswith("tmp/"):
+            continue
+        if known_relative_paths is not None:
+            resolved_from_archive = resolve_zip_member_path(candidate, known_relative_paths)
+            if resolved_from_archive:
+                return resolved_from_archive, normalized_line
+        return candidate, normalized_line
+
+    normalized_file_path = normalize_static_scan_file_path(raw_file_path, project_root)
+    if not normalized_file_path:
+        return None, normalized_line
+
+    if known_relative_paths is not None:
+        resolved_from_archive = resolve_zip_member_path(normalized_file_path, known_relative_paths)
+        if resolved_from_archive:
+            return resolved_from_archive, normalized_line
+
+    return normalized_file_path, normalized_line
+
+
 def build_legacy_static_finding_path_candidates(file_path: str) -> list[str]:
     normalized = _normalize_path_text(file_path)
     if not normalized:

@@ -76,6 +76,10 @@ export type FindingDetailPageModel = {
   trackingItems: FindingDetailTrackingItem[];
   overviewItems: FindingDetailTrackingItem[];
   codeSections: FindingDetailCodeView[];
+  codeBrowserTarget: {
+    filePath: string | null;
+    line: number | null;
+  } | null;
 };
 
 export function isFindingDetailFullFilePathSupported(
@@ -166,6 +170,19 @@ function isFiniteLineNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function buildCodeBrowserTarget(params: {
+  filePath?: string | null;
+  line?: number | null;
+}): FindingDetailPageModel["codeBrowserTarget"] {
+  const rawFilePath = normalizeFindingDetailFullFilePath(params.filePath);
+  const line = isFiniteLineNumber(params.line) && params.line > 0 ? params.line : null;
+  if (!rawFilePath && line === null) return null;
+  return {
+    filePath: rawFilePath || null,
+    line,
+  };
+}
+
 function formatLocation(params: {
   filePath?: string | null;
   lineStart?: number | null;
@@ -182,6 +199,26 @@ function formatLocation(params: {
     return `${filePath}:${lineStart}`;
   }
   return filePath;
+}
+
+function resolvePreferredFilePath(
+  rawFilePath: string | null | undefined,
+  resolvedFilePath?: string | null,
+): string | null {
+  const preferred = String(resolvedFilePath || "").trim();
+  if (preferred) return preferred;
+  const fallback = String(rawFilePath || "").trim();
+  return fallback || null;
+}
+
+function resolvePreferredLineStart(
+  fallbackLineStart: number | null | undefined,
+  resolvedLineStart?: number | null,
+): number | null {
+  if (isFiniteLineNumber(resolvedLineStart)) {
+    return resolvedLineStart;
+  }
+  return isFiniteLineNumber(fallbackLineStart) ? fallbackLineStart : null;
 }
 
 function buildTrackingItems(params: {
@@ -572,6 +609,14 @@ export function buildOpengrepFindingCodeViews(
   finding: OpengrepFinding,
   context: OpengrepFindingContext | null,
 ): FindingDetailCodeView[] {
+  const resolvedFilePath = resolvePreferredFilePath(
+    finding.file_path,
+    finding.resolved_file_path,
+  );
+  const resolvedStartLine = resolvePreferredLineStart(
+    finding.start_line ?? null,
+    finding.resolved_line_start,
+  );
   if (context && Array.isArray(context.lines) && context.lines.length > 0) {
     const sortedLines = [...context.lines].sort((a, b) => a.line_number - b.line_number);
     const hitLines = sortedLines.filter((line) => line.is_hit).map((line) => line.line_number);
@@ -581,19 +626,19 @@ export function buildOpengrepFindingCodeViews(
       {
         id: `static:${finding.id}`,
         title: "命中代码",
-        filePath: context.file_path || finding.file_path || null,
+        filePath: context.file_path || resolvedFilePath || null,
         code: sortedLines.map((line) => line.content || "").join("\n"),
         lineStart,
         lineEnd,
         highlightStartLine:
-          hitLines[0] ?? context.start_line ?? finding.start_line ?? null,
+          hitLines[0] ?? context.start_line ?? resolvedStartLine ?? null,
         highlightEndLine:
           hitLines[hitLines.length - 1] ??
           context.end_line ??
           parseStaticEndLine(finding) ??
-          finding.start_line ??
+          resolvedStartLine ??
           null,
-        focusLine: hitLines[0] ?? finding.start_line ?? context.start_line ?? lineStart ?? null,
+        focusLine: hitLines[0] ?? resolvedStartLine ?? context.start_line ?? lineStart ?? null,
       },
     ];
   }
@@ -604,13 +649,13 @@ export function buildOpengrepFindingCodeViews(
     {
       id: `static:${finding.id}`,
       title: "命中代码",
-      filePath: finding.file_path || null,
+      filePath: resolvedFilePath || null,
       code: fallbackCode,
-      lineStart: finding.start_line ?? null,
+      lineStart: resolvedStartLine ?? null,
       lineEnd: parseStaticEndLine(finding),
-      highlightStartLine: finding.start_line ?? null,
+      highlightStartLine: resolvedStartLine ?? null,
       highlightEndLine: parseStaticEndLine(finding),
-      focusLine: finding.start_line ?? null,
+      focusLine: resolvedStartLine ?? null,
     },
   ];
 }
@@ -618,37 +663,53 @@ export function buildOpengrepFindingCodeViews(
 export function buildGitleaksFindingCodeViews(
   finding: GitleaksFinding,
 ): FindingDetailCodeView[] {
+  const resolvedFilePath = resolvePreferredFilePath(
+    finding.file_path,
+    finding.resolved_file_path,
+  );
+  const resolvedStartLine = resolvePreferredLineStart(
+    finding.start_line ?? null,
+    finding.resolved_line_start,
+  );
   const content = String(finding.match || finding.secret || "").trim();
   if (!content) return [];
   return [
     {
       id: `gitleaks:${finding.id}`,
       title: "命中内容",
-      filePath: finding.file_path || null,
+      filePath: resolvedFilePath || null,
       code: content,
-      lineStart: finding.start_line ?? null,
-      lineEnd: finding.end_line ?? finding.start_line ?? null,
-      highlightStartLine: finding.start_line ?? null,
-      highlightEndLine: finding.end_line ?? finding.start_line ?? null,
-      focusLine: finding.start_line ?? null,
+      lineStart: resolvedStartLine ?? null,
+      lineEnd: finding.end_line ?? resolvedStartLine ?? null,
+      highlightStartLine: resolvedStartLine ?? null,
+      highlightEndLine: finding.end_line ?? resolvedStartLine ?? null,
+      focusLine: resolvedStartLine ?? null,
     },
   ];
 }
 
 export function buildBanditFindingCodeViews(finding: BanditFinding): FindingDetailCodeView[] {
+  const resolvedFilePath = resolvePreferredFilePath(
+    finding.file_path,
+    finding.resolved_file_path,
+  );
+  const resolvedStartLine = resolvePreferredLineStart(
+    finding.line_number ?? null,
+    finding.resolved_line_start,
+  );
   const content = String(finding.code_snippet || "").trim();
   if (!content) return [];
   return [
     {
       id: `bandit:${finding.id}`,
       title: "风险代码",
-      filePath: finding.file_path || null,
+      filePath: resolvedFilePath || null,
       code: content,
-      lineStart: finding.line_number ?? null,
-      lineEnd: finding.line_number ?? null,
-      highlightStartLine: finding.line_number ?? null,
-      highlightEndLine: finding.line_number ?? null,
-      focusLine: finding.line_number ?? null,
+      lineStart: resolvedStartLine ?? null,
+      lineEnd: resolvedStartLine ?? null,
+      highlightStartLine: resolvedStartLine ?? null,
+      highlightEndLine: resolvedStartLine ?? null,
+      focusLine: resolvedStartLine ?? null,
     },
   ];
 }
@@ -672,6 +733,14 @@ export function buildYasaFindingCodeViews(
 }
 
 export function buildAgentFindingCodeViews(finding: AgentFinding): FindingDetailCodeView[] {
+  const resolvedFilePath = resolvePreferredFilePath(
+    finding.file_path,
+    finding.resolved_file_path,
+  );
+  const resolvedStartLine = resolvePreferredLineStart(
+    finding.line_start ?? null,
+    finding.resolved_line_start,
+  );
   const contextCode = String(finding.code_context || "").trim();
   const snippetCode = String(finding.code_snippet || "").trim();
   const code = contextCode || snippetCode;
@@ -679,7 +748,7 @@ export function buildAgentFindingCodeViews(finding: AgentFinding): FindingDetail
 
   const lineStart = isFiniteLineNumber(finding.context_start_line)
     ? finding.context_start_line
-    : finding.line_start;
+    : resolvedStartLine;
   const lineEnd = isFiniteLineNumber(finding.context_end_line)
     ? finding.context_end_line
     : finding.line_end;
@@ -688,13 +757,13 @@ export function buildAgentFindingCodeViews(finding: AgentFinding): FindingDetail
     {
       id: `agent:${finding.id}`,
       title: contextCode ? "命中代码" : "命中片段",
-      filePath: finding.file_path,
+      filePath: resolvedFilePath,
       code,
       lineStart: lineStart ?? null,
       lineEnd: lineEnd ?? lineStart ?? null,
-      highlightStartLine: finding.line_start ?? lineStart ?? null,
+      highlightStartLine: resolvedStartLine ?? lineStart ?? null,
       highlightEndLine: finding.line_end ?? lineEnd ?? lineStart ?? null,
-      focusLine: finding.line_start ?? lineStart ?? null,
+      focusLine: resolvedStartLine ?? lineStart ?? null,
     },
   ];
 }
@@ -707,6 +776,7 @@ function buildBaseModel(params: {
   trackingItems: FindingDetailTrackingItem[];
   overviewItems: FindingDetailTrackingItem[];
   codeSections: FindingDetailCodeView[];
+  codeBrowserTarget: FindingDetailPageModel["codeBrowserTarget"];
   projectId?: string | null;
   projectSourceType?: ProjectSourceType | null;
   projectName?: string | null;
@@ -725,6 +795,7 @@ function buildBaseModel(params: {
         projectName: params.projectName,
       }),
     ),
+    codeBrowserTarget: params.codeBrowserTarget,
   };
 }
 
@@ -741,8 +812,8 @@ export function buildAgentFindingDetailModel(params: {
   const severity = resolveSeverityDisplay(finding.severity);
   const confidence = resolveNumericConfidenceDisplay(resolveAgentConfidenceValue(finding));
   const location = formatLocation({
-    filePath: finding.file_path,
-    lineStart: finding.line_start,
+    filePath: resolvePreferredFilePath(finding.file_path, finding.resolved_file_path),
+    lineStart: resolvePreferredLineStart(finding.line_start, finding.resolved_line_start),
     lineEnd: finding.line_end,
   });
   const typeDisplay = resolveCweDisplay({
@@ -796,6 +867,10 @@ export function buildAgentFindingDetailModel(params: {
         trackingItems,
       }),
       codeSections,
+      codeBrowserTarget: buildCodeBrowserTarget({
+        filePath: finding.resolved_file_path ?? finding.file_path,
+        line: finding.resolved_line_start ?? finding.line_start,
+      }),
       projectId: params.projectId,
       projectSourceType: params.projectSourceType,
       projectName: params.projectName,
@@ -827,6 +902,10 @@ export function buildAgentFindingDetailModel(params: {
       trackingItems,
     }),
     codeSections,
+    codeBrowserTarget: buildCodeBrowserTarget({
+      filePath: finding.resolved_file_path ?? finding.file_path,
+      line: finding.resolved_line_start ?? finding.line_start,
+    }),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,
@@ -847,8 +926,8 @@ export function buildOpengrepFindingDetailModel(params: {
   const severity = resolveSeverityDisplay(finding.severity);
   const confidence = resolveTextConfidenceDisplay(finding.confidence);
   const location = formatLocation({
-    filePath: finding.file_path,
-    lineStart: finding.start_line,
+    filePath: resolvePreferredFilePath(finding.file_path, finding.resolved_file_path),
+    lineStart: resolvePreferredLineStart(finding.start_line ?? null, finding.resolved_line_start),
     lineEnd: parseStaticEndLine(finding),
   });
   const typeDisplay = resolveCweDisplay({
@@ -896,6 +975,10 @@ export function buildOpengrepFindingDetailModel(params: {
     codeSections: buildFindingDetailCodeSections(
       buildOpengrepFindingCodeViews(finding, params.context ?? null),
     ),
+    codeBrowserTarget: buildCodeBrowserTarget({
+      filePath: finding.resolved_file_path ?? finding.file_path,
+      line: finding.resolved_line_start ?? finding.start_line,
+    }),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,
@@ -913,8 +996,8 @@ export function buildGitleaksFindingDetailModel(params: {
 }): FindingDetailPageModel {
   const { finding } = params;
   const location = formatLocation({
-    filePath: finding.file_path,
-    lineStart: finding.start_line,
+    filePath: resolvePreferredFilePath(finding.file_path, finding.resolved_file_path),
+    lineStart: resolvePreferredLineStart(finding.start_line ?? null, finding.resolved_line_start),
     lineEnd: finding.end_line,
   });
   const summaryStats: FindingDetailSummaryStat[] = [
@@ -952,6 +1035,10 @@ export function buildGitleaksFindingDetailModel(params: {
       trackingItems,
     }),
     codeSections: buildFindingDetailCodeSections(buildGitleaksFindingCodeViews(finding)),
+    codeBrowserTarget: buildCodeBrowserTarget({
+      filePath: finding.resolved_file_path ?? finding.file_path,
+      line: finding.resolved_line_start ?? finding.start_line,
+    }),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,
@@ -971,9 +1058,9 @@ export function buildBanditFindingDetailModel(params: {
   const severity = resolveSeverityDisplay(finding.issue_severity);
   const confidence = resolveTextConfidenceDisplay(finding.issue_confidence);
   const location = formatLocation({
-    filePath: finding.file_path,
-    lineStart: finding.line_number,
-    lineEnd: finding.line_number,
+    filePath: resolvePreferredFilePath(finding.file_path, finding.resolved_file_path),
+    lineStart: resolvePreferredLineStart(finding.line_number ?? null, finding.resolved_line_start),
+    lineEnd: resolvePreferredLineStart(finding.line_number ?? null, finding.resolved_line_start),
   });
   const headlineValue = [
     String(finding.test_id || "").trim(),
@@ -1018,6 +1105,10 @@ export function buildBanditFindingDetailModel(params: {
       trackingItems,
     }),
     codeSections: buildFindingDetailCodeSections(buildBanditFindingCodeViews(finding)),
+    codeBrowserTarget: buildCodeBrowserTarget({
+      filePath: finding.resolved_file_path ?? finding.file_path,
+      line: finding.resolved_line_start ?? finding.line_number,
+    }),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,
@@ -1035,9 +1126,9 @@ export function buildPhpstanFindingDetailModel(params: {
 }): FindingDetailPageModel {
   const { finding } = params;
   const location = formatLocation({
-    filePath: finding.file_path,
-    lineStart: finding.line ?? null,
-    lineEnd: finding.line ?? null,
+    filePath: resolvePreferredFilePath(finding.file_path, finding.resolved_file_path),
+    lineStart: resolvePreferredLineStart(finding.line ?? null, finding.resolved_line_start),
+    lineEnd: resolvePreferredLineStart(finding.line ?? null, finding.resolved_line_start),
   });
   const summaryStats: FindingDetailSummaryStat[] = [
     { label: "漏洞危害", value: "低危", tone: "success" },
@@ -1080,6 +1171,10 @@ export function buildPhpstanFindingDetailModel(params: {
       trackingItems,
     }),
     codeSections: buildFindingDetailCodeSections(buildPhpstanFindingCodeViews(finding)),
+    codeBrowserTarget: buildCodeBrowserTarget({
+      filePath: finding.resolved_file_path ?? finding.file_path,
+      line: finding.resolved_line_start ?? finding.line,
+    }),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,
@@ -1098,8 +1193,8 @@ export function buildYasaFindingDetailModel(params: {
 }): FindingDetailPageModel {
   const { finding } = params;
   const location = formatLocation({
-    filePath: finding.file_path,
-    lineStart: finding.start_line ?? null,
+    filePath: resolvePreferredFilePath(finding.file_path, finding.resolved_file_path),
+    lineStart: resolvePreferredLineStart(finding.start_line ?? null, finding.resolved_line_start),
     lineEnd: finding.end_line ?? finding.start_line ?? null,
   });
   const normalizedLevel = String(finding.level || "warning").trim().toLowerCase();
@@ -1143,6 +1238,10 @@ export function buildYasaFindingDetailModel(params: {
       trackingItems,
     }),
     codeSections: buildFindingDetailCodeSections(buildYasaFindingCodeViews(finding)),
+    codeBrowserTarget: buildCodeBrowserTarget({
+      filePath: finding.resolved_file_path ?? finding.file_path,
+      line: finding.resolved_line_start ?? finding.start_line,
+    }),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,
@@ -1160,8 +1259,8 @@ export function buildPmdFindingDetailModel(params: {
 }): FindingDetailPageModel {
   const { finding } = params;
   const location = formatLocation({
-    filePath: finding.file_path,
-    lineStart: finding.begin_line ?? null,
+    filePath: resolvePreferredFilePath(finding.file_path, finding.resolved_file_path),
+    lineStart: resolvePreferredLineStart(finding.begin_line ?? null, finding.resolved_line_start),
     lineEnd: finding.end_line ?? finding.begin_line ?? null,
   });
   const priority = Number(finding.priority);
@@ -1216,6 +1315,10 @@ export function buildPmdFindingDetailModel(params: {
       trackingItems,
     }),
     codeSections: buildFindingDetailCodeSections(buildPmdFindingCodeViews(finding)),
+    codeBrowserTarget: buildCodeBrowserTarget({
+      filePath: finding.resolved_file_path ?? finding.file_path,
+      line: finding.resolved_line_start ?? finding.begin_line,
+    }),
     projectId: params.projectId,
     projectSourceType: params.projectSourceType,
     projectName: params.projectName,

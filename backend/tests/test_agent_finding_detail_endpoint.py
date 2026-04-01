@@ -151,6 +151,8 @@ async def test_get_agent_finding_returns_enriched_payload():
     assert result.id == "finding-1"
     assert result.task_id == task_id
     assert result.file_path == "app.py"
+    assert result.resolved_file_path == "app.py"
+    assert result.resolved_line_start == 10
     assert result.reachability_file == "app.py"
     assert result.display_title
     assert result.function_name == "dangerous"

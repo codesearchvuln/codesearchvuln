@@ -24,6 +24,8 @@ export interface PhpstanFinding {
   scan_task_id: string;
   file_path: string;
   line?: number | null;
+  resolved_file_path?: string | null;
+  resolved_line_start?: number | null;
   message: string;
   identifier?: string | null;
   tip?: string | null;

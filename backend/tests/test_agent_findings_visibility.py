@@ -121,6 +121,8 @@ async def test_list_agent_findings_hides_false_positive_by_default():
     assert len(only_effective) == 1
     assert only_effective[0].id == "finding-1"
     assert only_effective[0].file_path == "app.py"
+    assert only_effective[0].resolved_file_path == "app.py"
+    assert only_effective[0].resolved_line_start == 10
     assert only_effective[0].reachability_file == "app.py"
     assert "该漏洞位于app.py:10-11的dangerous函数中" in (only_effective[0].description or "")
     assert "程序在该路径上缺少必要的输入约束或边界校验处理" in (only_effective[0].description or "")

@@ -25,6 +25,7 @@ from app.models.bandit import BanditFinding, BanditScanTask
 from app.db.static_finding_paths import (
     build_zip_member_path_candidates,
     normalize_static_scan_file_path,
+    resolve_static_finding_location,
 )
 from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
@@ -152,6 +153,8 @@ class OpengrepFindingResponse(BaseModel):
     description: Optional[str]
     file_path: str
     start_line: Optional[int]
+    resolved_file_path: Optional[str] = None
+    resolved_line_start: Optional[int] = None
     code_snippet: Optional[str]
     severity: str
     status: str
@@ -1305,12 +1308,18 @@ def _serialize_finding_response(
     rule_confidence_map: Dict[str, Optional[str]],
     rule_cwe_map: Dict[str, Optional[List[str]]],
     rule_display_name_map: Dict[str, str],
+    project_root: Optional[str] = None,
 ) -> Dict[str, Any]:
     resolved_confidence, resolved_cwe, resolved_rule_name = _resolve_finding_enrichment(
         finding,
         rule_confidence_map=rule_confidence_map,
         rule_cwe_map=rule_cwe_map,
         rule_display_name_map=rule_display_name_map,
+    )
+    resolved_file_path, resolved_line_start = resolve_static_finding_location(
+        finding.file_path,
+        line_start=finding.start_line,
+        project_root=project_root,
     )
     return {
         "id": finding.id,
@@ -1319,6 +1328,8 @@ def _serialize_finding_response(
         "description": finding.description,
         "file_path": finding.file_path,
         "start_line": finding.start_line,
+        "resolved_file_path": resolved_file_path,
+        "resolved_line_start": resolved_line_start,
         "code_snippet": finding.code_snippet,
         "severity": finding.severity,
         "status": finding.status,
@@ -1739,8 +1750,10 @@ async def get_static_task_findings(
     """获取静态代码扫描任务的漏洞列表"""
     # 验证任务存在
     result = await db.execute(select(OpengrepScanTask).where(OpengrepScanTask.id == task_id))
-    if not result.scalar_one_or_none():
+    task = result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
+    project_root = await _get_project_root(task.project_id)
 
     confidence_filter = _normalize_confidence(confidence)
     if confidence is not None and confidence_filter is None:
@@ -1774,6 +1787,7 @@ async def get_static_task_findings(
             rule_confidence_map=rule_confidence_map,
             rule_cwe_map=rule_cwe_map,
             rule_display_name_map=rule_display_name_map,
+            project_root=project_root,
         )
 
         if confidence_filter and finding_dict.get("confidence") != confidence_filter:
@@ -1795,7 +1809,8 @@ async def get_static_task_finding(
 ):
     """获取静态代码扫描任务的单条漏洞详情。"""
     task_result = await db.execute(select(OpengrepScanTask).where(OpengrepScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     finding_result = await db.execute(
@@ -1814,11 +1829,14 @@ async def get_static_task_finding(
         rule_display_name_map,
     ) = await _build_finding_rule_lookup_maps(db, [finding])
 
+    project_root = await _get_project_root(task.project_id)
+
     return _serialize_finding_response(
         finding,
         rule_confidence_map=rule_confidence_map,
         rule_cwe_map=rule_cwe_map,
         rule_display_name_map=rule_display_name_map,
+        project_root=project_root,
     )
 
 

@@ -32,6 +32,8 @@ export interface YasaFinding {
   file_path: string;
   start_line?: number | null;
   end_line?: number | null;
+  resolved_file_path?: string | null;
+  resolved_line_start?: number | null;
   status: string;
 }
 

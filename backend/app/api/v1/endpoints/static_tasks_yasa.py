@@ -41,6 +41,10 @@ from app.api.v1.endpoints.static_tasks_shared import (
 from app.models.project import Project
 from app.models.user import User
 from app.models.yasa import YasaFinding, YasaRuleConfig, YasaScanTask
+from app.db.static_finding_paths import (
+    normalize_static_scan_file_path,
+    resolve_static_finding_location,
+)
 from app.services.project_metrics import project_metrics_refresher
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 from app.services.yasa_runtime import (
@@ -115,6 +119,8 @@ class YasaFindingResponse(BaseModel):
     file_path: str
     start_line: Optional[int]
     end_line: Optional[int]
+    resolved_file_path: Optional[str] = None
+    resolved_line_start: Optional[int] = None
     status: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -773,7 +779,13 @@ async def _execute_yasa_scan(
                             rule_name=finding_item.get("rule_name"),
                             level=str(finding_item.get("level") or "warning")[:32],
                             message=str(finding_item.get("message") or "")[:4000],
-                            file_path=str(finding_item.get("file_path") or "unknown")[:1200],
+                            file_path=(
+                                normalize_static_scan_file_path(
+                                    str(finding_item.get("file_path") or ""),
+                                    "/scan/project",
+                                )
+                                or str(finding_item.get("file_path") or "unknown")
+                            )[:1200],
                             start_line=finding_item.get("start_line"),
                             end_line=finding_item.get("end_line"),
                             status="open",
@@ -1403,7 +1415,8 @@ async def get_yasa_findings(
     current_user: User = Depends(deps.get_current_user),
 ):
     task_result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     query = select(YasaFinding).where(YasaFinding.scan_task_id == task_id)
@@ -1658,7 +1671,8 @@ async def get_yasa_finding(
     current_user: User = Depends(deps.get_current_user),
 ):
     task_result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     finding_result = await db.execute(
@@ -1669,7 +1683,19 @@ async def get_yasa_finding(
     finding = finding_result.scalar_one_or_none()
     if not finding:
         raise HTTPException(status_code=404, detail="漏洞不存在")
-    return finding
+    project_root = await _get_project_root(task.project_id)
+    resolved_file_path, resolved_line_start = resolve_static_finding_location(
+        finding.file_path,
+        line_start=finding.start_line,
+        project_root=project_root,
+    )
+    return YasaFindingResponse.model_validate(
+        {
+            **finding.__dict__,
+            "resolved_file_path": resolved_file_path,
+            "resolved_line_start": resolved_line_start,
+        }
+    )
 
 
 @router.post("/yasa/findings/{finding_id}/status")

@@ -36,6 +36,7 @@ from app.models.pmd import PmdRuleConfig
 from app.models.pmd_scan import PmdFinding, PmdScanTask
 from app.models.project import Project
 from app.models.user import User
+from app.db.static_finding_paths import resolve_static_finding_location
 from app.services.agent.tools.external_tools import (
     _build_pmd_runner_command,
     _normalize_pmd_violation_path,
@@ -135,6 +136,8 @@ class PmdFindingResponse(BaseModel):
     file_path: str
     begin_line: Optional[int]
     end_line: Optional[int]
+    resolved_file_path: Optional[str] = None
+    resolved_line_start: Optional[int] = None
     rule: Optional[str]
     ruleset: Optional[str]
     priority: Optional[int]
@@ -748,7 +751,8 @@ async def get_pmd_findings(
 ):
     _ = current_user
     task_result = await db.execute(select(PmdScanTask).where(PmdScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     query = select(PmdFinding).where(PmdFinding.scan_task_id == task_id)
@@ -768,7 +772,8 @@ async def get_pmd_finding(
 ):
     _ = current_user
     task_result = await db.execute(select(PmdScanTask).where(PmdScanTask.id == task_id))
-    if not task_result.scalar_one_or_none():
+    task = task_result.scalar_one_or_none()
+    if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     finding_result = await db.execute(
@@ -779,7 +784,19 @@ async def get_pmd_finding(
     finding = finding_result.scalar_one_or_none()
     if not finding:
         raise HTTPException(status_code=404, detail="PMD 问题不存在")
-    return finding
+    project_root = await _get_project_root(task.project_id)
+    resolved_file_path, resolved_line_start = resolve_static_finding_location(
+        finding.file_path,
+        line_start=finding.begin_line,
+        project_root=project_root,
+    )
+    return PmdFindingResponse.model_validate(
+        {
+            **finding.__dict__,
+            "resolved_file_path": resolved_file_path,
+            "resolved_line_start": resolved_line_start,
+        }
+    )
 
 
 @router.post("/pmd/findings/{finding_id}/status")

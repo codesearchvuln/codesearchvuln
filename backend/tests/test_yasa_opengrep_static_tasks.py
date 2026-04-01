@@ -1,11 +1,13 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.api.v1.endpoints import static_tasks_opengrep
 from app.api.v1.endpoints import static_tasks_yasa
+from app.api.v1.endpoints import static_tasks
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
 from app.models.yasa import YasaFinding, YasaScanTask
 
@@ -27,6 +29,47 @@ class _ScalarsResult:
 
     def all(self):
         return list(self._values)
+
+
+@pytest.mark.asyncio
+async def test_get_yasa_finding_returns_normalized_resolved_location(monkeypatch):
+    task = SimpleNamespace(id="task-1", project_id="project-1")
+    finding = SimpleNamespace(
+        id="finding-1",
+        scan_task_id="task-1",
+        rule_id="demo.rule",
+        rule_name="Demo Rule",
+        level="warning",
+        message="runner finding",
+        file_path="/workspace/demo/src/main.ts",
+        start_line=7,
+        end_line=7,
+        status="open",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneOrNoneResult(task),
+            _ScalarOneOrNoneResult(finding),
+        ]
+    )
+    monkeypatch.setattr(
+        static_tasks._yasa,
+        "_get_project_root",
+        AsyncMock(return_value="/workspace/demo"),
+    )
+
+    result = await static_tasks.get_yasa_finding(
+        task_id="task-1",
+        finding_id="finding-1",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert result.file_path == "/workspace/demo/src/main.ts"
+    assert result.start_line == 7
+    assert result.resolved_file_path == "src/main.ts"
+    assert result.resolved_line_start == 7
 
 
 class _FakeYasaSession:

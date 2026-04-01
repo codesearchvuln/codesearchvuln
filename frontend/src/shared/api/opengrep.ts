@@ -305,6 +305,8 @@ export interface OpengrepFinding {
     description?: string | null;
     file_path: string;
     start_line?: number | null;
+    resolved_file_path?: string | null;
+    resolved_line_start?: number | null;
     code_snippet?: string | null;
     severity: string;
     status: string;

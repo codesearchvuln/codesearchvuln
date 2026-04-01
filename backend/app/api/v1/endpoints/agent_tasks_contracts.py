@@ -184,6 +184,8 @@ class AgentFindingResponse(BaseModel):
     file_path: Optional[str]
     line_start: Optional[int]
     line_end: Optional[int]
+    resolved_file_path: Optional[str] = None
+    resolved_line_start: Optional[int] = None
     function_name: Optional[str] = None
     code_snippet: Optional[str]
     code_context: Optional[str] = None

@@ -94,7 +94,7 @@ async def test_get_static_task_finding_returns_enriched_finding_payload():
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
-            _ScalarOneOrNoneResult(SimpleNamespace(id="task-1")),
+            _ScalarOneOrNoneResult(SimpleNamespace(id="task-1", project_id="project-1")),
             _ScalarOneOrNoneResult(finding),
             _AllResult(
                 [
@@ -120,6 +120,8 @@ async def test_get_static_task_finding_returns_enriched_finding_payload():
     assert result["confidence"] == "HIGH"
     assert result["cwe"] == ["CWE-89"]
     assert result["rule_name"] == "python.security.sql-injection"
+    assert result["resolved_file_path"] == "src/app/db.py"
+    assert result["resolved_line_start"] == 23
 
 
 @pytest.mark.asyncio
@@ -252,7 +254,7 @@ async def test_get_gitleaks_finding_returns_finding_payload():
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
-            _ScalarOneOrNoneResult(SimpleNamespace(id="task-1")),
+            _ScalarOneOrNoneResult(SimpleNamespace(id="task-1", project_id="project-1")),
             _ScalarOneOrNoneResult(finding),
         ]
     )
@@ -268,3 +270,5 @@ async def test_get_gitleaks_finding_returns_finding_payload():
     assert result.scan_task_id == "task-1"
     assert result.rule_id == "generic-api-key"
     assert result.file_path == "src/config.ts"
+    assert result.resolved_file_path == "src/config.ts"
+    assert result.resolved_line_start == 8

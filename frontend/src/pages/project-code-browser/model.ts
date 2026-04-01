@@ -87,6 +87,11 @@ export interface ProjectCodeBrowserSearchStatus {
 	error?: string;
 }
 
+export interface ProjectCodeBrowserNavigationTarget {
+	filePath: string | null;
+	line: number | null;
+}
+
 type MutableTreeNode = ProjectCodeBrowserTreeNode & {
 	children?: MutableTreeNode[];
 };
@@ -101,6 +106,33 @@ function getProjectCodeBrowserDirectoryPath(filePath: string) {
 	const normalized = String(filePath || "").trim();
 	const index = normalized.lastIndexOf("/");
 	return index >= 0 ? normalized.slice(0, index) : "";
+}
+
+function normalizeProjectCodeBrowserPath(filePath: string): string {
+	return String(filePath || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+}
+
+function buildProjectCodeBrowserPathCandidates(filePath: string): string[] {
+	const normalized = normalizeProjectCodeBrowserPath(filePath);
+	if (!normalized) return [];
+
+	const candidates: string[] = [];
+	const seen = new Set<string>();
+	const append = (value: string) => {
+		const nextValue = normalizeProjectCodeBrowserPath(value);
+		if (!nextValue || seen.has(nextValue)) return;
+		seen.add(nextValue);
+		candidates.push(nextValue);
+	};
+
+	append(normalized);
+
+	const parts = normalized.split("/").filter(Boolean);
+	if (parts.length >= 2) {
+		append(parts.slice(1).join("/"));
+	}
+
+	return candidates;
 }
 
 function getProjectCodeBrowserSearchScore(value: string, query: string) {
@@ -505,6 +537,52 @@ export function resolveProjectCodeBrowserPreviewDecorationForSearchResult(
 	};
 }
 
+export function buildProjectCodeBrowserPreviewDecorationFromLine(
+	line: number | null,
+	fileState: ProjectCodeBrowserFileViewState,
+): ProjectCodeBrowserPreviewDecoration {
+	if (
+		!(
+			typeof line === "number" &&
+			Number.isFinite(line) &&
+			line > 0 &&
+			fileState.status === "ready"
+		)
+	) {
+		return {};
+	}
+
+	const maxLine = fileState.displayLines.reduce((maxValue, currentLine) => {
+		if (
+			typeof currentLine.lineNumber === "number" &&
+			Number.isFinite(currentLine.lineNumber)
+		) {
+			return Math.max(maxValue, currentLine.lineNumber);
+		}
+		return maxValue;
+	}, 0);
+
+	const focusLine = maxLine > 0 ? Math.min(Math.trunc(line), maxLine) : Math.trunc(line);
+	return {
+		focusLine,
+		highlightStartLine: focusLine,
+		highlightEndLine: focusLine,
+	};
+}
+
+export function resolveProjectCodeBrowserPreviewDecorationForTarget(params: {
+	filePath: string;
+	line: number | null;
+	fileState: ProjectCodeBrowserFileViewState;
+}): Record<string, ProjectCodeBrowserPreviewDecoration> {
+	return {
+		[params.filePath]: buildProjectCodeBrowserPreviewDecorationFromLine(
+			params.line,
+			params.fileState,
+		),
+	};
+}
+
 export function toggleProjectCodeBrowserFolder(
 	current: Set<string>,
 	folderPath: string,
@@ -530,6 +608,104 @@ export function resolveProjectCodeBrowserBackTarget(input: {
 			? input.from
 			: "";
 	return normalizedFrom || PROJECT_CODE_BROWSER_FALLBACK_PATH;
+}
+
+export function parseProjectCodeBrowserNavigationTarget(
+	search: string,
+): ProjectCodeBrowserNavigationTarget {
+	const searchParams = new URLSearchParams(String(search || ""));
+	const rawFilePath = String(searchParams.get("file") || "").trim();
+	const rawLine = Number(searchParams.get("line"));
+	return {
+		filePath: rawFilePath || null,
+		line:
+			Number.isFinite(rawLine) && rawLine > 0
+				? Math.trunc(rawLine)
+				: null,
+	};
+}
+
+export function resolveProjectCodeBrowserInitialTarget(search: string): {
+	filePath: string;
+	line: number | null;
+	key: string;
+} | null {
+	const target = parseProjectCodeBrowserNavigationTarget(search);
+	if (!target.filePath) return null;
+	return {
+		filePath: target.filePath,
+		line: target.line,
+		key:
+			target.line !== null
+				? `${target.filePath}:${target.line}`
+				: target.filePath,
+	};
+}
+
+export function resolveProjectCodeBrowserNavigationFilePath(
+	requestedFilePath: string,
+	files: ProjectCodeBrowserFileEntry[],
+): string | null {
+	const candidates = buildProjectCodeBrowserPathCandidates(requestedFilePath);
+	if (candidates.length === 0) return null;
+
+	for (const file of files) {
+		const sourcePath = normalizeProjectCodeBrowserPath(file.sourcePath ?? file.path);
+		const displayPath = normalizeProjectCodeBrowserPath(file.path);
+		const fileCandidates = new Set<string>([
+			...buildProjectCodeBrowserPathCandidates(sourcePath),
+			...buildProjectCodeBrowserPathCandidates(displayPath),
+		]);
+		if (candidates.some((candidate) => fileCandidates.has(candidate))) {
+			return file.sourcePath ?? file.path;
+		}
+	}
+
+	return null;
+}
+
+function findProjectCodeBrowserDisplayPathForSelection(
+	nodes: ProjectCodeBrowserTreeNode[],
+	selectedFilePath: string,
+): string | null {
+	for (const node of nodes) {
+		if (node.kind === "file") {
+			const sourcePath = normalizeProjectCodeBrowserPath(node.sourcePath ?? node.path);
+			if (sourcePath === normalizeProjectCodeBrowserPath(selectedFilePath)) {
+				return node.path;
+			}
+			continue;
+		}
+		if (Array.isArray(node.children) && node.children.length > 0) {
+			const nested = findProjectCodeBrowserDisplayPathForSelection(
+				node.children,
+				selectedFilePath,
+			);
+			if (nested) return nested;
+		}
+	}
+	return null;
+}
+
+export function buildProjectCodeBrowserExpandedFoldersForSelection(
+	current: Set<string>,
+	nodes: ProjectCodeBrowserTreeNode[],
+	selectedFilePath: string,
+): Set<string> {
+	const next = new Set(current);
+	const displayPath = findProjectCodeBrowserDisplayPathForSelection(
+		nodes,
+		selectedFilePath,
+	);
+	if (!displayPath) return next;
+
+	const segments = displayPath.split("/").filter(Boolean);
+	let currentPath = "";
+	for (let index = 0; index < segments.length - 1; index += 1) {
+		currentPath = currentPath ? `${currentPath}/${segments[index]}` : segments[index];
+		next.add(currentPath);
+	}
+	return next;
 }
 
 export async function buildProjectCodeBrowserFileSuccessState(

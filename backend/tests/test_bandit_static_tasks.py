@@ -116,6 +116,44 @@ async def test_update_bandit_finding_status_validation_and_success():
 
 
 @pytest.mark.asyncio
+async def test_get_bandit_finding_returns_resolved_location_payload():
+    task = SimpleNamespace(id="task-1", project_id="project-1")
+    finding = SimpleNamespace(
+        id="finding-1",
+        scan_task_id="task-1",
+        test_id="B602",
+        test_name="subprocess_popen_with_shell_equals_true",
+        issue_severity="HIGH",
+        issue_confidence="HIGH",
+        file_path="src/app/main.py",
+        line_number=42,
+        code_snippet="subprocess.Popen(cmd, shell=True)",
+        issue_text="shell=True risk",
+        more_info="https://bandit.readthedocs.io/",
+        status="open",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneOrNoneResult(task),
+            _ScalarOneOrNoneResult(finding),
+        ]
+    )
+
+    result = await static_tasks.get_bandit_finding(
+        task_id="task-1",
+        finding_id="finding-1",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert result.file_path == "src/app/main.py"
+    assert result.line_number == 42
+    assert result.resolved_file_path == "src/app/main.py"
+    assert result.resolved_line_start == 42
+
+
+@pytest.mark.asyncio
 async def test_execute_bandit_scan_transitions_to_completed(monkeypatch, tmp_path):
     task = BanditScanTask(
         id="bandit-task-1",

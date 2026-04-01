@@ -1764,6 +1764,8 @@ def _serialize_agent_findings(
                     "file_path": normalized_item_file_path,
                     "line_start": item.line_start,
                     "line_end": item.line_end,
+                    "resolved_file_path": normalized_item_file_path,
+                    "resolved_line_start": item.line_start,
                     "function_name": getattr(item, "function_name", None),
                     "code_snippet": item.code_snippet,
                     "code_context": item.code_context,

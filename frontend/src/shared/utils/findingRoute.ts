@@ -109,6 +109,32 @@ export function buildAgentFindingDetailNavigation(params: {
 	};
 }
 
+export function buildProjectCodeBrowserRoute(params: {
+	projectId: string;
+	filePath?: string | null;
+	line?: number | null;
+}): string {
+	const projectId = String(params.projectId || "").trim();
+	const basePath = `/projects/${normalizeSegment(projectId)}/code-browser`;
+	const searchParams = new URLSearchParams();
+
+	const filePath = String(params.filePath || "").trim();
+	if (filePath) {
+		searchParams.set("file", filePath);
+	}
+
+	if (
+		typeof params.line === "number" &&
+		Number.isFinite(params.line) &&
+		params.line > 0
+	) {
+		searchParams.set("line", String(Math.trunc(params.line)));
+	}
+
+	const query = searchParams.toString();
+	return query ? `${basePath}?${query}` : basePath;
+}
+
 export function isFindingDetailLocationState(
 	value: unknown,
 ): value is FindingDetailLocationState {

@@ -62,6 +62,7 @@ import {
 import { api as databaseApi } from "@/shared/api/database";
 import type { Project } from "@/shared/types";
 import {
+  buildProjectCodeBrowserRoute,
   isFindingDetailLocationState,
   normalizeReturnToPath,
   resolveFindingDetailBackTarget,
@@ -183,29 +184,6 @@ export default function FindingDetail() {
   const [yasaFinding, setYasaFinding] = useState<YasaFinding | null>(null);
   const [agentFinding, setAgentFinding] = useState<AgentFinding | null>(null);
   const [project, setProject] = useState<Project | null>(null);
-
-  const codeBrowserAction = useMemo<FindingDetailCodeBrowserAction>(() => {
-    const label = "代码浏览";
-    if (loading) {
-      return { label, disabledReason: "正在加载项目数据..." };
-    }
-    if (!project) {
-      return { label, disabledReason: "当前漏洞未关联项目" };
-    }
-    if (!project.id) {
-      return { label, disabledReason: "项目信息缺失，暂无法跳转" };
-    }
-    if (project.source_type !== "zip") {
-      return { label, disabledReason: "仅 ZIP 类型项目支持代码浏览" };
-    }
-    return {
-      label,
-      to: `/projects/${project.id}/code-browser`,
-      state: {
-        from: `${location.pathname}${location.search}`,
-      },
-    };
-  }, [loading, project, location.pathname, location.search]);
 
   useEffect(() => {
     let cancelled = false;
@@ -489,6 +467,39 @@ export default function FindingDetail() {
     staticTask?.name,
     taskId,
   ]);
+
+  const codeBrowserAction = useMemo<FindingDetailCodeBrowserAction>(() => {
+    const label = "代码浏览";
+    if (loading) {
+      return { label, disabledReason: "正在加载项目数据..." };
+    }
+    if (!project) {
+      return { label, disabledReason: "当前漏洞未关联项目" };
+    }
+    if (!project.id) {
+      return { label, disabledReason: "项目信息缺失，暂无法跳转" };
+    }
+    if (project.source_type !== "zip") {
+      return { label, disabledReason: "仅 ZIP 类型项目支持代码浏览" };
+    }
+
+    const targetFilePath = model?.codeBrowserTarget?.filePath ?? null;
+    if (!targetFilePath) {
+      return { label, disabledReason: "当前漏洞未提供可定位的文件路径" };
+    }
+
+    return {
+      label,
+      to: buildProjectCodeBrowserRoute({
+        projectId: project.id,
+        filePath: targetFilePath,
+        line: model?.codeBrowserTarget?.line ?? null,
+      }),
+      state: {
+        from: `${location.pathname}${location.search}`,
+      },
+    };
+  }, [loading, location.pathname, location.search, model, project]);
 
   const handleBack = () => {
     const target = resolveFindingDetailBackTarget({

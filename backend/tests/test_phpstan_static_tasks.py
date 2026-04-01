@@ -143,6 +143,45 @@ async def test_update_phpstan_finding_status_validation_and_success():
 
 
 @pytest.mark.asyncio
+async def test_get_phpstan_finding_returns_normalized_resolved_location(monkeypatch):
+    task = SimpleNamespace(id="task-1", project_id="project-1")
+    finding = SimpleNamespace(
+        id="finding-1",
+        scan_task_id="task-1",
+        file_path="/workspace/demo/src/Service.php",
+        line=21,
+        message="User input may reach eval().",
+        identifier="security.eval",
+        tip=None,
+        status="open",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneOrNoneResult(task),
+            _ScalarOneOrNoneResult(finding),
+        ]
+    )
+    monkeypatch.setattr(
+        static_tasks._phpstan,
+        "_get_project_root",
+        AsyncMock(return_value="/workspace/demo"),
+    )
+
+    result = await static_tasks.get_phpstan_finding(
+        task_id="task-1",
+        finding_id="finding-1",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert result.file_path == "/workspace/demo/src/Service.php"
+    assert result.line == 21
+    assert result.resolved_file_path == "src/Service.php"
+    assert result.resolved_line_start == 21
+
+
+@pytest.mark.asyncio
 async def test_execute_phpstan_scan_transitions_to_completed(monkeypatch, tmp_path):
     task = PhpstanScanTask(
         id="phpstan-task-1",
