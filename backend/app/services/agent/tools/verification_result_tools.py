@@ -709,12 +709,14 @@ class SaveVerificationResultTool(AgentTool):
 - poc_code: Fuzzing Harness / PoC 代码
 - suggestion: 修复建议
 - confidence: 置信度 [0.0, 1.0]
+- verification_evidence: 验证证据（必须包含验证方法、关键代码片段或执行输出、漏洞存在与否的理由）
+- reachability: 可达性（reachable|likely_reachable|unreachable）
 
 【由 Python 程序补全】
 - task_id, is_verified, code_snippet, report
 
 兼容字段（旧链路可继续传）：
-- verdict, reachability, verification_evidence, cwe_id, poc_plan, code_context, localization_status
+- verdict, reachability, cwe_id, poc_plan, code_context, localization_status
 
 返回值：
 - saved: 是否成功保存
