@@ -544,6 +544,24 @@ export default function ProjectDetail() {
 		}
 	}, [project]);
 
+	const handleFetchProjectArchive = useCallback(async () => {
+		if (!project?.id) return;
+
+		try {
+			const archive = await api.downloadProjectArchive(project.id);
+
+			// TODO: 后续在这里实现压缩包下载、缓存或传递给后续处理逻辑。
+			console.log("Project archive fetched:", {
+				filename: archive.filename,
+				size: archive.blob.size,
+				type: archive.blob.type,
+			});
+		} catch (error) {
+			console.error("Failed to fetch project archive:", error);
+			toast.error("获取项目压缩包失败");
+		}
+	}, [project]);
+
 	useEffect(() => {
 		if (
 			!shouldAutoGenerateProjectDescription({

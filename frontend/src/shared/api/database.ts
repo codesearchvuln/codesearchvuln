@@ -443,6 +443,25 @@ export const api = {
     await apiClient.delete(`/projects/${id}`);
   },
 
+  async downloadProjectArchive(
+    projectId: string,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const res = await apiClient.get(`/projects/${projectId}/archive`, {
+      responseType: "blob",
+    });
+
+    const disposition = String(res.headers["content-disposition"] || "");
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    const basicMatch = disposition.match(/filename="?([^";]+)"?/i);
+    const decodedUtf8 = utf8Match?.[1] ? decodeURIComponent(utf8Match[1]) : null;
+    const filename = decodedUtf8 || basicMatch?.[1] || `project-${projectId}.zip`;
+
+    return {
+      blob: res.data,
+      filename,
+    };
+  },
+
   async exportProjectBundle(params?: {
     projectIds?: string[];
     includeArchives?: boolean;
