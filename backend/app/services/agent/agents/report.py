@@ -648,12 +648,31 @@ class ReportAgent(BaseAgent):
             "",
             "## 风险总览",
             "",
-            f"- 严重程度分布：critical={severity_stats.get('critical', 0)}, high={severity_stats.get('high', 0)}, medium={severity_stats.get('medium', 0)}, low={severity_stats.get('low', 0)}, info={severity_stats.get('info', 0)}",
-            f"- 漏洞类型分布：{json.dumps(vuln_type_stats, ensure_ascii=False)}",
-            "",
-            "## Top 风险条目",
-            "",
+            "- 严重程度分布",
+            f"  - critical：{severity_stats.get('critical', 0)}",
+            f"  - high：{severity_stats.get('high', 0)}",
+            f"  - medium：{severity_stats.get('medium', 0)}",
+            f"  - low：{severity_stats.get('low', 0)}",
+            f"  - info：{severity_stats.get('info', 0)}",
+            "- 漏洞类型分布",
         ]
+
+        sorted_vuln_types = sorted(
+            vuln_type_stats.items(),
+            key=lambda item: (-int(item[1]), str(item[0])),
+        )
+        if sorted_vuln_types:
+            for vuln_type, count in sorted_vuln_types:
+                lines.append(f"  - {vuln_type}：{count}")
+        else:
+            lines.append("  - 暂无")
+        lines.extend(
+            [
+                "",
+                "## Top 风险条目",
+                "",
+            ]
+        )
 
         if not top_findings:
             lines.extend(

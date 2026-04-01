@@ -1,3 +1,5 @@
+import sys
+import types
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -50,7 +52,8 @@ def _make_finding(**overrides) -> SimpleNamespace:
         "code_context": None,
         "function_name": None,
         "references": None,
-        "is_verified": False,
+        "status": "verified",
+        "is_verified": True,
         "has_poc": False,
         "poc_code": None,
         "poc_description": None,
@@ -64,7 +67,7 @@ def _make_finding(**overrides) -> SimpleNamespace:
         "verification_result": None,
         "verification_evidence": None,
         "reachability": None,
-        "verdict": None,
+        "verdict": "confirmed",
         "created_at": datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc),
     }
     payload.update(overrides)
@@ -175,7 +178,7 @@ async def test_generate_report_falls_back_to_generated_finding_report_when_missi
     body = response.body.decode("utf-8")
     assert "## 漏洞报告 1" in body
     assert "漏洞详情报告：Fallback Finding" not in body
-    assert "### 报告信息" in body
+    assert "### 报告信息" not in body
     assert "Fallback Finding" in body
 
 
@@ -204,8 +207,27 @@ def test_markdown_to_html_supports_parenthesized_ordered_list():
     html = reporting_endpoint._markdown_to_html(markdown)
 
     assert "<ol>" in html
-    assert "<li>代码证据：MagickCore/delegate.c lines 408-422</li>" in html
-    assert "<li>危险调用：system(sanitize_command)</li>" in html
+    assert html.count("<li>") == 2
+    assert "代码证据：MagickCore/delegate.c lines 408-422" in html
+    assert "危险调用：system(sanitize_command)" in html
+
+
+def test_markdown_to_html_supports_nested_lists():
+    markdown = """- 严重程度分布
+  - critical：0
+  - high：12
+- 漏洞类型分布
+  - memory_corruption：10
+  - other：1
+"""
+
+    html = reporting_endpoint._markdown_to_html(markdown)
+
+    assert "<ul>" in html
+    assert "<li>\n严重程度分布\n<ul>" in html
+    assert "<li>\ncritical：0\n</li>" in html
+    assert "<li>\n漏洞类型分布\n<ul>" in html
+    assert "<li>\nmemory_corruption：10\n</li>" in html
 
 
 def test_build_finding_markdown_report_hides_fix_code_and_uses_mock_poc():
@@ -226,10 +248,93 @@ def test_build_finding_markdown_report_hides_fix_code_and_uses_mock_poc():
         },
     )
 
+    assert "## 报告信息" not in report
     assert "参考修复代码" not in report
     assert "概念验证 (PoC)" not in report
     assert "## Mock PoC" in report
     assert "### Mock PoC 代码" in report
+
+
+def test_build_finding_markdown_report_keeps_code_span_values_without_escape_backslashes():
+    task = _make_task(task_id="task-1")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    report = reporting_endpoint._build_finding_markdown_report(
+        task=task,
+        project=project,
+        finding_id="finding-1",
+        finding_data={
+            "display_title": "Memory Corruption Finding",
+            "severity": "high",
+            "vulnerability_type": "memory_corruption",
+            "has_poc": False,
+        },
+    )
+
+    assert "`memory_corruption`" in report
+    assert "memory\\_corruption" not in report
+
+
+def test_build_project_report_fallback_formats_risk_overview_as_nested_lists():
+    markdown = reporting_endpoint._build_project_report_fallback(
+        project=SimpleNamespace(name="Demo"),
+        findings=[
+            _make_finding(
+                id="finding-1",
+                severity="high",
+                vulnerability_type="command_injection",
+                title="delegate command injection",
+            )
+        ],
+        report_descriptions={},
+    )
+
+    assert "## 风险总览" in markdown
+    assert "- 严重程度分布\n  - critical：0\n  - high：1" in markdown
+    assert "- 漏洞类型分布\n  - command_injection：1" in markdown
+
+
+def test_strip_finding_export_noise_removes_empty_sections():
+    markdown = """## 报告信息
+
+| 属性 | 内容 |
+|---|---|
+| 漏洞 ID | abc |
+
+## 漏洞概览
+
+- 严重程度：HIGH
+
+## 6. 调用链
+
+- Source：`未明确 source`
+- Sink：`未明确 sink`
+- 路径：未明确 source -> 未明确 sink
+
+## 7. PoC
+
+```text
+暂无可执行 PoC，可基于 source->sink 路径补充 Fuzzing Harness。
+```
+
+## 修复建议
+
+尽快修复
+"""
+
+    cleaned = reporting_endpoint._strip_finding_export_noise(markdown)
+
+    assert "## 报告信息" not in cleaned
+    assert "## 6. 调用链" not in cleaned
+    assert "## 7. PoC" not in cleaned
+    assert "## 漏洞概览" in cleaned
+    assert "## 修复建议" in cleaned
+
+
+def test_markdown_to_html_unescapes_code_span_underscores():
+    html = reporting_endpoint._markdown_to_html("- **漏洞类型:** `memory\\_corruption`")
+
+    assert "<code>memory_corruption</code>" in html
+    assert "memory\\_corruption" not in html
 
 
 @pytest.mark.asyncio
@@ -240,7 +345,17 @@ async def test_generate_report_strips_redundant_embedded_titles():
     project = SimpleNamespace(id="project-1", name="Demo")
     finding = _make_finding(
         id="finding-1",
-        report="# 漏洞详情报告：XSS\n\n## 报告信息\n\n- 位置: src/app.py:1",
+        report=(
+            "# 漏洞详情报告：XSS\n\n"
+            "## 报告信息\n\n"
+            "| 字段 | 值 |\n|---|---|\n| 位置 | src/app.py:1 |\n\n"
+            "## 6. 调用链\n\n"
+            "- Source：`未明确 source`\n"
+            "- Sink：`未明确 sink`\n"
+            "- 路径：未明确 source -> 未明确 sink\n\n"
+            "## 7. PoC\n\n"
+            "```text\n暂无可执行 PoC，可基于 source->sink 路径补充 Fuzzing Harness。\n```"
+        ),
     )
 
     db = AsyncMock()
@@ -258,6 +373,9 @@ async def test_generate_report_strips_redundant_embedded_titles():
     assert body.count("# 安全审计导出报告") == 1
     assert "# 安全审计报告" not in body
     assert "漏洞详情报告：XSS" not in body
+    assert "| **漏洞 ID** |" not in body
+    assert "暂无可执行 PoC" not in body
+    assert "未明确 source" not in body
     assert "### 报告信息" in body
 
 
@@ -289,6 +407,48 @@ async def test_generate_report_supports_pdf_export(monkeypatch):
     assert response.headers["content-disposition"].endswith(".pdf")
 
 
+def test_render_markdown_to_pdf_bytes_uses_cjk_stylesheet(monkeypatch):
+    captured = {}
+
+    class _FakeHTML:
+        def __init__(self, string):
+            captured["html"] = string
+
+        def write_pdf(self, stylesheets=None, font_config=None):
+            captured["stylesheets"] = stylesheets
+            captured["font_config"] = font_config
+            return b"%PDF-1.7\nfake"
+
+    class _FakeCSS:
+        def __init__(self, string, font_config=None):
+            captured["css"] = string
+            captured["css_font_config"] = font_config
+
+    class _FakeFontConfiguration:
+        pass
+
+    fake_weasyprint = types.ModuleType("weasyprint")
+    fake_weasyprint.HTML = _FakeHTML
+    fake_weasyprint.CSS = _FakeCSS
+    fake_weasyprint_text = types.ModuleType("weasyprint.text")
+    fake_weasyprint_fonts = types.ModuleType("weasyprint.text.fonts")
+    fake_weasyprint_fonts.FontConfiguration = _FakeFontConfiguration
+
+    monkeypatch.setitem(sys.modules, "weasyprint", fake_weasyprint)
+    monkeypatch.setitem(sys.modules, "weasyprint.text", fake_weasyprint_text)
+    monkeypatch.setitem(sys.modules, "weasyprint.text.fonts", fake_weasyprint_fonts)
+
+    pdf_bytes = reporting_endpoint._render_markdown_to_pdf_bytes("# 标题")
+
+    assert pdf_bytes.startswith(b"%PDF-1.7")
+    assert "Noto Sans CJK SC" in captured["css"]
+    assert "padding-left: 16px" in captured["css"]
+    assert "li > p { margin: 0; }" in captured["css"]
+    assert captured["stylesheets"]
+    assert isinstance(captured["font_config"], _FakeFontConfiguration)
+    assert captured["css_font_config"] is captured["font_config"]
+
+
 @pytest.mark.asyncio
 async def test_generate_report_json_shape_compatible():
     task = _make_task(report="项目报告正文")
@@ -311,3 +471,312 @@ async def test_generate_report_json_shape_compatible():
     assert "findings" in payload
     assert payload["summary"]["total_findings"] == 1
     assert payload["report_metadata"]["project_name"] == "Demo"
+
+
+@pytest.mark.asyncio
+async def test_generate_report_excludes_uncertain_findings_from_exports():
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    confirmed = _make_finding(
+        id="finding-confirmed",
+        title="Confirmed Finding",
+        status="verified",
+        is_verified=True,
+        verdict="confirmed",
+        confidence=0.91,
+        ai_confidence=0.91,
+    )
+    uncertain = _make_finding(
+        id="finding-uncertain",
+        title="Uncertain Finding",
+        status="uncertain",
+        is_verified=True,
+        verdict="uncertain",
+        confidence=0.5,
+        ai_confidence=0.5,
+        description="should not be exported",
+    )
+
+    markdown_db = AsyncMock()
+    markdown_db.get = AsyncMock(side_effect=[task, project])
+    markdown_db.execute = AsyncMock(return_value=_ScalarListResult([uncertain, confirmed]))
+
+    markdown_response = await generate_audit_report(
+        task_id="task-1",
+        format="markdown",
+        db=markdown_db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = markdown_response.body.decode("utf-8")
+    assert "Confirmed Finding" in body
+    assert "Uncertain Finding" not in body
+    assert "should not be exported" not in body
+
+    json_db = AsyncMock()
+    json_db.get = AsyncMock(side_effect=[task, project])
+    json_db.execute = AsyncMock(return_value=_ScalarListResult([uncertain, confirmed]))
+
+    payload = await generate_audit_report(
+        task_id="task-1",
+        format="json",
+        db=json_db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert payload["summary"]["total_findings"] == 1
+    assert [item["id"] for item in payload["findings"]] == ["finding-confirmed"]
+
+
+@pytest.mark.asyncio
+async def test_generate_report_keeps_status_verified_findings_even_when_is_verified_is_false():
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    likely_verified = _make_finding(
+        id="finding-likely-verified",
+        title="Likely Verified Finding",
+        status="verified",
+        is_verified=False,
+        verdict="uncertain",
+        confidence=0.9,
+        ai_confidence=0.9,
+        description="should be exported because status is verified",
+    )
+    uncertain = _make_finding(
+        id="finding-uncertain",
+        title="Uncertain Finding",
+        status="uncertain",
+        is_verified=True,
+        verdict="uncertain",
+        confidence=0.5,
+        ai_confidence=0.5,
+        description="should not be exported",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([uncertain, likely_verified]))
+
+    response = await generate_audit_report(
+        task_id="task-status-verified",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "Likely Verified Finding" in body
+    assert "should be exported because status is verified" in body
+    assert "Uncertain Finding" not in body
+    assert "should not be exported" not in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_normalizes_flat_project_risk_overview_to_nested_lists():
+    task = _make_task(
+        report=(
+            "# 项目风险评估报告：Demo\n\n"
+            "## 风险总览\n\n"
+            "- 严重程度分布：critical=0, high=12, medium=1, low=0, info=0\n"
+            '- 漏洞类型分布：{"memory_corruption": 10, "other": 1, "command_injection": 2}\n'
+        )
+    )
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-confirmed",
+        title="Confirmed Finding",
+        status="verified",
+        is_verified=True,
+        verdict="confirmed",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await generate_audit_report(
+        task_id="task-risk-overview",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "- 严重程度分布\n  - critical：0\n  - high：12\n  - medium：1\n  - low：0\n  - info：0" in body
+    assert "- 漏洞类型分布\n  - memory_corruption：10\n  - other：1\n  - command_injection：2" in body
+    assert "严重程度分布：critical=0, high=12" not in body
+    assert '漏洞类型分布：{"memory_corruption": 10' not in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_normalizes_inline_code_escapes_in_stored_reports():
+    task = _make_task(
+        report=(
+            "# 项目风险评估报告：Demo\n\n"
+            "## 风险总览\n\n"
+            "- 漏洞类型：`memory\\_corruption`\n"
+        )
+    )
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-confirmed",
+        title="Confirmed Finding",
+        status="verified",
+        is_verified=True,
+        verdict="confirmed",
+        report="# 漏洞详情报告：X\n\n- **漏洞类型:** `memory\\_corruption`\n",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await generate_audit_report(
+        task_id="task-inline-code-unescape",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "`memory_corruption`" in body
+    assert "memory\\_corruption" not in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_uses_clean_empty_project_report_when_all_findings_filtered():
+    task = _make_task(
+        report=(
+            "# 项目风险评估报告：Demo\n\n"
+            "- uncertain：3\n"
+            "- false_positive：1\n"
+            "- uncertain 项建议安排人工复核\n"
+        )
+    )
+    project = SimpleNamespace(id="project-1", name="Demo")
+    uncertain = _make_finding(
+        id="finding-uncertain-only",
+        title="Uncertain Finding",
+        status="uncertain",
+        is_verified=True,
+        verdict="uncertain",
+        confidence=0.5,
+        ai_confidence=0.5,
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([uncertain]))
+
+    response = await generate_audit_report(
+        task_id="task-empty-export",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "本次导出范围内未发现可确认风险。" in body
+    assert "导出报告仅保留可确认的漏洞结论" in body
+    assert "本次导出范围内无可确认漏洞。" in body
+    assert "uncertain：" not in body
+    assert "false_positive" not in body
+    assert "安排人工复核" not in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_uses_reachability_target_function_for_generated_sections():
+    task = _make_task(task_id="task-func", report=None)
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-rt",
+        title="delegate command injection",
+        vulnerability_type="command_injection",
+        file_path="MagickCore/delegate.c",
+        line_start=408,
+        line_end=412,
+        function_name=None,
+        report=None,
+        verification_result={
+            "verdict": "confirmed",
+            "evidence": "用户可控参数进入危险调用点。",
+            "reachability_target": {
+                "file_path": "MagickCore/delegate.c",
+                "function": "ExternalDelegateCommand",
+                "start_line": 390,
+                "end_line": 450,
+            },
+            "function_trigger_flow": [
+                "MagickCore/delegate.c:ExternalDelegateCommand (390-450)",
+                "命中位置: MagickCore/delegate.c:408-412",
+            ],
+        },
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await generate_audit_report(
+        task_id="task-func",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "ExternalDelegateCommand" in body
+    assert "未知函数" not in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_rebuilds_degraded_project_summary_titles():
+    task = _make_task(
+        task_id="task-summary",
+        report=(
+            "# 项目风险评估报告：Demo\n\n"
+            "## Top 风险条目\n\n"
+            "1. MagickCore/delegate.c中未知函数命令注入漏洞 | high | MagickCore/delegate.c:408\n"
+        ),
+    )
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-summary",
+        title="MagickCore/delegate.c中未知函数命令注入漏洞",
+        vulnerability_type="command_injection",
+        file_path="MagickCore/delegate.c",
+        line_start=408,
+        line_end=412,
+        function_name=None,
+        report=None,
+        verification_result={
+            "verdict": "confirmed",
+            "evidence": "用户可控参数进入危险调用点。",
+            "reachability_target": {
+                "file_path": "MagickCore/delegate.c",
+                "function": "ExternalDelegateCommand",
+                "start_line": 390,
+                "end_line": 450,
+            },
+            "function_trigger_flow": [
+                "MagickCore/delegate.c:ExternalDelegateCommand (390-450)",
+                "命中位置: MagickCore/delegate.c:408-412",
+            ],
+        },
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await generate_audit_report(
+        task_id="task-summary",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "## Top 风险条目" in body
+    assert "ExternalDelegateCommand" in body
+    assert "MagickCore/delegate.c中未知函数命令注入漏洞" not in body

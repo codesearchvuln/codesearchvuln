@@ -192,6 +192,8 @@ def test_report_project_fallback_handles_non_numeric_confidence_text():
 
     assert "Top 风险条目" in markdown
     assert "MagickCore/delegate.c:439" in markdown
+    assert "- 严重程度分布\n  - critical：0\n  - high：1" in markdown
+    assert "- 漏洞类型分布\n  - command_injection：1" in markdown
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,9 @@
 DeepAudit 后端提供三种格式的漏洞审计报告导出：**PDF**、**Markdown**、**JSON**。报告内容由两个阶段产生：
 
 1. **ReportAgent 阶段**（扫描期间）：为每条已验证漏洞生成 Markdown 格式的详情报告，并对整个项目生成风险评估报告，分别存储于数据库字段 `AgentFinding.report` 和 `AgentTask.report`。
-2. **导出阶段**（按需请求）：用户调用导出 API，系统从数据库拉取数据，组装并转换为目标格式后以附件形式返回。
+2. **导出阶段**（按需请求）：用户调用导出 API，系统从数据库拉取数据，过滤掉 `status/verdict=uncertain`（典型为 `confidence=0.5`）与 `false_positive` 条目后，再组装并转换为目标格式返回。
+
+> 若过滤后无可确认漏洞，项目报告会退化为一份简短“无可确认风险”摘要，而不会继续输出包含 `uncertain` 统计或人工复核建议的兜底模板。
 
 ---
 
@@ -179,6 +181,7 @@ GET /api/v1/agent-tasks/{task_id}/findings/{finding_id}/report?format=markdown|j
 ║  generate_audit_report(task_id, format)                  ║
 ║      │                                                   ║
 ║      ├─[1] 从 DB 加载 AgentTask + AgentFinding[]        ║
+║      │       └─ 仅保留 confirmed/likely/legacy verified ║
 ║      │                                                   ║
 ║      ├─[2] _build_report_descriptions()                  ║
 ║      │       ├─ _resolve_vulnerability_profile()         ║
@@ -283,6 +286,8 @@ class AgentFinding(Base):
 | `_resolve_vulnerability_profile` | `agent_tasks_findings.py` | 获取漏洞类型配置文件 |
 | `ReportAgent.run` | `agents/report.py` | 生成漏洞详情及项目级 Markdown 报告 |
 | `CreateVulnerabilityReportTool._execute` | `tools/reporting_tool.py` | Agent 工具：记录单条漏洞 |
+
+> 导出过滤规则：`is_verified` 仅表示“完成 verification 阶段”，并不等价于“应导出”。报告导出只保留 `status=verified` 或 `verdict in {confirmed, likely}` 的条目；`uncertain` / `false_positive` 不进入最终报告。
 
 ---
 

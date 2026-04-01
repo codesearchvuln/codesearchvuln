@@ -10,7 +10,7 @@ ARG BACKEND_APT_SECURITY_FALLBACK=security.debian.org
 ARG BACKEND_PYPI_INDEX_PRIMARY=https://mirrors.aliyun.com/pypi/simple/
 ARG BACKEND_PYPI_INDEX_FALLBACK=https://pypi.org/simple
 ARG BACKEND_PYPI_INDEX_CANDIDATES=https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.bfsu.edu.cn/pypi/web/simple/,https://pypi.org/simple
-ARG BACKEND_INSTALL_CJK_FONTS=0
+ARG BACKEND_INSTALL_CJK_FONTS=1
 ARG DOCKER_CLI_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/docker:cli
 FROM ${UV_IMAGE} AS uvbin
 FROM ${DOCKER_CLI_IMAGE} AS docker-cli-src
