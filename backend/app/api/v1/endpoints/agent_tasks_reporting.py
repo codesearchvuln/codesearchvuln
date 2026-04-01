@@ -344,7 +344,7 @@ def _should_export_finding_in_report(finding_row: AgentFinding) -> bool:
         return False
     if normalized_status == FindingStatus.UNCERTAIN:
         return False
-    if normalized_status == FindingStatus.VERIFIED:
+    if normalized_status in {FindingStatus.VERIFIED, FindingStatus.LIKELY}:
         return True
     if normalized_status in {
         FindingStatus.NEW,

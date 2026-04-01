@@ -274,7 +274,7 @@ def _normalize_authenticity_verdict(
     if status_hint in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
         return "false_positive"
     if status_hint in {"uncertain", "unknown", "needs_review", "needs-review"}:
-        return "uncertain"
+        return "likely"
     if status_hint in {"verified", "true_positive", "exists", "vulnerable", "confirmed", "likely"}:
         return "likely"
 
@@ -287,7 +287,7 @@ def _normalize_authenticity_verdict(
         return "likely"
     if confidence <= 0.2:
         return "false_positive"
-    return "uncertain"
+    return "likely"
 
 
 def _normalize_verification_status(
@@ -299,17 +299,19 @@ def _normalize_verification_status(
         return FindingStatus.VERIFIED
     if text in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
         return FindingStatus.FALSE_POSITIVE
-    if text in {"uncertain", "unknown", "needs_review", "needs-review"}:
-        return FindingStatus.UNCERTAIN
-    if text in {"confirmed", "likely"}:
+    if text in {"confirmed"}:
         return FindingStatus.VERIFIED
+    if text in {"likely", "uncertain", "unknown", "needs_review", "needs-review"}:
+        return FindingStatus.LIKELY
 
     normalized_verdict = str(verdict or "").strip().lower()
-    if normalized_verdict in {"confirmed", "likely"}:
+    if normalized_verdict == "confirmed":
         return FindingStatus.VERIFIED
+    if normalized_verdict in {"likely", "uncertain"}:
+        return FindingStatus.LIKELY
     if normalized_verdict == "false_positive":
         return FindingStatus.FALSE_POSITIVE
-    return FindingStatus.UNCERTAIN
+    return FindingStatus.LIKELY
 
 
 def _normalize_reachability(
@@ -795,6 +797,26 @@ async def _save_findings(
             verification_result_payload_input = finding.get("verification_result")
             if not isinstance(verification_result_payload_input, dict):
                 verification_result_payload_input = {}
+            meaningful_verification_payload = {
+                key: value
+                for key, value in verification_result_payload_input.items()
+                if key not in {"finding_identity"}
+            }
+
+            has_verification_signal = bool(meaningful_verification_payload) or any(
+                finding.get(key) is not None
+                for key in (
+                    "verdict",
+                    "authenticity",
+                    "status",
+                    "reachability",
+                    "verification_evidence",
+                    "verification_details",
+                )
+            )
+            if not has_verification_signal:
+                mark_filtered("missing_verification_result", finding)
+                continue
 
             # 4) verification compatibility gate (allow synthesis from top-level)
             authenticity_raw = (
@@ -816,7 +838,7 @@ async def _save_findings(
                 elif status_hint in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
                     authenticity = "false_positive"
                 elif status_hint in {"uncertain", "unknown", "needs_review", "needs-review"}:
-                    authenticity = "uncertain"
+                    authenticity = "likely"
             if authenticity not in {"confirmed", "likely", "uncertain", "false_positive"}:
                 authenticity = _normalize_authenticity_verdict(finding, confidence)
             if authenticity not in {"confirmed", "likely", "uncertain", "false_positive"}:
@@ -832,8 +854,12 @@ async def _save_findings(
                 authenticity = "false_positive"
             elif normalized_status == FindingStatus.VERIFIED and authenticity == "false_positive":
                 authenticity = "likely"
-            elif normalized_status == FindingStatus.UNCERTAIN and authenticity in {"confirmed", "likely", "false_positive"}:
-                authenticity = "uncertain"
+            elif normalized_status == FindingStatus.VERIFIED and authenticity in {"likely", "uncertain"}:
+                authenticity = "confirmed"
+            elif normalized_status == FindingStatus.LIKELY and authenticity == "uncertain":
+                authenticity = "likely"
+            elif normalized_status == FindingStatus.LIKELY and authenticity == "false_positive":
+                authenticity = "likely"
 
             verification_stage_completed = bool(
                 finding.get("verification_stage_completed")
@@ -1153,11 +1179,18 @@ async def _save_findings(
             )
             if not isinstance(existing_reachability_target, dict):
                 existing_reachability_target = {}
+            verification_result_payload["reachability_target"] = {
+                **existing_reachability_target,
+                "file_path": stored_file_path,
+                "function": reachability_target_function,
+                "start_line": reachability_target_start_line,
+                "end_line": reachability_target_end_line,
+            }
             # status 映射：由 LLM/status 输入表达漏洞是否存在，程序只负责规范化
             if normalized_status == FindingStatus.FALSE_POSITIVE:
                 db_status = FindingStatus.FALSE_POSITIVE
-            elif normalized_status == FindingStatus.UNCERTAIN:
-                db_status = FindingStatus.UNCERTAIN
+            elif normalized_status == FindingStatus.LIKELY:
+                db_status = FindingStatus.LIKELY
             else:
                 db_status = FindingStatus.VERIFIED
             
@@ -1250,7 +1283,8 @@ async def _save_findings(
             if poc_code and not has_poc:
                 has_poc = True
 
-            allow_poc = authenticity == "confirmed" and str(severity_enum).lower() in {"critical", "high"}
+            # 保留 confirmed/likely 阶段生成的 harness / PoC 片段，便于后续详情展示与人工复核。
+            allow_poc = authenticity in {"confirmed", "likely"}
             if not allow_poc:
                 has_poc = False
                 poc_code = None
@@ -1511,7 +1545,11 @@ def _serialize_agent_findings(
                 if str(item.status) == FindingStatus.FALSE_POSITIVE
                 else (
                     str(getattr(item, "verdict", "") or "").strip().lower()
-                    or "uncertain"
+                    or (
+                        "confirmed"
+                        if str(item.status) == FindingStatus.VERIFIED
+                        else "likely"
+                    )
                 )
             )
         authenticity = str(authenticity).lower()
@@ -1726,10 +1764,18 @@ def _serialize_agent_findings(
                     "file_path": normalized_item_file_path,
                     "line_start": item.line_start,
                     "line_end": item.line_end,
+                    "function_name": getattr(item, "function_name", None),
                     "code_snippet": item.code_snippet,
                     "code_context": item.code_context,
+                    "source": getattr(item, "source", None),
+                    "sink": getattr(item, "sink", None),
+                    "dataflow_path": (
+                        item.dataflow_path if isinstance(getattr(item, "dataflow_path", None), list) else None
+                    ),
                     "cwe_id": cwe_id,
                     "cwe_name": profile["name"],
+                    "cvss_score": getattr(item, "cvss_score", None),
+                    "cvss_vector": getattr(item, "cvss_vector", None),
                     "context_start_line": context_start_line,
                     "context_end_line": context_end_line,
                     "is_verified": item.is_verified,

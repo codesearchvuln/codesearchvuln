@@ -172,6 +172,56 @@ async def test_save_verification_result_clone_for_worker_resets_buffer_and_dedup
     assert len(persisted_batches) == 2
 
 
+@pytest.mark.asyncio
+async def test_save_verification_result_normalizes_uncertain_status_to_likely_and_keeps_display_fields():
+    buffered: List[Dict[str, Any]] = []
+
+    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+        buffered.extend(findings)
+        return len(findings)
+
+    tool = SaveVerificationResultTool(task_id="task-rich-fields", save_callback=_save_callback)
+    result = await tool.execute(
+        file_path="src/demo.c",
+        line_start=108,
+        line_end=112,
+        function_name="ClonePolygonEdgesTLS",
+        title="src/demo.c中ClonePolygonEdgesTLS函数内存破坏漏洞",
+        vulnerability_type="memory_corruption",
+        severity="high",
+        status="uncertain",
+        verdict="uncertain",
+        confidence=0.74,
+        reachability="likely_reachable",
+        verification_evidence="fuzzing harness observed a repeatable invalid free pattern",
+        description="复制指针未清理，后续释放路径可能触发双重释放。",
+        source="用户可控图像绘制参数",
+        sink="DestroyEdgeInfo / free edge info",
+        dataflow_path=["ParseDrawCommand", "ClonePolygonEdgesTLS", "DestroyEdgeInfo"],
+        cvss_score=8.1,
+        cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H",
+        poc_code="int main(void) { return 0; }",
+        suggestion="复制指针后清空所有权并在释放前增加唯一释放保护。",
+        code_snippet="edge_info[i] = CloneEdgeInfo(source[i]);",
+        code_context="if (clone_failed) { DestroyEdgeInfo(edge_info[i]); }",
+        report="# Rich finding report",
+    )
+
+    assert result.success is True
+    assert buffered
+    saved = buffered[0]
+    assert saved["status"] == "likely"
+    assert saved["verification_result"]["status"] == "likely"
+    assert saved["source"] == "用户可控图像绘制参数"
+    assert saved["sink"] == "DestroyEdgeInfo / free edge info"
+    assert saved["dataflow_path"] == ["ParseDrawCommand", "ClonePolygonEdgesTLS", "DestroyEdgeInfo"]
+    assert saved["cvss_score"] == 8.1
+    assert saved["cvss_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H"
+    assert saved["poc_code"] == "int main(void) { return 0; }"
+    assert saved["suggestion"] == "复制指针后清空所有权并在释放前增加唯一释放保护。"
+    assert saved["report"] == "# Rich finding report"
+
+
 def test_report_project_fallback_handles_non_numeric_confidence_text():
     agent = ReportAgent(llm_service=_SequenceLLM([]), tools={}, event_emitter=None)
     markdown = agent._build_project_report_fallback(

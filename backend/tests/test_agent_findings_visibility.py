@@ -327,3 +327,57 @@ async def test_list_agent_findings_verified_only_keeps_status_verified_items():
     )
 
     assert [item.id for item in results] == ["finding-likely"]
+
+
+@pytest.mark.asyncio
+async def test_list_agent_findings_verified_only_includes_status_likely_items():
+    task_id = "task-status-likely"
+    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc)
+
+    likely_finding = SimpleNamespace(
+        id="finding-likely-status",
+        task_id=task_id,
+        vulnerability_type="memory_corruption",
+        severity="high",
+        title="likely status issue",
+        description="likely",
+        file_path="/tmp/audit-workspace/app.py",
+        line_start=44,
+        line_end=48,
+        code_snippet="free(ptr);",
+        code_context="line43\nline44\nline45",
+        is_verified=False,
+        ai_confidence=0.74,
+        status="likely",
+        suggestion="fix",
+        has_poc=False,
+        poc_code=None,
+        poc_description=None,
+        poc_steps=None,
+        verification_result={"authenticity": "likely", "status": "likely"},
+        created_at=now,
+    )
+
+    db = AsyncMock()
+
+    async def get_side_effect(model, _id):
+        if model is AgentTask:
+            return SimpleNamespace(id=task_id, project_id="project-1")
+        if model is Project:
+            return SimpleNamespace(id="project-1")
+        return None
+
+    db.get = AsyncMock(side_effect=get_side_effect)
+    db.execute = AsyncMock(return_value=_ScalarListResult([likely_finding]))
+
+    results = await list_agent_findings(
+        task_id=task_id,
+        verified_only=True,
+        include_false_positive=False,
+        skip=0,
+        limit=50,
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert [item.id for item in results] == ["finding-likely-status"]

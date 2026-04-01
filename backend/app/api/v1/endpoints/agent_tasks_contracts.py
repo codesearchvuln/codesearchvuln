@@ -184,10 +184,16 @@ class AgentFindingResponse(BaseModel):
     file_path: Optional[str]
     line_start: Optional[int]
     line_end: Optional[int]
+    function_name: Optional[str] = None
     code_snippet: Optional[str]
     code_context: Optional[str] = None
+    source: Optional[str] = None
+    sink: Optional[str] = None
+    dataflow_path: Optional[List[str]] = None
     cwe_id: Optional[str] = None
     cwe_name: Optional[str] = None
+    cvss_score: Optional[float] = None
+    cvss_vector: Optional[str] = None
     context_start_line: Optional[int] = None
     context_end_line: Optional[int] = None
     

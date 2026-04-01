@@ -1110,12 +1110,12 @@ class AuditWorkflowEngine:
     @staticmethod
     def _normalize_finding_status(value: Any) -> str:
         normalized = str(value or "").strip().lower()
-        if normalized in {"verified", "true_positive", "exists", "vulnerable", "confirmed", "likely"}:
+        if normalized in {"verified", "true_positive", "exists", "vulnerable", "confirmed"}:
             return "verified"
+        if normalized in {"likely", "uncertain", "unknown", "needs_review", "needs-review"}:
+            return "likely"
         if normalized in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
             return "false_positive"
-        if normalized in {"uncertain", "unknown", "needs_review", "needs-review"}:
-            return "uncertain"
         if normalized in {"blocked"}:
             return "blocked"
         return ""

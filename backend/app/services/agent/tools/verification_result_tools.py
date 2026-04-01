@@ -59,6 +59,35 @@ _UPDATE_FORBIDDEN_FIELDS = {
     "fingerprint",
 }
 
+_ALLOWED_VERDICTS = {"confirmed", "likely", "uncertain", "false_positive"}
+_ALLOWED_REACHABILITY = {"reachable", "likely_reachable", "unknown", "unreachable"}
+
+
+def _normalize_save_verdict(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in _ALLOWED_VERDICTS:
+        return text
+    return ""
+
+
+def _normalize_save_status(value: Any, verdict: Optional[str]) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"verified", "true_positive", "exists", "vulnerable", "confirmed"}:
+        return "verified"
+    if text in {"likely", "uncertain", "unknown", "needs_review", "needs-review"}:
+        return "likely"
+    if text in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
+        return "false_positive"
+
+    normalized_verdict = _normalize_save_verdict(verdict)
+    if normalized_verdict == "confirmed":
+        return "verified"
+    if normalized_verdict in {"likely", "uncertain"}:
+        return "likely"
+    if normalized_verdict == "false_positive":
+        return "false_positive"
+    return "likely"
+
 
 def build_finding_identity(task_id: str, finding: Dict[str, Any]) -> str:
     file_path = str(finding.get("file_path") or finding.get("file") or "").strip().lower()
@@ -339,6 +368,29 @@ class AgentFindingModel(BaseModel):
         default=None,
         description="详细描述",
     )
+
+    status: Optional[Literal["verified", "likely", "false_positive", "uncertain"]] = Field(
+        default=None,
+        description="展示状态。推荐使用 verified|likely|false_positive；传 uncertain 时会在保存时归一化为 likely。",
+    )
+
+    confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="顶层置信度，若提供会与 verification_result.confidence 对齐。",
+    )
+
+    source: Optional[str] = Field(default=None, description="Source 描述")
+    sink: Optional[str] = Field(default=None, description="Sink 描述")
+    dataflow_path: Optional[List[str]] = Field(default=None, description="数据流路径")
+    cvss_score: Optional[float] = Field(default=None, description="CVSS3.1 分数")
+    cvss_vector: Optional[str] = Field(default=None, description="CVSS3.1 向量")
+    poc_code: Optional[str] = Field(default=None, description="Fuzzing Harness / PoC 代码")
+    suggestion: Optional[str] = Field(default=None, description="修复建议")
+    code_snippet: Optional[str] = Field(default=None, description="漏洞代码片段")
+    code_context: Optional[str] = Field(default=None, description="漏洞上下文代码")
+    report: Optional[str] = Field(default=None, description="漏洞详情 Markdown 报告")
     
     @field_validator("line_end", mode="before")
     @classmethod
@@ -367,6 +419,14 @@ class AgentFindingModel(BaseModel):
         if not text:
             raise ValueError("function_name 不能为空字符串")
         return text
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status_if_present(cls, v):
+        if v is None:
+            return v
+        normalized = _normalize_save_status(v, None)
+        return normalized or None
 
     @field_validator("cwe_id", mode="before")
     @classmethod
@@ -399,6 +459,11 @@ class SaveVerificationResultsInput(BaseModel):
             "  - vulnerability_type: 漏洞类型\n"
             "  - severity: 严重程度（critical|high|medium|low|info）\n"
             "  - verification_result: 嵌套的 VerificationResultModel 对象\n"
+            "推荐额外提供以下展示字段：\n"
+            "  - status: 展示状态（verified|likely|false_positive；legacy uncertain 会归一化为 likely）\n"
+            "  - description/source/sink/dataflow_path: 用于漏洞详情展示\n"
+            "  - poc_code/suggestion: 用于 PoC 与修复建议展示\n"
+            "  - cvss_score/cvss_vector: 用于风险评分展示\n"
             "\n"
             "每条 finding 的 verification_result 必须包含：\n"
             "  - verdict: 真实性判定（confirmed|likely|uncertain|false_positive）\n"
@@ -406,7 +471,7 @@ class SaveVerificationResultsInput(BaseModel):
             "  - reachability: 可达性（reachable|likely_reachable|unknown|unreachable）\n"
             "  - verification_evidence: 验证证据（至少 10 字符）\n"
             "\n"
-            "false_positive 和 uncertain verdict 的 findings 会被保存但分别标记为不同的状态。"
+            "false_positive 会被标记为 false_positive；likely/uncertain 会统一落到 likely 状态，方便后续展示。"
         ),
     )
     
@@ -432,8 +497,7 @@ class SaveVerificationResultsInput(BaseModel):
 
         def _normalize_reachability(verdict: Optional[str], reachability: Any) -> str:
             text = str(reachability or "").strip().lower()
-            allowed = {"reachable", "likely_reachable", "unknown", "unreachable"}
-            if text in allowed:
+            if text in _ALLOWED_REACHABILITY:
                 return text
             if verdict == "confirmed":
                 return "reachable"
@@ -453,14 +517,14 @@ class SaveVerificationResultsInput(BaseModel):
             if not isinstance(vr, dict):
                 vr = {}
 
-            verdict = str(
+            verdict = _normalize_save_verdict(
                 vr.get("verdict")
                 or payload.get("verdict")
                 or payload.get("authenticity")
-                or "uncertain"
-            ).strip().lower()
-            if verdict not in {"confirmed", "likely", "uncertain", "false_positive"}:
-                verdict = "uncertain"
+                or "likely"
+            )
+            if not verdict:
+                verdict = "likely"
 
             confidence_raw = vr.get("confidence", payload.get("confidence", 0.5))
             try:
@@ -483,17 +547,26 @@ class SaveVerificationResultsInput(BaseModel):
                     f"confidence={confidence:.2f}; finding_index={idx}"
                 )
 
+            normalized_status = _normalize_save_status(
+                vr.get("status") or payload.get("status"),
+                verdict,
+            )
+            if normalized_status == "likely" and verdict == "uncertain":
+                verdict = "likely"
+
             payload["verification_result"] = {
                 **vr,
                 "verdict": verdict,
                 "confidence": confidence,
                 "reachability": reachability,
                 "verification_evidence": evidence_text,
+                "status": normalized_status,
             }
             payload["verdict"] = verdict
             payload["confidence"] = confidence
             payload["reachability"] = reachability
             payload["verification_evidence"] = evidence_text
+            payload["status"] = normalized_status
 
             function_name = str(payload.get("function_name") or "").strip()
             if not function_name:
@@ -573,7 +646,7 @@ class SaveVerificationResultTool(AgentTool):
     1. **强制验证参数** - 通过 Pydantic 模型确保 finding 的数据质量
     2. **前置校验** - 在工具执行前检查必填字段和类型
     3. **详细错误报告** - 告知 Agent 哪些字段缺失或错误，便于纠正
-    4. **支持多状态** - 持久化 confirmed、likely、uncertain、false_positive 等多种 verdict
+    4. **支持多状态** - 持久化 confirmed、likely、false_positive，并兼容 legacy uncertain 输入
 
     调用时机：每验证完一个漏洞，确定其 verdict / confidence / reachability /
     verification_evidence 后，立即调用此工具完成持久化，
@@ -632,7 +705,7 @@ class SaveVerificationResultTool(AgentTool):
 - source: Source 描述
 - sink: Sink 描述
 - dataflow_path: 数据流路径（数组）
-- status: 漏洞存在性状态（verified|uncertain|false_positive）
+- status: 漏洞展示状态（verified|likely|false_positive；legacy uncertain 会自动归一化为 likely）
 - poc_code: Fuzzing Harness / PoC 代码
 - suggestion: 修复建议
 - confidence: 置信度 [0.0, 1.0]
@@ -724,6 +797,7 @@ class SaveVerificationResultTool(AgentTool):
         function_trigger_flow: Optional[List[str]] = None,
         code_context: Optional[str] = None,
         localization_status: Optional[str] = None,
+        report: Optional[str] = None,
         **kwargs,
     ) -> ToolResult:
         """
@@ -736,7 +810,7 @@ class SaveVerificationResultTool(AgentTool):
             title: 漏洞标题
             vulnerability_type: 漏洞类型
             severity: 严重程度
-            status: 漏洞存在性状态（verified|uncertain|false_positive）
+            status: 漏洞展示状态（verified|likely|false_positive；legacy uncertain 会自动归一化为 likely）
             verdict: 真实性判定
             confidence: 置信度
             reachability: 可达性
@@ -807,6 +881,7 @@ class SaveVerificationResultTool(AgentTool):
                         "localization_status",
                         item.get("localization_status"),
                     ),
+                    report=item.get("report") or item.get("vulnerability_report"),
                 )
                 if result.success and isinstance(result.data, dict) and (
                     bool(result.data.get("saved")) or bool(result.data.get("already_saved"))
@@ -860,33 +935,20 @@ class SaveVerificationResultTool(AgentTool):
         if normalized_severity not in {"critical", "high", "medium", "low", "info"}:
             normalized_severity = "medium"
 
-        normalized_verdict = str(verdict or "").strip().lower()
-        if normalized_verdict not in {"confirmed", "likely", "uncertain", "false_positive"}:
-            normalized_verdict = "uncertain"
+        normalized_verdict = _normalize_save_verdict(verdict)
+        if not normalized_verdict:
+            normalized_verdict = "likely"
 
-        normalized_status_raw = str(status or "").strip().lower()
-        if normalized_status_raw in {"verified", "true_positive", "exists", "vulnerable"}:
-            normalized_status = "verified"
-        elif normalized_status_raw in {"false_positive", "not_vulnerable", "not_exists", "non_vuln"}:
-            normalized_status = "false_positive"
-        elif normalized_status_raw in {"uncertain", "unknown", "needs_review", "needs-review"}:
-            normalized_status = "uncertain"
-        elif normalized_status_raw in {"confirmed", "likely"}:
-            normalized_status = "verified"
-        else:
-            if normalized_verdict in {"confirmed", "likely"}:
-                normalized_status = "verified"
-            elif normalized_verdict == "false_positive":
-                normalized_status = "false_positive"
-            else:
-                normalized_status = "uncertain"
+        normalized_status = _normalize_save_status(status, normalized_verdict)
+        if normalized_status == "likely" and normalized_verdict == "uncertain":
+            normalized_verdict = "likely"
 
         # is_verified 由程序设置：仅表示“已经过 verification 阶段”
         # SaveVerificationResultTool 只在 verification 阶段调用，因此固定为 True。
         normalized_is_verified = True
 
         normalized_reachability = str(reachability or "").strip().lower()
-        if normalized_reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
+        if normalized_reachability not in _ALLOWED_REACHABILITY:
             if normalized_verdict == "confirmed":
                 normalized_reachability = "reachable"
             elif normalized_verdict == "likely":
@@ -942,6 +1004,7 @@ class SaveVerificationResultTool(AgentTool):
             "confidence": normalized_confidence,
             "cvss_score": normalized_cvss_score,
             "cvss_vector": cvss_vector,
+            "report": report,
             # code_snippet 同时放到顶层，供 _save_findings 作为初始候选值
             # （_save_findings 仍会用文件实际内容覆盖）
             "code_snippet": code_snippet,

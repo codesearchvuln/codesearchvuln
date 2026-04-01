@@ -326,8 +326,9 @@ class FindingStatus:
     """发现状态"""
     NEW = "new"               # 新发现
     ANALYZING = "analyzing"   # 分析中
-    VERIFIED = "verified"     # 已验证（confirmed 或 likely 状态）
-    UNCERTAIN = "uncertain"   # 不确定（信息不足，需进一步验证）
+    VERIFIED = "verified"     # 已确认（通常对应 confirmed）
+    LIKELY = "likely"         # 高概率存在漏洞（通常对应 likely）
+    UNCERTAIN = "uncertain"   # 兼容旧数据的历史状态，新链路不再主动写入
     FALSE_POSITIVE = "false_positive"  # 误报
     NEEDS_REVIEW = "needs_review"      # 需要人工审核
     FIXED = "fixed"           # 已修复

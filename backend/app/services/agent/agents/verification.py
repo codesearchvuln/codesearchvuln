@@ -302,13 +302,18 @@ for current_user, from_user, to_user, amount in payloads:
 
 ## 📊 真实性与置信度判定
 
-### status 等级（必填）
+### verdict 等级（必填）
 | 等级 | 标准 | Confidence |
 |------|------|-----------|
 | `confirmed` | 漏洞确认存在且可利用 | ≥ 0.8 |
 | `likely` | 高度可能存在漏洞，代码分析明确但无法动态验证 | ≥ 0.7 |
 | `uncertain` | 需要更多信息才能判断 | 0.3-0.7 |
 | `false_positive` | 确认是误报，有明确理由 | ≤ 0.3 |
+
+保存 `save_verification_result` 时，`status` 字段请使用：
+- `verified`：对应 `confirmed`
+- `likely`：对应 `likely`，以及 legacy 的 `uncertain`
+- `false_positive`：对应 `false_positive`
 
 ═══════════════════════════════════════════════════════════════
 
@@ -629,12 +634,12 @@ class VerificationAgent(BaseAgent):
     @staticmethod
     def _normalize_verification_status(value: Any) -> str:
         normalized = str(value or "").strip().lower()
-        if normalized in {"verified", "true_positive", "exists", "vulnerable", "confirmed", "likely"}:
+        if normalized in {"verified", "true_positive", "exists", "vulnerable", "confirmed"}:
             return "verified"
+        if normalized in {"likely", "uncertain", "unknown", "needs_review", "needs-review"}:
+            return "likely"
         if normalized in {"false_positive", "false-positive", "not_vulnerable", "not_exists", "non_vuln"}:
             return "false_positive"
-        if normalized in {"uncertain", "unknown", "needs_review", "needs-review"}:
-            return "uncertain"
         if normalized in {"blocked"}:
             return "blocked"
         return ""
@@ -643,17 +648,15 @@ class VerificationAgent(BaseAgent):
     def _status_to_verdict(status: str) -> str:
         normalized_status = str(status or "").strip().lower()
         if normalized_status == "verified":
+            return "confirmed"
+        if normalized_status == "likely":
             return "likely"
         if normalized_status == "false_positive":
             return "false_positive"
-        return "uncertain"
+        return "likely"
 
     def _normalize_verdict(self, finding: Dict[str, Any]) -> str:
-        """兼容性方法：优先按 status 判定，再回退到历史 verdict。"""
-        normalized_status = self._normalize_verification_status(finding.get("status"))
-        if normalized_status:
-            return self._status_to_verdict(normalized_status)
-
+        """兼容性方法：优先尊重显式 verdict，再回退按 status 推断。"""
         verdict = finding.get("verdict") or finding.get("authenticity")
         if isinstance(verdict, str):
             verdict = verdict.strip().lower()
@@ -661,6 +664,10 @@ class VerificationAgent(BaseAgent):
             verdict = None
         if verdict in {"confirmed", "likely", "uncertain", "false_positive"}:
             return verdict
+
+        normalized_status = self._normalize_verification_status(finding.get("status"))
+        if normalized_status:
+            return self._status_to_verdict(normalized_status)
 
         confidence_raw = finding.get("confidence")
         confidence = None
@@ -677,13 +684,13 @@ class VerificationAgent(BaseAgent):
                 return "likely"
             if confidence <= CONFIDENCE_THRESHOLD_FALSE_POSITIVE:
                 return "false_positive"
-            return "uncertain"
+            return "likely"
 
         logger.debug(
-            f"[Verification] status/verdict 均缺失，保守设为uncertain: "
+            f"[Verification] status/verdict 均缺失，保守设为likely: "
             f"{finding.get('file_path')}:{finding.get('line_start')}"
         )
-        return "uncertain"
+        return "likely"
 
     def _normalize_reachability_value(self, value: Any, verdict: str) -> str:
         """规范化可达性判定
@@ -762,6 +769,63 @@ class VerificationAgent(BaseAgent):
                 "出现与漏洞描述一致的异常响应/执行路径",
             ],
         }
+
+    def _build_minimal_probe_request(
+        self,
+        finding: Dict[str, Any],
+    ) -> Optional[tuple[str, Dict[str, Any]]]:
+        file_path, line_start, _line_end = self._normalize_file_location(finding)
+        normalized_file_path = str(file_path or finding.get("file_path") or "").strip()
+        function_name = str(finding.get("function_name") or "").strip()
+
+        if normalized_file_path and "get_code_window" in self.tools:
+            return (
+                "get_code_window",
+                {
+                    "file_path": normalized_file_path,
+                    "anchor_line": line_start,
+                    "before_lines": 8,
+                    "after_lines": 20,
+                },
+            )
+
+        if normalized_file_path and function_name and "get_symbol_body" in self.tools:
+            return (
+                "get_symbol_body",
+                {
+                    "file_path": normalized_file_path,
+                    "symbol_name": function_name,
+                },
+            )
+
+        if normalized_file_path and "read_file" in self.tools:
+            return ("read_file", {"file_path": normalized_file_path})
+
+        if normalized_file_path and function_name and "extract_function" in self.tools:
+            return (
+                "extract_function",
+                {
+                    "file_path": normalized_file_path,
+                    "function_name": function_name,
+                },
+            )
+
+        if "search_code" in self.tools:
+            keyword = (
+                function_name
+                or str(finding.get("title") or "").strip()
+                or str(finding.get("vulnerability_type") or "").strip()
+                or normalized_file_path
+            )
+            if keyword:
+                payload: Dict[str, Any] = {"keyword": keyword}
+                if normalized_file_path:
+                    parent_dir = str(Path(normalized_file_path).parent).strip()
+                    if parent_dir and parent_dir != ".":
+                        payload["directory"] = parent_dir
+                return ("search_code", payload)
+
+        return None
 
     def _normalize_mock_poc(self, poc_value: Any) -> Any:
         if poc_value is None:
@@ -1548,6 +1612,10 @@ class VerificationAgent(BaseAgent):
             if not suggestion:
                 suggestion = self._get_recommendation(str(merged.get("vulnerability_type") or ""))
 
+            fix_code = merged.get("fix_code")
+            if verdict in {"confirmed", "likely"} and not str(fix_code or "").strip():
+                fix_code = self._build_default_fix_code(merged)
+
             allow_poc = verdict in {"confirmed", "likely"}
             poc_value = merged.get("poc") if allow_poc else None
             if allow_poc and not poc_value:
@@ -1688,7 +1756,7 @@ class VerificationAgent(BaseAgent):
                     "verification_result": verification_result,
                     "function_trigger_flow": flow,
                     "suggestion": str(suggestion),
-                    "fix_code": None,
+                    "fix_code": fix_code,
                     "poc": poc_value,
                     # === 新字段：函数定位状态透明度 ===
                     "localization_status": localization_status,
@@ -2481,21 +2549,20 @@ class VerificationAgent(BaseAgent):
                         await self.emit_thinking("拒绝过早完成：必须先使用工具验证漏洞")
                         if findings_to_verify:
                             forced_target = findings_to_verify[0]
-                            forced_file = str(forced_target.get("file_path") or "").strip()
-                            forced_line = int(forced_target.get("line_start") or 1)
-                            if forced_file:
-                                forced_input = {
-                                    "file_path": forced_file,
-                                    "anchor_line": forced_line,
-                                    "before_lines": 8,
-                                    "after_lines": 20,
-                                }
-                                forced_observation = await self.execute_tool("get_code_window", forced_input)
+                            forced_probe = self._build_minimal_probe_request(forced_target)
+                            if forced_probe:
+                                forced_tool_name, forced_input = forced_probe
+                                forced_observation = await self.execute_tool(forced_tool_name, forced_input)
                                 self._conversation_history.append(
                                     {
                                         "role": "user",
                                         "content": f"Observation:\n{forced_observation}",
                                     }
+                                )
+                            else:
+                                logger.warning(
+                                    "[%s] 无可用的最小验证工具，无法自动注入强制探测步骤",
+                                    self.name,
                                 )
                         self._conversation_history.append(
                             {
@@ -2716,6 +2783,8 @@ class VerificationAgent(BaseAgent):
 
                 def _default_reachability(status_value: str) -> str:
                     if status_value == "verified":
+                        return "reachable"
+                    if status_value == "likely":
                         return "likely_reachable"
                     if status_value == "false_positive":
                         return "unreachable"
@@ -2739,13 +2808,19 @@ class VerificationAgent(BaseAgent):
                     verification_evidence = verification_result.get("verification_evidence") or finding.get("verification_evidence")
 
                     if not status_value:
-                        if finding.get("is_verified") is True:
+                        if verdict == "confirmed":
+                            status_value = "verified"
+                        elif verdict in {"likely", "uncertain"}:
+                            status_value = "likely"
+                        elif verdict == "false_positive":
+                            status_value = "false_positive"
+                        elif finding.get("is_verified") is True:
                             status_value = "verified"
                         else:
                             if confidence is None:
-                                status_value = "uncertain"
+                                status_value = "likely"
                                 logger.debug(
-                                    f"[{self.name}] confidence缺失，status设为uncertain: {finding.get('file_path', '?')}"
+                                    f"[{self.name}] confidence缺失，status设为likely: {finding.get('file_path', '?')}"
                                 )
                             else:
                                 try:
@@ -2753,12 +2828,12 @@ class VerificationAgent(BaseAgent):
                                 except Exception:
                                     confidence_val = CONFIDENCE_DEFAULT_FALLBACK
 
-                                if confidence_val >= CONFIDENCE_THRESHOLD_LIKELY:
-                                    status_value = "verified"
+                                if confidence_val >= CONFIDENCE_THRESHOLD_FALSE_POSITIVE and confidence_val <= 1.0:
+                                    status_value = "likely"
                                 elif confidence_val <= CONFIDENCE_THRESHOLD_FALSE_POSITIVE:
                                     status_value = "false_positive"
                                 else:
-                                    status_value = "uncertain"
+                                    status_value = "likely"
 
                         logger.warning(
                             f"[{self.name}] Missing/invalid status for {finding.get('file_path', '?')}, inferred as: {status_value}"
@@ -2766,6 +2841,10 @@ class VerificationAgent(BaseAgent):
 
                     if not verdict or verdict not in ["confirmed", "likely", "uncertain", "false_positive"]:
                         verdict = self._status_to_verdict(status_value)
+                    elif status_value == "likely" and verdict == "uncertain":
+                        verdict = "likely"
+                    elif status_value == "verified" and verdict == "likely":
+                        verdict = "confirmed"
 
                     confidence_value = _coerce_confidence(confidence)
                     if not reachability:
@@ -2791,8 +2870,12 @@ class VerificationAgent(BaseAgent):
                             "reachability": reachability,
                             "verification_evidence": verification_evidence,
                         },
-                        "is_verified": status_value == "verified",
-                        "verified_at": datetime.now(timezone.utc).isoformat() if status_value == "verified" else None,
+                        "is_verified": status_value in {"verified", "likely"},
+                        "verified_at": (
+                            datetime.now(timezone.utc).isoformat()
+                            if status_value in {"verified", "likely"}
+                            else None
+                        ),
                     }
 
                     if not verified.get("recommendation"):
@@ -2806,20 +2889,21 @@ class VerificationAgent(BaseAgent):
                     fallback_confidence = CONFIDENCE_DEFAULT_FALLBACK
                     fallback_verified = {
                         **finding,
-                        "status": "uncertain",
-                        "verdict": "uncertain",
+                        "status": "likely",
+                        "verdict": "likely",
                         "confidence": fallback_confidence,
-                        "reachability": "unknown",
+                        "reachability": "likely_reachable",
                         "verification_result": {
-                            "status": "uncertain",
+                            "status": "likely",
+                            "verdict": "likely",
                             "confidence": fallback_confidence,
-                            "reachability": "unknown",
+                            "reachability": "likely_reachable",
                             "verification_evidence": (
                                 f"verifier={self.name}; mode=fallback_branch_auto_generated; "
                                 f"reason=missing_llm_output; file={finding.get('file_path') or 'unknown'}"
                             ),
                         },
-                        "is_verified": False,
+                        "is_verified": True,
                     }
                     if task_id:
                         ensure_finding_identity(task_id, fallback_verified)
@@ -2839,6 +2923,9 @@ class VerificationAgent(BaseAgent):
                     or verified_findings[idx].get("verdict")
                 )
                 if finding_status == "verified":
+                    todo_item.status = "verified"
+                    todo_item.final_verdict = "confirmed"
+                elif finding_status == "likely":
                     todo_item.status = "verified"
                     todo_item.final_verdict = "likely"
                 elif finding_status == "false_positive":
@@ -2898,7 +2985,7 @@ class VerificationAgent(BaseAgent):
                             "verification_todo_id": todo_item.id,
                             "verification_fingerprint": todo_item.fingerprint,
                             "verification_status": "verified",
-                            "status": "verified",
+                            "status": meta_status or "verified",
                             "authenticity": meta_authenticity,
                             "verification_evidence": meta_evidence,
                             "description": meta_description,
@@ -2967,10 +3054,16 @@ class VerificationAgent(BaseAgent):
                 for item in verified_findings
             ]
             verified_count = len([s for s in status_values if s == "verified"])
-            likely_count = 0
+            likely_count = len([s for s in status_values if s == "likely"])
             uncertain_count = len([s for s in status_values if s == "uncertain"])
             false_positive_count = len([s for s in status_values if s == "false_positive"])
-            confirmed_count = verified_count
+            confirmed_count = len(
+                [
+                    item
+                    for item in verified_findings
+                    if str(item.get("verdict") or "").strip().lower() == "confirmed"
+                ]
+            )
             self._trace(
                 "run_completed",
                 findings=len(verified_findings),
@@ -2992,7 +3085,7 @@ class VerificationAgent(BaseAgent):
 
             await self.emit_event(
                 "info",
-                f"Verification Agent 完成: {verified_count} 已验证, {uncertain_count} 待复核, {false_positive_count} 误报",
+                f"Verification Agent 完成: {confirmed_count} 已确认, {likely_count} 高概率, {false_positive_count} 误报",
             )
 
             logger.info(f"[{self.name}] Returning {len(verified_findings)} verified findings")
@@ -3004,11 +3097,11 @@ class VerificationAgent(BaseAgent):
             if "save_verification_result" in self.tools and verified_findings:
                 logger.info(
                     "[%s] save_verification_result 工具可用，验证过程中应已逐个保存 %d 条结果 "
-                    "(verified=%d, uncertain=%d, false_positive=%d)",
+                    "(confirmed=%d, likely=%d, false_positive=%d)",
                     self.name,
                     len(verified_findings),
-                    verified_count,
-                    uncertain_count,
+                    confirmed_count,
+                    likely_count,
                     false_positive_count,
                 )
                 if not self._has_successful_save_verification_call():
@@ -3145,7 +3238,7 @@ class VerificationAgent(BaseAgent):
             verdict = ""
 
         if not normalized_status:
-            normalized_status = self._normalize_verification_status(verdict) or "uncertain"
+            normalized_status = self._normalize_verification_status(verdict) or "likely"
         if not verdict:
             verdict = self._status_to_verdict(normalized_status)
 
@@ -3162,6 +3255,8 @@ class VerificationAgent(BaseAgent):
         ).strip().lower()
         if reachability not in {"reachable", "likely_reachable", "unknown", "unreachable"}:
             if normalized_status == "verified":
+                reachability = "reachable"
+            elif normalized_status == "likely":
                 reachability = "likely_reachable"
             elif normalized_status == "false_positive":
                 reachability = "unreachable"
@@ -3198,6 +3293,9 @@ class VerificationAgent(BaseAgent):
             "poc_code": finding.get("poc_code"),
             "cvss_score": finding.get("cvss_score"),
             "cvss_vector": finding.get("cvss_vector"),
+            "code_snippet": finding.get("code_snippet"),
+            "code_context": finding.get("code_context"),
+            "report": finding.get("report") or finding.get("vulnerability_report"),
             "verdict": verdict,
             "confidence": confidence,
             "reachability": reachability,
@@ -3341,16 +3439,19 @@ class VerificationAgent(BaseAgent):
             )
 
         verified = [f for f in verified_findings if _finding_status(f) == "verified"]
+        likely = [f for f in verified_findings if _finding_status(f) == "likely"]
         uncertain = [f for f in verified_findings if _finding_status(f) == "uncertain"]
         false_positives = [f for f in verified_findings if _finding_status(f) == "false_positive"]
 
-        # 提取关键发现（已验证的高危漏洞）
+        actionable_findings = verified + likely
+
+        # 提取关键发现（已确认/高概率的高危漏洞）
         key_findings = []
-        for f in verified:
+        for f in actionable_findings:
             if f.get("severity") in ["critical", "high"]:
                 key_findings.append(f)
         if len(key_findings) < 10:
-            for f in verified:
+            for f in actionable_findings:
                 if f not in key_findings:
                     key_findings.append(f)
                     if len(key_findings) >= 10:
@@ -3358,7 +3459,7 @@ class VerificationAgent(BaseAgent):
 
         # 构建建议行动 - 修复建议
         suggested_actions = []
-        for f in verified[:10]:
+        for f in actionable_findings[:10]:
             suggestion = f.get("suggestion", "") or f.get("recommendation", "")
             suggested_actions.append({
                 "action": "fix_vulnerability",
@@ -3371,32 +3472,36 @@ class VerificationAgent(BaseAgent):
 
         # 构建洞察
         insights = [
-            f"验证完成: {confirmed_count}个已验证, {len(uncertain)}个待复核, {false_positive_count}个误报",
-            f"验证准确率: {confirmed_count / len(verified_findings) * 100:.1f}%" if verified_findings else "无数据",
+            f"验证完成: {confirmed_count}个已确认, {likely_count}个高概率, {false_positive_count}个误报",
+            (
+                f"有效命中率: {(confirmed_count + likely_count) / len(verified_findings) * 100:.1f}%"
+                if verified_findings
+                else "无数据"
+            ),
         ]
 
         # 统计各类型漏洞
         type_counts = {}
-        for f in verified:
+        for f in actionable_findings:
             vtype = f.get("vulnerability_type", "unknown")
             type_counts[vtype] = type_counts.get(vtype, 0) + 1
         if type_counts:
             top_types = sorted(type_counts.items(), key=lambda x: x[1], reverse=True)[:3]
             insights.append(f"主要漏洞类型: {', '.join([f'{t}({c})' for t, c in top_types])}")
 
-        # 需要关注的文件（有已验证漏洞的文件）
+        # 需要关注的文件（有已确认/高概率漏洞的文件）
         attention_points = []
         files_with_confirmed = {}
-        for f in verified:
+        for f in actionable_findings:
             fp = f.get("file_path", "")
             if fp:
                 files_with_confirmed[fp] = files_with_confirmed.get(fp, 0) + 1
         for fp, count in sorted(files_with_confirmed.items(), key=lambda x: x[1], reverse=True)[:10]:
-            attention_points.append(f"{fp} ({count}个已验证漏洞)")
+            attention_points.append(f"{fp} ({count}个已确认/高概率漏洞)")
 
         # 优先修复的区域
         priority_areas = []
-        for f in verified:
+        for f in actionable_findings:
             if f.get("severity") in ["critical", "high"]:
                 fp = f.get("file_path", "")
                 if fp and fp not in priority_areas:
@@ -3416,7 +3521,7 @@ class VerificationAgent(BaseAgent):
         }
 
         # 构建摘要
-        summary = f"验证完成: {confirmed_count}个已验证漏洞, {len(uncertain)}个待复核漏洞"
+        summary = f"验证完成: {confirmed_count}个已确认漏洞, {likely_count}个高概率漏洞"
         if confirmed_count > 0:
             high_count = len([f for f in verified if f.get("severity") in ["critical", "high"]])
             if high_count > 0:

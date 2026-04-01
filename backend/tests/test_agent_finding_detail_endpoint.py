@@ -52,10 +52,16 @@ def _build_agent_finding(
         line_end=11,
         code_snippet="dangerous()",
         code_context="line9\nline10\nline11",
+        function_name="dangerous",
+        source="request query param",
+        sink="dangerous render",
+        dataflow_path=["request.args", "dangerous", "render"],
         is_verified=(status == "verified"),
         ai_confidence=0.92,
         status=status,
         suggestion="fix",
+        cvss_score=8.6,
+        cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:L",
         has_poc=False,
         poc_code=None,
         poc_description=None,
@@ -147,6 +153,12 @@ async def test_get_agent_finding_returns_enriched_payload():
     assert result.file_path == "app.py"
     assert result.reachability_file == "app.py"
     assert result.display_title
+    assert result.function_name == "dangerous"
+    assert result.source == "request query param"
+    assert result.sink == "dangerous render"
+    assert result.dataflow_path == ["request.args", "dangerous", "render"]
+    assert result.cvss_score == 8.6
+    assert result.cvss_vector == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:L"
 
 
 @pytest.mark.asyncio

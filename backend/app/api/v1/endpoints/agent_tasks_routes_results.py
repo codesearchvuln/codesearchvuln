@@ -71,6 +71,7 @@ async def list_agent_findings(
             or_(
                 AgentFinding.is_verified == True,
                 AgentFinding.status == FindingStatus.VERIFIED,
+                AgentFinding.status == FindingStatus.LIKELY,
             )
         )
     
@@ -109,7 +110,7 @@ async def list_agent_findings(
             if (
                 getattr(item, "is_verified", False)
                 or str(getattr(item, "status", "") or "").strip().lower()
-                == FindingStatus.VERIFIED
+                in {FindingStatus.VERIFIED, FindingStatus.LIKELY}
             )
         ]
     return serialized_findings
@@ -417,6 +418,7 @@ def _is_live_verified_finding(item: Any) -> bool:
 
     return (
         status == FindingStatus.VERIFIED
+        or status == FindingStatus.LIKELY
         or authenticity in {"confirmed", "likely"}
         or verdict in {"confirmed", "likely"}
     )

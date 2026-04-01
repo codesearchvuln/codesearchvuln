@@ -782,26 +782,30 @@ async def _execute_agent_task(task_id: str):
                         verdict_for_state = str(finding_row.verdict or "").strip().lower()
                         if status_for_state in {"false_positive", "false-positive", "not_vulnerable", "not_exists"}:
                             finding_row.status = FindingStatus.FALSE_POSITIVE
-                        elif status_for_state in {"uncertain", "unknown", "needs_review", "needs-review"}:
-                            finding_row.status = FindingStatus.UNCERTAIN
-                        elif status_for_state in {"verified", "true_positive", "exists", "vulnerable", "confirmed", "likely"}:
+                        elif status_for_state in {"verified", "true_positive", "exists", "vulnerable", "confirmed"}:
                             finding_row.status = FindingStatus.VERIFIED
+                        elif status_for_state in {"likely", "uncertain", "unknown", "needs_review", "needs-review"}:
+                            finding_row.status = FindingStatus.LIKELY
                         elif verdict_for_state == "false_positive":
                             finding_row.status = FindingStatus.FALSE_POSITIVE
-                        elif verdict_for_state == "uncertain":
-                            finding_row.status = FindingStatus.UNCERTAIN
-                        elif verdict_for_state in {"confirmed", "likely"}:
+                        elif verdict_for_state == "confirmed":
                             finding_row.status = FindingStatus.VERIFIED
+                        elif verdict_for_state in {"likely", "uncertain"}:
+                            finding_row.status = FindingStatus.LIKELY
 
                         # status 与 verdict 冲突时，以 status 语义为准
                         if finding_row.status == FindingStatus.FALSE_POSITIVE and finding_row.verdict in {"confirmed", "likely"}:
                             finding_row.verdict = "false_positive"
                             verification_result["verdict"] = "false_positive"
                             verification_result["authenticity"] = "false_positive"
-                        elif finding_row.status == FindingStatus.UNCERTAIN and finding_row.verdict in {"confirmed", "likely", "false_positive"}:
-                            finding_row.verdict = "uncertain"
-                            verification_result["verdict"] = "uncertain"
-                            verification_result["authenticity"] = "uncertain"
+                        elif finding_row.status == FindingStatus.VERIFIED and finding_row.verdict in {"likely", "uncertain"}:
+                            finding_row.verdict = "confirmed"
+                            verification_result["verdict"] = "confirmed"
+                            verification_result["authenticity"] = "confirmed"
+                        elif finding_row.status == FindingStatus.LIKELY and str(finding_row.verdict or "").strip().lower() in {"false_positive", "uncertain"}:
+                            finding_row.verdict = "likely"
+                            verification_result["verdict"] = "likely"
+                            verification_result["authenticity"] = "likely"
                         elif finding_row.status == FindingStatus.VERIFIED and str(finding_row.verdict or "").strip().lower() == "false_positive":
                             finding_row.verdict = "likely"
                             verification_result["verdict"] = "likely"
@@ -813,6 +817,7 @@ async def _execute_agent_task(task_id: str):
                             or finding_row.is_verified
                             or finding_row.status in {
                                 FindingStatus.VERIFIED,
+                                FindingStatus.LIKELY,
                                 FindingStatus.UNCERTAIN,
                                 FindingStatus.FALSE_POSITIVE,
                             }
