@@ -280,6 +280,87 @@ async def test_phpstan_bootstrap_scanner_fallback_parses_plaintext_lines(monkeyp
     assert result.findings[0].line_start == 12
 
 
+@pytest.mark.asyncio
+async def test_phpstan_bootstrap_scanner_returns_empty_result_when_no_php_files_in_stdout(
+    monkeypatch,
+    tmp_path,
+):
+    _workspace_dir, _project_dir, output_dir, _logs_dir = _prepare_phpstan_workspace(
+        monkeypatch,
+        tmp_path,
+    )
+
+    async def _fake_run_scanner_container(_spec, **_kwargs):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir / "report.json").write_text(
+            "[ERROR] No files found to analyse.",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            success=False,
+            container_id="phpstan-bootstrap-no-files-stdout",
+            exit_code=1,
+            stdout_path=None,
+            stderr_path=None,
+            error="scanner container exited with code 1",
+        )
+
+    monkeypatch.setattr(
+        phpstan_bootstrap,
+        "run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
+    )
+
+    scanner = PhpstanBootstrapScanner()
+    result = await scanner.scan(str(tmp_path))
+    assert result.total_findings == 0
+    assert result.findings == []
+    assert result.metadata.get("no_files_to_analyse") is True
+    assert result.metadata.get("skip_reason") == "no_files_found_to_analyse"
+
+
+@pytest.mark.asyncio
+async def test_phpstan_bootstrap_scanner_returns_empty_result_when_no_php_files_in_stderr(
+    monkeypatch,
+    tmp_path,
+):
+    _workspace_dir, _project_dir, _output_dir, logs_dir = _prepare_phpstan_workspace(
+        monkeypatch,
+        tmp_path,
+    )
+
+    async def _fake_run_scanner_container(_spec, **_kwargs):
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        Path(logs_dir / "stdout.log").write_text("", encoding="utf-8")
+        Path(logs_dir / "stderr.log").write_text(
+            "[ERROR] No files found to analyze.",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            success=False,
+            container_id="phpstan-bootstrap-no-files-stderr",
+            exit_code=1,
+            stdout_path=str(logs_dir / "stdout.log"),
+            stderr_path=str(logs_dir / "stderr.log"),
+            error="scanner container exited with code 1",
+        )
+
+    monkeypatch.setattr(
+        phpstan_bootstrap,
+        "run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
+    )
+
+    scanner = PhpstanBootstrapScanner()
+    result = await scanner.scan(str(tmp_path))
+    assert result.total_findings == 0
+    assert result.findings == []
+    assert result.metadata.get("no_files_to_analyse") is True
+    assert result.metadata.get("skip_reason") == "no_files_found_to_analyse"
+
+
 def test_phpstan_bootstrap_parse_output_supports_bracket_noise_before_json():
     parsed = phpstan_bootstrap._parse_output(
         "[warning] bootstrap log\n{\"files\":{},\"totals\":{}}"

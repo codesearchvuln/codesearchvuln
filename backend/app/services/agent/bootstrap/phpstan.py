@@ -92,6 +92,19 @@ _PHPSTAN_SECURITY_FALLBACK_KEYWORDS = (
 )
 
 
+_PHPSTAN_NO_FILES_PATTERNS = (
+    "no files found to analyse",
+    "no files found to analyze",
+)
+
+
+def _is_no_files_to_analyse_output(*texts: Optional[str]) -> bool:
+    combined = "\n".join(str(text or "") for text in texts).lower()
+    if not combined.strip():
+        return False
+    return any(pattern in combined for pattern in _PHPSTAN_NO_FILES_PATTERNS)
+
+
 def _parse_output(output_text: str) -> Dict[str, Any]:
     text = str(output_text or "").strip()
     if not text:
@@ -356,8 +369,32 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
             files_payload = payload.get("files")
             files_map: Dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
             raw_findings = _collect_raw_messages(files_map)
+            no_files_to_analyse = (
+                process_result.exit_code in {0, 1}
+                and not raw_findings
+                and _is_no_files_to_analyse_output(
+                    stdout_text,
+                    stderr_text,
+                    process_result.error,
+                )
+            )
 
             if parse_error is not None and process_result.exit_code in {0, 1} and not raw_findings:
+                if no_files_to_analyse:
+                    return StaticBootstrapScanResult(
+                        scanner_name=self.scanner_name,
+                        source=self.source,
+                        total_findings=0,
+                        findings=[],
+                        metadata={
+                            "timeout_seconds": self.timeout_seconds,
+                            "level": self.level,
+                            "exit_code": process_result.exit_code,
+                            "parse_warning": str(parse_error)[:300],
+                            "no_files_to_analyse": True,
+                            "skip_reason": "no_files_found_to_analyse",
+                        },
+                    )
                 preview = (stderr_text or stdout_text or process_result.error or "").strip()[:300]
                 raise RuntimeError(
                     f"phpstan output parse failed: {parse_error}. output preview: {preview}"
@@ -366,6 +403,22 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
             if process_result.exit_code > 1 and not raw_findings:
                 error_message = (stderr_text or stdout_text or process_result.error or "unknown error").strip()
                 raise RuntimeError(f"phpstan failed: {error_message[:300]}")
+
+            if no_files_to_analyse:
+                return StaticBootstrapScanResult(
+                    scanner_name=self.scanner_name,
+                    source=self.source,
+                    total_findings=0,
+                    findings=[],
+                    metadata={
+                        "timeout_seconds": self.timeout_seconds,
+                        "level": self.level,
+                        "exit_code": process_result.exit_code,
+                        "parse_warning": str(parse_error)[:300] if parse_error is not None else None,
+                        "no_files_to_analyse": True,
+                        "skip_reason": "no_files_found_to_analyse",
+                    },
+                )
 
             findings = self._normalize_findings(files_map)
             return StaticBootstrapScanResult(

@@ -257,6 +257,50 @@ def _build_code_windows(
     return snippet, context, context_start, context_end
 
 
+def _normalize_function_line_range(
+    start_value: Any,
+    end_value: Any,
+) -> Tuple[Optional[int], Optional[int]]:
+    start_line = _to_int(start_value)
+    end_line = _to_int(end_value)
+    if start_line is not None and start_line <= 0:
+        start_line = None
+    if end_line is not None and end_line <= 0:
+        end_line = None
+    if start_line is not None and end_line is None:
+        end_line = start_line
+    if start_line is not None and end_line is not None and end_line < start_line:
+        end_line = start_line
+    return start_line, end_line
+
+
+def _extract_declared_function_line_range(
+    finding: Dict[str, Any],
+    verification_payload: Optional[Dict[str, Any]],
+) -> Tuple[Optional[int], Optional[int], str]:
+    direct_start, direct_end = _normalize_function_line_range(
+        finding.get("function_start_line") or finding.get("function_start"),
+        finding.get("function_end_line") or finding.get("function_end"),
+    )
+    if direct_start is not None:
+        return direct_start, direct_end, "finding"
+
+    reachability_target = (
+        verification_payload.get("reachability_target")
+        if isinstance(verification_payload, dict)
+        else None
+    )
+    if isinstance(reachability_target, dict):
+        target_start, target_end = _normalize_function_line_range(
+            reachability_target.get("start_line"),
+            reachability_target.get("end_line"),
+        )
+        if target_start is not None:
+            return target_start, target_end, "verification_result.reachability_target"
+
+    return None, None, "none"
+
+
 def _normalize_authenticity_verdict(
     finding: Dict[str, Any],
     confidence: float,
@@ -965,13 +1009,33 @@ async def _save_findings(
             context_text = None
             context_start_line = None
             context_end_line = None
+            declared_function_start_line, declared_function_end_line, declared_function_range_source = (
+                _extract_declared_function_line_range(
+                    finding,
+                    verification_result_payload_input,
+                )
+            )
 
             if authenticity == "false_positive":
                 if raw_file_path:
-                    stored_file_path = _normalize_relative_file_path(
+                    stored_file_path, full_file_path = _resolve_finding_file_path(
                         str(raw_file_path),
                         project_root,
                     )
+                    if not stored_file_path:
+                        stored_file_path = _normalize_relative_file_path(
+                            str(raw_file_path),
+                            project_root,
+                        )
+                    if full_file_path:
+                        try:
+                            file_content = Path(full_file_path).read_text(
+                                encoding="utf-8",
+                                errors="replace",
+                            )
+                            file_lines = file_content.splitlines()
+                        except Exception:
+                            file_lines = []
                 if line_end is None and line_start is not None:
                     line_end = line_start
             else:
@@ -1035,19 +1099,43 @@ async def _save_findings(
 
             # 7.5) 获取函数定位信息，但允许定位失败时仍然保存（降级模式）
             reachability_target_function = _infer_function_name_for_save(finding, line_start)
-            reachability_target_start_line = None
-            reachability_target_end_line = None
+            reachability_target_start_line = declared_function_start_line
+            reachability_target_end_line = declared_function_end_line
             locator_language = None
             locator_resolution_engine = None
             locator_diagnostics = None
             locator_resolution_method = None
             localization_status = "unknown"  # success|failed|partial
+            function_locator_anchor_line = (
+                line_start if line_start is not None else declared_function_start_line
+            )
+            function_locator_anchor_from_snippet = False
+            function_range_correction_applied = False
 
-            if function_locator and full_file_path and line_start is not None and file_lines:
+            if file_lines:
+                inferred_anchor_start, _ = _infer_line_range_from_snippet(
+                    file_lines,
+                    code_snippet_text,
+                )
+                if inferred_anchor_start is None and snippet_text:
+                    inferred_anchor_start, _ = _infer_line_range_from_snippet(
+                        file_lines,
+                        snippet_text,
+                    )
+                if inferred_anchor_start is not None:
+                    function_locator_anchor_line = inferred_anchor_start
+                    function_locator_anchor_from_snippet = True
+
+            if (
+                function_locator
+                and full_file_path
+                and function_locator_anchor_line is not None
+                and file_lines
+            ):
                 try:
                     located = function_locator.locate(
                         full_file_path=full_file_path,
-                        line_start=line_start,
+                        line_start=function_locator_anchor_line,
                         relative_file_path=stored_file_path,
                         file_lines=file_lines,
                     )
@@ -1057,6 +1145,15 @@ async def _save_findings(
                         reachability_target_start_line = _to_int(located.get("start_line"))
                         reachability_target_end_line = _to_int(located.get("end_line"))
                         localization_status = "success"
+                        if (
+                            declared_function_start_line is not None
+                            and declared_function_end_line is not None
+                            and (
+                                reachability_target_start_line != declared_function_start_line
+                                or reachability_target_end_line != declared_function_end_line
+                            )
+                        ):
+                            function_range_correction_applied = True
                     else:
                         localization_status = "failed"
                     locator_language = located.get("language")
@@ -1071,7 +1168,7 @@ async def _save_findings(
                 authenticity != "false_positive"
                 and function_locator
                 and full_file_path
-                and line_start is not None
+                and function_locator_anchor_line is not None
                 and file_lines
                 and localization_status == "failed"
             ):
@@ -1191,6 +1288,125 @@ async def _save_findings(
                 "start_line": reachability_target_start_line,
                 "end_line": reachability_target_end_line,
             }
+            original_line_start = line_start
+            original_line_end = line_end
+            hit_line_outside_function = False
+            hit_line_correction_applied = False
+            hit_line_correction_reason = None
+            hit_line_correction_skipped_reason = None
+            function_start_for_hit = _to_int(reachability_target_start_line)
+            function_end_for_hit = _to_int(reachability_target_end_line)
+            if (
+                function_start_for_hit is not None
+                and function_start_for_hit > 0
+                and function_end_for_hit is not None
+                and function_end_for_hit > 0
+            ):
+                current_line_start = line_start
+                current_line_end = line_end if line_end is not None else line_start
+                if (
+                    current_line_start is not None
+                    and current_line_end is not None
+                    and current_line_end < current_line_start
+                ):
+                    current_line_end = current_line_start
+                if (
+                    current_line_start is not None
+                    and current_line_end is not None
+                    and (
+                        current_line_start < function_start_for_hit
+                        or current_line_start > function_end_for_hit
+                        or current_line_end > function_end_for_hit
+                    )
+                ):
+                    hit_line_outside_function = True
+                    line_start = function_start_for_hit
+                    line_end = function_start_for_hit
+                    hit_line_correction_applied = True
+                    hit_line_correction_reason = (
+                        "outside_function_range_align_to_function_start"
+                    )
+            else:
+                hit_line_correction_skipped_reason = "missing_function_range"
+            context_window_rebuild_applied = False
+            context_window_rebuild_skipped_reason = None
+            if file_lines and line_start is not None:
+                rebuild_line_start = line_start
+                rebuild_line_end = line_end if line_end is not None else line_start
+                total_lines = len(file_lines)
+                if total_lines > 0:
+                    rebuild_line_start = max(1, min(rebuild_line_start, total_lines))
+                    rebuild_line_end = max(
+                        rebuild_line_start,
+                        min(rebuild_line_end, total_lines),
+                    )
+                    rebuilt_snippet, rebuilt_context, rebuilt_context_start, rebuilt_context_end = (
+                        _build_code_windows(
+                            file_lines=file_lines,
+                            line_start=rebuild_line_start,
+                            line_end=rebuild_line_end,
+                            radius=12,
+                        )
+                    )
+                    if (
+                        rebuilt_context
+                        and rebuilt_context_start is not None
+                        and rebuilt_context_end is not None
+                    ):
+                        snippet_text = rebuilt_snippet or snippet_text
+                        context_text = rebuilt_context
+                        context_start_line = rebuilt_context_start
+                        context_end_line = rebuilt_context_end
+                        context_window_rebuild_applied = True
+                    else:
+                        context_window_rebuild_skipped_reason = (
+                            "failed_to_rebuild_context_window"
+                        )
+                else:
+                    context_window_rebuild_skipped_reason = "empty_file_lines"
+            else:
+                context_window_rebuild_skipped_reason = "missing_file_lines_or_line_start"
+
+            if hit_line_correction_applied and not context_window_rebuild_applied:
+                # Avoid keeping stale context metadata from pre-correction or external payload.
+                context_text = None
+                context_start_line = None
+                context_end_line = None
+                if file_lines and line_start is not None:
+                    safe_line_start = max(1, min(line_start, len(file_lines)))
+                    safe_line_end = max(
+                        safe_line_start,
+                        min(line_end if line_end is not None else line_start, len(file_lines)),
+                    )
+                    snippet_text = (
+                        "\n".join(file_lines[safe_line_start - 1 : safe_line_end]).strip()
+                        or snippet_text
+                    )
+            verification_result_payload["context_start_line"] = context_start_line
+            verification_result_payload["context_end_line"] = context_end_line
+            verification_result_payload["function_range_validation"] = {
+                "declared_start_line": declared_function_start_line,
+                "declared_end_line": declared_function_end_line,
+                "declared_source": declared_function_range_source,
+                "resolved_start_line": reachability_target_start_line,
+                "resolved_end_line": reachability_target_end_line,
+                "localization_status": localization_status,
+                "anchor_line": function_locator_anchor_line,
+                "anchor_from_snippet": function_locator_anchor_from_snippet,
+                "correction_applied": function_range_correction_applied,
+                "hit_line_outside_function": hit_line_outside_function,
+                "hit_line_correction_applied": hit_line_correction_applied,
+                "original_line_start": original_line_start,
+                "original_line_end": original_line_end,
+                "corrected_line_start": line_start,
+                "corrected_line_end": line_end,
+                "hit_line_correction_reason": hit_line_correction_reason,
+                "hit_line_correction_skipped_reason": hit_line_correction_skipped_reason,
+                "context_window_rebuild_applied": context_window_rebuild_applied,
+                "context_window_rebuild_skipped_reason": (
+                    context_window_rebuild_skipped_reason
+                ),
+            }
             # status 映射：由 LLM/status 输入表达漏洞是否存在，程序只负责规范化
             if normalized_status == FindingStatus.FALSE_POSITIVE:
                 db_status = FindingStatus.FALSE_POSITIVE
@@ -1251,10 +1467,49 @@ async def _save_findings(
                     str(raw_file_path),
                     project_root,
                 )
+            if original_line_start is not None:
+                finding_metadata_payload["raw_line_start"] = original_line_start
+            if original_line_end is not None:
+                finding_metadata_payload["raw_line_end"] = original_line_end
             if line_start is not None:
-                finding_metadata_payload["raw_line_start"] = line_start
+                finding_metadata_payload["corrected_line_start"] = line_start
             if line_end is not None:
-                finding_metadata_payload["raw_line_end"] = line_end
+                finding_metadata_payload["corrected_line_end"] = line_end
+            finding_metadata_payload["function_range_declared_source"] = (
+                declared_function_range_source
+            )
+            if declared_function_start_line is not None:
+                finding_metadata_payload["declared_function_start_line"] = (
+                    declared_function_start_line
+                )
+            if declared_function_end_line is not None:
+                finding_metadata_payload["declared_function_end_line"] = (
+                    declared_function_end_line
+                )
+            if function_locator_anchor_line is not None:
+                finding_metadata_payload["function_locator_anchor_line"] = (
+                    function_locator_anchor_line
+                )
+            finding_metadata_payload["function_locator_anchor_from_snippet"] = (
+                function_locator_anchor_from_snippet
+            )
+            finding_metadata_payload["function_range_correction_applied"] = (
+                function_range_correction_applied
+            )
+            finding_metadata_payload["hit_line_outside_function"] = (
+                hit_line_outside_function
+            )
+            finding_metadata_payload["hit_line_correction_applied"] = (
+                hit_line_correction_applied
+            )
+            if hit_line_correction_reason:
+                finding_metadata_payload["hit_line_correction_reason"] = (
+                    hit_line_correction_reason
+                )
+            if hit_line_correction_skipped_reason:
+                finding_metadata_payload["hit_line_correction_skipped_reason"] = (
+                    hit_line_correction_skipped_reason
+                )
             attacker_flow_text = _normalize_optional_text(finding.get("attacker_flow"))
             if attacker_flow_text:
                 finding_metadata_payload["attacker_flow"] = attacker_flow_text
