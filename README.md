@@ -49,18 +49,14 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ### 3. 启动服务
 
-默认推荐直接使用 Docker Compose。本仓库现在明确区分两种后端运行形态：
+默认推荐直接使用 Docker Compose。默认 `docker compose up` 现在采用“核心栈镜像优先”契约：
 
-- `dev-with-source-mount`: `docker compose up`
-- `self-contained-image`: `docker compose -f docker-compose.yml -f docker-compose.self-contained.yml up -d`
-
-本地开发联调使用前者；无源码部署使用后者。
+- `backend`、`frontend`、`db`、`redis` 以及扫描 / sandbox 运行时默认直接消费已发布镜像
+- `nexus-web`、`nexus-itemDetail` 是保留的本地构建例外
+- `docker-compose.self-contained.yml` 仅保留兼容入口，不再是主路径
 
 ```bash
 docker compose up
-
-# 无源码部署（backend 不挂载 ./backend 或仓库根目录）
-docker compose -f docker-compose.yml -f docker-compose.self-contained.yml up -d
 ```
 
 Windows 请使用 Docker Desktop + Linux containers。
@@ -76,11 +72,11 @@ docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 
 首次拉取源码、仅存在 `docker/env/backend/env.example` 时，`./scripts/compose-up-local-build.sh` 会自动生成 `docker/env/backend/.env`，避免本地构建入口因为缺少 backend env 文件而中断。
 
-默认 `docker compose up` 为远程镜像模式的 `dev-with-source-mount`，只拉起常驻服务；基础 compose 上追加 `--build` 不会把主服务切成本地构建。
+默认 `docker compose up` 只拉起常驻服务，并直接消费核心栈远程镜像；基础 compose 上追加 `--build` 不会把主服务切成本地构建。
 如需切到本地构建，请显式叠加 `docker-compose.full.yml`。
-如需无源码部署，请显式叠加 `docker-compose.self-contained.yml`。
+如需兼容旧的 backend-only self-contained 入口，可显式叠加 `docker-compose.self-contained.yml`。
 生产 release artifact 部署不走这条前端本地构建链路：`deploy/package-release-artifacts.sh` 现在会产出可直接部署的 `vulhunter-frontend-v*.tar.gz`，包内包含静态站点文件和 deploy 侧 nginx 配置；目标机由 `deploy/deploy-release-artifacts.sh` 解压后，通过 `deploy/compose/docker-compose.release-static-frontend.yml` 直接挂载该包启动 frontend。
-默认远程镜像地址可通过 `GHCR_REGISTRY`、`VULHUNTER_IMAGE_NAMESPACE`、`NEXUS_WEB_IMAGE_NAMESPACE`、`VULHUNTER_IMAGE_TAG`、`NEXUS_WEB_IMAGE_TAG` 覆盖。
+默认远程镜像地址可通过 `GHCR_REGISTRY`、`VULHUNTER_IMAGE_NAMESPACE`、`VULHUNTER_IMAGE_TAG` 覆盖。
 默认远程模式按匿名可拉取设计；如果你使用自有命名空间，请确保对应 GHCR 包对匿名拉取开放，或直接通过 `*_IMAGE` 环境变量覆盖完整镜像地址。
 
 默认 `docker compose up` 的 compose 层只拉起常驻服务，compose 不再声明一次性 runner 预热 / 自检服务。

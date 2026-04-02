@@ -123,6 +123,8 @@ pack_docker_layout() {
   cp "$ROOT_DIR/.dockerignore" "$tmp_root/"
   cp "$ROOT_DIR/docker-compose.yml" "$tmp_root/"
   cp "$ROOT_DIR/docker-compose.full.yml" "$tmp_root/"
+  cp "$ROOT_DIR/docker-compose.hybrid.yml" "$tmp_root/"
+  cp "$ROOT_DIR/docker-compose.self-contained.yml" "$tmp_root/"
   cp -R "$ROOT_DIR/deploy/compose" "$tmp_root/deploy/"
   cp -R "$ROOT_DIR/docker" "$tmp_root/"
   cp -R "$ROOT_DIR/frontend/yasa-engine-overrides" "$tmp_root/frontend/"

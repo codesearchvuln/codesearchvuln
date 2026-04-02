@@ -24,7 +24,6 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   GHCR_REGISTRY: ghcr.io
   VULHUNTER_IMAGE_NAMESPACE: unbengable12
-  NEXUS_WEB_IMAGE_NAMESPACE: unbengable12
 
 jobs:
   build-and-release:
@@ -33,7 +32,6 @@ jobs:
     
     permissions:
       contents: write
-      packages: write
     
     steps:
       # 1. 检出代码
@@ -120,6 +118,8 @@ jobs:
             .dockerignore \
             docker-compose.yml \
             docker-compose.full.yml \
+            docker-compose.hybrid.yml \
+            docker-compose.self-contained.yml \
             frontend/.dockerignore \
             docker/backend.Dockerfile \
             docker/frontend.Dockerfile \
@@ -193,14 +193,12 @@ jobs:
           echo "- \`checksums.txt\`: 文件校验和" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
           echo "### Docker 镜像" >> CHANGELOG.md
-          echo "- Frontend: \`${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ steps.version.outputs.VERSION }}\`" >> CHANGELOG.md
-          echo "- Backend: \`${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ steps.version.outputs.VERSION }}\`" >> CHANGELOG.md
+          echo "- 由 \`.github/workflows/docker-publish.yml\` 负责发布与校验 GHCR 镜像" >> CHANGELOG.md
+          echo "- 默认镜像命名空间: \`${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}\`" >> CHANGELOG.md
           echo "" >> CHANGELOG.md
           echo "### 快速部署" >> CHANGELOG.md
-          echo "\`\`\`bash" >> CHANGELOG.md
-          echo "# 部署" >> CHANGELOG.md
-          echo "docker compose up -d" >> CHANGELOG.md
-          echo "\`\`\`" >> CHANGELOG.md
+          echo "- 使用 release 中的 docker 配置包与 env 模板部署" >> CHANGELOG.md
+          echo "- Docker 镜像发布状态请查看 \`docker-publish.yml\` 工作流结果" >> CHANGELOG.md
       
       # 12. 创建 GitHub Release
       - name: 创建 Release
@@ -217,85 +215,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      # 13. 登录 GitHub Container Registry
-      - name: 登录到 GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      # 14. 设置 QEMU（用于多架构构建）
-      - name: 设置 QEMU
-        uses: docker/setup-qemu-action@v4
-      
-      # 15. 设置 Docker Buildx
-      - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v4
-      
-      # 16. 构建并推送前端 Docker 镜像
-      - name: 构建并推送前端 Docker 镜像
-        uses: docker/build-push-action@v7
-        with:
-          context: ./frontend
-          file: ./docker/frontend.Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ steps.version.outputs.VERSION }}
-            ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:latest
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
-      
-      # 17. 构建并推送后端 Docker 镜像
-      - name: 构建并推送后端 Docker 镜像
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/backend.Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ steps.version.outputs.VERSION }}
-            ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:latest
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
-      
-      # 18. 构建并推送沙箱 Docker 镜像
-      - name: 构建并推送沙箱 Docker 镜像
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/sandbox.Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox:${{ steps.version.outputs.VERSION }}
-            ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox:latest
-          cache-from: type=gha,scope=sandbox
-          cache-to: type=gha,mode=max,scope=sandbox
-
-      - name: 验证 GHCR 匿名拉取
-        shell: bash
-        run: |
-          set -euo pipefail
-          images=(
-            "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-frontend:${{ steps.version.outputs.VERSION }}"
-            "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${{ steps.version.outputs.VERSION }}"
-            "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox:${{ steps.version.outputs.VERSION }}"
-          )
-
-          docker logout ghcr.io || true
-
-          for image in "${images[@]}"; do
-            echo "Verifying anonymous pull access for ${image}"
-            if ! docker manifest inspect "${image}" >/dev/null; then
-              echo "::error::Anonymous pull check failed for ${image}. Ensure the package exists, uses the expected namespace, and is public."
-              exit 1
-            fi
-          done
-      
-      # 19. 更新 README 中的版本号
+      # 13. 更新 README 中的版本号
       - name: 更新 README 版本号
         if: github.event_name == 'push'
         run: |

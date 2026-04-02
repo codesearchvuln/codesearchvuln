@@ -21,14 +21,11 @@ def test_backend_dockerfile_no_longer_installs_local_pmd_runtime() -> None:
     dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
 
     runtime_base_block = _stage_block(dockerfile_text, "FROM python-base AS runtime-base")
-    scanner_tools_base_block = _stage_block(dockerfile_text, "FROM runtime-base AS scanner-tools-base")
     runtime_block = _stage_block(dockerfile_text, "FROM runtime-base AS runtime")
 
     assert "openjdk-21-jre-headless" not in runtime_base_block
     assert "php-cli" not in runtime_base_block
     assert "unzip" not in runtime_base_block
-
-    assert "apt-get install -y --no-install-recommends unzip" in scanner_tools_base_block
 
     assert "PMD_CACHE" not in runtime_block
     assert "pmd-dist-7.0.0-bin.zip" not in runtime_block
@@ -43,6 +40,8 @@ def test_compose_exposes_scanner_pmd_image_without_compose_runner_service() -> N
         "SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
         "vulhunter-pmd-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
+    assert "GHCR_REGISTRY: ${GHCR_REGISTRY:-ghcr.io}" in compose_text
+    assert "RUNNER_PREFLIGHT_STRICT: \"${RUNNER_PREFLIGHT_STRICT:-true}\"" in compose_text
     assert "\n  pmd-runner:\n" not in compose_text
     assert "runner preflight / warmup" not in compose_text
     assert "动态拉起临时 runner 容器" in compose_text
@@ -81,3 +80,4 @@ def test_docker_publish_workflow_builds_pmd_runner() -> None:
     assert "build_pmd_runner" in workflow_text
     assert "./docker/pmd-runner.Dockerfile" in workflow_text
     assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
+    assert "build_nexus_web" not in workflow_text

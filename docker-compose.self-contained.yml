@@ -1,12 +1,12 @@
 # =============================================
-# VulHunter self-contained-image 覆盖层
+# VulHunter self-contained-image 兼容覆盖层
 # =============================================
 # 用法:
 # docker compose -f docker-compose.yml -f docker-compose.self-contained.yml up -d
 #
-# 目标:
-#   backend 容器不再依赖宿主机源码目录
-#   fallback build 固定使用镜像内的 /opt/backend-build-context
+# 说明:
+#   基础 compose 已默认采用核心栈镜像优先路径。
+#   该文件仅保留兼容入口，继续显式固定 backend fallback build 上下文。
 
 services:
   backend:

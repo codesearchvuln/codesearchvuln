@@ -67,17 +67,11 @@ on:
         required: false
         type: boolean
         default: false
-      build_nexus_web:
-        description: '构建 nexus-web 镜像'
-        required: false
-        type: boolean
-        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   GHCR_REGISTRY: ghcr.io
   VULHUNTER_IMAGE_NAMESPACE: unbengable12
-  NEXUS_WEB_IMAGE_NAMESPACE: unbengable12
 
 jobs:
   build-and-push:
@@ -439,19 +433,6 @@ jobs:
             --type spdx \
             "${IMAGE}:${TAG}@${DIGEST}"
 
-      - name: 构建并推送 nexus-web Docker 镜像
-        if: ${{ github.event.inputs.build_nexus_web == 'true' }}
-        uses: docker/build-push-action@v7
-        with:
-          context: ./nexus-web/src
-          file: ./nexus-web/src/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.NEXUS_WEB_IMAGE_NAMESPACE }}/nexus-web:${{ steps.image-tag.outputs.tag }}
-          cache-from: type=gha,scope=nexus-web
-          cache-to: type=gha,mode=max,scope=nexus-web
-
       - name: 设置 GHCR 包为公开可见性
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -502,9 +483,6 @@ jobs:
           if [ "${{ steps.image-tag.outputs.build_all }}" == "true" ] || [ "${{ github.event.inputs.build_sandbox_runner }}" == "true" ]; then
             set_public "vulhunter-sandbox-runner"
           fi
-          if [ "${{ github.event.inputs.build_nexus_web }}" == "true" ]; then
-            set_public "nexus-web"
-          fi
 
       - name: 验证 GHCR 匿名拉取
         shell: bash
@@ -548,9 +526,6 @@ jobs:
           fi
           if [ "${{ steps.image-tag.outputs.build_all }}" == "true" ] || [ "${{ github.event.inputs.build_sandbox_runner }}" == "true" ]; then
             add_image "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner:${{ steps.image-tag.outputs.tag }}"
-          fi
-          if [ "${{ github.event.inputs.build_nexus_web }}" == "true" ]; then
-            add_image "${GHCR_REGISTRY}/${NEXUS_WEB_IMAGE_NAMESPACE}/nexus-web:${{ steps.image-tag.outputs.tag }}"
           fi
 
           docker logout ghcr.io || true
@@ -608,7 +583,4 @@ jobs:
           fi
           if [ "${{ steps.image-tag.outputs.build_all }}" == "true" ] || [ "${{ github.event.inputs.build_sandbox_runner }}" == "true" ]; then
             echo "- \`${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ steps.image-tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "${{ github.event.inputs.build_nexus_web }}" == "true" ]; then
-            echo "- \`${{ env.GHCR_REGISTRY }}/${{ env.NEXUS_WEB_IMAGE_NAMESPACE }}/nexus-web:${{ steps.image-tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
           fi

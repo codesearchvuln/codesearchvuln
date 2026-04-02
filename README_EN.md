@@ -49,7 +49,11 @@ All Dockerfiles, runner image build files, and Docker-specific environment files
 
 ### 3. Start the services
 
-The default recommended entrypoint is plain Docker Compose:
+The default recommended entrypoint is plain Docker Compose with an image-first core stack:
+
+- `backend`, `frontend`, `db`, `redis`, and the scan/sandbox runtime images pull published images by default
+- `nexus-web` and `nexus-itemDetail` remain the explicit local-build exception
+- `docker-compose.self-contained.yml` remains available only as a compatibility overlay
 
 ```bash
 docker compose up
@@ -68,9 +72,9 @@ docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 
 On a fresh checkout where only `docker/env/backend/env.example` exists, `./scripts/compose-up-local-build.sh` now bootstraps `docker/env/backend/.env` automatically so the local-build entrypoint does not fail early on a missing backend env file.
 
-The default `docker compose up` path is the remote-image path. Adding `--build` to the base compose file does not switch the main services to local builds.
+The default `docker compose up` path now uses remote images for the core stack. Adding `--build` to the base compose file does not switch the main services to local builds.
 Use the `docker-compose.full.yml` overlay explicitly when you want local image builds.
-The default remote image addresses can be overridden through `GHCR_REGISTRY`, `VULHUNTER_IMAGE_NAMESPACE`, `NEXUS_WEB_IMAGE_NAMESPACE`, `VULHUNTER_IMAGE_TAG`, and `NEXUS_WEB_IMAGE_TAG`.
+The default remote image addresses can be overridden through `GHCR_REGISTRY`, `VULHUNTER_IMAGE_NAMESPACE`, and `VULHUNTER_IMAGE_TAG`.
 The remote mode assumes anonymous pull access. If you publish under your own namespace, make sure the GHCR packages are publicly pullable or override the full `*_IMAGE` values directly.
 
 The default `docker compose up` path now only brings up the long-lived compose services and no longer declares one-shot compose runner warmup services.

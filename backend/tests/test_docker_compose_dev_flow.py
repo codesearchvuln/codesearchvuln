@@ -19,10 +19,6 @@ DEFAULT_FRONTEND_IMAGE = (
     "${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
     "/vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}}"
 )
-DEFAULT_NEXUS_WEB_IMAGE = (
-    "${NEXUS_WEB_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${NEXUS_WEB_IMAGE_NAMESPACE:-unbengable12}"
-    "/nexus-web:${NEXUS_WEB_IMAGE_TAG:-latest}}"
-)
 DEFAULT_SANDBOX_IMAGE = (
     "${SANDBOX_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
     "/vulhunter-sandbox:${VULHUNTER_IMAGE_TAG:-latest}}"
@@ -56,42 +52,39 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
         assert f"\n  {runner_service}:" not in compose_text
     assert f"image: {DEFAULT_BACKEND_IMAGE}" in compose_text
     assert f"image: {DEFAULT_FRONTEND_IMAGE}" in compose_text
-    assert f"image: {DEFAULT_NEXUS_WEB_IMAGE}" in compose_text
     assert "vulhunter/backend-dev:latest" not in compose_text
     assert "vulhunter/frontend-dev:latest" not in compose_text
     assert "target: dev-runtime" not in compose_text
     assert "target: dev" not in compose_text
-    assert "build:" not in compose_text
-    assert "dockerfile:" not in compose_text
-    assert "./backend:/app" in compose_text
-    assert ".:/workspace:ro" in compose_text
-    assert "./frontend:/app" in compose_text
-    assert "/opt/backend-venv" in compose_text
+    assert "\n  backend:\n" in compose_text
+    assert "\n  frontend:\n" in compose_text
+    assert "\n  nexus-web:\n" in compose_text
+    assert "\n  nexus-itemDetail:\n" in compose_text
+    assert "./backend:/app" not in compose_text
+    assert ".:/workspace:ro" not in compose_text
+    assert "./frontend:/app" not in compose_text
+    assert "./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" not in compose_text
+    assert "/opt/backend-venv" not in compose_text
     assert "/app/.venv" not in compose_text
-    assert "/root/.cache/uv" in compose_text
-    assert "/app/node_modules" in compose_text
-    assert "/pnpm/store" in compose_text
-    assert "${VULHUNTER_FRONTEND_PORT:-3000}:5173" in compose_text
-    assert 'FRONTEND_PUBLIC_URL: http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}' in compose_text
-    assert 'BACKEND_PUBLIC_URL: http://localhost:${VULHUNTER_BACKEND_PORT:-8000}' in compose_text
+    assert "/root/.cache/uv" not in compose_text
+    assert "/app/node_modules" not in compose_text
+    assert "/pnpm/store" not in compose_text
+    assert "${VULHUNTER_FRONTEND_PORT:-3000}:80" in compose_text
+    assert 'FRONTEND_PUBLIC_URL: http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}' not in compose_text
+    assert 'BACKEND_PUBLIC_URL: http://localhost:${VULHUNTER_BACKEND_PORT:-8000}' not in compose_text
     assert "command: /app/scripts/dev-entrypoint.sh" not in compose_text
     assert "command:\n      - sh\n      - /app/scripts/dev-entrypoint.sh" not in compose_text
     assert "BACKEND_PYPI_INDEX_PRIMARY: ${BACKEND_PYPI_INDEX_PRIMARY:-}" in compose_text
     assert "BACKEND_PYPI_INDEX_FALLBACK: ${BACKEND_PYPI_INDEX_FALLBACK:-}" in compose_text
-    assert "BACKEND_INSTALL_YASA: ${BACKEND_INSTALL_YASA:-1}" in compose_text
-    assert "YASA_VERSION: ${YASA_VERSION:-v0.2.33}" in compose_text
-    assert (
-        "BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,"
-        "https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"
-    ) in compose_text
+    assert "BACKEND_INSTALL_YASA" not in compose_text
+    assert "YASA_VERSION:" not in compose_text
+    assert "BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/" in compose_text
     assert "YASA_ENABLED: ${YASA_ENABLED:-true}" in compose_text
     assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in compose_text
     assert "SCAN_WORKSPACE_VOLUME: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}" in compose_text
     assert "GHCR_REGISTRY: ${GHCR_REGISTRY:-ghcr.io}" in compose_text
     assert "VULHUNTER_IMAGE_NAMESPACE: ${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}" in compose_text
     assert "VULHUNTER_IMAGE_TAG: ${VULHUNTER_IMAGE_TAG:-latest}" in compose_text
-    assert "NEXUS_WEB_IMAGE_NAMESPACE: ${NEXUS_WEB_IMAGE_NAMESPACE:-unbengable12}" in compose_text
-    assert "NEXUS_WEB_IMAGE_TAG: ${NEXUS_WEB_IMAGE_TAG:-latest}" in compose_text
     assert (
         "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
@@ -122,8 +115,9 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}" in compose_text
     assert "/tmp/vulhunter/scans:/tmp/vulhunter/scans" not in compose_text
     assert "scan_workspace:/tmp/vulhunter/scans" in compose_text
-    assert "/var/run/docker.sock:/var/run/docker.sock" in compose_text
-    assert "RUNNER_PREFLIGHT_BUILD_CONTEXT: /workspace" in compose_text
+    assert "${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock" in compose_text
+    assert "RUNNER_PREFLIGHT_BUILD_CONTEXT: /opt/backend-build-context" in compose_text
+    assert 'RUNNER_PREFLIGHT_STRICT: "${RUNNER_PREFLIGHT_STRICT:-true}"' in compose_text
     assert "MCP_REQUIRE_ALL_READY_ON_STARTUP" not in compose_text
     assert '/bin/sh", "-lc"' not in compose_text
     assert (
@@ -141,8 +135,10 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "MCP_CODE_INDEX_ENABLED" not in compose_text
     assert "SKILL_REGISTRY_AUTO_SYNC_ON_STARTUP" not in compose_text
     assert "CODEX_SKILLS_AUTO_INSTALL" not in compose_text
-    assert 'profiles: ["tools"]' in compose_text
+    assert 'profiles: [ "tools" ]' in compose_text
     assert "adminer:" in compose_text
+    assert "build:\n      context: ./nexus-web" in compose_text
+    assert "build:\n      context: ./nexus-itemDetail" in compose_text
     assert "YASA_HOST_BIN_PATH" not in compose_text
     assert "YASA_HOST_RESOURCE_DIR" not in compose_text
     assert "YASA_BIN_PATH:" not in compose_text
@@ -152,16 +148,16 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     backend_text = backend_dockerfile.read_text(encoding="utf-8")
     assert "FROM runtime-base AS dev-runtime" in backend_text
     assert 'COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py' in backend_text
-    assert "ARG BACKEND_INSTALL_YASA=1" in backend_text
-    assert "ARG YASA_VERSION=v0.2.33" in backend_text
+    assert "BACKEND_INSTALL_YASA" not in backend_text
+    assert "ARG YASA_VERSION=" not in backend_text
     assert "backend-dev-entrypoint.sh" not in backend_text
     assert 'CMD ["/bin/sh", "/usr/local/bin/backend-dev-entrypoint.sh"]' not in backend_text
     assert 'CMD ["/bin/sh", "/app/docker-entrypoint.sh"]' not in backend_text
-    assert "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" in backend_text
-    assert "COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides" in backend_text
+    assert "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" not in backend_text
+    assert "COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides" not in backend_text
     assert "COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides" in backend_text
-    assert 'ordered_indexes="$(order_indexes "${pypi_index_candidates}")"' in backend_text
-    assert 'while IFS= read -r index_url; do' in backend_text
+    assert 'best_index="$(cat /tmp/pypi-best-index)"' in backend_text
+    assert 'for idx in "$@"; do \\' in backend_text
     assert 'sync_with_index "${BACKEND_PYPI_INDEX_PRIMARY}" || sync_with_index "${BACKEND_PYPI_INDEX_FALLBACK}"' not in backend_text
     assert "nodebase" not in backend_text
     assert "mcp-builder" not in backend_text
@@ -199,12 +195,12 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "dockerfile: docker/backend.Dockerfile" in full_overlay_text
     assert "working_dir: !reset null" in full_overlay_text
     assert "command: !reset null" in full_overlay_text
-    assert "./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" in full_overlay_text
-    assert "${VULHUNTER_FRONTEND_PORT:-3000}:80" in full_overlay_text
-    assert "VITE_API_BASE_URL: /api/v1" in full_overlay_text
+    assert "./frontend:/app" in full_overlay_text
+    assert "${VULHUNTER_FRONTEND_PORT:-3000}:5173" in full_overlay_text
+    assert "VITE_API_TARGET: http://backend:8000" in full_overlay_text
     assert "CODEX_SKILLS_AUTO_INSTALL" not in full_overlay_text
-    assert "- BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}" in full_overlay_text
-    assert "- YASA_VERSION=${YASA_VERSION:-v0.2.33}" in full_overlay_text
+    assert "BACKEND_INSTALL_YASA" not in full_overlay_text
+    assert "YASA_VERSION=" not in full_overlay_text
     assert "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}" in full_overlay_text
     assert "SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-vulhunter/opengrep-runner-local:latest}" in full_overlay_text
     assert "SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-vulhunter/bandit-runner-local:latest}" in full_overlay_text
@@ -212,11 +208,7 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-vulhunter/phpstan-runner-local:latest}" in full_overlay_text
     assert "SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-vulhunter/pmd-runner-local:latest}" in full_overlay_text
     assert "FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-vulhunter/flow-parser-runner-local:latest}" in full_overlay_text
-    assert (
-        "- BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-"
-        "https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,"
-        "https://pypi.org/simple}"
-    ) in full_overlay_text
+    assert "- BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/" in full_overlay_text
     assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in full_overlay_text
     assert "SCAN_WORKSPACE_VOLUME: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}" in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in full_overlay_text
@@ -226,9 +218,6 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "BACKEND_PNPM_CMD_TIMEOUT_SECONDS" not in full_overlay_text
     assert "BACKEND_PNPM_INSTALL_OPTIONAL" not in full_overlay_text
     assert "MCP_REQUIRED_RUNTIME_DOMAIN" not in full_overlay_text
-    assert "  sandbox:" in full_overlay_text
-    assert "vulhunter/sandbox-local:latest" in full_overlay_text
-    assert "docker/sandbox.Dockerfile" in full_overlay_text
     assert "SANDBOX_IMAGE: ${SANDBOX_IMAGE:-vulhunter/sandbox-local:latest}" in full_overlay_text
     assert "SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-vulhunter/sandbox-runner-local:latest}" in full_overlay_text
     assert 'SANDBOX_RUNNER_ENABLED: "${SANDBOX_RUNNER_ENABLED:-true}"' in full_overlay_text
@@ -240,14 +229,9 @@ def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
         encoding="utf-8"
     )
 
-    assert 'ARG YASA_UAST_VERSION=v0.2.8' in backend_text
-    assert 'UAST_PLATFORM="linux-arm64"; \\' in backend_text
-    assert 'YASA_UAST_BUILD_MODE="source"; \\' in backend_text
-    assert 'CGO_ENABLED=0 GOOS=linux GOARCH="${YASA_GO_ARCH}"' in backend_text
-    assert 'go build -o "${YASA_ENGINE_DIR}/deps/uast4go/uast4go" .' in backend_text
-    assert 'python3 -m venv "${YASA_HOME}/uast4py-venv"; \\' in backend_text
-    assert 'COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yasa-launchers/uast4py' in backend_text
-    assert 'cp /tmp/yasa-launchers/uast4py "${YASA_ENGINE_DIR}/deps/uast4py/uast4py"; \\' in backend_text
+    assert "COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides" in backend_text
+    assert "RUNNER_PREFLIGHT_BUILD_CONTEXT=/opt/backend-build-context" in backend_text
+    assert 'CMD ["python3", "-m", "app.runtime.container_startup", "prod"]' in backend_text
 
 
 def test_nexus_web_dockerfile_pins_pnpm_before_nginx_runtime() -> None:
@@ -255,11 +239,10 @@ def test_nexus_web_dockerfile_pins_pnpm_before_nginx_runtime() -> None:
         encoding="utf-8"
     )
 
-    assert 'corepack prepare "pnpm@${NEXUS_WEB_PNPM_VERSION}" --activate' in nexus_dockerfile
-    assert 'if (pkg.packageManager) process.exit(0);' in nexus_dockerfile
-    assert 'pkg.packageManager = `pnpm@${process.env.NEXUS_WEB_PNPM_VERSION}`;' in nexus_dockerfile
-    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR}/nginx:1.27-alpine AS runtime" in nexus_dockerfile
-    assert "COPY nginx.conf /etc/nginx/nginx.conf" in nexus_dockerfile
+    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in nexus_dockerfile
+    assert "COPY ./dist /usr/share/nginx/html" in nexus_dockerfile
+    assert "COPY ./nginx.conf /etc/nginx/nginx.conf" in nexus_dockerfile
+    assert "EXPOSE 5174" in nexus_dockerfile
 
 
 def test_scripts_and_packaging_use_new_compose_layout() -> None:
@@ -310,6 +293,10 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
     if package_script is not None:
         assert '-f "${ROOT_DIR}/docker-compose.full.yml"' in package_script
         assert 'cp "$ROOT_DIR/docker-compose.full.yml" "$tmp_root/"' in package_script
+        assert '-f "${ROOT_DIR}/docker-compose.hybrid.yml"' in package_script
+        assert 'cp "$ROOT_DIR/docker-compose.hybrid.yml" "$tmp_root/"' in package_script
+        assert '-f "${ROOT_DIR}/docker-compose.self-contained.yml"' in package_script
+        assert 'cp "$ROOT_DIR/docker-compose.self-contained.yml" "$tmp_root/"' in package_script
     if deploy_script is not None:
         assert '-f "${TARGET_DIR}/docker-compose.full.yml"' in deploy_script
 
@@ -341,6 +328,8 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in root_readme
     assert "默认推荐直接使用 Docker Compose" in root_readme
     assert "scripts/README-COMPOSE.md" in root_readme
+    assert "核心栈镜像优先" in root_readme
+    assert "nexus-web" in root_readme
     assert "backend runs runner preflight during startup" in root_readme_en
     assert "no longer declares one-shot compose runner warmup services" in root_readme_en
     assert "docker compose up" in root_readme_en
@@ -358,6 +347,7 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
     assert "docker compose up --build" not in compose_readme
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in compose_readme
     assert "docker-compose.full.yml" in compose_readme
+    assert "核心栈镜像优先" in compose_readme
     assert "Docker Desktop + Linux containers" in compose_readme
     assert "runner 预热 / 自检容器" not in compose_readme
     assert "runner preflight / warmup" not in root_readme_en
@@ -381,7 +371,7 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     runtime_text = backend_text.split("FROM runtime-base AS runtime", maxsplit=1)[1]
 
     assert '"code2flow>=' not in pyproject_text
-    assert '"bandit>=' in pyproject_text
+    assert '"bandit>=' not in pyproject_text
     assert '"tree-sitter>=' not in pyproject_text
     assert '"tree-sitter-language-pack>=' not in pyproject_text
     assert "pip install --retries 5 --timeout 60 --disable-pip-version-check code2flow bandit" not in backend_text
@@ -541,8 +531,9 @@ def test_docker_publish_pushes_all_runner_images() -> None:
     assert "./docker/flow-parser-runner.Dockerfile" in workflow_text
     assert "./docker/sandbox-runner.Dockerfile" in workflow_text
     assert "VULHUNTER_IMAGE_NAMESPACE" in workflow_text
-    assert "NEXUS_WEB_IMAGE_NAMESPACE" in workflow_text
     assert "GHCR_REGISTRY: ghcr.io" in workflow_text
+    assert "build_nexus_web" not in workflow_text
+    assert "./nexus-web/src" not in workflow_text
     assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
     assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
     assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
@@ -563,11 +554,14 @@ def test_release_workflow_packages_yasa_override_assets() -> None:
     )
 
     assert ".dockerignore" in workflow_text
+    assert "docker-compose.hybrid.yml" in workflow_text
+    assert "docker-compose.self-contained.yml" in workflow_text
     assert "frontend/yasa-engine-overrides/" in workflow_text
     assert "VULHUNTER_IMAGE_NAMESPACE" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ steps.version.outputs.VERSION }}" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ steps.version.outputs.VERSION }}" in workflow_text
-    assert "docker logout ghcr.io || true" in workflow_text
-    assert "docker manifest inspect" in workflow_text
+    assert "docker-publish.yml" in workflow_text
+    assert "docker/build-push-action" not in workflow_text
+    assert "docker/login-action" not in workflow_text
+    assert "docker manifest inspect" not in workflow_text
+    assert "docker compose up -d" not in workflow_text
     assert 'cp -R "$ROOT_DIR/docker" "$tmp_root/"' in package_script
     assert 'cp -R "$ROOT_DIR/frontend/yasa-engine-overrides" "$tmp_root/frontend/"' in package_script
