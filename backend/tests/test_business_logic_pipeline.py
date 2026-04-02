@@ -89,8 +89,15 @@ class TestBusinessLogicAnalysisAgent:
                 "\"severity\": \"high\", "
                 "\"confidence\": 0.92, "
                 "\"function_name\": \"update_order\", "
+                "\"source\": \"request.path_params['order_id']\", "
+                "\"sink\": \"Order.query.get(order_id)\", "
                 "\"attacker_flow\": \"PUT /api/orders/2 -> update_order -> Order.query.get(2)\", "
-                "\"evidence_chain\": [\"read_file\", \"search_code\"]"
+                "\"evidence_chain\": [\"read_file\", \"search_code\"], "
+                "\"finding_metadata\": {"
+                "\"sink_reachable\": true, "
+                "\"upstream_call_chain\": [\"PUT /api/orders/{order_id}\", \"update_order(order_id)\", \"Order.query.get(order_id)\"], "
+                "\"sink_trigger_condition\": \"攻击者可以控制 order_id，且路径上不存在 owner 校验\""
+                "}"
                 "}",
                 17,
             ),
@@ -133,10 +140,71 @@ class TestBusinessLogicAnalysisAgent:
         assert result.success is True
         assert result.data["findings_pushed"] == 1
         assert result.data["findings_with_complete_evidence"] == 1
+        assert result.data["findings_with_real_source_sink"] == 1
         assert result.data["analysis_with_evidence"] == 1
         assert result.data["context_pack"]["route"] == "/api/orders/{order_id}"
         assert result.data["context_pack"]["object_type"] == "order"
         assert result.data["findings"][0]["title"].endswith("IDOR越权漏洞")
+
+    def test_validate_real_source_sink_rejects_unknown_placeholder(self):
+        agent = BusinessLogicAnalysisAgent(
+            llm_service=MagicMock(),
+            tools={},
+            event_emitter=None,
+        )
+        finding = {
+            "file_path": "app/api/orders.py",
+            "line_start": 42,
+            "title": "app/api/orders.py中update_order函数IDOR越权漏洞",
+            "description": "update_order 未验证订单归属。",
+            "vulnerability_type": "idor",
+            "source": "unknown",
+            "sink": "Order.query.get(order_id)",
+            "attacker_flow": "PUT /api/orders/2 -> update_order -> Order.query.get(2)",
+            "evidence_chain": ["read_file", "search_code"],
+            "finding_metadata": {
+                "sink_reachable": True,
+                "upstream_call_chain": [
+                    "PUT /api/orders/{order_id}",
+                    "update_order(order_id)",
+                    "Order.query.get(order_id)",
+                ],
+                "sink_trigger_condition": "攻击者可以控制 order_id，且路径上不存在 owner 校验",
+            },
+        }
+
+        errors = agent._validate_real_source_sink_finding(finding)
+        assert any("`source` 必须是可定位的真实代码表达式" in item for item in errors)
+
+    def test_validate_real_source_sink_rejects_non_boolean_sink_reachable(self):
+        agent = BusinessLogicAnalysisAgent(
+            llm_service=MagicMock(),
+            tools={},
+            event_emitter=None,
+        )
+        finding = {
+            "file_path": "app/api/orders.py",
+            "line_start": 42,
+            "title": "app/api/orders.py中update_order函数IDOR越权漏洞",
+            "description": "update_order 未验证订单归属。",
+            "vulnerability_type": "idor",
+            "source": "request.path_params['order_id']",
+            "sink": "Order.query.get(order_id)",
+            "attacker_flow": "PUT /api/orders/2 -> update_order -> Order.query.get(2)",
+            "evidence_chain": ["read_file", "search_code"],
+            "finding_metadata": {
+                "sink_reachable": 2,
+                "upstream_call_chain": [
+                    "PUT /api/orders/{order_id}",
+                    "update_order(order_id)",
+                    "Order.query.get(order_id)",
+                ],
+                "sink_trigger_condition": "攻击者可以控制 order_id，且路径上不存在 owner 校验",
+            },
+        }
+
+        errors = agent._validate_real_source_sink_finding(finding)
+        assert any("`finding_metadata.sink_reachable` 必须明确为 true" in item for item in errors)
 
 
 class TestBusinessLogicWorkflowDedupStrategy:

@@ -19,11 +19,15 @@ import hashlib
 import threading
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.services.json_safe import dump_json_safe
+from app.models.analysis import (
+    REAL_DATAFLOW_EVIDENCE_LIST_FIELDS,
+    REAL_DATAFLOW_PLACEHOLDER_VALUES,
+)
 
 from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
 from .react_parser import parse_react_response
@@ -51,6 +55,28 @@ _TRACE_HANDLER_LOCK = threading.Lock()
 
 _PSEUDO_FUNCTION_NAMES = {"__attribute__", "__declspec"}
 _CONTROL_KEYWORDS = {"if", "for", "while", "switch", "catch", "else", "return"}
+_SINK_REACHABLE_TRUTHY_VALUES = {
+    "true",
+    "1",
+    "yes",
+    "y",
+    "reachable",
+    "triggerable",
+    "can_trigger",
+    "可达",
+    "可触发",
+}
+_SOURCE_SINK_PLACEHOLDER_VALUES = set(REAL_DATAFLOW_PLACEHOLDER_VALUES)
+_SOURCE_SINK_GATE_METADATA_KEYS: Tuple[str, ...] = (
+    "sink_reachable",
+    "upstream_call_chain",
+    "sink_trigger_condition",
+)
+_SOURCE_SINK_GATE_VULNERABILITY_TYPES = {
+    "business_logic",
+    "idor",
+    "auth_bypass",
+}
 
 # === 全局置信度阈值常量 ===
 # 统一所有地方的置信度判定逻辑，避免阈值不一致导致的误判
@@ -96,11 +122,12 @@ VERIFICATION_SYSTEM_PROMPT = """你是 VulHunter 的漏洞验证 Agent，一个*
 ##  降低误报的黄金准则
 
 1. **输入可控且无过滤**：证明用户输入能到达危险函数，且没有有效防御（参数化查询、转义、白名单）
-2. **代码路径可达**：确认函数被外部调用（路由、API、公开方法），否则 confidence ≤ 0.5
-3. **构造稳定 PoC**：confirmed 判定必须提供能稳定触发的 payload 和执行结果
-4. **考虑上下文防御**：检查上游过滤、类型转换、安全配置（HttpOnly、CSP）等
-5. **多 payload 测试**：测试多种变形，绕过简单过滤
-6. **误报分析**：若未触发，分析原因（过滤函数、参数限制、框架转义）并记录
+2. **Source/Sink 必须真实**：`source`/`sink` 不能是占位符；必须有上游调用链与 sink 可触发证据
+3. **代码路径可达**：确认函数被外部调用（路由、API、公开方法），否则 confidence ≤ 0.5
+4. **构造稳定 PoC**：confirmed 判定必须提供能稳定触发的 payload 和执行结果
+5. **考虑上下文防御**：检查上游过滤、类型转换、安全配置（HttpOnly、CSP）等
+6. **多 payload 测试**：测试多种变形，绕过简单过滤
+7. **误报分析**：若未触发，分析原因（过滤函数、参数限制、框架转义）并记录
 
 ═══════════════════════════════════════════════════════════════
 
@@ -721,8 +748,459 @@ class VerificationAgent(BaseAgent):
             return "unknown"
         return "unreachable"
 
+    @staticmethod
+    def _normalize_text_list(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            text = str(value).strip()
+            return [text] if text else []
+        return []
+
+    @staticmethod
+    def _normalize_sink_reachability_flag(value: Any) -> Optional[bool]:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            if value == 1:
+                return True
+            if value == 0:
+                return False
+            return None
+        text = str(value or "").strip().lower()
+        if not text:
+            return None
+        if text in _SINK_REACHABLE_TRUTHY_VALUES:
+            return True
+        if text in {"false", "0", "no", "n", "unreachable", "blocked", "不可达", "不可触发"}:
+            return False
+        return None
+
+    @staticmethod
+    def _is_placeholder_source_or_sink(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        text = str(value or "").strip().lower()
+        if not text:
+            return True
+        if text in _SOURCE_SINK_PLACEHOLDER_VALUES:
+            return True
+        return text.startswith("<") and text.endswith(">")
+
+    @classmethod
+    def _pick_best_text_value(
+        cls,
+        primary: Any,
+        fallback: Any,
+        reject_placeholders: bool = False,
+    ) -> str:
+        for candidate in (primary, fallback):
+            text = str(candidate or "").strip()
+            if not text:
+                continue
+            if reject_placeholders and cls._is_placeholder_source_or_sink(text):
+                continue
+            return text
+        for candidate in (primary, fallback):
+            text = str(candidate or "").strip()
+            if text:
+                return text
+        return ""
+
+    @classmethod
+    def _pick_best_text_list(
+        cls,
+        primary: Any,
+        fallback: Any,
+        min_items: int = 0,
+    ) -> List[str]:
+        primary_list = cls._normalize_text_list(primary)
+        fallback_list = cls._normalize_text_list(fallback)
+        min_required = max(1, int(min_items or 0))
+        if len(primary_list) >= min_required:
+            return primary_list
+        if len(fallback_list) >= min_required:
+            return fallback_list
+        return primary_list or fallback_list
+
+    @staticmethod
+    def _metadata_has_source_sink_signal(payload: Dict[str, Any]) -> bool:
+        metadata_payload = payload.get("finding_metadata")
+        if not isinstance(metadata_payload, dict):
+            return False
+        for key in _SOURCE_SINK_GATE_METADATA_KEYS:
+            value = metadata_payload.get(key)
+            if value not in (None, "", [], {}):
+                return True
+        return False
+
+    @classmethod
+    def _has_source_sink_signal(cls, payload: Dict[str, Any]) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        # 仅在存在 source/sink 门禁元数据或历史门禁结果时触发。
+        # 普通漏洞（如 SQLi/XSS）即使包含 source/sink 字段，也不应被业务逻辑门禁误伤。
+        if cls._metadata_has_source_sink_signal(payload):
+            return True
+        for key in _SOURCE_SINK_GATE_METADATA_KEYS:
+            value = payload.get(key)
+            if value not in (None, "", [], {}):
+                return True
+        verification_payload = payload.get("verification_result")
+        if isinstance(verification_payload, dict):
+            if verification_payload.get("source_sink_authenticity_passed") in {True, False}:
+                return True
+            if verification_payload.get("source_sink_authenticity_errors"):
+                return True
+            nested_metadata = verification_payload.get("finding_metadata")
+            if isinstance(nested_metadata, dict):
+                for key in _SOURCE_SINK_GATE_METADATA_KEYS:
+                    value = nested_metadata.get(key)
+                    if value not in (None, "", [], {}):
+                        return True
+        return False
+
+    @classmethod
+    def _should_enforce_source_sink_authenticity_gate(
+        cls,
+        finding: Dict[str, Any],
+        fallback: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        for payload in (fallback, finding):
+            if not isinstance(payload, dict):
+                continue
+            vulnerability_type = normalize_vulnerability_type(payload.get("vulnerability_type"))
+            if vulnerability_type in _SOURCE_SINK_GATE_VULNERABILITY_TYPES:
+                return True
+            if cls._has_source_sink_signal(payload):
+                return True
+        return False
+
+    @staticmethod
+    def _extract_source_sink_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        extracted: Dict[str, Any] = {}
+        metadata_payload = payload.get("finding_metadata")
+        if isinstance(metadata_payload, dict):
+            extracted.update(metadata_payload)
+        verification_payload = payload.get("verification_result")
+        if isinstance(verification_payload, dict):
+            nested_metadata = verification_payload.get("finding_metadata")
+            if isinstance(nested_metadata, dict):
+                extracted.update(nested_metadata)
+        for metadata_key in _SOURCE_SINK_GATE_METADATA_KEYS:
+            raw_value = payload.get(metadata_key)
+            if raw_value in (None, "", [], {}):
+                continue
+            extracted[metadata_key] = raw_value
+        return extracted
+
+    @classmethod
+    def _validate_source_sink_authenticity(
+        cls,
+        finding: Dict[str, Any],
+        fallback: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, List[str], Dict[str, Any]]:
+        finding_payload = finding if isinstance(finding, dict) else {}
+        fallback_payload = fallback if isinstance(fallback, dict) else {}
+        finding_metadata_raw = cls._extract_source_sink_metadata(finding_payload)
+        fallback_metadata_raw = cls._extract_source_sink_metadata(fallback_payload)
+        merged_metadata: Dict[str, Any] = {}
+
+        source = cls._pick_best_text_value(
+            finding_payload.get("source"),
+            fallback_payload.get("source"),
+            reject_placeholders=True,
+        )
+        sink = cls._pick_best_text_value(
+            finding_payload.get("sink"),
+            fallback_payload.get("sink"),
+            reject_placeholders=True,
+        )
+        attacker_flow = cls._pick_best_text_value(
+            finding_payload.get("attacker_flow"),
+            fallback_payload.get("attacker_flow"),
+        )
+        taint_flow = cls._pick_best_text_list(
+            finding_payload.get("taint_flow"),
+            fallback_payload.get("taint_flow"),
+        )
+        evidence_chain = cls._pick_best_text_list(
+            finding_payload.get("evidence_chain"),
+            fallback_payload.get("evidence_chain"),
+        )
+
+        errors: List[str] = []
+        if not source:
+            raw_source = cls._pick_best_text_value(
+                finding_payload.get("source"),
+                fallback_payload.get("source"),
+            )
+            if raw_source and cls._is_placeholder_source_or_sink(raw_source):
+                errors.append("source 为占位符，无法证明输入来源真实")
+            else:
+                errors.append("source 为空，无法证明输入来源真实")
+        elif cls._is_placeholder_source_or_sink(source):
+            errors.append("source 为占位符，无法证明输入来源真实")
+
+        if not sink:
+            raw_sink = cls._pick_best_text_value(
+                finding_payload.get("sink"),
+                fallback_payload.get("sink"),
+            )
+            if raw_sink and cls._is_placeholder_source_or_sink(raw_sink):
+                errors.append("sink 为占位符，无法证明危险点真实")
+            else:
+                errors.append("sink 为空，无法证明危险点真实")
+        elif cls._is_placeholder_source_or_sink(sink):
+            errors.append("sink 为占位符，无法证明危险点真实")
+
+        sink_reachable = cls._normalize_sink_reachability_flag(finding_metadata_raw.get("sink_reachable"))
+        if sink_reachable is None:
+            sink_reachable = cls._normalize_sink_reachability_flag(fallback_metadata_raw.get("sink_reachable"))
+        if sink_reachable is not True:
+            errors.append("sink_reachable 未明确为 true，无法证明 sink 可触发")
+        else:
+            merged_metadata["sink_reachable"] = True
+
+        upstream_call_chain = cls._pick_best_text_list(
+            finding_metadata_raw.get("upstream_call_chain"),
+            fallback_metadata_raw.get("upstream_call_chain"),
+            min_items=2,
+        )
+        if len(upstream_call_chain) < 2:
+            errors.append("upstream_call_chain 不完整，缺少上游调用链证据")
+        else:
+            merged_metadata["upstream_call_chain"] = upstream_call_chain
+
+        sink_trigger_condition = cls._pick_best_text_value(
+            finding_metadata_raw.get("sink_trigger_condition"),
+            fallback_metadata_raw.get("sink_trigger_condition"),
+        )
+        if not sink_trigger_condition:
+            errors.append("sink_trigger_condition 为空，缺少触发前置条件")
+        else:
+            merged_metadata["sink_trigger_condition"] = sink_trigger_condition
+
+        has_flow_evidence = bool(attacker_flow) or any(
+            bool(cls._normalize_text_list(finding_payload.get(field_name)))
+            or bool(cls._normalize_text_list(fallback_payload.get(field_name)))
+            for field_name in REAL_DATAFLOW_EVIDENCE_LIST_FIELDS
+        )
+        if not has_flow_evidence:
+            errors.append("缺少 flow 证据（attacker_flow / taint_flow / evidence_chain）")
+
+        normalized_context: Dict[str, Any] = {
+            "source": source,
+            "sink": sink,
+            "attacker_flow": attacker_flow,
+            "taint_flow": taint_flow,
+            "evidence_chain": evidence_chain,
+            "finding_metadata": merged_metadata,
+        }
+        return len(errors) == 0, errors, normalized_context
+
+    @classmethod
+    def _apply_source_sink_authenticity_gate(
+        cls,
+        finding: Dict[str, Any],
+        fallback: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        normalized = dict(finding or {})
+        verification_result = (
+            dict(normalized.get("verification_result"))
+            if isinstance(normalized.get("verification_result"), dict)
+            else {}
+        )
+
+        if not cls._should_enforce_source_sink_authenticity_gate(normalized, fallback=fallback):
+            verification_result.pop("source_sink_authenticity_passed", None)
+            verification_result.pop("source_sink_authenticity_errors", None)
+            if verification_result:
+                normalized["verification_result"] = verification_result
+            return normalized
+
+        passed, errors, context = cls._validate_source_sink_authenticity(normalized, fallback=fallback)
+
+        for key in ("source", "sink", "attacker_flow"):
+            value = str(context.get(key) or "").strip()
+            if not value:
+                continue
+            existing = str(normalized.get(key) or "").strip()
+            if key in {"source", "sink"}:
+                if not existing or cls._is_placeholder_source_or_sink(existing):
+                    normalized[key] = value
+            elif not existing:
+                normalized[key] = value
+
+        for list_key in ("taint_flow", "evidence_chain"):
+            normalized_list = cls._normalize_text_list(context.get(list_key))
+            if normalized_list and not cls._normalize_text_list(normalized.get(list_key)):
+                normalized[list_key] = normalized_list
+
+        merged_metadata = context.get("finding_metadata")
+        if isinstance(merged_metadata, dict) and merged_metadata:
+            existing_metadata = (
+                dict(normalized.get("finding_metadata"))
+                if isinstance(normalized.get("finding_metadata"), dict)
+                else {}
+            )
+            existing_metadata.update(merged_metadata)
+            normalized["finding_metadata"] = existing_metadata
+
+        if passed:
+            verification_result["source_sink_authenticity_passed"] = True
+            verification_result.pop("source_sink_authenticity_errors", None)
+            normalized["verification_result"] = verification_result
+            return normalized
+
+        reason = f"source/sink 真实性校验失败: {'; '.join(errors)}"
+
+        normalized["status"] = "false_positive"
+        normalized["verdict"] = "false_positive"
+        normalized["authenticity"] = "false_positive"
+        normalized["reachability"] = "unreachable"
+        normalized["is_verified"] = False
+        normalized["verified_at"] = None
+
+        try:
+            raw_confidence = float(normalized.get("confidence", CONFIDENCE_DEFAULT_FALLBACK))
+        except Exception:
+            raw_confidence = CONFIDENCE_DEFAULT_FALLBACK
+        normalized["confidence"] = max(0.0, min(raw_confidence, CONFIDENCE_THRESHOLD_FALSE_POSITIVE))
+
+        verification_evidence = str(
+            verification_result.get("verification_evidence")
+            or normalized.get("verification_evidence")
+            or normalized.get("description")
+            or ""
+        ).strip()
+        if verification_evidence:
+            verification_evidence = f"{verification_evidence}\n[SourceSinkGate] {reason}"
+        else:
+            verification_evidence = f"[SourceSinkGate] {reason}"
+
+        normalized["verification_evidence"] = verification_evidence
+
+        verification_result.update(
+            {
+                "status": "false_positive",
+                "verdict": "false_positive",
+                "authenticity": "false_positive",
+                "reachability": "unreachable",
+                "confidence": normalized["confidence"],
+                "verification_evidence": verification_evidence,
+                "verification_details": verification_evidence,
+                "source_sink_authenticity_passed": False,
+                "source_sink_authenticity_errors": errors,
+                "verification_reason": "source_sink_authenticity_failed",
+            }
+        )
+        normalized["verification_result"] = verification_result
+        return normalized
+
     def _normalize_vulnerability_key(self, finding: Dict[str, Any]) -> str:
         return normalize_vulnerability_type(finding.get("vulnerability_type"))
+
+    def _build_finding_match_features(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(finding, dict):
+            return {
+                "identity": "",
+                "vulnerability_key": "",
+                "file_path": "",
+                "line_start": 0,
+                "title": "",
+            }
+        file_path, normalized_line_start, _line_end = self._normalize_file_location(finding)
+
+        has_explicit_line = False
+        for line_key in ("line_start", "line"):
+            try:
+                if int(finding.get(line_key)) > 0:
+                    has_explicit_line = True
+                    break
+            except Exception:
+                continue
+        if not has_explicit_line and file_path:
+            # 文件路径中显式包含 `path:line` 时，视为真实定位信息。
+            raw_file_path = str(finding.get("file_path") or finding.get("file") or "").strip()
+            if ":" in raw_file_path:
+                _prefix, suffix = raw_file_path.split(":", 1)
+                token = suffix.split()[0] if suffix.split() else ""
+                has_explicit_line = token.isdigit() and int(token) > 0
+
+        line_start = int(normalized_line_start or 0) if has_explicit_line else 0
+        return {
+            "identity": str(finding.get("finding_identity") or "").strip(),
+            "vulnerability_key": self._normalize_vulnerability_key(finding),
+            "file_path": file_path,
+            "line_start": line_start,
+            "title": str(finding.get("title") or "").strip().lower(),
+        }
+
+    def _select_fallback_finding(
+        self,
+        finding: Dict[str, Any],
+        fallback_findings: List[Dict[str, Any]],
+        used_indexes: set[int],
+        preferred_index: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(finding, dict):
+            return None
+        if not isinstance(fallback_findings, list) or not fallback_findings:
+            return None
+
+        target = self._build_finding_match_features(finding)
+        best_index: Optional[int] = None
+        best_score = -1
+
+        for index, candidate in enumerate(fallback_findings):
+            if index in used_indexes or not isinstance(candidate, dict):
+                continue
+            candidate_features = self._build_finding_match_features(candidate)
+            score = 0
+            if target["identity"] and candidate_features["identity"] and target["identity"] == candidate_features["identity"]:
+                score += 100
+            if (
+                target["vulnerability_key"]
+                and candidate_features["vulnerability_key"]
+                and target["vulnerability_key"] == candidate_features["vulnerability_key"]
+            ):
+                score += 20
+            if target["file_path"] and candidate_features["file_path"] and target["file_path"] == candidate_features["file_path"]:
+                score += 20
+            if target["line_start"] > 0 and candidate_features["line_start"] > 0 and target["line_start"] == candidate_features["line_start"]:
+                score += 20
+            if target["title"] and candidate_features["title"] and target["title"] == candidate_features["title"]:
+                score += 5
+            if preferred_index is not None and index == preferred_index:
+                score += 1
+            if score > best_score:
+                best_score = score
+                best_index = index
+
+        if best_index is None:
+            if (
+                preferred_index is not None
+                and 0 <= preferred_index < len(fallback_findings)
+                and preferred_index not in used_indexes
+                and isinstance(fallback_findings[preferred_index], dict)
+            ):
+                best_index = preferred_index
+            else:
+                return None
+        elif best_score <= 0 and (
+            preferred_index is not None
+            and 0 <= preferred_index < len(fallback_findings)
+            and preferred_index not in used_indexes
+            and isinstance(fallback_findings[preferred_index], dict)
+        ):
+            best_index = preferred_index
+
+        used_indexes.add(best_index)
+        selected = fallback_findings[best_index]
+        return selected if isinstance(selected, dict) else None
 
     def _infer_cwe_id(self, finding: Dict[str, Any]) -> str:
         resolved = resolve_cwe_id(
@@ -1748,33 +2226,36 @@ class VerificationAgent(BaseAgent):
                 }
             )
 
-            repaired_findings.append(
-                {
-                    **merged,
-                    "vulnerability_type": vuln_profile.get("key", "other"),
-                    "title": structured_title,
-                    "display_title": structured_title,
-                    "file_path": resolved_file_path or normalized_file_path,
-                    "line_start": line_start,
-                    "line_end": line_end,
-                    "function_name": effective_function_name,
-                    "verdict": verdict,
-                    "authenticity": verdict,
-                    "reachability": reachability,
-                    "is_verified": verdict in {"confirmed", "likely"},
-                    "cwe_id": cwe_id,
-                    "verification_details": str(evidence),
-                    "verification_evidence": str(evidence),
-                    "verification_result": verification_result,
-                    "function_trigger_flow": flow,
-                    "suggestion": str(suggestion),
-                    "fix_code": fix_code,
-                    "poc": poc_value,
-                    # === 新字段：函数定位状态透明度 ===
-                    "localization_status": localization_status,
-                    "file_readable": file_readable,
-                }
+            repaired_entry = {
+                **merged,
+                "vulnerability_type": vuln_profile.get("key", "other"),
+                "title": structured_title,
+                "display_title": structured_title,
+                "file_path": resolved_file_path or normalized_file_path,
+                "line_start": line_start,
+                "line_end": line_end,
+                "function_name": effective_function_name,
+                "verdict": verdict,
+                "authenticity": verdict,
+                "reachability": reachability,
+                "is_verified": verdict in {"confirmed", "likely"},
+                "cwe_id": cwe_id,
+                "verification_details": str(evidence),
+                "verification_evidence": str(evidence),
+                "verification_result": verification_result,
+                "function_trigger_flow": flow,
+                "suggestion": str(suggestion),
+                "fix_code": fix_code,
+                "poc": poc_value,
+                # === 新字段：函数定位状态透明度 ===
+                "localization_status": localization_status,
+                "file_readable": file_readable,
+            }
+            repaired_entry = self._apply_source_sink_authenticity_gate(
+                repaired_entry,
+                fallback=base,
             )
+            repaired_findings.append(repaired_entry)
 
         summary = final_answer.get("summary")
         if not isinstance(summary, dict):
@@ -2802,7 +3283,14 @@ class VerificationAgent(BaseAgent):
                         return "unreachable"
                     return "unknown"
 
-                for finding in final_result["findings"]:
+                used_fallback_indexes: set[int] = set()
+                for finding_index, finding in enumerate(final_result["findings"]):
+                    fallback_finding = self._select_fallback_finding(
+                        finding,
+                        findings_to_verify,
+                        used_fallback_indexes,
+                        preferred_index=finding_index,
+                    )
                     # === 适配新的verification_result嵌套结构 ===
                     # 优先从verification_result中获取，向后兼容finding层级
                     verification_result = finding.get("verification_result", {})
@@ -2889,6 +3377,10 @@ class VerificationAgent(BaseAgent):
                             else None
                         ),
                     }
+                    verified = self._apply_source_sink_authenticity_gate(
+                        verified,
+                        fallback=fallback_finding,
+                    )
 
                     if not verified.get("recommendation"):
                         verified["recommendation"] = self._get_recommendation(finding.get("vulnerability_type", ""))
@@ -2917,6 +3409,10 @@ class VerificationAgent(BaseAgent):
                         },
                         "is_verified": True,
                     }
+                    fallback_verified = self._apply_source_sink_authenticity_gate(
+                        fallback_verified,
+                        fallback=finding,
+                    )
                     if task_id:
                         ensure_finding_identity(task_id, fallback_verified)
                     verified_findings.append(fallback_verified)
@@ -3214,6 +3710,10 @@ class VerificationAgent(BaseAgent):
         self,
         finding: Dict[str, Any],
     ) -> Dict[str, Any]:
+        finding = self._apply_source_sink_authenticity_gate(
+            dict(finding or {}),
+            fallback=finding if isinstance(finding, dict) else None,
+        )
         verification_payload = finding.get("verification_result")
         if not isinstance(verification_payload, dict):
             verification_payload = {}
@@ -3301,7 +3801,7 @@ class VerificationAgent(BaseAgent):
             "sink": finding.get("sink"),
             "dataflow_path": finding.get("dataflow_path"),
             "status": normalized_status,
-            "is_verified": True,
+            "is_verified": normalized_status in {"verified", "likely"},
             "poc_code": finding.get("poc_code"),
             "cvss_score": finding.get("cvss_score"),
             "cvss_vector": finding.get("cvss_vector"),
