@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import {
 	useCallback,
 	useEffect,
@@ -30,6 +30,10 @@ import {
 	AGENT_AUDIT_FINDINGS_PAGE_SIZE,
 	calculateResponsiveFindingsPageSize,
 	buildFindingTableState,
+	getAgentAuditFindingDisplayStatus,
+	getAgentAuditFindingStatusBadgeClass,
+	getAgentAuditFindingStatusLabel,
+	type AgentAuditFindingDisplayStatus,
 	resolveAgentAuditPaginationTransition,
 	shouldSyncFindingPageFromTableState,
 	shouldResetFindingPage,
@@ -84,6 +88,15 @@ export type RealtimeMergedFindingItem = {
 	timestamp?: string | null;
 	is_verified: boolean;
 };
+
+const ACTIVE_TRUE_BUTTON_CLASS =
+	"cyber-btn-outline h-7 px-2.5 border-emerald-500/70 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/20";
+const IDLE_TRUE_BUTTON_CLASS =
+	"cyber-btn-outline h-7 px-2.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10";
+const ACTIVE_FALSE_BUTTON_CLASS =
+	"cyber-btn-outline h-7 px-2.5 border-rose-500/70 bg-rose-500/15 text-rose-200 hover:bg-rose-500/20";
+const IDLE_FALSE_BUTTON_CLASS =
+	"cyber-btn-outline h-7 px-2.5 border-rose-500/40 text-rose-400 hover:bg-rose-500/10";
 
 function isFalsePositiveFinding(item: RealtimeMergedFindingItem): boolean {
 	return (
@@ -159,6 +172,14 @@ export default function RealtimeFindingsPanel(props: {
 		next: { page: number; pageSize: number },
 		source?: "user" | "layout",
 	) => void;
+	updatingKey?: string | null;
+	onToggleStatus?: (
+		item: RealtimeMergedFindingItem,
+		target: Exclude<AgentAuditFindingDisplayStatus, "open">,
+	) => void;
+	getDisplayStatus?: (
+		item: RealtimeMergedFindingItem,
+	) => AgentAuditFindingDisplayStatus;
 }) {
 	const [internalPage, setInternalPage] = useState(1);
 	const [internalPageSize, setInternalPageSize] = useState(() =>
@@ -375,7 +396,10 @@ export default function RealtimeFindingsPanel(props: {
 										{tableState.hasVisibleConfidence ? (
 											<TableHead className="w-[110px]">置信度</TableHead>
 										) : null}
-										<TableHead className="w-[160px] text-center">
+										<TableHead className="w-[120px] text-center">
+											漏洞状态
+										</TableHead>
+										<TableHead className="w-[280px] text-center">
 											操作
 										</TableHead>
 									</TableRow>
@@ -383,6 +407,18 @@ export default function RealtimeFindingsPanel(props: {
 								<TableBody>
 									{tableState.rows.map((row, index) => {
 										const findingItem = row.raw as RealtimeMergedFindingItem;
+										const statusValue =
+											props.getDisplayStatus?.(findingItem) ??
+											row.statusValue ??
+											getAgentAuditFindingDisplayStatus(findingItem);
+										const rowUpdatePrefix = `${findingItem.id}:`;
+										const rowStatusUpdating = Boolean(
+											props.updatingKey?.startsWith(rowUpdatePrefix),
+										);
+										const verifyUpdating =
+											props.updatingKey === `${findingItem.id}:verified`;
+										const falsePositiveUpdating =
+											props.updatingKey === `${findingItem.id}:false_positive`;
 
 										return (
 											<TableRow
@@ -422,16 +458,72 @@ export default function RealtimeFindingsPanel(props: {
 													</TableCell>
 												) : null}
 												<TableCell className="py-3 text-center">
-													<Button
-														type="button"
-														size="sm"
+													<Badge
 														variant="outline"
-														className="cyber-btn-ghost h-8 px-3"
-														disabled={props.isRunning}
-														onClick={() => props.onOpenDetail(findingItem)}
+														className={`text-[11px] ${getAgentAuditFindingStatusBadgeClass(
+															statusValue,
+														)}`}
 													>
-														{getActionLabel(findingItem)}
-													</Button>
+														{getAgentAuditFindingStatusLabel(statusValue)}
+													</Badge>
+												</TableCell>
+												<TableCell className="py-3 text-center">
+													<div className="flex items-center justify-center gap-1.5 flex-wrap">
+														<Button
+															type="button"
+															size="sm"
+															variant="outline"
+															className="cyber-btn-ghost h-8 px-3"
+															onClick={() => props.onOpenDetail(findingItem)}
+														>
+															{getActionLabel(findingItem)}
+														</Button>
+														<Button
+															type="button"
+															size="sm"
+															variant="outline"
+															className={
+																statusValue === "verified"
+																	? ACTIVE_TRUE_BUTTON_CLASS
+																	: IDLE_TRUE_BUTTON_CLASS
+															}
+															disabled={rowStatusUpdating}
+															aria-pressed={statusValue === "verified"}
+															onClick={() =>
+																props.onToggleStatus?.(findingItem, "verified")
+															}
+														>
+															{verifyUpdating ? (
+																<Loader2 className="w-3 h-3 animate-spin" />
+															) : (
+																"判真"
+															)}
+														</Button>
+														<Button
+															type="button"
+															size="sm"
+															variant="outline"
+															className={
+																statusValue === "false_positive"
+																	? ACTIVE_FALSE_BUTTON_CLASS
+																	: IDLE_FALSE_BUTTON_CLASS
+															}
+															disabled={rowStatusUpdating}
+															aria-pressed={statusValue === "false_positive"}
+															onClick={() =>
+																props.onToggleStatus?.(
+																	findingItem,
+																	"false_positive",
+																)
+															}
+														>
+															{falsePositiveUpdating ? (
+																<Loader2 className="w-3 h-3 animate-spin" />
+															) : (
+																"判假"
+															)}
+														</Button>
+													</div>
 												</TableCell>
 											</TableRow>
 										);

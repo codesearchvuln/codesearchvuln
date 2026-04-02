@@ -60,6 +60,12 @@ class _RequiredKeywordSchema(BaseModel):
     keyword: str
 
 
+class ReconRiskPointInput(BaseModel):
+    file_path: str
+    line_start: int
+    description: str
+
+
 class _SearchLikeTool:
     args_schema = _RequiredKeywordSchema
 
@@ -253,3 +259,34 @@ async def test_tool_result_keeps_native_metadata_for_mcp_fallback_success():
     assert result_event.metadata.get("tool_status") == "completed"
     assert result_event.metadata.get("mcp_fallback_used") is True
     assert result_event.tool_output["metadata"]["render_type"] == "analysis_summary"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_normalizes_nested_pydantic_inputs_before_logging():
+    agent, emitter = _make_agent("demo_tool", _SuccessTool())
+
+    output = await agent.execute_tool(
+        "demo_tool",
+        {
+            "risk_points": [
+                ReconRiskPointInput(
+                    file_path="src/auth.py",
+                    line_start=42,
+                    description="Potential SQL injection",
+                )
+            ]
+        },
+    )
+
+    assert output
+    tool_call_events = _get_events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    assert tool_call_events[0].tool_input == {
+        "risk_points": [
+            {
+                "file_path": "src/auth.py",
+                "line_start": 42,
+                "description": "Potential SQL injection",
+            }
+        ]
+    }

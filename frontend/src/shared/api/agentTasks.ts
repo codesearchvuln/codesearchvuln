@@ -244,6 +244,12 @@ export interface AgentTaskSummary {
   duration_seconds: number | null;
 }
 
+export interface AgentFindingStatusUpdateResponse {
+  message: string;
+  finding_id: string;
+  status: string;
+}
+
 // ============ API Functions ============
 
 /**
@@ -347,6 +353,26 @@ export async function updateAgentFinding(
   data: { status?: string }
 ): Promise<AgentFinding> {
   const response = await apiClient.patch(`/agent-tasks/${taskId}/findings/${findingId}`, data);
+  return response.data;
+}
+
+/**
+ * 更新发现状态
+ */
+export async function updateAgentFindingStatus(
+  taskId: string,
+  findingId: string,
+  status: string,
+): Promise<AgentFindingStatusUpdateResponse> {
+  const response = await apiClient.patch(
+    `/agent-tasks/${taskId}/findings/${findingId}/status`,
+    undefined,
+    {
+      params: {
+        status,
+      },
+    },
+  );
   return response.data;
 }
 

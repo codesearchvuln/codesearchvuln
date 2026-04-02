@@ -42,6 +42,16 @@ function sanitizeCapabilities(values: string[]): string[] {
     .filter((value) => value.length > 0);
 }
 
+function normalizeCatalogKey(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function isUsableSkillCatalogItem(
+  skill: Pick<SkillCatalogItemPayload, "skill_id" | "entrypoint">,
+): boolean {
+  return normalizeCatalogKey(skill.skill_id).length > 0 && normalizeCatalogKey(skill.entrypoint).length > 0;
+}
+
 export function buildExternalToolRows({
   skillCatalog,
   staticSkillCatalog,
@@ -52,8 +62,22 @@ export function buildExternalToolRows({
   const staticCatalogById = new Map(
     staticSkillCatalog.map((item) => [item.id, item] as const),
   );
+  const dedupedSkillCatalog = new Map<string, SkillCatalogItemPayload>();
 
-  return skillCatalog.map((skill) => {
+  for (const skill of skillCatalog) {
+    if (!isUsableSkillCatalogItem(skill)) {
+      continue;
+    }
+    const skillId = normalizeCatalogKey(skill.skill_id);
+    if (!dedupedSkillCatalog.has(skillId)) {
+      dedupedSkillCatalog.set(skillId, {
+        ...skill,
+        skill_id: skillId,
+      });
+    }
+  }
+
+  return Array.from(dedupedSkillCatalog.values()).map((skill) => {
     const staticSkill = staticCatalogById.get(skill.skill_id);
     const fallbackSummary = String(skill.summary || "").trim();
     const capabilities = sanitizeCapabilities(staticSkill?.taskList || []);

@@ -233,19 +233,6 @@ export const LogEntry = memo(function LogEntry({
 						) : null}
 					</div>
 
-					<div className="min-w-0">
-						{item.phaseLabel ? (
-							<span
-								className="block truncate text-xs text-primary"
-								title={item.phaseLabel}
-							>
-								{item.phaseLabel}
-							</span>
-						) : (
-							<span className="text-xs text-muted-foreground">-</span>
-						)}
-					</div>
-
 					<div className="flex justify-start md:justify-start">
 						<button
 							type="button"

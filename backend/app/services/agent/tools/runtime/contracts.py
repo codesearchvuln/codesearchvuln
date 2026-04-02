@@ -18,6 +18,29 @@ class ToolContractViolation(Exception):
 
 class ToolInputContractRegistry:
     @staticmethod
+    def _dump_validated_model(value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            try:
+                return value.model_dump()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        if hasattr(value, "dict"):
+            try:
+                return value.dict()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        if isinstance(value, list):
+            return [ToolInputContractRegistry._dump_validated_model(item) for item in value]
+        if isinstance(value, tuple):
+            return [ToolInputContractRegistry._dump_validated_model(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: ToolInputContractRegistry._dump_validated_model(item)
+                for key, item in value.items()
+            }
+        return value
+
+    @staticmethod
     def allowed_fields(schema: Any) -> set[str]:
         if schema is None:
             return set()
@@ -54,6 +77,10 @@ class ToolInputContractRegistry:
                 error_code="invalid_input",
                 diagnostics=["pydantic_validation_failed"],
             ) from exc
+
+        dumped = cls._dump_validated_model(validated)
+        if isinstance(dumped, dict):
+            return dumped
 
         model_fields = getattr(type(validated), "model_fields", None)
         if isinstance(model_fields, dict):

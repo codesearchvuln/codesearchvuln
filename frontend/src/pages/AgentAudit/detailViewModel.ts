@@ -132,12 +132,20 @@ export interface FindingTableRow {
   confidence: number | null;
   confidenceLabel: string | null;
   confidenceScore: number;
+  statusValue: AgentAuditFindingDisplayStatus;
+  statusLabel: string;
+  statusClassName: string;
   filePath: string;
   line: number | null;
   location: string;
   raw: RealtimeFindingLike;
   stableKey: string;
 }
+
+export type AgentAuditFindingDisplayStatus =
+  | "open"
+  | "verified"
+  | "false_positive";
 
 export interface FindingTableState {
   allRows: RealtimeFindingLike[];
@@ -269,6 +277,48 @@ export function isVisibleVerifiedVulnerability(item: RealtimeFindingLike): boole
     !isFalsePositiveFinding(item) &&
     hasDisplayableConfidence(item)
   );
+}
+
+export function getAgentAuditFindingDisplayStatus(
+  item: RealtimeFindingLike,
+): AgentAuditFindingDisplayStatus {
+  if (isFalsePositiveFinding(item)) return "false_positive";
+
+  const status = String(item.status || "").trim().toLowerCase();
+  const verificationProgress = String(item.verification_progress || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    item.is_verified ||
+    status === "verified" ||
+    status === "likely" ||
+    verificationProgress === "verified"
+  ) {
+    return "verified";
+  }
+
+  return "open";
+}
+
+export function getAgentAuditFindingStatusLabel(
+  status: AgentAuditFindingDisplayStatus,
+): string {
+  if (status === "verified") return "确报";
+  if (status === "false_positive") return "误报";
+  return "待验证";
+}
+
+export function getAgentAuditFindingStatusBadgeClass(
+  status: AgentAuditFindingDisplayStatus,
+): string {
+  if (status === "verified") {
+    return "border-emerald-500/30 bg-emerald-500/15 text-emerald-300";
+  }
+  if (status === "false_positive") {
+    return "border-rose-500/30 bg-rose-500/15 text-rose-300";
+  }
+  return "border-border bg-muted text-muted-foreground";
 }
 
 function normalizeSeverityKey(item: RealtimeFindingLike): string {
@@ -461,6 +511,7 @@ function buildFindingRow(item: RealtimeFindingLike): FindingTableRow {
     typeof item.confidence === "number" && Number.isFinite(item.confidence)
       ? item.confidence
       : null;
+  const statusValue = getAgentAuditFindingDisplayStatus(item);
   const filePath = String(item.file_path || "").trim() || "-";
   const line = toPositiveNumberOrNull(item.line_start);
   const title = String(item.display_title || item.title || "未命名漏洞").trim() || "未命名漏洞";
@@ -476,6 +527,9 @@ function buildFindingRow(item: RealtimeFindingLike): FindingTableRow {
     confidence,
     confidenceLabel: getConfidenceLabel(confidence),
     confidenceScore: getConfidenceScore(confidence),
+    statusValue,
+    statusLabel: getAgentAuditFindingStatusLabel(statusValue),
+    statusClassName: getAgentAuditFindingStatusBadgeClass(statusValue),
     filePath,
     line,
     location: getLocation(item),

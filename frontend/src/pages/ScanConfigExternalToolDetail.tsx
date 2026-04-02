@@ -36,12 +36,11 @@ function buildSkillExamplePrompts(skillId: string): string[] {
     list_files: ["列出和 plist 解析最相关的源文件", "列出 src 目录下的核心 C 文件"],
     get_file_outline: ["概览 src/main.c 的整体职责", "这个文件在 plist 解析流程里扮演什么角色？"],
     get_function_summary: ["总结 plist_from_memory 函数做什么", "帮我理解主解析入口函数的风险点"],
+    locate_enclosing_function: ["src/xplist.c 第 120 行属于哪个函数？", "帮我确认 XML 解析锚点落在哪个函数里"],
     get_symbol_body: ["提取 plist_from_memory 函数源码", "提取主解析入口函数代码"],
     pattern_match: ["搜索是否存在 XML_PARSE_NOENT 风险模式", "帮我匹配危险解析选项"],
     smart_scan: ["请快速扫描 libplist 的高风险区域", "用 smart_scan 看看哪些文件值得优先阅读"],
     quick_audit: ["对 libplist 做一次快速审计", "请总结 libplist 的优先检查点"],
-    think: ["如果我要先理解 libplist 的解析入口，你会怎么规划证据收集顺序？"],
-    reflect: ["如果目前只读了入口文件，下一步还缺哪些证据？"],
   };
   return catalogPrompts[skillId] ?? ["这个 skill 在 libplist 上最适合怎么测试？"];
 }
@@ -220,7 +219,7 @@ function SkillTestBench({
         <div>
           <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">测试台</div>
           <div className="mt-1 text-sm text-muted-foreground">
-            默认项目固定为 {skillDetail.default_test_project_name}，仅允许当前 skill + think / reflect。
+            默认项目固定为 {skillDetail.default_test_project_name}，仅允许当前 skill 和测试 runner 必需的宿主辅助能力。
           </div>
         </div>
         <Badge variant="outline">{running ? "运行中" : skillDetail.test_supported ? "可运行" : "已禁用"}</Badge>

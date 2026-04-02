@@ -32,6 +32,7 @@ import {
   cancelAgentTask,
   getAgentTree,
   getAgentEvents,
+  updateAgentFindingStatus,
   AgentFinding,
   AgentEvent,
 } from "@/shared/api/agentTasks";
@@ -68,6 +69,7 @@ import {
 import {
   fromAgentEvent as agentEventToRealtimeItem,
   fromAgentFinding as agentFindingToRealtimeItem,
+  normalizeDisplaySeverity,
 } from "./realtimeFindingMapper";
 import { mergeRealtimeFindingsBatch } from "./realtimeFindingMerge";
 import {
@@ -89,6 +91,7 @@ import type {
 } from "./types";
 import {
   accumulateTokenUsage,
+  type AgentAuditFindingDisplayStatus,
   resolveAgentAuditBackTarget,
   resolveAgentAuditDetailTitle,
   buildStatsSummary,
@@ -563,6 +566,36 @@ function toDialogFinding(item: RealtimeMergedFindingItem): AgentFinding {
   };
 }
 
+function applyManualStatusToPersistedFinding(
+  finding: AgentFinding,
+  target: Exclude<AgentAuditFindingDisplayStatus, "open">,
+): AgentFinding {
+  return {
+    ...finding,
+    status: target,
+    is_verified: target === "verified",
+    authenticity: target === "false_positive" ? "false_positive" : null,
+  };
+}
+
+function applyManualStatusToRealtimeFinding(
+  item: RealtimeMergedFindingItem,
+  target: Exclude<AgentAuditFindingDisplayStatus, "open">,
+): RealtimeMergedFindingItem {
+  const falsePositive = target === "false_positive";
+  return {
+    ...item,
+    status: target,
+    authenticity: falsePositive ? "false_positive" : null,
+    is_verified: target === "verified",
+    verification_progress: target === "verified" ? "verified" : "pending",
+    display_severity: falsePositive
+      ? "invalid"
+      : normalizeDisplaySeverity(item.severity, false),
+    detailMode: falsePositive ? "false_positive_reason" : "detail",
+  };
+}
+
 function AgentAuditPageContent() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
@@ -627,6 +660,7 @@ function AgentAuditPageContent() {
 
   // Realtime panels state
   const [realtimeFindings, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
+  const [findingStatusUpdatingKey, setFindingStatusUpdatingKey] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [tokenUsage, setTokenUsage] = useState(() => createTokenUsageAccumulator());
   const [statsNow, setStatsNow] = useState(() => new Date());
@@ -729,6 +763,50 @@ function AgentAuditPageContent() {
       setFindingsFilters(nextFilters);
     },
     [],
+  );
+  const handleToggleFindingStatus = useCallback(
+    async (
+      item: RealtimeMergedFindingItem,
+      target: Exclude<AgentAuditFindingDisplayStatus, "open">,
+    ) => {
+      if (!taskId) return;
+
+      const updatingKey = `${item.id}:${target}`;
+      setFindingStatusUpdatingKey(updatingKey);
+      try {
+        await updateAgentFindingStatus(taskId, item.id, target);
+
+        const nextFindings = findings.map((finding) =>
+          finding.id === item.id
+            ? applyManualStatusToPersistedFinding(finding, target)
+            : finding,
+        );
+        setFindings(nextFindings);
+        setRealtimeFindings((prev) =>
+          prev.map((current) =>
+            current.id === item.id
+              ? applyManualStatusToRealtimeFinding(current, target)
+              : current,
+          ),
+        );
+
+        toast.success(target === "verified" ? "已标记为确报" : "已标记为误报");
+      } catch (error) {
+        console.error(error);
+        const message =
+          typeof (error as { response?: { data?: { detail?: string } } })?.response
+            ?.data?.detail === "string"
+            ? (error as { response?: { data?: { detail?: string } } }).response
+                ?.data?.detail
+            : "更新漏洞状态失败";
+        toast.error(message || "更新漏洞状态失败");
+      } finally {
+        setFindingStatusUpdatingKey((current) =>
+          current === updatingKey ? null : current,
+        );
+      }
+    },
+    [findings, setFindings, taskId],
   );
   const selectedAgentNode = useMemo(
     () =>
@@ -3382,6 +3460,8 @@ function AgentAuditPageContent() {
                 page={findingsPagination.page}
                 pageSize={findingsPagination.pageSize}
                 onPaginationChange={handleFindingsPaginationChange}
+                updatingKey={findingStatusUpdatingKey}
+                onToggleStatus={handleToggleFindingStatus}
                 onOpenDetail={(item) =>
                   openFindingDetailPage(
                     item.id,
@@ -3459,7 +3539,6 @@ function AgentAuditPageContent() {
                     <span>时间戳</span>
                     <span>类型标签</span>
                     <span>事件概况</span>
-                    <span>阶段</span>
                     <span>操作</span>
                   </div>
                   <div

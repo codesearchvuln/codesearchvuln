@@ -113,6 +113,20 @@ export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] = [
     pitfalls: ["不要期待返回大段源码。", "如果需要源码主体，改用 get_symbol_body。"],
   },
   {
+    id: "locate_enclosing_function",
+    category: "代码读取与定位",
+    summary: "根据文件与行号定位所属函数及其范围，辅助补全函数级证据。",
+    goal: "在只有文件锚点时快速回到函数边界，避免手动猜测函数范围。",
+    taskList: ["定位所属函数", "返回函数范围", "补全函数级证据锚点"],
+    inputChecklist: [
+      "`file_path` (string, required): 文件路径",
+      "`line` (number, required): 函数内任意锚点行",
+    ],
+    exampleInput:
+      "```json\n{\n  \"file_path\": \"src/time64.c\",\n  \"line\": 132\n}\n```",
+    pitfalls: ["不要在没有明确锚点行时调用。", "定位到函数后仍应继续结合语义分析工具完成验证。"],
+  },
+  {
     id: "get_symbol_body",
     category: "代码读取与定位",
     summary: "提取函数/方法主体源码，只负责源码提取。",
@@ -227,26 +241,6 @@ export const SKILL_TOOLS_CATALOG: SkillToolCatalogItem[] = [
     inputChecklist: ["`title` (string, required): 标题", "`file_path` (string, required): 文件路径"],
     exampleInput: "```json\n{\n  \"title\": \"src/time64.c中asctime64_r栈溢出漏洞\",\n  \"file_path\": \"src/time64.c\"\n}\n```",
     pitfalls: ["不要在未完成验证时创建正式报告。"],
-  },
-  {
-    id: "think",
-    category: "报告与协作编排",
-    summary: "分析、规划与决策工具。",
-    goal: "帮助 Agent 明确下一步动作与取舍。",
-    taskList: ["分析现状", "规划下一步", "输出决策理由"],
-    inputChecklist: ["`thought` (string, required): 思考内容"],
-    exampleInput: "```json\n{\n  \"thought\": \"先补代码证据，再做动态验证\"\n}\n```",
-    pitfalls: ["不要把 think 输出当成最终证据。"],
-  },
-  {
-    id: "reflect",
-    category: "报告与协作编排",
-    summary: "复盘、校验与策略调整工具。",
-    goal: "避免无效重试并及时纠偏。",
-    taskList: ["复盘失败原因", "校验当前假设", "调整执行策略"],
-    inputChecklist: ["`thought` (string, required): 复盘内容"],
-    exampleInput: "```json\n{\n  \"thought\": \"当前证据不足，需要先定位函数范围\"\n}\n```",
-    pitfalls: ["不要在未回看错误信息时机械重试。"],
   },
 ];
 
