@@ -17,12 +17,15 @@ export default defineConfig(({ mode }: ConfigEnv) => {
             identifierNamesGenerator: "hexadecimal",
             renameGlobals: false,        // 不重命名全局：避免破坏 React 运行时
 
-            // 字符串混淆（中等成本，SSE 安全）
-            stringArray: true,
-            stringArrayEncoding: ["base64"],
-            stringArrayThreshold: 0.75,  // 75% 字符串被混淆
-            stringArrayRotate: true,
-            stringArrayShuffle: true,
+            // ⚠️ stringArray 必须关闭：
+            // vite-plugin-javascript-obfuscator v2.x 的 include/exclude 参数被忽略，
+            // 插件实际在所有源文件（含 routes.tsx）的 transform 阶段运行。
+            // stringArray:true 会将 import("@/pages/AgentAudit") 的路径字符串
+            // 编码进字符串数组，导致 Rollup 无法静态分析该动态 import，
+            // 从而不生成对应 chunk，浏览器运行时报
+            // "Failed to resolve module specifier '@/pages/AgentAudit'"
+            stringArray: false,
+
             splitStrings: false,          // 关闭：避免破坏 EventSource URL 构造
 
             // 关闭高风险选项
@@ -39,15 +42,6 @@ export default defineConfig(({ mode }: ConfigEnv) => {
             sourceMap: false,
             target: "browser",
           },
-          // 只混淆应用自身入口 chunk，跳过第三方依赖 chunk
-          include: ["**/assets/index-*.js"],
-          exclude: [
-            "**/assets/vendor-*.js",
-            "**/assets/charts-*.js",
-            "**/assets/ai-*.js",
-            "**/assets/ui-*.js",
-            "**/assets/utils-*.js",
-          ],
         });
       })()
     : null;
