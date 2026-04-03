@@ -154,7 +154,8 @@ services:
       VITE_HMR_CLIENT_PORT: "${VULHUNTER_FRONTEND_PORT:-3000}"
 
   nexus-web:
-    image: ${NEXUS_WEB_IMAGE:-docker.m.daocloud.io/vulhunter/nexus-web-local:latest}
+    image: ${NEXUS_WEB_IMAGE:-vulhunter/nexus-web-local:latest}
+    pull_policy: ${NEXUS_WEB_PULL_POLICY:-build}
     build:
       context: ./nexus-web
       dockerfile: ../docker/nexus-web.Dockerfile
@@ -169,7 +170,8 @@ services:
     restart: always
 
   nexus-itemDetail:
-    image: ${NEXUS_ITEM_DETAIL_IMAGE:-docker.m.daocloud.io/vulhunter/nexus-item-detail-local:latest}
+    image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}
+    pull_policy: ${NEXUS_ITEM_DETAIL_PULL_POLICY:-build}
     build:
       context: ./nexus-itemDetail
       dockerfile: ../docker/nexus-web.Dockerfile
