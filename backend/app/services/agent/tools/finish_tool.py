@@ -134,7 +134,7 @@ class FinishScanTool(AgentTool):
                 logger.warning(f"Failed to update tracer: {e}")
         
         # 获取统计信息
-        stats = agent_registry.get_statistics()
+        stats = agent_registry.get_statistics(task_id=self._get_task_id())
         
         return ToolResult(
             success=True,
@@ -150,6 +150,8 @@ class FinishScanTool(AgentTool):
     
     def _validate_root_agent(self) -> Optional[ToolResult]:
         """验证是否为根Agent"""
+        task_id = self._get_task_id()
+
         # 检查是否有父Agent
         parent_id = agent_registry.get_parent(self.agent_id)
         
@@ -160,7 +162,7 @@ class FinishScanTool(AgentTool):
             )
         
         # 检查是否为注册的根Agent
-        root_id = agent_registry.get_root_agent_id()
+        root_id = agent_registry.get_root_agent_id(task_id=task_id, agent_id=self.agent_id)
         if root_id and root_id != self.agent_id:
             return ToolResult(
                 success=False,
@@ -172,7 +174,7 @@ class FinishScanTool(AgentTool):
     def _check_active_agents(self) -> Optional[ToolResult]:
         """检查是否有活跃的子Agent"""
         try:
-            tree = agent_registry.get_agent_tree()
+            tree = agent_registry.get_agent_tree(task_id=self._get_task_id())
             
             running_agents = []
             waiting_agents = []
@@ -245,7 +247,7 @@ class FinishScanTool(AgentTool):
         all_findings = []
         
         try:
-            tree = agent_registry.get_agent_tree()
+            tree = agent_registry.get_agent_tree(task_id=self._get_task_id())
             
             for agent_id, node in tree["nodes"].items():
                 result = node.get("result")
@@ -275,6 +277,22 @@ class FinishScanTool(AgentTool):
             logger.warning(f"Failed to collect findings: {e}")
         
         return all_findings
+
+    def _get_task_id(self) -> Optional[str]:
+        """获取当前 Agent 所属任务 ID。"""
+        node = agent_registry.get_agent_node(self.agent_id) or {}
+        task_id = str(node.get("task_id") or "").strip()
+        if task_id:
+            return task_id
+
+        if self.agent_state is not None:
+            task_context = getattr(self.agent_state, "task_context", None)
+            if isinstance(task_context, dict):
+                fallback_task_id = str(task_context.get("task_id") or "").strip()
+                if fallback_task_id:
+                    return fallback_task_id
+
+        return None
     
     def _summarize_findings(self, findings: List[Dict[str, Any]]) -> Dict[str, Any]:
         """生成发现摘要"""

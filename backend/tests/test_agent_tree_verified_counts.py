@@ -158,11 +158,17 @@ async def test_get_agent_tree_uses_live_verified_counts_while_task_running(monke
         },
     }
 
-    monkeypatch.setattr(agent_registry, "get_agent_tree", lambda: tree)
+    monkeypatch.setattr(
+        agent_registry,
+        "get_agent_tree",
+        lambda task_id=None: tree if task_id == "task-running" else {"root_agent_id": None, "nodes": {}},
+    )
     monkeypatch.setattr(
         agent_registry,
         "get_statistics",
-        lambda: {"total": 2, "running": 2, "completed": 0, "failed": 0},
+        lambda task_id=None: {"total": 2, "running": 2, "completed": 0, "failed": 0}
+        if task_id == "task-running"
+        else {"total": 0, "running": 0, "completed": 0, "failed": 0},
     )
     monkeypatch.setattr(agent_registry, "get_agent", lambda _agent_id: None)
 

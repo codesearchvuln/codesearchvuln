@@ -396,7 +396,13 @@ async def _execute_agent_task(task_id: str):
             _running_orchestrators[task_id] = orchestrator
             _running_tasks[task_id] = orchestrator  # 兼容旧的取消逻辑
             _running_event_managers[task_id] = event_manager  # 用于 SSE 流
-            
+
+            if hasattr(orchestrator, "configure_trace_logger"):
+                try:
+                    orchestrator.configure_trace_logger(orchestrator.name, task_id)
+                except Exception as exc:
+                    logger.warning("[AgentTask] configure_trace_logger failed for orchestrator: %s", exc)
+
             # 注册 Orchestrator 到 Agent Registry（使用其内置方法）
             orchestrator._register_to_registry(task="Root orchestrator for security audit")
             
@@ -1595,6 +1601,12 @@ async def _execute_agent_task(task_id: str):
                     await _save_agent_tree(save_db, task_id)
             except Exception as save_error:
                 logger.error(f"Failed to save agent tree: {save_error}")
+
+            try:
+                cleared_nodes = agent_registry.clear_task(task_id)
+                logger.debug("Cleared %s runtime agent nodes for task %s", cleared_nodes, task_id)
+            except Exception as clear_error:
+                logger.warning("Failed to clear runtime agent tree for task %s: %s", task_id, clear_error)
 
             # 清理
             _running_orchestrators.pop(task_id, None)

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from sqlalchemy import (
     Column, String, Integer, Float, Text, Boolean,
-    DateTime, ForeignKey, Enum as SQLEnum, JSON, Index, text
+    DateTime, ForeignKey, Enum as SQLEnum, JSON, Index, UniqueConstraint, text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -594,7 +594,7 @@ class AgentTreeNode(Base):
     task_id = Column(String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Agent 信息
-    agent_id = Column(String(50), nullable=False, unique=True, index=True)
+    agent_id = Column(String(50), nullable=False, index=True)
     agent_name = Column(String(255), nullable=False)
     agent_type = Column(String(50), nullable=False)
     
@@ -625,6 +625,7 @@ class AgentTreeNode(Base):
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
+        UniqueConstraint("task_id", "agent_id", name="uq_agent_tree_nodes_task_agent"),
         Index("ix_agent_tree_nodes_task_depth_created", "task_id", "depth", "created_at"),
     )
     

@@ -583,7 +583,10 @@ class BaseAgent(ABC):
             return
         
         logger.debug(f"[AgentTree] 正在注册 Agent: {self.config.name} (id={self._agent_id}, parent={self.parent_id})")
-        
+        task_id = str(getattr(self, "_task_id", "") or "").strip() or None
+        if task_id:
+            self._state.task_context["task_id"] = task_id
+
         agent_registry.register_agent(
             agent_id=self._agent_id,
             agent_name=self.config.name,
@@ -593,13 +596,14 @@ class BaseAgent(ABC):
             agent_instance=self,
             state=self._state,
             knowledge_modules=self.knowledge_modules,
+            task_id=task_id,
         )
         
         # 创建消息队列
         message_bus.create_queue(self._agent_id)
         self._registered = True
         
-        tree = agent_registry.get_agent_tree()
+        tree = agent_registry.get_agent_tree(task_id=task_id)
         logger.debug(f"[AgentTree] Agent 注册完成: {self.config.name}, 当前树节点数: {len(tree['nodes'])}")
     
     def set_parent_id(self, parent_id: str) -> None:

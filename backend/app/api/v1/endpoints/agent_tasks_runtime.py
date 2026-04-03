@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_task import AgentTask, AgentTaskStatus, AgentTreeNode
@@ -588,11 +588,14 @@ async def _save_agent_tree(db: AsyncSession, task_id: str) -> None:
     from app.services.agent.core import agent_registry
 
     try:
-        tree = agent_registry.get_agent_tree()
+        tree = agent_registry.get_agent_tree(task_id=task_id)
         nodes = tree.get("nodes", {})
+
+        await db.execute(delete(AgentTreeNode).where(AgentTreeNode.task_id == task_id))
 
         if not nodes:
             logger.warning(f"[SaveAgentTree] No agent nodes to save for task {task_id}")
+            await db.commit()
             return
 
         logger.info(f"[SaveAgentTree] Saving {len(nodes)} agent nodes for task {task_id}")

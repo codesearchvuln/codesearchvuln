@@ -610,9 +610,9 @@ async def get_agent_tree(
     
     if runner:
         from app.services.agent.core import agent_registry
-        
-        tree = agent_registry.get_agent_tree()
-        stats = agent_registry.get_statistics()
+
+        tree = agent_registry.get_agent_tree(task_id=task_id)
+        stats = agent_registry.get_statistics(task_id=task_id)
         logger.debug(f"[AgentTree API] tree nodes={len(tree.get('nodes', {}))}, root={tree.get('root_agent_id')}")
         logger.debug(f"[AgentTree API] 节点详情: {list(tree.get('nodes', {}).keys())}")
         
