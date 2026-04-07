@@ -8,7 +8,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -497,7 +497,8 @@ async def _execute_agent_task(task_id: str):
                     await event_emitter.emit_warning(
                         "静态预扫未筛选出 ERROR + HIGH/MEDIUM 候选，启动入口点回退流程"
                     )
-                entry = _discover_entry_points_deterministic(
+                entry = await asyncio.to_thread(
+                    _discover_entry_points_deterministic,
                     project_root=normalized_project_root,
                     target_files=task.target_files,
                     exclude_patterns=task.exclude_patterns,
@@ -1889,7 +1890,28 @@ async def _initialize_tools(
     }
 
 
-async def _collect_project_info(
+def _reset_task_workspace_sync(base_path: str) -> None:
+    if os.path.exists(base_path):
+        shutil.rmtree(base_path)
+    os.makedirs(base_path, exist_ok=True)
+
+
+def _extract_zip_project_sync(
+    zip_path: str,
+    base_path: str,
+    check_cancelled: Optional[Callable[[], None]] = None,
+) -> None:
+    import zipfile
+
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        file_list = zip_ref.namelist()
+        for i, file_name in enumerate(file_list):
+            if check_cancelled and i % 50 == 0:
+                check_cancelled()
+            zip_ref.extract(file_name, base_path)
+
+
+def _collect_project_info_sync(
     project_root: str, 
     project_name: str,
     exclude_patterns: Optional[List[str]] = None,
@@ -2008,6 +2030,21 @@ async def _collect_project_info(
     
     return info
 
+
+async def _collect_project_info(
+    project_root: str, 
+    project_name: str,
+    exclude_patterns: Optional[List[str]] = None,
+    target_files: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        _collect_project_info_sync,
+        project_root,
+        project_name,
+        exclude_patterns,
+        target_files,
+    )
+
 async def _get_project_root(
     project: Project,
     task_id: str,
@@ -2027,8 +2064,6 @@ async def _get_project_root(
     Raises:
         RuntimeError: 当项目文件获取失败时
     """
-    import zipfile
-
     # 辅助函数：发送事件
     async def emit(message: str, level: str = "info"):
         if event_emitter:
@@ -2047,9 +2082,7 @@ async def _get_project_root(
     base_path = f"/tmp/VulHunter/{task_id}"
 
     # 确保目录存在且为空
-    if os.path.exists(base_path):
-        shutil.rmtree(base_path)
-    os.makedirs(base_path, exist_ok=True)
+    await asyncio.to_thread(_reset_task_workspace_sync, base_path)
 
     # 在开始任何操作前检查取消
     check_cancelled()
@@ -2067,12 +2100,12 @@ async def _get_project_root(
     if zip_path and os.path.exists(zip_path):
         try:
             check_cancelled()
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                file_list = zip_ref.namelist()
-                for i, file_name in enumerate(file_list):
-                    if i % 50 == 0:
-                        check_cancelled()
-                    zip_ref.extract(file_name, base_path)
+            await asyncio.to_thread(
+                _extract_zip_project_sync,
+                zip_path,
+                base_path,
+                check_cancelled,
+            )
             logger.info("Extracted ZIP project %s to %s", project.id, base_path)
             await emit("ZIP 文件解压完成")
         except Exception as exc:

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import shutil
@@ -296,8 +297,8 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
         report_file = output_dir / "report.json"
 
         try:
-            shutil.rmtree(project_dir, ignore_errors=True)
-            copy_project_tree_to_scan_dir(project_root, project_dir)
+            await asyncio.to_thread(shutil.rmtree, project_dir, True)
+            await asyncio.to_thread(copy_project_tree_to_scan_dir, project_root, project_dir)
 
             cmd = [
                 "phpstan",

@@ -166,8 +166,8 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         ensure_scan_logs_dir("yasa-bootstrap", task_id)
         meta_dir = Path(workspace_dir) / "meta"
         meta_dir.mkdir(parents=True, exist_ok=True)
-        shutil.rmtree(project_dir, ignore_errors=True)
-        copy_project_tree_to_scan_dir(project_root, project_dir)
+        await asyncio.to_thread(shutil.rmtree, project_dir, True)
+        await asyncio.to_thread(copy_project_tree_to_scan_dir, project_root, project_dir)
         checker_pack_ids = [self.profile["checker_pack"]]
         checker_ids: List[str] | None = None
         if self.custom_rule_config is not None:

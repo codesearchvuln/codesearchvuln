@@ -270,6 +270,19 @@ class SmartScanTool(AgentTool):
         max_files: int, 
         quick_mode: bool
     ) -> List[str]:
+        return await asyncio.to_thread(
+            self._collect_files_sync,
+            target,
+            max_files,
+            quick_mode,
+        )
+
+    def _collect_files_sync(
+        self, 
+        target: str, 
+        max_files: int, 
+        quick_mode: bool
+    ) -> List[str]:
         """收集要扫描的文件"""
         full_path = os.path.normpath(os.path.join(self.project_root, target))
         
@@ -343,6 +356,17 @@ class SmartScanTool(AgentTool):
         return files
     
     async def _scan_file(
+        self, 
+        file_path: str,
+        focus_vulnerabilities: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._scan_file_sync,
+            file_path,
+            focus_vulnerabilities,
+        )
+
+    def _scan_file_sync(
         self, 
         file_path: str,
         focus_vulnerabilities: Optional[List[str]] = None
@@ -574,6 +598,17 @@ class QuickAuditTool(AgentTool):
         file_path: str,
         deep_analysis: bool = True,
         **kwargs
+    ) -> ToolResult:
+        return await asyncio.to_thread(
+            self._execute_sync,
+            file_path,
+            deep_analysis,
+        )
+
+    def _execute_sync(
+        self,
+        file_path: str,
+        deep_analysis: bool = True,
     ) -> ToolResult:
         """执行快速审计"""
         full_path = os.path.join(self.project_root, file_path)

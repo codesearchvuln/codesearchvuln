@@ -9,6 +9,7 @@
 - 更好的输出格式化
 """
 
+import asyncio
 import os
 import re
 from typing import Optional, List, Dict, Any
@@ -366,6 +367,11 @@ class PatternMatchTool(AgentTool):
     @property
     def args_schema(self):
         return PatternMatchInput
+
+    @staticmethod
+    def _read_file_text_sync(full_path: str) -> str:
+        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+            return f.read()
     
     async def _execute(
         self,
@@ -403,16 +409,16 @@ class PatternMatchTool(AgentTool):
                 )
 
             if os.path.isdir(full_path):
-                return self._scan_directory(
-                    full_path=full_path,
-                    scan_root=scan_file,
-                    pattern_types=normalized_pattern_types,
-                    language=language,
+                return await asyncio.to_thread(
+                    self._scan_directory,
+                    full_path,
+                    scan_file,
+                    normalized_pattern_types,
+                    language,
                 )
 
             try:
-                with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    code = f.read()
+                code = await asyncio.to_thread(self._read_file_text_sync, full_path)
                 file_path = scan_file
             except Exception as e:
                 return ToolResult(

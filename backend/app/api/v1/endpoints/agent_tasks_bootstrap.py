@@ -56,6 +56,14 @@ from app.services.yasa_language import (
 logger = logging.getLogger(__name__)
 
 
+async def _prepare_scan_project_dir_async(
+    project_root: str,
+    project_dir: str | Path,
+) -> None:
+    await asyncio.to_thread(shutil.rmtree, project_dir, True)
+    await asyncio.to_thread(copy_project_tree_to_scan_dir, project_root, project_dir)
+
+
 _VERIFICATION_LEVEL_ALIASES = {
     "analysis_with_poc_plan": "analysis_with_poc_plan",
     "analysis_only": "analysis_with_poc_plan",
@@ -573,8 +581,7 @@ async def _run_bootstrap_gitleaks_scan(
     report_path = output_dir / "report.json"
 
     try:
-        shutil.rmtree(project_dir, ignore_errors=True)
-        copy_project_tree_to_scan_dir(project_root, project_dir)
+        await _prepare_scan_project_dir_async(project_root, project_dir)
 
         cmd = [
             "gitleaks",
