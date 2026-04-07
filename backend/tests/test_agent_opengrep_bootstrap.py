@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -952,3 +953,154 @@ async def test_prepare_embedded_bootstrap_yasa_rejects_disabled_rule_config():
             yasa_enabled=True,
             yasa_rule_config_id="cfg-2",
         )
+
+
+@pytest.mark.asyncio
+async def test_embedded_bootstrap_logs_opengrep_start_and_success(monkeypatch, caplog):
+    active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="HIGH")]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult(active_rules))
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    caplog.set_level(logging.INFO, logger="app.api.v1.endpoints.agent_tasks_bootstrap")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks.OpenGrepBootstrapScanner.scan",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                total_findings=1,
+                findings=[
+                    {
+                        "id": "og-1",
+                        "title": "danger",
+                        "description": "danger",
+                        "file_path": "src/a.py",
+                        "line_start": 6,
+                        "line_end": 6,
+                        "severity": "ERROR",
+                        "confidence": "HIGH",
+                        "vulnerability_type": "rule-1",
+                        "source": "opengrep_bootstrap",
+                    }
+                ],
+            )
+        ),
+    )
+
+    await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        opengrep_enabled=True,
+        bandit_enabled=False,
+        gitleaks_enabled=False,
+        phpstan_enabled=False,
+        yasa_enabled=False,
+    )
+
+    assert "[EmbeddedBootstrap][OpenGrep] start project_root=/tmp/project" in caplog.text
+    assert (
+        "[EmbeddedBootstrap][OpenGrep] success project_root=/tmp/project "
+        "total_findings=1 candidate_count=1"
+    ) in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_embedded_bootstrap_logs_phpstan_start_and_success(monkeypatch, caplog):
+    active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="HIGH")]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult(active_rules))
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    caplog.set_level(logging.INFO, logger="app.api.v1.endpoints.agent_tasks_bootstrap")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks.OpenGrepBootstrapScanner.scan",
+        AsyncMock(return_value=SimpleNamespace(total_findings=0, findings=[])),
+    )
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks.PhpstanBootstrapScanner.scan",
+        AsyncMock(return_value=SimpleNamespace(total_findings=2, findings=[])),
+    )
+
+    _, _, source = await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        opengrep_enabled=True,
+        bandit_enabled=False,
+        gitleaks_enabled=False,
+        phpstan_enabled=True,
+        yasa_enabled=False,
+    )
+
+    assert source == "embedded_opengrep_phpstan"
+    assert "[EmbeddedBootstrap][PHPStan] start project_root=/tmp/project" in caplog.text
+    assert (
+        "[EmbeddedBootstrap][PHPStan] success project_root=/tmp/project "
+        "total_findings=2 candidate_count=0"
+    ) in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_embedded_bootstrap_logs_error_on_gitleaks_failure(monkeypatch, caplog):
+    db = AsyncMock()
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    caplog.set_level(logging.INFO, logger="app.api.v1.endpoints.agent_tasks_bootstrap")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap._run_bootstrap_gitleaks_scan",
+        AsyncMock(side_effect=RuntimeError("gitleaks bootstrap failure")),
+    )
+
+    with pytest.raises(RuntimeError, match="Gitleaks 预处理失败"):
+        await _prepare_embedded_bootstrap_findings(
+            db=db,
+            project_root="/tmp/project",
+            event_emitter=event_emitter,
+            opengrep_enabled=False,
+            bandit_enabled=False,
+            gitleaks_enabled=True,
+            phpstan_enabled=False,
+            yasa_enabled=False,
+        )
+
+    assert "[EmbeddedBootstrap][Gitleaks] error project_root=/tmp/project" in caplog.text
+    assert "gitleaks bootstrap failure" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_embedded_bootstrap_logs_yasa_skipped(caplog):
+    db = AsyncMock()
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    caplog.set_level(logging.INFO, logger="app.api.v1.endpoints.agent_tasks_bootstrap")
+
+    _, _, source = await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        programming_languages='["php"]',
+        opengrep_enabled=False,
+        bandit_enabled=False,
+        gitleaks_enabled=False,
+        phpstan_enabled=False,
+        yasa_enabled=True,
+    )
+
+    assert source == "embedded_yasa"
+    assert "[EmbeddedBootstrap][YASA] skipped project_root=/tmp/project" in caplog.text
+    assert "YASA 引擎仅支持 Java / Go / TypeScript / Python 项目" in caplog.text

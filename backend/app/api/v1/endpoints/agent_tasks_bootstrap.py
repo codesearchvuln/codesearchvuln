@@ -644,6 +644,58 @@ def _dedupe_bootstrap_findings(
     return deduped
 
 
+def _log_embedded_bootstrap_start(tool_name: str, project_root: str) -> None:
+    logger.info(
+        "[EmbeddedBootstrap][%s] start project_root=%s",
+        tool_name,
+        project_root,
+    )
+
+
+def _log_embedded_bootstrap_success(
+    tool_name: str,
+    project_root: str,
+    total_findings: int,
+    candidate_count: int,
+) -> None:
+    logger.info(
+        "[EmbeddedBootstrap][%s] success project_root=%s total_findings=%d candidate_count=%d",
+        tool_name,
+        project_root,
+        int(total_findings or 0),
+        int(candidate_count or 0),
+    )
+
+
+def _log_embedded_bootstrap_error(
+    tool_name: str,
+    project_root: str,
+    message: str,
+    *,
+    exc_info: bool = True,
+) -> None:
+    logger.error(
+        "[EmbeddedBootstrap][%s] error project_root=%s reason=%s",
+        tool_name,
+        project_root,
+        message,
+        exc_info=exc_info,
+    )
+
+
+def _log_embedded_bootstrap_skipped(
+    tool_name: str,
+    project_root: str,
+    reason: str,
+) -> None:
+    logger.info(
+        "[EmbeddedBootstrap][%s] skipped project_root=%s reason=%s",
+        tool_name,
+        project_root,
+        reason,
+    )
+
+
 async def _prepare_embedded_bootstrap_findings(
     db: AsyncSession,
     project_root: str,
@@ -684,11 +736,18 @@ async def _prepare_embedded_bootstrap_findings(
         return [], None, "disabled_empty_seed"
 
     if opengrep_enabled:
+        _log_embedded_bootstrap_start("OpenGrep", project_root)
         active_rules_result = await db.execute(
             select(OpengrepRule).where(OpengrepRule.is_active == True)
         )
         active_rules = active_rules_result.scalars().all()
         if not active_rules:
+            _log_embedded_bootstrap_error(
+                "OpenGrep",
+                project_root,
+                "当前没有启用规则",
+                exc_info=False,
+            )
             if event_emitter:
                 await event_emitter.emit_error(
                     "OpenGrep 预处理失败：当前没有启用规则，无法继续智能审计"
@@ -710,10 +769,12 @@ async def _prepare_embedded_bootstrap_findings(
             scanner = OpenGrepBootstrapScanner(active_rules=active_rules)
             scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
+            _log_embedded_bootstrap_error("OpenGrep", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error("OpenGrep 预处理失败：未安装 opengrep")
             raise RuntimeError("OpenGrep 预处理失败：未安装 opengrep") from exc
         except Exception as exc:
+            _log_embedded_bootstrap_error("OpenGrep", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error(f"OpenGrep 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"OpenGrep 预处理失败：{str(exc)[:200]}") from exc
@@ -732,8 +793,15 @@ async def _prepare_embedded_bootstrap_findings(
             normalized_opengrep_findings,
             exclude_patterns=exclude_patterns,
         )
+        _log_embedded_bootstrap_success(
+            "OpenGrep",
+            project_root,
+            opengrep_total_findings,
+            len(opengrep_candidates),
+        )
 
     if bandit_enabled:
+        _log_embedded_bootstrap_start("Bandit", project_root)
         if event_emitter:
             await event_emitter.emit_info(
                 "🧪 Bandit 内嵌预扫开始",
@@ -749,6 +817,7 @@ async def _prepare_embedded_bootstrap_findings(
             bandit_rule_ids = await _resolve_bandit_bootstrap_rule_ids(db)
         except Exception as exc:
             message = str(exc)[:200]
+            _log_embedded_bootstrap_error("Bandit", project_root, message)
             if event_emitter:
                 await event_emitter.emit_error(message)
             raise RuntimeError(message) from exc
@@ -756,10 +825,12 @@ async def _prepare_embedded_bootstrap_findings(
             scanner = BanditBootstrapScanner(rule_ids=bandit_rule_ids)
             scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
+            _log_embedded_bootstrap_error("Bandit", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error("Bandit 预处理失败：未安装 bandit")
             raise RuntimeError("Bandit 预处理失败：未安装 bandit") from exc
         except Exception as exc:
+            _log_embedded_bootstrap_error("Bandit", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error(f"Bandit 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"Bandit 预处理失败：{str(exc)[:200]}") from exc
@@ -778,8 +849,15 @@ async def _prepare_embedded_bootstrap_findings(
             normalized_bandit_findings,
             exclude_patterns=exclude_patterns,
         )
+        _log_embedded_bootstrap_success(
+            "Bandit",
+            project_root,
+            bandit_total_findings,
+            len(bandit_candidates),
+        )
 
     if gitleaks_enabled:
+        _log_embedded_bootstrap_start("Gitleaks", project_root)
         if event_emitter:
             await event_emitter.emit_info(
                 "🧪 Gitleaks 内嵌预扫开始",
@@ -794,10 +872,12 @@ async def _prepare_embedded_bootstrap_findings(
         try:
             parsed_gitleaks_findings = await _run_bootstrap_gitleaks_scan(project_root)
         except FileNotFoundError as exc:
+            _log_embedded_bootstrap_error("Gitleaks", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error("Gitleaks 预处理失败：未安装 gitleaks")
             raise RuntimeError("Gitleaks 预处理失败：未安装 gitleaks") from exc
         except Exception as exc:
+            _log_embedded_bootstrap_error("Gitleaks", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error(f"Gitleaks 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"Gitleaks 预处理失败：{str(exc)[:200]}") from exc
@@ -812,8 +892,15 @@ async def _prepare_embedded_bootstrap_findings(
             normalized_gitleaks_findings,
             exclude_patterns=exclude_patterns,
         )
+        _log_embedded_bootstrap_success(
+            "Gitleaks",
+            project_root,
+            gitleaks_total_findings,
+            len(gitleaks_candidates),
+        )
 
     if phpstan_enabled:
+        _log_embedded_bootstrap_start("PHPStan", project_root)
         if event_emitter:
             await event_emitter.emit_info(
                 "🧪 PHPStan 内嵌预扫开始",
@@ -829,10 +916,12 @@ async def _prepare_embedded_bootstrap_findings(
             scanner = PhpstanBootstrapScanner(level=8)
             scan_result = await scanner.scan(project_root)
         except FileNotFoundError as exc:
+            _log_embedded_bootstrap_error("PHPStan", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error("PHPStan 预处理失败：未安装 phpstan")
             raise RuntimeError("PHPStan 预处理失败：未安装 phpstan") from exc
         except Exception as exc:
+            _log_embedded_bootstrap_error("PHPStan", project_root, str(exc))
             if event_emitter:
                 await event_emitter.emit_error(f"PHPStan 预处理失败：{str(exc)[:160]}")
             raise RuntimeError(f"PHPStan 预处理失败：{str(exc)[:200]}") from exc
@@ -851,10 +940,17 @@ async def _prepare_embedded_bootstrap_findings(
             normalized_phpstan_findings,
             exclude_patterns=exclude_patterns,
         )
+        _log_embedded_bootstrap_success(
+            "PHPStan",
+            project_root,
+            phpstan_total_findings,
+            len(phpstan_candidates),
+        )
 
     if yasa_enabled:
         if is_yasa_blocked_project_language(programming_languages) and not str(yasa_rule_config_id or "").strip():
             skip_reason = "YASA 引擎仅支持 Java / Go / TypeScript / Python 项目"
+            _log_embedded_bootstrap_skipped("YASA", project_root, skip_reason)
             if event_emitter:
                 await event_emitter.emit_info(
                     skip_reason,
@@ -889,6 +985,7 @@ async def _prepare_embedded_bootstrap_findings(
                 skip_reason = (
                     f"YASA 已跳过：未检测到可支持语言（支持 {YASA_SUPPORTED_LANGUAGES_TEXT}）"
                 )
+                _log_embedded_bootstrap_skipped("YASA", project_root, skip_reason)
                 if event_emitter:
                     await event_emitter.emit_info(
                         skip_reason,
@@ -905,6 +1002,7 @@ async def _prepare_embedded_bootstrap_findings(
                 yasa_candidates = []
                 yasa_total_findings = 0
             else:
+                _log_embedded_bootstrap_start("YASA", project_root)
                 if event_emitter:
                     await event_emitter.emit_info(
                         "🧪 YASA 内嵌预扫开始",
@@ -928,10 +1026,12 @@ async def _prepare_embedded_bootstrap_findings(
                     )
                     scan_result = await scanner.scan(project_root)
                 except FileNotFoundError as exc:
+                    _log_embedded_bootstrap_error("YASA", project_root, str(exc))
                     if event_emitter:
                         await event_emitter.emit_error("YASA 预处理失败：未安装 yasa")
                     raise RuntimeError("YASA 预处理失败：未安装 yasa") from exc
                 except Exception as exc:
+                    _log_embedded_bootstrap_error("YASA", project_root, str(exc))
                     if event_emitter:
                         await event_emitter.emit_error(f"YASA 预处理失败：{str(exc)[:160]}")
                     raise RuntimeError(f"YASA 预处理失败：{str(exc)[:200]}") from exc
@@ -949,6 +1049,12 @@ async def _prepare_embedded_bootstrap_findings(
                 yasa_candidates = _filter_bootstrap_findings(
                     normalized_yasa_findings,
                     exclude_patterns=exclude_patterns,
+                )
+                _log_embedded_bootstrap_success(
+                    "YASA",
+                    project_root,
+                    yasa_total_findings,
+                    len(yasa_candidates),
                 )
 
     merged_candidates = _dedupe_bootstrap_findings(
