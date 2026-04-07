@@ -411,6 +411,22 @@ def _parse_rule_config_checker_ids(rule_config_payload: Any) -> List[str]:
     return deduplicated
 
 
+def _looks_like_codeql_payload(payload_text: str, filename: Optional[str] = None) -> bool:
+    normalized_name = str(filename or "").strip().lower()
+    if normalized_name.endswith(".ql") or normalized_name.endswith(".qls"):
+        return True
+
+    normalized = str(payload_text or "").lower()
+    indicators = (
+        "import semmle.",
+        "@kind problem",
+        "@id ",
+        "select ",
+        "qlpack.yml",
+    )
+    return any(token in normalized for token in indicators)
+
+
 def _normalize_checker_values(values: Optional[List[str]]) -> List[str]:
     if not values:
         return []
@@ -1457,6 +1473,18 @@ async def import_yasa_rule_config(
 
     if not payload_text:
         raise HTTPException(status_code=400, detail="rule_config_json 或 rule_config_file 必须提供")
+
+    if _looks_like_codeql_payload(
+        payload_text,
+        filename=getattr(rule_config_file, "filename", None),
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "不支持直接导入 CodeQL 规则文件（.ql/.qls）。"
+                "请导入 YASA rule-config JSON（必须包含 checkerIds）"
+            ),
+        )
 
     try:
         rule_config_payload = json.loads(payload_text)

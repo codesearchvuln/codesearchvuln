@@ -109,6 +109,26 @@ async def test_import_yasa_rule_config_uses_snapshot_catalog(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_import_yasa_rule_config_rejects_codeql_payload_with_clear_message():
+    db = _FakeDb()
+    with pytest.raises(static_tasks_yasa.HTTPException) as exc_info:
+        await static_tasks_yasa.import_yasa_rule_config(
+            name="codeql-demo",
+            description="demo",
+            language="golang",
+            checker_pack_ids=None,
+            checker_ids=None,
+            rule_config_json='import semmle.code.cpp.security.BufferAccess\nselect 1',
+            rule_config_file=None,
+            db=db,  # type: ignore[arg-type]
+            current_user=_mock_user(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "CodeQL" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_update_yasa_rule_config_uses_snapshot_catalog(monkeypatch):
     monkeypatch.setattr(
         static_tasks_yasa,
