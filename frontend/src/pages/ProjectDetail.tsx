@@ -896,7 +896,7 @@ export default function ProjectDetail() {
 			<div className="relative z-10">
 				<iframe
 					ref={nexusIframeRef}
-					src="http://localhost:5175"
+          src={`http://${window.location.hostname}:5175`}
 					title="Nexus-itemDetail"
 					className="w-full border-0 rounded-lg"
 					style={{ height: '600px' }}

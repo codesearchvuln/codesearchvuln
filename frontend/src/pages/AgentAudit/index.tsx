@@ -67,7 +67,7 @@ export function HomeScanCards() {
       <div className="absolute inset-0 z-10">
         <iframe
           ref={iframeRef}
-          src="http://localhost:5174"
+          src={`http://${window.location.hostname}:5174`}
           title="GitNexus"
           className="w-full h-full border-0 pointer-events-auto"
         />
