@@ -322,7 +322,10 @@ export function AuditDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[88vh] overflow-hidden flex flex-col">
+      <DialogContent
+        aria-describedby={undefined}
+        className="max-w-5xl h-[88vh] overflow-hidden flex flex-col"
+      >
         <DialogHeader className="border-b border-border pb-3">
           <div className="flex items-center justify-between gap-3">
             <DialogTitle className="flex items-center gap-2">

@@ -551,6 +551,7 @@ function AdvancedConfigDialog(props: {
 	return (
 		<Dialog open={props.open} onOpenChange={props.onOpenChange}>
 			<DialogContent
+				aria-describedby={undefined}
 				showCloseButton={false}
 				className="!w-[min(92vw,980px)] !max-w-none h-[80vh] p-0 gap-0 flex flex-col cyber-dialog border border-border rounded-lg"
 			>

@@ -553,7 +553,13 @@ export function YasaRuntimeConfigDialog({
 }: YasaRuntimeConfigDialogProps) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="!w-[min(92vw,760px)] !max-w-none p-0 gap-0 cyber-dialog border border-border rounded-lg">
+			<DialogContent
+				aria-describedby={undefined}
+				className="!w-[min(92vw,760px)] !max-w-none p-0 gap-0 cyber-dialog border border-border rounded-lg"
+			>
+				<DialogHeader className="sr-only">
+					<DialogTitle>YASA 运行配置</DialogTitle>
+				</DialogHeader>
 				<YasaRuntimeConfigContent
 					{...runtimeConfigContent}
 					onRequestClose={() => onOpenChange(false)}
@@ -1081,7 +1087,10 @@ export default function YasaRules({
 			</div>
 
 			<Dialog open={showDetail} onOpenChange={setShowDetail}>
-				<DialogContent className="!w-[min(92vw,980px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
+				<DialogContent
+					aria-describedby={undefined}
+					className="!w-[min(92vw,980px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
+				>
 					<DialogHeader className="px-6 pt-4 flex-shrink-0 border-b border-border bg-muted/30">
 						<DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
 							<Code2 className="w-5 h-5 text-primary" />
@@ -1120,7 +1129,10 @@ export default function YasaRules({
 				</DialogContent>
 			</Dialog>
 			<Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-				<DialogContent className="cyber-dialog max-w-3xl border border-border">
+				<DialogContent
+					aria-describedby={undefined}
+					className="cyber-dialog max-w-3xl border border-border"
+				>
 					<DialogHeader>
 						<DialogTitle>导入 YASA 自定义规则配置</DialogTitle>
 					</DialogHeader>

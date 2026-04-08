@@ -772,7 +772,10 @@ export default function PhpstanRules({
 					}
 				}}
 			>
-				<DialogContent className="!w-[min(90vw,900px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
+				<DialogContent
+					aria-describedby={undefined}
+					className="!w-[min(90vw,900px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
+				>
 					<DialogHeader className="px-6 pt-4 flex-shrink-0">
 						<DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
 							<Code className="w-5 h-5 text-primary" />

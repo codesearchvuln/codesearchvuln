@@ -555,6 +555,7 @@ export default function ProjectTaskFindingsDialog({
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent
+				aria-describedby={undefined}
 				showCloseButton={false}
 				className="!w-[min(96vw,1200px)] !max-w-none max-h-[88vh] overflow-hidden flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
 			>

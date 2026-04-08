@@ -320,6 +320,7 @@ export default function CreateProjectDialog({
 			}}
 		>
 			<DialogContent
+				aria-describedby={undefined}
 				className="!w-[min(92vw,760px)] !max-w-none max-h-[88vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
 				showCloseButton={!uploading}
 			>

@@ -267,7 +267,10 @@ export default function CreateProjectScanDialogContent({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!w-[min(92vw,760px)] !max-w-none max-h-[88vh] p-0 gap-0 flex flex-col cyber-dialog border border-border rounded-lg">
+      <DialogContent
+        aria-describedby={undefined}
+        className="!w-[min(92vw,760px)] !max-w-none max-h-[88vh] p-0 gap-0 flex flex-col cyber-dialog border border-border rounded-lg"
+      >
         <DialogHeader className="px-6 py-4 border-b border-border bg-muted">
           <DialogTitle className="flex items-center gap-3 font-mono">
             <div className="p-2 rounded border border-sky-500/30 bg-sky-500/10">

@@ -757,7 +757,10 @@ export default function CreateScanTaskDialog({
 	return (
 		<>
 			<Dialog open={open} onOpenChange={onOpenChange}>
-				<DialogContent className="!w-[min(90vw,520px)] !max-w-none max-h-[85vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
+				<DialogContent
+					aria-describedby={undefined}
+					className="!w-[min(90vw,520px)] !max-w-none max-h-[85vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
+				>
 					{/* Header */}
 					<DialogHeader className="px-5 py-4 border-b border-border flex-shrink-0 bg-muted">
 						<DialogTitle className="flex items-center gap-3 font-mono text-foreground">

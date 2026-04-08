@@ -362,7 +362,10 @@ export const ReportExportDialog = memo(function ReportExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[90vh] bg-background border-border p-0 gap-0 overflow-hidden shadow-2xl">
+      <DialogContent
+        aria-describedby={undefined}
+        className="max-w-5xl h-[90vh] bg-background border-border p-0 gap-0 overflow-hidden shadow-2xl"
+      >
         <div className="relative px-6 py-5 border-b border-border bg-card">
           <DialogHeader className="relative">
             <div className="flex items-center justify-between">

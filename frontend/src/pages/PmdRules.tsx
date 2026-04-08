@@ -739,7 +739,10 @@ export default function PmdRules({
 			{/* </div> */}
 
 			<Dialog open={showDetail} onOpenChange={setShowDetail}>
-				<DialogContent className="!w-[min(92vw,980px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg">
+				<DialogContent
+					aria-describedby={undefined}
+					className="!w-[min(92vw,980px)] !max-w-none max-h-[90vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
+				>
 					<DialogHeader className="px-6 pt-4 flex-shrink-0 border-b border-border bg-muted/30">
 						<DialogTitle className="font-mono text-lg uppercase tracking-wider flex items-center gap-2 text-foreground">
 							<Code2 className="w-5 h-5 text-primary" />
@@ -774,7 +777,10 @@ export default function PmdRules({
 				</DialogContent>
 			</Dialog>
 			<Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-				<DialogContent className="cyber-dialog max-w-3xl border border-border">
+				<DialogContent
+					aria-describedby={undefined}
+					className="cyber-dialog max-w-3xl border border-border"
+				>
 					<DialogHeader>
 						<DialogTitle>导入自定义规则</DialogTitle>
 					</DialogHeader>

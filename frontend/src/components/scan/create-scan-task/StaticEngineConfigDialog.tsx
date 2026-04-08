@@ -221,7 +221,10 @@ export default function StaticEngineConfigDialog({
 }: StaticEngineConfigDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!w-[min(92vw,760px)] !max-w-none p-0 gap-0 cyber-dialog border border-border rounded-lg">
+      <DialogContent
+        aria-describedby={undefined}
+        className="!w-[min(92vw,760px)] !max-w-none p-0 gap-0 cyber-dialog border border-border rounded-lg"
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>{getEngineTitle(contentProps.engine)} 配置</DialogTitle>
         </DialogHeader>

@@ -739,7 +739,10 @@ export default function GitleaksRules({
 					if (!open) resetForm();
 				}}
 			>
-				<DialogContent className="cyber-dialog max-w-3xl max-h-[90vh] overflow-y-auto border-border">
+				<DialogContent
+					aria-describedby={undefined}
+					className="cyber-dialog max-w-3xl max-h-[90vh] overflow-y-auto border-border"
+				>
 					<DialogHeader>
 						<DialogTitle>
 							{editingRule ? "编辑 Gitleaks 规则" : "新建 Gitleaks 规则"}
