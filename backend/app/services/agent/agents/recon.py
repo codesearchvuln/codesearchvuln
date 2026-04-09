@@ -361,10 +361,6 @@ class ReconAgent(BaseAgent):
         self._conversation_history: List[Dict[str, str]] = []
         self._steps: List[ReconStep] = []
         self._recon_queue_snapshot: Dict[str, Any] = {}
-        # 上下文压缩追踪
-        self._files_read: List[str] = []
-        self._risk_points_pushed: List[Dict[str, Any]] = []
-        self._history_compressed_at: List[int] = []
     
     def _parse_llm_response(self, response: str) -> ReconStep:
         """解析 LLM 响应（共享 ReAct 解析器）"""
@@ -679,10 +675,6 @@ class ReconAgent(BaseAgent):
         ]
         
         self._steps = []
-        # 重置上下文压缩追踪
-        self._files_read = []
-        self._risk_points_pushed = []
-        self._history_compressed_at = []
         final_result = None
         error_message = None  #  跟踪错误信息
         last_action_signature: Optional[str] = None
@@ -704,17 +696,7 @@ class ReconAgent(BaseAgent):
                     await self.emit_thinking("🛑 任务已取消，停止执行")
                     break
 
-                # 🗜️ 上下文压缩：对话历史超过 20 条时自动压缩
-                if self._should_compress_history():
-                    self._compress_history()
-                    await self.emit_event(
-                        "info",
-                        f"🗜️ 对话历史已压缩（迭代={self._iteration}，"
-                        f"已读文件={len(self._files_read)}，"
-                        f"已推送风险点={len(self._risk_points_pushed)}）",
-                    )
-                
-                # 调用 LLM 进行思考和决策（使用基类统一方法）
+                # 调用 LLM 进行思考和决策（使用与 AnalysisAgent 相同的共享压缩路径）
                 try:
                     llm_output, tokens_this_round = await self.stream_llm_call(
                         self._conversation_history,
@@ -915,30 +897,6 @@ Final Answer: [JSON格式的结果]"""
                         # 成功调用，重置失败计数
                         if tool_call_key in self._failed_tool_calls:
                             del self._failed_tool_calls[tool_call_key]
-                        # 📌 追踪已读文件和已推送风险点
-                        ai = step.action_input or {}
-                        if step.action == "read_file" and ai.get("file_path"):
-                            fp = str(ai["file_path"]).strip()
-                            if fp and fp not in self._files_read:
-                                self._files_read.append(fp)
-                        elif step.action == "push_risk_point_to_queue" and ai.get("file_path"):
-                            self._risk_points_pushed.append({
-                                "file_path": str(ai.get("file_path", "")),
-                                "line_start": ai.get("line_start", 1),
-                                "description": str(ai.get("description", ""))[:200],
-                                "severity": str(ai.get("severity", "high")),
-                                "vulnerability_type": str(ai.get("vulnerability_type", "unknown")),
-                            })
-                        elif step.action == "push_risk_points_to_queue" and isinstance(ai.get("risk_points"), list):
-                            for rp in ai["risk_points"]:
-                                if isinstance(rp, dict) and rp.get("file_path"):
-                                    self._risk_points_pushed.append({
-                                        "file_path": str(rp.get("file_path", "")),
-                                        "line_start": rp.get("line_start", 1),
-                                        "description": str(rp.get("description", ""))[:200],
-                                        "severity": str(rp.get("severity", "high")),
-                                        "vulnerability_type": str(rp.get("vulnerability_type", "unknown")),
-                                    })
                     
                     #  工具执行后检查取消状态
                     if self.is_cancelled:
@@ -1156,115 +1114,6 @@ Final Answer:""",
             "web_vulnerability_focus": focus,
         }
         return final_result
-
-    # ──────────────────────────────────────────────────────────────
-    # 上下文压缩 (Context Compression)
-    # ──────────────────────────────────────────────────────────────
-
-    _COMPRESS_THRESHOLD = 50   # 对话消息条数超过此值时触发压缩
-    _COMPRESS_KEEP_RECENT = 10  # 压缩后在末尾保留的最近消息数
-
-    def _should_compress_history(self) -> bool:
-        """当对话历史条数超过阈值时返回 True。
-        每次压缩后历史会缩短，因此自然地不会立刻再次触发。
-        """
-        return len(self._conversation_history) > self._COMPRESS_THRESHOLD
-
-    def _build_context_summary_message(self) -> str:
-        """根据已追踪的信息构建紧凑摘要，用于替换历史中的中间片段。"""
-        lines = [
-            "[系统: 以下是本次侦察到目前为止收集的关键信息摘要，对话历史已压缩。]",
-            "",
-        ]
-
-        # 已读取的文件
-        if self._files_read:
-            lines.append(f"## 已读取文件（共 {len(self._files_read)} 个）")
-            for f in self._files_read[:30]:
-                lines.append(f"  - {f}")
-            if len(self._files_read) > 30:
-                lines.append(f"  ... 还有 {len(self._files_read) - 30} 个文件")
-            lines.append("")
-
-        # 已推送的风险点
-        if self._risk_points_pushed:
-            lines.append(f"## 已推送风险点（共 {len(self._risk_points_pushed)} 个）")
-            for rp in self._risk_points_pushed[:25]:
-                sev   = rp.get("severity", "?")
-                vtype = rp.get("vulnerability_type", "?")
-                fp    = rp.get("file_path", "?")
-                ln    = rp.get("line_start", "?")
-                desc  = rp.get("description", "")[:100]
-                lines.append(f"  - [{sev}] {fp}:{ln} ({vtype}) — {desc}")
-            if len(self._risk_points_pushed) > 25:
-                lines.append(f"  ... 还有 {len(self._risk_points_pushed) - 25} 个")
-            lines.append("")
-
-        # 技术栈（从步骤中提取）
-        partial = self._summarize_from_steps()
-        tech = partial.get("tech_stack", {})
-        langs = tech.get("languages", [])
-        fwks  = tech.get("frameworks", [])
-        dbs   = tech.get("databases", [])
-        if langs or fwks or dbs:
-            lines.append("## 识别到的技术栈")
-            if langs:
-                lines.append(f"  - 语言: {', '.join(langs)}")
-            if fwks:
-                lines.append(f"  - 框架: {', '.join(fwks)}")
-            if dbs:
-                lines.append(f"  - 数据库: {', '.join(dbs)}")
-            lines.append("")
-
-        # 最近的分析思路（最后 5 步中有 thought 的）
-        recent_thoughts = [s.thought for s in self._steps[-5:] if s.thought]
-        if recent_thoughts:
-            lines.append("## 最近的分析思路")
-            for t in recent_thoughts:
-                lines.append(f"  > {t[:200]}")
-            lines.append("")
-
-        lines.append(
-            "请继续执行侦察任务，基于以上已收集的信息继续深入分析尚未覆盖的区域，"
-            "并将新发现的风险点推送到队列。"
-        )
-        return "\n".join(lines)
-
-    def _compress_history(self) -> None:
-        """压缩对话历史。
-
-        策略：
-          保留 [0] 系统提示 + [1] 初始用户消息 + 摘要消息 + 最近 N 条消息。
-          中间所有历史消息被替换为一条结构化摘要，避免 token 溢出。
-        """
-        if len(self._conversation_history) <= self._COMPRESS_THRESHOLD:
-            return
-
-        system_msg  = self._conversation_history[0]
-        initial_msg = self._conversation_history[1] if len(self._conversation_history) > 1 else None
-        recent_msgs = self._conversation_history[-self._COMPRESS_KEEP_RECENT:]
-
-        summary_msg = {
-            "role": "user",
-            "content": self._build_context_summary_message(),
-        }
-
-        new_history: List[Dict[str, str]] = [system_msg]
-        if initial_msg:
-            new_history.append(initial_msg)
-        new_history.append(summary_msg)
-        new_history.extend(recent_msgs)
-
-        old_len = len(self._conversation_history)
-        self._conversation_history = new_history
-        self._history_compressed_at.append(self._iteration)
-        logger.info(
-            "[%s] 历史已压缩: %d → %d 条（iteration=%d，文件=%d，风险点=%d）",
-            self.name, old_len, len(self._conversation_history),
-            self._iteration, len(self._files_read), len(self._risk_points_pushed),
-        )
-
-    # ──────────────────────────────────────────────────────────────
 
     @staticmethod
     def _append_unique(values: List[str], value: str) -> None:
