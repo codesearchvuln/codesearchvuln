@@ -57,6 +57,10 @@ def test_release_workflow_generates_validates_and_force_pushes_release_branch() 
     assert "git ls-remote --tags" in workflow_text
     assert "git push origin --delete" in workflow_text
     assert "release-tag-cleanup.txt" in workflow_text
+    assert 'release_id=""' in workflow_text
+    assert 'if release_id="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq \'.id\' 2>/dev/null)"; then' in workflow_text
+    assert '[[ "${release_id}" =~ ^[0-9]+$ ]]' in workflow_text
+    assert 'releases/tags/${tag}" --jq \'.id\' 2>/dev/null || true' not in workflow_text
 
 
 def test_scheduled_release_workflow_no_longer_uses_git_tags_as_release_state() -> None:
