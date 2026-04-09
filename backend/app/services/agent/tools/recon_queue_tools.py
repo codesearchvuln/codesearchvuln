@@ -130,6 +130,7 @@ class PushRiskPointToQueueTool(AgentTool):
         - vulnerability_type：比如 sql_injection、xss、command_injection 等
         - confidence：0.0-1.0，用来记录推断的置信度
 
+        重复推送同一风险点时会执行幂等跳过，不视为失败。
         调用后会返回当前队列大小，可据此判断是否需要等待消费。"""
 
     @property
@@ -139,10 +140,40 @@ class PushRiskPointToQueueTool(AgentTool):
     async def _execute(self, **kwargs) -> ToolResult:
         data = kwargs
         try:
+            contains = getattr(self.queue_service, "contains", None)
+            duplicate = bool(contains(self.task_id, data)) if callable(contains) else False
             success = self.queue_service.enqueue(self.task_id, data)
             queue_size = self.queue_service.size(self.task_id)
-            message = f"风险点已入队，当前队列大小 {queue_size}" if success else "风险点入队失败"
-            return ToolResult(success=success, data={"message": message, "queue_size": queue_size})
+            if success:
+                return ToolResult(
+                    success=True,
+                    data={
+                        "message": f"风险点已入队，当前队列大小 {queue_size}",
+                        "queue_size": queue_size,
+                        "enqueue_status": "enqueued",
+                        "duplicate_skipped": False,
+                    },
+                )
+            if duplicate:
+                return ToolResult(
+                    success=True,
+                    data={
+                        "message": f"风险点重复，已跳过重复入队，当前队列大小 {queue_size}",
+                        "queue_size": queue_size,
+                        "enqueue_status": "duplicate_skipped",
+                        "duplicate_skipped": True,
+                    },
+                )
+            return ToolResult(
+                success=False,
+                error="风险点入队失败",
+                data={
+                    "message": "风险点入队失败",
+                    "queue_size": queue_size,
+                    "enqueue_status": "failed",
+                    "duplicate_skipped": False,
+                },
+            )
         except Exception as exc:
             logger.error(f"[ReconQueue] Push failed: {exc}")
             return ToolResult(success=False, error=str(exc), data={})
@@ -297,7 +328,7 @@ class PushRiskPointsBatchToQueueTool(AgentTool):
         }
 
         每条风险点的字段与 push_risk_point_to_queue 相同。
-        返回成功入队的数量和当前队列大小。"""
+        返回成功入队数量、重复跳过数量和当前队列大小。"""
 
     @property
     def args_schema(self):
@@ -315,8 +346,20 @@ class PushRiskPointsBatchToQueueTool(AgentTool):
         try:
             count = self.queue_service.enqueue_batch(self.task_id, data_list)
             queue_size = self.queue_service.size(self.task_id)
-            message = f"批量入队 {count}/{len(data_list)} 个风险点，当前队列大小 {queue_size}"
-            return ToolResult(success=True, data={"message": message, "enqueued": count, "queue_size": queue_size})
+            duplicate_skipped = max(0, len(data_list) - count)
+            message = (
+                f"批量入队 {count}/{len(data_list)} 个风险点，"
+                f"跳过重复 {duplicate_skipped} 个，当前队列大小 {queue_size}"
+            )
+            return ToolResult(
+                success=True,
+                data={
+                    "message": message,
+                    "enqueued": count,
+                    "duplicate_skipped": duplicate_skipped,
+                    "queue_size": queue_size,
+                },
+            )
         except Exception as exc:
             logger.error(f"[ReconQueue] Batch push failed: {exc}")
             return ToolResult(success=False, error=str(exc), data={})
