@@ -4,6 +4,7 @@ import json
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, patch
 
@@ -246,6 +247,7 @@ def workflow_harness(instrumentation):
         verification_max_workers=2,
         enable_parallel_report=True,
         report_max_workers=2,
+        use_agent_count_config_file=False,
     )
     risk_points = _load_vulnerable_points()
 
@@ -453,3 +455,46 @@ async def test_report_phase_runs_in_parallel(workflow_harness, instrumentation):
     assert len(report_workers) == workflow_config.report_max_workers
     assert report_parallelism >= 2
     assert report_parallelism <= workflow_config.report_max_workers
+
+
+def test_engine_loads_worker_counts_from_yaml(tmp_path):
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(
+        "\n".join(
+            [
+                "agents:",
+                "  analysis:",
+                "    count: 4",
+                "  verification:",
+                "    count: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    engine = AuditWorkflowEngine(
+        recon_queue_service=InMemoryReconRiskQueue(),
+        vuln_queue_service=InMemoryVulnerabilityQueue(),
+        task_id=TEST_TASK_ID,
+        orchestrator=SimpleNamespace(),
+        workflow_config=WorkflowConfig(
+            enable_parallel_analysis=True,
+            analysis_max_workers=9,
+            enable_parallel_verification=True,
+            verification_max_workers=9,
+            enable_parallel_report=True,
+            report_max_workers=2,
+            use_agent_count_config_file=True,
+            agent_count_config_path=str(config_file),
+        ),
+    )
+
+    assert engine.workflow_config.analysis_max_workers == 4
+    assert engine.workflow_config.verification_max_workers == 1
+    assert engine.analysis_executor.max_workers == 4
+    assert engine.bl_analysis_executor.max_workers == 4
+    assert engine.verification_executor.max_workers == 1
+    assert engine.analysis_executor.enable_parallel is True
+    assert engine.verification_executor.enable_parallel is False
+    assert engine.analysis_executor.semaphore is engine.bl_analysis_executor.semaphore

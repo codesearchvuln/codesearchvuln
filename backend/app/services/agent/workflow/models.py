@@ -14,7 +14,10 @@ class WorkflowConfig:
     """
     Workflow 执行配置
 
-    控制并行化行为和 worker 数量
+    控制并行化行为和 worker 数量。
+
+    analysis / verification 的 worker 数量可由同目录下的 config.yml 覆盖。
+    其中 analysis worker 数同时作为 analysis + business_logic_analysis 的共享总池大小。
     """
     enable_parallel_analysis: bool = True
     enable_parallel_verification: bool = True
@@ -23,6 +26,8 @@ class WorkflowConfig:
     verification_max_workers: int = 3
     report_max_workers: int = 3
     bl_analysis_max_workers: int = 3
+    use_agent_count_config_file: bool = True
+    agent_count_config_path: Optional[str] = None
 
     @property
     def should_parallelize_analysis(self) -> bool:
@@ -41,8 +46,8 @@ class WorkflowConfig:
 
     @property
     def should_parallelize_bl_analysis(self) -> bool:
-        """是否应该并行化 BusinessLogicAnalysis（workers > 1 且启用）"""
-        return self.enable_parallel_analysis and self.bl_analysis_max_workers > 1
+        """是否应该并行化 BusinessLogicAnalysis（共享 analysis 总池 > 1 且启用）"""
+        return self.enable_parallel_analysis and self.analysis_max_workers > 1
 
 
 class WorkflowPhase(Enum):

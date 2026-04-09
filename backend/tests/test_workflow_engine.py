@@ -103,6 +103,7 @@ def _build_orchestrator(
             enable_parallel_analysis=False,
             enable_parallel_verification=False,
             enable_parallel_report=False,
+            use_agent_count_config_file=False,
         ),
     )
     return agent

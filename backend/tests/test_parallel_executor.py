@@ -175,9 +175,11 @@ class MockOrchestrator:
 
         self.sub_agents = {
             "analysis": MockAgent(analysis_llm, {"__kind__": "analysis"}),
+            "business_logic_analysis": MockAgent(analysis_llm, {"__kind__": "business_logic_analysis"}),
             "verification": MockAgent(verification_llm, {"__kind__": "verification"}),
         }
         self.sub_agents["analysis"].name = "analysis"
+        self.sub_agents["business_logic_analysis"].name = "business_logic_analysis"
         self.sub_agents["verification"].name = "verification"
 
         self.is_cancelled = False
@@ -496,3 +498,60 @@ async def test_concurrent_limit():
         await executor.run_parallel_analysis(state=state, task_id="test_task", recon_queue=queue)
 
     assert max_active <= 2
+
+
+@pytest.mark.asyncio
+async def test_analysis_and_bl_analysis_share_total_pool():
+    orchestrator = MockOrchestrator()
+    shared_limit = 2
+    shared_semaphore = asyncio.Semaphore(shared_limit)
+    analysis_queue = MockQueue(
+        [{"file_path": f"analysis{i}.py", "line_start": i * 10 + 1} for i in range(3)]
+    )
+    bl_queue = MockQueue(
+        [{"file_path": f"bl{i}.py", "line_start": i * 10 + 100} for i in range(3)]
+    )
+    analysis_executor = ParallelPhaseExecutor(
+        orchestrator,
+        "analysis",
+        max_workers=3,
+        enable_parallel=True,
+        shared_semaphore=shared_semaphore,
+    )
+    bl_executor = ParallelPhaseExecutor(
+        orchestrator,
+        "business_logic_analysis",
+        max_workers=3,
+        enable_parallel=True,
+        shared_semaphore=shared_semaphore,
+    )
+    state = WorkflowState()
+    max_active = 0
+
+    async def tracked_dispatch(worker_agent, params):
+        nonlocal max_active
+        current_active = shared_limit - shared_semaphore._value
+        max_active = max(max_active, current_active)
+        await asyncio.sleep(0.02)
+
+    with (
+        patch.object(analysis_executor, "_dispatch_to_worker_agent", side_effect=tracked_dispatch),
+        patch.object(bl_executor, "_dispatch_to_worker_agent", side_effect=tracked_dispatch),
+    ):
+        await asyncio.gather(
+            analysis_executor.run_parallel_analysis(
+                state=state,
+                task_id="test_task",
+                recon_queue=analysis_queue,
+            ),
+            bl_executor.run_parallel_bl_analysis(
+                state=state,
+                task_id="test_task",
+                bl_queue=bl_queue,
+            ),
+        )
+
+    assert state.analysis_risk_points_processed == 3
+    assert state.bl_risk_points_processed == 3
+    assert max_active == shared_limit
+    assert analysis_executor.semaphore is bl_executor.semaphore

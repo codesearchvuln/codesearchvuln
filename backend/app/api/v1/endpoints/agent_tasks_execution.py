@@ -344,7 +344,8 @@ async def _execute_agent_task(task_id: str):
                 if hasattr(agent, "set_write_scope_guard"):
                     agent.set_write_scope_guard(write_scope_guard)
 
-            # 创建 Workflow 配置（从 settings 读取）
+            # 创建 Workflow 配置（基础值来自 settings；
+            # analysis / verification worker 数可由 workflow/config.yml 覆盖）
             from app.core.config import settings
             workflow_config = WorkflowConfig(
                 enable_parallel_analysis=settings.ENABLE_PARALLEL_ANALYSIS,
@@ -353,6 +354,7 @@ async def _execute_agent_task(task_id: str):
                 analysis_max_workers=settings.ANALYSIS_MAX_WORKERS,
                 verification_max_workers=settings.VERIFICATION_MAX_WORKERS,
                 report_max_workers=settings.REPORT_MAX_WORKERS,
+                use_agent_count_config_file=True,
             )
 
             # 创建 Orchestrator Agent（使用确定性 Workflow 版本，注入两个队列服务）

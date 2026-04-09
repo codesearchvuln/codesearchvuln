@@ -17,7 +17,10 @@ import json
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+import yaml
 
 from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord, WorkflowConfig
 from .memory_monitor import MemoryMonitor
@@ -47,6 +50,7 @@ class AuditWorkflowEngine:
     """
 
     RECON_EMPTY_QUEUE_MAX_ATTEMPTS = 3
+    AGENT_COUNT_CONFIG_FILE = "config.yml"
 
     def __init__(
         self,
@@ -73,7 +77,11 @@ class AuditWorkflowEngine:
         self.task_id = task_id
         self.orchestrator = orchestrator
         inherited_workflow_config = getattr(orchestrator, "_workflow_config", None)
-        self.workflow_config = workflow_config or inherited_workflow_config or WorkflowConfig()
+        base_workflow_config = workflow_config or inherited_workflow_config or WorkflowConfig()
+        self.workflow_config = self._resolve_workflow_config(base_workflow_config)
+        self.analysis_shared_pool_size = max(1, self.workflow_config.analysis_max_workers)
+        self.analysis_shared_semaphore = asyncio.Semaphore(self.analysis_shared_pool_size)
+        self.bl_analysis_worker_limit = self.analysis_shared_pool_size
 
         #  内存监控
         self.memory_monitor = MemoryMonitor()
@@ -85,6 +93,7 @@ class AuditWorkflowEngine:
             agent_type="analysis",
             max_workers=self.workflow_config.analysis_max_workers,
             enable_parallel=self.workflow_config.should_parallelize_analysis,
+            shared_semaphore=self.analysis_shared_semaphore,
         )
 
         self.verification_executor = ParallelPhaseExecutor(
@@ -105,22 +114,114 @@ class AuditWorkflowEngine:
         self.bl_analysis_executor = ParallelPhaseExecutor(
             orchestrator=orchestrator,
             agent_type="business_logic_analysis",
-            max_workers=self.workflow_config.bl_analysis_max_workers,
+            max_workers=self.bl_analysis_worker_limit,
             enable_parallel=self.workflow_config.should_parallelize_bl_analysis,
+            shared_semaphore=self.analysis_shared_semaphore,
         )
 
         logger.info(
             f"[WorkflowEngine] Initialized with parallel config: "
             f"analysis_workers={self.workflow_config.analysis_max_workers} "
-            f"(enabled={self.workflow_config.should_parallelize_analysis}), "
-            f"bl_analysis_workers={self.workflow_config.bl_analysis_max_workers} "
-            f"(enabled={self.workflow_config.should_parallelize_bl_analysis}), "
+            f"(shared_pool={self.analysis_shared_pool_size}, "
+            f"enabled={self.workflow_config.should_parallelize_analysis}), "
+            f"bl_analysis_workers={self.bl_analysis_worker_limit} "
+            f"(shared_with_analysis_pool, "
+            f"enabled={self.workflow_config.should_parallelize_bl_analysis}), "
             f"verification_workers={self.workflow_config.verification_max_workers} "
             f"(enabled={self.workflow_config.should_parallelize_verification}), "
             f"report_workers={self.workflow_config.report_max_workers} "
             f"(enabled={self.workflow_config.should_parallelize_report}), "
             f"bl_queue={'enabled' if business_logic_queue_service else 'disabled'}"
         )
+
+    def _resolve_workflow_config(self, workflow_config: WorkflowConfig) -> WorkflowConfig:
+        resolved_config = copy.deepcopy(workflow_config)
+        return self._apply_agent_count_config_file(resolved_config)
+
+    def _apply_agent_count_config_file(self, workflow_config: WorkflowConfig) -> WorkflowConfig:
+        if not getattr(workflow_config, "use_agent_count_config_file", True):
+            return workflow_config
+
+        raw_config_path = getattr(workflow_config, "agent_count_config_path", None)
+        config_path = (
+            Path(raw_config_path)
+            if raw_config_path
+            else Path(__file__).with_name(self.AGENT_COUNT_CONFIG_FILE)
+        )
+
+        if not config_path.exists():
+            return workflow_config
+
+        try:
+            with config_path.open("r", encoding="utf-8") as file:
+                file_config = yaml.safe_load(file) or {}
+        except Exception as exc:
+            logger.warning(
+                "[WorkflowEngine] Failed to load agent count config from %s: %s",
+                config_path,
+                exc,
+            )
+            return workflow_config
+
+        if not isinstance(file_config, dict):
+            logger.warning(
+                "[WorkflowEngine] Ignoring agent count config at %s because it is not a mapping",
+                config_path,
+            )
+            return workflow_config
+
+        agents_config = file_config.get("agents") or {}
+        if not isinstance(agents_config, dict):
+            logger.warning(
+                "[WorkflowEngine] Ignoring agent count config at %s because 'agents' is not a mapping",
+                config_path,
+            )
+            return workflow_config
+
+        overrides_applied: Dict[str, int] = {}
+        for agent_name, field_name in (
+            ("analysis", "analysis_max_workers"),
+            ("verification", "verification_max_workers"),
+        ):
+            agent_config = agents_config.get(agent_name)
+            if not isinstance(agent_config, dict):
+                continue
+
+            count = agent_config.get("count")
+            if count is None:
+                continue
+
+            try:
+                worker_count = int(count)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "[WorkflowEngine] Ignoring %s.count=%r in %s because it is not an integer",
+                    agent_name,
+                    count,
+                    config_path,
+                )
+                continue
+
+            if worker_count < 1:
+                logger.warning(
+                    "[WorkflowEngine] Ignoring %s.count=%s in %s because it must be >= 1",
+                    agent_name,
+                    worker_count,
+                    config_path,
+                )
+                continue
+
+            setattr(workflow_config, field_name, worker_count)
+            overrides_applied[field_name] = worker_count
+
+        if overrides_applied:
+            logger.info(
+                "[WorkflowEngine] Loaded agent count overrides from %s: %s",
+                config_path,
+                overrides_applied,
+            )
+
+        return workflow_config
 
     # ─────────────────────────────────────────────────────────────────────────
     # 公开入口
@@ -952,7 +1053,7 @@ class AuditWorkflowEngine:
         从 BL 风险点队列逐条取出风险点，调度 BusinessLogicAnalysisAgent。
 
         根据配置选择并行或串行模式：
-        - 并行模式：使用 ParallelPhaseExecutor 创建 worker 池（最多 bl_analysis_max_workers 个）
+        - 并行模式：使用与 Analysis 共用总池的 ParallelPhaseExecutor
         - 串行模式：降级到串行处理（fallback）
         """
         bl_analysis_agent = self.orchestrator.sub_agents.get("business_logic_analysis")

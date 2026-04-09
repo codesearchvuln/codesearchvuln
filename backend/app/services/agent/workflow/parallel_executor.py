@@ -37,6 +37,7 @@ class ParallelPhaseExecutor:
         agent_type: str,  # "analysis" or "verification"
         max_workers: int,
         enable_parallel: bool = True,
+        shared_semaphore: asyncio.Semaphore | None = None,
     ):
         """
         初始化并行执行器
@@ -46,12 +47,13 @@ class ParallelPhaseExecutor:
             agent_type: Agent 类型（"analysis" 或 "verification"）
             max_workers: 最大 worker 数量
             enable_parallel: 是否启用并行（False 则降级到串行）
+            shared_semaphore: 可选的共享并发信号量；传入时可与其他 phase 共用总池
         """
         self.orchestrator = orchestrator
         self.agent_type = agent_type
         self.max_workers = max_workers
         self.enable_parallel = enable_parallel
-        self.semaphore = asyncio.Semaphore(max_workers)
+        self.semaphore = shared_semaphore or asyncio.Semaphore(max_workers)
         self.worker_agents: dict[int, BaseAgent] = {}
         self.active_workers: set[int] = set()
         self.lock = asyncio.Lock()  # 保护共享状态
