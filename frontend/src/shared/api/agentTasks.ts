@@ -5,6 +5,10 @@
 
 import { apiClient } from "./serverClient";
 import { buildApiUrl } from "./apiBase";
+import {
+  buildReportDownloadBaseName,
+  resolveFilenameFromDisposition,
+} from "../utils/reportExportFilename";
 
 // ============ Types ============
 
@@ -582,19 +586,17 @@ export async function downloadAgentReport(taskId: string, format: "markdown" | "
   link.href = url;
 
   // Calculate filename
-  let filename = `audit-report-${taskId.slice(0, 8)}.md`;
+  const baseName = buildReportDownloadBaseName(undefined, taskId.slice(0, 8));
+  let filename = `${baseName}.md`;
   if (format === 'json') {
-    filename = `audit-report-${taskId.slice(0, 8)}.json`;
+    filename = `${baseName}.json`;
   } else if (format === 'pdf') {
-    filename = `audit-report-${taskId.slice(0, 8)}.pdf`;
+    filename = `${baseName}.pdf`;
   }
 
   // Try to get filename from header
   const contentDisposition = response.headers['content-disposition'];
-  if (contentDisposition) {
-    const match = contentDisposition.match(/filename=(.+)/);
-    if (match && match[1]) filename = match[1].replace(/['"]/g, ''); // Remove quotes if present
-  }
+  filename = resolveFilenameFromDisposition(contentDisposition, filename);
 
   link.setAttribute('download', filename);
   document.body.appendChild(link);

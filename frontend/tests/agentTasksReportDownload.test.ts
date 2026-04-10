@@ -72,7 +72,7 @@ test("downloadAgentReport requests pdf format and prefers Content-Disposition fi
     return {
       data: new Blob(["pdf-bytes"], { type: "application/pdf" }),
       headers: {
-        "content-disposition": 'attachment; filename="server-report.pdf"',
+        "content-disposition": "attachment; filename=\"fallback.pdf\"; filename*=UTF-8''%E6%BC%8F%E6%B4%9E%E6%8A%A5%E5%91%8A-Demo-2026-04-10.pdf",
       },
     };
   }) as typeof apiClient.get;
@@ -93,7 +93,7 @@ test("downloadAgentReport requests pdf format and prefers Content-Disposition fi
 
   const anchor = shim.getAnchor();
   assert.ok(anchor);
-  assert.equal(anchor?.download, "server-report.pdf");
+  assert.equal(anchor?.download, "漏洞报告-Demo-2026-04-10.pdf");
   assert.equal(anchor?.clickCount, 1);
 });
 
@@ -117,5 +117,5 @@ test("downloadAgentReport falls back to pdf extension when header is missing", a
 
   const anchor = shim.getAnchor();
   assert.ok(anchor);
-  assert.equal(anchor?.download, "audit-report-12345678.pdf");
+  assert.match(anchor?.download || "", /^漏洞报告-12345678-\d{4}-\d{2}-\d{2}\.pdf$/);
 });

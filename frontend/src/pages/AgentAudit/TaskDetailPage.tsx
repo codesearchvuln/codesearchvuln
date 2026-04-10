@@ -3887,6 +3887,7 @@ function AgentAuditPageContent() {
         open={showExportDialog}
         onOpenChange={setShowExportDialog}
         task={task}
+        projectName={projectName}
         findings={findings}
       />
 

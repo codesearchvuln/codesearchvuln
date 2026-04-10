@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -64,6 +65,40 @@ def _resolve_query_bool(value: Any, default: bool) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return bool(value)
+
+
+def _sanitize_download_filename_segment(value: Optional[str], fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1F]+', "-", text)
+    text = re.sub(r"\s+", " ", text).strip(" .")
+    return text or fallback
+
+
+def _build_report_download_filename(project: Project, extension: str) -> str:
+    project_fallback = str(getattr(project, "id", "") or "project")
+    project_name = _sanitize_download_filename_segment(
+        getattr(project, "name", None),
+        project_fallback,
+    )
+    date_part = datetime.now().strftime("%Y-%m-%d")
+    normalized_extension = str(extension or "").lstrip(".") or "txt"
+    return f"漏洞报告-{project_name}-{date_part}.{normalized_extension}"
+
+
+def _build_download_content_disposition(filename: str) -> str:
+    extension_match = re.search(r"(\.[A-Za-z0-9]+)$", filename)
+    extension = extension_match.group(1) if extension_match else ""
+    stem = filename[: -len(extension)] if extension else filename
+    ascii_stem = re.sub(r"[^\x20-\x7E]+", "_", stem)
+    ascii_stem = re.sub(r"_+", "_", ascii_stem).strip(" ._-") or "vulnerability-report"
+    ascii_filename = f"{ascii_stem}{extension}"
+    encoded_filename = quote(filename, safe="")
+    return (
+        f'attachment; filename="{ascii_filename}"; '
+        f"filename*=UTF-8''{encoded_filename}"
+    )
 
 def _escape_markdown_inline(text: Optional[str]) -> str:
     """转义 Markdown 行内特殊字符，避免标题/位置等结构被破坏。"""
@@ -2324,21 +2359,21 @@ async def generate_audit_report(
 
     if format == "pdf":
         pdf_content = _render_markdown_to_pdf_bytes(export_markdown)
-        filename = f"audit_report_{task.id[:8]}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        filename = _build_report_download_filename(project, "pdf")
         return Response(
             content=pdf_content,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": _build_download_content_disposition(filename)
             },
         )
 
-    filename = f"audit_report_{task.id[:8]}_{datetime.now().strftime('%Y%m%d')}.md"
+    filename = _build_report_download_filename(project, "md")
     return Response(
         content=export_markdown,
         media_type="text/markdown; charset=utf-8",
         headers={
-            "Content-Disposition": f"attachment; filename={filename}"
+            "Content-Disposition": _build_download_content_disposition(filename)
         }
     )
 

@@ -35,6 +35,10 @@ import {
 import { apiClient } from "@/shared/api/serverClient";
 import type { AgentTask, AgentFinding } from "@/shared/api/agentTasks";
 import {
+  buildReportDownloadBaseName,
+  resolveFilenameFromDisposition,
+} from "@/shared/utils/reportExportFilename";
+import {
   EnhancedStatsPanel,
   ExportOptionsPanel,
   FormatSelector,
@@ -55,6 +59,7 @@ interface ReportExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   task: AgentTask | null;
+  projectName?: string | null;
   findings: AgentFinding[];
 }
 
@@ -117,6 +122,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
   open,
   onOpenChange,
   task,
+  projectName,
   findings,
 }: ReportExportDialogProps) {
   const [activeFormat, setActiveFormat] = useState<ReportFormat>("markdown");
@@ -234,24 +240,6 @@ export const ReportExportDialog = memo(function ReportExportDialog({
     }
   }, [preview.content]);
 
-  const resolveFilenameFromDisposition = useCallback(
-    (contentDisposition: string | undefined, fallback: string) => {
-      if (!contentDisposition) return fallback;
-      const filenameStarMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
-      if (filenameStarMatch?.[1]) {
-        try {
-          return decodeURIComponent(filenameStarMatch[1]);
-        } catch {
-          return filenameStarMatch[1];
-        }
-      }
-      const filenameMatch = contentDisposition.match(/filename=([^;]+)/i);
-      if (!filenameMatch?.[1]) return fallback;
-      return filenameMatch[1].trim().replace(/['"]/g, "") || fallback;
-    },
-    [],
-  );
-
   const triggerBrowserDownload = useCallback((blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -269,8 +257,10 @@ export const ReportExportDialog = memo(function ReportExportDialog({
     setDownloading(true);
     try {
       const config = FORMAT_CONFIG[activeFormat];
-      const datePart = new Date().toISOString().slice(0, 10);
-      const baseName = `audit_report_${task.name || task.id.substring(0, 8)}_${datePart}`;
+      const baseName = buildReportDownloadBaseName(
+        projectName,
+        task.project_id?.substring(0, 8) || task.id.substring(0, 8),
+      );
 
       if (activeFormat === "pdf") {
         const response = await apiClient.get(`/agent-tasks/${task.id}/report`, {
@@ -324,7 +314,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
     exportOptions,
     onOpenChange,
     preview.content,
-    resolveFilenameFromDisposition,
+    projectName,
     task,
     triggerBrowserDownload,
   ]);
