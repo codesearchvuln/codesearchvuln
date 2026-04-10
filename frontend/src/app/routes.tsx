@@ -32,7 +32,7 @@ const TaskManagementIntelligent = lazy(
 	() => import("@/pages/TaskManagementIntelligent"),
 );
 const TaskManagementHybrid = lazy(() => import("@/pages/TaskManagementHybrid"));
-const AgentTestPage = lazy(() => import("@/pages/AgentTest"));
+const DataManagementPage = lazy(() => import("@/pages/DataManagement"));
 
 function LegacyOpengrepRulesRedirect() {
 	const location = useLocation();
@@ -237,10 +237,10 @@ const routes: RouteConfig[] = [
 		navVisible: false,
 	},
 	{
-		name: "Agent 测试",
-		nameKey: "route.agentTest",
-		path: "/agent-test",
-		element: <AgentTestPage />,
+		name: "数据管理",
+		nameKey: "route.dataManagement",
+		path: "/data-management",
+		element: <DataManagementPage />,
 		visible: true,
 		navVisible: true,
 		navGroup: "devTest",

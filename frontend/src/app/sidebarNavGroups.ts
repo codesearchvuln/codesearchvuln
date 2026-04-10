@@ -31,6 +31,6 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroupConfig[] = [
 		titleKey: "route.devTest",
 		fallbackLabel: "开发测试",
 		icon: Code,
-		defaultEntryPath: "/agent-test",
+		defaultEntryPath: "/data-management",
 	},
 ];

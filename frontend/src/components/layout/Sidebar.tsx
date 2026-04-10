@@ -12,6 +12,7 @@ import {
 	X,
 	LayoutDashboard,
 	FolderGit2,
+	DatabaseBackup,
 	// Zap,
 	// ListTodo,
 	// Trash2,
@@ -49,7 +50,7 @@ const routeIcons: Record<string, React.ReactNode> = {
 	"/scan-config/engines": <Zap className="w-[1.125rem] h-[1.125rem]" />,
 	"/scan-config/intelligent-engine": <Bot className="w-[1.125rem] h-[1.125rem]" />,
 	"/scan-config/external-tools": <Wrench className="w-[1.125rem] h-[1.125rem]" />,
-	"/agent-test": <Bot className="w-[1.125rem] h-[1.125rem]" />,
+	"/data-management": <DatabaseBackup className="w-[1.125rem] h-[1.125rem]" />,
 	// "/prompts": <MessageSquare className="w-[1.125rem] h-[1.125rem]" />,
 	// "/recycle-bin": <Trash2 className="w-[1.125rem] h-[1.125rem]" />,
 };

@@ -9,19 +9,18 @@ const [{ default: routes }, { SIDEBAR_NAV_GROUPS }] = await Promise.all([
 	import("../src/app/sidebarNavGroups.ts"),
 ]);
 
-test("agent test route is grouped under devTest navigation", () => {
-	const agentTestRoute = routes.find((route) => route.path === "/agent-test");
-
-	assert.ok(agentTestRoute);
-	assert.equal(agentTestRoute.navGroup, "devTest");
-});
-
-test("code window demo route has been removed from devTest navigation", () => {
-	const demoRoute = routes.find(
-		(route) => route.path === "/agent-test/code-window-demo",
+test("data management route is grouped under devTest navigation", () => {
+	const dataManagementRoute = routes.find(
+		(route) => route.path === "/data-management",
 	);
 
-	assert.equal(demoRoute, undefined);
+	assert.ok(dataManagementRoute);
+	assert.equal(dataManagementRoute.navGroup, "devTest");
+});
+
+test("agent test route has been removed", () => {
+	const agentTestRoute = routes.find((route) => route.path === "/agent-test");
+	assert.equal(agentTestRoute, undefined);
 });
 
 test("sidebar navigation groups keep the expected parent order", () => {
@@ -31,13 +30,13 @@ test("sidebar navigation groups keep the expected parent order", () => {
 	);
 });
 
-test("devTest group defaults to the agent test page", () => {
+test("devTest group defaults to the data management page", () => {
 	const devTestGroup = SIDEBAR_NAV_GROUPS.find(
 		(group) => group.id === "devTest",
 	);
 
 	assert.ok(devTestGroup);
-	assert.equal(devTestGroup.defaultEntryPath, "/agent-test");
+	assert.equal(devTestGroup.defaultEntryPath, "/data-management");
 });
 
 test("agent task detail route uses a different page component than the home route", () => {
