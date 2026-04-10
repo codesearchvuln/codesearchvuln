@@ -36,6 +36,7 @@ class ReportExportOptions:
 
 
 DEFAULT_REPORT_EXPORT_OPTIONS = ReportExportOptions()
+REPORT_EXPORT_FOOTER = "*本报告由自动化安全审计系统自动生成*"
 
 
 def _uses_default_report_export_options(options: ReportExportOptions) -> bool:
@@ -78,6 +79,12 @@ def _escape_markdown_table_cell(text: Optional[str]) -> str:
     return _escape_markdown_inline(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
 
 
+def _render_markdown_heading_text(text: Optional[str]) -> str:
+    if text is None:
+        return ""
+    return re.sub(r"\s+", " ", str(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")).strip()
+
+
 def _render_markdown_code_span(text: Optional[str]) -> str:
     value = "" if text is None else str(text)
     value = value.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ").strip()
@@ -94,6 +101,334 @@ def _strip_markdown_escape_backslashes(text: str) -> str:
 
 def _normalize_severity(sev: Optional[str]) -> str:
     return str(sev).lower().strip() if sev else ""
+
+
+def _get_report_export_severity_label(severity: Optional[str]) -> str:
+    severity_map = {
+        "critical": "严重",
+        "high": "高危",
+        "medium": "中危",
+        "low": "低危",
+        "info": "信息",
+        "unknown": "未知",
+    }
+    normalized = _normalize_severity(severity)
+    if normalized in severity_map:
+        return severity_map[normalized]
+    fallback = _normalize_optional_text(severity)
+    return fallback or "未知"
+
+
+def _get_report_export_authenticity_label(value: Optional[str]) -> str:
+    label_map = {
+        "confirmed": "已确认真实漏洞",
+        "verified": "已确认真实漏洞",
+        "likely": "高概率真实漏洞",
+        "uncertain": "待进一步确认",
+        "false_positive": "已判定为误报",
+        "unknown": "待确认",
+    }
+    normalized = _normalize_export_finding_token(value)
+    if normalized in label_map:
+        return label_map[normalized]
+    fallback = _normalize_optional_text(value)
+    return fallback or "待确认"
+
+
+def _get_report_export_reachability_label(value: Optional[str]) -> str:
+    label_map = {
+        "reachable": "可达",
+        "likely_reachable": "可能可达",
+        "unknown": "暂不明确",
+        "unreachable": "不可达",
+    }
+    normalized = _normalize_export_finding_token(value)
+    if normalized in label_map:
+        return label_map[normalized]
+    fallback = _normalize_optional_text(value)
+    return fallback or "暂不明确"
+
+
+def _get_report_export_vulnerability_type_label(
+    vulnerability_type: Optional[str],
+    *,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    code_snippet: Optional[str] = None,
+) -> str:
+    raw_type = _normalize_optional_text(vulnerability_type)
+    profile = _resolve_vulnerability_profile(
+        vulnerability_type,
+        title=title,
+        description=description,
+        code_snippet=code_snippet,
+    )
+    profile_name = _normalize_optional_text(profile.get("name") if isinstance(profile, dict) else None)
+    return profile_name or raw_type or "未知类型"
+
+
+def _get_report_export_project_description(project: Project) -> str:
+    description = _normalize_optional_text(getattr(project, "description", None))
+    if not description:
+        return "暂无项目描述"
+    return re.sub(r"\s+", " ", description)
+
+
+def _build_project_scan_result_lines(
+    *,
+    project: Project,
+    findings: List[AgentFinding],
+    export_statuses: Optional[Dict[str, str]] = None,
+    export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
+) -> List[str]:
+    status_map = export_statuses or {}
+    severity_stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    status_stats = {"pending": 0, "verified": 0, "false_positive": 0}
+    vuln_type_stats: Dict[str, int] = {}
+
+    for finding_row in findings:
+        severity = _normalize_severity(getattr(finding_row, "severity", None))
+        if severity in severity_stats:
+            severity_stats[severity] += 1
+
+        export_status = status_map.get(str(getattr(finding_row, "id", "") or ""), "pending")
+        if export_status in status_stats:
+            status_stats[export_status] += 1
+
+        vuln_type_label = _get_report_export_vulnerability_type_label(
+            getattr(finding_row, "vulnerability_type", None),
+            title=getattr(finding_row, "title", None),
+            description=getattr(finding_row, "description", None),
+            code_snippet=getattr(finding_row, "code_snippet", None),
+        )
+        vuln_type_stats[vuln_type_label] = vuln_type_stats.get(vuln_type_label, 0) + 1
+
+    lines = [
+        "## 漏洞扫描结果",
+        "",
+    ]
+    if export_options.include_metadata:
+        lines.append(
+            f"- 项目描述：{_escape_markdown_inline(_get_report_export_project_description(project))}"
+        )
+    lines.extend(
+        [
+            f"- 漏洞总数：{len(findings)}",
+            f"- 待确认：{status_stats.get('pending', 0)}",
+            f"- 确报：{status_stats.get('verified', 0)}",
+            f"- 误报：{status_stats.get('false_positive', 0)}",
+            "- 严重程度分布",
+            f"  - 严重：{severity_stats.get('critical', 0)}",
+            f"  - 高危：{severity_stats.get('high', 0)}",
+            f"  - 中危：{severity_stats.get('medium', 0)}",
+            f"  - 低危：{severity_stats.get('low', 0)}",
+            f"  - 信息：{severity_stats.get('info', 0)}",
+            "- 漏洞类型分布",
+        ]
+    )
+
+    sorted_vuln_types = sorted(
+        vuln_type_stats.items(),
+        key=lambda item: (-int(item[1]), str(item[0])),
+    )
+    if sorted_vuln_types:
+        for vuln_type, count in sorted_vuln_types:
+            lines.append(f"  - {_escape_markdown_inline(vuln_type)}：{count}")
+    else:
+        lines.append("  - 暂无")
+    lines.append("")
+    return lines
+
+
+def _remove_markdown_sections(markdown_text: str, titles: set[str]) -> str:
+    content = _normalize_optional_text(markdown_text)
+    if not content:
+        return ""
+
+    lines = content.split("\n")
+    headings: List[Tuple[int, int, str]] = []
+    in_code_block = False
+
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        matched = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if matched:
+            headings.append(
+                (
+                    index,
+                    len(matched.group(1)),
+                    _normalize_markdown_section_title(matched.group(2)),
+                )
+            )
+
+    remove_ranges: List[Tuple[int, int]] = []
+    for heading_index, (start_line, level, normalized_title) in enumerate(headings):
+        if normalized_title not in titles:
+            continue
+
+        end_line = len(lines)
+        for next_start, next_level, _next_title in headings[heading_index + 1 :]:
+            if next_level <= level:
+                end_line = next_start
+                break
+        remove_ranges.append((start_line, end_line))
+
+    if not remove_ranges:
+        return content
+
+    merged_ranges: List[Tuple[int, int]] = []
+    for start_line, end_line in sorted(remove_ranges):
+        if not merged_ranges or start_line > merged_ranges[-1][1]:
+            merged_ranges.append((start_line, end_line))
+        else:
+            prev_start, prev_end = merged_ranges[-1]
+            merged_ranges[-1] = (prev_start, max(prev_end, end_line))
+
+    cleaned_lines: List[str] = []
+    cursor = 0
+    for start_line, end_line in merged_ranges:
+        cleaned_lines.extend(lines[cursor:start_line])
+        cursor = end_line
+    cleaned_lines.extend(lines[cursor:])
+
+    cleaned = "\n".join(cleaned_lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _insert_section_after_title(markdown_text: str, section_markdown: str) -> str:
+    content = _normalize_optional_text(markdown_text)
+    section = _normalize_optional_text(section_markdown)
+    if not section:
+        return content or ""
+    if not content:
+        return section
+
+    lines = content.split("\n")
+    in_code_block = False
+    title_index: Optional[int] = None
+
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if re.match(r"^#\s+.+$", stripped):
+            title_index = index
+            break
+
+    section_lines = [""] + section.split("\n") + [""]
+    if title_index is None:
+        merged = section.split("\n") + [""] + lines
+    else:
+        insert_at = title_index + 1
+        while insert_at < len(lines) and not lines[insert_at].strip():
+            insert_at += 1
+        merged = lines[:insert_at] + section_lines + lines[insert_at:]
+
+    normalized = "\n".join(merged)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _ensure_project_report_title(markdown_text: str, project: Project) -> str:
+    content = _normalize_optional_text(markdown_text)
+    title_line = f"# 项目风险评估报告：{project.name}"
+    if not content:
+        return title_line
+
+    lines = content.split("\n")
+    first_non_empty_index: Optional[int] = None
+    for index, line in enumerate(lines):
+        if line.strip():
+            first_non_empty_index = index
+            break
+
+    if first_non_empty_index is None:
+        return title_line
+
+    first_line = lines[first_non_empty_index].strip()
+    if re.match(r"^#\s+.+$", first_line):
+        lines[first_non_empty_index] = title_line
+        return "\n".join(lines).strip()
+
+    return f"{title_line}\n\n{content}".strip()
+
+
+def _strip_report_export_footer(markdown_text: Optional[str]) -> str:
+    content = _normalize_optional_text(markdown_text)
+    if not content:
+        return ""
+
+    content = re.sub(
+        r"\n*---\n\*(?:本报告由自动化安全审计系统(?:自动)?生成)\*\s*$",
+        "",
+        content.strip(),
+    )
+    content = re.sub(
+        r"(?m)^\*(?:本报告由自动化安全审计系统(?:自动)?生成)\*\s*$",
+        "",
+        content,
+    )
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    return content.strip()
+
+
+def _append_report_export_footer(markdown_text: str) -> str:
+    content = _strip_report_export_footer(markdown_text)
+    if not content:
+        return REPORT_EXPORT_FOOTER
+    return f"{content.rstrip()}\n\n---\n\n{REPORT_EXPORT_FOOTER}"
+
+
+def _normalize_poc_reference_text(text: Optional[str]) -> str:
+    normalized = _normalize_optional_text(text)
+    if not normalized:
+        return ""
+    return re.sub(r"(?i)\bmock\s*poc\b", "PoC 参考", normalized)
+
+
+def _normalize_top_risk_entries(markdown_text: str) -> str:
+    content = _normalize_optional_text(markdown_text)
+    if not content:
+        return ""
+
+    lines = content.split("\n")
+    in_code_block = False
+    active_top_risk_level: Optional[int] = None
+
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if heading_match:
+            heading_level = len(heading_match.group(1))
+            heading_title = _normalize_markdown_section_title(heading_match.group(2))
+            if heading_title == "top 风险条目":
+                active_top_risk_level = heading_level
+            elif active_top_risk_level is not None and heading_level <= active_top_risk_level:
+                active_top_risk_level = None
+            continue
+
+        if active_top_risk_level is None:
+            continue
+
+        if re.match(r"^\d+\.\s+", stripped):
+            lines[index] = _strip_markdown_escape_backslashes(raw_line)
+
+    return "\n".join(lines).strip()
 
 
 def _finding_sort_key(finding: AgentFinding) -> Tuple[int, float]:
@@ -458,66 +793,31 @@ def _parse_vuln_type_distribution_entries(raw_text: Optional[str]) -> List[Tuple
     return entries
 
 
-def _normalize_project_report_risk_overview(markdown_text: str) -> str:
-    if not markdown_text:
-        return markdown_text
+def _normalize_project_report_risk_overview(
+    markdown_text: str,
+    *,
+    project: Project,
+    findings: List[AgentFinding],
+    export_statuses: Optional[Dict[str, str]] = None,
+    export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
+) -> str:
+    normalized_content = _strip_report_export_footer(markdown_text)
+    summary_section = "\n".join(
+        _build_project_scan_result_lines(
+            project=project,
+            findings=findings,
+            export_statuses=export_statuses,
+            export_options=export_options,
+        )
+    ).strip()
 
-    normalized_lines: List[str] = []
-    in_code_block = False
-
-    for raw_line in markdown_text.split("\n"):
-        stripped = raw_line.strip()
-        if stripped.startswith("```"):
-            in_code_block = not in_code_block
-            normalized_lines.append(raw_line)
-            continue
-
-        if in_code_block:
-            normalized_lines.append(raw_line)
-            continue
-
-        severity_match = re.match(r"^(?:[-*+]\s+)?严重程度分布[:：]\s*(.+)$", stripped)
-        if severity_match:
-            severity_pairs = _parse_inline_distribution_pairs(severity_match.group(1))
-            if not severity_pairs:
-                normalized_lines.append(raw_line)
-                continue
-
-            severity_map = {
-                str(key).strip().lower(): str(value).strip()
-                for key, value in severity_pairs
-                if str(key).strip()
-            }
-            normalized_lines.append("- 严重程度分布")
-            rendered_keys = set()
-            for key in ("critical", "high", "medium", "low", "info"):
-                value = severity_map.get(key)
-                if value is None:
-                    continue
-                normalized_lines.append(f"  - {key}：{value}")
-                rendered_keys.add(key)
-
-            for key, value in severity_pairs:
-                lowered_key = str(key).strip().lower()
-                if lowered_key in rendered_keys:
-                    continue
-                normalized_lines.append(f"  - {str(key).strip()}：{str(value).strip()}")
-            continue
-
-        vuln_type_match = re.match(r"^(?:[-*+]\s+)?漏洞类型分布[:：]\s*(.+)$", stripped)
-        if vuln_type_match:
-            vuln_entries = _parse_vuln_type_distribution_entries(vuln_type_match.group(1))
-            normalized_lines.append("- 漏洞类型分布")
-            if vuln_entries:
-                for vuln_type, count in vuln_entries:
-                    normalized_lines.append(f"  - {vuln_type}：{count}")
-            else:
-                normalized_lines.append("  - 暂无")
-            continue
-
-        normalized_lines.append(raw_line)
-
-    return "\n".join(normalized_lines)
+    stripped_content = _remove_markdown_sections(
+        normalized_content,
+        {"项目概览", "漏洞扫描结果", "风险总览", "业务影响评估"},
+    )
+    content_with_summary = _insert_section_after_title(stripped_content, summary_section)
+    content_with_summary = _normalize_top_risk_entries(content_with_summary)
+    return _ensure_project_report_title(content_with_summary, project)
 
 
 def _build_project_report_fallback(
@@ -548,22 +848,6 @@ def _build_project_report_fallback(
             ]
         )
 
-    severity_stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-    status_stats = {"pending": 0, "verified": 0, "false_positive": 0}
-    vuln_type_stats: Dict[str, int] = {}
-
-    for finding_row in findings:
-        severity = _normalize_severity(getattr(finding_row, "severity", None))
-        if severity in severity_stats:
-            severity_stats[severity] += 1
-
-        export_status = status_map.get(str(getattr(finding_row, "id", "") or ""), "pending")
-        if export_status in status_stats:
-            status_stats[export_status] += 1
-
-        vulnerability_type = str(getattr(finding_row, "vulnerability_type", "") or "").strip().lower() or "other"
-        vuln_type_stats[vulnerability_type] = vuln_type_stats.get(vulnerability_type, 0) + 1
-
     top_findings = sorted(
         findings,
         key=lambda item: (
@@ -578,44 +862,15 @@ def _build_project_report_fallback(
     lines = [
         f"# 项目风险评估报告：{project.name}",
         "",
-        "## 风险总览",
+        *_build_project_scan_result_lines(
+            project=project,
+            findings=findings,
+            export_statuses=status_map,
+            export_options=export_options,
+        ),
+        "## Top 风险条目",
         "",
-        "- 严重程度分布",
-        f"  - critical：{severity_stats.get('critical', 0)}",
-        f"  - high：{severity_stats.get('high', 0)}",
-        f"  - medium：{severity_stats.get('medium', 0)}",
-        f"  - low：{severity_stats.get('low', 0)}",
-        f"  - info：{severity_stats.get('info', 0)}",
-        "- 漏洞类型分布",
     ]
-
-    if export_options.include_metadata:
-        lines[2:2] = [
-            "## 项目概览",
-            "",
-            f"- 漏洞总数：{len(findings)}",
-            f"- 待确认：{status_stats.get('pending', 0)}",
-            f"- 确报：{status_stats.get('verified', 0)}",
-            f"- 误报：{status_stats.get('false_positive', 0)}",
-            "",
-        ]
-
-    sorted_vuln_types = sorted(
-        vuln_type_stats.items(),
-        key=lambda item: (-int(item[1]), str(item[0])),
-    )
-    if sorted_vuln_types:
-        for vuln_type, count in sorted_vuln_types:
-            lines.append(f"  - {vuln_type}：{count}")
-    else:
-        lines.append("  - 暂无")
-    lines.extend(
-        [
-            "",
-            "## Top 风险条目",
-            "",
-        ]
-    )
 
     if not top_findings:
         lines.extend(
@@ -633,6 +888,7 @@ def _build_project_report_fallback(
                 or "未命名漏洞"
             )
             severity = _normalize_severity(getattr(finding_row, "severity", None)) or "unknown"
+            severity_label = _get_report_export_severity_label(severity)
             if export_options.include_metadata:
                 file_path = _normalize_relative_file_path(
                     str(getattr(finding_row, "file_path", "") or ""),
@@ -640,31 +896,22 @@ def _build_project_report_fallback(
                 ) or "-"
                 line_start = getattr(finding_row, "line_start", None) or "-"
                 lines.append(
-                    f"{index}. {_escape_markdown_inline(display_title)} | "
-                    f"{severity} | "
-                    f"{_escape_markdown_inline(file_path)}:{line_start}"
+                    f"{index}. {_render_markdown_heading_text(display_title)} | "
+                    f"{severity_label} | "
+                    f"{_render_markdown_heading_text(file_path)}:{line_start}"
                 )
             else:
                 lines.append(
-                    f"{index}. {_escape_markdown_inline(display_title)} | {severity}"
+                    f"{index}. {_render_markdown_heading_text(display_title)} | {severity_label}"
                 )
         lines.append("")
-
-    lines.extend(
-        [
-            "## 业务影响评估",
-            "",
-            "- 确报高危漏洞优先级最高；待确认条目需要继续复核，误报条目可作为验证结论留档。",
-            "",
-        ]
-    )
     if export_options.include_remediation:
         lines.extend(
             [
                 "## 优先级修复计划",
                 "",
-                "- P0：确报且严重程度为 critical/high 的漏洞，立即修复并回归验证。",
-                "- P1：待确认或 medium 风险漏洞，纳入最近迭代复核与修复计划。",
+                "- P0：确报且严重程度为严重/高危的漏洞，立即修复并回归验证。",
+                "- P1：待确认或中危风险漏洞，纳入最近迭代复核与修复计划。",
                 "- P2：误报条目保留判定依据，作为规则调优和验证样本。",
                 "",
                 "## 后续治理建议",
@@ -691,6 +938,7 @@ def _should_use_project_report_fallback(
 def _normalize_markdown_section_title(title: str) -> str:
     text = re.sub(r"`", "", str(title or "")).strip().lower()
     text = re.sub(r"^\d+\s*[.)、．]\s*", "", text)
+    text = re.sub(r"\s+", " ", text)
     return text
 
 
@@ -755,7 +1003,7 @@ def _strip_finding_export_noise(markdown_text: Optional[str]) -> str:
             should_remove = True
         elif normalized_title == "调用链" and _section_is_placeholder_call_chain(body):
             should_remove = True
-        elif normalized_title in {"poc", "mock poc"} and _section_is_placeholder_poc(body):
+        elif normalized_title in {"poc", "mock poc", "poc 参考", "poc参考"} and _section_is_placeholder_poc(body):
             should_remove = True
 
         if should_remove:
@@ -795,13 +1043,18 @@ def _build_finding_markdown_report(
     sections: List[str] = []
 
     title = str(finding_data.get("display_title") or finding_data.get("title") or "未命名漏洞")
-    severity = str(finding_data.get("severity") or "unknown").upper()
-    vuln_type = str(finding_data.get("vulnerability_type") or "unknown")
-    authenticity = str(finding_data.get("authenticity") or "unknown")
-    reachability = str(finding_data.get("reachability") or "unknown")
+    severity = _get_report_export_severity_label(finding_data.get("severity"))
+    vuln_type = _get_report_export_vulnerability_type_label(
+        finding_data.get("vulnerability_type"),
+        title=finding_data.get("title"),
+        description=finding_data.get("description"),
+        code_snippet=finding_data.get("code_snippet"),
+    )
+    authenticity = _get_report_export_authenticity_label(finding_data.get("authenticity"))
+    reachability = _get_report_export_reachability_label(finding_data.get("reachability"))
     status_label = str(finding_data.get("status_label") or "").strip()
 
-    sections.append(f"# 漏洞详情报告：{_escape_markdown_inline(title)}")
+    sections.append(f"# 漏洞详情报告：{_render_markdown_heading_text(title)}")
     sections.append("")
     sections.append("---")
     sections.append("")
@@ -811,7 +1064,7 @@ def _build_finding_markdown_report(
     if status_label:
         sections.append(f"- **状态:** {_escape_markdown_inline(status_label)}")
     sections.append(f"- **严重程度:** {severity}")
-    sections.append(f"- **漏洞类型:** {_render_markdown_code_span(vuln_type)}")
+    sections.append(f"- **漏洞类型:** {_escape_markdown_inline(vuln_type)}")
     sections.append(f"- **真实性判定:** {_escape_markdown_inline(authenticity)}")
     sections.append(f"- **可达性:** {_escape_markdown_inline(reachability)}")
 
@@ -863,11 +1116,11 @@ def _build_finding_markdown_report(
         sections.append("")
 
     if bool(finding_data.get("has_poc")):
-        sections.append("## Mock PoC")
+        sections.append("## PoC 参考")
         sections.append("")
         poc_description = finding_data.get("poc_description")
         if poc_description:
-            sections.append(str(poc_description))
+            sections.append(_normalize_poc_reference_text(str(poc_description)))
             sections.append("")
 
         poc_steps = finding_data.get("poc_steps")
@@ -880,7 +1133,7 @@ def _build_finding_markdown_report(
 
         poc_code = finding_data.get("poc_code")
         if poc_code:
-            sections.append("### Mock PoC 代码")
+            sections.append("### PoC 参考代码")
             sections.append("")
             sections.append("```")
             sections.append(str(poc_code).strip())
@@ -889,7 +1142,7 @@ def _build_finding_markdown_report(
 
     sections.append("---")
     sections.append("")
-    sections.append("*本报告由自动化安全审计系统生成*")
+    sections.append(REPORT_EXPORT_FOOTER)
     sections.append("")
     return "\n".join(sections)
 
@@ -1389,16 +1642,19 @@ def _build_task_export_markdown(
             r"安全扫描.*报告",
             r"审计导出报告",
         ],
-        level_offset=1,
+        level_offset=0,
     )
-    project_report = _normalize_project_report_risk_overview(project_report)
+    project_report = _normalize_project_report_risk_overview(
+        project_report,
+        project=project,
+        findings=findings,
+        export_statuses=export_statuses,
+        export_options=export_options,
+    )
+    project_report = _strip_report_export_footer(project_report)
 
     lines: List[str] = []
-    lines.append("# 安全审计导出报告")
-    lines.append("")
     if export_options.include_metadata:
-        lines.append("## 项目报告")
-        lines.append("")
         lines.append(str(project_report).strip() if project_report else "_无项目报告内容_")
         lines.append("")
 
@@ -1407,7 +1663,7 @@ def _build_task_export_markdown(
         lines.append("")
         lines.append("本次导出范围内无可导出的漏洞条目。")
         lines.append("")
-        content = "\n".join(lines)
+        content = _append_report_export_footer("\n".join(lines))
         if export_options.compact_mode:
             return _compact_markdown(content)
         return content
@@ -1419,7 +1675,7 @@ def _build_task_export_markdown(
     ]
     finding_index = 1
 
-    for export_status, section_title in section_order:
+    for export_status, _section_title in section_order:
         section_findings = [
             finding_row
             for finding_row in findings
@@ -1427,9 +1683,6 @@ def _build_task_export_markdown(
         ]
         if not section_findings:
             continue
-
-        lines.append(f"## {section_title}")
-        lines.append("")
 
         for finding_row in section_findings:
             finding_report = None
@@ -1461,13 +1714,14 @@ def _build_task_export_markdown(
                 level_offset=1,
             )
             finding_report = _strip_finding_export_noise(finding_report)
+            finding_report = _strip_report_export_footer(finding_report)
             finding_title = (
                 report_descriptions.get(str(getattr(finding_row, "id", "") or ""), {}).get("display_title")
                 or _normalize_optional_text(getattr(finding_row, "title", None))
             )
             if finding_title:
                 lines.append(
-                    f"### 漏洞报告 {finding_index}: {_escape_markdown_inline(finding_title)}"
+                    f"### 漏洞报告 {finding_index}: {_render_markdown_heading_text(finding_title)}"
                 )
             else:
                 lines.append(f"### 漏洞报告 {finding_index}")
@@ -1476,7 +1730,7 @@ def _build_task_export_markdown(
             lines.append("")
             finding_index += 1
 
-    content = "\n".join(lines)
+    content = _append_report_export_footer("\n".join(lines))
     if export_options.compact_mode:
         return _compact_markdown(content)
     return content
@@ -1879,7 +2133,7 @@ async def generate_audit_report(
     md_lines.append(f"- **工具调用次数:** {task.tool_calls_count}")
     md_lines.append(f"- **Token 消耗:** {task.tokens_used:,}")
     if with_poc > 0:
-        md_lines.append(f"- **生成的 Mock PoC:** {with_poc}")
+        md_lines.append(f"- **生成的 PoC 参考:** {with_poc}")
     md_lines.append("")
 
     # Detailed Findings
@@ -1915,7 +2169,7 @@ async def generate_audit_report(
                     if export_status == FindingStatus.VERIFIED
                     else "[未验证]"
                 )
-                poc_badge = " [含 Mock PoC]" if f.has_poc else ""
+                poc_badge = " [含 PoC 参考]" if f.has_poc else ""
 
                 md_lines.append(
                     f"### {severity_level.upper()}-{i}: {_escape_markdown_inline(f.title)}"
@@ -1994,13 +2248,13 @@ async def generate_audit_report(
                     md_lines.append(f.suggestion)
                     md_lines.append("")
 
-                #  添加 Mock PoC 详情
+                #  添加 PoC 参考详情
                 if f.has_poc:
-                    md_lines.append("**Mock PoC:**")
+                    md_lines.append("**PoC 参考:**")
                     md_lines.append("")
 
                     if f.poc_description:
-                        md_lines.append(f"*{f.poc_description}*")
+                        md_lines.append(f"*{_normalize_poc_reference_text(f.poc_description)}*")
                         md_lines.append("")
 
                     if f.poc_steps:
@@ -2011,7 +2265,7 @@ async def generate_audit_report(
                         md_lines.append("")
 
                     if f.poc_code:
-                        md_lines.append("**Mock PoC 代码:**")
+                        md_lines.append("**PoC 参考代码:**")
                         md_lines.append("")
                         md_lines.append("```")
                         md_lines.append(f.poc_code.strip().replace('\\n', '\n').replace('\r\n', '\n'))
@@ -2045,7 +2299,7 @@ async def generate_audit_report(
     # Footer
     md_lines.append("---")
     md_lines.append("")
-    md_lines.append("*本报告由自动化安全审计系统生成*")
+    md_lines.append(REPORT_EXPORT_FOOTER)
     md_lines.append("")
     legacy_content = "\n".join(md_lines)
     project_report_fallback = (

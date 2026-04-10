@@ -114,7 +114,8 @@ async def test_generate_report_keeps_long_text_and_escapes_markdown_fields():
     body = response.body.decode("utf-8")
     assert response.media_type == "text/markdown; charset=utf-8"
 
-    assert "Unsafe \\[link\\]\\(x\\) \\#1 \\| critical" in body
+    assert "### 漏洞报告 1: Unsafe [link](x) #1 | critical" in body
+    assert "Unsafe \\[link\\]\\(x\\) \\#1 \\| critical" not in body
     assert "src/security/\\[core\\]\\(module\\)\\#file.py:12-15" in body
     assert long_description in body
     assert "VulHunter" not in body
@@ -239,7 +240,7 @@ def test_markdown_to_html_supports_nested_lists():
     assert "<li>\nmemory_corruption：10\n</li>" in html
 
 
-def test_build_finding_markdown_report_hides_fix_code_and_uses_mock_poc():
+def test_build_finding_markdown_report_uses_chinese_overview_and_poc_reference():
     task = _make_task(task_id="task-1")
     project = SimpleNamespace(id="project-1", name="Demo")
     report = reporting_endpoint._build_finding_markdown_report(
@@ -250,6 +251,8 @@ def test_build_finding_markdown_report_hides_fix_code_and_uses_mock_poc():
             "display_title": "Mock PoC Finding",
             "severity": "high",
             "vulnerability_type": "command_injection",
+            "authenticity": "confirmed",
+            "reachability": "likely_reachable",
             "has_poc": True,
             "poc_description": "Mock PoC: 仅用于测试环境复现",
             "poc_code": "echo 'mock'",
@@ -260,11 +263,16 @@ def test_build_finding_markdown_report_hides_fix_code_and_uses_mock_poc():
     assert "## 报告信息" not in report
     assert "参考修复代码" not in report
     assert "概念验证 (PoC)" not in report
-    assert "## Mock PoC" in report
-    assert "### Mock PoC 代码" in report
+    assert "- **严重程度:** 高危" in report
+    assert "- **漏洞类型:** 命令注入漏洞" in report
+    assert "- **真实性判定:** 已确认真实漏洞" in report
+    assert "- **可达性:** 可能可达" in report
+    assert "## PoC 参考" in report
+    assert "### PoC 参考代码" in report
+    assert report.rstrip().endswith("*本报告由自动化安全审计系统自动生成*")
 
 
-def test_build_finding_markdown_report_keeps_code_span_values_without_escape_backslashes():
+def test_build_finding_markdown_report_keeps_vulnerability_type_values_without_escape_backslashes():
     task = _make_task(task_id="task-1")
     project = SimpleNamespace(id="project-1", name="Demo")
     report = reporting_endpoint._build_finding_markdown_report(
@@ -279,13 +287,14 @@ def test_build_finding_markdown_report_keeps_code_span_values_without_escape_bac
         },
     )
 
-    assert "`memory_corruption`" in report
+    assert "内存破坏漏洞" in report
+    assert "memory_corruption" not in report
     assert "memory\\_corruption" not in report
 
 
 def test_build_project_report_fallback_formats_risk_overview_as_nested_lists():
     markdown = reporting_endpoint._build_project_report_fallback(
-        project=SimpleNamespace(name="Demo"),
+        project=SimpleNamespace(name="Demo", description="演示项目"),
         findings=[
             _make_finding(
                 id="finding-1",
@@ -297,9 +306,12 @@ def test_build_project_report_fallback_formats_risk_overview_as_nested_lists():
         report_descriptions={},
     )
 
-    assert "## 风险总览" in markdown
-    assert "- 严重程度分布\n  - critical：0\n  - high：1" in markdown
-    assert "- 漏洞类型分布\n  - command_injection：1" in markdown
+    assert "## 漏洞扫描结果" in markdown
+    assert "## 风险总览" not in markdown
+    assert "## 业务影响评估" not in markdown
+    assert "- 项目描述：演示项目" in markdown
+    assert "- 严重程度分布\n  - 严重：0\n  - 高危：1" in markdown
+    assert "- 漏洞类型分布\n  - 命令注入漏洞：1" in markdown
 
 
 def test_strip_finding_export_noise_removes_empty_sections():
@@ -379,13 +391,15 @@ async def test_generate_report_strips_redundant_embedded_titles():
     )
 
     body = response.body.decode("utf-8")
-    assert body.count("# 安全审计导出报告") == 1
+    assert "# 安全审计导出报告" not in body
+    assert "## 项目报告" not in body
+    assert body.count("# 项目风险评估报告：Demo") == 1
     assert "# 安全审计报告" not in body
     assert "漏洞详情报告：XSS" not in body
     assert "| **漏洞 ID** |" not in body
     assert "暂无可执行 PoC" not in body
     assert "未明确 source" not in body
-    assert "### 报告信息" in body
+    assert "## 报告信息" in body
 
 
 @pytest.mark.asyncio
@@ -701,10 +715,46 @@ async def test_generate_report_normalizes_flat_project_risk_overview_to_nested_l
     )
 
     body = response.body.decode("utf-8")
-    assert "- 严重程度分布\n  - critical：0\n  - high：12\n  - medium：1\n  - low：0\n  - info：0" in body
-    assert "- 漏洞类型分布\n  - memory_corruption：10\n  - other：1\n  - command_injection：2" in body
+    assert "## 漏洞扫描结果" in body
+    assert "## 风险总览" not in body
+    assert "- 严重程度分布\n  - 严重：0\n  - 高危：1\n  - 中危：0\n  - 低危：0\n  - 信息：0" in body
+    assert "- 漏洞类型分布\n  - 跨站脚本漏洞：1" in body
     assert "严重程度分布：critical=0, high=12" not in body
     assert '漏洞类型分布：{"memory_corruption": 10' not in body
+
+
+@pytest.mark.asyncio
+async def test_generate_report_keeps_single_footer_at_end():
+    task = _make_task(report="## 项目级风险评估\n\n项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding_a = _make_finding(
+        id="finding-a",
+        title="Finding A",
+        report=None,
+        has_poc=True,
+        poc_code="echo A",
+    )
+    finding_b = _make_finding(
+        id="finding-b",
+        title="Finding B",
+        report=None,
+        severity="low",
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding_a, finding_b]))
+
+    response = await generate_audit_report(
+        task_id="task-single-footer",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert body.count("本报告由自动化安全审计系统自动生成") == 1
+    assert body.rstrip().endswith("*本报告由自动化安全审计系统自动生成*")
 
 
 @pytest.mark.asyncio
@@ -823,9 +873,9 @@ async def test_generate_report_exports_verified_pending_and_false_positive_secti
     )
 
     markdown_body = markdown_response.body.decode("utf-8")
-    assert "## 确报" in markdown_body
-    assert "## 待确认" in markdown_body
-    assert "## 误报" in markdown_body
+    assert "## 确报" not in markdown_body
+    assert "## 待确认" not in markdown_body
+    assert "## 误报" not in markdown_body
     assert "Verified Finding" in markdown_body
     assert "Pending Finding" in markdown_body
     assert "False Positive Finding" in markdown_body
@@ -961,3 +1011,4 @@ async def test_generate_report_rebuilds_degraded_project_summary_titles():
     assert "## Top 风险条目" in body
     assert "ExternalDelegateCommand" in body
     assert "MagickCore/delegate.c中未知函数命令注入漏洞" not in body
+    assert "\\" not in body.split("## Top 风险条目", 1)[1].split("---", 1)[0]
