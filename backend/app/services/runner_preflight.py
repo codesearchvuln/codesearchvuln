@@ -113,6 +113,7 @@ def _ensure_runner_image(client, spec: RunnerPreflightSpec) -> None:
 def run_runner_preflight_sync(spec: RunnerPreflightSpec) -> RunnerPreflightResult:
     container = None
     container_id: str | None = None
+    client = None
     try:
         client = docker.from_env()
         _ensure_runner_image(client, spec)
@@ -186,6 +187,11 @@ def run_runner_preflight_sync(spec: RunnerPreflightSpec) -> RunnerPreflightResul
         if container is not None:
             try:
                 container.remove(force=True)
+            except Exception:
+                pass
+        if client is not None:
+            try:
+                client.close()
             except Exception:
                 pass
 

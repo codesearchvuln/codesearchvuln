@@ -452,66 +452,60 @@ export function useStaticAnalysisData({
     opengrepSilentRefreshRef.current = true;
     try {
       await loadOpengrepTask(true);
-      await loadOpengrepFindings(true);
     } finally {
       opengrepSilentRefreshRef.current = false;
     }
-  }, [loadOpengrepFindings, loadOpengrepTask, opengrepTaskId]);
+  }, [loadOpengrepTask, opengrepTaskId]);
 
   const refreshGitleaksSilently = useCallback(async () => {
     if (!gitleaksTaskId || gitleaksSilentRefreshRef.current) return;
     gitleaksSilentRefreshRef.current = true;
     try {
       await loadGitleaksTask(true);
-      await loadGitleaksFindings(true);
     } finally {
       gitleaksSilentRefreshRef.current = false;
     }
-  }, [gitleaksTaskId, loadGitleaksFindings, loadGitleaksTask]);
+  }, [gitleaksTaskId, loadGitleaksTask]);
 
   const refreshBanditSilently = useCallback(async () => {
     if (!banditTaskId || banditSilentRefreshRef.current) return;
     banditSilentRefreshRef.current = true;
     try {
       await loadBanditTask(true);
-      await loadBanditFindings(true);
     } finally {
       banditSilentRefreshRef.current = false;
     }
-  }, [banditTaskId, loadBanditFindings, loadBanditTask]);
+  }, [banditTaskId, loadBanditTask]);
 
   const refreshPhpstanSilently = useCallback(async () => {
     if (!phpstanTaskId || phpstanSilentRefreshRef.current) return;
     phpstanSilentRefreshRef.current = true;
     try {
       await loadPhpstanTask(true);
-      await loadPhpstanFindings(true);
     } finally {
       phpstanSilentRefreshRef.current = false;
     }
-  }, [loadPhpstanFindings, loadPhpstanTask, phpstanTaskId]);
+  }, [loadPhpstanTask, phpstanTaskId]);
 
   const refreshPmdSilently = useCallback(async () => {
     if (!pmdTaskId || pmdSilentRefreshRef.current) return;
     pmdSilentRefreshRef.current = true;
     try {
       await loadPmdTask(true);
-      await loadPmdFindings(true);
     } finally {
       pmdSilentRefreshRef.current = false;
     }
-  }, [loadPmdFindings, loadPmdTask, pmdTaskId]);
+  }, [loadPmdTask, pmdTaskId]);
 
   const refreshYasaSilently = useCallback(async () => {
     if (!yasaTaskId || yasaSilentRefreshRef.current) return;
     yasaSilentRefreshRef.current = true;
     try {
       await loadYasaTask(true);
-      await loadYasaFindings(true);
     } finally {
       yasaSilentRefreshRef.current = false;
     }
-  }, [loadYasaFindings, loadYasaTask, yasaTaskId]);
+  }, [loadYasaTask, yasaTaskId]);
 
   const handleInterrupt = useCallback(async () => {
     if (!interruptTarget) return;

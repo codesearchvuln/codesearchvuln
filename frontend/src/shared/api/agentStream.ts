@@ -128,6 +128,7 @@ export class AgentStreamHandler {
   private abortController: AbortController | null = null; //  用于取消请求
   private isDisconnecting = false; //  标记是否正在断开
   private terminalEventReceived = false;
+  private reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(taskId: string, options: StreamOptions = {}) {
     this.taskId = taskId;
@@ -146,6 +147,7 @@ export class AgentStreamHandler {
     //  重置断开标志，允许新的连接
     this.isDisconnecting = false;
     this.terminalEventReceived = false;
+    this.clearReconnectTimeout();
 
     //  如果已经连接，不重复连接
     if (this.isConnected) {
@@ -198,7 +200,9 @@ export class AgentStreamHandler {
           delayMs: delay,
         });
       }
-      setTimeout(() => {
+      this.clearReconnectTimeout();
+      this.reconnectTimeoutId = setTimeout(() => {
+        this.reconnectTimeoutId = null;
         if (!this.isDisconnecting && !this.terminalEventReceived) {
           this.connect();
         }
@@ -222,6 +226,14 @@ export class AgentStreamHandler {
       source,
       terminal: false,
     });
+  }
+
+  private clearReconnectTimeout(): void {
+    if (this.reconnectTimeoutId === null) {
+      return;
+    }
+    clearTimeout(this.reconnectTimeoutId);
+    this.reconnectTimeoutId = null;
   }
 
   /**
@@ -567,6 +579,7 @@ export class AgentStreamHandler {
     //  标记正在断开，防止重连
     this.isDisconnecting = true;
     this.isConnected = false;
+    this.clearReconnectTimeout();
 
     //  取消 fetch 请求 (wrap in try-catch to handle AbortError)
     if (this.abortController) {

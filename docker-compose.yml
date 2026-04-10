@@ -13,6 +13,8 @@ services:
   db:
     image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/postgres:15-alpine
     restart: unless-stopped
+    mem_limit: 1g
+    pids_limit: 512
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -33,6 +35,8 @@ services:
   backend:
     image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}
     restart: unless-stopped
+    mem_limit: 4g
+    pids_limit: 1024
     working_dir: /app
     volumes:
       - ./docker/env/backend:/docker/env/backend
@@ -123,6 +127,8 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}}
     restart: unless-stopped
+    mem_limit: 512m
+    pids_limit: 256
     ports:
       - "${VULHUNTER_FRONTEND_PORT:-3000}:80"
     environment:
@@ -143,6 +149,8 @@ services:
   redis:
     image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/redis:7-alpine
     restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 256
     ports:
       - "6379:6379"
     volumes:
@@ -182,6 +190,8 @@ services:
     networks:
       - vulhunter-network
     restart: always
+    mem_limit: 512m
+    pids_limit: 256
 
   nexus-itemDetail:
     image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}
@@ -198,6 +208,8 @@ services:
     networks:
       - vulhunter-network
     restart: always
+    mem_limit: 512m
+    pids_limit: 256
 
 networks:
   vulhunter-network:

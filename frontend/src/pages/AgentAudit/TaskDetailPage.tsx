@@ -131,6 +131,7 @@ const FINDINGS_REFRESH_INTERVAL = 10000;
 const FINDINGS_PAGE_SIZE = 200;
 const BOOTSTRAP_FINDING_PAGE_SIZE = 200;
 const EVENT_DEDUP_WINDOW_SIZE = 5000;
+const MAX_REALTIME_FINDINGS = 1000;
 const TERMINAL_RECOVERY_MAX_ATTEMPTS = 2;
 const TERMINAL_RECOVERY_RETRY_INTERVAL_MS = 1500;
 const TERMINAL_RECOVERY_DEBOUNCE_MS = 30_000;
@@ -171,6 +172,16 @@ const LOG_TYPE_LABELS: Record<string, string> = {
   user: "用户",
   progress: "进度",
 };
+
+function limitRealtimeFindings(
+  items: RealtimeMergedFindingItem[],
+  maxItems = MAX_REALTIME_FINDINGS,
+): RealtimeMergedFindingItem[] {
+  if (items.length <= maxItems) {
+    return items;
+  }
+  return items.slice(items.length - maxItems);
+}
 
 type HomeScanCard = {
   key: "static" | "agent" | "hybrid";
@@ -705,7 +716,7 @@ function AgentAuditPageContent() {
   const [, setHighlightedAgentId] = useState<string | null>(null);
 
   // Realtime panels state
-  const [, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
+  const [realtimeFindings, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
   const [findingStatusUpdatingKey, setFindingStatusUpdatingKey] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [tokenUsage, setTokenUsage] = useState(() => createTokenUsageAccumulator());
@@ -737,6 +748,8 @@ function AgentAuditPageContent() {
   const agentTreeRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const highlightClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollGuardTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAgentTreeRefreshTime = useRef<number>(0);
   const previousTaskIdRef = useRef<string | undefined>(undefined);
   const disconnectStreamRef = useRef<(() => void) | null>(null);
@@ -768,14 +781,9 @@ function AgentAuditPageContent() {
   const [historicalEventsLoaded, setHistoricalEventsLoaded] =
     useState<boolean>(false);
   const { logoSrc, cycleLogoVariant } = useLogoVariant();
-  const persistedDisplayFindings = useMemo(() => {
-    return findings
-      .map(agentFindingToRealtimeItem)
-      .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
-  }, [findings]);
   const visibleManagedFindings = useMemo(
-    () => persistedDisplayFindings,
-    [persistedDisplayFindings],
+    () => realtimeFindings,
+    [realtimeFindings],
   );
   const failedReason = useMemo(() => {
     if (task?.status !== "failed") return null;
@@ -1170,7 +1178,13 @@ function AgentAuditPageContent() {
             anchorHeight: anchorRect.height,
           });
         }
-        setTimeout(() => clearHighlights(), 1800);
+        if (highlightClearTimerRef.current) {
+          clearTimeout(highlightClearTimerRef.current);
+        }
+        highlightClearTimerRef.current = setTimeout(() => {
+          highlightClearTimerRef.current = null;
+          clearHighlights();
+        }, 1800);
       });
     },
     [clearHighlights, handleFindingsFiltersChange, selectAgent],
@@ -1395,6 +1409,31 @@ function AgentAuditPageContent() {
     setAutoScroll(getTaskAutoScroll(taskId || null));
     previousTaskIdRef.current = taskId;
   }, [taskId, reset, setAutoScroll]);
+
+  useEffect(() => {
+    return () => {
+      if (agentTreeRefreshTimer.current) {
+        clearTimeout(agentTreeRefreshTimer.current);
+        agentTreeRefreshTimer.current = null;
+      }
+      if (highlightClearTimerRef.current) {
+        clearTimeout(highlightClearTimerRef.current);
+        highlightClearTimerRef.current = null;
+      }
+      if (scrollGuardTimeoutRef.current) {
+        clearTimeout(scrollGuardTimeoutRef.current);
+        scrollGuardTimeoutRef.current = null;
+      }
+      if (disconnectStreamRef.current) {
+        disconnectStreamRef.current();
+        disconnectStreamRef.current = null;
+      }
+      toolLogIdByCallIdRef.current.clear();
+      pendingToolBucketsRef.current.clear();
+      seenEventKeysRef.current.clear();
+      seenEventOrderRef.current = [];
+    };
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -2334,9 +2373,11 @@ function AgentAuditPageContent() {
         const mergedFindingItem = agentEventToRealtimeItem(normalizedEvent);
         if (mergedFindingItem) {
           setRealtimeFindings((prev) =>
-            mergeRealtimeFindingsBatch(prev, [mergedFindingItem], {
-              source: "event",
-            }),
+            limitRealtimeFindings(
+              mergeRealtimeFindingsBatch(prev, [mergedFindingItem], {
+                source: "event",
+              }),
+            ),
           );
         }
 
@@ -2709,11 +2750,13 @@ function AgentAuditPageContent() {
         ingestTokenEvents(events as UnifiedAgentEvent[]);
         if (!verifiedFindingsManuallyClearedRef.current) {
           const findingItems = events
-            .map(agentEventToRealtimeItem)
-            .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+          .map(agentEventToRealtimeItem)
+          .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
           if (findingItems.length) {
             setRealtimeFindings((prev) =>
-              mergeRealtimeFindingsBatch(prev, findingItems, { source: "event" }),
+              limitRealtimeFindings(
+                mergeRealtimeFindingsBatch(prev, findingItems, { source: "event" }),
+              ),
             );
           }
         }
@@ -2951,7 +2994,9 @@ function AgentAuditPageContent() {
         .filter((item): item is RealtimeMergedFindingItem => Boolean(item));
       if (items.length) {
         setRealtimeFindings((prev) =>
-          mergeRealtimeFindingsBatch(prev, items, { source: "db" }),
+          limitRealtimeFindings(
+            mergeRealtimeFindingsBatch(prev, items, { source: "db" }),
+          ),
         );
       }
     }
@@ -3316,8 +3361,12 @@ function AgentAuditPageContent() {
       window.requestAnimationFrame(() => {
         markProgrammaticScroll();
       });
-      window.setTimeout(() => {
+      if (scrollGuardTimeoutRef.current) {
+        clearTimeout(scrollGuardTimeoutRef.current);
+      }
+      scrollGuardTimeoutRef.current = window.setTimeout(() => {
         markProgrammaticScroll();
+        scrollGuardTimeoutRef.current = null;
       }, 120);
     }
   }, [markProgrammaticScroll]);

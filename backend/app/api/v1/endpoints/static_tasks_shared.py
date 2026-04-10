@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Dict, List, Optional
 
@@ -32,6 +32,7 @@ from app.services.scanner_runner import stop_scanner_container_sync
 
 logger = logging.getLogger(__name__)
 SCAN_PROGRESS_MAX_LOGS = 120
+SCAN_PROGRESS_TERMINAL_STATUSES = {"completed", "failed", "interrupted", "cancelled"}
 _scan_progress_store: Dict[str, Dict[str, Any]] = {}
 
 
@@ -654,6 +655,50 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _parse_progress_timestamp(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _clear_scan_progress(task_id: str) -> bool:
+    return _scan_progress_store.pop(task_id, None) is not None
+
+
+def prune_scan_progress_store(
+    *,
+    ttl_seconds: Optional[int] = None,
+    now: Optional[datetime] = None,
+) -> int:
+    ttl = max(
+        1,
+        int(
+            ttl_seconds
+            or getattr(settings, "STATIC_SCAN_PROGRESS_TTL_SECONDS", 60 * 60)
+            or 60 * 60
+        ),
+    )
+    reference_time = now.astimezone(timezone.utc) if isinstance(now, datetime) else datetime.now(timezone.utc)
+    cutoff = reference_time - timedelta(seconds=ttl)
+    expired_task_ids: list[str] = []
+
+    for task_id, state in list(_scan_progress_store.items()):
+        updated_at = _parse_progress_timestamp((state or {}).get("updated_at"))
+        if updated_at is None or updated_at <= cutoff:
+            expired_task_ids.append(task_id)
+
+    for task_id in expired_task_ids:
+        _clear_scan_progress(task_id)
+
+    return len(expired_task_ids)
+
+
 def _dt_to_iso(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
         return None
@@ -703,6 +748,8 @@ def _record_scan_progress(
             state["logs"] = state["logs"][-SCAN_PROGRESS_MAX_LOGS:]
     state["updated_at"] = _utc_now_iso()
     _scan_progress_store[task_id] = state
+    if str(state.get("status", "")).lower() in SCAN_PROGRESS_TERMINAL_STATUSES:
+        _clear_scan_progress(task_id)
 async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """获取用户配置（与 agent_tasks 一致）"""
     if not user_id:

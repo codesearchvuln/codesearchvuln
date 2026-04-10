@@ -2,7 +2,7 @@ import { Zap, Bot, Layers, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLogoVariant } from "@/shared/branding/useLogoVariant";
 import { useTheme } from "next-themes";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type HomeScanCard = {
   key: "static" | "agent" | "hybrid";
@@ -41,16 +41,19 @@ export function HomeScanCards() {
   const { logoSrc, cycleLogoVariant } = useLogoVariant();
   const { resolvedTheme } = useTheme();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [isNexusLoaded, setIsNexusLoaded] = useState(false);
+  const iframeOrigin = `http://${window.location.hostname}:5174`;
 
   // 主题变化时通知 iframe
   useEffect(() => {
+    if (!isNexusLoaded) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
 
     const sendTheme = () => {
       iframe.contentWindow?.postMessage(
         { type: "THEME_CHANGE", theme: resolvedTheme },
-        "http://localhost:5174"
+        iframeOrigin
       );
     };
 
@@ -60,17 +63,47 @@ export function HomeScanCards() {
     sendTheme();
 
     return () => iframe.removeEventListener("load", sendTheme);
-  }, [resolvedTheme]);
+  }, [iframeOrigin, isNexusLoaded, resolvedTheme]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsNexusLoaded(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   return (
     <div className="min-h-[100dvh] relative overflow-hidden">
       <div className="absolute inset-0 z-10">
-        <iframe
-          ref={iframeRef}
-          src={`http://${window.location.hostname}:5174`}
-          title="GitNexus"
-          className="w-full h-full border-0 pointer-events-auto"
-        />
+        {isNexusLoaded ? (
+          <iframe
+            ref={iframeRef}
+            src={iframeOrigin}
+            title="GitNexus"
+            className="w-full h-full border-0 pointer-events-auto"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.22),_transparent_55%),linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.98))]">
+            <button
+              type="button"
+              onClick={() => setIsNexusLoaded(true)}
+              className="pointer-events-auto rounded-2xl border border-primary/50 bg-background/80 px-6 py-4 text-left shadow-[0_0_40px_rgba(59,130,246,0.2)] backdrop-blur-md transition hover:scale-[1.02] hover:border-primary hover:bg-background/90"
+            >
+              <div className="text-sm font-semibold text-primary">
+                加载 GitNexus 预览
+              </div>
+              <div className="mt-2 max-w-md text-sm text-foreground/70">
+                首页默认不自动挂载可视化 iframe，避免长时间待机时维持第二套前端运行时。
+              </div>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="relative z-20 w-full max-w-[1200px] mx-auto px-6 text-center pointer-events-none min-h-[100dvh] flex flex-col">

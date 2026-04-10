@@ -33,6 +33,22 @@ const initialState: AgentAuditState = {
 };
 
 const INDEX_PROGRESS_PATTERN = /索引进度[:：]?\s*(\d+)\s*\/\s*(\d+)/;
+export const MAX_AGENT_AUDIT_LOGS = 2000;
+
+function limitAgentAuditLogs<T>(logs: T[], maxLogs = MAX_AGENT_AUDIT_LOGS): T[] {
+  if (logs.length <= maxLogs) {
+    return logs;
+  }
+  return logs.slice(logs.length - maxLogs);
+}
+
+export function appendAgentAuditLogWithLimit<T>(
+  logs: T[],
+  nextLog: T,
+  maxLogs = MAX_AGENT_AUDIT_LOGS,
+): T[] {
+  return limitAgentAuditLogs([...logs, nextLog], maxLogs);
+}
 
 function inferProgressStatus(
   progressKey: string,
@@ -108,7 +124,7 @@ function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): Ag
       return { ...state, agentTree: action.payload };
 
     case 'SET_LOGS':
-      return { ...state, logs: action.payload };
+      return { ...state, logs: limitAgentAuditLogs(action.payload) };
 
     case 'ADD_LOG': {
       const { id: providedId, ...logData } = action.payload;
@@ -124,7 +140,7 @@ function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): Ag
           return { ...state, logs: nextLogs };
         }
       }
-      return { ...state, logs: [...state.logs, newLog] };
+      return { ...state, logs: appendAgentAuditLogWithLimit(state.logs, newLog) };
     }
 
     case 'UPDATE_LOG': {
@@ -211,7 +227,7 @@ function agentAuditReducer(state: AgentAuditState, action: AgentAuditAction): Ag
           time,
           eventTimestamp,
         });
-        return { ...state, logs: [...state.logs, newLog] };
+        return { ...state, logs: appendAgentAuditLogWithLimit(state.logs, newLog) };
       }
     }
 
@@ -283,7 +299,7 @@ export function useAgentAuditState() {
   const addLog = useCallback(
     (log: Omit<LogItem, "id" | "time"> & { time?: string; eventTimestamp?: string | null }): string => {
       const newLog = createLogItem(log);
-      dispatch({ type: 'SET_LOGS', payload: [...state.logs, newLog] });
+      dispatch({ type: 'SET_LOGS', payload: appendAgentAuditLogWithLimit(state.logs, newLog) });
       return newLog.id;
     },
     [state.logs],

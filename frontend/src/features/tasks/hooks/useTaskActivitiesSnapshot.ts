@@ -18,7 +18,6 @@ interface UseTaskActivitiesSnapshotOptions {
 }
 
 const ACTIVE_STATUSES = new Set(["running", "pending"]);
-const IDLE_POLLING_INTERVAL_MS = 60_000;
 
 export function useTaskActivitiesSnapshot(
 	options: UseTaskActivitiesSnapshotOptions = {},
@@ -27,10 +26,12 @@ export function useTaskActivitiesSnapshot(
 		autoLoad = true,
 		forceInitial = false,
 		pollingIntervalMs,
-		idlePollingIntervalMs = IDLE_POLLING_INTERVAL_MS,
 	} = options;
 	const [storeState, setStoreState] = useState(() =>
 		getTaskActivitiesStoreState(),
+	);
+	const [isPageVisible, setIsPageVisible] = useState(() =>
+		typeof document === "undefined" ? true : !document.hidden,
 	);
 
 	useEffect(() => {
@@ -53,33 +54,27 @@ export function useTaskActivitiesSnapshot(
 	);
 
 	useEffect(() => {
-		if (!pollingIntervalMs || !hasActiveTasks) return;
+		if (!pollingIntervalMs || !hasActiveTasks || document.hidden) return;
+		if (!isPageVisible) return;
 		const timer = window.setInterval(() => {
+			if (document.hidden) return;
 			void refreshTaskActivitiesSnapshot();
 		}, pollingIntervalMs);
 		return () => {
 			window.clearInterval(timer);
 		};
-	}, [pollingIntervalMs, hasActiveTasks]);
-
-	useEffect(() => {
-		if (!pollingIntervalMs || hasActiveTasks) return;
-		const interval = Math.max(idlePollingIntervalMs, pollingIntervalMs);
-		const timer = window.setInterval(() => {
-			void refreshTaskActivitiesSnapshot();
-		}, interval);
-		return () => {
-			window.clearInterval(timer);
-		};
-	}, [idlePollingIntervalMs, pollingIntervalMs, hasActiveTasks]);
+	}, [isPageVisible, pollingIntervalMs, hasActiveTasks]);
 
 	useEffect(() => {
 		const handleVisibilityChange = () => {
+			setIsPageVisible(!document.hidden);
 			if (!document.hidden) {
 				void refreshTaskActivitiesSnapshot();
 			}
 		};
 		const handleFocus = () => {
+			if (document.hidden) return;
+			setIsPageVisible(true);
 			void refreshTaskActivitiesSnapshot();
 		};
 

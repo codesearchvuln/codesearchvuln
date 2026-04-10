@@ -112,6 +112,8 @@ services:
 
   frontend:
     image: vulhunter/frontend-local:latest
+    mem_limit: 1536m
+    pids_limit: 512
     build: !override
       context: ./frontend
       dockerfile: ${FRONTEND_DOCKERFILE:-../docker/frontend.Dockerfile}
@@ -149,7 +151,8 @@ services:
       BACKEND_PUBLIC_URL: http://localhost:${VULHUNTER_BACKEND_PORT:-8000}
       VITE_API_TARGET: http://backend:8000
       VITE_API_BASE_URL: /api/v1
-      CHOKIDAR_USEPOLLING: ${FRONTEND_CHOKIDAR_USEPOLLING:-true}
+      # Disable polling by default to avoid idle-state watcher churn; opt in only when host FS events are unavailable.
+      CHOKIDAR_USEPOLLING: ${FRONTEND_CHOKIDAR_USEPOLLING:-false}
       CHOKIDAR_INTERVAL: ${FRONTEND_CHOKIDAR_INTERVAL:-300}
       VITE_HMR_CLIENT_PORT: "${VULHUNTER_FRONTEND_PORT:-3000}"
 

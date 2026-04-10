@@ -70,6 +70,26 @@ class ZipCacheManager:
         """生成缓存键"""
         key_str = f"{project_id}:{file_path}:{zip_hash}"
         return hashlib.md5(key_str.encode()).hexdigest()
+
+    def _remove_entry_locked(self, cache_key: str) -> Optional[FileCacheEntry]:
+        entry = self.cache.pop(cache_key, None)
+        if entry is not None:
+            self.stats["total_memory"] = max(
+                0,
+                self.stats["total_memory"] - entry.get_memory_size(),
+            )
+        return entry
+
+    def _prune_expired_locked(self) -> int:
+        expired_keys = [key for key, entry in self.cache.items() if entry.is_expired(self.ttl)]
+        for cache_key in expired_keys:
+            self._remove_entry_locked(cache_key)
+        return len(expired_keys)
+
+    def _sync_total_memory_locked(self) -> int:
+        total_memory = sum(entry.get_memory_size() for entry in self.cache.values())
+        self.stats["total_memory"] = total_memory
+        return total_memory
     
     async def get(self, project_id: str, file_path: str, zip_hash: str) -> Optional[FileCacheEntry]:
         """
@@ -85,19 +105,19 @@ class ZipCacheManager:
         """
         async with self.lock:
             cache_key = self._generate_cache_key(project_id, file_path, zip_hash)
-            
+
             entry = self.cache.get(cache_key)
             if entry is None:
                 self.stats["misses"] += 1
                 return None
-            
+
             # 检查过期
             if entry.is_expired(self.ttl):
-                del self.cache[cache_key]
+                self._remove_entry_locked(cache_key)
                 self.stats["misses"] += 1
                 logger.info(f"缓存过期: {cache_key}")
                 return None
-            
+
             # 更新访问信息
             entry.touch()
             self.stats["hits"] += 1
@@ -135,32 +155,37 @@ class ZipCacheManager:
         
         async with self.lock:
             cache_key = self._generate_cache_key(project_id, file_path, zip_hash)
-            
+            pruned = self._prune_expired_locked()
+            if pruned > 0:
+                logger.info(f"已主动清理 {pruned} 个过期 ZIP 缓存条目")
+
+            self._remove_entry_locked(cache_key)
+
             # 创建缓存条目
             entry = FileCacheEntry(content, size, encoding, is_text, zip_hash)
             entry_size = entry.get_memory_size()
-            
+
             # 检查内存限制
             new_total = self.stats["total_memory"] + entry_size
-            
+
             # 需要清理时LRU删除
             while new_total > self.max_size and self.cache:
                 removed_key = self._evict_lru()
                 if removed_key:
-                    removed_entry = self.cache.pop(removed_key, None)
+                    removed_entry = self._remove_entry_locked(removed_key)
                     if removed_entry:
-                        new_total -= removed_entry.get_memory_size()
+                        new_total = self.stats["total_memory"] + entry_size
                         self.stats["evictions"] += 1
                 else:
                     break
-            
+
             # 如果still超过限制，不缓存
             if new_total > self.max_size:
                 logger.warning(f"缓存满，无法缓存文件: {file_path}")
                 return False
-            
+
             self.cache[cache_key] = entry
-            self.stats["total_memory"] = new_total
+            self.stats["total_memory"] += entry_size
             logger.debug(f"缓存文件: {file_path} (大小: {entry_size}字节)")
             return True
     
@@ -191,18 +216,26 @@ class ZipCacheManager:
                 k for k, v in self.cache.items()
                 if v.file_hash == zip_hash
             ]
-            
+
             deleted_count = 0
             for key in keys_to_delete:
-                entry = self.cache.pop(key, None)
+                entry = self._remove_entry_locked(key)
                 if entry:
-                    self.stats["total_memory"] -= entry.get_memory_size()
                     deleted_count += 1
-            
+
             if deleted_count > 0:
                 logger.info(f"已清除 {deleted_count} 个缓存条目")
-            
+
             return deleted_count
+
+    async def prune_expired(self) -> int:
+        """主动清理过期缓存条目。"""
+        async with self.lock:
+            removed = self._prune_expired_locked()
+            if removed > 0:
+                logger.info(f"已主动清理 {removed} 个过期 ZIP 缓存条目")
+            self._sync_total_memory_locked()
+            return removed
     
     async def clear_all(self) -> None:
         """清空所有缓存"""
@@ -213,6 +246,8 @@ class ZipCacheManager:
     
     def get_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""
+        total_memory = sum(entry.get_memory_size() for entry in self.cache.values())
+        self.stats["total_memory"] = total_memory
         total_entries = len(self.cache)
         hit_rate = (
             self.stats["hits"] / (self.stats["hits"] + self.stats["misses"])
@@ -226,7 +261,7 @@ class ZipCacheManager:
             "misses": self.stats["misses"],
             "hit_rate": f"{hit_rate * 100:.1f}%",
             "evictions": self.stats["evictions"],
-            "memory_used_mb": self.stats["total_memory"] / 1024 / 1024,
+            "memory_used_mb": total_memory / 1024 / 1024,
             "memory_limit_mb": self.max_size / 1024 / 1024,
         }
 

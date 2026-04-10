@@ -128,10 +128,17 @@ def test_run_runner_preflight_sync_uses_explicit_command_and_removes_container(m
             seen["working_dir"] = working_dir
             return _FakeContainer()
 
+    class _FakeClient:
+        def __init__(self):
+            self.containers = _FakeContainers()
+
+        def close(self):
+            seen["client_closed"] = True
+
     monkeypatch.setattr(
         runner_preflight.docker,
         "from_env",
-        lambda: SimpleNamespace(containers=_FakeContainers()),
+        lambda: _FakeClient(),
         raising=False,
     )
     monkeypatch.setattr(runner_preflight, "_ensure_runner_image", lambda *_args, **_kwargs: None)
@@ -156,6 +163,7 @@ def test_run_runner_preflight_sync_uses_explicit_command_and_removes_container(m
     assert seen["auto_remove"] is False
     assert seen["wait_timeout"] == 17
     assert seen["removed"] is True
+    assert seen["client_closed"] is True
 
 
 def test_run_runner_preflight_sync_reports_failure_and_removes_container(monkeypatch):
@@ -181,10 +189,17 @@ def test_run_runner_preflight_sync_reports_failure_and_removes_container(monkeyp
         def run(self, image, command=None, detach=None, auto_remove=None, environment=None, working_dir=None):
             return _FakeContainer()
 
+    class _FakeClient:
+        def __init__(self):
+            self.containers = _FakeContainers()
+
+        def close(self):
+            seen["client_closed"] = True
+
     monkeypatch.setattr(
         runner_preflight.docker,
         "from_env",
-        lambda: SimpleNamespace(containers=_FakeContainers()),
+        lambda: _FakeClient(),
         raising=False,
     )
     monkeypatch.setattr(runner_preflight, "_ensure_runner_image", lambda *_args, **_kwargs: None)
@@ -203,6 +218,7 @@ def test_run_runner_preflight_sync_reports_failure_and_removes_container(monkeyp
     assert result.stderr == "tool missing"
     assert result.error is not None
     assert seen["removed"] is True
+    assert seen["client_closed"] is True
 
 
 def test_run_runner_preflight_sync_reports_timeout_and_removes_container(monkeypatch):
@@ -224,10 +240,17 @@ def test_run_runner_preflight_sync_reports_timeout_and_removes_container(monkeyp
         def run(self, image, command=None, detach=None, auto_remove=None, environment=None, working_dir=None):
             return _FakeContainer()
 
+    class _FakeClient:
+        def __init__(self):
+            self.containers = _FakeContainers()
+
+        def close(self):
+            seen["client_closed"] = True
+
     monkeypatch.setattr(
         runner_preflight.docker,
         "from_env",
-        lambda: SimpleNamespace(containers=_FakeContainers()),
+        lambda: _FakeClient(),
         raising=False,
     )
     monkeypatch.setattr(runner_preflight, "_ensure_runner_image", lambda *_args, **_kwargs: None)
@@ -245,6 +268,87 @@ def test_run_runner_preflight_sync_reports_timeout_and_removes_container(monkeyp
     assert result.exit_code == 124
     assert "timed out" in (result.error or "")
     assert seen["removed"] is True
+    assert seen["client_closed"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_agent_services_closes_docker_and_redis_clients(monkeypatch):
+    from app import main
+
+    events: list[str] = []
+
+    docker_module = types.ModuleType("docker")
+    redis_module = types.ModuleType("redis")
+
+    class _DockerClient:
+        def ping(self):
+            events.append("docker_ping")
+
+        def close(self):
+            events.append("docker_close")
+
+    class _RedisPool:
+        def disconnect(self):
+            events.append("redis_disconnect")
+
+    class _RedisClient:
+        def __init__(self):
+            self.connection_pool = _RedisPool()
+
+        def ping(self):
+            events.append("redis_ping")
+
+        def close(self):
+            events.append("redis_close")
+
+    docker_module.from_env = lambda: _DockerClient()
+    redis_module.from_url = lambda _url: _RedisClient()
+
+    monkeypatch.setitem(sys.modules, "docker", docker_module)
+    monkeypatch.setitem(sys.modules, "redis", redis_module)
+
+    issues = await main.check_agent_services()
+
+    assert issues == []
+    assert events == [
+        "docker_ping",
+        "docker_close",
+        "redis_ping",
+        "redis_close",
+        "redis_disconnect",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_cache_cleanup_once_prunes_scan_progress_and_zip_cache(monkeypatch):
+    from app import main
+
+    seen: dict[str, object] = {}
+
+    async def _fake_prune_zip_cache():
+        seen["zip"] = True
+        return 4
+
+    class _ZipCacheManager:
+        async def prune_expired(self):
+            return await _fake_prune_zip_cache()
+
+    monkeypatch.setattr(
+        main.GlobalRepoCacheManager,
+        "cleanup_unused_caches",
+        lambda **_kwargs: 2,
+    )
+    monkeypatch.setattr(main, "prune_scan_progress_store", lambda **_kwargs: 3)
+    monkeypatch.setattr(main, "get_zip_cache_manager", lambda: _ZipCacheManager())
+
+    summary = await main._run_cache_cleanup_once()
+
+    assert summary == {
+        "repo_caches": 2,
+        "scan_progress_entries": 3,
+        "zip_cache_entries": 4,
+    }
+    assert seen["zip"] is True
 
 
 @pytest.mark.asyncio

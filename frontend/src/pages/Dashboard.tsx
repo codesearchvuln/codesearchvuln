@@ -27,6 +27,7 @@ const DashboardCommandCenter = lazy(
 );
 
 type RangeDays = 7 | 14 | 30;
+const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 
 function createEmptyTaskStatusByScanType() {
 	return {
@@ -192,6 +193,9 @@ export default function Dashboard() {
 	const [snapshot, setSnapshot] = useState<DashboardSnapshotResponse>(EMPTY_SNAPSHOT);
 	const [loading, setLoading] = useState(true);
 	const [rangeDays, setRangeDays] = useState<RangeDays>(14);
+	const [isPageVisible, setIsPageVisible] = useState(() =>
+		typeof document === "undefined" ? true : !document.hidden,
+	);
 	const [storeState, setStoreState] = useState(() =>
 		getDashboardSnapshotStoreState(),
 	);
@@ -208,7 +212,6 @@ export default function Dashboard() {
 						const nextSnapshot = await loadDashboardSnapshot({
 							topN: 10,
 							rangeDays,
-							force: true,
 						});
 						if (requestSeq !== requestSeqRef.current) {
 							return;
@@ -235,15 +238,50 @@ export default function Dashboard() {
 
 	useEffect(() => {
 		void loadDashboardData();
+	}, [loadDashboardData]);
 
-		const timer = window.setInterval(() => {
+	useEffect(() => {
+		const storeSnapshot = storeState.snapshot;
+		if (!storeSnapshot) return;
+		if (storeSnapshot.rangeDays !== rangeDays) return;
+		setSnapshot(normalizeSnapshot(storeSnapshot.data));
+	}, [rangeDays, storeState.snapshot]);
+
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			setIsPageVisible(!document.hidden);
+			if (document.hidden) {
+				return;
+			}
 			void loadDashboardData({ silent: true });
-		}, 15000);
+		};
+		const handleFocus = () => {
+			if (document.hidden) return;
+			setIsPageVisible(true);
+			void loadDashboardData({ silent: true });
+		};
+
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		window.addEventListener("focus", handleFocus);
+		return () => {
+			document.removeEventListener("visibilitychange", handleVisibilityChange);
+			window.removeEventListener("focus", handleFocus);
+		};
+	}, [loadDashboardData]);
+
+	useEffect(() => {
+		if (!isPageVisible) return;
+		const timer = window.setInterval(() => {
+			if (document.hidden) {
+				return;
+			}
+			void loadDashboardData({ silent: true });
+		}, DASHBOARD_REFRESH_INTERVAL_MS);
 
 		return () => {
 			window.clearInterval(timer);
 		};
-	}, [loadDashboardData]);
+	}, [isPageVisible, loadDashboardData]);
 
 	const handleRangeDaysChange = useCallback((value: RangeDays) => {
 		startTransition(() => {

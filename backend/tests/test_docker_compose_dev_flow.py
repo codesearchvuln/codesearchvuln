@@ -116,8 +116,13 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "/tmp/vulhunter/scans:/tmp/vulhunter/scans" not in compose_text
     assert "scan_workspace:/tmp/vulhunter/scans" in compose_text
     assert "${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock" in compose_text
-    assert "RUNNER_PREFLIGHT_BUILD_CONTEXT: /opt/backend-build-context" in compose_text
+    assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in compose_text
     assert 'RUNNER_PREFLIGHT_STRICT: "${RUNNER_PREFLIGHT_STRICT:-true}"' in compose_text
+    assert "mem_limit: 4g" in compose_text
+    assert "pids_limit: 1024" in compose_text
+    assert "mem_limit: 512m" in compose_text
+    assert "pids_limit: 256" in compose_text
+    assert "mem_limit: 1g" in compose_text
     assert "MCP_REQUIRE_ALL_READY_ON_STARTUP" not in compose_text
     assert '/bin/sh", "-lc"' not in compose_text
     assert (
@@ -161,7 +166,6 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert 'CMD ["/bin/sh", "/app/docker-entrypoint.sh"]' not in backend_text
     assert "https://github.com/antgroup/YASA-Engine/archive/refs/tags/${YASA_VERSION}.tar.gz" not in backend_text
     assert "COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides" not in backend_text
-    assert "COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides" in backend_text
     assert 'best_index="$(cat /tmp/pypi-best-index)"' in backend_text
     assert 'for idx in "$@"; do \\' in backend_text
     assert 'sync_with_index "${BACKEND_PYPI_INDEX_PRIMARY}" || sync_with_index "${BACKEND_PYPI_INDEX_FALLBACK}"' not in backend_text
@@ -221,6 +225,9 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "- BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/" in full_overlay_text
     assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in full_overlay_text
     assert "SCAN_WORKSPACE_VOLUME: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}" in full_overlay_text
+    assert "mem_limit: 1536m" in full_overlay_text
+    assert "pids_limit: 512" in full_overlay_text
+    assert "CHOKIDAR_USEPOLLING: ${FRONTEND_CHOKIDAR_USEPOLLING:-false}" in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_FALLBACK" not in full_overlay_text
     assert "BACKEND_NPM_REGISTRY_CANDIDATES" not in full_overlay_text
@@ -234,13 +241,21 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "\n  frontend-dev:" not in full_overlay_text
 
 
+def test_hybrid_overlay_uses_frontend_dev_without_default_polling_and_with_resource_limits() -> None:
+    hybrid_overlay_text = (REPO_ROOT / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
+
+    assert "target: dev" in hybrid_overlay_text
+    assert "${VULHUNTER_FRONTEND_PORT:-3000}:5173" in hybrid_overlay_text
+    assert "CHOKIDAR_USEPOLLING: ${FRONTEND_CHOKIDAR_USEPOLLING:-false}" in hybrid_overlay_text
+    assert "mem_limit: 1536m" in hybrid_overlay_text
+    assert "pids_limit: 512" in hybrid_overlay_text
+
+
 def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
     backend_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(
         encoding="utf-8"
     )
 
-    assert "COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides" in backend_text
-    assert "RUNNER_PREFLIGHT_BUILD_CONTEXT=/opt/backend-build-context" in backend_text
     assert 'CMD ["python3", "-m", "app.runtime.container_startup", "prod"]' in backend_text
 
 

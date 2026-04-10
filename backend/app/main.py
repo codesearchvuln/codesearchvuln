@@ -15,8 +15,10 @@ from app.api.v1.api import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
 from app.db.session import AsyncSessionLocal
+from app.api.v1.endpoints.static_tasks_shared import prune_scan_progress_store
 from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
 from app.services.runner_preflight import run_configured_runner_preflights
+from app.services.zip_cache_manager import get_zip_cache_manager
 from app.models.agent_task import AgentTask, AgentTaskStatus
 from app.models.gitleaks import GitleaksScanTask
 from app.models.opengrep import OpengrepScanTask
@@ -58,6 +60,7 @@ async def check_agent_services():
     issues = []
 
     # 检查 Docker/沙箱服务
+    client = None
     try:
         import docker
 
@@ -68,19 +71,38 @@ async def check_agent_services():
         issues.append("Docker Python 库未安装 (pip install docker)")
     except Exception as e:
         issues.append(f"Docker 服务不可用: {e}")
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
 
     # 检查 Redis 连接（可选警告）
+    redis_client = None
     try:
         import redis
 
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-        r = redis.from_url(redis_url)
-        r.ping()
+        redis_client = redis.from_url(redis_url)
+        redis_client.ping()
         logger.info("  - Redis 服务可用")
     except ImportError:
         logger.warning("  - Redis Python 库未安装，部分功能可能受限")
     except Exception as e:
         logger.warning(f"  - Redis 服务连接失败: {e}")
+    finally:
+        if redis_client is not None:
+            try:
+                redis_client.close()
+            except Exception:
+                pass
+            connection_pool = getattr(redis_client, "connection_pool", None)
+            if connection_pool is not None:
+                try:
+                    connection_pool.disconnect()
+                except Exception:
+                    pass
 
     return issues
 
@@ -148,16 +170,33 @@ async def assert_database_schema_is_latest() -> None:
             "请运行 alembic upgrade head"
         )
 
+
+async def _run_cache_cleanup_once() -> dict[str, int]:
+    summary = {
+        "repo_caches": 0,
+        "scan_progress_entries": 0,
+        "zip_cache_entries": 0,
+    }
+    summary["repo_caches"] = GlobalRepoCacheManager.cleanup_unused_caches(
+        max_age_days=30,
+        max_unused_days=14,
+    )
+    summary["scan_progress_entries"] = prune_scan_progress_store()
+    summary["zip_cache_entries"] = await get_zip_cache_manager().prune_expired()
+    return summary
+
+
 async def _run_daily_cache_cleanup(stop_event: asyncio.Event) -> None:
     """每日清理一次缓存，直到收到停止信号。"""
     while not stop_event.is_set():
         try:
-            cleaned = GlobalRepoCacheManager.cleanup_unused_caches(
-                max_age_days=30,
-                max_unused_days=14,
-            )
-            if cleaned > 0:
-                logger.info(f"  - 定时清理完成，已清理 {cleaned} 个过期的 Git 项目缓存")
+            summary = await _run_cache_cleanup_once()
+            if summary["repo_caches"] > 0:
+                logger.info(f"  - 定时清理完成，已清理 {summary['repo_caches']} 个过期的 Git 项目缓存")
+            if summary["scan_progress_entries"] > 0:
+                logger.info(f"  - 定时清理完成，已清理 {summary['scan_progress_entries']} 个静态扫描进度残留")
+            if summary["zip_cache_entries"] > 0:
+                logger.info(f"  - 定时清理完成，已清理 {summary['zip_cache_entries']} 个过期 ZIP 缓存条目")
         except Exception as e:
             logger.warning(f"定时清理过期缓存失败: {e}")
 
@@ -494,13 +533,13 @@ async def lifespan(app: FastAPI):
         logger.warning(f"清理异步资源失败: {e}")
 
     try:
-        # 可选：清理过期的 git 缓存（超过30天未使用的缓存）
-        cleaned = GlobalRepoCacheManager.cleanup_unused_caches(
-            max_age_days=30, 
-            max_unused_days=14
-        )
-        if cleaned > 0:
-            logger.info(f"  - 已清理 {cleaned} 个过期的 Git 项目缓存")
+        summary = await _run_cache_cleanup_once()
+        if summary["repo_caches"] > 0:
+            logger.info(f"  - 已清理 {summary['repo_caches']} 个过期的 Git 项目缓存")
+        if summary["scan_progress_entries"] > 0:
+            logger.info(f"  - 已清理 {summary['scan_progress_entries']} 个静态扫描进度残留")
+        if summary["zip_cache_entries"] > 0:
+            logger.info(f"  - 已清理 {summary['zip_cache_entries']} 个过期 ZIP 缓存条目")
     except Exception as e:
         logger.warning(f"清理过期缓存失败: {e}")
 
