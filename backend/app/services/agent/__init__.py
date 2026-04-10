@@ -1,100 +1,61 @@
 """
 VulHunter Agent 服务模块
-基于动态 Agent 树架构的 AI 代码安全审计
 
-架构:
-- OrchestratorAgent 作为编排层，动态调度子 Agent
-- ReconAgent 负责侦察和文件分析
-- AnalysisAgent 负责漏洞分析
-- VerificationAgent 负责验证发现
-
-工作流:
-    START → Orchestrator → [Recon/Analysis/Verification] → Report → END
-
-    支持动态创建子Agent进行专业化分析
+对外保持原有导出名，但改为懒加载，避免轻量模块在导入时触发整条
+agent/runtime/docker 依赖链。
 """
 
-# 事件管理
-from .event_manager import EventManager, AgentEventEmitter
+from __future__ import annotations
 
-# Agent 类
-from .agents import (
-    BaseAgent, AgentConfig, AgentResult,
-    OrchestratorAgent, ReconAgent, AnalysisAgent, VerificationAgent,
-)
+from importlib import import_module
 
-# 核心模块（状态管理、注册表、消息）
-from .core import (
-    AgentState, AgentStatus,
-    AgentRegistry, agent_registry,
-    AgentMessage, MessageType, MessagePriority, MessageBus,
-)
+_EXPORTS = {
+    "EventManager": ".event_manager",
+    "AgentEventEmitter": ".event_manager",
+    "BaseAgent": ".agents",
+    "AgentConfig": ".agents",
+    "AgentResult": ".agents",
+    "OrchestratorAgent": ".agents",
+    "ReconAgent": ".agents",
+    "AnalysisAgent": ".agents",
+    "VerificationAgent": ".agents",
+    "AgentState": ".core",
+    "AgentStatus": ".core",
+    "AgentRegistry": ".core",
+    "agent_registry": ".core",
+    "AgentMessage": ".core",
+    "MessageType": ".core",
+    "MessagePriority": ".core",
+    "MessageBus": ".core",
+    "KnowledgeLoader": ".knowledge",
+    "knowledge_loader": ".knowledge",
+    "get_available_modules": ".knowledge",
+    "get_module_content": ".knowledge",
+    "SecurityKnowledgeRAG": ".knowledge",
+    "security_knowledge_rag": ".knowledge",
+    "SecurityKnowledgeQueryTool": ".knowledge",
+    "GetVulnerabilityKnowledgeTool": ".knowledge",
+    "CreateVulnerabilityReportTool": ".tools",
+    "FinishScanTool": ".tools",
+    "CreateSubAgentTool": ".tools",
+    "SendMessageTool": ".tools",
+    "ViewAgentGraphTool": ".tools",
+    "WaitForMessageTool": ".tools",
+    "AgentFinishTool": ".tools",
+    "Tracer": ".telemetry",
+    "get_global_tracer": ".telemetry",
+    "set_global_tracer": ".telemetry",
+}
 
-# 知识模块系统（基于RAG）
-from .knowledge import (
-    KnowledgeLoader, knowledge_loader,
-    get_available_modules, get_module_content,
-    SecurityKnowledgeRAG, security_knowledge_rag,
-    SecurityKnowledgeQueryTool, GetVulnerabilityKnowledgeTool,
-)
-
-# 协作工具
-from .tools import (
-    CreateVulnerabilityReportTool,
-    FinishScanTool,
-    CreateSubAgentTool, SendMessageTool, ViewAgentGraphTool,
-    WaitForMessageTool, AgentFinishTool,
-)
-
-# 遥测模块
-from .telemetry import Tracer, get_global_tracer, set_global_tracer
+__all__ = list(_EXPORTS)
 
 
-__all__ = [
-    # 事件管理
-    "EventManager",
-    "AgentEventEmitter",
+def __getattr__(name: str):
+    module_path = _EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_path, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
 
-    # Agent 类
-    "BaseAgent",
-    "AgentConfig",
-    "AgentResult",
-    "OrchestratorAgent",
-    "ReconAgent",
-    "AnalysisAgent",
-    "VerificationAgent",
-
-    # 核心模块
-    "AgentState",
-    "AgentStatus",
-    "AgentRegistry",
-    "agent_registry",
-    "AgentMessage",
-    "MessageType",
-    "MessagePriority",
-    "MessageBus",
-
-    # 知识模块（基于RAG）
-    "KnowledgeLoader",
-    "knowledge_loader",
-    "get_available_modules",
-    "get_module_content",
-    "SecurityKnowledgeRAG",
-    "security_knowledge_rag",
-    "SecurityKnowledgeQueryTool",
-    "GetVulnerabilityKnowledgeTool",
-
-    # 协作工具
-    "CreateVulnerabilityReportTool",
-    "FinishScanTool",
-    "CreateSubAgentTool",
-    "SendMessageTool",
-    "ViewAgentGraphTool",
-    "WaitForMessageTool",
-    "AgentFinishTool",
-
-    # 遥测模块
-    "Tracer",
-    "get_global_tracer",
-    "set_global_tracer",
-]

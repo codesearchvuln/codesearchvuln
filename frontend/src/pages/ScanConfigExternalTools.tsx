@@ -1,7 +1,14 @@
 import { Wrench } from "lucide-react";
 import SkillToolsPanel from "@/pages/intelligent-scan/SkillToolsPanel";
+import type { ExternalToolResourcePayload } from "@/shared/api/database";
 
-export default function ScanConfigExternalTools() {
+interface ScanConfigExternalToolsProps {
+  initialResources?: ExternalToolResourcePayload[];
+}
+
+export default function ScanConfigExternalTools({
+  initialResources = [],
+}: ScanConfigExternalToolsProps) {
   return (
     <div className="relative flex min-h-screen flex-col bg-background p-6">
       <div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
@@ -13,7 +20,7 @@ export default function ScanConfigExternalTools() {
               外部工具列表
             </div>
           </div>
-          <SkillToolsPanel />
+          <SkillToolsPanel initialResources={initialResources} />
         </div>
       </div>
     </div>

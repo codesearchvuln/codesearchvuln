@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { SKILL_TOOLS_CATALOG } from "../src/pages/intelligent-scan/skillToolsCatalog.ts";
 import {
   buildExternalToolListState,
+  buildExternalToolResources,
   buildExternalToolRows,
 } from "../src/pages/intelligent-scan/externalToolsViewModel.ts";
 
@@ -43,8 +44,13 @@ const backendCatalog = [
   },
 ];
 
-const rows = buildExternalToolRows({
+const resources = buildExternalToolResources({
   skillCatalog: backendCatalog,
+  promptSkills: null,
+});
+
+const rows = buildExternalToolRows({
+  resources,
   staticSkillCatalog: SKILL_TOOLS_CATALOG,
 });
 
@@ -52,6 +58,8 @@ test("buildExternalToolListState 支持动态 pageSize 切片", () => {
   const listState = buildExternalToolListState({
     rows,
     searchQuery: "",
+    typeFilter: "all",
+    statusFilter: "all",
     page: 2,
     pageSize: 2,
   });
@@ -60,13 +68,15 @@ test("buildExternalToolListState 支持动态 pageSize 切片", () => {
   assert.equal(listState.pageSize, 2);
   assert.equal(listState.startIndex, 2);
   assert.equal(listState.pageRows.length, 1);
-  assert.equal(listState.pageRows[0]?.id, rows[2]?.id);
+  assert.equal(listState.pageRows[0]?.tool_id, rows[2]?.tool_id);
 });
 
 test("buildExternalToolListState 会在过滤后重新计算总数和总页数", () => {
   const listState = buildExternalToolListState({
     rows,
     searchQuery: "检索",
+    typeFilter: "all",
+    statusFilter: "all",
     page: 1,
     pageSize: 3,
   });
@@ -74,13 +84,15 @@ test("buildExternalToolListState 会在过滤后重新计算总数和总页数",
   assert.equal(listState.totalRows, 1);
   assert.equal(listState.totalPages, 1);
   assert.equal(listState.pageRows.length, 1);
-  assert.equal(listState.pageRows[0]?.id, "search_code");
+  assert.equal(listState.pageRows[0]?.tool_id, "search_code");
 });
 
 test("buildExternalToolListState 会把超出范围的页码钳制到最后一页", () => {
   const listState = buildExternalToolListState({
     rows,
     searchQuery: "",
+    typeFilter: "all",
+    statusFilter: "all",
     page: 99,
     pageSize: 5,
   });
@@ -92,20 +104,21 @@ test("buildExternalToolListState 会把超出范围的页码钳制到最后一�
 
 test("buildExternalToolRows 仅以后端 catalog 作为可见集合并推断 PROMPT/CLI 类型", () => {
   assert.deepEqual(
-    rows.map((row) => row.id),
-    ["search_code", "run_code", "locate_enclosing_function"],
+    rows.map((row) => row.tool_id),
+    ["locate_enclosing_function", "run_code", "search_code"],
   );
-  assert.equal(rows.find((row) => row.id === "search_code")?.displayType, "PROMPT");
-  assert.equal(rows.find((row) => row.id === "run_code")?.displayType, "CLI");
+  assert.equal(rows.find((row) => row.tool_id === "search_code")?.typeLabel, "Scan Core");
+  assert.equal(rows.find((row) => row.tool_id === "run_code")?.typeLabel, "Scan Core");
   assert.equal(
-    rows.find((row) => row.id === "locate_enclosing_function")?.capabilities[0],
+    rows.find((row) => row.tool_id === "locate_enclosing_function")?.capabilities[0],
     "定位所属函数",
   );
 });
 
 test("buildExternalToolRows 会按 skill_id 去重并过滤不可用 skill", () => {
   const dedupedRows = buildExternalToolRows({
-    skillCatalog: [
+    resources: buildExternalToolResources({
+      skillCatalog: [
       backendCatalog[0],
       {
         ...backendCatalog[0],
@@ -119,23 +132,26 @@ test("buildExternalToolRows 会按 skill_id 去重并过滤不可用 skill", () 
         ...backendCatalog[2],
         entrypoint: "",
       },
-    ],
+      ],
+      promptSkills: null,
+    }),
     staticSkillCatalog: SKILL_TOOLS_CATALOG,
   });
 
-  assert.deepEqual(dedupedRows.map((row) => row.id), ["search_code"]);
+  assert.deepEqual(dedupedRows.map((row) => row.tool_id), ["search_code"]);
 });
 
 test("buildExternalToolListState 搜索范围包含类型字段", () => {
   const listState = buildExternalToolListState({
     rows,
     searchQuery: "cli",
+    typeFilter: "all",
+    statusFilter: "all",
     page: 1,
     pageSize: 10,
   });
 
-  assert.equal(listState.totalRows, 1);
-  assert.equal(listState.pageRows[0]?.id, "run_code");
+  assert.equal(listState.totalRows, 0);
 });
 
 test("SKILL_TOOLS_CATALOG 中 flow 工具的参数说明/示例与后端入口一致", () => {

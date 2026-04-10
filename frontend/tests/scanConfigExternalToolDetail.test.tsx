@@ -281,3 +281,119 @@ test("ScanConfigExternalToolDetailContent 对 structured_tool 渲染结构化参
   assert.match(markup, /flow-parser-runner-local:latest/);
   assert.doesNotMatch(markup, /请输入基于 libplist 的自然语言测试问题/);
 });
+
+test("ScanConfigExternalToolDetailContent 对 builtin Prompt Skill 渲染只读详情与启停入口", () => {
+  const markup = renderToStaticMarkup(
+    createElement(
+      SsrRouter,
+      {},
+      createElement(ScanConfigExternalToolDetailContent, {
+        toolType: "prompt-builtin",
+        toolId: "analysis",
+        toolName: "Analysis Agent Prompt Skill",
+        promptSkillDetail: {
+          tool_type: "prompt-builtin",
+          tool_id: "analysis",
+          name: "Analysis Agent Prompt Skill",
+          summary: "围绕单风险点做证据闭环。",
+          status_label: "停用",
+          is_enabled: false,
+          is_available: true,
+          content: "围绕单风险点做证据闭环。",
+          agent_key: "analysis",
+          scope: null,
+          is_builtin: true,
+          can_toggle: true,
+          can_edit: false,
+          can_delete: false,
+        },
+        events: [],
+        result: null,
+        running: false,
+        onPromptChange: () => {},
+        onRun: () => {},
+        onStop: () => {},
+      } as ExternalToolDetailContentProps),
+    ),
+  );
+
+  assert.match(markup, /Prompt Skill 详情/);
+  assert.match(markup, /Analysis Agent Prompt Skill/);
+  assert.match(markup, /Analysis Agent/);
+  assert.match(markup, /停用/);
+  assert.match(markup, />启用</);
+  assert.doesNotMatch(markup, />编辑</);
+  assert.doesNotMatch(markup, />删除</);
+  assert.doesNotMatch(markup, /运行测试/);
+});
+
+test("ScanConfigExternalToolDetailContent 对 custom Prompt Skill 渲染编辑与删除入口", () => {
+  const markup = renderToStaticMarkup(
+    createElement(
+      SsrRouter,
+      {},
+      createElement(ScanConfigExternalToolDetailContent, {
+        toolType: "prompt-custom",
+        toolId: "custom-1",
+        toolName: "Verification Notes",
+        promptSkillDetail: {
+          tool_type: "prompt-custom",
+          tool_id: "custom-1",
+          name: "Verification Notes",
+          summary: "补充验证阶段的证据约束。",
+          status_label: "启用",
+          is_enabled: true,
+          is_available: true,
+          content: "补充验证阶段的证据约束。",
+          agent_key: "verification",
+          scope: "agent_specific",
+          is_builtin: false,
+          can_toggle: true,
+          can_edit: true,
+          can_delete: true,
+        },
+        events: [],
+        result: null,
+        running: false,
+        onPromptChange: () => {},
+        onRun: () => {},
+        onStop: () => {},
+      } as ExternalToolDetailContentProps),
+    ),
+  );
+
+  assert.match(markup, /Prompt Skill 详情/);
+  assert.match(markup, /Verification Notes/);
+  assert.match(markup, /Verification Agent/);
+  assert.match(markup, /智能体专属/);
+  assert.match(markup, />停用</);
+  assert.match(markup, />编辑</);
+  assert.match(markup, />删除</);
+});
+
+test("ScanConfigExternalToolDetailContent 返回链接保留原列表 query", () => {
+  const markup = renderToStaticMarkup(
+    createElement(
+      SsrRouter,
+      { location: "/scan-config/external-tools/skill/get_code_window?page=3&q=xml&type=prompt-custom&status=enabled" },
+      createElement(ScanConfigExternalToolDetailContent, {
+        toolType: "skill",
+        toolId: "get_code_window",
+        toolName: "get_code_window",
+        skillCatalogItem: codeWindowCatalog,
+        skillDetail: supportedDetail,
+        prompt: "读取 plist 解析入口",
+        examplePrompts: ["读取 plist 解析入口"],
+        events: [],
+        result: null,
+        running: false,
+        onPromptChange: () => {},
+        onRun: () => {},
+        onStop: () => {},
+        returnToSearch: "?page=3&q=xml&type=prompt-custom&status=enabled",
+      } as ExternalToolDetailContentProps),
+    ),
+  );
+
+  assert.match(markup, /\/scan-config\/external-tools\?page=3&amp;q=xml&amp;type=prompt-custom&amp;status=enabled/);
+});

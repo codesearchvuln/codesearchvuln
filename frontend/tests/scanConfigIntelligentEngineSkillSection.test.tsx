@@ -18,9 +18,10 @@ test("ScanConfigIntelligentEngine 展示 Skill 管理区与外部工具入口", 
 	);
 
 	assert.match(markup, /Skill 管理/);
-	assert.match(markup, /前往外部工具详情/);
+	assert.match(markup, /Prompt Skill 已迁移到外部工具页/);
+	assert.match(markup, /前往外部工具管理/);
 	assert.match(markup, /\/scan-config\/external-tools/);
-	assert.match(markup, /Agent 角色/);
-	assert.match(markup, /Skill Key/);
-	assert.match(markup, /business_logic_recon/);
+	assert.doesNotMatch(markup, /Agent 角色/);
+	assert.doesNotMatch(markup, /Skill Key/);
+	assert.doesNotMatch(markup, /business_logic_recon/);
 });

@@ -1,66 +1,103 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { Search } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Plus, Search } from "lucide-react";
+import { toast } from "sonner";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api, type SkillCatalogItemPayload } from "@/shared/api/database";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  api,
+  type ExternalToolResourcePayload,
+  type PromptSkillScopePayload,
+} from "@/shared/api/database";
+import PromptSkillEditorDialog from "./PromptSkillEditorDialog";
 import { SKILL_TOOLS_CATALOG } from "./skillToolsCatalog";
 import {
   buildExternalToolListState,
+  buildExternalToolResources,
   buildExternalToolRows,
+  type ExternalToolStatusFilter,
+  type ExternalToolTypeFilter,
 } from "./externalToolsViewModel";
 import {
+  EXTERNAL_TOOLS_MAX_PAGE_SIZE,
   resolveAnchoredExternalToolsPage,
   resolveExternalToolsFirstVisibleIndex,
   resolveResponsiveExternalToolsLayout,
 } from "./externalToolsResponsiveLayout";
+import {
+  mergeExternalToolsUrlState,
+  parseExternalToolsUrlState,
+} from "./externalToolsUrlState";
+import {
+  buildPromptSkillAgentOptions,
+  DEFAULT_PROMPT_SKILL_FORM,
+  extractPromptSkillErrorMessage,
+  normalizePromptSkillCreatePayload,
+  scopeLabel,
+  type PromptSkillFormState,
+} from "./promptSkillShared";
 
 export interface SkillToolsPanelProps {
-  initialSkillCatalog?: SkillCatalogItemPayload[];
+  initialResources?: ExternalToolResourcePayload[];
 }
 
 export default function SkillToolsPanel({
-  initialSkillCatalog = [],
+  initialResources = [],
 }: SkillToolsPanelProps) {
-  const [skillCatalog, setSkillCatalog] =
-    useState<SkillCatalogItemPayload[]>(initialSkillCatalog);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [page, setPage] = useState(1);
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const parsedUrlState = useMemo(
+    () => parseExternalToolsUrlState(searchParams),
+    [searchParams],
+  );
+  const [resources, setResources] = useState<ExternalToolResourcePayload[]>(
+    initialResources,
+  );
+  const [supportedAgentKeys, setSupportedAgentKeys] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState(parsedUrlState.searchQuery);
+  const [typeFilter, setTypeFilter] =
+    useState<ExternalToolTypeFilter>(parsedUrlState.typeFilter);
+  const [statusFilter, setStatusFilter] =
+    useState<ExternalToolStatusFilter>(parsedUrlState.statusFilter);
+  const [page, setPage] = useState(parsedUrlState.page);
+  const [loading, setLoading] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<PromptSkillFormState>(DEFAULT_PROMPT_SKILL_FORM);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
-  const pageSizeRef = useRef(6);
-  const [pageSize, setPageSize] = useState(6);
+  const pageSizeRef = useRef(EXTERNAL_TOOLS_MAX_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(EXTERNAL_TOOLS_MAX_PAGE_SIZE);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void api
-      .getSkillCatalog({
-        namespace: "scan-core",
-        limit: 200,
-      })
-      .then((items) => {
-        if (cancelled || items.length === 0) {
-          return;
-        }
-        setSkillCatalog(items);
-      })
-      .catch(() => {
-        // Keep initial data when the catalog request fails.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const agentOptions = useMemo(
+    () =>
+      buildPromptSkillAgentOptions({
+        supportedAgentKeys,
+        builtinAgentKeys: resources
+          .filter((item) => item.tool_type === "prompt-builtin")
+          .map((item) => item.agent_key || ""),
+        customAgentKeys: resources
+          .filter((item) => item.tool_type === "prompt-custom")
+          .map((item) => item.agent_key),
+      }),
+    [resources, supportedAgentKeys],
+  );
 
   const rows = useMemo(
     () =>
       buildExternalToolRows({
-        skillCatalog,
+        resources,
         staticSkillCatalog: SKILL_TOOLS_CATALOG,
       }),
-    [skillCatalog],
+    [resources],
   );
 
   const listState = useMemo(
@@ -68,15 +105,77 @@ export default function SkillToolsPanel({
       buildExternalToolListState({
         rows,
         searchQuery,
+        typeFilter,
+        statusFilter,
         page,
         pageSize,
       }),
-    [page, pageSize, rows, searchQuery],
+    [page, pageSize, rows, searchQuery, statusFilter, typeFilter],
   );
+
+  const syncUrlState = (
+    nextState: Partial<{
+      page: number;
+      searchQuery: string;
+      typeFilter: ExternalToolTypeFilter;
+      statusFilter: ExternalToolStatusFilter;
+    }>,
+  ) => {
+    const nextParams = mergeExternalToolsUrlState(
+      new URLSearchParams(searchParams),
+      {
+        page,
+        searchQuery,
+        typeFilter,
+        statusFilter,
+        ...nextState,
+      },
+    );
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const detailSearch = useMemo(() => {
+    const nextParams = mergeExternalToolsUrlState(
+      new URLSearchParams(searchParams),
+      {
+        page,
+        searchQuery,
+        typeFilter,
+        statusFilter,
+      },
+    );
+    const serialized = nextParams.toString();
+    return serialized ? `?${serialized}` : "";
+  }, [page, searchParams, searchQuery, setSearchParams, statusFilter, typeFilter]);
+
+  useEffect(() => {
+    if (searchQuery !== parsedUrlState.searchQuery) {
+      setSearchQuery(parsedUrlState.searchQuery);
+    }
+    if (typeFilter !== parsedUrlState.typeFilter) {
+      setTypeFilter(parsedUrlState.typeFilter);
+    }
+    if (statusFilter !== parsedUrlState.statusFilter) {
+      setStatusFilter(parsedUrlState.statusFilter);
+    }
+    if (page !== parsedUrlState.page) {
+      setPage(parsedUrlState.page);
+    }
+  }, [
+    page,
+    parsedUrlState.page,
+    parsedUrlState.searchQuery,
+    parsedUrlState.statusFilter,
+    parsedUrlState.typeFilter,
+    searchQuery,
+    statusFilter,
+    typeFilter,
+  ]);
 
   useEffect(() => {
     if (page !== listState.page) {
       setPage(listState.page);
+      syncUrlState({ page: listState.page });
     }
   }, [listState.page, page]);
 
@@ -103,8 +202,8 @@ export default function SkillToolsPanel({
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => {
-            updateLayout();
-          });
+          updateLayout();
+        });
     observer?.observe(viewportNode);
     window.addEventListener("resize", updateLayout);
     window.visualViewport?.addEventListener("resize", updateLayout);
@@ -132,42 +231,226 @@ export default function SkillToolsPanel({
     pageSizeRef.current = pageSize;
   }, [listState.totalRows, pageSize]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadResources() {
+      setLoading(true);
+      try {
+        const payload = await api.getExternalToolCatalog({
+          limit: 200,
+        }).catch(async () => {
+          const [skillCatalog, promptSkills] = await Promise.all([
+            api.getSkillCatalog({ limit: 200 }),
+            api.getPromptSkills({ limit: 500 }),
+          ]);
+          return {
+            supportedAgentKeys: promptSkills.supportedAgentKeys,
+            items: buildExternalToolResources({
+              skillCatalog,
+              promptSkills,
+            }),
+          };
+        });
+        if (cancelled) {
+          return;
+        }
+        setSupportedAgentKeys(payload.supportedAgentKeys);
+        if (payload.items.length > 0 || initialResources.length === 0) {
+          setResources(payload.items);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          toast.error(`加载外部工具失败：${extractPromptSkillErrorMessage(error)}`);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadResources();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialResources.length]);
+
+  const resetForm = () => {
+    setForm({
+      ...DEFAULT_PROMPT_SKILL_FORM,
+      agent_key: agentOptions[0]?.key || "",
+    });
+  };
+
+  const handleScopeChange = (nextScope: PromptSkillScopePayload) => {
+    setForm((current) => ({
+      ...current,
+      scope: nextScope,
+      agent_key:
+        nextScope === "agent_specific"
+          ? current.agent_key || agentOptions[0]?.key || ""
+          : "",
+    }));
+  };
+
+  const handleCreatePromptSkill = async () => {
+    const name = form.name.trim();
+    const content = form.content.trim();
+
+    if (!name) {
+      toast.error("请填写 Skill 名称");
+      return;
+    }
+    if (!content) {
+      toast.error("请填写 Skill 内容");
+      return;
+    }
+    if (form.scope === "agent_specific" && !form.agent_key) {
+      toast.error("请选择目标智能体");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const created = await api.createPromptSkill(
+        normalizePromptSkillCreatePayload(form),
+      );
+      toast.success("Prompt Skill 已创建");
+      setDialogOpen(false);
+      resetForm();
+      navigate(
+        `/scan-config/external-tools/prompt-custom/${encodeURIComponent(created.id)}${detailSearch}`,
+      );
+    } catch (error) {
+      toast.error(`保存失败：${extractPromptSkillErrorMessage(error)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTogglePromptRow = async (row: ExternalToolResourcePayload) => {
+    if (row.tool_type === "skill") {
+      return;
+    }
+    try {
+      if (row.tool_type === "prompt-builtin") {
+        await api.updateBuiltinPromptSkill(row.tool_id, {
+          is_active: !row.is_enabled,
+        });
+      } else {
+        await api.updatePromptSkill(row.tool_id, {
+          is_active: !row.is_enabled,
+        });
+      }
+      const payload = await api.getExternalToolCatalog({ limit: 200 }).catch(async () => {
+        const [skillCatalog, promptSkills] = await Promise.all([
+          api.getSkillCatalog({ limit: 200 }),
+          api.getPromptSkills({ limit: 500 }),
+        ]);
+        return {
+          supportedAgentKeys: promptSkills.supportedAgentKeys,
+          items: buildExternalToolResources({
+            skillCatalog,
+            promptSkills,
+          }),
+        };
+      });
+      setSupportedAgentKeys(payload.supportedAgentKeys);
+      setResources(payload.items);
+      toast.success(row.is_enabled ? "Prompt Skill 已停用" : "Prompt Skill 已启用");
+    } catch (error) {
+      toast.error(`更新状态失败：${extractPromptSkillErrorMessage(error)}`);
+    }
+  };
+
   return (
-    <div className="flex flex-1 flex-col gap-5 min-h-0">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
-        <div className="space-y-3">
-          <Input
-            type="search"
-            value={searchQuery}
-            onChange={(event) => {
-              setSearchQuery(event.target.value);
-              setPage(1);
-            }}
-            startIcon={<Search className="h-4 w-4" />}
-            placeholder="搜索工具名称、类型或执行功能..."
-            className="cyber-input h-11 border-border/60 bg-background/70"
-            wrapperClassName="max-w-full"
-            aria-label="搜索工具名称、类型或执行功能"
-          />
-        </div>
+    <div className="flex min-h-0 flex-1 flex-col gap-5">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_180px_180px_auto] xl:items-end">
+        <Input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setSearchQuery(nextValue);
+            setPage(1);
+            syncUrlState({ searchQuery: nextValue, page: 1 });
+          }}
+          startIcon={<Search className="h-4 w-4" />}
+          placeholder="搜索名称、摘要、智能体或作用域..."
+          className="cyber-input h-11 border-border/60 bg-background/70"
+          wrapperClassName="max-w-full"
+          aria-label="搜索名称、摘要、智能体或作用域"
+        />
+        <Select
+          value={typeFilter}
+          onValueChange={(value) => {
+            const nextValue = value as ExternalToolTypeFilter;
+            setTypeFilter(nextValue);
+            setPage(1);
+            syncUrlState({ typeFilter: nextValue, page: 1 });
+          }}
+        >
+          <SelectTrigger className="cyber-input h-11">
+            <SelectValue placeholder="筛选资源类型" />
+          </SelectTrigger>
+          <SelectContent className="border-border cyber-dialog">
+            <SelectItem value="all">全部类型</SelectItem>
+            <SelectItem value="skill">Scan Core</SelectItem>
+            <SelectItem value="prompt-builtin">Builtin Prompt Skill</SelectItem>
+            <SelectItem value="prompt-custom">Custom Prompt Skill</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => {
+            const nextValue = value as ExternalToolStatusFilter;
+            setStatusFilter(nextValue);
+            setPage(1);
+            syncUrlState({ statusFilter: nextValue, page: 1 });
+          }}
+        >
+          <SelectTrigger className="cyber-input h-11">
+            <SelectValue placeholder="筛选状态" />
+          </SelectTrigger>
+          <SelectContent className="border-border cyber-dialog">
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="enabled">已启用</SelectItem>
+            <SelectItem value="disabled">已停用</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          className="cyber-btn-primary h-11 px-4"
+          onClick={() => {
+            resetForm();
+            setDialogOpen(true);
+          }}
+        >
+          <Plus className="h-4 w-4" />
+          新增 Prompt Skill
+        </Button>
       </div>
 
-      <div ref={tableViewportRef} className="flex flex-1 min-h-[20rem] flex-col">
+      <div ref={tableViewportRef} className="flex min-h-[20rem] flex-1 flex-col">
         <div className="overflow-x-auto rounded-sm border border-border/50 bg-background/20">
-          <table className="min-w-[780px] w-full border-collapse">
+          <table className="min-w-[980px] w-full border-collapse">
             <thead>
               <tr className="border-b border-border/50 bg-background/60 text-left">
                 <th className="px-4 py-3 text-xs font-mono uppercase tracking-[0.24em] text-muted-foreground">
                   序号
                 </th>
                 <th className="px-4 py-3 text-xs font-mono uppercase tracking-[0.24em] text-muted-foreground">
-                  工具名称
+                  名称
                 </th>
                 <th className="px-4 py-3 text-xs font-mono uppercase tracking-[0.24em] text-muted-foreground">
                   类型
                 </th>
                 <th className="px-4 py-3 text-xs font-mono uppercase tracking-[0.24em] text-muted-foreground">
                   执行功能
+                </th>
+                <th className="px-4 py-3 text-xs font-mono uppercase tracking-[0.24em] text-muted-foreground">
+                  状态
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-mono uppercase tracking-[0.24em] text-muted-foreground">
                   操作
@@ -180,7 +463,7 @@ export default function SkillToolsPanel({
                   const order = listState.startIndex + index + 1;
                   return (
                     <tr
-                      key={`${row.type}:${row.id}`}
+                      key={`${row.tool_type}:${row.tool_id}`}
                       className="border-b border-border/30 align-top transition-colors duration-150 hover:bg-background/40"
                     >
                       <td className="px-4 py-4 text-sm font-mono text-muted-foreground">
@@ -191,34 +474,58 @@ export default function SkillToolsPanel({
                           <div className="text-sm font-semibold text-foreground">
                             {row.name}
                           </div>
+                          {row.agent_label ? (
+                            <div className="text-xs text-muted-foreground">
+                              {row.scope ? `${scopeLabel(row.scope)} · ` : ""}
+                              {row.agent_label}
+                            </div>
+                          ) : null}
                         </div>
                       </td>
                       <td className="px-4 py-4">
                         <Badge variant="outline" className="text-[10px] uppercase">
-                          {row.displayType}
+                          {row.typeLabel}
                         </Badge>
                       </td>
                       <td className="px-4 py-4">
                         <div
-                          className="text-sm leading-6 text-foreground/90 whitespace-nowrap overflow-hidden text-ellipsis"
+                          className="max-w-[420px] overflow-hidden text-ellipsis whitespace-nowrap text-sm leading-6 text-foreground/90"
                           title={row.capabilities.join("; ")}
                         >
                           {row.capabilities.join("; ")}
                         </div>
                       </td>
+                      <td className="px-4 py-4">
+                        <Badge variant={row.is_enabled ? "default" : "secondary"}>
+                          {row.status_label}
+                        </Badge>
+                      </td>
                       <td className="px-4 py-4 text-right">
-                        <Button
-                          asChild
-                          size="sm"
-                          variant="outline"
-                          className="cyber-btn-ghost h-8 px-3"
-                        >
-                          <Link
-                            to={`/scan-config/external-tools/${row.type}/${encodeURIComponent(row.id)}`}
+                        <div className="flex justify-end gap-2">
+                          {row.tool_type !== "skill" ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="cyber-btn-ghost h-8 px-3"
+                              onClick={() => void handleTogglePromptRow(row)}
+                            >
+                              {row.is_enabled ? "停用" : "启用"}
+                            </Button>
+                          ) : null}
+                          <Button
+                            asChild
+                            size="sm"
+                            variant="outline"
+                            className="cyber-btn-ghost h-8 px-3"
                           >
-                            详情
-                          </Link>
-                        </Button>
+                            <Link
+                              to={`/scan-config/external-tools/${row.tool_type}/${encodeURIComponent(row.tool_id)}${detailSearch}`}
+                            >
+                              详情
+                            </Link>
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -226,10 +533,12 @@ export default function SkillToolsPanel({
               ) : (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-4 py-12 text-center text-sm text-muted-foreground"
                   >
-                    未找到匹配的外部工具，尝试更换名称关键词、类型或执行功能描述。
+                    {loading
+                      ? "加载外部工具中..."
+                      : "未找到匹配的外部工具，尝试更换搜索词或筛选条件。"}
                   </td>
                 </tr>
               )}
@@ -249,7 +558,13 @@ export default function SkillToolsPanel({
             variant="outline"
             size="sm"
             className="cyber-btn-ghost h-8 px-3"
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            onClick={() =>
+              setPage((current) => {
+                const nextPage = Math.max(1, current - 1);
+                syncUrlState({ page: nextPage });
+                return nextPage;
+              })
+            }
             disabled={listState.page <= 1 || listState.totalRows === 0}
           >
             上一页
@@ -263,9 +578,11 @@ export default function SkillToolsPanel({
             size="sm"
             className="cyber-btn-ghost h-8 px-3"
             onClick={() =>
-              setPage((current) =>
-                Math.min(listState.totalPages, current + 1),
-              )
+              setPage((current) => {
+                const nextPage = Math.min(listState.totalPages, current + 1);
+                syncUrlState({ page: nextPage });
+                return nextPage;
+              })
             }
             disabled={
               listState.page >= listState.totalPages || listState.totalRows === 0
@@ -275,6 +592,20 @@ export default function SkillToolsPanel({
           </Button>
         </div>
       </div>
+
+      <PromptSkillEditorDialog
+        open={dialogOpen}
+        saving={saving}
+        title="新增 Prompt Skill"
+        description="配置运行时注入的自定义 Prompt Skill，支持通用和智能体专属两种作用域。"
+        submitLabel="创建 Skill"
+        form={form}
+        agentOptions={agentOptions}
+        onOpenChange={setDialogOpen}
+        onFormChange={(updater) => setForm((current) => updater(current))}
+        onScopeChange={handleScopeChange}
+        onSubmit={() => void handleCreatePromptSkill()}
+      />
     </div>
   );
 }

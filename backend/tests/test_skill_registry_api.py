@@ -4,6 +4,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1.endpoints import skills as skills_module
+from app.models.user import User
+from app.utils.security import get_password_hash
 
 
 @pytest.mark.asyncio
@@ -98,3 +100,151 @@ async def test_skill_detail_endpoint_returns_404_for_missing_skill():
 
     assert exc_info.value.status_code == 404
     assert "missing-skill" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_skill_catalog_external_tools_mode_returns_scan_core_and_prompt_resources(
+    db,
+    test_user,
+):
+    created = await skills_module.create_prompt_skill(
+        request=skills_module.PromptSkillCreateRequest(
+            name="analysis custom",
+            content="analysis custom content",
+            scope="agent_specific",
+            agent_key="analysis",
+            is_active=True,
+        ),
+        db=db,
+        current_user=test_user,
+    )
+    await skills_module.update_builtin_prompt_skill(
+        agent_key="analysis",
+        request=skills_module.PromptSkillBuiltinUpdateRequest(is_active=False),
+        db=db,
+        current_user=test_user,
+    )
+
+    response = await skills_module.get_skill_catalog(
+        q="",
+        namespace=None,
+        resource_mode="external_tools",
+        limit=200,
+        offset=0,
+        db=db,
+        current_user=test_user,
+    )
+
+    assert response.total >= 3
+    rows = {(item.tool_type, item.tool_id): item for item in response.items}
+
+    scan_core = rows[("skill", "search_code")]
+    assert scan_core.resource_kind_label == "Scan Core"
+    assert scan_core.is_enabled is True
+    assert scan_core.is_available is True
+    assert scan_core.entrypoint == "scan-core/search_code"
+    assert scan_core.agent_key is None
+    assert scan_core.scope is None
+
+    builtin_prompt = rows[("prompt-builtin", "analysis")]
+    assert builtin_prompt.resource_kind_label == "Builtin Prompt Skill"
+    assert builtin_prompt.is_enabled is False
+    assert builtin_prompt.status_label == "停用"
+    assert builtin_prompt.is_available is True
+    assert builtin_prompt.entrypoint is None
+    assert builtin_prompt.agent_key == "analysis"
+    assert builtin_prompt.scope is None
+
+    custom_prompt = rows[("prompt-custom", created.id)]
+    assert custom_prompt.resource_kind_label == "Custom Prompt Skill"
+    assert custom_prompt.is_enabled is True
+    assert custom_prompt.is_available is True
+    assert custom_prompt.entrypoint is None
+    assert custom_prompt.agent_key == "analysis"
+    assert custom_prompt.scope == "agent_specific"
+
+
+@pytest.mark.asyncio
+async def test_prompt_builtin_resource_detail_returns_read_only_prompt_skill_metadata(
+    db,
+    test_user,
+):
+    await skills_module.update_builtin_prompt_skill(
+        agent_key="analysis",
+        request=skills_module.PromptSkillBuiltinUpdateRequest(is_active=False),
+        db=db,
+        current_user=test_user,
+    )
+
+    response = await skills_module.get_skill_resource_detail(
+        tool_type="prompt-builtin",
+        tool_id="analysis",
+        db=db,
+        current_user=test_user,
+    )
+
+    assert response.tool_type == "prompt-builtin"
+    assert response.tool_id == "analysis"
+    assert response.agent_key == "analysis"
+    assert response.is_builtin is True
+    assert response.can_toggle is True
+    assert response.can_edit is False
+    assert response.can_delete is False
+    assert response.is_enabled is False
+    assert response.status_label == "停用"
+    assert response.content
+
+
+@pytest.mark.asyncio
+async def test_prompt_custom_resource_detail_respects_user_scope(db, test_user):
+    created = await skills_module.create_prompt_skill(
+        request=skills_module.PromptSkillCreateRequest(
+            name="custom detail",
+            content="custom detail content",
+            scope="agent_specific",
+            agent_key="verification",
+            is_active=False,
+        ),
+        db=db,
+        current_user=test_user,
+    )
+
+    response = await skills_module.get_skill_resource_detail(
+        tool_type="prompt-custom",
+        tool_id=created.id,
+        db=db,
+        current_user=test_user,
+    )
+
+    assert response.tool_type == "prompt-custom"
+    assert response.tool_id == created.id
+    assert response.agent_key == "verification"
+    assert response.scope == "agent_specific"
+    assert response.is_builtin is False
+    assert response.can_toggle is True
+    assert response.can_edit is True
+    assert response.can_delete is True
+    assert response.is_enabled is False
+    assert response.status_label == "停用"
+    assert response.content == "custom detail content"
+
+    other_user = User(
+        email="other@example.com",
+        full_name="Other User",
+        hashed_password=get_password_hash("password123"),
+        is_active=True,
+        role="admin",
+    )
+    db.add(other_user)
+    await db.commit()
+    await db.refresh(other_user)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await skills_module.get_skill_resource_detail(
+            tool_type="prompt-custom",
+            tool_id=created.id,
+            db=db,
+            current_user=other_user,
+        )
+
+    assert exc_info.value.status_code in {403, 404}

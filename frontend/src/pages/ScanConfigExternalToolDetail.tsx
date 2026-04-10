@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, Link, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Play, Square, Wrench } from "lucide-react";
+import { Navigate, Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, Loader2, Play, Square, Trash2, Wrench } from "lucide-react";
+import { toast } from "sonner";
 
 import ToolEvidencePreview from "@/pages/AgentAudit/components/ToolEvidencePreview";
 import { parseToolEvidenceFromLog } from "@/pages/AgentAudit/toolEvidence";
@@ -8,9 +9,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  api,
+  type ExternalToolResourcePayload,
+  type ExternalToolType,
+  type PromptSkillDetailPayload,
+  type PromptSkillScopePayload,
+} from "@/shared/api/database";
+import PromptSkillEditorDialog from "@/pages/intelligent-scan/PromptSkillEditorDialog";
+import {
   SKILL_TOOLS_CATALOG,
   type SkillToolCatalogItem,
 } from "@/pages/intelligent-scan/skillToolsCatalog";
+import {
+} from "@/pages/intelligent-scan/externalToolsViewModel";
+import {
+  buildPromptSkillAgentOptions,
+  buildPromptSkillFormState,
+  extractPromptSkillErrorMessage,
+  normalizePromptSkillUpdatePayload,
+  resolvePromptAgentLabel,
+  scopeLabel,
+  type PromptSkillFormState,
+} from "@/pages/intelligent-scan/promptSkillShared";
 import SkillTestEventLog from "@/pages/skill-test/components/SkillTestEventLog";
 import type {
   SkillDetailResponse,
@@ -19,6 +39,41 @@ import type {
   ToolTestPreset,
 } from "@/pages/skill-test/types";
 import { useSkillTestStream } from "@/pages/skill-test/useSkillTestStream";
+
+function normalizeScanCoreDetail(
+  resource: ExternalToolResourcePayload,
+): SkillDetailResponse | null {
+  const detail = resource.scan_core_detail;
+  if (!detail) {
+    return null;
+  }
+
+  return {
+    enabled: detail.enabled,
+    skill_id: detail.skill_id,
+    name: detail.name,
+    namespace: detail.namespace,
+    summary: detail.summary,
+    entrypoint: detail.entrypoint,
+    mirror_dir: detail.mirror_dir,
+    source_root: detail.source_root,
+    source_dir: detail.source_dir,
+    source_skill_md: detail.source_skill_md,
+    aliases: detail.aliases,
+    has_scripts: detail.has_scripts,
+    has_bin: detail.has_bin,
+    has_assets: detail.has_assets,
+    files_count: detail.files_count,
+    workflow_content: detail.workflow_content,
+    workflow_truncated: detail.workflow_truncated,
+    workflow_error: detail.workflow_error,
+    test_supported: detail.test_supported,
+    test_mode: detail.test_mode,
+    test_reason: detail.test_reason,
+    default_test_project_name: detail.default_test_project_name,
+    tool_test_preset: (detail.tool_test_preset as ToolTestPreset | null) ?? null,
+  };
+}
 
 function decodeToolId(rawToolId?: string) {
   if (!rawToolId) return "";
@@ -95,12 +150,19 @@ function toolInputListValue(value: unknown) {
   return String(value ?? "");
 }
 
+function resolveToolBadgeLabel(toolType: ExternalToolType) {
+  if (toolType === "skill") return "SCAN CORE";
+  if (toolType === "prompt-builtin") return "BUILTIN PROMPT";
+  return "CUSTOM PROMPT";
+}
+
 export interface ExternalToolDetailContentProps {
-  toolType: "skill";
+  toolType: ExternalToolType;
   toolId: string;
   toolName: string;
-  skillCatalogItem: SkillToolCatalogItem | null;
-  skillDetail: SkillDetailResponse | null;
+  skillCatalogItem?: SkillToolCatalogItem | null;
+  skillDetail?: SkillDetailResponse | null;
+  promptSkillDetail?: PromptSkillDetailPayload | null;
   prompt: string;
   examplePrompts: string[];
   events: SkillTestEvent[];
@@ -114,21 +176,38 @@ export interface ExternalToolDetailContentProps {
   onRunStructured?: () => void;
   loading?: boolean;
   error?: string | null;
+  promptSkillBusy?: boolean;
+  onTogglePromptSkill?: () => void;
+  onEditPromptSkill?: () => void;
+  onDeletePromptSkill?: () => void;
+  returnToSearch?: string;
 }
 
-function ToolHeader({ toolType, toolName, toolId }: { toolType: "skill"; toolName: string; toolId: string }) {
+function ToolHeader({
+  toolType,
+  toolName,
+  toolId,
+  returnToSearch = "",
+}: {
+  toolType: ExternalToolType;
+  toolName: string;
+  toolId: string;
+  returnToSearch?: string;
+}) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="space-y-3">
         <div className="section-header mb-1">
           <Wrench className="w-4 h-4 text-primary" />
-          <div className="font-mono font-bold uppercase text-sm text-foreground">外部工具详情</div>
+          <div className="font-mono font-bold uppercase text-sm text-foreground">
+            {toolType === "skill" ? "外部工具详情" : "Prompt Skill 详情"}
+          </div>
         </div>
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-lg font-mono font-semibold text-foreground break-all">{toolName}</div>
             <Badge variant="outline" className="text-[10px] uppercase">
-              {toolType === "skill" ? "SKILL" : ""}
+              {resolveToolBadgeLabel(toolType)}
             </Badge>
           </div>
           <div className="text-xs font-mono text-muted-foreground break-all">{toolId || "-"}</div>
@@ -136,7 +215,7 @@ function ToolHeader({ toolType, toolName, toolId }: { toolType: "skill"; toolNam
       </div>
 
       <Button asChild variant="outline" size="sm" className="cyber-btn-ghost h-8 px-3">
-        <Link to="/scan-config/external-tools">
+        <Link to={`/scan-config/external-tools${returnToSearch}`}>
           <ArrowLeft className="w-4 h-4" />
           返回列表
         </Link>
@@ -507,12 +586,112 @@ function SkillFinalResult({
   );
 }
 
+function PromptSkillDetailSection({
+  detail,
+  busy,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  detail: PromptSkillDetailPayload;
+  busy: boolean;
+  onToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const agentLabel =
+    detail.scope === "global"
+      ? "全部智能体"
+      : resolvePromptAgentLabel({
+          agentKey: detail.agent_key,
+          agentLabel: detail.agent_label,
+          displayName: detail.display_name,
+        });
+
+  return (
+    <div className="space-y-6 border-t border-border/50 pt-6">
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="outline">{detail.resource_kind_label}</Badge>
+        <Badge variant={detail.is_enabled ? "default" : "secondary"}>
+          {detail.status_label}
+        </Badge>
+        {detail.scope ? <Badge variant="outline">{scopeLabel(detail.scope)}</Badge> : null}
+        <Badge variant="outline">{agentLabel}</Badge>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3 rounded border border-border/40 bg-background/40 p-4">
+          <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">
+            概览
+          </div>
+          <p className="text-sm leading-7 text-foreground/90">{detail.summary}</p>
+          <div className="text-xs font-mono text-muted-foreground">
+            {detail.scope ? scopeLabel(detail.scope) : "内置"} · {agentLabel}
+          </div>
+        </div>
+        <div className="space-y-3 rounded border border-border/40 bg-background/40 p-4">
+          <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">
+            操作
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="cyber-btn-ghost h-8 px-3"
+              onClick={onToggle}
+              disabled={busy || !detail.can_toggle}
+            >
+              {detail.is_enabled ? "停用" : "启用"}
+            </Button>
+            {detail.can_edit ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="cyber-btn-ghost h-8 px-3"
+                onClick={onEdit}
+                disabled={busy}
+              >
+                编辑
+              </Button>
+            ) : null}
+            {detail.can_delete ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 border-red-500/40 px-3 text-red-400 hover:text-red-300"
+                onClick={onDelete}
+                disabled={busy}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                删除
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3 rounded border border-border/40 bg-background/30 p-4">
+        <div className="text-xs font-mono uppercase tracking-[0.28em] text-muted-foreground">
+          Skill 内容
+        </div>
+        <div className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground/90">
+          {detail.content}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ScanConfigExternalToolDetailContent({
   toolType,
   toolId,
   toolName,
-  skillCatalogItem,
-  skillDetail,
+  skillCatalogItem = null,
+  skillDetail = null,
+  promptSkillDetail = null,
   prompt,
   examplePrompts,
   events,
@@ -526,17 +705,35 @@ export function ScanConfigExternalToolDetailContent({
   onRunStructured = () => {},
   loading = false,
   error = null,
+  promptSkillBusy = false,
+  onTogglePromptSkill = () => {},
+  onEditPromptSkill = () => {},
+  onDeletePromptSkill = () => {},
+  returnToSearch = "",
 }: ExternalToolDetailContentProps) {
   return (
     <div className="space-y-6 p-6 bg-background min-h-screen relative">
       <div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
       <div className="relative z-10 space-y-6">
         <div className="cyber-card p-5 space-y-6">
-          <ToolHeader toolType={toolType} toolName={toolName} toolId={toolId} />
+          <ToolHeader
+            toolType={toolType}
+            toolName={toolName}
+            toolId={toolId}
+            returnToSearch={returnToSearch}
+          />
           {loading ? (
             <div className="border-t border-border/50 pt-6 text-sm text-muted-foreground">加载技能详情中…</div>
           ) : error ? (
             <div className="border-t border-border/50 pt-6 text-sm text-red-300">{error}</div>
+          ) : toolType !== "skill" && promptSkillDetail ? (
+            <PromptSkillDetailSection
+              detail={promptSkillDetail}
+              busy={promptSkillBusy}
+              onToggle={onTogglePromptSkill}
+              onEdit={onEditPromptSkill}
+              onDelete={onDeletePromptSkill}
+            />
           ) : skillDetail ? (
             <div className="space-y-6 border-t border-border/50 pt-6">
               <SkillOverview skillCatalogItem={skillCatalogItem} skillDetail={skillDetail} />
@@ -568,7 +765,9 @@ export function ScanConfigExternalToolDetailContent({
               <SkillFinalResult result={result} events={events} />
             </div>
           ) : (
-            <div className="border-t border-border/50 pt-6 text-sm text-muted-foreground">未找到技能详情。</div>
+            <div className="border-t border-border/50 pt-6 text-sm text-muted-foreground">
+              未找到{toolType === "skill" ? "技能" : "Prompt Skill"}详情。
+            </div>
           )}
         </div>
       </div>
@@ -577,23 +776,58 @@ export function ScanConfigExternalToolDetailContent({
 }
 
 export default function ScanConfigExternalToolDetail() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const params = useParams<{ toolType?: string; toolId?: string }>();
-  const toolType = params.toolType;
+  const rawToolType = params.toolType;
   const toolId = decodeToolId(params.toolId);
+  const toolType = rawToolType as ExternalToolType | undefined;
+  const returnToSearch = location.search || "";
 
   const [skillDetail, setSkillDetail] = useState<SkillDetailResponse | null>(null);
+  const [promptSkillDetail, setPromptSkillDetail] =
+    useState<PromptSkillDetailPayload | null>(null);
+  const [promptSkillList, setPromptSkillList] =
+    useState<Awaited<ReturnType<typeof api.getPromptSkills>> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [promptSkillBusy, setPromptSkillBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [toolTestPreset, setToolTestPreset] = useState<ToolTestPreset | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<PromptSkillFormState>(
+    buildPromptSkillFormState(null),
+  );
 
   const skillCatalogItem = useMemo(
     () => SKILL_TOOLS_CATALOG.find((item) => item.id === toolId) ?? null,
     [toolId],
   );
-  const toolName = useMemo(() => resolveToolName(toolId), [toolId]);
+  const agentOptions = useMemo(
+    () =>
+      buildPromptSkillAgentOptions({
+        supportedAgentKeys: promptSkillList?.supportedAgentKeys,
+        builtinAgentKeys: promptSkillList?.builtinItems.map((item) => item.agent_key),
+        customAgentKeys: promptSkillList?.items.map((item) => item.agent_key),
+      }),
+    [promptSkillList],
+  );
+  const toolName = useMemo(() => {
+    if (promptSkillDetail) {
+      return promptSkillDetail.name;
+    }
+    if (toolType === "prompt-custom") {
+      return toolId || "Prompt Skill";
+    }
+    if (toolType === "prompt-builtin") {
+      return toolId || "Prompt Skill";
+    }
+    return resolveToolName(toolId);
+  }, [promptSkillDetail, toolId, toolType]);
   const examplePrompts = useMemo(() => buildSkillExamplePrompts(toolId), [toolId]);
-  const { events, running, result, runPrompt, runStructured, stop } = useSkillTestStream(toolId);
+  const { events, running, result, runPrompt, runStructured, stop } =
+    useSkillTestStream(toolType === "skill" ? toolId : "");
 
   useEffect(() => {
     setPrompt((previous) => previous || examplePrompts[0] || "");
@@ -607,22 +841,35 @@ export default function ScanConfigExternalToolDetail() {
     if (!toolId) return;
     let cancelled = false;
 
-    async function loadSkillDetail() {
+    async function loadDetail() {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`/api/v1/skills/${encodeURIComponent(toolId)}`);
-        if (!response.ok) {
-          throw new Error(`加载技能详情失败: ${response.status}`);
+        const [detailPayload, promptPayload] = await Promise.all([
+          api.getExternalToolResourceDetail(toolType, toolId),
+          toolType === "skill" ? Promise.resolve(null) : api.getPromptSkills({ limit: 1 }),
+        ]);
+
+        if (cancelled) {
+          return;
         }
-        const payload = (await response.json()) as SkillDetailResponse;
-        if (!cancelled) {
-          setSkillDetail(payload);
+
+        if (toolType === "skill") {
+          setSkillDetail(normalizeScanCoreDetail(detailPayload));
+          setPromptSkillDetail(null);
+        } else {
+          if (!detailPayload.content) {
+            throw new Error("未找到 Prompt Skill 详情");
+          }
+          setPromptSkillList(promptPayload);
+          setPromptSkillDetail(detailPayload as PromptSkillDetailPayload);
+          setSkillDetail(null);
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "加载技能详情失败");
+          setError(loadError instanceof Error ? loadError.message : "加载详情失败");
           setSkillDetail(null);
+          setPromptSkillDetail(null);
         }
       } finally {
         if (!cancelled) {
@@ -631,40 +878,174 @@ export default function ScanConfigExternalToolDetail() {
       }
     }
 
-    void loadSkillDetail();
+    void loadDetail();
     return () => {
       cancelled = true;
     };
   }, [toolId, toolType]);
 
-  if (toolType !== "skill") {
+  useEffect(() => {
+    if (promptSkillDetail) {
+      setForm(buildPromptSkillFormState(promptSkillDetail));
+    }
+  }, [promptSkillDetail]);
+
+  const handlePromptScopeChange = (nextScope: PromptSkillScopePayload) => {
+    setForm((current) => ({
+      ...current,
+      scope: nextScope,
+      agent_key:
+        nextScope === "agent_specific"
+          ? current.agent_key || agentOptions[0]?.key || ""
+          : "",
+    }));
+  };
+
+  const handleTogglePromptSkill = async () => {
+    if (!promptSkillDetail) {
+      return;
+    }
+    setPromptSkillBusy(true);
+    try {
+      if (promptSkillDetail.tool_type === "prompt-builtin") {
+        await api.updateBuiltinPromptSkill(promptSkillDetail.tool_id, {
+          is_active: !promptSkillDetail.is_enabled,
+        });
+      } else {
+        await api.updatePromptSkill(promptSkillDetail.tool_id, {
+          is_active: !promptSkillDetail.is_enabled,
+        });
+      }
+      const [detailPayload, promptPayload] = await Promise.all([
+        api.getExternalToolResourceDetail(promptSkillDetail.tool_type, promptSkillDetail.tool_id),
+        api.getPromptSkills({ limit: 1 }),
+      ]);
+      setPromptSkillList(promptPayload);
+      setPromptSkillDetail(detailPayload as PromptSkillDetailPayload);
+      toast.success(
+        promptSkillDetail.is_enabled ? "Prompt Skill 已停用" : "Prompt Skill 已启用",
+      );
+    } catch (toggleError) {
+      toast.error(`更新状态失败：${extractPromptSkillErrorMessage(toggleError)}`);
+    } finally {
+      setPromptSkillBusy(false);
+    }
+  };
+
+  const handleSavePromptSkill = async () => {
+    if (!promptSkillDetail || promptSkillDetail.tool_type !== "prompt-custom") {
+      return;
+    }
+    const name = form.name.trim();
+    const content = form.content.trim();
+    if (!name) {
+      toast.error("请填写 Skill 名称");
+      return;
+    }
+    if (!content) {
+      toast.error("请填写 Skill 内容");
+      return;
+    }
+    if (form.scope === "agent_specific" && !form.agent_key) {
+      toast.error("请选择目标智能体");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await api.updatePromptSkill(
+        promptSkillDetail.tool_id,
+        normalizePromptSkillUpdatePayload(form),
+      );
+      const [detailPayload, promptPayload] = await Promise.all([
+        api.getExternalToolResourceDetail("prompt-custom", promptSkillDetail.tool_id),
+        api.getPromptSkills({ limit: 1 }),
+      ]);
+      setPromptSkillList(promptPayload);
+      setPromptSkillDetail(detailPayload as PromptSkillDetailPayload);
+      setDialogOpen(false);
+      toast.success("Prompt Skill 已更新");
+    } catch (saveError) {
+      toast.error(`保存失败：${extractPromptSkillErrorMessage(saveError)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeletePromptSkill = async () => {
+    if (!promptSkillDetail || promptSkillDetail.tool_type !== "prompt-custom") {
+      return;
+    }
+    if (!window.confirm(`确认删除 Prompt Skill「${promptSkillDetail.name}」？`)) {
+      return;
+    }
+    setPromptSkillBusy(true);
+    try {
+      await api.deletePromptSkill(promptSkillDetail.tool_id);
+      toast.success("Prompt Skill 已删除");
+      navigate(`/scan-config/external-tools${returnToSearch}`);
+    } catch (deleteError) {
+      toast.error(`删除失败：${extractPromptSkillErrorMessage(deleteError)}`);
+    } finally {
+      setPromptSkillBusy(false);
+    }
+  };
+
+  if (
+    toolType !== "skill" &&
+    toolType !== "prompt-builtin" &&
+    toolType !== "prompt-custom"
+  ) {
     return <Navigate to="/scan-config/external-tools" replace />;
   }
 
   return (
-    <ScanConfigExternalToolDetailContent
-      toolType="skill"
-      toolId={toolId}
-      toolName={toolName}
-      skillCatalogItem={skillCatalogItem}
-      skillDetail={skillDetail}
-      prompt={prompt}
-      examplePrompts={examplePrompts}
-      events={events}
-      result={result}
-      running={running}
-      onPromptChange={setPrompt}
-      onRun={() => void runPrompt(prompt)}
-      onStop={stop}
-      toolTestPreset={toolTestPreset}
-      onToolTestPresetChange={setToolTestPreset}
-      onRunStructured={() => {
-        if (toolTestPreset) {
-          void runStructured(toolTestPreset);
-        }
-      }}
-      loading={loading}
-      error={error}
-    />
+    <>
+      <ScanConfigExternalToolDetailContent
+        toolType={toolType}
+        toolId={toolId}
+        toolName={toolName}
+        skillCatalogItem={skillCatalogItem}
+        skillDetail={skillDetail}
+        promptSkillDetail={promptSkillDetail}
+        prompt={prompt}
+        examplePrompts={examplePrompts}
+        events={events}
+        result={result}
+        running={running}
+        onPromptChange={setPrompt}
+        onRun={() => void runPrompt(prompt)}
+        onStop={stop}
+        toolTestPreset={toolTestPreset}
+        onToolTestPresetChange={setToolTestPreset}
+        onRunStructured={() => {
+          if (toolTestPreset) {
+            void runStructured(toolTestPreset);
+          }
+        }}
+        loading={loading}
+        error={error}
+        promptSkillBusy={promptSkillBusy}
+        onTogglePromptSkill={() => void handleTogglePromptSkill()}
+        onEditPromptSkill={() => setDialogOpen(true)}
+        onDeletePromptSkill={() => void handleDeletePromptSkill()}
+        returnToSearch={returnToSearch}
+      />
+      {promptSkillDetail?.tool_type === "prompt-custom" ? (
+        <PromptSkillEditorDialog
+          open={dialogOpen}
+          saving={saving}
+          title="编辑 Prompt Skill"
+          description="更新当前自定义 Prompt Skill 的作用域和注入内容。"
+          submitLabel="保存修改"
+          form={form}
+          agentOptions={agentOptions}
+          onOpenChange={setDialogOpen}
+          onFormChange={(updater) => setForm((current) => updater(current))}
+          onScopeChange={handlePromptScopeChange}
+          onSubmit={() => void handleSavePromptSkill()}
+        />
+      ) : null}
+    </>
   );
 }

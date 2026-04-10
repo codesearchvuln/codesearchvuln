@@ -13,19 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api import deps
-from app.api.v1.endpoints.agent_test import (
-    QueueEventEmitter,
-    _get_user_config,
-    _init_llm_service,
-    _run_agent_streaming,
-)
-from app.api.v1.endpoints.config import _resolve_verify_project
-from app.api.v1.endpoints.static_tasks_shared import _release_request_db_session
 from app.db.session import get_db
 from app.models.prompt_skill import PromptSkill
 from app.models.user_config import UserConfig
 from app.models.user import User
-from app.services.agent.skill_test_runner import SkillTestRunner, StructuredToolTestRunner
 from app.services.agent.skills.prompt_skills import (
     DEFAULT_PROMPT_SKILL_TEMPLATES,
     PROMPT_SKILL_AGENT_KEYS,
@@ -34,6 +25,19 @@ from app.services.agent.skills.prompt_skills import (
     PROMPT_SKILL_SCOPE_GLOBAL,
     build_prompt_skill_builtin_state,
     resolve_prompt_skill_scope_agent_key,
+)
+from app.services.agent.skills.resource_catalog import (
+    RESOURCE_MODE_EXTERNAL_TOOLS,
+    RESOURCE_MODE_SCAN_CORE_ONLY,
+    RESOURCE_TOOL_TYPE_PROMPT_BUILTIN,
+    RESOURCE_TOOL_TYPE_PROMPT_CUSTOM,
+    RESOURCE_TOOL_TYPE_SKILL,
+    build_prompt_builtin_catalog_item,
+    build_prompt_custom_catalog_item,
+    build_scan_core_catalog_item,
+    build_status_label,
+    filter_catalog_items,
+    paginate_catalog_items,
 )
 from app.services.agent.skills.scan_core import (
     get_scan_core_skill_detail,
@@ -46,14 +50,23 @@ router = APIRouter()
 
 class SkillCatalogItem(BaseModel):
     skill_id: str
+    tool_type: Optional[Literal["skill", "prompt-builtin", "prompt-custom"]] = None
+    tool_id: Optional[str] = None
     name: str
     namespace: str
     summary: str
-    entrypoint: str
+    entrypoint: Optional[str] = None
     aliases: List[str] = Field(default_factory=list)
     has_scripts: bool = False
     has_bin: bool = False
     has_assets: bool = False
+    status_label: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    is_available: Optional[bool] = None
+    resource_kind_label: Optional[str] = None
+    detail_supported: bool = True
+    agent_key: Optional[str] = None
+    scope: Optional[Literal["global", "agent_specific"]] = None
 
 
 class SkillCatalogResponse(BaseModel):
@@ -61,6 +74,7 @@ class SkillCatalogResponse(BaseModel):
     total: int = 0
     limit: int = 20
     offset: int = 0
+    supported_agent_keys: List[str] = Field(default_factory=list)
     items: List[SkillCatalogItem] = Field(default_factory=list)
     error: Optional[str] = None
 
@@ -160,6 +174,28 @@ class PromptSkillBuiltinUpdateRequest(BaseModel):
     is_active: bool = Field(default=True, description="是否启用内置 Prompt Skill")
 
 
+class SkillResourceDetailResponse(BaseModel):
+    tool_type: Literal["skill", "prompt-builtin", "prompt-custom"]
+    tool_id: str
+    name: str
+    summary: str
+    status_label: str
+    is_enabled: bool
+    is_available: bool
+    resource_kind_label: str
+    detail_supported: bool = True
+    namespace: str
+    entrypoint: Optional[str] = None
+    agent_key: Optional[str] = None
+    scope: Optional[Literal["global", "agent_specific"]] = None
+    content: Optional[str] = None
+    is_builtin: Optional[bool] = None
+    can_toggle: Optional[bool] = None
+    can_edit: Optional[bool] = None
+    can_delete: Optional[bool] = None
+    scan_core_detail: Optional[SkillDetailResponse] = None
+
+
 SkillDetailResponse.model_rebuild()
 
 
@@ -196,6 +232,199 @@ def _to_prompt_skill_builtin_item(agent_key: str, is_active: bool) -> PromptSkil
         content=str(DEFAULT_PROMPT_SKILL_TEMPLATES.get(agent_key) or "").strip(),
         is_active=bool(is_active),
     )
+
+
+def _status_label(is_enabled: bool) -> str:
+    return build_status_label(is_enabled=bool(is_enabled))
+
+
+def _build_scan_core_catalog_item(item: Dict[str, Any]) -> SkillCatalogItem:
+    return SkillCatalogItem(**build_scan_core_catalog_item(item))
+
+
+def _build_builtin_prompt_catalog_item(*, agent_key: str, is_active: bool) -> SkillCatalogItem:
+    return SkillCatalogItem(
+        **build_prompt_builtin_catalog_item(
+            agent_key=agent_key,
+            content=str(DEFAULT_PROMPT_SKILL_TEMPLATES.get(agent_key) or "").strip(),
+            is_active=is_active,
+        )
+    )
+
+
+def _build_custom_prompt_catalog_item(item: PromptSkillItemResponse) -> SkillCatalogItem:
+    prompt_row = PromptSkill(
+        id=item.id,
+        name=item.name,
+        content=item.content,
+        scope=item.scope,
+        agent_key=item.agent_key,
+        is_active=item.is_active,
+    )
+    return SkillCatalogItem(**build_prompt_custom_catalog_item(prompt_row))
+
+
+async def _list_custom_prompt_skill_items(
+    *,
+    db: AsyncSession,
+    current_user: User,
+) -> list[PromptSkillItemResponse]:
+    result = await db.execute(
+        select(PromptSkill)
+        .where(PromptSkill.user_id == str(current_user.id))
+        .order_by(PromptSkill.created_at.desc())
+    )
+    items = result.scalars().all()
+    return [_to_prompt_skill_item(item) for item in items]
+
+
+async def _build_external_tool_catalog_payload(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    query: str,
+    namespace: Optional[str],
+    limit: int,
+    offset: int,
+) -> SkillCatalogResponse:
+    builtin_state = await _load_user_builtin_prompt_skill_state(
+        db=db,
+        user_id=str(current_user.id),
+    )
+    custom_items = await _list_custom_prompt_skill_items(db=db, current_user=current_user)
+    scan_core_payload = search_scan_core_skills(query="", namespace=None, limit=500, offset=0)
+
+    all_items: list[SkillCatalogItem] = [
+        *[_build_scan_core_catalog_item(item) for item in scan_core_payload["items"]],
+        *[
+            _build_builtin_prompt_catalog_item(
+                agent_key=agent_key,
+                is_active=builtin_state.get(agent_key, True),
+            )
+            for agent_key in PROMPT_SKILL_AGENT_KEYS
+        ],
+        *[_build_custom_prompt_catalog_item(item) for item in custom_items],
+    ]
+
+    filtered_items = filter_catalog_items(
+        [item.model_dump() for item in all_items],
+        query=query,
+        namespace=namespace,
+    )
+    payload = paginate_catalog_items(filtered_items, limit=limit, offset=offset)
+    payload["supported_agent_keys"] = list(PROMPT_SKILL_AGENT_KEYS)
+    return SkillCatalogResponse(**payload)
+
+
+async def _load_prompt_skill_or_404(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    prompt_skill_id: str,
+) -> PromptSkill:
+    result = await db.execute(
+        select(PromptSkill).where(
+            PromptSkill.id == prompt_skill_id,
+            PromptSkill.user_id == str(current_user.id),
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Prompt Skill 不存在")
+    return item
+
+
+async def _build_skill_resource_detail(
+    *,
+    tool_type: str,
+    tool_id: str,
+    db: AsyncSession,
+    current_user: User,
+) -> SkillResourceDetailResponse:
+    normalized_tool_type = str(tool_type or "").strip()
+    normalized_tool_id = str(tool_id or "").strip()
+
+    if normalized_tool_type == RESOURCE_TOOL_TYPE_SKILL:
+        detail = get_scan_core_skill_detail(skill_id=normalized_tool_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail=f"Skill '{normalized_tool_id}' not found")
+        skill_detail = SkillDetailResponse(enabled=True, **detail)
+        return SkillResourceDetailResponse(
+            tool_type=RESOURCE_TOOL_TYPE_SKILL,
+            tool_id=normalized_tool_id,
+            name=skill_detail.name,
+            summary=skill_detail.summary,
+            status_label=build_status_label(is_enabled=True),
+            is_enabled=True,
+            is_available=True,
+            resource_kind_label="Scan Core",
+            detail_supported=True,
+            namespace=skill_detail.namespace,
+            entrypoint=skill_detail.entrypoint,
+            is_builtin=False,
+            can_toggle=False,
+            can_edit=False,
+            can_delete=False,
+            scan_core_detail=skill_detail,
+        )
+
+    if normalized_tool_type == RESOURCE_TOOL_TYPE_PROMPT_BUILTIN:
+        if normalized_tool_id not in PROMPT_SKILL_AGENT_KEYS:
+            raise HTTPException(status_code=404, detail="Builtin Prompt Skill 不存在")
+        builtin_state = await _load_user_builtin_prompt_skill_state(
+            db=db,
+            user_id=str(current_user.id),
+        )
+        is_active = builtin_state.get(normalized_tool_id, True)
+        content = str(DEFAULT_PROMPT_SKILL_TEMPLATES.get(normalized_tool_id) or "").strip()
+        return SkillResourceDetailResponse(
+            tool_type=RESOURCE_TOOL_TYPE_PROMPT_BUILTIN,
+            tool_id=normalized_tool_id,
+            name=normalized_tool_id,
+            summary=content,
+            status_label=_status_label(is_active),
+            is_enabled=bool(is_active),
+            is_available=True,
+            resource_kind_label="Builtin Prompt Skill",
+            detail_supported=True,
+            namespace="prompt-skill",
+            agent_key=normalized_tool_id,
+            scope=None,
+            content=content,
+            is_builtin=True,
+            can_toggle=True,
+            can_edit=False,
+            can_delete=False,
+        )
+
+    if normalized_tool_type == RESOURCE_TOOL_TYPE_PROMPT_CUSTOM:
+        item = await _load_prompt_skill_or_404(
+            db=db,
+            current_user=current_user,
+            prompt_skill_id=normalized_tool_id,
+        )
+        prompt_item = _to_prompt_skill_item(item)
+        return SkillResourceDetailResponse(
+            tool_type=RESOURCE_TOOL_TYPE_PROMPT_CUSTOM,
+            tool_id=prompt_item.id,
+            name=prompt_item.name,
+            summary=prompt_item.content,
+            status_label=_status_label(prompt_item.is_active),
+            is_enabled=bool(prompt_item.is_active),
+            is_available=True,
+            resource_kind_label="Custom Prompt Skill",
+            detail_supported=True,
+            namespace="prompt-skill",
+            agent_key=prompt_item.agent_key,
+            scope=prompt_item.scope,
+            content=prompt_item.content,
+            is_builtin=False,
+            can_toggle=True,
+            can_edit=True,
+            can_delete=True,
+        )
+
+    raise HTTPException(status_code=404, detail="资源类型不存在")
 
 
 def _parse_other_config_payload(raw_value: Any) -> Dict[str, Any]:
@@ -253,11 +482,21 @@ async def _save_user_builtin_prompt_skill_state(
 async def get_skill_catalog(
     q: str = Query(default="", description="Keyword query for skill search."),
     namespace: Optional[str] = Query(default=None, description="Filter by namespace."),
+    resource_mode: Literal["scan_core_only", "external_tools"] = Query(default=RESOURCE_MODE_SCAN_CORE_ONLY),
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> SkillCatalogResponse:
-    _ = current_user
+    if resource_mode == RESOURCE_MODE_EXTERNAL_TOOLS:
+        return await _build_external_tool_catalog_payload(
+            db=db,
+            current_user=current_user,
+            query=q,
+            namespace=namespace,
+            limit=limit,
+            offset=offset,
+        )
     payload = search_scan_core_skills(query=q, namespace=namespace, limit=limit, offset=offset)
     return SkillCatalogResponse(**payload)
 
@@ -442,6 +681,21 @@ async def get_skill_detail(
     return SkillDetailResponse(**payload)
 
 
+@router.get("/resources/{tool_type}/{tool_id}", response_model=SkillResourceDetailResponse)
+async def get_skill_resource_detail(
+    tool_type: Literal["skill", "prompt-builtin", "prompt-custom"],
+    tool_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> SkillResourceDetailResponse:
+    return await _build_skill_resource_detail(
+        tool_type=tool_type,
+        tool_id=tool_id,
+        db=db,
+        current_user=current_user,
+    )
+
+
 @router.post("/{skill_id}/test")
 async def run_skill_test(
     skill_id: str,
@@ -449,6 +703,16 @@ async def run_skill_test(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
+    from app.api.v1.endpoints.agent_test import (
+        QueueEventEmitter,
+        _get_user_config,
+        _init_llm_service,
+        _run_agent_streaming,
+    )
+    from app.api.v1.endpoints.config import _resolve_verify_project
+    from app.api.v1.endpoints.static_tasks_shared import _release_request_db_session
+    from app.services.agent.skill_test_runner import SkillTestRunner
+
     detail = get_scan_core_skill_detail(skill_id=skill_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
@@ -489,6 +753,16 @@ async def run_structured_tool_test(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
+    from app.api.v1.endpoints.agent_test import (
+        QueueEventEmitter,
+        _get_user_config,
+        _init_llm_service,
+        _run_agent_streaming,
+    )
+    from app.api.v1.endpoints.config import _resolve_verify_project
+    from app.api.v1.endpoints.static_tasks_shared import _release_request_db_session
+    from app.services.agent.skill_test_runner import StructuredToolTestRunner
+
     detail = get_scan_core_skill_detail(skill_id=skill_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")

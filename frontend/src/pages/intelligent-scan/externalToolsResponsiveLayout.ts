@@ -2,6 +2,7 @@ export const EXTERNAL_TOOLS_CARD_MIN_WIDTH = 300;
 export const EXTERNAL_TOOLS_CARD_MIN_HEIGHT = 240;
 export const EXTERNAL_TOOLS_GRID_GAP = 16;
 export const EXTERNAL_TOOLS_MIN_PAGE_SIZE = 1;
+export const EXTERNAL_TOOLS_MAX_PAGE_SIZE = 12;
 
 export interface ResponsiveExternalToolsLayoutInput {
   width: number;
@@ -43,7 +44,10 @@ export function resolveResponsiveExternalToolsLayout({
   return {
     columnCount,
     rowCount,
-    pageSize: Math.max(EXTERNAL_TOOLS_MIN_PAGE_SIZE, columnCount * rowCount),
+    pageSize: Math.min(
+      EXTERNAL_TOOLS_MAX_PAGE_SIZE,
+      Math.max(EXTERNAL_TOOLS_MIN_PAGE_SIZE, columnCount * rowCount),
+    ),
   };
 }
 

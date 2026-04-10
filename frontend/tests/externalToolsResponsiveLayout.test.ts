@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  EXTERNAL_TOOLS_MAX_PAGE_SIZE,
   resolveAnchoredExternalToolsPage,
   resolveExternalToolsFirstVisibleIndex,
   resolveResponsiveExternalToolsLayout,
@@ -50,6 +51,7 @@ test("resolveResponsiveExternalToolsLayout 会随高度增加分页容量", () =
   assert.equal(compact.columnCount, 1);
   assert.equal(tall.columnCount, 1);
   assert.ok(tall.pageSize > compact.pageSize);
+  assert.ok(tall.pageSize <= EXTERNAL_TOOLS_MAX_PAGE_SIZE);
 });
 
 test("resolveExternalToolsFirstVisibleIndex 返回当前页的首个锚点索引", () => {

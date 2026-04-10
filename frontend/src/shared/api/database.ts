@@ -58,6 +58,26 @@ export interface SkillCatalogItemPayload {
   has_scripts: boolean;
   has_bin: boolean;
   has_assets: boolean;
+  display_name?: string;
+  kind?: "tool" | "workflow" | "prompt";
+  source?: "scan_core" | "registry_manifest" | "prompt_effective";
+  selection_label?: string;
+  runtime_ready?: boolean;
+  reason?: string;
+  load_mode?: "summary_only";
+  deferred_tools?: string[];
+  tool_type?: ExternalToolType;
+  tool_id?: string;
+  resource_kind_label?: string;
+  status_label?: string;
+  is_enabled?: boolean;
+  is_available?: boolean;
+  detail_supported?: boolean;
+  agent_key?: string | null;
+  agent_label?: string | null;
+  scope?: PromptSkillScopePayload | null;
+  content?: string | null;
+  capabilities?: string[] | null;
 }
 
 interface SkillCatalogResponsePayload {
@@ -65,6 +85,7 @@ interface SkillCatalogResponsePayload {
   total: number;
   limit: number;
   offset: number;
+  supported_agent_keys?: string[];
   items: SkillCatalogItemPayload[];
   error?: string | null;
 }
@@ -80,12 +101,16 @@ export interface PromptSkillItemPayload {
   is_active: boolean;
   created_at?: string | null;
   updated_at?: string | null;
+  agent_label?: string | null;
+  display_name?: string | null;
 }
 
 export interface PromptSkillBuiltinItemPayload {
   agent_key: string;
   content: string;
   is_active: boolean;
+  agent_label?: string | null;
+  display_name?: string | null;
 }
 
 interface PromptSkillListResponsePayload {
@@ -101,6 +126,74 @@ interface PromptSkillListResponsePayload {
 export interface PromptSkillListPayload {
   builtinItems: PromptSkillBuiltinItemPayload[];
   items: PromptSkillItemPayload[];
+  supportedAgentKeys: string[];
+}
+
+export type ExternalToolType = "skill" | "prompt-builtin" | "prompt-custom";
+
+export interface ExternalToolScanCoreDetailPayload {
+  enabled: boolean;
+  skill_id: string;
+  name: string;
+  namespace: string;
+  summary: string;
+  entrypoint: string;
+  mirror_dir: string;
+  source_root: string;
+  source_dir: string;
+  source_skill_md: string;
+  aliases: string[];
+  has_scripts: boolean;
+  has_bin: boolean;
+  has_assets: boolean;
+  files_count: number;
+  workflow_content: string | null;
+  workflow_truncated: boolean | null;
+  workflow_error: string | null;
+  test_supported: boolean;
+  test_mode: "single_skill_strict" | "structured_tool" | "disabled";
+  test_reason: string | null;
+  default_test_project_name: "libplist";
+  tool_test_preset: Record<string, unknown> | null;
+}
+
+export interface ExternalToolResourcePayload {
+  tool_type: ExternalToolType;
+  tool_id: string;
+  name: string;
+  summary: string;
+  entrypoint: string | null;
+  namespace: string | null;
+  resource_kind_label: string;
+  status_label: string;
+  is_enabled: boolean;
+  is_available: boolean;
+  detail_supported: boolean;
+  agent_key: string | null;
+  agent_label?: string | null;
+  scope: PromptSkillScopePayload | null;
+  capabilities?: string[] | null;
+  content?: string | null;
+  is_builtin?: boolean;
+  can_toggle?: boolean;
+  can_edit?: boolean;
+  can_delete?: boolean;
+  display_name?: string | null;
+  scan_core_detail?: ExternalToolScanCoreDetailPayload | null;
+}
+
+export interface PromptSkillDetailPayload extends ExternalToolResourcePayload {
+  tool_type: "prompt-builtin" | "prompt-custom";
+  content: string;
+  is_builtin: boolean;
+  can_toggle: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+}
+
+export interface ExternalToolCatalogPayload {
+  supportedAgentKeys: string[];
+  items: ExternalToolResourcePayload[];
 }
 
 export interface PromptSkillCreatePayload {
@@ -663,7 +756,46 @@ export const api = {
     return {
       builtinItems: Array.isArray(res.data?.builtin_items) ? res.data.builtin_items : [],
       items: Array.isArray(res.data?.items) ? res.data.items : [],
+      supportedAgentKeys: Array.isArray(res.data?.supported_agent_keys)
+        ? res.data.supported_agent_keys
+        : [],
     };
+  },
+
+  async getExternalToolCatalog(params?: {
+    q?: string;
+    namespace?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ExternalToolCatalogPayload> {
+    const res = await apiClient.get<SkillCatalogResponsePayload>("/skills/catalog", {
+      params: {
+        q: params?.q ?? "",
+        namespace: params?.namespace,
+        resource_mode: "external_tools",
+        limit: params?.limit ?? 200,
+        offset: params?.offset ?? 0,
+      },
+    });
+
+    return {
+      supportedAgentKeys: Array.isArray(res.data?.supported_agent_keys)
+        ? res.data.supported_agent_keys
+        : [],
+      items: Array.isArray(res.data?.items)
+        ? (res.data.items as ExternalToolResourcePayload[])
+        : [],
+    };
+  },
+
+  async getExternalToolResourceDetail(
+    toolType: ExternalToolType,
+    toolId: string,
+  ): Promise<ExternalToolResourcePayload> {
+    const res = await apiClient.get<ExternalToolResourcePayload>(
+      `/skills/resources/${encodeURIComponent(toolType)}/${encodeURIComponent(toolId)}`,
+    );
+    return res.data;
   },
 
   async createPromptSkill(payload: PromptSkillCreatePayload): Promise<PromptSkillItemPayload> {
