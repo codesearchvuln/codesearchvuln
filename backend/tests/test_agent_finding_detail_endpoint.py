@@ -164,6 +164,39 @@ async def test_get_agent_finding_returns_enriched_payload():
 
 
 @pytest.mark.asyncio
+async def test_get_agent_finding_aligns_outside_hit_line_in_response():
+    task_id = "task-1"
+    finding = _build_agent_finding(finding_id="finding-outside", task_id=task_id)
+    finding.line_start = 1
+    finding.line_end = 1
+    finding.verification_result["reachability_target"]["start_line"] = 7
+    finding.verification_result["reachability_target"]["end_line"] = 18
+
+    db = AsyncMock()
+
+    async def get_side_effect(model, _id):
+        if model is AgentTask:
+            return SimpleNamespace(id=task_id, project_id="project-1")
+        if model is Project:
+            return SimpleNamespace(id="project-1")
+        return None
+
+    db.get = AsyncMock(side_effect=get_side_effect)
+    db.execute = AsyncMock(return_value=_ScalarOneOrNoneResult(finding))
+
+    result = await get_agent_finding(
+        task_id=task_id,
+        finding_id="finding-outside",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert result.line_start == 7
+    assert result.line_end == 7
+    assert result.resolved_line_start == 7
+
+
+@pytest.mark.asyncio
 async def test_get_agent_finding_can_include_false_positive():
     task_id = "task-1"
     finding = _build_agent_finding(

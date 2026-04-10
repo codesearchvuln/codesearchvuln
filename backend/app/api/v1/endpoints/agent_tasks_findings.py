@@ -274,6 +274,71 @@ def _normalize_function_line_range(
     return start_line, end_line
 
 
+def _align_hit_line_to_function_start_if_outside(
+    *,
+    line_start: Optional[int],
+    line_end: Optional[int],
+    function_start: Any,
+    function_end: Any,
+) -> Tuple[Optional[int], Optional[int], Dict[str, Any]]:
+    normalized_start = _to_int(line_start)
+    normalized_end = _to_int(line_end)
+    if normalized_start is not None and normalized_start <= 0:
+        normalized_start = None
+    if normalized_end is not None and normalized_end <= 0:
+        normalized_end = None
+    if normalized_start is not None and normalized_end is None:
+        normalized_end = normalized_start
+    if (
+        normalized_start is not None
+        and normalized_end is not None
+        and normalized_end < normalized_start
+    ):
+        normalized_end = normalized_start
+
+    normalized_function_start, normalized_function_end = _normalize_function_line_range(
+        function_start,
+        function_end,
+    )
+
+    diagnostics: Dict[str, Any] = {
+        "outside_function_range": False,
+        "correction_applied": False,
+        "correction_reason": None,
+        "correction_skipped_reason": None,
+        "function_start_line": normalized_function_start,
+        "function_end_line": normalized_function_end,
+    }
+
+    if normalized_function_start is None or normalized_function_end is None:
+        diagnostics["correction_skipped_reason"] = "missing_function_range"
+        return normalized_start, normalized_end, diagnostics
+
+    if normalized_start is None:
+        diagnostics["correction_applied"] = True
+        diagnostics["correction_reason"] = "missing_hit_line_align_to_function_start"
+        return normalized_function_start, normalized_function_start, diagnostics
+
+    is_outside = (
+        normalized_start < normalized_function_start
+        or normalized_start > normalized_function_end
+        or (
+            normalized_end is not None
+            and normalized_end > normalized_function_end
+        )
+    )
+    diagnostics["outside_function_range"] = is_outside
+
+    if is_outside:
+        diagnostics["correction_applied"] = True
+        diagnostics["correction_reason"] = (
+            "outside_function_range_align_to_function_start"
+        )
+        return normalized_function_start, normalized_function_start, diagnostics
+
+    return normalized_start, normalized_end, diagnostics
+
+
 def _extract_declared_function_line_range(
     finding: Dict[str, Any],
     verification_payload: Optional[Dict[str, Any]],
@@ -1290,44 +1355,26 @@ async def _save_findings(
             }
             original_line_start = line_start
             original_line_end = line_end
-            hit_line_outside_function = False
-            hit_line_correction_applied = False
-            hit_line_correction_reason = None
-            hit_line_correction_skipped_reason = None
-            function_start_for_hit = _to_int(reachability_target_start_line)
-            function_end_for_hit = _to_int(reachability_target_end_line)
-            if (
-                function_start_for_hit is not None
-                and function_start_for_hit > 0
-                and function_end_for_hit is not None
-                and function_end_for_hit > 0
-            ):
-                current_line_start = line_start
-                current_line_end = line_end if line_end is not None else line_start
-                if (
-                    current_line_start is not None
-                    and current_line_end is not None
-                    and current_line_end < current_line_start
-                ):
-                    current_line_end = current_line_start
-                if (
-                    current_line_start is not None
-                    and current_line_end is not None
-                    and (
-                        current_line_start < function_start_for_hit
-                        or current_line_start > function_end_for_hit
-                        or current_line_end > function_end_for_hit
-                    )
-                ):
-                    hit_line_outside_function = True
-                    line_start = function_start_for_hit
-                    line_end = function_start_for_hit
-                    hit_line_correction_applied = True
-                    hit_line_correction_reason = (
-                        "outside_function_range_align_to_function_start"
-                    )
-            else:
-                hit_line_correction_skipped_reason = "missing_function_range"
+            line_start, line_end, hit_line_correction_meta = (
+                _align_hit_line_to_function_start_if_outside(
+                    line_start=line_start,
+                    line_end=line_end,
+                    function_start=reachability_target_start_line,
+                    function_end=reachability_target_end_line,
+                )
+            )
+            hit_line_outside_function = bool(
+                hit_line_correction_meta.get("outside_function_range")
+            )
+            hit_line_correction_applied = bool(
+                hit_line_correction_meta.get("correction_applied")
+            )
+            hit_line_correction_reason = hit_line_correction_meta.get(
+                "correction_reason"
+            )
+            hit_line_correction_skipped_reason = hit_line_correction_meta.get(
+                "correction_skipped_reason"
+            )
             context_window_rebuild_applied = False
             context_window_rebuild_skipped_reason = None
             if file_lines and line_start is not None:
@@ -1402,6 +1449,8 @@ async def _save_findings(
                 "corrected_line_end": line_end,
                 "hit_line_correction_reason": hit_line_correction_reason,
                 "hit_line_correction_skipped_reason": hit_line_correction_skipped_reason,
+                "hit_line_correction_from_unified_helper": True,
+                "hit_line_correction_engine": "align_helper_v1",
                 "context_window_rebuild_applied": context_window_rebuild_applied,
                 "context_window_rebuild_skipped_reason": (
                     context_window_rebuild_skipped_reason
@@ -1868,6 +1917,14 @@ def _serialize_agent_findings(
                 reachability_function = raw_function_name.strip()
         if not reachability_file and normalized_item_file_path:
             reachability_file = normalized_item_file_path
+        serialized_line_start, serialized_line_end, _ = (
+            _align_hit_line_to_function_start_if_outside(
+                line_start=item.line_start,
+                line_end=item.line_end,
+                function_start=reachability_function_start_line,
+                function_end=reachability_function_end_line,
+            )
+        )
         flow_payload = (
             verification_payload.get("flow")
             if isinstance(verification_payload, dict)
@@ -1930,8 +1987,8 @@ def _serialize_agent_findings(
                 call_chain=flow_call_chain or [],
                 function_name=reachability_function,
                 file_path=reachability_file or normalized_item_file_path,
-                line_start=item.line_start,
-                line_end=item.line_end,
+                line_start=serialized_line_start,
+                line_end=serialized_line_end,
             )
         function_trigger_flow = [
             _sanitize_text_paths(step, None) or ""
@@ -1984,8 +2041,8 @@ def _serialize_agent_findings(
             code_context=item.code_context,
             cwe_id=cwe_id,
             raw_description=item.description,
-            line_start=item.line_start,
-            line_end=item.line_end,
+            line_start=serialized_line_start,
+            line_end=serialized_line_end,
             verification_evidence=verification_evidence,
             function_trigger_flow=function_trigger_flow,
         )
@@ -1999,8 +2056,8 @@ def _serialize_agent_findings(
             code_context=item.code_context,
             cwe_id=cwe_id,
             raw_description=item.description,
-            line_start=item.line_start,
-            line_end=item.line_end,
+            line_start=serialized_line_start,
+            line_end=serialized_line_end,
             verification_evidence=verification_evidence,
             function_trigger_flow=function_trigger_flow,
         )
@@ -2025,10 +2082,10 @@ def _serialize_agent_findings(
                     "description": structured_description,
                     "description_markdown": structured_description_markdown,
                     "file_path": normalized_item_file_path,
-                    "line_start": item.line_start,
-                    "line_end": item.line_end,
+                    "line_start": serialized_line_start,
+                    "line_end": serialized_line_end,
                     "resolved_file_path": normalized_item_file_path,
-                    "resolved_line_start": item.line_start,
+                    "resolved_line_start": serialized_line_start,
                     "function_name": getattr(item, "function_name", None),
                     "code_snippet": item.code_snippet,
                     "code_context": item.code_context,

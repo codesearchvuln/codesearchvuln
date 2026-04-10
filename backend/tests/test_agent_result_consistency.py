@@ -599,6 +599,80 @@ async def test_save_findings_skips_hit_line_correction_when_function_range_missi
 
 
 @pytest.mark.asyncio
+async def test_save_findings_aligns_missing_hit_line_to_function_start(tmp_path):
+    source_file = tmp_path / "src" / "missing_hit.py"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text(
+        "\n".join(
+            [
+                "def check(payload):",
+                "    value = payload.strip()",
+                "    return value",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarOneOrNoneResult(None))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    findings = [
+        {
+            "title": "missing hit line case",
+            "severity": "low",
+            "vulnerability_type": "xss",
+            "file_path": "src/missing_hit.py",
+            "line_start": None,
+            "line_end": None,
+            "verification_result": {
+                "authenticity": "false_positive",
+                "status": "false_positive",
+                "verification_evidence": "line not provided by upstream payload",
+                "reachability_target": {
+                    "function": "check",
+                    "start_line": 1,
+                    "end_line": 3,
+                },
+            },
+        }
+    ]
+
+    saved_count = await _save_findings(
+        db,
+        task_id="task-missing-hit-line",
+        findings=findings,
+        project_root=str(tmp_path),
+        save_diagnostics={},
+    )
+
+    assert saved_count == 1
+    saved_finding = db.add.call_args.args[0]
+    assert saved_finding.line_start == 1
+    assert saved_finding.line_end == 1
+    function_range_validation = (
+        saved_finding.verification_result.get("function_range_validation") or {}
+    )
+    assert function_range_validation.get("hit_line_correction_applied") is True
+    assert (
+        function_range_validation.get("hit_line_correction_reason")
+        == "missing_hit_line_align_to_function_start"
+    )
+    assert (
+        function_range_validation.get("hit_line_correction_engine")
+        == "align_helper_v1"
+    )
+    assert (
+        function_range_validation.get("hit_line_correction_from_unified_helper")
+        is True
+    )
+    assert function_range_validation.get("corrected_line_start") == 1
+    assert function_range_validation.get("corrected_line_end") == 1
+
+
+@pytest.mark.asyncio
 async def test_save_findings_clears_stale_context_lines_when_file_unavailable_for_false_positive(
     tmp_path,
 ):
