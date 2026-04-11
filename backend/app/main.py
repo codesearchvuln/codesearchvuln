@@ -4,35 +4,37 @@ import os
 import signal
 import subprocess
 import warnings
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
+from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.future import select
 
 from app.api.v1.api import api_router
+from app.api.v1.endpoints.static_tasks_shared import prune_scan_progress_store
 from app.core.config import settings
+from app.core.logging_setup import configure_backend_file_logging
 from app.db.init_db import init_db
 from app.db.session import AsyncSessionLocal
-from app.api.v1.endpoints.static_tasks_shared import prune_scan_progress_store
-from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
-from app.services.runner_preflight import run_configured_runner_preflights
-from app.services.zip_cache_manager import get_zip_cache_manager
 from app.models.agent_task import AgentTask, AgentTaskStatus
+from app.models.bandit import BanditScanTask
 from app.models.gitleaks import GitleaksScanTask
 from app.models.opengrep import OpengrepScanTask
-from app.models.bandit import BanditScanTask
 from app.models.phpstan import PhpstanScanTask
 from app.models.pmd_scan import PmdScanTask
 from app.models.yasa import YasaScanTask
-from sqlalchemy.future import select
-from sqlalchemy import text
-from alembic.config import Config as AlembicConfig
-from alembic.script import ScriptDirectory
+from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
+from app.services.runner_preflight import run_configured_runner_preflights
+from app.services.zip_cache_manager import get_zip_cache_manager
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
+configure_backend_file_logging()
 logger = logging.getLogger(__name__)
 
 # 禁用 uvicorn access log 和 LiteLLM INFO 日志
@@ -202,7 +204,7 @@ async def _run_daily_cache_cleanup(stop_event: asyncio.Event) -> None:
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=24 * 60 * 60)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
 
 
@@ -236,7 +238,7 @@ def _mark_task_interrupted(task) -> bool:
         changed = True
 
     if hasattr(task, "completed_at") and getattr(task, "completed_at", None) is None:
-        task.completed_at = datetime.now(timezone.utc)
+        task.completed_at = datetime.now(UTC)
 
     if hasattr(task, "error_message") and not getattr(task, "error_message", None):
         task.error_message = INTERRUPTED_ERROR_MESSAGE
@@ -463,7 +465,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("=" * 50)
     logger.info("VulHunter 后端服务已启动")
-    logger.info(f"API 文档: http://localhost:8000/docs")
+    logger.info("API 文档: http://localhost:8000/docs")
     logger.info("=" * 50)
     # logger.info("演示账户: demo@example.com / demo123")
     logger.info("无需账号即可使用")
@@ -518,16 +520,16 @@ async def lifespan(app: FastAPI):
     # 清理未关闭的 aiohttp ClientSession（修复资源泄漏警告）
     try:
         import gc
-        
+
         # 等待一小段时间让所有 pending 的异步任务完成
         await asyncio.sleep(0.1)
-        
+
         # 强制垃圾回收，触发并清理未关闭的资源
         gc.collect()
-        
+
         # 再等待一点时间让清理完成
         await asyncio.sleep(0.05)
-        
+
         logger.info("  - 异步资源清理完成")
     except Exception as e:
         logger.warning(f"清理异步资源失败: {e}")
