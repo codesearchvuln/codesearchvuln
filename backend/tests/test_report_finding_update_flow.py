@@ -135,6 +135,41 @@ async def test_save_verification_result_is_saved_false_when_callback_saves_zero(
 
 
 @pytest.mark.asyncio
+async def test_save_verification_result_zero_save_can_retry_same_payload():
+    saved_batches: List[List[Dict[str, Any]]] = []
+    save_results = [0, 1]
+
+    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+        saved_batches.append([dict(item) for item in findings])
+        return save_results.pop(0)
+
+    tool = SaveVerificationResultTool(task_id="task-zero-retry", save_callback=_save_callback)
+    payload = {
+        "file_path": "src/retry_demo.py",
+        "line_start": 12,
+        "function_name": "demo",
+        "title": "src/retry_demo.py中demo函数SQL注入漏洞",
+        "vulnerability_type": "sql_injection",
+        "severity": "high",
+        "verdict": "confirmed",
+        "confidence": 0.88,
+        "reachability": "reachable",
+        "verification_evidence": "retry should be allowed when callback reports zero rows saved",
+    }
+
+    first = await tool.execute(**payload)
+    second = await tool.execute(**payload)
+
+    assert first.success is True
+    assert first.data["saved"] is False
+    assert second.success is True
+    assert second.data["saved"] is True
+    assert second.data["total_saved"] == 1
+    assert len(saved_batches) == 2
+    assert len(tool.buffered_findings) == 1
+
+
+@pytest.mark.asyncio
 async def test_save_verification_result_clone_for_worker_resets_buffer_and_dedup_state():
     persisted_batches: List[List[Dict[str, Any]]] = []
 
@@ -220,6 +255,99 @@ async def test_save_verification_result_normalizes_uncertain_status_to_likely_an
     assert saved["poc_code"] == "int main(void) { return 0; }"
     assert saved["suggestion"] == "复制指针后清空所有权并在释放前增加唯一释放保护。"
     assert saved["report"] == "# Rich finding report"
+
+
+@pytest.mark.asyncio
+async def test_save_verification_result_accepts_nested_finding_payload_and_keeps_verification_metadata():
+    buffered: List[Dict[str, Any]] = []
+
+    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+        buffered.extend(findings)
+        return len(findings)
+
+    tool = SaveVerificationResultTool(task_id="task-nested-finding", save_callback=_save_callback)
+    result = await tool.execute(
+        finding={
+            "file_path": "src/handler.py",
+            "line_start": 12,
+            "line_end": 18,
+            "function_name": "handle_login",
+            "title": "src/handler.py中handle_login函数SQL注入漏洞",
+            "vulnerability_type": "sql_injection",
+            "severity": "high",
+            "description": "用户输入直接进入 SQL sink。",
+            "fix_code": "cursor.execute(query, (user_input,))",
+            "fix_description": "改为参数化查询。",
+            "verification_method": "agent_verification",
+            "attacker_flow": "request.body.username -> handle_login",
+            "taint_flow": ["request.body.username", "build_query", "cursor.execute"],
+            "evidence_chain": ["search_code", "get_symbol_body", "run_code"],
+            "finding_metadata": {
+                "sink_reachable": True,
+                "upstream_call_chain": ["router.login", "handle_login"],
+                "sink_trigger_condition": "POST /api/login",
+            },
+            "verification_result": {
+                "verdict": "confirmed",
+                "confidence": 0.93,
+                "reachability": "reachable",
+                "verification_evidence": "dynamic replay confirmed the SQL sink is reachable",
+                "flow": {"call_chain": ["router.login", "handle_login", "cursor.execute"]},
+                "reachability_target": {
+                    "file_path": "src/handler.py",
+                    "function": "handle_login",
+                    "start_line": 10,
+                    "end_line": 20,
+                },
+                "verification_todo_id": "todo-123",
+                "verification_fingerprint": "fingerprint-123",
+                "source_sink_authenticity_passed": True,
+            },
+        }
+    )
+
+    assert result.success is True
+    assert buffered
+    saved = buffered[0]
+    assert saved["fix_code"] == "cursor.execute(query, (user_input,))"
+    assert saved["fix_description"] == "改为参数化查询。"
+    assert saved["verification_method"] == "agent_verification"
+    assert saved["attacker_flow"] == "request.body.username -> handle_login"
+    assert saved["taint_flow"] == ["request.body.username", "build_query", "cursor.execute"]
+    assert saved["evidence_chain"] == ["search_code", "get_symbol_body", "run_code"]
+    assert saved["finding_metadata"]["sink_reachable"] is True
+    assert saved["finding_metadata"]["upstream_call_chain"] == ["router.login", "handle_login"]
+    assert saved["verification_result"]["flow"]["call_chain"] == [
+        "router.login",
+        "handle_login",
+        "cursor.execute",
+    ]
+    assert saved["verification_result"]["reachability_target"]["function"] == "handle_login"
+    assert saved["verification_result"]["verification_todo_id"] == "todo-123"
+    assert saved["verification_result"]["verification_fingerprint"] == "fingerprint-123"
+    assert saved["verification_result"]["source_sink_authenticity_passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_save_verification_result_rejects_unknown_fields():
+    tool = SaveVerificationResultTool(task_id="task-unknown-field")
+    result = await tool.execute(
+        file_path="src/demo.py",
+        line_start=12,
+        function_name="demo",
+        title="src/demo.py中demo函数SQL注入漏洞",
+        vulnerability_type="sql_injection",
+        severity="high",
+        verdict="confirmed",
+        confidence=0.9,
+        reachability="reachable",
+        verification_evidence="unknown field rejection should happen before execution",
+        unexpected_field="boom",
+    )
+
+    assert result.success is False
+    assert result.error_code == "unknown_field"
+    assert "发现未知字段" in str(result.data)
 
 
 def test_report_project_fallback_handles_non_numeric_confidence_text():

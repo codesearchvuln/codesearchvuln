@@ -18,7 +18,7 @@ import logging
 import re
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .base import AgentTool, ToolResult
 
@@ -61,6 +61,11 @@ _UPDATE_FORBIDDEN_FIELDS = {
 
 _ALLOWED_VERDICTS = {"confirmed", "likely", "uncertain", "false_positive"}
 _ALLOWED_REACHABILITY = {"reachable", "likely_reachable", "unknown", "unreachable"}
+_SOURCE_SINK_GATE_METADATA_KEYS = {
+    "sink_reachable",
+    "upstream_call_chain",
+    "sink_trigger_condition",
+}
 
 
 def _normalize_save_verdict(value: Any) -> str:
@@ -87,6 +92,39 @@ def _normalize_save_status(value: Any, verdict: Optional[str]) -> str:
     if normalized_verdict == "false_positive":
         return "false_positive"
     return "likely"
+
+
+def _has_meaningful_value(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _pick_first_meaningful(*values: Any) -> Any:
+    for value in values:
+        if _has_meaningful_value(value):
+            return value
+    return None
+
+
+def _normalize_text_list(value: Any) -> Optional[List[str]]:
+    if value in (None, "", [], ()):
+        return None
+    if isinstance(value, list):
+        normalized = [str(item).strip() for item in value if str(item).strip()]
+        return normalized or None
+    text = str(value).strip()
+    return [text] if text else None
+
+
+def _merge_optional_dicts(*values: Any) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        for key, item in value.items():
+            if item is None:
+                continue
+            merged[str(key)] = item
+    return merged
 
 
 def build_finding_identity(task_id: str, finding: Dict[str, Any]) -> str:
@@ -600,6 +638,91 @@ class SaveVerificationResultsInput(BaseModel):
         return result
 
 
+class SaveVerificationResultCallInput(BaseModel):
+    """单条 save_verification_result 调用的兼容输入模型。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    findings: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="兼容旧链路：批量 findings 列表。",
+    )
+    finding: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="兼容输入：完整的单个 finding 对象（可内含 verification_result）。",
+    )
+    verification_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="兼容输入：嵌套 verification_result 对象。",
+    )
+
+    finding_identity: Optional[str] = None
+    file_path: Optional[str] = None
+    file: Optional[str] = None
+    path: Optional[str] = None
+    line_start: Optional[int] = None
+    line: Optional[int] = None
+    line_end: Optional[int] = None
+    function_name: Optional[str] = None
+    title: Optional[str] = None
+    display_title: Optional[str] = None
+    vulnerability_type: Optional[str] = None
+    type: Optional[str] = None
+    severity: Optional[str] = None
+    description: Optional[str] = None
+    source: Optional[str] = None
+    sink: Optional[str] = None
+    dataflow_path: Optional[Any] = None
+    is_verified: Optional[bool] = None
+    cvss_score: Optional[Any] = None
+    cvss_vector: Optional[str] = None
+    poc_code: Optional[str] = None
+    poc: Optional[Dict[str, Any]] = None
+    poc_plan: Optional[str] = None
+    suggestion: Optional[str] = None
+    verdict: Optional[str] = None
+    authenticity: Optional[str] = None
+    confidence: Optional[Any] = None
+    ai_confidence: Optional[Any] = None
+    status: Optional[str] = None
+    reachability: Optional[str] = None
+    verification_evidence: Optional[str] = None
+    verification_details: Optional[str] = None
+    evidence: Optional[str] = None
+    cwe_id: Optional[str] = None
+    code_snippet: Optional[str] = None
+    function_trigger_flow: Optional[Any] = None
+    code_context: Optional[str] = None
+    localization_status: Optional[str] = None
+    report: Optional[str] = None
+    vulnerability_report: Optional[str] = None
+    flow: Optional[Dict[str, Any]] = None
+    reachability_target: Optional[Dict[str, Any]] = None
+    context_start_line: Optional[int] = None
+    context_end_line: Optional[int] = None
+    function_range_validation: Optional[Dict[str, Any]] = None
+    validation_reason: Optional[str] = None
+    localization_failure_trace: Optional[Any] = None
+    known_facts: Optional[Any] = None
+    inferences_to_verify: Optional[Any] = None
+    final_conclusion: Optional[Any] = None
+    verification_todo_id: Optional[str] = None
+    verification_fingerprint: Optional[str] = None
+    source_sink_authenticity_passed: Optional[bool] = None
+    source_sink_authenticity_errors: Optional[Any] = None
+    finding_metadata: Optional[Dict[str, Any]] = None
+    attacker_flow: Optional[str] = None
+    taint_flow: Optional[Any] = None
+    evidence_chain: Optional[Any] = None
+    missing_checks: Optional[Any] = None
+    fix_code: Optional[str] = None
+    fix_description: Optional[str] = None
+    verification_method: Optional[str] = None
+    sink_reachable: Optional[Any] = None
+    upstream_call_chain: Optional[Any] = None
+    sink_trigger_condition: Optional[str] = None
+
+
 class UpdateVulnerabilityFindingInput(BaseModel):
     finding_identity: str = Field(
         ...,
@@ -717,16 +840,18 @@ class SaveVerificationResultTool(AgentTool):
 
 兼容字段（旧链路可继续传）：
 - verdict, reachability, cwe_id, poc_plan, code_context, localization_status
+- finding / verification_result / findings（历史嵌套结构）
+- flow, reachability_target, verification_todo_id, verification_fingerprint
+- finding_metadata, attacker_flow, taint_flow, evidence_chain, missing_checks
 
 返回值：
 - saved: 是否成功保存
 - total_saved: 任务累计保存数
 - message: 结果描述"""
 
-    # args_schema intentionally not overridden (returns None from base class).
-    # _execute() accepts individual flat params; SaveVerificationResultInput
-    # (which expects a "findings" list) does NOT match the _execute() signature
-    # and would cause Pydantic ValidationError on every call.
+    @property
+    def args_schema(self):
+        return SaveVerificationResultCallInput
 
     # ------------------------------------------------------------------ #
     # 公开属性：供 Orchestrator / 持久化兜底逻辑读取
@@ -764,6 +889,32 @@ class SaveVerificationResultTool(AgentTool):
         except Exception:
             normalized = str(findings)
         return hashlib.sha1(normalized.encode("utf-8", errors="ignore")).hexdigest()
+
+    @staticmethod
+    def _build_buffer_key(finding: Dict[str, Any]) -> str:
+        identity = str(finding.get("finding_identity") or "").strip()
+        if identity:
+            return f"identity:{identity}"
+        return "|".join(
+            [
+                str(finding.get("file_path") or "").strip().lower(),
+                str(finding.get("line_start") or ""),
+                str(finding.get("function_name") or "").strip().lower(),
+                str(finding.get("vulnerability_type") or "").strip().lower(),
+                str(finding.get("title") or "").strip().lower(),
+            ]
+        )
+
+    def _upsert_buffered_finding(self, finding: Dict[str, Any]) -> None:
+        buffer_key = self._build_buffer_key(finding)
+        for idx, existing in enumerate(self._buffered_findings):
+            if not isinstance(existing, dict):
+                continue
+            if self._build_buffer_key(existing) != buffer_key:
+                continue
+            self._buffered_findings[idx] = merge_finding_patch(existing, finding)
+            return
+        self._buffered_findings.append(finding)
 
     # ------------------------------------------------------------------ #
     # 核心执行逻辑
@@ -823,6 +974,15 @@ class SaveVerificationResultTool(AgentTool):
             ToolResult，包含 saved、total_saved、message
         """
         task_id = self.task_id
+        finding_payload = (
+            dict(kwargs.get("finding"))
+            if isinstance(kwargs.get("finding"), dict)
+            else {}
+        )
+        verification_payload = _merge_optional_dicts(
+            finding_payload.get("verification_result"),
+            kwargs.get("verification_result"),
+        )
 
         # 兼容旧版批量入参：{"findings": [{...}, {...}]}
         # 新规范仍推荐单条调用；这里仅做鲁棒性兜底，避免因历史提示词导致整批失败。
@@ -840,51 +1000,7 @@ class SaveVerificationResultTool(AgentTool):
             failed_count = 0
             for item in candidate_findings:
                 attempted_count += 1
-                verification_payload = (
-                    item.get("verification_result")
-                    if isinstance(item.get("verification_result"), dict)
-                    else {}
-                )
-                result = await self._execute(
-                    file_path=item.get("file_path"),
-                    line_start=item.get("line_start"),
-                    line_end=item.get("line_end"),
-                    function_name=item.get("function_name"),
-                    title=item.get("title"),
-                    vulnerability_type=item.get("vulnerability_type"),
-                    severity=item.get("severity"),
-                    confidence=verification_payload.get("confidence", item.get("confidence")),
-                    status=verification_payload.get("status", item.get("status")),
-                    description=item.get("description"),
-                    finding_identity=item.get("finding_identity"),
-                    source=item.get("source"),
-                    sink=item.get("sink"),
-                    dataflow_path=item.get("dataflow_path"),
-                    is_verified=item.get("is_verified"),
-                    cvss_score=item.get("cvss_score"),
-                    cvss_vector=item.get("cvss_vector"),
-                    poc_code=item.get("poc_code"),
-                    suggestion=item.get("suggestion"),
-                    verdict=verification_payload.get("verdict", item.get("verdict")),
-                    reachability=verification_payload.get("reachability", item.get("reachability")),
-                    verification_evidence=verification_payload.get(
-                        "verification_evidence",
-                        item.get("verification_evidence"),
-                    ),
-                    cwe_id=item.get("cwe_id"),
-                    poc_plan=verification_payload.get("poc_plan", item.get("poc_plan")),
-                    code_snippet=item.get("code_snippet"),
-                    function_trigger_flow=verification_payload.get(
-                        "function_trigger_flow",
-                        item.get("function_trigger_flow"),
-                    ),
-                    code_context=verification_payload.get("code_context", item.get("code_context")),
-                    localization_status=verification_payload.get(
-                        "localization_status",
-                        item.get("localization_status"),
-                    ),
-                    report=item.get("report") or item.get("vulnerability_report"),
-                )
+                result = await self._execute(finding=item)
                 if result.success and isinstance(result.data, dict) and (
                     bool(result.data.get("saved")) or bool(result.data.get("already_saved"))
                 ):
@@ -910,23 +1026,99 @@ class SaveVerificationResultTool(AgentTool):
                 },
             )
 
-        file_path = str(file_path or kwargs.get("path") or "unknown").strip() or "unknown"
+        file_path = str(
+            _pick_first_meaningful(
+                file_path,
+                finding_payload.get("file_path"),
+                kwargs.get("file"),
+                finding_payload.get("file"),
+                kwargs.get("path"),
+                finding_payload.get("path"),
+            )
+            or "unknown"
+        ).strip() or "unknown"
+        raw_line_start = _pick_first_meaningful(
+            line_start,
+            kwargs.get("line"),
+            finding_payload.get("line_start"),
+            finding_payload.get("line"),
+        )
         try:
-            line_start = max(1, int(line_start if line_start is not None else 1))
+            line_start = max(1, int(raw_line_start if raw_line_start is not None else 1))
         except Exception:
             line_start = 1
+        raw_line_end = _pick_first_meaningful(
+            line_end,
+            finding_payload.get("line_end"),
+        )
         try:
-            line_end = int(line_end) if line_end is not None else line_start
+            line_end = int(raw_line_end) if raw_line_end is not None else line_start
         except Exception:
             line_end = line_start
         line_end = max(line_start, line_end)
 
-        function_name = str(function_name or "").strip() or f"<function_at_line_{line_start}>"
-        title = str(title or "").strip() or f"{file_path}中{function_name}函数漏洞"
-        vulnerability_type = str(vulnerability_type or "unknown").strip() or "unknown"
-        severity = str(severity or "medium").strip() or "medium"
+        reachability_target = _pick_first_meaningful(
+            kwargs.get("reachability_target"),
+            verification_payload.get("reachability_target"),
+            finding_payload.get("reachability_target"),
+        )
+        function_name = str(
+            _pick_first_meaningful(
+                function_name,
+                finding_payload.get("function_name"),
+                reachability_target.get("function") if isinstance(reachability_target, dict) else None,
+            )
+            or ""
+        ).strip()
+        if not function_name:
+            title_text = str(
+                _pick_first_meaningful(
+                    title,
+                    finding_payload.get("title"),
+                    kwargs.get("display_title"),
+                    finding_payload.get("display_title"),
+                )
+                or ""
+            )
+            title_match = re.search(r"中([A-Za-z_][A-Za-z0-9_]*)函数", title_text)
+            if title_match:
+                function_name = title_match.group(1).strip()
+        if not function_name:
+            function_name = f"<function_at_line_{line_start}>"
+
+        title = str(
+            _pick_first_meaningful(
+                title,
+                finding_payload.get("title"),
+                kwargs.get("display_title"),
+                finding_payload.get("display_title"),
+            )
+            or f"{file_path}中{function_name}函数漏洞"
+        ).strip() or f"{file_path}中{function_name}函数漏洞"
+        vulnerability_type = str(
+            _pick_first_meaningful(
+                vulnerability_type,
+                kwargs.get("type"),
+                finding_payload.get("vulnerability_type"),
+                finding_payload.get("type"),
+            )
+            or "unknown"
+        ).strip() or "unknown"
+        severity = str(
+            _pick_first_meaningful(
+                severity,
+                finding_payload.get("severity"),
+            )
+            or "medium"
+        ).strip() or "medium"
         if confidence is None:
-            confidence = kwargs.get("ai_confidence", 0.5)
+            confidence = _pick_first_meaningful(
+                verification_payload.get("confidence"),
+                finding_payload.get("confidence"),
+                kwargs.get("ai_confidence"),
+            )
+        if confidence is None:
+            confidence = 0.5
 
         try:
             normalized_confidence = max(0.0, min(float(confidence), 1.0))
@@ -937,11 +1129,26 @@ class SaveVerificationResultTool(AgentTool):
         if normalized_severity not in {"critical", "high", "medium", "low", "info"}:
             normalized_severity = "medium"
 
+        verdict = _pick_first_meaningful(
+            verdict,
+            kwargs.get("authenticity"),
+            verification_payload.get("verdict"),
+            verification_payload.get("authenticity"),
+            finding_payload.get("verdict"),
+            finding_payload.get("authenticity"),
+        )
         normalized_verdict = _normalize_save_verdict(verdict)
         if not normalized_verdict:
             normalized_verdict = "likely"
 
-        normalized_status = _normalize_save_status(status, normalized_verdict)
+        normalized_status = _normalize_save_status(
+            _pick_first_meaningful(
+                status,
+                verification_payload.get("status"),
+                finding_payload.get("status"),
+            ),
+            normalized_verdict,
+        )
         if normalized_status == "likely" and normalized_verdict == "uncertain":
             normalized_verdict = "likely"
 
@@ -949,7 +1156,14 @@ class SaveVerificationResultTool(AgentTool):
         # SaveVerificationResultTool 只在 verification 阶段调用，因此固定为 True。
         normalized_is_verified = True
 
-        normalized_reachability = str(reachability or "").strip().lower()
+        normalized_reachability = str(
+            _pick_first_meaningful(
+                reachability,
+                verification_payload.get("reachability"),
+                finding_payload.get("reachability"),
+            )
+            or ""
+        ).strip().lower()
         if normalized_reachability not in _ALLOWED_REACHABILITY:
             if normalized_verdict == "confirmed":
                 normalized_reachability = "reachable"
@@ -960,30 +1174,278 @@ class SaveVerificationResultTool(AgentTool):
             else:
                 normalized_reachability = "unknown"
 
-        evidence_text = str(verification_evidence or "").strip()
+        evidence_text = str(
+            _pick_first_meaningful(
+                verification_evidence,
+                kwargs.get("verification_details"),
+                kwargs.get("evidence"),
+                verification_payload.get("verification_evidence"),
+                verification_payload.get("verification_details"),
+                verification_payload.get("evidence"),
+                finding_payload.get("verification_evidence"),
+                finding_payload.get("verification_details"),
+                finding_payload.get("evidence"),
+                description,
+                finding_payload.get("description"),
+            )
+            or ""
+        ).strip()
         if len(evidence_text) < 10:
             evidence_text = (
                 f"auto_generated_verification_evidence: verdict={normalized_verdict}; "
                 f"confidence={normalized_confidence:.2f}; file={file_path}"
             )
 
+        function_trigger_flow = _pick_first_meaningful(
+            function_trigger_flow,
+            verification_payload.get("function_trigger_flow"),
+            finding_payload.get("function_trigger_flow"),
+            (verification_payload.get("flow") or {}).get("function_trigger_flow")
+            if isinstance(verification_payload.get("flow"), dict)
+            else None,
+            (finding_payload.get("flow") or {}).get("function_trigger_flow")
+            if isinstance(finding_payload.get("flow"), dict)
+            else None,
+        )
+        normalized_function_trigger_flow = _normalize_text_list(function_trigger_flow)
+
+        raw_flow_payload = _pick_first_meaningful(
+            kwargs.get("flow"),
+            verification_payload.get("flow"),
+            finding_payload.get("flow"),
+        )
+        flow_payload = dict(raw_flow_payload) if isinstance(raw_flow_payload, dict) else {}
+
         if isinstance(dataflow_path, list):
             normalized_dataflow_path = [str(item) for item in dataflow_path if str(item).strip()]
         elif dataflow_path is None:
-            normalized_dataflow_path = function_trigger_flow[:] if isinstance(function_trigger_flow, list) else None
+            flow_call_chain = flow_payload.get("call_chain") if isinstance(flow_payload, dict) else None
+            normalized_dataflow_path = (
+                _normalize_text_list(
+                    _pick_first_meaningful(
+                        finding_payload.get("dataflow_path"),
+                        flow_call_chain,
+                        normalized_function_trigger_flow,
+                    )
+                )
+            )
         else:
-            normalized_dataflow_path = [str(dataflow_path)]
+            normalized_dataflow_path = _normalize_text_list(dataflow_path)
+
+        if normalized_dataflow_path and "call_chain" not in flow_payload:
+            flow_payload["call_chain"] = list(normalized_dataflow_path)
+        if normalized_function_trigger_flow and "function_trigger_flow" not in flow_payload:
+            flow_payload["function_trigger_flow"] = list(normalized_function_trigger_flow)
 
         normalized_cvss_score: Optional[float]
-        if cvss_score is None:
+        raw_cvss_score = _pick_first_meaningful(
+            cvss_score,
+            finding_payload.get("cvss_score"),
+        )
+        if raw_cvss_score is None:
             normalized_cvss_score = None
         else:
             try:
-                normalized_cvss_score = float(cvss_score)
+                normalized_cvss_score = float(raw_cvss_score)
             except Exception:
                 normalized_cvss_score = None
 
+        description = _pick_first_meaningful(
+            description,
+            finding_payload.get("description"),
+        )
+        finding_identity = _pick_first_meaningful(
+            finding_identity,
+            finding_payload.get("finding_identity"),
+        )
+        source = _pick_first_meaningful(source, finding_payload.get("source"))
+        sink = _pick_first_meaningful(sink, finding_payload.get("sink"))
+        cwe_id = _pick_first_meaningful(cwe_id, finding_payload.get("cwe_id"))
+        poc_plan = _pick_first_meaningful(
+            poc_plan,
+            verification_payload.get("poc_plan"),
+            finding_payload.get("poc_plan"),
+        )
+        code_snippet = _pick_first_meaningful(
+            code_snippet,
+            verification_payload.get("code_snippet"),
+            finding_payload.get("code_snippet"),
+        )
+        code_context = _pick_first_meaningful(
+            code_context,
+            verification_payload.get("code_context"),
+            finding_payload.get("code_context"),
+        )
+        localization_status = _pick_first_meaningful(
+            localization_status,
+            verification_payload.get("localization_status"),
+            finding_payload.get("localization_status"),
+        )
+        report = _pick_first_meaningful(
+            report,
+            kwargs.get("vulnerability_report"),
+            finding_payload.get("report"),
+            finding_payload.get("vulnerability_report"),
+        )
+        cvss_vector = _pick_first_meaningful(
+            cvss_vector,
+            finding_payload.get("cvss_vector"),
+        )
+        poc_code = _pick_first_meaningful(
+            poc_code,
+            finding_payload.get("poc_code"),
+        )
+        suggestion = _pick_first_meaningful(
+            suggestion,
+            verification_payload.get("suggestion"),
+            finding_payload.get("suggestion"),
+        )
+
+        finding_metadata = _merge_optional_dicts(
+            finding_payload.get("finding_metadata"),
+            verification_payload.get("finding_metadata"),
+            kwargs.get("finding_metadata"),
+        )
+        for metadata_key in _SOURCE_SINK_GATE_METADATA_KEYS:
+            metadata_value = _pick_first_meaningful(
+                kwargs.get(metadata_key),
+                verification_payload.get(metadata_key),
+                finding_payload.get(metadata_key),
+                finding_metadata.get(metadata_key),
+            )
+            if metadata_value is not None:
+                finding_metadata[metadata_key] = metadata_value
+
+        verification_todo_id = _pick_first_meaningful(
+            kwargs.get("verification_todo_id"),
+            verification_payload.get("verification_todo_id"),
+            finding_payload.get("verification_todo_id"),
+        )
+        verification_fingerprint = _pick_first_meaningful(
+            kwargs.get("verification_fingerprint"),
+            verification_payload.get("verification_fingerprint"),
+            finding_payload.get("verification_fingerprint"),
+        )
+        attacker_flow = _pick_first_meaningful(
+            kwargs.get("attacker_flow"),
+            finding_payload.get("attacker_flow"),
+        )
+        taint_flow = _normalize_text_list(
+            _pick_first_meaningful(
+                kwargs.get("taint_flow"),
+                finding_payload.get("taint_flow"),
+            )
+        )
+        evidence_chain = _normalize_text_list(
+            _pick_first_meaningful(
+                kwargs.get("evidence_chain"),
+                finding_payload.get("evidence_chain"),
+            )
+        )
+        missing_checks = _normalize_text_list(
+            _pick_first_meaningful(
+                kwargs.get("missing_checks"),
+                finding_payload.get("missing_checks"),
+            )
+        )
+        fix_code = _pick_first_meaningful(
+            kwargs.get("fix_code"),
+            finding_payload.get("fix_code"),
+        )
+        fix_description = _pick_first_meaningful(
+            kwargs.get("fix_description"),
+            finding_payload.get("fix_description"),
+        )
+        verification_method = _pick_first_meaningful(
+            kwargs.get("verification_method"),
+            finding_payload.get("verification_method"),
+        )
+        poc = _pick_first_meaningful(
+            kwargs.get("poc"),
+            finding_payload.get("poc"),
+        )
+
+        source_sink_authenticity_errors = _normalize_text_list(
+            _pick_first_meaningful(
+                kwargs.get("source_sink_authenticity_errors"),
+                verification_payload.get("source_sink_authenticity_errors"),
+                finding_payload.get("source_sink_authenticity_errors"),
+            )
+        )
+        source_sink_authenticity_passed = _pick_first_meaningful(
+            kwargs.get("source_sink_authenticity_passed"),
+            verification_payload.get("source_sink_authenticity_passed"),
+            finding_payload.get("source_sink_authenticity_passed"),
+        )
+
         # 构造 finding 字典
+        verification_result_payload = {
+            **verification_payload,
+            "verdict": normalized_verdict,
+            "authenticity": normalized_verdict,
+            "confidence": normalized_confidence,
+            "reachability": normalized_reachability,
+            "status": normalized_status,
+            "verification_stage_completed": True,
+            "verification_evidence": evidence_text,
+            "verification_details": str(
+                _pick_first_meaningful(
+                    verification_payload.get("verification_details"),
+                    kwargs.get("verification_details"),
+                    finding_payload.get("verification_details"),
+                    evidence_text,
+                )
+                or evidence_text
+            ),
+            "evidence": str(
+                _pick_first_meaningful(
+                    verification_payload.get("evidence"),
+                    kwargs.get("evidence"),
+                    finding_payload.get("evidence"),
+                    evidence_text,
+                )
+                or evidence_text
+            ),
+            "poc_plan": poc_plan,
+            "code_snippet": code_snippet,
+            "suggestion": suggestion,
+            "function_trigger_flow": normalized_function_trigger_flow,
+            "code_context": code_context,
+            "localization_status": localization_status,
+        }
+        if flow_payload:
+            verification_result_payload["flow"] = flow_payload
+        for passthrough_key in (
+            "reachability_target",
+            "context_start_line",
+            "context_end_line",
+            "function_range_validation",
+            "validation_reason",
+            "localization_failure_trace",
+            "known_facts",
+            "inferences_to_verify",
+            "final_conclusion",
+        ):
+            passthrough_value = _pick_first_meaningful(
+                kwargs.get(passthrough_key),
+                verification_payload.get(passthrough_key),
+                finding_payload.get(passthrough_key),
+            )
+            if passthrough_value is not None:
+                verification_result_payload[passthrough_key] = passthrough_value
+        if verification_todo_id:
+            verification_result_payload["verification_todo_id"] = verification_todo_id
+        if verification_fingerprint:
+            verification_result_payload["verification_fingerprint"] = verification_fingerprint
+        if source_sink_authenticity_passed in {True, False}:
+            verification_result_payload["source_sink_authenticity_passed"] = bool(
+                source_sink_authenticity_passed
+            )
+        if source_sink_authenticity_errors:
+            verification_result_payload["source_sink_authenticity_errors"] = source_sink_authenticity_errors
+        if finding_metadata:
+            verification_result_payload["finding_metadata"] = dict(finding_metadata)
+
         finding = {
             "finding_identity": finding_identity,
             "file_path": file_path,
@@ -991,6 +1453,10 @@ class SaveVerificationResultTool(AgentTool):
             "line_end": line_end if line_end is not None else line_start,
             "function_name": function_name,
             "title": title,
+            "display_title": _pick_first_meaningful(
+                kwargs.get("display_title"),
+                finding_payload.get("display_title"),
+            ),
             "vulnerability_type": vulnerability_type,
             "severity": normalized_severity,
             "cwe_id": cwe_id,
@@ -1002,43 +1468,58 @@ class SaveVerificationResultTool(AgentTool):
             "is_verified": normalized_is_verified,
             "verification_stage_completed": True,
             "poc_code": poc_code,
+            "poc": poc,
             "suggestion": suggestion,
             "confidence": normalized_confidence,
             "cvss_score": normalized_cvss_score,
             "cvss_vector": cvss_vector,
             "report": report,
+            "vulnerability_report": report,
+            "fix_code": fix_code,
+            "fix_description": fix_description,
+            "verification_method": verification_method,
             # code_snippet 同时放到顶层，供 _save_findings 作为初始候选值
             # （_save_findings 仍会用文件实际内容覆盖）
             "code_snippet": code_snippet,
-            "verification_result": {
-                "verdict": normalized_verdict,
-                "confidence": normalized_confidence,
-                "reachability": normalized_reachability,
-                "status": normalized_status,
-                "verification_stage_completed": True,
-                "verification_evidence": evidence_text,
-                "poc_plan": poc_plan,
-                "code_snippet": code_snippet,
-                "suggestion": suggestion,
-                "function_trigger_flow": function_trigger_flow,
-                "code_context": code_context,
-                "localization_status": localization_status,
-            },
+            "finding_metadata": dict(finding_metadata) if finding_metadata else None,
+            "attacker_flow": attacker_flow,
+            "taint_flow": taint_flow,
+            "evidence_chain": evidence_chain,
+            "missing_checks": missing_checks,
+            "verification_todo_id": verification_todo_id,
+            "verification_fingerprint": verification_fingerprint,
+            "sink_reachable": finding_metadata.get("sink_reachable") if finding_metadata else None,
+            "upstream_call_chain": (
+                finding_metadata.get("upstream_call_chain") if finding_metadata else None
+            ),
+            "sink_trigger_condition": (
+                finding_metadata.get("sink_trigger_condition") if finding_metadata else None
+            ),
+            "known_facts": _pick_first_meaningful(
+                kwargs.get("known_facts"),
+                finding_payload.get("known_facts"),
+            ),
+            "inferences_to_verify": _pick_first_meaningful(
+                kwargs.get("inferences_to_verify"),
+                finding_payload.get("inferences_to_verify"),
+            ),
+            "final_conclusion": _pick_first_meaningful(
+                kwargs.get("final_conclusion"),
+                finding_payload.get("final_conclusion"),
+            ),
+            "verification_result": verification_result_payload,
         }
         ensure_finding_identity(task_id, finding)
 
-        # 生成指纹用于去重
-        fingerprint_data = (
-            f"{finding.get('finding_identity')}:{file_path}:{line_start}:"
-            f"{function_name}:{vulnerability_type}:{normalized_verdict}:{normalized_status}"
-        )
-        fingerprint = hashlib.sha1(fingerprint_data.encode("utf-8")).hexdigest()[:12]
+        # 生成精确 payload digest：只对完全重复的保存做幂等拦截，
+        # 保留同一 finding 后续补充 report / flow / metadata 的能力。
+        payload_digest = self._build_payload_digest([finding])
 
-        if fingerprint in self._seen_payload_digests:
+        if payload_digest in self._seen_payload_digests:
             logger.info(
-                "[SaveVerificationResult][%s] 幂等保护：重复 finding（fingerprint=%s），跳过",
+                "[SaveVerificationResult][%s] 幂等保护：重复 finding（payload_digest=%s），跳过",
                 task_id,
-                fingerprint,
+                payload_digest,
             )
             current_saved = int(self._saved_count or 0)
             return ToolResult(
@@ -1052,7 +1533,7 @@ class SaveVerificationResultTool(AgentTool):
             )
 
         # 更新内存缓冲（供外部兜底读取）
-        self._buffered_findings.append(finding)
+        self._upsert_buffered_finding(finding)
 
         logger.info(
             "[SaveVerificationResult][%s] 保存验证结果：%s (%s) - status=%s, verdict=%s, confidence=%.2f",
@@ -1083,9 +1564,11 @@ class SaveVerificationResultTool(AgentTool):
         # 调用注入的持久化回调
         try:
             saved = await self._save_callback([finding])
-            self._seen_payload_digests.add(fingerprint)
+            saved_delta = int(saved or 0)
             previous_saved = int(self._saved_count or 0)
-            self._saved_count = previous_saved + int(saved)
+            self._saved_count = previous_saved + saved_delta
+            if saved_delta > 0:
+                self._seen_payload_digests.add(payload_digest)
             
             logger.info(
                 "[SaveVerificationResult][%s] 持久化完成：finding=%s, total_saved=%d",
