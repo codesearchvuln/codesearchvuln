@@ -695,6 +695,23 @@ async def _execute_agent_task(task_id: str):
                 merge_finding_patch,
             )
 
+            async def _save_findings_isolated(
+                findings_payload: Any,
+                *,
+                save_diagnostics: Optional[Dict[str, Any]] = None,
+            ) -> int:
+                findings_list = findings_payload if isinstance(findings_payload, list) else []
+                if not findings_list:
+                    return 0
+                async with async_session_factory() as persist_db:
+                    return await _save_findings(
+                        persist_db,
+                        task_id,
+                        findings_list,
+                        project_root=normalized_project_root,
+                        save_diagnostics=save_diagnostics,
+                    )
+
             async def _persist_findings_callback(findings_payload: Any) -> int:
                 findings_list = findings_payload if isinstance(findings_payload, list) else []
                 if not findings_list:
@@ -724,14 +741,10 @@ async def _execute_agent_task(task_id: str):
                     )
                     return 0
 
-                async with async_session_factory() as persist_db:
-                    saved = await _save_findings(
-                        persist_db,
-                        task_id,
-                        findings_list,
-                        project_root=normalized_project_root,
-                        save_diagnostics=finding_save_diagnostics,
-                    )
+                saved = await _save_findings_isolated(
+                    findings_list,
+                    save_diagnostics=finding_save_diagnostics,
+                )
                 if isinstance(seen_payload_digests, set):
                     seen_payload_digests.add(payload_digest)
                 persist_state["saved_count"] = int(persist_state.get("saved_count") or 0) + int(saved)
@@ -1078,11 +1091,8 @@ async def _execute_agent_task(task_id: str):
                     )
                 else:
                     async def _persist_findings_once():
-                        return await _save_findings(
-                            db,
-                            task_id,
+                        return await _save_findings_isolated(
                             findings,
-                            project_root=normalized_project_root,
                             save_diagnostics=finding_save_diagnostics,
                         )
 
@@ -1095,11 +1105,8 @@ async def _execute_agent_task(task_id: str):
 
                 if final_findings_sync_required:
                     async def _sync_final_findings_once():
-                        return await _save_findings(
-                            db,
-                            task_id,
+                        return await _save_findings_isolated(
                             findings,
-                            project_root=normalized_project_root,
                         )
 
                     synced_count = await _run_with_retries(

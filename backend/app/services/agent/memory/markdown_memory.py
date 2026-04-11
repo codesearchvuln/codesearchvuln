@@ -19,6 +19,7 @@ MEMORY_FILES: Dict[str, str] = {
     "recon": "recon.md",
     "analysis": "analysis.md",
     "verification": "verification.md",
+    "report": "report.md",
     "skills": "skills.md",
 }
 
@@ -181,7 +182,7 @@ class MarkdownMemoryStore:
         """Load memory excerpts to inject into agent prompts."""
         self.ensure()
         bundle: Dict[str, str] = {}
-        for key in ("shared", "orchestrator", "recon", "analysis", "verification"):
+        for key in ("shared", "orchestrator", "recon", "analysis", "verification", "report"):
             bundle[key] = self._read_tail(self._path(key), int(max_chars))
         bundle["skills"] = self._read_head_lines(
             self._path("skills"),
@@ -228,10 +229,10 @@ class MarkdownMemoryStore:
 
         Args:
             task_id: 当前任务 ID，用于在文件头写入溯源标记。
-            keys: 要清除的记忆键列表，默认为 ["orchestrator", "recon", "analysis", "verification"]。
+            keys: 要清除的记忆键列表，默认为 ["orchestrator", "recon", "analysis", "verification", "report"]。
         """
         if keys is None:
-            keys = ["orchestrator", "recon", "analysis", "verification"]
+            keys = ["orchestrator", "recon", "analysis", "verification", "report"]
         self.ensure()
         ts = datetime.now(timezone.utc).isoformat()
         header = (

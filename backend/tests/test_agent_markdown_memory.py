@@ -14,6 +14,7 @@ def test_markdown_memory_append_and_rotate(tmp_path: Path):
         "recon.md",
         "analysis.md",
         "verification.md",
+        "report.md",
         "skills.md",
     ):
         assert (project_dir / name).exists()
@@ -43,6 +44,13 @@ def test_markdown_memory_append_and_rotate(tmp_path: Path):
     assert "archived:" in shared_text
     assert "```json" in shared_text
 
-    bundle = store.load_bundle(max_chars=2000, skills_max_lines=10)
-    assert "shared" in bundle and "skills" in bundle
+    store.append_entry(
+        "report",
+        task_id="t1",
+        source="report",
+        title="report-summary",
+        summary="stored without key errors",
+    )
 
+    bundle = store.load_bundle(max_chars=2000, skills_max_lines=10)
+    assert "shared" in bundle and "report" in bundle and "skills" in bundle

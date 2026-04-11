@@ -168,14 +168,59 @@ async def test_save_findings_synthesizes_false_positive_fingerprint_without_loca
     assert saved_count == 1
     saved_finding = db.add.call_args.args[0]
     assert saved_finding.status == "false_positive"
-    assert saved_finding.verification_result["verification_fingerprint"].startswith(
-        "fp:task-fp-synth:"
-    )
+    synthesized_fingerprint = saved_finding.verification_result["verification_fingerprint"]
+    assert synthesized_fingerprint.startswith("fp:")
+    assert len(synthesized_fingerprint) <= 64
     assert (
         saved_finding.finding_metadata["verification_fingerprint"]
-        == saved_finding.verification_result["verification_fingerprint"]
+        == synthesized_fingerprint
     )
-    assert saved_finding.fingerprint == saved_finding.verification_result["verification_fingerprint"]
+    assert saved_finding.fingerprint == synthesized_fingerprint
+
+
+@pytest.mark.asyncio
+async def test_save_findings_compacts_overlong_false_positive_verification_fingerprint(tmp_path):
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.execute = AsyncMock(return_value=_ScalarOneOrNoneResult(None))
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+
+    original_fingerprint = (
+        "fp:1d3e0f7a-e77d-4a71-b6fe-fe0acdefa960:"
+        "26889623-a2d7-515b-842b-f56c7460ae35"
+    )
+    findings = [
+        {
+            "title": "误报指纹过长",
+            "severity": "low",
+            "vulnerability_type": "hardcoded_secret",
+            "description": "长 verification_fingerprint 应该被压缩到数据库可接受的长度。",
+            "file_path": "examples/demo.env.example",
+            "verdict": "false_positive",
+            "authenticity": "false_positive",
+            "reachability": "unreachable",
+            "verification_evidence": "验证阶段判定为误报。",
+            "verification_fingerprint": original_fingerprint,
+            "verification_result": {},
+        }
+    ]
+
+    saved_count = await _save_findings(
+        db,
+        task_id="task-fp-long",
+        findings=findings,
+        project_root=str(tmp_path),
+    )
+
+    assert saved_count == 1
+    saved_finding = db.add.call_args.args[0]
+    compacted_fingerprint = saved_finding.verification_result["verification_fingerprint"]
+    assert compacted_fingerprint.startswith("fp:")
+    assert len(compacted_fingerprint) <= 64
+    assert compacted_fingerprint != original_fingerprint
+    assert saved_finding.finding_metadata["verification_fingerprint"] == compacted_fingerprint
+    assert saved_finding.fingerprint == compacted_fingerprint
 
 
 @pytest.mark.asyncio

@@ -62,3 +62,39 @@ def test_snapshot_runtime_stats_to_task_uses_max_not_overwrite():
     assert task.total_iterations == 30
     assert task.tool_calls_count == 40
     assert task.tokens_used == 500
+
+
+class _TaskWithFailingCounterReads:
+    def __init__(self) -> None:
+        object.__setattr__(self, "_values", {})
+
+    def __getattribute__(self, name):
+        if name in {"total_iterations", "tool_calls_count", "tokens_used"}:
+            values = object.__getattribute__(self, "_values")
+            if name not in values:
+                raise RuntimeError(f"{name} expired")
+            return values[name]
+        return object.__getattribute__(self, name)
+
+    def __setattr__(self, name, value):
+        if name in {"total_iterations", "tool_calls_count", "tokens_used"}:
+            values = object.__getattribute__(self, "_values")
+            values[name] = value
+            return
+        object.__setattr__(self, name, value)
+
+
+def test_snapshot_runtime_stats_to_task_handles_unreadable_existing_counters():
+    task = _TaskWithFailingCounterReads()
+    task.id = "task-expired"
+    orchestrator = SimpleNamespace(
+        get_stats=lambda: {"iterations": 2, "tool_calls": 3, "tokens_used": 4},
+        sub_agents={},
+    )
+
+    snapshot = _snapshot_runtime_stats_to_task(task, orchestrator)
+
+    assert snapshot == {"iterations": 2, "tool_calls": 3, "tokens_used": 4}
+    assert task.total_iterations == 2
+    assert task.tool_calls_count == 3
+    assert task.tokens_used == 4

@@ -1,5 +1,6 @@
 """Finding normalization, enrichment, persistence, and serialization for agent tasks."""
 
+import hashlib
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ from datetime import datetime, timezone
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -30,6 +31,8 @@ from .agent_tasks_bootstrap import _is_core_ignored_path
 from .agent_tasks_contracts import AgentFindingResponse
 
 logger = logging.getLogger(__name__)
+_MAX_DB_FINGERPRINT_LENGTH = 64
+
 
 def _safe_text(value: Any) -> str:
     """将任意结构安全转换为文本，避免保存时意外截断或类型错误。"""
@@ -64,6 +67,25 @@ def _normalize_optional_text(value: Any) -> Optional[str]:
         return None
     text = _safe_text(value).strip()
     return text or None
+
+
+def _compact_verification_fingerprint(raw_value: str, *, task_id: Optional[str]) -> str:
+    seed = f"{str(task_id or '').strip()}|{raw_value}"
+    digest = hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:56]
+    return f"fp:{digest}"
+
+
+def _normalize_verification_fingerprint(
+    value: Any,
+    *,
+    task_id: Optional[str],
+) -> Optional[str]:
+    fingerprint = _normalize_optional_text(value)
+    if not fingerprint:
+        return None
+    if len(fingerprint) <= _MAX_DB_FINGERPRINT_LENGTH:
+        return fingerprint
+    return _compact_verification_fingerprint(fingerprint, task_id=task_id)
 
 
 def _normalize_relative_file_path(path_value: str, project_root: Optional[str]) -> str:
@@ -1029,9 +1051,10 @@ async def _save_findings(
                 finding.get("verification_todo_id")
                 or verification_result_payload_input.get("verification_todo_id")
             )
-            verification_fingerprint = _normalize_optional_text(
+            verification_fingerprint = _normalize_verification_fingerprint(
                 finding.get("verification_fingerprint")
-                or verification_result_payload_input.get("verification_fingerprint")
+                or verification_result_payload_input.get("verification_fingerprint"),
+                task_id=task_id,
             )
             if authenticity == "false_positive" and not verification_fingerprint:
                 fingerprint_basis = "|".join(
@@ -1047,8 +1070,9 @@ async def _save_findings(
                         verification_details_text,
                     ]
                 )
-                verification_fingerprint = (
-                    f"fp:{str(task_id or '').strip()}:{uuid5(NAMESPACE_URL, fingerprint_basis)}"
+                verification_fingerprint = _compact_verification_fingerprint(
+                    fingerprint_basis,
+                    task_id=task_id,
                 )
             if verification_todo_id:
                 verification_result_payload_input["verification_todo_id"] = verification_todo_id

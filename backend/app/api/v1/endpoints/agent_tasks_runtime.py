@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, inspect as sa_inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.models.agent_task import AgentTask, AgentTaskStatus, AgentTreeNode
 from app.services.agent.event_manager import EventManager
@@ -572,9 +573,36 @@ def _snapshot_runtime_stats_to_task(task: AgentTask, orchestrator: Any) -> Dict[
     """
     snapshot = _collect_orchestrator_stats(orchestrator)
 
-    task.total_iterations = max(int(task.total_iterations or 0), int(snapshot["iterations"]))
-    task.tool_calls_count = max(int(task.tool_calls_count or 0), int(snapshot["tool_calls"]))
-    task.tokens_used = max(int(task.tokens_used or 0), int(snapshot["tokens_used"]))
+    def _read_task_counter(name: str) -> int:
+        try:
+            state = sa_inspect(task)
+        except Exception:
+            state = None
+
+        if state is not None:
+            attr_state = state.attrs.get(name)
+            if attr_state is not None:
+                loaded_value = attr_state.loaded_value
+                if loaded_value is NO_VALUE:
+                    return 0
+                try:
+                    return int(loaded_value or 0)
+                except Exception:
+                    return 0
+
+        try:
+            return int(getattr(task, name) or 0)
+        except Exception:
+            logger.debug(
+                "[AgentTask] Runtime counter %s unavailable on task %s; using 0",
+                name,
+                getattr(task, "id", "<unknown>"),
+            )
+            return 0
+
+    task.total_iterations = max(_read_task_counter("total_iterations"), int(snapshot["iterations"]))
+    task.tool_calls_count = max(_read_task_counter("tool_calls_count"), int(snapshot["tool_calls"]))
+    task.tokens_used = max(_read_task_counter("tokens_used"), int(snapshot["tokens_used"]))
     return snapshot
 
 
