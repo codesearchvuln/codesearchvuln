@@ -63,6 +63,12 @@ def test_analysis_prompt_requires_two_evidence_classes_and_structured_title():
     assert "代码证据" in ANALYSIS_SYSTEM_PROMPT
     assert "流证据" in ANALYSIS_SYSTEM_PROMPT
     assert "dataflow_analysis/controlflow_analysis_light" in ANALYSIS_SYSTEM_PROMPT
+    assert "语义级代码理解" in ANALYSIS_SYSTEM_PROMPT
+    assert "攻击链推理" in ANALYSIS_SYSTEM_PROMPT
+    assert "只负责常规代码安全漏洞" in ANALYSIS_SYSTEM_PROMPT
+    assert "不负责业务逻辑漏洞" in ANALYSIS_SYSTEM_PROMPT
+    assert "BusinessLogicAnalysisAgent" in ANALYSIS_SYSTEM_PROMPT
+    assert "用户输入未过滤 -> 输入进入敏感函数 -> 敏感函数执行系统命令/危险操作 -> 攻击者获得实际副作用" in ANALYSIS_SYSTEM_PROMPT
     assert "src/time64.c中asctime64_r栈溢出漏洞" in ANALYSIS_SYSTEM_PROMPT
     assert '"file_path": "src/example.py"' in ANALYSIS_SYSTEM_PROMPT
     assert "Action Input: {\n    \"finding\": {" not in ANALYSIS_SYSTEM_PROMPT
@@ -87,6 +93,9 @@ def test_business_logic_prompts_require_tool_usage_and_failure_handling():
     assert "get_code_window" in BL_ANALYSIS_SYSTEM_PROMPT
     assert "get_function_summary" in BL_ANALYSIS_SYSTEM_PROMPT
     assert "push_finding_to_queue" in BL_ANALYSIS_SYSTEM_PROMPT
+    assert "只负责业务逻辑漏洞" in BL_ANALYSIS_SYSTEM_PROMPT
+    assert "不负责常规代码漏洞" in BL_ANALYSIS_SYSTEM_PROMPT
+    assert "AnalysisAgent" in BL_ANALYSIS_SYSTEM_PROMPT
 
 
 

@@ -27,6 +27,7 @@ from app.services.json_safe import dump_json_safe
 from app.models.analysis import (
     REAL_DATAFLOW_EVIDENCE_LIST_FIELDS,
     REAL_DATAFLOW_PLACEHOLDER_VALUES,
+    REAL_DATAFLOW_SEMANTIC_LIST_FIELDS,
 )
 
 from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
@@ -135,11 +136,54 @@ VERIFICATION_SYSTEM_PROMPT = """你是 VulHunter 的漏洞验证 Agent，一个*
 
 1. **输入可控且无过滤**：证明用户输入能到达危险函数，且没有有效防御（参数化查询、转义、白名单）
 2. **Source/Sink 必须真实**：`source`/`sink` 不能是占位符；必须有上游调用链与 sink 可触发证据
-3. **代码路径可达**：确认函数被外部调用（路由、API、公开方法），否则 confidence ≤ 0.5
-4. **构造稳定 PoC**：confirmed 判定必须提供能稳定触发的 payload 和执行结果
-5. **考虑上下文防御**：检查上游过滤、类型转换、安全配置（HttpOnly、CSP）等
-6. **多 payload 测试**：测试多种变形，绕过简单过滤
-7. **误报分析**：若未触发，分析原因（过滤函数、参数限制、框架转义）并记录
+3. **语义链要闭环**：不仅要看到 sink，还要证明变量如何流入、在哪个调用上下文下执行、最终产生什么副作用
+4. **代码路径可达**：确认函数被外部调用（路由、API、公开方法），否则 confidence ≤ 0.5
+5. **构造稳定 PoC**：confirmed 判定必须提供能稳定触发的 payload 和执行结果
+6. **考虑上下文防御**：检查上游过滤、类型转换、安全配置（HttpOnly、CSP）、固定模板和安全包装函数
+7. **多 payload 测试**：测试多种变形，绕过简单过滤
+8. **误报分析**：若未触发，分析原因（过滤函数、参数限制、框架转义、shell=False、参数数组调用）并记录
+
+═══════════════════════════════════════════════════════════════
+
+## 语义级代码理解（必须执行）
+
+在做验证结论前，你必须先还原代码语义，而不是把分析阶段给出的链路当作既定事实：
+
+1. **变量之间的数据流**
+   - 逐跳确认输入如何通过局部变量、对象属性、字典键、返回值、helper 函数传递到 sink
+   - 明确记录别名、复制、拼接、格式化、类型转换、默认值和包装函数
+   - 若某一步只能猜测，必须标成待验证推论，不能直接视为事实
+
+2. **函数调用上下文**
+   - 确认函数由谁调用：路由、控制器、service、worker、计划任务、hook、模板层
+   - 确认调用前条件：登录态、角色、租户隔离、状态机 guard、feature flag、事务边界、异常分支
+   - 确认调用后效果：数据库写入、外部请求、系统命令执行、文件系统副作用、权限或状态变化
+
+3. **输入输出关系**
+   - 判断输入是否真正决定最终的命令字符串、SQL 条件、文件路径、模板片段、资源 ID、金额或状态值
+   - 判断函数输出或副作用是否真正落地，而不是仅构造对象、返回未执行命令或进入不会运行的分支
+   - 若输入无法支配最终敏感输出，或输出没有真实安全影响，应降级为 `uncertain` 或 `false_positive`
+
+若 finding 中已提供 `variable_flow`、`call_context`、`input_output_relations`、`sanitization_checks`、`attack_chain_steps`，你应把它们视为待复核线索，不得未经工具核实直接采信。
+
+═══════════════════════════════════════════════════════════════
+
+## 攻击链闭环审计（必须执行）
+
+对命令执行、权限绕过、IDOR、业务高危操作等问题，必须逐步验证完整攻击链：
+
+1. **用户输入是否真实可控**
+2. **输入是否缺少有效过滤/约束，或现有过滤可被绕过**
+3. **输入是否进入敏感函数/敏感参数**
+4. **敏感函数是否真的执行系统命令或高危副作用**
+5. **攻击者是否因此获得可见收益、状态变化或越权能力**
+
+对于“用户输入未过滤 -> 输入进入敏感函数 -> 敏感函数执行系统命令”这一类问题：
+- 缺少第 1、2、3 任一跳，不能判定为真实命令执行漏洞
+- 缺少第 4 跳，只能说明存在危险构造或潜在 sink，通常应降级
+- 缺少第 5 跳，影响结论必须保守，避免把调试代码、死分支、仅日志输出误报为漏洞
+
+只有当攻击链关键跳跃都获得直接支持后，才能给出 `confirmed` 或高 confidence 的 `likely`。
 
 ═══════════════════════════════════════════════════════════════
 
@@ -389,6 +433,7 @@ for current_user, from_user, to_user, amount in payloads:
 ```
 步骤1: 先做反证
     └─> get_code_window / get_symbol_body / search_code 检查过滤、白名单、参数化、权限、状态条件
+    └─> 先还原 variable_flow / call_context / input_output_relations，确认不是局部误读
     └─> 验证 source 是否真实可控、sink 是否真实可触发、路径是否真实可达
     └─> 若反证成功（漏洞不存在），立即判定 false_positive，保存结果并结束该发现
     └─> 若反证失败，进入后续正向验证
@@ -400,6 +445,7 @@ for current_user, from_user, to_user, amount in payloads:
 步骤3: 分析上下文
     └─> search_code 查找调用链（验证可达性）
     └─> get_code_window 读取配置文件附近窗口（检查防御机制）
+    └─> 补齐攻击链中的过滤、授权、状态、模板、命令拼接与最终副作用
 
 步骤4: 构建 Harness
     └─> 根据漏洞类型选择模板
@@ -2910,6 +2956,26 @@ class VerificationAgent(BaseAgent):
                     except ValueError:
                         pass
 
+            evidence_context = {
+                key: finding.get(key)
+                for key in (
+                    "source",
+                    "sink",
+                    "attacker_flow",
+                    "taint_flow",
+                    "evidence_chain",
+                    *REAL_DATAFLOW_SEMANTIC_LIST_FIELDS,
+                    "finding_metadata",
+                )
+                if finding.get(key) not in (None, "", [], {})
+            }
+            evidence_context_block = ""
+            if evidence_context:
+                evidence_context_block = (
+                    "\n**已有链路证据 / 待复核线索**:\n```json\n"
+                    f"{json.dumps(evidence_context, ensure_ascii=False, indent=2)}\n```\n"
+                )
+
             initial_message = f"""请验证以下安全发现：
 
 {handoff_context if handoff_context else ''}
@@ -2928,16 +2994,19 @@ class VerificationAgent(BaseAgent):
 
 **发现描述**:
 {finding.get('description', 'N/A')[:400]}
+{evidence_context_block}
 
 ## 验证指南
 1. **直接使用上述文件路径** - 使用精确路径: `{file_path}`
 2. **先读取完整文件内容** - 使用 `get_code_window` 工具了解上下文
-3. **先做反证** - 优先证明漏洞不存在，检查输入是否受控、路径是否可达、防御是否生效
-4. **若反证成功则立即终止** - 直接判定为 `false_positive` 并结束该发现的继续验证
-5. **若反证失败再做正向验证** - 继续分析代码逻辑并使用 `run_code` 做正向验证
-6. **正向验证要结合 Mock** - 如可能，使用 Mock/Fuzzing Harness 验证真实触发条件
-7. **明确区分事实/推论/结论** - 输出时显式列出 `known_facts`、`inferences_to_verify`、`final_conclusion`
-8. **逐跳质问推理链** - 每个“因此/从而/所以”前后的推理都要检查是否有代码或逻辑的直接支持，缺证据就继续取证或降级结论
+3. **先还原语义链** - 先确认 `variable_flow`、`call_context`、`input_output_relations` 是否真实成立，再判断漏洞
+4. **先做反证** - 优先证明漏洞不存在，检查输入是否受控、路径是否可达、防御是否生效
+5. **若反证成功则立即终止** - 直接判定为 `false_positive` 并结束该发现的继续验证
+6. **若反证失败再做正向验证** - 继续分析代码逻辑并使用 `run_code` 做正向验证
+7. **必须复核完整攻击链** - 特别核查“用户输入未过滤 -> 输入进入敏感函数 -> 敏感函数执行系统命令/高危操作”是否逐跳成立
+8. **正向验证要结合 Mock** - 如可能，使用 Mock/Fuzzing Harness 验证真实触发条件和副作用
+9. **明确区分事实/推论/结论** - 输出时显式列出 `known_facts`、`inferences_to_verify`、`final_conclusion`
+10. **逐跳质问推理链** - 每个“因此/从而/所以”前后的推理都要检查是否有代码或逻辑的直接支持，缺证据就继续取证或降级结论
 
 ## 验证要求
 - 验证级别: {config.get('verification_level', 'standard')}
@@ -2951,10 +3020,12 @@ class VerificationAgent(BaseAgent):
 
 请立即开始验证这个发现：
 1. 使用 get_code_window 读取 `{file_path}` (关注第 {line_start} 行附近)
-2. 优先尝试反证漏洞不存在；若反证成功，立即终止并给出 `false_positive`
-3. 若反证失败，再使用其他工具 (run_code, search_code, get_symbol_body) 做正向验证和 Mock 验证
-4. 给出最终验证结论
-5. 输出结果时，必须把事实、推论和结论分开写；所有推理跳跃都要先检查是否有直接支持
+2. 先复核变量逐跳流向、调用上下文和输入输出关系，确认链路不是误读
+3. 优先尝试反证漏洞不存在；若反证成功，立即终止并给出 `false_positive`
+4. 若反证失败，再使用其他工具 (run_code, search_code, get_symbol_body) 做正向验证和 Mock 验证
+5. 对命令执行/高危操作类问题，必须明确回答“输入是否未过滤、是否进入敏感函数、敏感函数是否真的执行危险副作用”
+6. 给出最终验证结论
+7. 输出结果时，必须把事实、推论和结论分开写；所有推理跳跃都要先检查是否有直接支持
 
 {f'💡 参考 Analysis Agent 的分析要点。' if handoff_context else ''}"""
         else:
@@ -2973,6 +3044,29 @@ class VerificationAgent(BaseAgent):
                         except ValueError:
                             pass
 
+                evidence_field_names = [
+                    key
+                    for key in (
+                        "source",
+                        "sink",
+                        "attacker_flow",
+                        *REAL_DATAFLOW_EVIDENCE_LIST_FIELDS,
+                        *REAL_DATAFLOW_SEMANTIC_LIST_FIELDS,
+                    )
+                    if finding.get(key) not in (None, "", [], {})
+                ]
+                attacker_flow_hint = str(finding.get("attacker_flow") or "").strip()
+                evidence_summary = (
+                    f"\n- 已有链路证据字段: {', '.join(evidence_field_names)}"
+                    if evidence_field_names
+                    else ""
+                )
+                attacker_flow_summary = (
+                    f"\n- attacker_flow: {attacker_flow_hint[:220]}"
+                    if attacker_flow_hint
+                    else ""
+                )
+
                 findings_summary.append(f"""
 ### 发现 {index + 1}: {finding.get('title', 'Unknown')}
 - 类型: {finding.get('vulnerability_type', 'unknown')}
@@ -2983,6 +3077,8 @@ class VerificationAgent(BaseAgent):
 {finding.get('code_snippet', 'N/A')}
 ```
 - 描述: {finding.get('description', 'N/A')}
+- 要求复核: variable_flow / call_context / input_output_relations / attack_chain_steps
+{evidence_summary}{attacker_flow_summary}
 """)
 
             initial_message = f"""请验证以下 {len(findings_to_verify)} 个安全发现。
@@ -2995,12 +3091,14 @@ class VerificationAgent(BaseAgent):
 ## 重要验证指南
 1. **直接使用上面列出的文件路径** - 不要猜测或搜索其他路径
 2. **如果文件路径包含冒号和行号** (如 "app.py:36"), 请提取文件名 "app.py" 并使用 get_code_window 读取
-3. **先读取文件内容，再优先做反证**
-4. **反证成功则立即终止该发现的继续验证** - 直接判定为 `false_positive`
-5. **反证失败再进入正向验证** - 结合 `run_code` 与 Mock/Fuzzing Harness 验证漏洞是否可触发
-6. **不要假设文件在子目录中** - 使用发现中提供的精确路径
-7. **明确区分事实/推论/结论** - 每个发现都要列出 `known_facts`、`inferences_to_verify`、`final_conclusion`
-8. **逐跳检查推理链** - 对“因此/从而/所以”等连接词前后的每一步都核查是否有直接代码或逻辑支持
+3. **先读取文件内容并还原语义链** - 先复核变量流向、调用上下文、输入输出关系，再做判断
+4. **优先做反证** - 先检查过滤、参数化、白名单、权限、状态机、shell=False、参数数组调用等防御
+5. **反证成功则立即终止该发现的继续验证** - 直接判定为 `false_positive`
+6. **反证失败再进入正向验证** - 结合 `run_code` 与 Mock/Fuzzing Harness 验证漏洞是否可触发
+7. **不要假设文件在子目录中** - 使用发现中提供的精确路径
+8. **必须复核完整攻击链** - 对“用户输入未过滤 -> 输入进入敏感函数 -> 敏感函数执行系统命令/高危操作”逐跳核验
+9. **明确区分事实/推论/结论** - 每个发现都要列出 `known_facts`、`inferences_to_verify`、`final_conclusion`
+10. **逐跳检查推理链** - 对“因此/从而/所以”等连接词前后的每一步都核查是否有直接代码或逻辑支持
 
 ## 验证要求
 - 验证级别: {config.get('verification_level', 'standard')}
@@ -3011,10 +3109,12 @@ class VerificationAgent(BaseAgent):
 
 请开始验证。对于每个发现：
 1. 首先使用 get_code_window 读取发现中指定的文件（使用精确路径）
-2. 优先尝试反证漏洞不存在，反证成功就立即结束该发现
-3. 只有在反证失败后，才继续做正向验证和 Mock 验证
-4. 最后判断是否为真实漏洞
-5. 输出结果时，必须把事实、推论和结论分开写；所有推理跳跃都要先检查是否有直接支持
+2. 先复核变量逐跳流向、调用上下文和输入输出关系，确认不是局部危险点误报
+3. 优先尝试反证漏洞不存在，反证成功就立即结束该发现
+4. 只有在反证失败后，才继续做正向验证和 Mock 验证
+5. 对命令执行/高危操作类问题，明确回答输入过滤、敏感函数进入、真实副作用是否都成立
+6. 最后判断是否为真实漏洞
+7. 输出结果时，必须把事实、推论和结论分开写；所有推理跳跃都要先检查是否有直接支持
 {f'特别注意 Analysis Agent 提到的关注点。' if handoff_context else ''}"""
 
         use_prompt_skills = bool(config.get("use_prompt_skills", False))

@@ -23,6 +23,15 @@ REAL_DATAFLOW_EVIDENCE_LIST_FIELDS: Tuple[str, ...] = (
     "evidence_chain",
 )
 
+# 语义级代码理解与攻击链推理佐证字段（用于降低误报）
+REAL_DATAFLOW_SEMANTIC_LIST_FIELDS: Tuple[str, ...] = (
+    "variable_flow",
+    "call_context",
+    "input_output_relations",
+    "sanitization_checks",
+    "attack_chain_steps",
+)
+
 # source/sink 占位符黑名单（分析与验证阶段需保持一致）
 REAL_DATAFLOW_PLACEHOLDER_VALUES: Tuple[str, ...] = (
     "source",
@@ -60,6 +69,5 @@ class InstantAnalysis(Base):
 
     # Relationships
     user = relationship("User", backref="instant_analyses")
-
 
 

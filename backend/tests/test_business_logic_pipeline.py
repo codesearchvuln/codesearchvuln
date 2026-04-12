@@ -206,6 +206,30 @@ class TestBusinessLogicAnalysisAgent:
         errors = agent._validate_real_source_sink_finding(finding)
         assert any("`finding_metadata.sink_reachable` 必须明确为 true" in item for item in errors)
 
+    @pytest.mark.asyncio
+    async def test_analysis_skips_regular_vulnerability_risk_point(self):
+        agent = BusinessLogicAnalysisAgent(
+            llm_service=MagicMock(),
+            tools={},
+            event_emitter=None,
+        )
+
+        result = await agent.run(
+            {
+                "risk_point": {
+                    "file_path": "app/api/login.py",
+                    "line_start": 21,
+                    "description": "用户输入直接拼接 SQL",
+                    "vulnerability_type": "sql_injection",
+                }
+            }
+        )
+
+        assert result.success is True
+        assert result.data["findings"] == []
+        assert result.data["degraded_reason"] == "bl_scope_excludes_regular_vulnerability"
+        assert result.data["scope_owner"] == "analysis"
+
 
 class TestBusinessLogicWorkflowDedupStrategy:
     @pytest.mark.asyncio

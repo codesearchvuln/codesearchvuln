@@ -11,6 +11,7 @@ from app.services.agent.agents.orchestrator import OrchestratorAgent
 from app.services.agent.agents.verification import VerificationAgent
 from app.services.agent.utils.vulnerability_naming import (
     build_cn_structured_title,
+    is_business_logic_vulnerability_type,
     resolve_vulnerability_profile,
 )
 
@@ -41,6 +42,27 @@ def test_vulnerability_profile_refines_other_type_for_memory_signal():
     )
     assert profile["key"] == "stack_overflow"
     assert profile["name"] == "栈溢出漏洞"
+
+
+def test_business_logic_scope_helper_respects_explicit_regular_type():
+    assert (
+        is_business_logic_vulnerability_type(
+            "sql_injection",
+            title="app/api/user.py中query_user函数SQL注入漏洞",
+            description="攻击者可注入 SQL，并进一步造成越权读取。",
+            code_snippet='cursor.execute("SELECT * FROM users WHERE id = " + user_id)',
+        )
+        is False
+    )
+    assert (
+        is_business_logic_vulnerability_type(
+            "other",
+            title="app/api/orders.py中update_order函数业务逻辑漏洞",
+            description="order_id 来自用户输入且缺少所有权校验，存在越权风险。",
+            code_snippet="order = Order.query.get(order_id)",
+        )
+        is True
+    )
 
 
 def test_build_cn_structured_title_is_three_segment_and_without_harm_suffix():
