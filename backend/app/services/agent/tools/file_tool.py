@@ -1321,8 +1321,8 @@ class FileSearchTool(AgentTool):
 class CodeWindowInput(BaseModel):
     file_path: str = Field(description="文件路径（相对于项目根目录）")
     anchor_line: int = Field(description="锚点行号（从1开始）")
-    before_lines: int = Field(default=2, description="向前读取的行数")
-    after_lines: int = Field(default=2, description="向后读取的行数")
+    before_lines: int = Field(default=20, description="向前读取的行数（默认20）")
+    after_lines: int = Field(default=20, description="向后读取的行数（默认20）")
 
 
 class CodeWindowTool(AgentTool):
@@ -1347,13 +1347,18 @@ class CodeWindowTool(AgentTool):
 
     @property
     def description(self) -> str:
-        return """围绕锚点返回极小代码窗口，用于取证和前端代码展示。
+        return """围绕锚点返回代码窗口，用于取证和前端代码展示。
 
 输入:
 - file_path: 文件路径（相对于项目根目录）
 - anchor_line: 锚点行号（从1开始）
-- before_lines: 可选，向前读取的行数（默认2）
-- after_lines: 可选，向后读取的行数（默认2）"""
+    - before_lines: 可选，向前读取的行数（默认20）
+    - after_lines: 可选，向后读取的行数（默认20）
+
+    返回策略:
+    - 默认返回约 41 行（锚点前后各 20 行）
+    - 系统会自动扩展窗口，尽量保证至少返回 40 行
+    - 若文件总行数不足 40 行，则返回该文件全部行"""
 
     @property
     def args_schema(self):
@@ -1363,8 +1368,8 @@ class CodeWindowTool(AgentTool):
         self,
         file_path: str,
         anchor_line: int,
-        before_lines: int = 2,
-        after_lines: int = 2,
+        before_lines: int = 20,
+        after_lines: int = 20,
         **kwargs,
     ) -> ToolResult:
         try:
@@ -1377,9 +1382,9 @@ class CodeWindowTool(AgentTool):
                 return ToolResult(success=False, error=error or "文件定位失败")
 
             focus_line = max(1, int(anchor_line or 1))
-            before = max(0, min(int(before_lines or 0), 20))
-            after = max(0, min(int(after_lines or 0), 20))
-            if before + after > 40:
+            before = max(0, min(int(before_lines or 0), 200))
+            after = max(0, min(int(after_lines or 0), 200))
+            if before + after > 400:
                 return ToolResult(success=False, error="代码窗口跨度过大，请缩小 before_lines/after_lines")
 
             lines = await asyncio.to_thread(_read_lines_sync, full_path)
@@ -1390,6 +1395,22 @@ class CodeWindowTool(AgentTool):
 
             start_line = max(1, focus_line - before)
             end_line = min(len(lines), focus_line + after)
+
+            # 默认并尽量保证最少返回 40 行（文件不足 40 行时返回全部）
+            min_window_lines = min(40, len(lines))
+            current_window_lines = end_line - start_line + 1
+            if current_window_lines < min_window_lines:
+                missing = min_window_lines - current_window_lines
+
+                # 先向后补齐，再向前补齐
+                grow_after = min(missing, len(lines) - end_line)
+                end_line += grow_after
+                missing -= grow_after
+
+                if missing > 0:
+                    grow_before = min(missing, start_line - 1)
+                    start_line -= grow_before
+
             selected = [lines[index - 1].rstrip("\n") for index in range(start_line, end_line + 1)]
             language = _detect_language(relative_path)
             structured_lines = _build_structured_lines(
