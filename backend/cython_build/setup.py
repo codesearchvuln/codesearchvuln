@@ -25,6 +25,7 @@ BUILD_DIR = Path(__file__).resolve().parent
 APP_DIR = BUILD_DIR.parent / "app"
 EXCLUSION_LIST_FILE = BUILD_DIR / "exclusion_list.txt"
 DEFAULT_RELEASE_ALLOWLIST_FILE = BUILD_DIR / "release_allowlist.txt"
+DEFAULT_RELEASE_EXCLUSION_FILE = BUILD_DIR / "release_exclusion_list.txt"
 
 
 def _load_patterns(pattern_file: Path) -> list[str]:
@@ -49,6 +50,17 @@ else:
     INCLUDE_PATTERNS_FILE = None
 
 INCLUDE_PATTERNS = _load_patterns(INCLUDE_PATTERNS_FILE) if INCLUDE_PATTERNS_FILE is not None else []
+exclude_patterns_file = os.environ.get("CYTHON_EXCLUDE_PATTERNS_FILE", "").strip()
+if exclude_patterns_file:
+    EXTRA_EXCLUDE_PATTERNS_FILE = Path(exclude_patterns_file)
+elif INCLUDE_PATTERNS_FILE is not None:
+    EXTRA_EXCLUDE_PATTERNS_FILE = DEFAULT_RELEASE_EXCLUSION_FILE
+else:
+    EXTRA_EXCLUDE_PATTERNS_FILE = None
+
+EXTRA_EXCLUDE_PATTERNS = (
+    _load_patterns(EXTRA_EXCLUDE_PATTERNS_FILE) if EXTRA_EXCLUDE_PATTERNS_FILE is not None else []
+)
 
 
 def _matches_pattern(rel_path: str, pattern: str) -> bool:
@@ -62,7 +74,7 @@ def _matches_pattern(rel_path: str, pattern: str) -> bool:
 
 def should_exclude(rel_path: str) -> bool:
     """判断文件是否应排除编译（相对于 app/ 的路径）"""
-    for pattern in EXCLUDE_PATTERNS:
+    for pattern in [*EXCLUDE_PATTERNS, *EXTRA_EXCLUDE_PATTERNS]:
         if _matches_pattern(rel_path, pattern):
             return True
     return False

@@ -1,3 +1,5 @@
+import ast
+import fnmatch
 from pathlib import Path
 
 
@@ -169,6 +171,9 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
     backend_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
     setup_text = (REPO_ROOT / "backend" / "cython_build" / "setup.py").read_text(encoding="utf-8")
     allowlist_text = (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").read_text(encoding="utf-8")
+    release_exclusion_text = (REPO_ROOT / "backend" / "cython_build" / "release_exclusion_list.txt").read_text(
+        encoding="utf-8"
+    )
     dockerignore_text = (REPO_ROOT / "docker" / "backend.Dockerfile.dockerignore").read_text(encoding="utf-8")
 
     assert "FROM builder AS selective-cython-compiler" in backend_text
@@ -178,6 +183,8 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
     assert "remaining non-preserved .py count" in backend_text
 
     assert "CYTHON_INCLUDE_PATTERNS_FILE" in setup_text
+    assert "DEFAULT_RELEASE_EXCLUSION_FILE" in setup_text
+    assert "CYTHON_EXCLUDE_PATTERNS_FILE" in setup_text
     assert "DEFAULT_RELEASE_ALLOWLIST_FILE" in setup_text
     assert 'module_name = f"app.' in setup_text
     assert "Extension(module_name" in setup_text
@@ -188,6 +195,8 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
     assert "services/llm_rule/*.py" in allowlist_text
     assert "services/scanner_runner.py" in allowlist_text
     assert "db/*.py" in allowlist_text
+    assert "services/agent/core/state.py" in release_exclusion_text
+    assert "services/agent/tools/*.py" in release_exclusion_text
 
     for ignored_path in (
         ".git",
@@ -202,3 +211,49 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
         "backend/uploads",
     ):
         assert ignored_path in dockerignore_text
+
+
+def test_release_allowlist_excludes_pydantic_base_model_modules() -> None:
+    allowlist_text = (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").read_text(encoding="utf-8")
+    release_exclusion_text = (REPO_ROOT / "backend" / "cython_build" / "release_exclusion_list.txt").read_text(
+        encoding="utf-8"
+    )
+    allow_patterns = [
+        line.strip()
+        for line in allowlist_text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    exclude_patterns = [
+        line.strip()
+        for line in release_exclusion_text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    app_root = REPO_ROOT / "backend" / "app"
+
+    compiled_base_model_modules: list[str] = []
+    for path in sorted(app_root.rglob("*.py")):
+        rel_path = path.relative_to(app_root).as_posix()
+        if not any(fnmatch.fnmatch(rel_path, pattern) for pattern in allow_patterns):
+            continue
+        if any(fnmatch.fnmatch(rel_path, pattern) for pattern in exclude_patterns):
+            continue
+
+        module = ast.parse(path.read_text(encoding="utf-8"))
+        base_model_aliases = {
+            alias.asname or alias.name
+            for node in module.body
+            if isinstance(node, ast.ImportFrom) and node.module == "pydantic"
+            for alias in node.names
+            if alias.name == "BaseModel"
+        }
+        if not base_model_aliases:
+            continue
+
+        if any(
+            isinstance(node, ast.ClassDef)
+            and any(isinstance(base, ast.Name) and base.id in base_model_aliases for base in node.bases)
+            for node in module.body
+        ):
+            compiled_base_model_modules.append(rel_path)
+
+    assert compiled_base_model_modules == []

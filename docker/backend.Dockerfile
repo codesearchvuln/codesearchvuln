@@ -450,6 +450,8 @@ for mod_name in cython_mods:
 pyc_mods = [
     'app.main',
     'app.runtime.container_startup',
+    'app.services.agent.core.state',
+    'app.services.agent.tools.finish_tool',
     'app.api.v1.endpoints.agent_tasks_execution',
     'app.models.project',
     'app.schemas.search',

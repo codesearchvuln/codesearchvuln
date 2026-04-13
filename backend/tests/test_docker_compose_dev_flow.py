@@ -615,6 +615,10 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "docker compose config" in workflow_text
     assert "docker compose up -d db redis backend" in workflow_text
     assert "docker compose up -d frontend" in workflow_text
+    assert "service_cid()" in workflow_text
+    assert "docker compose ps -q \"$1\"" in workflow_text
+    assert "service_health()" in workflow_text
+    assert "docker inspect --format" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text

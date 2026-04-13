@@ -1,0 +1,9 @@
+# Release-only Cython exclusion list (relative to backend/app/).
+# These modules define Pydantic BaseModel classes that fail under Cythonized
+# method objects in runtime-release, so they must remain bytecode-only.
+
+services/agent/core/state.py
+services/agent/core/validation.py
+services/agent/knowledge/tools.py
+services/agent/tool_runtime/virtual_tools.py
+services/agent/tools/*.py

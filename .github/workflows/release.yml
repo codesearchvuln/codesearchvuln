@@ -240,6 +240,35 @@ jobs:
         run: |
           set -euo pipefail
 
+          service_cid() {
+            docker compose ps -q "$1"
+          }
+
+          service_status() {
+            local cid
+            cid="$(service_cid "$1")"
+            if [[ -z "${cid}" ]]; then
+              echo "missing"
+              return 0
+            fi
+            docker inspect --format '{{.State.Status}}' "${cid}" 2>/dev/null || echo "unknown"
+          }
+
+          service_health() {
+            local cid
+            cid="$(service_cid "$1")"
+            if [[ -z "${cid}" ]]; then
+              echo "missing"
+              return 0
+            fi
+            docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${cid}" 2>/dev/null || echo "unknown"
+          }
+
+          dump_debug() {
+            docker compose ps || true
+            docker compose logs backend frontend || true
+          }
+
           cleanup() {
             docker compose down -v || true
           }
@@ -248,14 +277,20 @@ jobs:
           docker compose up -d db redis backend
           backend_ready=false
           for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+            backend_status="$(service_status backend)"
+            backend_health="$(service_health backend)"
+            if [[ "${backend_status}" == "running" && "${backend_health}" == "healthy" ]] && \
+               curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
               backend_ready=true
+              break
+            fi
+            if [[ "${backend_status}" == "exited" || "${backend_status}" == "dead" || "${backend_health}" == "unhealthy" ]]; then
               break
             fi
             sleep 5
           done
           if [[ "${backend_ready}" != "true" ]]; then
-            docker compose logs backend
+            dump_debug
             echo "::error::Release backend failed to become ready for generated release tree."
             exit 1
           fi
@@ -263,15 +298,23 @@ jobs:
           docker compose up -d frontend
           frontend_ready=false
           for attempt in $(seq 1 12); do
-            if curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then
+            backend_status="$(service_status backend)"
+            backend_health="$(service_health backend)"
+            frontend_status="$(service_status frontend)"
+            if [[ "${backend_status}" == "running" && "${backend_health}" == "healthy" ]] && \
+               curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1 && \
+               curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then
               frontend_ready=true
+              break
+            fi
+            if [[ "${backend_status}" != "running" || "${backend_health}" != "healthy" || "${frontend_status}" == "exited" || "${frontend_status}" == "dead" ]]; then
               break
             fi
             sleep 5
           done
           if [[ "${frontend_ready}" != "true" ]]; then
-            docker compose logs frontend
-            echo "::error::Release frontend failed to become ready for generated release tree."
+            dump_debug
+            echo "::error::Release frontend/backend failed readiness verification for generated release tree."
             exit 1
           fi
           exit 0
