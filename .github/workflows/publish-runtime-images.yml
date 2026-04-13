@@ -419,40 +419,40 @@ jobs:
           export FLOW_PARSER_RUNNER_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-flow-parser-runner" "${BUILD_FLOW_PARSER_DIGEST}")"
 
           manifest_json="$(python3 - <<'PY'
-from __future__ import annotations
+          from __future__ import annotations
 
-import json
-import os
-from datetime import datetime, timezone
-
-
-def required(name: str) -> str:
-    value = os.environ.get(name, "").strip()
-    if not value and os.environ.get("REQUIRE_COMPLETE_MANIFEST", "false") == "true":
-        raise SystemExit(f"missing manifest ref: {name}")
-    return value
+          import json
+          import os
+          from datetime import datetime, timezone
 
 
-payload = {
-    "revision": os.environ["GITHUB_SHA"],
-    "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-    "images": {
-        "backend": {"ref": required("BACKEND_REF")},
-        "frontend": {"ref": required("FRONTEND_REF")},
-        "sandbox": {"ref": required("SANDBOX_REF")},
-        "sandbox_runner": {"ref": required("SANDBOX_RUNNER_REF")},
-        "scanner_yasa": {"ref": required("SCANNER_YASA_REF")},
-        "scanner_opengrep": {"ref": required("SCANNER_OPENGREP_REF")},
-        "scanner_bandit": {"ref": required("SCANNER_BANDIT_REF")},
-        "scanner_gitleaks": {"ref": required("SCANNER_GITLEAKS_REF")},
-        "scanner_phpstan": {"ref": required("SCANNER_PHPSTAN_REF")},
-        "scanner_pmd": {"ref": required("SCANNER_PMD_REF")},
-        "flow_parser_runner": {"ref": required("FLOW_PARSER_RUNNER_REF")},
-    },
-}
-print(json.dumps(payload, separators=(",", ":")))
-PY
-)"
+          def required(name: str) -> str:
+              value = os.environ.get(name, "").strip()
+              if not value and os.environ.get("REQUIRE_COMPLETE_MANIFEST", "false") == "true":
+                  raise SystemExit(f"missing manifest ref: {name}")
+              return value
+
+
+          payload = {
+              "revision": os.environ["GITHUB_SHA"],
+              "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "images": {
+                  "backend": {"ref": required("BACKEND_REF")},
+                  "frontend": {"ref": required("FRONTEND_REF")},
+                  "sandbox": {"ref": required("SANDBOX_REF")},
+                  "sandbox_runner": {"ref": required("SANDBOX_RUNNER_REF")},
+                  "scanner_yasa": {"ref": required("SCANNER_YASA_REF")},
+                  "scanner_opengrep": {"ref": required("SCANNER_OPENGREP_REF")},
+                  "scanner_bandit": {"ref": required("SCANNER_BANDIT_REF")},
+                  "scanner_gitleaks": {"ref": required("SCANNER_GITLEAKS_REF")},
+                  "scanner_phpstan": {"ref": required("SCANNER_PHPSTAN_REF")},
+                  "scanner_pmd": {"ref": required("SCANNER_PMD_REF")},
+                  "flow_parser_runner": {"ref": required("FLOW_PARSER_RUNNER_REF")},
+              },
+          }
+          print(json.dumps(payload, separators=(",", ":")))
+          PY
+          )"
 
           printf '%s\n' "${manifest_json}" > release-manifest.json
           {
