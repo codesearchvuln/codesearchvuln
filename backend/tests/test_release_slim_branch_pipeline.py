@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -100,6 +101,105 @@ def _run_release_generator(
     )
 
 
+def _install_fake_runtime_tools(tmp_path: Path) -> Path:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    docker_script = bin_dir / "docker"
+    docker_script.write_text(
+        """#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+log_path = Path(os.environ["FAKE_DOCKER_LOG"])
+log_path.parent.mkdir(parents=True, exist_ok=True)
+
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(" ".join(sys.argv[1:]) + "\\n")
+
+cmd = sys.argv[1:]
+if not cmd:
+    raise SystemExit("missing docker command")
+
+if cmd[0] == "pull":
+    raise SystemExit(0)
+if cmd[0] == "tag":
+    raise SystemExit(0)
+if cmd[0] == "save":
+    for image in cmd[1:]:
+        sys.stdout.buffer.write(f"{image}\\n".encode("utf-8"))
+    sys.stdout.buffer.flush()
+    raise SystemExit(0)
+if cmd[:2] == ["image", "rm"]:
+    raise SystemExit(0)
+
+raise SystemExit(f"unsupported docker command: {' '.join(cmd)}")
+""",
+        encoding="utf-8",
+    )
+    docker_script.chmod(docker_script.stat().st_mode | stat.S_IXUSR)
+
+    zstd_script = bin_dir / "zstd"
+    zstd_script.write_text(
+        """#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+args = sys.argv[1:]
+log_path = Path(os.environ["FAKE_ZSTD_LOG"])
+log_path.parent.mkdir(parents=True, exist_ok=True)
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(" ".join(args) + "\\n")
+output_path = Path(args[args.index("-o") + 1])
+output_path.write_bytes(b"fake-zstd\\n" + sys.stdin.buffer.read())
+""",
+        encoding="utf-8",
+    )
+    zstd_script.chmod(zstd_script.stat().st_mode | stat.S_IXUSR)
+    return bin_dir
+
+
+def _run_package_release_images(
+    tmp_path: Path, manifest_path: Path, *, arch: str = "amd64"
+) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
+    script_path = REPO_ROOT / "scripts" / "package-release-images.sh"
+    script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
+
+    bin_dir = _install_fake_runtime_tools(tmp_path)
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    output_dir = tmp_path / "release-assets"
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+
+    result = subprocess.run(
+        [
+            str(script_path),
+            "--image-manifest",
+            str(manifest_path),
+            "--output-dir",
+            str(output_dir),
+            "--arch",
+            arch,
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    return result, output_dir, docker_log, zstd_log
+
+
 def _assert_nexus_runtime_bundle(output_dir: Path, bundle_name: str) -> None:
     bundle_root = output_dir / bundle_name
     assert bundle_root.exists(), bundle_name
@@ -165,6 +265,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "package-release-images.sh" in workflow_text
     assert "--arch ${{ matrix.arch }}" in workflow_text
     assert "matrix:" in workflow_text
+    assert "compression-level: 0" in workflow_text
     assert "gh release create" in workflow_text
     assert "gh release upload" in workflow_text
     assert "--image-manifest" in workflow_text
@@ -446,3 +547,82 @@ def test_package_release_images_embedded_python_compiles() -> None:
     end = script_text.rindex("\nPY")
 
     compile(script_text[start:end], str(REPO_ROOT / "scripts" / "package-release-images.sh"), "exec")
+
+
+def test_package_release_images_script_logs_progress_and_preserves_expected_order(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "release-manifest.json"
+    manifest = _write_release_manifest(manifest_path)
+
+    result, output_dir, docker_log, zstd_log = _run_package_release_images(tmp_path, manifest_path)
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+
+    assert result.returncode == 0, combined_output
+    for marker in (
+        "package start:",
+        "image order:",
+        "using supplemental image source for static_frontend",
+        "pull start: backend",
+        "pull end: flow_parser_runner",
+        "all pulls complete",
+        "bundle stream start:",
+        "compression heartbeat:",
+        "checksum start:",
+        "checksum end:",
+        "cleanup end",
+    ):
+        assert marker in combined_output
+
+    docker_commands = docker_log.read_text(encoding="utf-8").splitlines()
+    pull_commands = [line for line in docker_commands if line.startswith("pull ")]
+    expected_pulls = [
+        f"pull --platform linux/amd64 {manifest['images']['backend']['ref']}",
+        "pull --platform linux/amd64 docker.m.daocloud.io/library/nginx:1.27-alpine",
+        f"pull --platform linux/amd64 {manifest['images']['sandbox']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['sandbox_runner']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['scanner_yasa']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['scanner_opengrep']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['scanner_bandit']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['scanner_gitleaks']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['scanner_phpstan']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['scanner_pmd']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['flow_parser_runner']['ref']}",
+    ]
+    assert pull_commands == expected_pulls
+    assert pull_commands[-1].endswith(manifest["images"]["flow_parser_runner"]["ref"])
+    assert zstd_log.read_text(encoding="utf-8").splitlines() == [
+        f"-T0 -3 -q -o {output_dir / 'vulhunter-images-amd64.tar.zst'}"
+    ]
+
+    bundle_path = output_dir / "vulhunter-images-amd64.tar.zst"
+    metadata = json.loads((output_dir / "images-manifest-amd64.json").read_text(encoding="utf-8"))
+    expected_checksum = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    assert metadata["bundle_sha256"] == expected_checksum
+
+
+def test_package_release_images_script_rejects_invalid_manifest_contract(tmp_path: Path) -> None:
+    missing_manifest_path = tmp_path / "missing-manifest.json"
+    missing_manifest = _write_release_manifest(missing_manifest_path)
+    del missing_manifest["images"]["backend"]
+    missing_manifest_path.write_text(json.dumps(missing_manifest), encoding="utf-8")
+
+    missing_result, _, _, _ = _run_package_release_images(tmp_path / "missing", missing_manifest_path)
+    missing_output = "\n".join(part for part in [missing_result.stdout, missing_result.stderr] if part)
+    assert missing_result.returncode != 0
+    assert "missing required image ref: backend" in missing_output
+
+    nondigest_manifest_path = tmp_path / "nondigest-manifest.json"
+    nondigest_manifest = _write_release_manifest(nondigest_manifest_path)
+    nondigest_manifest["images"]["backend"]["ref"] = "ghcr.io/acme-sec/vulhunter-backend:latest"
+    nondigest_manifest_path.write_text(json.dumps(nondigest_manifest), encoding="utf-8")
+
+    nondigest_result, _, _, _ = _run_package_release_images(tmp_path / "nondigest", nondigest_manifest_path)
+    nondigest_output = "\n".join(part for part in [nondigest_result.stdout, nondigest_result.stderr] if part)
+    assert nondigest_result.returncode != 0
+    assert "manifest image ref must be digest-pinned: backend" in nondigest_output
+
+
+def test_package_release_images_script_uses_streaming_checksum_implementation() -> None:
+    script_text = (REPO_ROOT / "scripts" / "package-release-images.sh").read_text(encoding="utf-8")
+
+    assert "read_bytes()" not in script_text
+    assert "sha256_file(bundle_path)" in script_text

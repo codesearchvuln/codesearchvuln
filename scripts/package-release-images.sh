@@ -57,10 +57,12 @@ IMAGE_MANIFEST="$(cd "$(dirname "$IMAGE_MANIFEST")" && pwd)/$(basename "$IMAGE_M
 python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$ARCH" <<'PY'
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import hashlib
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -72,52 +74,161 @@ revision = str(manifest["revision"]).strip()
 if not revision:
     raise SystemExit("release manifest revision is required")
 
-contracts = {
-    "backend": "vulhunter-local/backend",
-    "static_frontend": "vulhunter-local/static-frontend-nginx",
-    "sandbox": "vulhunter-local/sandbox",
-    "sandbox_runner": "vulhunter-local/sandbox-runner",
-    "scanner_yasa": "vulhunter-local/yasa-runner",
-    "scanner_opengrep": "vulhunter-local/opengrep-runner",
-    "scanner_bandit": "vulhunter-local/bandit-runner",
-    "scanner_gitleaks": "vulhunter-local/gitleaks-runner",
-    "scanner_phpstan": "vulhunter-local/phpstan-runner",
-    "scanner_pmd": "vulhunter-local/pmd-runner",
-    "flow_parser_runner": "vulhunter-local/flow-parser-runner",
-}
+MANIFEST_IMAGE_CONTRACTS = [
+    ("backend", "vulhunter-local/backend"),
+    ("sandbox", "vulhunter-local/sandbox"),
+    ("sandbox_runner", "vulhunter-local/sandbox-runner"),
+    ("scanner_yasa", "vulhunter-local/yasa-runner"),
+    ("scanner_opengrep", "vulhunter-local/opengrep-runner"),
+    ("scanner_bandit", "vulhunter-local/bandit-runner"),
+    ("scanner_gitleaks", "vulhunter-local/gitleaks-runner"),
+    ("scanner_phpstan", "vulhunter-local/phpstan-runner"),
+    ("scanner_pmd", "vulhunter-local/pmd-runner"),
+    ("flow_parser_runner", "vulhunter-local/flow-parser-runner"),
+]
+SUPPLEMENTAL_IMAGE_CONTRACTS = [
+    ("static_frontend", "docker.m.daocloud.io/library/nginx:1.27-alpine", "vulhunter-local/static-frontend-nginx"),
+]
+CHECKSUM_PROGRESS_MIN_BYTES = 128 * 1024 * 1024
+CHECKSUM_CHUNK_SIZE = 1024 * 1024
+CHECKSUM_PROGRESS_INTERVAL_SECONDS = 30.0
+COMPRESSION_HEARTBEAT_INTERVAL_SECONDS = 30.0
+COMPRESSION_POLL_INTERVAL_SECONDS = 1.0
 
+
+def log(message: str) -> None:
+    timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    print(f"[release-images] {timestamp} {message}", flush=True)
+
+
+def format_size(num_bytes: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    value = float(num_bytes)
+    unit = units[0]
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            break
+        value /= 1024.0
+    if unit == "B":
+        return f"{int(value)} {unit}"
+    return f"{value:.1f} {unit}"
+
+
+def bundle_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except FileNotFoundError:
+        return 0
+
+
+def resolve_manifest_ref(images_section: object, logical_name: str) -> str:
+    if not isinstance(images_section, dict):
+        raise SystemExit("release manifest images section is required")
+
+    image_entry = images_section.get(logical_name)
+    if not isinstance(image_entry, dict):
+        raise SystemExit(f"missing required image ref: {logical_name}")
+
+    ref = str(image_entry.get("ref", "")).strip()
+    if not ref:
+        raise SystemExit(f"missing required image ref: {logical_name}")
+    if "@sha256:" not in ref:
+        raise SystemExit(f"manifest image ref must be digest-pinned: {logical_name}")
+    return ref
+
+
+def sha256_file(path: Path) -> str:
+    total_bytes = path.stat().st_size
+    processed_bytes = 0
+    digest = hashlib.sha256()
+
+    log(f"checksum start: file={path.name} size={format_size(total_bytes)}")
+    last_progress = time.monotonic()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(CHECKSUM_CHUNK_SIZE)
+            if not chunk:
+                break
+            digest.update(chunk)
+            processed_bytes += len(chunk)
+            now = time.monotonic()
+            if (
+                total_bytes >= CHECKSUM_PROGRESS_MIN_BYTES
+                and now - last_progress >= CHECKSUM_PROGRESS_INTERVAL_SECONDS
+            ):
+                log(
+                    "checksum progress: "
+                    f"processed={format_size(processed_bytes)}/{format_size(total_bytes)}"
+                )
+                last_progress = now
+
+    hexdigest = digest.hexdigest()
+    log(f"checksum end: sha256={hexdigest}")
+    return hexdigest
+
+
+images_section = manifest.get("images")
 images: list[tuple[str, str, str]] = []
-for logical_name, local_repo in contracts.items():
-    if logical_name == "static_frontend":
-        ref = "docker.m.daocloud.io/library/nginx:1.27-alpine"
-    else:
-        ref = str(manifest["images"][logical_name]["ref"]).strip()
-        if not ref:
-            raise SystemExit(f"missing required image ref: {logical_name}")
+for logical_name, local_repo in MANIFEST_IMAGE_CONTRACTS:
+    ref = resolve_manifest_ref(images_section, logical_name)
     images.append((logical_name, ref, f"{local_repo}:{revision}"))
+
+for logical_name, source_ref, local_repo in SUPPLEMENTAL_IMAGE_CONTRACTS:
+    log(
+        "using supplemental image source for "
+        f"{logical_name}: {source_ref} (outside release-manifest.json)"
+    )
+    images.insert(1, (logical_name, source_ref, f"{local_repo}:{revision}"))
 
 bundle_path = output_dir / f"vulhunter-images-{arch}.tar.zst"
 metadata_path = output_dir / f"images-manifest-{arch}.json"
 local_tags = [local_tag for _, _, local_tag in images]
 
+log(
+    "package start: "
+    f"arch={arch} revision={revision} bundle={bundle_path.name}"
+)
+log("image order: " + ", ".join(logical_name for logical_name, _, _ in images))
+
 for logical_name, source_ref, local_tag in images:
+    log(f"pull start: {logical_name} source={source_ref}")
     subprocess.run(["docker", "pull", "--platform", f"linux/{arch}", source_ref], check=True)
+    log(f"pull end: {logical_name}")
     subprocess.run(["docker", "tag", source_ref, local_tag], check=True)
+    log(f"tag end: {logical_name} target={local_tag}")
+
+log("all pulls complete")
 
 save_cmd = ["docker", "save", *local_tags]
+log("bundle stream start: docker save -> zstd")
 save_proc = subprocess.Popen(save_cmd, stdout=subprocess.PIPE)
 zstd_proc = subprocess.Popen(
-    ["zstd", "-T0", "-19", "-q", "-o", str(bundle_path)],
+    ["zstd", "-T0", "-3", "-q", "-o", str(bundle_path)],
     stdin=save_proc.stdout,
 )
 assert save_proc.stdout is not None
 save_proc.stdout.close()
-save_rc = save_proc.wait()
-zstd_rc = zstd_proc.wait()
+last_heartbeat = 0.0
+while True:
+    save_rc = save_proc.poll()
+    zstd_rc = zstd_proc.poll()
+    now = time.monotonic()
+    if last_heartbeat == 0.0 or now - last_heartbeat >= COMPRESSION_HEARTBEAT_INTERVAL_SECONDS:
+        log(
+            "compression heartbeat: "
+            f"bundle_size={format_size(bundle_size(bundle_path))} "
+            f"save_status={'running' if save_rc is None else save_rc} "
+            f"zstd_status={'running' if zstd_rc is None else zstd_rc}"
+        )
+        last_heartbeat = now
+    if save_rc is not None and zstd_rc is not None:
+        break
+    time.sleep(COMPRESSION_POLL_INTERVAL_SECONDS)
+
 if save_rc != 0 or zstd_rc != 0:
     raise SystemExit(f"failed to package images for {arch}")
 
-bundle_sha256 = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+bundle_sha256 = sha256_file(bundle_path)
 metadata = {
     "revision": revision,
     "architecture": arch,
@@ -135,4 +246,5 @@ metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
 
 cleanup_targets = [target for image in images for target in (image[2], image[1])]
 subprocess.run(["docker", "image", "rm", "-f", *cleanup_targets], check=False)
+log("cleanup end")
 PY
