@@ -23,6 +23,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend dist
+        working-directory: frontend
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+
       - name: Generate slim release tree
         run: |
           ./scripts/generate-release-branch.sh \

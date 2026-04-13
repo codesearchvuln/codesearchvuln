@@ -101,12 +101,13 @@ RUN set -eux; \
   apt-get update && \
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libpq5 libffi8 libcairo2 libpango-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info fonts-dejavu-core); \
   rm -rf /var/lib/apt/lists/*; \
-  mkdir -p /app/uploads/zip_files /app/data/runtime/xdg-data /app/data/runtime/xdg-cache /app/data/runtime/xdg-config
+  mkdir -p /app/uploads/zip_files /app/data/runtime/xdg-data /app/data/runtime/xdg-cache /app/data/runtime/xdg-config /app/frontend/public/images
 
 COPY --from=builder /opt/backend-venv /opt/backend-venv
 COPY backend/app /app/app
 COPY backend/alembic /app/alembic
 COPY backend/alembic.ini /app/alembic.ini
+COPY backend/assets/report/logo_nobg.png /app/frontend/public/images/logo_nobg.png
 COPY backend/scripts/reset_static_scan_tables.py /app/scripts/reset_static_scan_tables.py
 
 RUN groupadd --gid 1001 appgroup && \

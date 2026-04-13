@@ -109,17 +109,13 @@ services:
       - vulhunter-network
 
   frontend:
-    image: ${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}}
+    image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine}
     restart: unless-stopped
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "${VULHUNTER_FRONTEND_PORT:-3000}:80"
-    environment:
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      http_proxy: ""
-      https_proxy: ""
-      NO_PROXY: "*"
-      VITE_API_BASE_URL: /api/v1
     depends_on:
       backend:
         condition: service_healthy

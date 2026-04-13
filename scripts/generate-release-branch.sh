@@ -72,24 +72,17 @@ validate_release_tree() {
     "docker-compose.hybrid.yml"
     "scripts/README-COMPOSE.md"
     "docker/backend.Dockerfile"
-    "docker/frontend.Dockerfile"
     "docker/nexus-web.Dockerfile"
     "docker/env/backend/env.example"
     "backend/alembic.ini"
+    "backend/assets/report/logo_nobg.png"
     "backend/pyproject.toml"
     "backend/requirements-heavy.txt"
     "backend/uv.lock"
     "backend/app/main.py"
     "backend/app/services/runner_preflight.py"
-    "frontend/package.json"
-    "frontend/pnpm-lock.yaml"
-    "frontend/vite.config.ts"
-    "frontend/scripts/clean.mjs"
-    "frontend/scripts/chunkObfuscatorPlugin.ts"
-    "frontend/scripts/obfuscatorOptions.ts"
-    "frontend/scripts/dev-launcher.mjs"
-    "frontend/src/app/main.tsx"
-    "frontend/yasa-engine-overrides/src/config.ts"
+    "frontend/dist/index.html"
+    "frontend/nginx.conf"
     "nexus-web/dist/index.html"
     "nexus-web/nginx.conf"
     "nexus-itemDetail/dist/index.html"
@@ -102,14 +95,17 @@ validate_release_tree() {
     "docs"
     "docker-compose.full.yml"
     "docker-compose.self-contained.yml"
+    "docker/frontend.Dockerfile"
+    "docker/env/frontend/.env.example"
     "backend/tests"
+    "frontend/package.json"
+    "frontend/pnpm-lock.yaml"
+    "frontend/vite.config.ts"
+    "frontend/public"
+    "frontend/src"
+    "frontend/scripts"
     "frontend/tests"
-    "frontend/scripts/dev-entrypoint.sh"
-    "frontend/scripts/generate-cwe-catalog.mjs"
-    "frontend/scripts/run-in-dev-container.sh"
-    "frontend/scripts/run-node-tests.mjs"
-    "frontend/scripts/setup.cjs"
-    "frontend/scripts/setup.sh"
+    "frontend/yasa-engine-overrides"
     "scripts/compose-up-local-build.sh"
     "scripts/compose-up-with-fallback.sh"
   )
@@ -122,7 +118,7 @@ validate_release_tree() {
     [[ ! -e "$OUTPUT_DIR/$rel_path" ]] || die "forbidden path present in release tree: $rel_path"
   done
 
-  for rel_path in nexus-web nexus-itemDetail; do
+  for rel_path in frontend nexus-web nexus-itemDetail; do
     [[ -d "$OUTPUT_DIR/$rel_path/dist" ]] || die "missing runtime bundle dist directory: $rel_path/dist"
     [[ -f "$OUTPUT_DIR/$rel_path/nginx.conf" ]] || die "missing runtime bundle nginx config: $rel_path/nginx.conf"
     [[ "$(find "$OUTPUT_DIR/$rel_path" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]] || \
@@ -149,6 +145,17 @@ clean_generated_tree() {
     -delete
 }
 
+prune_frontend_runtime_bundle() {
+  local bundle_root="$1"
+
+  [[ -d "$bundle_root" ]] || return 0
+
+  find "$bundle_root" -mindepth 1 -maxdepth 1 ! -name dist ! -name nginx.conf -exec rm -rf {} +
+
+  [[ -d "$bundle_root/dist" ]] || die "frontend runtime bundle missing dist directory: ${bundle_root#$OUTPUT_DIR/}"
+  [[ -f "$bundle_root/nginx.conf" ]] || die "frontend runtime bundle missing nginx.conf: ${bundle_root#$OUTPUT_DIR/}"
+}
+
 prune_nexus_runtime_bundle() {
   local bundle_root="$1"
 
@@ -158,16 +165,6 @@ prune_nexus_runtime_bundle() {
 
   [[ -d "$bundle_root/dist" ]] || die "nexus runtime bundle missing dist directory: ${bundle_root#$OUTPUT_DIR/}"
   [[ -f "$bundle_root/nginx.conf" ]] || die "nexus runtime bundle missing nginx.conf: ${bundle_root#$OUTPUT_DIR/}"
-}
-
-prune_frontend_release_scripts() {
-  local scripts_root="$OUTPUT_DIR/frontend/scripts"
-
-  [[ -d "$scripts_root" ]] || return 0
-
-  find "$scripts_root" -mindepth 1 -maxdepth 1 \
-    ! \( -name "clean.mjs" -o -name "chunkObfuscatorPlugin.ts" -o -name "obfuscatorOptions.ts" -o -name "dev-launcher.mjs" \) \
-    -exec rm -rf {} +
 }
 
 prune_release_tree() {
@@ -183,9 +180,6 @@ prune_release_tree() {
     "$OUTPUT_DIR/backend/uploads" \
     "$OUTPUT_DIR/backend/log" \
     "$OUTPUT_DIR/backend/data" \
-    "$OUTPUT_DIR/frontend/tests" \
-    "$OUTPUT_DIR/frontend/docs" \
-    "$OUTPUT_DIR/frontend/dist" \
     "$OUTPUT_DIR/frontend/node_modules"
 
   rm -f \
@@ -201,7 +195,7 @@ prune_release_tree() {
     "$OUTPUT_DIR/backend/SANDBOX_RUNNER_MIGRATION.md" \
     "$OUTPUT_DIR/backend/get-pip.py"
 
-  prune_frontend_release_scripts
+  prune_frontend_runtime_bundle "$OUTPUT_DIR/frontend"
   prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-web"
   prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-itemDetail"
 
@@ -352,7 +346,7 @@ def sanitize_js_like(path: Path) -> None:
     path.write_text("\n".join(sanitized).rstrip() + "\n", encoding="utf-8")
 
 
-for base in (root / "backend" / "app", root / "frontend"):
+for base in (root / "backend" / "app",):
     if not base.exists():
         continue
     for path in base.rglob("*"):
