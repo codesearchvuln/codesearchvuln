@@ -208,6 +208,42 @@ async def test_save_verification_result_clone_for_worker_resets_buffer_and_dedup
 
 
 @pytest.mark.asyncio
+async def test_save_verification_result_can_buffer_without_immediate_persistence():
+    persisted_batches: List[List[Dict[str, Any]]] = []
+
+    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+        persisted_batches.append([dict(item) for item in findings])
+        return len(findings)
+
+    tool = SaveVerificationResultTool(
+        task_id="task-deferred",
+        save_callback=_save_callback,
+        defer_persistence=True,
+    )
+    result = await tool.execute(
+        file_path="src/deferred_demo.py",
+        line_start=18,
+        function_name="handle",
+        title="src/deferred_demo.py中handle函数SQL注入漏洞",
+        vulnerability_type="sql_injection",
+        severity="high",
+        verdict="confirmed",
+        confidence=0.91,
+        reachability="reachable",
+        verification_evidence="buffer first; flush after verification phase",
+    )
+
+    assert result.success is True
+    assert result.data["saved"] is False
+    assert result.data["buffered"] is True
+    assert result.data["deferred"] is True
+    assert persisted_batches == []
+    assert len(tool.buffered_findings) == 1
+    assert tool.saved_count is None
+    assert tool.is_saved is False
+
+
+@pytest.mark.asyncio
 async def test_save_verification_result_normalizes_uncertain_status_to_likely_and_keeps_display_fields():
     buffered: List[Dict[str, Any]] = []
 

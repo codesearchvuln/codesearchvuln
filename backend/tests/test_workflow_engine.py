@@ -22,6 +22,7 @@ import pytest
 from app.services.agent.agents.base import AgentResult
 from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
 from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
+from app.services.agent.tools.verification_result_tools import SaveVerificationResultTool
 from app.services.agent.workflow import (
     AuditWorkflowEngine,
     WorkflowOrchestratorAgent,
@@ -675,6 +676,81 @@ class TestDuplicateFingerprintSkipping:
         await engine.run({}, {}, "/tmp", TASK_ID)
 
         assert len(orch._verified_queue_fingerprints) == 3
+
+
+class TestVerificationPersistenceSync:
+    @pytest.mark.asyncio
+    async def test_sync_verification_results_uses_all_findings_and_deduplicates_before_persist(
+        self,
+        orchestrator_with_queues,
+    ):
+        orch, recon_q, vuln_q = orchestrator_with_queues
+        persisted_batches: List[List[Dict[str, Any]]] = []
+
+        async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+            persisted_batches.append([dict(item) for item in findings])
+            return len(findings)
+
+        save_tool = SaveVerificationResultTool(
+            task_id=TASK_ID,
+            save_callback=_save_callback,
+            defer_persistence=True,
+        )
+        orch.sub_agents["verification"].tools = {"save_verification_result": save_tool}
+        orch._all_findings = [
+            {
+                "finding_identity": "fid:shared",
+                "title": "src/app.py中login函数SQL注入漏洞",
+                "file_path": "src/app.py",
+                "line_start": 21,
+                "function_name": "login",
+                "vulnerability_type": "sql_injection",
+                "severity": "high",
+                "description": "first half",
+                "verification_stage_completed": True,
+                "poc_code": "print('poc')",
+                "verification_result": {
+                    "status": "verified",
+                    "verdict": "confirmed",
+                    "confidence": 0.92,
+                    "reachability": "reachable",
+                    "verification_evidence": "first evidence",
+                },
+            },
+            {
+                "finding_identity": "fid:shared",
+                "title": "src/app.py中login函数SQL注入漏洞",
+                "file_path": "src/app.py",
+                "line_start": 21,
+                "function_name": "login",
+                "vulnerability_type": "sql_injection",
+                "severity": "high",
+                "description": "second half with report",
+                "verification_stage_completed": True,
+                "vulnerability_report": "# merged report",
+                "verification_result": {
+                    "status": "verified",
+                    "verdict": "confirmed",
+                    "confidence": 0.92,
+                    "reachability": "reachable",
+                    "verification_evidence": "second evidence with more detail",
+                },
+            },
+        ]
+
+        engine = AuditWorkflowEngine(recon_q, vuln_q, TASK_ID, orch)
+        await engine._sync_verification_tool_buffer_to_db(TASK_ID)
+
+        assert len(persisted_batches) == 1
+        assert len(persisted_batches[0]) == 1
+        persisted = persisted_batches[0][0]
+        assert persisted["finding_identity"] == "fid:shared"
+        assert persisted["poc_code"] == "print('poc')"
+        assert persisted["vulnerability_report"] == "# merged report"
+        assert (
+            persisted["verification_result"]["verification_evidence"]
+            == "second evidence with more detail"
+        )
 
 
 class TestCancellation:

@@ -185,6 +185,336 @@ def merge_finding_patch(base_finding: Dict[str, Any], patch: Dict[str, Any]) -> 
     return merged
 
 
+_DEDUP_PREFERRED_TEXT_FIELDS = {
+    "title",
+    "description",
+    "code_snippet",
+    "code_context",
+    "source",
+    "sink",
+    "suggestion",
+    "fix_code",
+    "fix_description",
+    "report",
+    "vulnerability_report",
+    "verification_evidence",
+    "verification_details",
+    "evidence",
+    "verification_method",
+    "poc_code",
+    "poc_description",
+    "final_conclusion",
+}
+_DEDUP_MERGE_LIST_FIELDS = {
+    "dataflow_path",
+    "taint_flow",
+    "evidence_chain",
+    "missing_checks",
+    "poc_steps",
+    "function_trigger_flow",
+}
+_DEDUP_PLACEHOLDER_TOKENS = (
+    "auto_generated",
+    "auto synthesized",
+    "暂无",
+    "unknown",
+    "n/a",
+)
+_DEDUP_PLACEHOLDER_FUNCTION_NAMES = {
+    "<function_not_localized>",
+    "<unknown>",
+    "unknown",
+}
+
+
+def _normalize_dedup_file_path(value: Any) -> str:
+    file_path = str(value or "").strip().replace("\\", "/").lower()
+    if file_path and ":" in file_path:
+        prefix, suffix = file_path.split(":", 1)
+        token = suffix.split()[0] if suffix.split() else ""
+        if token.isdigit():
+            file_path = prefix.strip()
+    return file_path
+
+
+def _normalize_dedup_line(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except Exception:
+        return 0
+
+
+def _normalize_dedup_function_name(value: Any) -> str:
+    function_name = str(value or "").strip().lower()
+    if not function_name:
+        return ""
+    if function_name in _DEDUP_PLACEHOLDER_FUNCTION_NAMES:
+        return ""
+    if function_name.startswith("<function_"):
+        return ""
+    return function_name
+
+
+def _text_signal_score(value: Any) -> tuple[int, int]:
+    text = str(value or "").strip()
+    if not text:
+        return (-1, -1)
+    lowered = text.lower()
+    placeholder_penalty = -500 if any(token in lowered for token in _DEDUP_PLACEHOLDER_TOKENS) else 0
+    return (placeholder_penalty + len(text), len(text))
+
+
+def _pick_more_informative_text(current: Any, incoming: Any) -> Any:
+    current_text = str(current or "").strip()
+    incoming_text = str(incoming or "").strip()
+    if not incoming_text:
+        return current
+    if not current_text:
+        return incoming
+    if _text_signal_score(incoming_text) > _text_signal_score(current_text):
+        return incoming
+    return current
+
+
+def _merge_text_list_values(current: Any, incoming: Any) -> Any:
+    merged: List[str] = []
+    for value in (current, incoming):
+        if isinstance(value, list):
+            candidates = value
+        elif value in (None, "", [], ()):
+            candidates = []
+        else:
+            candidates = [value]
+        for item in candidates:
+            normalized = str(item).strip()
+            if normalized and normalized not in merged:
+                merged.append(normalized)
+    return merged or None
+
+
+def _finding_richness_score(finding: Dict[str, Any]) -> int:
+    if not isinstance(finding, dict):
+        return -1
+
+    verification_payload = (
+        finding.get("verification_result")
+        if isinstance(finding.get("verification_result"), dict)
+        else {}
+    )
+    score = 0
+    if str(finding.get("finding_identity") or "").strip():
+        score += 40
+    if str(
+        finding.get("verification_fingerprint")
+        or verification_payload.get("verification_fingerprint")
+        or ""
+    ).strip():
+        score += 30
+    if _normalize_dedup_file_path(finding.get("file_path") or finding.get("file")):
+        score += 12
+    if _normalize_dedup_line(finding.get("line_start") or finding.get("line")) > 0:
+        score += 10
+    if _normalize_dedup_function_name(finding.get("function_name")):
+        score += 10
+
+    status = _normalize_save_status(
+        finding.get("status") or verification_payload.get("status"),
+        finding.get("verdict") or verification_payload.get("verdict"),
+    )
+    if status == "verified":
+        score += 12
+    elif status == "likely":
+        score += 8
+    elif status == "false_positive":
+        score += 6
+
+    for key in (
+        "description",
+        "code_snippet",
+        "suggestion",
+        "poc_code",
+        "report",
+        "vulnerability_report",
+    ):
+        if str(finding.get(key) or "").strip():
+            score += 4
+    for key in ("verification_evidence", "verification_details", "evidence"):
+        value = finding.get(key) or verification_payload.get(key)
+        score += max(_text_signal_score(value)[0], 0) // 40
+    if isinstance(finding.get("dataflow_path"), list) and finding.get("dataflow_path"):
+        score += min(10, len(finding["dataflow_path"]))
+    if isinstance(verification_payload, dict):
+        score += len(
+            [
+                key
+                for key in (
+                    "verification_evidence",
+                    "verification_details",
+                    "reachability",
+                    "function_trigger_flow",
+                    "known_facts",
+                    "inferences_to_verify",
+                    "final_conclusion",
+                )
+                if verification_payload.get(key) not in (None, "", [], {})
+            ]
+        ) * 2
+    return score
+
+
+def _merge_duplicate_dict_fields(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(primary or {})
+    for key, value in (secondary or {}).items():
+        if key == "verification_result" and isinstance(value, dict):
+            existing_payload = (
+                merged.get("verification_result")
+                if isinstance(merged.get("verification_result"), dict)
+                else {}
+            )
+            merged["verification_result"] = _merge_duplicate_dict_fields(
+                existing_payload,
+                value,
+            )
+            continue
+        if key in _DEDUP_MERGE_LIST_FIELDS:
+            merged_list = _merge_text_list_values(merged.get(key), value)
+            if merged_list:
+                merged[key] = merged_list
+            continue
+        if key in _DEDUP_PREFERRED_TEXT_FIELDS:
+            preferred = _pick_more_informative_text(merged.get(key), value)
+            if preferred not in (None, ""):
+                merged[key] = preferred
+            continue
+        if key == "finding_metadata" and isinstance(value, dict):
+            existing_metadata = (
+                merged.get("finding_metadata")
+                if isinstance(merged.get("finding_metadata"), dict)
+                else {}
+            )
+            metadata = dict(existing_metadata)
+            metadata.update(value)
+            if metadata:
+                merged["finding_metadata"] = metadata
+            continue
+        if key == "report":
+            report_value = _pick_more_informative_text(merged.get("report"), value)
+            if report_value not in (None, ""):
+                merged["report"] = report_value
+            continue
+        if key == "vulnerability_report":
+            report_value = _pick_more_informative_text(
+                merged.get("vulnerability_report"),
+                value,
+            )
+            if report_value not in (None, ""):
+                merged["vulnerability_report"] = report_value
+            continue
+        if merged.get(key) in (None, "", [], {}):
+            merged[key] = value
+    return merged
+
+
+def build_verification_dedup_aliases(finding: Dict[str, Any]) -> List[str]:
+    if not isinstance(finding, dict):
+        return []
+
+    verification_payload = (
+        finding.get("verification_result")
+        if isinstance(finding.get("verification_result"), dict)
+        else {}
+    )
+    aliases: List[str] = []
+    finding_identity = str(
+        finding.get("finding_identity")
+        or verification_payload.get("finding_identity")
+        or ""
+    ).strip()
+    if finding_identity:
+        aliases.append(f"identity:{finding_identity}")
+
+    verification_fingerprint = str(
+        finding.get("verification_fingerprint")
+        or verification_payload.get("verification_fingerprint")
+        or ""
+    ).strip().lower()
+    if verification_fingerprint:
+        aliases.append(f"verification_fingerprint:{verification_fingerprint}")
+
+    file_path = _normalize_dedup_file_path(finding.get("file_path") or finding.get("file"))
+    vulnerability_type = str(
+        finding.get("vulnerability_type") or finding.get("type") or ""
+    ).strip().lower()
+    line_start = _normalize_dedup_line(finding.get("line_start") or finding.get("line"))
+    function_name = _normalize_dedup_function_name(finding.get("function_name"))
+    title = str(finding.get("title") or "").strip().lower()
+
+    if file_path and vulnerability_type and function_name:
+        aliases.append(f"function:{file_path}|{vulnerability_type}|{function_name}")
+    if file_path and vulnerability_type and line_start > 0:
+        aliases.append(f"line:{file_path}|{vulnerability_type}|{line_start}")
+    if file_path and vulnerability_type and title:
+        aliases.append(f"title:{file_path}|{vulnerability_type}|{title}")
+    if not aliases and vulnerability_type and title:
+        aliases.append(f"fallback:{vulnerability_type}|{title}")
+    return aliases
+
+
+def merge_duplicate_findings(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    existing_copy = dict(existing or {})
+    incoming_copy = dict(incoming or {})
+    if _finding_richness_score(incoming_copy) > _finding_richness_score(existing_copy):
+        primary, secondary = incoming_copy, existing_copy
+    else:
+        primary, secondary = existing_copy, incoming_copy
+
+    merged = _merge_duplicate_dict_fields(primary, secondary)
+    report_value = _pick_more_informative_text(
+        merged.get("vulnerability_report") or merged.get("report"),
+        secondary.get("vulnerability_report") or secondary.get("report"),
+    )
+    if report_value not in (None, ""):
+        merged["report"] = report_value
+        merged["vulnerability_report"] = report_value
+    return merged
+
+
+def deduplicate_verification_findings(
+    findings: List[Dict[str, Any]],
+    task_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    deduped: List[Dict[str, Any]] = []
+    alias_to_index: Dict[str, int] = {}
+
+    for raw_finding in findings or []:
+        if not isinstance(raw_finding, dict):
+            continue
+        finding = dict(raw_finding)
+        if task_id:
+            ensure_finding_identity(task_id, finding)
+        aliases = build_verification_dedup_aliases(finding)
+        existing_index = next(
+            (alias_to_index[alias] for alias in aliases if alias in alias_to_index),
+            None,
+        )
+
+        if existing_index is None:
+            deduped.append(finding)
+            existing_index = len(deduped) - 1
+        else:
+            deduped[existing_index] = merge_duplicate_findings(
+                deduped[existing_index],
+                finding,
+            )
+
+        if task_id:
+            ensure_finding_identity(task_id, deduped[existing_index])
+        for alias in build_verification_dedup_aliases(deduped[existing_index]):
+            alias_to_index[alias] = existing_index
+
+    return deduped
+
+
 def validate_finding_update_patch(fields_to_update: Dict[str, Any]) -> tuple[bool, Optional[str], Dict[str, Any], List[str]]:
     if not isinstance(fields_to_update, dict) or not fields_to_update:
         return False, "fields_to_update 不能为空", {}, []
@@ -785,16 +1115,20 @@ class SaveVerificationResultTool(AgentTool):
         self,
         task_id: str,
         save_callback: Optional[Callable[[List[Dict[str, Any]]], Coroutine[Any, Any, int]]] = None,
+        defer_persistence: bool = False,
     ):
         """
         Args:
             task_id: 当前审计任务 ID，用于日志追踪
             save_callback: 异步持久化回调 async (findings: List[Dict]) -> int
                            返回实际保存的条数。若为 None，结果仅写入内存缓冲。
+            defer_persistence: 为 True 时只缓冲结果，不在工具执行时立即入库；
+                               由 Workflow 在 Verification 结束后统一去重并批量持久化。
         """
         super().__init__()
         self.task_id = task_id
         self._save_callback = save_callback
+        self._defer_persistence = bool(defer_persistence)
         # 内存缓冲：即使没有注入回调也能暂存结果
         self._buffered_findings: List[Dict[str, Any]] = []
         self._saved_count: Optional[int] = None  # None 表示尚未调用过
@@ -870,6 +1204,10 @@ class SaveVerificationResultTool(AgentTool):
     @property
     def saved_count(self) -> Optional[int]:
         return self._saved_count
+
+    @property
+    def defer_persistence(self) -> bool:
+        return self._defer_persistence
 
     def clone_for_worker(self) -> "SaveVerificationResultTool":
         """
@@ -1545,19 +1883,29 @@ class SaveVerificationResultTool(AgentTool):
             normalized_confidence,
         )
 
-        if self._save_callback is None:
-            # 无回调时仅写入缓冲，Orchestrator 侧兜底持久化会读取 buffered_findings
-            logger.warning(
-                "[SaveVerificationResult][%s] 未注入 save_callback，结果仅写入内存缓冲",
-                task_id,
-            )
+        if self._save_callback is None or self._defer_persistence:
+            # 无回调或启用 deferred 模式时仅写入缓冲，由 Workflow 统一去重后落库。
+            if self._defer_persistence:
+                logger.info(
+                    "[SaveVerificationResult][%s] 延迟持久化模式已启用，结果先写入缓冲，等待 Workflow 统一入库",
+                    task_id,
+                )
+            else:
+                logger.warning(
+                    "[SaveVerificationResult][%s] 未注入 save_callback，结果仅写入内存缓冲",
+                    task_id,
+                )
             return ToolResult(
                 success=True,
                 data={
                     "saved": False,
-                    "total_saved": 0,
+                    "total_saved": int(self._saved_count or 0),
                     "buffered": True,
-                    "message": f"结果已写入内存缓冲（{title}），将在任务完成时由 Orchestrator 统一持久化",
+                    "deferred": self._defer_persistence,
+                    "message": (
+                        f"结果已写入内存缓冲（{title}），"
+                        "将在 Verification 阶段结束后统一去重并持久化"
+                    ),
                 },
             )
 

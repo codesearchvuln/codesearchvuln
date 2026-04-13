@@ -25,6 +25,7 @@ import yaml
 from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord, WorkflowConfig
 from .memory_monitor import MemoryMonitor
 from .parallel_executor import ParallelPhaseExecutor
+from ..tools.verification_result_tools import deduplicate_verification_findings
 
 if TYPE_CHECKING:
     from ..agents.orchestrator import OrchestratorAgent
@@ -1131,11 +1132,50 @@ class AuditWorkflowEngine:
             len(self.orchestrator._all_findings),
         )
 
+    def _collect_verification_findings_for_persistence(
+        self,
+        task_id: str,
+        save_tool: Any,
+    ) -> List[Dict[str, Any]]:
+        candidates: List[Dict[str, Any]] = []
+
+        for item in self.orchestrator._all_findings or []:
+            if not isinstance(item, dict):
+                continue
+            verification_payload = item.get("verification_result")
+            verification_completed = bool(
+                item.get("verification_stage_completed")
+                or self._resolve_finding_status(item)
+                or (
+                    isinstance(verification_payload, dict)
+                    and any(value not in (None, "", [], {}) for value in verification_payload.values())
+                )
+            )
+            if not verification_completed:
+                continue
+            candidates.append(dict(item))
+
+        buffered_findings = getattr(save_tool, "buffered_findings", None)
+        if isinstance(buffered_findings, list):
+            for item in buffered_findings:
+                if not isinstance(item, dict):
+                    continue
+                candidates.append(dict(item))
+
+        deduped = deduplicate_verification_findings(candidates, task_id=task_id)
+        for item in deduped:
+            existing_report = str(
+                item.get("vulnerability_report") or item.get("report") or ""
+            ).strip()
+            if not existing_report:
+                item["vulnerability_report"] = self._build_verification_report_markdown(item)
+        return deduped
+
     async def _sync_verification_tool_buffer_to_db(self, task_id: str) -> None:
         """
         Verification 阶段结束后的最终同步：
-        - 将 save_verification_result 工具缓冲中的结果去重后再触发一次持久化回调，
-          防止 Agent 结束时出现“已保存但未入库”的尾部丢失。
+        - 将 Verification 阶段产出的最终 findings 统一去重后再触发一次持久化回调，
+          保证“验证之后、入库之前”存在一个确定性的去重关口。
         """
         orc = self.orchestrator
         verification_agent = orc.sub_agents.get("verification")
@@ -1147,48 +1187,24 @@ class AuditWorkflowEngine:
         if save_tool is None:
             return
 
-        buffered_findings = getattr(save_tool, "buffered_findings", None)
-        if not isinstance(buffered_findings, list) or not buffered_findings:
-            return
-
         save_callback = getattr(save_tool, "_save_callback", None)
         if save_callback is None:
             logger.warning(
-                "[WorkflowEngine] save_verification_result buffer has %s items but _save_callback is missing",
-                len(buffered_findings),
+                "[WorkflowEngine] save_verification_result is available but _save_callback is missing",
             )
             await orc.emit_event(
                 "warning",
                 (
-                    "[Workflow] Verification 结果已缓冲但未注入持久化回调，"
-                    f"当前缓冲 {len(buffered_findings)} 条"
+                    "[Workflow] Verification 结果已完成去重准备，但未注入持久化回调，"
+                    "本轮无法写入数据库"
                 ),
             )
             return
 
-        deduped_findings: List[Dict[str, Any]] = []
-        seen_keys: set[str] = set()
-        for item in buffered_findings:
-            if not isinstance(item, dict):
-                continue
-            # 最小兜底：在最终入库同步前确保每条 finding 都带有可落库的报告字段，
-            # 避免出现 report 为空（_save_findings 仅识别 vulnerability_report/report）。
-            existing_report = str(
-                item.get("vulnerability_report") or item.get("report") or ""
-            ).strip()
-            if not existing_report:
-                item["vulnerability_report"] = self._build_verification_report_markdown(item)
-
-            key = str(item.get("finding_identity") or "").strip()
-            if not key:
-                key = (
-                    f"{item.get('file_path', '')}:{item.get('line_start', '')}:"
-                    f"{item.get('vulnerability_type', '')}:{item.get('title', '')}"
-                )
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            deduped_findings.append(dict(item))
+        deduped_findings = self._collect_verification_findings_for_persistence(
+            task_id=task_id,
+            save_tool=save_tool,
+        )
 
         if not deduped_findings:
             return
@@ -1196,16 +1212,16 @@ class AuditWorkflowEngine:
         try:
             persisted_count = int(await save_callback(deduped_findings) or 0)
             logger.info(
-                "[WorkflowEngine] Verification buffer sync done: task_id=%s buffered=%s deduped=%s persisted=%s",
+                "[WorkflowEngine] Verification findings sync done: task_id=%s candidates=%s deduped=%s persisted=%s",
                 task_id,
-                len(buffered_findings),
+                len(getattr(self.orchestrator, "_all_findings", []) or []),
                 len(deduped_findings),
                 persisted_count,
             )
             await orc.emit_event(
                 "info",
                 (
-                    "[Workflow] Verification 结果入库同步完成："
+                    "[Workflow] Verification 结果去重后入库同步完成："
                     f"补写 {persisted_count}/{len(deduped_findings)} 条"
                 ),
             )

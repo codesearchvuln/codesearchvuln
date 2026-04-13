@@ -1807,6 +1807,7 @@ async def _initialize_tools(
         verification_tools["save_verification_result"] = SaveVerificationResultTool(
             task_id=task_id,
             save_callback=save_callback,
+            defer_persistence=True,
         )
         logger.info("[Tools] Added save_verification_result tool for task %s", task_id)
         report_update_tool = UpdateVulnerabilityFindingTool(

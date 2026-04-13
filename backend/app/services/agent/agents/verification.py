@@ -48,7 +48,10 @@ from ..utils.vulnerability_naming import (
     resolve_cwe_id,
     resolve_vulnerability_profile,
 )
-from ..tools.verification_result_tools import ensure_finding_identity
+from ..tools.verification_result_tools import (
+    deduplicate_verification_findings,
+    ensure_finding_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -3578,18 +3581,20 @@ class VerificationAgent(BaseAgent):
                         ensure_finding_identity(task_id, fallback_verified)
                     verified_findings.append(fallback_verified)
 
+            verified_findings_for_todos = list(verified_findings)
+
             for idx, todo_item in enumerate(todo_items):
                 current_todo_index = idx + 1
                 current_todo_id = todo_item.id
-                if idx >= len(verified_findings):
+                if idx >= len(verified_findings_for_todos):
                     todo_item.status = "blocked"
                     todo_item.final_verdict = "uncertain"
                     todo_item.blocked_reason = "missing_verification_output"
                     continue
                 finding_status = self._normalize_verification_status(
-                    verified_findings[idx].get("status")
-                    or (verified_findings[idx].get("verification_result") or {}).get("status")
-                    or verified_findings[idx].get("verdict")
+                    verified_findings_for_todos[idx].get("status")
+                    or (verified_findings_for_todos[idx].get("verification_result") or {}).get("status")
+                    or verified_findings_for_todos[idx].get("verdict")
                 )
                 if finding_status == "verified":
                     todo_item.status = "verified"
@@ -3603,39 +3608,39 @@ class VerificationAgent(BaseAgent):
                 else:
                     todo_item.status = "uncertain"
                     todo_item.final_verdict = "uncertain"
-                meta_title = str(verified_findings[idx].get("title") or todo_item.title)
-                meta_vuln = str(verified_findings[idx].get("vulnerability_type") or "unknown")
-                meta_sev = str(verified_findings[idx].get("severity") or "medium")
-                meta_file = str(verified_findings[idx].get("file_path") or todo_item.file_path)
-                raw_meta_line_start = verified_findings[idx].get("line_start") or todo_item.line_start
-                raw_meta_line_end = verified_findings[idx].get("line_end")
+                meta_title = str(verified_findings_for_todos[idx].get("title") or todo_item.title)
+                meta_vuln = str(verified_findings_for_todos[idx].get("vulnerability_type") or "unknown")
+                meta_sev = str(verified_findings_for_todos[idx].get("severity") or "medium")
+                meta_file = str(verified_findings_for_todos[idx].get("file_path") or todo_item.file_path)
+                raw_meta_line_start = verified_findings_for_todos[idx].get("line_start") or todo_item.line_start
+                raw_meta_line_end = verified_findings_for_todos[idx].get("line_end")
                 meta_line_start = int(raw_meta_line_start) if raw_meta_line_start is not None else None
                 meta_line_end = (
                     int(raw_meta_line_end)
                     if raw_meta_line_end is not None
                     else meta_line_start
                 )
-                verification_payload = verified_findings[idx].get("verification_result")
+                verification_payload = verified_findings_for_todos[idx].get("verification_result")
                 if not isinstance(verification_payload, dict):
                     verification_payload = {}
                 meta_status = self._normalize_verification_status(
                     verification_payload.get("status")
-                    or verified_findings[idx].get("status")
+                    or verified_findings_for_todos[idx].get("status")
                     or todo_item.status
                 ) or todo_item.status
                 meta_authenticity = self._status_to_verdict(meta_status)
                 meta_evidence = str(
                     verification_payload.get("verification_evidence")
-                    or verified_findings[idx].get("verification_evidence")
-                    or verified_findings[idx].get("description")
+                    or verified_findings_for_todos[idx].get("verification_evidence")
+                    or verified_findings_for_todos[idx].get("description")
                     or ""
                 ).strip()
-                meta_description = str(verified_findings[idx].get("description") or "").strip() or None
+                meta_description = str(verified_findings_for_todos[idx].get("description") or "").strip() or None
                 meta_description_markdown = str(
-                    verified_findings[idx].get("description_markdown") or ""
+                    verified_findings_for_todos[idx].get("description_markdown") or ""
                 ).strip() or None
                 meta_code_snippet = (
-                    str(verified_findings[idx].get("code_snippet") or "").strip() or None
+                    str(verified_findings_for_todos[idx].get("code_snippet") or "").strip() or None
                 )
                 if todo_item.status == "verified":
                     await self.emit_event(
@@ -3713,6 +3718,19 @@ class VerificationAgent(BaseAgent):
                             "code_snippet": meta_code_snippet,
                         },
                     )
+
+            deduped_verified_findings = deduplicate_verification_findings(
+                verified_findings,
+                task_id=task_id,
+            )
+            if len(deduped_verified_findings) != len(verified_findings):
+                logger.info(
+                    "[%s] Post-verification dedup reduced findings: before=%s after=%s",
+                    self.name,
+                    len(verified_findings),
+                    len(deduped_verified_findings),
+                )
+            verified_findings = deduped_verified_findings
 
             status_values = [
                 self._normalize_verification_status(
