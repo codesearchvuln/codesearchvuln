@@ -44,7 +44,6 @@ jobs:
       build_sandbox: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       multi_arch: true
-      publish_latest_for_changed_push: false
       emit_release_manifest: true
       require_complete_manifest: true
 

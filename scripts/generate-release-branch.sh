@@ -201,7 +201,7 @@ validate_release_tree() {
   done
 
   if find "$OUTPUT_DIR" \
-    \( -name '.github' -o -name 'backend' -o -name 'frontend' -o -name '__pycache__' -o -name '.pytest_cache' -o -name 'node_modules' \) \
+    \( -path "$OUTPUT_DIR/.github" -o -path "$OUTPUT_DIR/backend" -o -path "$OUTPUT_DIR/frontend" -o -name '__pycache__' -o -name '.pytest_cache' -o -name 'node_modules' \) \
     -print -quit | grep -q .; then
     die "release tree still contains source or dev residue"
   fi

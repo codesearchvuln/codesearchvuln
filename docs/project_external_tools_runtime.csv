@@ -1,0 +1,30 @@
+序号,工具名称,工具执行功能简介
+1,PostgreSQL,存储项目、任务、扫描结果等结构化数据
+2,Redis,提供任务队列、缓存与运行期协调能力
+3,OpenAI API,为智能扫描提供默认 LLM 推理能力
+4,YASA,执行 YASA 静态规则扫描并输出发现
+5,OpenGrep,执行模式匹配静态扫描并输出规则命中
+6,Bandit,执行 Python 安全静态扫描并输出问题
+7,Gitleaks,检测仓库中的密钥与敏感凭据泄露
+8,PHPStan,执行 PHP 静态分析并输出类型与规则问题
+9,PMD,执行 Java 规则扫描并输出违规项
+10,Flow Parser Runner,解析代码结构并生成函数/调用关系辅助分析
+11,Docker Sandbox,在隔离容器中执行 PoC 或验证代码
+12,Sandbox Runner,提供轻量隔离执行环境并承载验证依赖
+13,list_files,列出目录和候选文件以缩小代码范围
+14,search_code,在项目中搜索关键词模式和调用位置
+15,get_code_window,按锚点提取小段代码窗口用于取证
+16,get_file_outline,返回文件结构入口和风险提示摘要
+17,get_function_summary,总结函数职责输入输出和关键调用
+18,get_symbol_body,提取目标函数或符号的主体源码
+19,locate_enclosing_function,按文件和行号定位所属函数范围
+20,smart_scan,批量扫描高风险文件并汇总安全概览
+21,quick_audit,对单个文件做快速深入安全审计
+22,pattern_match,扫描常见漏洞模式并生成候选风险点
+23,controlflow_analysis_light,分析调用链分支条件和代码可达性
+24,dataflow_analysis,追踪污点从源到汇的数据传播链路
+25,logic_authz_analysis,分析认证授权和业务逻辑约束风险
+26,run_code,在沙箱中运行测试代码或 PoC 脚本
+27,sandbox_exec,在隔离沙箱中执行命令验证漏洞行为
+28,verify_vulnerability,发送验证载荷判断漏洞是否可利用
+29,create_vulnerability_report,生成正式漏洞报告并沉淀证据

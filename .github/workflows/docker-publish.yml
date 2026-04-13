@@ -150,6 +150,5 @@ jobs:
       build_sandbox: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox || false }}
       build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox_runner || false }}
       multi_arch: ${{ github.event_name == 'workflow_dispatch' }}
-      publish_latest_for_changed_push: true
       emit_release_manifest: false
       require_complete_manifest: false
