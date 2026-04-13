@@ -74,7 +74,7 @@ def test_external_tools_manual_pmd_section_documents_runner_requirements() -> No
 
 
 def test_docker_publish_workflow_builds_pmd_runner() -> None:
-    workflow_path = _repo_root() / ".github" / "workflows" / "docker-publish.yml"
+    workflow_path = _repo_root() / ".github" / "workflows" / "publish-runtime-images.yml"
     workflow_text = workflow_path.read_text(encoding="utf-8")
 
     assert "build_pmd_runner" in workflow_text

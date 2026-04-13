@@ -1,13 +1,11 @@
 # VulHunter Release
 
-该分支是由 `main` 自动生成的最新 slim-source 发布快照，只支持以下两种启动方式：
+该分支是由 `main` 自动生成的最新运行时分发快照（runtime-only distribution）。
+release 不包含 backend 源码和 frontend 源码，也不支持源码级构建。
+唯一受支持的启动方式是：
 
 ```bash
 docker compose up
-```
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build
 ```
 
 ## 启动前准备
@@ -24,18 +22,16 @@ cp docker/env/backend/env.example docker/env/backend/.env
 - `LLM_PROVIDER`
 - `LLM_MODEL`
 
-## 两种启动方式的区别
+## 运行方式说明
 
-- `docker compose up`：`backend`、runner、sandbox 继续使用云端镜像；主 `frontend` 与 `nexus-web`、`nexus-itemDetail` 直接消费 release 自带的本地静态产物，不再构建或暴露 frontend 源码。
-- `docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build`：在默认链路基础上，仅把 `backend` 切到本地构建；主 `frontend` 仍使用同一套本地 `dist` 挂载，`nexus-web` 与 `nexus-itemDetail` 仍沿用基础 compose 的本地构建例外。
+- `backend`、`frontend`、runner、sandbox 都使用已打包并固定到 digest 的镜像引用。
+- `nexus-web` 与 `nexus-itemDetail` 因静态产物随 release 一起分发，仍在本地构建极简 Nginx 镜像。
+- 如需替换默认镜像，可通过 `BACKEND_IMAGE`、`FRONTEND_IMAGE`、`SANDBOX_IMAGE` 以及对应的 `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE` / `SANDBOX_RUNNER_IMAGE` 环境变量覆盖。
 
-## 静态产物说明
+## Nexus 静态产物说明
 
-- release 快照保留 `frontend/dist/**`、`frontend/nginx.conf`
 - release 快照保留 `nexus-web/dist/**`、`nexus-web/nginx.conf`、`nexus-itemDetail/dist/**`、`nexus-itemDetail/nginx.conf`
-- release 快照不再公开 frontend 源码，只保留部署所需的 bundled runtime assets
-- slim release 不恢复旧的 release artifact / deploy 脚本体系
-- 主 `frontend` 默认监听 `http://localhost:3000`
+- runtime-only release 不恢复旧的 release artifact / deploy 脚本体系
 - `nexus-web` 默认监听 `http://localhost:5174`
 - `nexus-itemDetail` 默认监听 `http://localhost:5175`
 

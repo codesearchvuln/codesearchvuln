@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      refresh_all_runtime_images:
+        description: 'Rebuild runner and sandbox runtime images before generating release'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release-branch
@@ -12,10 +18,34 @@ concurrency:
 
 permissions:
   contents: write
+  packages: write
+  actions: write
 
 jobs:
+  publish-runtime-images:
+    uses: ./.github/workflows/publish-runtime-images.yml
+    secrets: inherit
+    with:
+      tag: latest
+      build_frontend: true
+      build_backend: true
+      build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_gitleaks_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_sandbox: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      multi_arch: true
+      publish_latest_for_changed_push: false
+      emit_release_manifest: true
+      require_complete_manifest: true
+
   generate-release-branch:
     runs-on: ubuntu-latest
+    needs: publish-runtime-images
 
     steps:
       - name: Checkout main
@@ -23,31 +53,50 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
         with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build frontend dist
-        working-directory: frontend
+      - name: Write release-manifest.json
         run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm build
+          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
 
-      - name: Generate slim release tree
+      - name: Generate runtime release tree
         run: |
           ./scripts/generate-release-branch.sh \
             --output "${RUNNER_TEMP}/release-tree" \
+            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
             --validate
 
-      - name: Validate compose entrypoints
+      - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
         run: |
           docker compose config >/dev/null
-          docker compose -f docker-compose.yml -f docker-compose.hybrid.yml config >/dev/null
+
+      - name: Smoke test backend runtime
+        working-directory: ${{ runner.temp }}/release-tree
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            docker compose down -v || true
+          }
+          trap cleanup EXIT
+
+          docker compose up -d db redis backend
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          docker compose logs backend
+          echo "::error::Backend health check failed for generated release tree."
+          exit 1
 
       - name: Delete public release tags and releases
         env:

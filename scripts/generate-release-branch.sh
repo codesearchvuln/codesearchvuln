@@ -5,21 +5,23 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="$ROOT_DIR"
 OUTPUT_DIR=""
+IMAGE_MANIFEST=""
 VALIDATE="false"
 ALLOWLIST_PATH="$ROOT_DIR/scripts/release-allowlist.txt"
 TEMPLATE_DIR="$ROOT_DIR/scripts/release-templates"
 
 usage() {
   cat <<'USAGE'
-Usage: generate-release-branch.sh --output <dir> [--source <dir>] [--validate]
+Usage: generate-release-branch.sh --output <dir> --image-manifest <file> [--source <dir>] [--validate]
 
-Generate a latest-only slim release tree from the checked-out repository.
+Generate a latest-only runtime release tree from the checked-out repository.
 
 Options:
-  --output <dir>   Required. Destination directory for the generated release tree.
-  --source <dir>   Override the source repository root. Defaults to the current checkout.
-  --validate       Validate the generated tree after copying.
-  -h, --help       Show this help text.
+  --output <dir>           Required. Destination directory for the generated release tree.
+  --image-manifest <file>  Required. JSON manifest with digest-pinned runtime image refs.
+  --source <dir>           Override the source repository root. Defaults to the current checkout.
+  --validate               Validate the generated tree after copying.
+  -h, --help               Show this help text.
 USAGE
 }
 
@@ -62,80 +64,6 @@ copy_allowlisted_entry() {
   cp -R "$src_abs" "$dest_abs"
 }
 
-validate_release_tree() {
-  local required_paths forbidden_paths rel_path
-
-  required_paths=(
-    "README.md"
-    "README_EN.md"
-    "docker-compose.yml"
-    "docker-compose.hybrid.yml"
-    "scripts/README-COMPOSE.md"
-    "docker/backend.Dockerfile"
-    "docker/nexus-web.Dockerfile"
-    "docker/env/backend/env.example"
-    "backend/alembic.ini"
-    "backend/assets/report/logo_nobg.png"
-    "backend/pyproject.toml"
-    "backend/requirements-heavy.txt"
-    "backend/uv.lock"
-    "backend/app/main.py"
-    "backend/app/services/runner_preflight.py"
-    "frontend/dist/index.html"
-    "frontend/nginx.conf"
-    "nexus-web/dist/index.html"
-    "nexus-web/nginx.conf"
-    "nexus-itemDetail/dist/index.html"
-    "nexus-itemDetail/nginx.conf"
-  )
-  forbidden_paths=(
-    "NOTICE"
-    ".github"
-    "deploy"
-    "docs"
-    "docker-compose.full.yml"
-    "docker-compose.self-contained.yml"
-    "docker/frontend.Dockerfile"
-    "docker/env/frontend/.env.example"
-    "backend/tests"
-    "frontend/package.json"
-    "frontend/pnpm-lock.yaml"
-    "frontend/vite.config.ts"
-    "frontend/public"
-    "frontend/src"
-    "frontend/scripts"
-    "frontend/tests"
-    "frontend/yasa-engine-overrides"
-    "scripts/compose-up-local-build.sh"
-    "scripts/compose-up-with-fallback.sh"
-  )
-
-  for rel_path in "${required_paths[@]}"; do
-    [[ -e "$OUTPUT_DIR/$rel_path" ]] || die "missing required release path: $rel_path"
-  done
-
-  for rel_path in "${forbidden_paths[@]}"; do
-    [[ ! -e "$OUTPUT_DIR/$rel_path" ]] || die "forbidden path present in release tree: $rel_path"
-  done
-
-  for rel_path in frontend nexus-web nexus-itemDetail; do
-    [[ -d "$OUTPUT_DIR/$rel_path/dist" ]] || die "missing runtime bundle dist directory: $rel_path/dist"
-    [[ -f "$OUTPUT_DIR/$rel_path/nginx.conf" ]] || die "missing runtime bundle nginx config: $rel_path/nginx.conf"
-    [[ "$(find "$OUTPUT_DIR/$rel_path" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]] || \
-      die "runtime bundle contains unexpected top-level files: $rel_path"
-    [[ ! -e "$OUTPUT_DIR/$rel_path/src" ]] || die "runtime bundle leaked source directory: $rel_path/src"
-    [[ ! -e "$OUTPUT_DIR/$rel_path/node_modules" ]] || die "runtime bundle leaked node_modules: $rel_path/node_modules"
-    [[ ! -e "$OUTPUT_DIR/$rel_path/tests" ]] || die "runtime bundle leaked tests directory: $rel_path/tests"
-    [[ ! -e "$OUTPUT_DIR/$rel_path/package.json" ]] || die "runtime bundle leaked package.json: $rel_path/package.json"
-  done
-
-  if find "$OUTPUT_DIR" \
-    \( -name '.github' -o -name 'tests' -o -name '__pycache__' -o -name '.pytest_cache' -o -name 'node_modules' \) \
-    -print -quit | grep -q .; then
-    die "release tree still contains test or dev residue"
-  fi
-}
-
 clean_generated_tree() {
   find "$OUTPUT_DIR" \
     \( -name '__pycache__' -o -name '.pytest_cache' -o -name '.mypy_cache' \) \
@@ -143,17 +71,6 @@ clean_generated_tree() {
   find "$OUTPUT_DIR" \
     \( -name '*.pyc' -o -name '*.pyo' -o -name '.DS_Store' \) \
     -delete
-}
-
-prune_frontend_runtime_bundle() {
-  local bundle_root="$1"
-
-  [[ -d "$bundle_root" ]] || return 0
-
-  find "$bundle_root" -mindepth 1 -maxdepth 1 ! -name dist ! -name nginx.conf -exec rm -rf {} +
-
-  [[ -d "$bundle_root/dist" ]] || die "frontend runtime bundle missing dist directory: ${bundle_root#$OUTPUT_DIR/}"
-  [[ -f "$bundle_root/nginx.conf" ]] || die "frontend runtime bundle missing nginx.conf: ${bundle_root#$OUTPUT_DIR/}"
 }
 
 prune_nexus_runtime_bundle() {
@@ -167,196 +84,127 @@ prune_nexus_runtime_bundle() {
   [[ -f "$bundle_root/nginx.conf" ]] || die "nexus runtime bundle missing nginx.conf: ${bundle_root#$OUTPUT_DIR/}"
 }
 
-prune_release_tree() {
-  rm -rf \
-    "$OUTPUT_DIR/.github" \
-    "$OUTPUT_DIR/deploy" \
-    "$OUTPUT_DIR/docs" \
-    "$OUTPUT_DIR/backend/tests" \
-    "$OUTPUT_DIR/backend/docs" \
-    "$OUTPUT_DIR/backend/.venv" \
-    "$OUTPUT_DIR/backend/.pytest_cache" \
-    "$OUTPUT_DIR/backend/.mypy_cache" \
-    "$OUTPUT_DIR/backend/uploads" \
-    "$OUTPUT_DIR/backend/log" \
-    "$OUTPUT_DIR/backend/data" \
-    "$OUTPUT_DIR/frontend/node_modules"
+render_release_compose() {
+  python3 - "$IMAGE_MANIFEST" "$TEMPLATE_DIR/docker-compose.release-slim.yml" "$OUTPUT_DIR/docker-compose.yml" <<'PY'
+from __future__ import annotations
 
-  rm -f \
-    "$OUTPUT_DIR/NOTICE" \
-    "$OUTPUT_DIR/docker-compose.full.yml" \
-    "$OUTPUT_DIR/docker-compose.self-contained.yml" \
-    "$OUTPUT_DIR/docker-compose.release.yml" \
-    "$OUTPUT_DIR/docker-compose.release-cython.yml" \
-    "$OUTPUT_DIR/docker-compose.frontend-only.yml" \
-    "$OUTPUT_DIR/docker-compose.podman.yml" \
-    "$OUTPUT_DIR/backend/.env" \
-    "$OUTPUT_DIR/backend/README.md" \
-    "$OUTPUT_DIR/backend/SANDBOX_RUNNER_MIGRATION.md" \
-    "$OUTPUT_DIR/backend/get-pip.py"
+import json
+import sys
+from pathlib import Path
 
-  prune_frontend_runtime_bundle "$OUTPUT_DIR/frontend"
-  prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-web"
-  prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-itemDetail"
 
-  rm -rf "$OUTPUT_DIR/scripts"
+manifest_path = Path(sys.argv[1])
+template_path = Path(sys.argv[2])
+output_path = Path(sys.argv[3])
+
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+required_keys = {
+    "backend": "__BACKEND_IMAGE_REF__",
+    "frontend": "__FRONTEND_IMAGE_REF__",
+    "sandbox": "__SANDBOX_IMAGE_REF__",
+    "sandbox_runner": "__SANDBOX_RUNNER_IMAGE_REF__",
+    "scanner_yasa": "__SCANNER_YASA_IMAGE_REF__",
+    "scanner_opengrep": "__SCANNER_OPENGREP_IMAGE_REF__",
+    "scanner_bandit": "__SCANNER_BANDIT_IMAGE_REF__",
+    "scanner_gitleaks": "__SCANNER_GITLEAKS_IMAGE_REF__",
+    "scanner_phpstan": "__SCANNER_PHPSTAN_IMAGE_REF__",
+    "scanner_pmd": "__SCANNER_PMD_IMAGE_REF__",
+    "flow_parser_runner": "__FLOW_PARSER_RUNNER_IMAGE_REF__",
+}
+
+
+def get_ref(logical_name: str) -> str:
+    try:
+        value = str(manifest["images"][logical_name]["ref"]).strip()
+    except Exception as exc:  # pragma: no cover - defensive error path
+        raise SystemExit(f"missing required image ref: {logical_name}") from exc
+
+    if not value:
+        raise SystemExit(f"missing required image ref: {logical_name}")
+    if "@sha256:" not in value:
+        raise SystemExit(f"image ref must be digest-pinned: {logical_name}")
+    return value
+
+
+compose_text = template_path.read_text(encoding="utf-8")
+for logical_name, placeholder in required_keys.items():
+    compose_text = compose_text.replace(placeholder, get_ref(logical_name))
+
+leftovers = [placeholder for placeholder in required_keys.values() if placeholder in compose_text]
+if leftovers:
+    raise SystemExit(f"unrendered release compose placeholders: {', '.join(leftovers)}")
+
+output_path.write_text(compose_text, encoding="utf-8")
+PY
 }
 
 overlay_release_templates() {
   mkdir -p \
     "$OUTPUT_DIR/scripts" \
     "$OUTPUT_DIR/docker" \
-    "$OUTPUT_DIR/backend/app/services"
+    "$OUTPUT_DIR/docker/env/backend"
 
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
-  cp "$TEMPLATE_DIR/docker-compose.release-slim.yml" "$OUTPUT_DIR/docker-compose.yml"
-  cp "$TEMPLATE_DIR/docker-compose.hybrid.release-slim.yml" "$OUTPUT_DIR/docker-compose.hybrid.yml"
-  cp "$TEMPLATE_DIR/backend.Dockerfile" "$OUTPUT_DIR/docker/backend.Dockerfile"
-  cp "$TEMPLATE_DIR/runner_preflight.py" "$OUTPUT_DIR/backend/app/services/runner_preflight.py"
+  render_release_compose
 }
 
-sanitize_release_tree() {
-  python3 - "$OUTPUT_DIR" <<'PY'
-from __future__ import annotations
+validate_release_tree() {
+  local required_paths forbidden_paths rel_path
 
-import ast
-import io
-import sys
-import tokenize
-from pathlib import Path
+  required_paths=(
+    "README.md"
+    "README_EN.md"
+    "docker-compose.yml"
+    "scripts/README-COMPOSE.md"
+    "docker/nexus-web.Dockerfile"
+    "docker/env/backend/env.example"
+    "nexus-web/dist/index.html"
+    "nexus-web/nginx.conf"
+    "nexus-itemDetail/dist/index.html"
+    "nexus-itemDetail/nginx.conf"
+  )
+  forbidden_paths=(
+    "backend"
+    "frontend"
+    ".github"
+    "deploy"
+    "docs"
+    "docker-compose.full.yml"
+    "docker-compose.hybrid.yml"
+    "docker-compose.self-contained.yml"
+    "docker/backend.Dockerfile"
+    "docker/frontend.Dockerfile"
+    "scripts/compose-up-local-build.sh"
+    "scripts/compose-up-with-fallback.sh"
+  )
 
+  for rel_path in "${required_paths[@]}"; do
+    [[ -e "$OUTPUT_DIR/$rel_path" ]] || die "missing required release path: $rel_path"
+  done
 
-root = Path(sys.argv[1])
+  for rel_path in "${forbidden_paths[@]}"; do
+    [[ ! -e "$OUTPUT_DIR/$rel_path" ]] || die "forbidden path present in release tree: $rel_path"
+  done
 
-LICENSE_PATTERNS = ("copyright", "license", "spdx")
-JS_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+  for rel_path in nexus-web nexus-itemDetail; do
+    [[ -d "$OUTPUT_DIR/$rel_path/dist" ]] || die "missing runtime bundle dist directory: $rel_path/dist"
+    [[ -f "$OUTPUT_DIR/$rel_path/nginx.conf" ]] || die "missing runtime bundle nginx config: $rel_path/nginx.conf"
+    [[ "$(find "$OUTPUT_DIR/$rel_path" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]] || \
+      die "runtime bundle contains unexpected top-level files: $rel_path"
+    [[ ! -e "$OUTPUT_DIR/$rel_path/src" ]] || die "runtime bundle leaked source directory: $rel_path/src"
+    [[ ! -e "$OUTPUT_DIR/$rel_path/node_modules" ]] || die "runtime bundle leaked node_modules: $rel_path/node_modules"
+    [[ ! -e "$OUTPUT_DIR/$rel_path/tests" ]] || die "runtime bundle leaked tests directory: $rel_path/tests"
+    [[ ! -e "$OUTPUT_DIR/$rel_path/package.json" ]] || die "runtime bundle leaked package.json: $rel_path/package.json"
+  done
 
-
-def preserve_header_lines(lines: list[str]) -> tuple[list[str], int]:
-    kept: list[str] = []
-    index = 0
-    for index, line in enumerate(lines):
-        stripped = line.lstrip()
-        if stripped.startswith("#!"):
-            kept.append(line)
-            continue
-        if "coding" in stripped and stripped.startswith("#"):
-            kept.append(line)
-            continue
-        if stripped.startswith("#") and any(token in stripped.lower() for token in LICENSE_PATTERNS):
-            kept.append(line)
-            continue
-        if stripped == "":
-            if kept:
-                kept.append(line)
-            continue
-        return kept, index
-    return kept, len(lines)
-
-
-class StripDocstrings(ast.NodeTransformer):
-    def _strip_body(self, body):
-        if body and isinstance(body[0], ast.Expr) and isinstance(getattr(body[0], "value", None), ast.Constant):
-            if isinstance(body[0].value.value, str):
-                body = body[1:]
-        return body
-
-    def visit_Module(self, node):
-        node.body = self._strip_body(node.body)
-        self.generic_visit(node)
-        return node
-
-    def visit_FunctionDef(self, node):
-        node.body = self._strip_body(node.body)
-        self.generic_visit(node)
-        return node
-
-    def visit_AsyncFunctionDef(self, node):
-        node.body = self._strip_body(node.body)
-        self.generic_visit(node)
-        return node
-
-    def visit_ClassDef(self, node):
-        node.body = self._strip_body(node.body)
-        self.generic_visit(node)
-        return node
-
-
-def sanitize_python(path: Path) -> None:
-    original = path.read_text(encoding="utf-8")
-    lines = original.splitlines(keepends=True)
-    header, body_start = preserve_header_lines(lines)
-    body = "".join(lines[body_start:])
-
-    try:
-        tree = ast.parse(body)
-        tree = StripDocstrings().visit(tree)
-        ast.fix_missing_locations(tree)
-        sanitized = ast.unparse(tree)
-        if sanitized and not sanitized.endswith("\n"):
-            sanitized += "\n"
-    except Exception:
-        tokens: list[tokenize.TokenInfo] = []
-        for token in tokenize.generate_tokens(io.StringIO(body).readline):
-            if token.type == tokenize.COMMENT:
-                continue
-            tokens.append(token)
-        sanitized = tokenize.untokenize(tokens)
-        if sanitized and not sanitized.endswith("\n"):
-            sanitized += "\n"
-
-    path.write_text("".join(header) + sanitized, encoding="utf-8")
-
-
-def sanitize_js_like(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    sanitized: list[str] = []
-    in_block = False
-    keep_block = False
-
-    for line in lines:
-        stripped = line.strip()
-        lowered = stripped.lower()
-        if in_block:
-            if keep_block:
-                sanitized.append(line)
-            if "*/" in stripped:
-                in_block = False
-                keep_block = False
-            continue
-
-        if stripped.startswith("/*"):
-            in_block = True
-            keep_block = any(token in lowered for token in LICENSE_PATTERNS)
-            if keep_block:
-                sanitized.append(line)
-            if "*/" in stripped:
-                in_block = False
-                keep_block = False
-            continue
-
-        if stripped.startswith("//") and not any(token in lowered for token in LICENSE_PATTERNS):
-            continue
-
-        sanitized.append(line)
-
-    path.write_text("\n".join(sanitized).rstrip() + "\n", encoding="utf-8")
-
-
-for base in (root / "backend" / "app",):
-    if not base.exists():
-        continue
-    for path in base.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix == ".py":
-            sanitize_python(path)
-        elif path.suffix in JS_EXTENSIONS:
-            sanitize_js_like(path)
-PY
+  if find "$OUTPUT_DIR" \
+    \( -name '.github' -o -name 'backend' -o -name 'frontend' -o -name '__pycache__' -o -name '.pytest_cache' -o -name 'node_modules' \) \
+    -print -quit | grep -q .; then
+    die "release tree still contains source or dev residue"
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -364,6 +212,11 @@ while [[ $# -gt 0 ]]; do
     --output)
       [[ $# -ge 2 ]] || die "--output requires a value"
       OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --image-manifest)
+      [[ $# -ge 2 ]] || die "--image-manifest requires a value"
+      IMAGE_MANIFEST="$2"
       shift 2
       ;;
     --source)
@@ -386,10 +239,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$OUTPUT_DIR" ]] || die "--output is required"
+[[ -n "$IMAGE_MANIFEST" ]] || die "--image-manifest is required"
 [[ -f "$ALLOWLIST_PATH" ]] || die "allowlist not found: $ALLOWLIST_PATH"
 
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
 OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
+IMAGE_MANIFEST="$(cd "$(dirname "$IMAGE_MANIFEST")" && pwd)/$(basename "$IMAGE_MANIFEST")"
+
+[[ -f "$IMAGE_MANIFEST" ]] || die "image manifest not found: $IMAGE_MANIFEST"
 
 case "$OUTPUT_DIR" in
   "$SOURCE_DIR"|"$SOURCE_DIR"/*)
@@ -407,16 +264,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   copy_allowlisted_entry "$line"
 done < "$ALLOWLIST_PATH"
 
-prune_release_tree
+prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-web"
+prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-itemDetail"
 overlay_release_templates
-sanitize_release_tree
 clean_generated_tree
 
 if [[ "$VALIDATE" == "true" ]]; then
   validate_release_tree
   if command -v docker >/dev/null 2>&1; then
     (cd "$OUTPUT_DIR" && docker compose -f docker-compose.yml config >/dev/null)
-    (cd "$OUTPUT_DIR" && docker compose -f docker-compose.yml -f docker-compose.hybrid.yml config >/dev/null)
   fi
 fi
 

@@ -10,26 +10,17 @@ permissions:
   contents: read
 
 jobs:
-  publish-latest-images:
-    name: 刷新 latest 镜像
+  publish-runtime-release:
+    name: 刷新运行时镜像并重建 release 分支
     runs-on: ubuntu-latest
 
     steps:
-      - name: 触发 Docker Publish 工作流
+      - name: 触发 Release Branch 工作流
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run docker-publish.yml \
+          gh workflow run release.yml \
             --ref main \
-            -f tag=latest \
-            -f build_yasa_runner=true \
-            -f build_opengrep_runner=true \
-            -f build_bandit_runner=true \
-            -f build_gitleaks_runner=true \
-            -f build_phpstan_runner=true \
-            -f build_flow_parser_runner=true \
-            -f build_pmd_runner=true \
-            -f build_sandbox=true \
-            -f build_sandbox_runner=true
+            -f refresh_all_runtime_images=true
 
-          echo "已触发 docker-publish.yml 刷新 latest 镜像。"
+          echo "已触发 release.yml 刷新运行时镜像并重建 release 分支。"

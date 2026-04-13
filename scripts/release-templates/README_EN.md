@@ -1,14 +1,11 @@
 # VulHunter Release
 
-This branch is an auto-generated latest slim-source release snapshot from `main`.
-It supports exactly two startup commands:
+This branch is an auto-generated runtime-only distribution snapshot from `main`.
+It does not ship backend source code or frontend source code and does not support source-based rebuilds.
+The only supported startup command is:
 
 ```bash
 docker compose up
-```
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build
 ```
 
 ## Before You Start
@@ -25,18 +22,16 @@ Set at least:
 - `LLM_PROVIDER`
 - `LLM_MODEL`
 
-## Supported Modes
+## Runtime Mode
 
-- `docker compose up`: `backend`, runner images, and sandbox use published cloud images; the main `frontend` plus `nexus-web` and `nexus-itemDetail` consume the bundled local runtime assets directly and no longer build or expose frontend source.
-- `docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build`: on top of the default path, only `backend` switches to a local build; the main `frontend` keeps using the same bundled `dist` mount, and `nexus-web` / `nexus-itemDetail` keep using the base compose local-build exception.
+- `backend`, `frontend`, runner images, and sandbox use published digest-pinned OCI images.
+- `nexus-web` and `nexus-itemDetail` still build locally from the bundled static runtime assets.
+- You can override the default runtime images with `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `SANDBOX_IMAGE`, `SCANNER_*_IMAGE`, `FLOW_PARSER_RUNNER_IMAGE`, and `SANDBOX_RUNNER_IMAGE`.
 
-## Runtime Assets
+## Nexus Runtime Assets
 
-- The release snapshot keeps `frontend/dist/**` and `frontend/nginx.conf`
 - The release snapshot keeps `nexus-web/dist/**`, `nexus-web/nginx.conf`, `nexus-itemDetail/dist/**`, and `nexus-itemDetail/nginx.conf`
-- The release snapshot no longer publishes frontend source and ships only bundled runtime assets for deployment
-- The slim release flow does not restore the legacy release artifact or deploy script pipeline
-- `frontend` listens on `http://localhost:3000` by default
+- The runtime-only release flow does not restore the legacy release artifact or deploy script pipeline
 - `nexus-web` listens on `http://localhost:5174` by default
 - `nexus-itemDetail` listens on `http://localhost:5175` by default
 

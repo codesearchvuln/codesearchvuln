@@ -520,10 +520,13 @@ def test_runner_dockerfiles_exist_for_all_migrated_scanners() -> None:
         assert 'rm -f /etc/apt/sources.list.d/debian.sources 2>/dev/null || true;' in runner_text
 
 
-def test_docker_publish_pushes_all_runner_images() -> None:
+def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
         encoding="utf-8"
     )
+    reusable_workflow_text = (
+        REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml"
+    ).read_text(encoding="utf-8")
 
     assert "\n  push:\n" in workflow_text
     assert "\n    branches:\n      - main\n" in workflow_text
@@ -533,15 +536,9 @@ def test_docker_publish_pushes_all_runner_images() -> None:
     assert "'v*.*.*'" not in workflow_text
     assert "detect-changes:" in workflow_text
     assert "dorny/paths-filter@v3" in workflow_text
-    assert "needs.detect-changes.outputs.frontend == 'true'" in workflow_text
-    assert "needs.detect-changes.outputs.backend == 'true'" in workflow_text
+    assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "tag:" in workflow_text
-    assert "build-frontend-latest:" in workflow_text
-    assert "build-backend-latest:" in workflow_text
-    assert "build-manual:" in workflow_text
-    assert "if: github.event_name == 'push'" in workflow_text
-    assert "if: github.event_name == 'workflow_dispatch'" in workflow_text
-    assert "platforms: linux/amd64" in workflow_text
+    assert "publish-runtime-images:" in workflow_text
     assert "build_yasa_runner" in workflow_text
     assert "build_opengrep_runner" in workflow_text
     assert "build_bandit_runner" in workflow_text
@@ -549,29 +546,23 @@ def test_docker_publish_pushes_all_runner_images() -> None:
     assert "build_phpstan_runner" in workflow_text
     assert "build_flow_parser_runner" in workflow_text
     assert "build_sandbox_runner" in workflow_text
-    assert "./docker/backend.Dockerfile" in workflow_text
-    assert "./docker/frontend.Dockerfile" in workflow_text
-    assert "context: ." in workflow_text
-    assert "./docker/yasa-runner.Dockerfile" in workflow_text
-    assert "./docker/opengrep-runner.Dockerfile" in workflow_text
-    assert "./docker/bandit-runner.Dockerfile" in workflow_text
-    assert "./docker/gitleaks-runner.Dockerfile" in workflow_text
-    assert "./docker/phpstan-runner.Dockerfile" in workflow_text
-    assert "./docker/flow-parser-runner.Dockerfile" in workflow_text
-    assert "./docker/sandbox-runner.Dockerfile" in workflow_text
-    assert "VULHUNTER_IMAGE_NAMESPACE" in workflow_text
-    assert "GHCR_REGISTRY: ghcr.io" in workflow_text
+    assert "release_manifest" in workflow_text
     assert "build_nexus_web" not in workflow_text
     assert "./nexus-web/src" not in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
-    assert "docker logout ghcr.io || true" in workflow_text
-    assert "docker manifest inspect" in workflow_text
+    assert "workflow_call:" in reusable_workflow_text
+    assert "docker/build-push-action@v7" in reusable_workflow_text
+    assert "./docker/backend.Dockerfile" in reusable_workflow_text
+    assert "./docker/frontend.Dockerfile" in reusable_workflow_text
+    assert "./docker/yasa-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/opengrep-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/bandit-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/gitleaks-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/phpstan-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/flow-parser-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/pmd-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/sandbox-runner.Dockerfile" in reusable_workflow_text
+    assert "release-manifest.json" in reusable_workflow_text
+    assert "docker manifest inspect" in reusable_workflow_text
 
 
 def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
@@ -579,12 +570,10 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
         encoding="utf-8"
     )
 
-    assert "build-frontend-latest:" in workflow_text
-    assert "build-backend-latest:" in workflow_text
-    assert "vulhunter-frontend:latest" in workflow_text
-    assert "vulhunter-backend:latest" in workflow_text
-    assert "platforms: linux/amd64" in workflow_text
-    assert "platforms: linux/amd64,linux/arm64" in workflow_text
+    assert "publish-runtime-images:" in workflow_text
+    assert "publish_latest_for_changed_push: true" in workflow_text
+    assert "build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}" in workflow_text
+    assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
     assert "- 'frontend/**'" in workflow_text
     assert "- 'backend/**'" in workflow_text
     assert "- 'docker/frontend.Dockerfile'" in workflow_text
@@ -593,14 +582,17 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     assert "- 'frontend/yasa-engine-overrides/**'" in workflow_text
 
 
-def test_release_workflow_builds_slim_release_tree() -> None:
+def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
 
+    assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "generate-release-branch.sh" in workflow_text
+    assert "--image-manifest" in workflow_text
     assert "--validate" in workflow_text
     assert "docker compose config" in workflow_text
+    assert "docker compose up -d db redis backend" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text

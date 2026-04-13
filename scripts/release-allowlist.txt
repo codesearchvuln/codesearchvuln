@@ -1,12 +1,8 @@
-# Directories copied into the generated release tree before pruning/sanitizing.
-backend/
-frontend/dist
-frontend/nginx.conf
-frontend/public/logo_vulhunter_bp1.png => backend/assets/report/logo_nobg.png
-
 # Runtime Docker files and env templates needed by the release tree.
 docker/nexus-web.Dockerfile
 docker/env/backend/env.example
+
+# Bundled runtime assets retained in the generated release tree.
 nexus-web/
 nexus-itemDetail/
 
