@@ -208,7 +208,7 @@ services:
         FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine
         COPY ./dist /usr/share/nginx/html
         COPY ./nginx.conf /etc/nginx/nginx.conf
-        EXPOSE 5174
+        EXPOSE 5175
       args:
         DOCKERHUB_LIBRARY_MIRROR: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
       tags:

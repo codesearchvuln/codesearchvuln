@@ -177,7 +177,7 @@ services:
     pull_policy: ${NEXUS_ITEM_DETAIL_PULL_POLICY:-build}
     build:
       context: ./nexus-itemDetail
-      dockerfile: ../docker/nexus-web.Dockerfile
+      dockerfile: ../docker/nexus-web-itemDetail.Dockerfile
       args:
         - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
       tags:
