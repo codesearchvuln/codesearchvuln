@@ -47,6 +47,7 @@ services:
       SCAN_WORKSPACE_VOLUME: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}
       RUNNER_PREFLIGHT_ENABLED: "${RUNNER_PREFLIGHT_ENABLED:-true}"
       RUNNER_PREFLIGHT_STRICT: "${RUNNER_PREFLIGHT_STRICT:-true}"
+      RUNNER_PREFLIGHT_OFFLINE_MODE: "${RUNNER_PREFLIGHT_OFFLINE_MODE:-false}"
       RUNNER_PREFLIGHT_TIMEOUT_SECONDS: "${RUNNER_PREFLIGHT_TIMEOUT_SECONDS:-30}"
       RUNNER_PREFLIGHT_MAX_CONCURRENCY: "${RUNNER_PREFLIGHT_MAX_CONCURRENCY:-2}"
       DOCKERHUB_LIBRARY_MIRROR: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
@@ -157,9 +158,14 @@ services:
     pull_policy: ${NEXUS_WEB_PULL_POLICY:-build}
     build:
       context: ./nexus-web
-      dockerfile: ../docker/nexus-web.Dockerfile
+      dockerfile_inline: |
+        ARG DOCKERHUB_LIBRARY_MIRROR
+        FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine
+        COPY ./dist /usr/share/nginx/html
+        COPY ./nginx.conf /etc/nginx/nginx.conf
+        EXPOSE 5174
       args:
-        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        DOCKERHUB_LIBRARY_MIRROR: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
       tags:
         - ${NEXUS_WEB_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-web-local:latest}
     ports:
@@ -173,9 +179,14 @@ services:
     pull_policy: ${NEXUS_ITEM_DETAIL_PULL_POLICY:-build}
     build:
       context: ./nexus-itemDetail
-      dockerfile: ../docker/nexus-web.Dockerfile
+      dockerfile_inline: |
+        ARG DOCKERHUB_LIBRARY_MIRROR
+        FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine
+        COPY ./dist /usr/share/nginx/html
+        COPY ./nginx.conf /etc/nginx/nginx.conf
+        EXPOSE 5174
       args:
-        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        DOCKERHUB_LIBRARY_MIRROR: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
       tags:
         - ${NEXUS_ITEM_DETAIL_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-item-detail-local:latest}
     ports:

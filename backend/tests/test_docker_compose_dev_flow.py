@@ -148,6 +148,10 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert 'pull_policy: ${NEXUS_ITEM_DETAIL_PULL_POLICY:-build}' in compose_text
     assert "build:\n      context: ./nexus-web" in compose_text
     assert "build:\n      context: ./nexus-itemDetail" in compose_text
+    assert "dockerfile_inline: |" in compose_text
+    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
+    assert "COPY ./dist /usr/share/nginx/html" in compose_text
+    assert "COPY ./nginx.conf /etc/nginx/nginx.conf" in compose_text
     assert "tags:\n        - ${NEXUS_WEB_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-web-local:latest}" in compose_text
     assert "tags:\n        - ${NEXUS_ITEM_DETAIL_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-item-detail-local:latest}" in compose_text
     assert "YASA_HOST_BIN_PATH" not in compose_text
@@ -259,15 +263,14 @@ def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
     assert 'CMD ["python3", "-m", "app.runtime.container_startup", "prod"]' in backend_text
 
 
-def test_nexus_web_dockerfile_pins_pnpm_before_nginx_runtime() -> None:
-    nexus_dockerfile = (REPO_ROOT / "docker" / "nexus-web.Dockerfile").read_text(
-        encoding="utf-8"
-    )
+def test_nexus_web_build_is_inlined_into_root_compose() -> None:
+    compose_text = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
-    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in nexus_dockerfile
-    assert "COPY ./dist /usr/share/nginx/html" in nexus_dockerfile
-    assert "COPY ./nginx.conf /etc/nginx/nginx.conf" in nexus_dockerfile
-    assert "EXPOSE 5174" in nexus_dockerfile
+    assert compose_text.count("dockerfile_inline: |") >= 2
+    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
+    assert "COPY ./dist /usr/share/nginx/html" in compose_text
+    assert "COPY ./nginx.conf /etc/nginx/nginx.conf" in compose_text
+    assert "EXPOSE 5174" in compose_text
 
 
 def test_scripts_and_packaging_use_new_compose_layout() -> None:

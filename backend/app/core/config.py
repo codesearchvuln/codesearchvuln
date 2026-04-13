@@ -149,6 +149,7 @@ class Settings(BaseSettings):
     SCANNER_PMD_IMAGE: str = _default_image("vulhunter-pmd-runner")
     RUNNER_PREFLIGHT_ENABLED: bool = True
     RUNNER_PREFLIGHT_STRICT: bool = False
+    RUNNER_PREFLIGHT_OFFLINE_MODE: bool = False
     RUNNER_PREFLIGHT_TIMEOUT_SECONDS: int = 30
     RUNNER_PREFLIGHT_MAX_CONCURRENCY: int = 2
     BACKEND_VENV_PATH: str = "/opt/backend-venv"

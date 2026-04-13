@@ -30,7 +30,8 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "nexus-itemDetail:\n    image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in compose_text
     assert "context: ./nexus-web" in compose_text
     assert "context: ./nexus-itemDetail" in compose_text
-    assert "dockerfile: ../docker/nexus-web.Dockerfile" in compose_text
+    assert "dockerfile_inline: |" in compose_text
+    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
     assert "NEXUS_WEB_PULL_POLICY" in compose_text
     assert "NEXUS_ITEM_DETAIL_PULL_POLICY" in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in compose_text

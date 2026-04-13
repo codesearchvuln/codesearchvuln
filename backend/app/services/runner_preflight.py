@@ -107,7 +107,15 @@ def _ensure_runner_image(client, spec: RunnerPreflightSpec) -> None:
         return
     except Exception as exc:
         logger.warning("pull failed for %s (%s): %s", spec.name, spec.image, exc)
-        raise RuntimeError(f"pull failed for {spec.name}: {exc}") from exc
+        if bool(getattr(settings, "RUNNER_PREFLIGHT_OFFLINE_MODE", False)):
+            raise RuntimeError(
+                f"offline runner image unavailable for {spec.name}: {spec.image}. "
+                "Run ./scripts/load-images.sh and retry the startup command."
+            ) from exc
+        raise RuntimeError(
+            f"pull failed for {spec.name}: {exc}. "
+            "If you intended to run offline, preload images with ./scripts/load-images.sh first."
+        ) from exc
 
 
 def run_runner_preflight_sync(spec: RunnerPreflightSpec) -> RunnerPreflightResult:

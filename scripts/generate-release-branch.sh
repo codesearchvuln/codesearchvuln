@@ -148,7 +148,73 @@ overlay_release_templates() {
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
+  cp "$TEMPLATE_DIR/load-images.sh" "$OUTPUT_DIR/scripts/load-images.sh"
+  cp "$TEMPLATE_DIR/use-offline-env.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
+  chmod +x "$OUTPUT_DIR/scripts/load-images.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
   render_release_compose
+  python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR/images-manifest.json" "$OUTPUT_DIR/docker/env/backend/offline-images.env.example" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+manifest_path = Path(sys.argv[1])
+metadata_path = Path(sys.argv[2])
+offline_env_path = Path(sys.argv[3])
+
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+revision = str(manifest["revision"]).strip()
+if not revision:
+    raise SystemExit("release manifest revision is required")
+
+image_contracts = {
+    "backend": ("BACKEND_IMAGE", "vulhunter-local/backend"),
+    "frontend": ("FRONTEND_IMAGE", "vulhunter-local/frontend"),
+    "sandbox": ("SANDBOX_IMAGE", "vulhunter-local/sandbox"),
+    "sandbox_runner": ("SANDBOX_RUNNER_IMAGE", "vulhunter-local/sandbox-runner"),
+    "scanner_yasa": ("SCANNER_YASA_IMAGE", "vulhunter-local/yasa-runner"),
+    "scanner_opengrep": ("SCANNER_OPENGREP_IMAGE", "vulhunter-local/opengrep-runner"),
+    "scanner_bandit": ("SCANNER_BANDIT_IMAGE", "vulhunter-local/bandit-runner"),
+    "scanner_gitleaks": ("SCANNER_GITLEAKS_IMAGE", "vulhunter-local/gitleaks-runner"),
+    "scanner_phpstan": ("SCANNER_PHPSTAN_IMAGE", "vulhunter-local/phpstan-runner"),
+    "scanner_pmd": ("SCANNER_PMD_IMAGE", "vulhunter-local/pmd-runner"),
+    "flow_parser_runner": ("FLOW_PARSER_RUNNER_IMAGE", "vulhunter-local/flow-parser-runner"),
+}
+
+images_payload: dict[str, dict[str, str]] = {}
+offline_env_lines = [
+    "# Copy this file to offline-images.env before using offline mode.",
+    "# Then run ./scripts/load-images.sh and ./scripts/use-offline-env.sh docker compose up -d",
+    "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
+]
+
+for logical_name, (env_var, local_repo) in image_contracts.items():
+    try:
+        source_ref = str(manifest["images"][logical_name]["ref"]).strip()
+    except Exception as exc:  # pragma: no cover - defensive path
+        raise SystemExit(f"missing required image ref: {logical_name}") from exc
+    if not source_ref:
+        raise SystemExit(f"missing required image ref: {logical_name}")
+
+    local_tag = f"{local_repo}:{revision}"
+    images_payload[logical_name] = {
+        "env_var": env_var,
+        "source_ref": source_ref,
+        "local_tag": local_tag,
+    }
+    offline_env_lines.append(f"{env_var}={local_tag}")
+
+metadata = {
+    "revision": revision,
+    "bundle_template": "images/vulhunter-images-{arch}.tar.zst",
+    "images": images_payload,
+}
+
+metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+offline_env_path.write_text("\n".join(offline_env_lines) + "\n", encoding="utf-8")
+PY
 }
 
 validate_release_tree() {
@@ -158,9 +224,12 @@ validate_release_tree() {
     "README.md"
     "README_EN.md"
     "docker-compose.yml"
+    "images-manifest.json"
     "scripts/README-COMPOSE.md"
-    "docker/nexus-web.Dockerfile"
+    "scripts/load-images.sh"
+    "scripts/use-offline-env.sh"
     "docker/env/backend/env.example"
+    "docker/env/backend/offline-images.env.example"
     "nexus-web/dist/index.html"
     "nexus-web/nginx.conf"
     "nexus-itemDetail/dist/index.html"

@@ -75,6 +75,12 @@ jobs:
             --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
             --validate
 
+      - name: Package offline image bundles
+        run: |
+          ./scripts/package-release-images.sh \
+            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --output-dir "${RUNNER_TEMP}/release-assets"
+
       - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
         run: |
@@ -130,6 +136,32 @@ jobs:
 
             git tag -d "${tag}" >/dev/null 2>&1 || true
           done < "${CLEANUP_FILE}"
+
+      - name: Publish offline release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_TAG: release-assets-latest
+          ASSET_DIR: ${{ runner.temp }}/release-assets
+        run: |
+          set -euo pipefail
+
+          if gh release view "${ASSET_TAG}" >/dev/null 2>&1; then
+            gh release delete "${ASSET_TAG}" --cleanup-tag --yes
+          fi
+
+          git tag -f "${ASSET_TAG}" "${GITHUB_SHA}"
+          git push --force origin "refs/tags/${ASSET_TAG}"
+
+          gh release create "${ASSET_TAG}" \
+            --title "VulHunter Offline Image Bundles" \
+            --notes "Offline runtime image bundles for the latest release branch snapshot."
+
+          gh release upload "${ASSET_TAG}" \
+            "${ASSET_DIR}/vulhunter-images-amd64.tar.zst" \
+            "${ASSET_DIR}/vulhunter-images-arm64.tar.zst" \
+            "${ASSET_DIR}/images-manifest-amd64.json" \
+            "${ASSET_DIR}/images-manifest-arm64.json" \
+            --clobber
 
       - name: Publish release branch
         env:

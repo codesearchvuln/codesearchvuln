@@ -98,6 +98,27 @@ def test_ensure_runner_image_raises_when_cloud_pull_fails(monkeypatch):
         runner_preflight._ensure_runner_image(SimpleNamespace(images=_FakeImages()), spec)
 
 
+def test_ensure_runner_image_offline_mode_points_to_load_script(monkeypatch):
+    class _FakeImages:
+        def get(self, _image):
+            raise runner_preflight.DOCKER_NOT_FOUND("missing")
+
+        def pull(self, _image):
+            raise RuntimeError("offline")
+
+    monkeypatch.setattr(runner_preflight.settings, "RUNNER_PREFLIGHT_OFFLINE_MODE", True, raising=False)
+
+    spec = runner_preflight.RunnerPreflightSpec(
+        name="bandit",
+        image="vulhunter-local/bandit-runner:test",
+        command=["bandit", "--version"],
+        timeout_seconds=10,
+    )
+
+    with pytest.raises(RuntimeError, match="scripts/load-images.sh"):
+        runner_preflight._ensure_runner_image(SimpleNamespace(images=_FakeImages()), spec)
+
+
 def test_run_runner_preflight_sync_uses_explicit_command_and_removes_container(monkeypatch):
     seen: dict[str, object] = {}
 

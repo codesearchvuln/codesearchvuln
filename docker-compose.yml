@@ -180,9 +180,14 @@ services:
     pull_policy: ${NEXUS_WEB_PULL_POLICY:-build}
     build:
       context: ./nexus-web
-      dockerfile: ../docker/nexus-web.Dockerfile
+      dockerfile_inline: |
+        ARG DOCKERHUB_LIBRARY_MIRROR
+        FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine
+        COPY ./dist /usr/share/nginx/html
+        COPY ./nginx.conf /etc/nginx/nginx.conf
+        EXPOSE 5174
       args:
-        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        DOCKERHUB_LIBRARY_MIRROR: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
       tags:
         - ${NEXUS_WEB_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-web-local:latest}
     ports:
@@ -198,9 +203,14 @@ services:
     pull_policy: ${NEXUS_ITEM_DETAIL_PULL_POLICY:-build}
     build:
       context: ./nexus-itemDetail
-      dockerfile: ../docker/nexus-web.Dockerfile
+      dockerfile_inline: |
+        ARG DOCKERHUB_LIBRARY_MIRROR
+        FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine
+        COPY ./dist /usr/share/nginx/html
+        COPY ./nginx.conf /etc/nginx/nginx.conf
+        EXPOSE 5174
       args:
-        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        DOCKERHUB_LIBRARY_MIRROR: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
       tags:
         - ${NEXUS_ITEM_DETAIL_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-item-detail-local:latest}
     ports:

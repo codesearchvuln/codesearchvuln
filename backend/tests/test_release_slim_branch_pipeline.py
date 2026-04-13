@@ -101,6 +101,13 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "workflow_dispatch:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "release-manifest.json" in workflow_text
+    assert "images-manifest-amd64.json" in workflow_text
+    assert "images-manifest-arm64.json" in workflow_text
+    assert "vulhunter-images-amd64.tar.zst" in workflow_text
+    assert "vulhunter-images-arm64.tar.zst" in workflow_text
+    assert "package-release-images.sh" in workflow_text
+    assert "gh release create" in workflow_text
+    assert "gh release upload" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "docker compose config" in workflow_text
     assert "docker compose up -d db redis backend" in workflow_text
@@ -168,9 +175,12 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "README.md",
         "README_EN.md",
         "docker-compose.yml",
+        "images-manifest.json",
         "scripts/README-COMPOSE.md",
-        "docker/nexus-web.Dockerfile",
+        "scripts/load-images.sh",
+        "scripts/use-offline-env.sh",
         "docker/env/backend/env.example",
+        "docker/env/backend/offline-images.env.example",
         "nexus-web/dist/index.html",
         "nexus-web/nginx.conf",
         "nexus-itemDetail/dist/index.html",
@@ -233,7 +243,8 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in compose_text
     assert "context: ./nexus-web" in compose_text
     assert "context: ./nexus-itemDetail" in compose_text
-    assert "dockerfile: ../docker/nexus-web.Dockerfile" in compose_text
+    assert "dockerfile_inline: |" in compose_text
+    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
     assert "vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}" not in compose_text
     assert "vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}" not in compose_text
 
@@ -268,9 +279,10 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
     )
     for doc in docs:
         assert "docker compose up" in doc
+        assert "load-images.sh" in doc
+        assert "offline-images.env" in doc
         assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in doc
-        assert "runtime-only" in doc or "runtime only" in doc or "运行时分发" in doc
-        assert "backend source" in doc or "backend 源码" in doc
+        assert "在线" in doc or "offline" in doc or "离线" in doc or "online" in doc
         assert "docker-compose.full.yml" not in doc
         assert "docker-compose.self-contained.yml" not in doc
         assert "docker/env/backend/env.example" in doc
@@ -278,3 +290,36 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "LLM_API_KEY" in doc
         assert "nexus-web" in doc
         assert "nexus-itemDetail" in doc
+
+
+def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) -> None:
+    output_dir = tmp_path / "release-tree"
+    manifest_path = tmp_path / "release-manifest.json"
+    manifest = _write_release_manifest(manifest_path)
+    result = _run_release_generator(output_dir, manifest_path)
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+
+    assert result.returncode == 0, combined_output
+
+    metadata = json.loads((output_dir / "images-manifest.json").read_text(encoding="utf-8"))
+    offline_env = (output_dir / "docker" / "env" / "backend" / "offline-images.env.example").read_text(
+        encoding="utf-8"
+    )
+    load_script = (output_dir / "scripts" / "load-images.sh").read_text(encoding="utf-8")
+    use_offline_env_script = (output_dir / "scripts" / "use-offline-env.sh").read_text(encoding="utf-8")
+
+    assert metadata["revision"] == manifest["revision"]
+    assert metadata["bundle_template"] == "images/vulhunter-images-{arch}.tar.zst"
+    assert metadata["images"]["backend"]["source_ref"] == manifest["images"]["backend"]["ref"]
+    assert metadata["images"]["backend"]["local_tag"] == f"vulhunter-local/backend:{manifest['revision']}"
+    assert metadata["images"]["frontend"]["local_tag"] == f"vulhunter-local/frontend:{manifest['revision']}"
+    assert metadata["images"]["scanner_yasa"]["local_tag"] == f"vulhunter-local/yasa-runner:{manifest['revision']}"
+    assert f"BACKEND_IMAGE=vulhunter-local/backend:{manifest['revision']}" in offline_env
+    assert f"FRONTEND_IMAGE=vulhunter-local/frontend:{manifest['revision']}" in offline_env
+    assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
+    assert "vulhunter-images-${arch}.tar.zst" in load_script
+    assert "images-manifest.json" in load_script
+    assert "docker load" in load_script
+    assert "docker tag" in load_script
+    assert "docker/env/backend/offline-images.env" in use_offline_env_script
+    assert "docker compose up -d" in use_offline_env_script

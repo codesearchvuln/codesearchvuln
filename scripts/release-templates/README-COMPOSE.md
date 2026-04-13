@@ -1,11 +1,21 @@
 # Compose 使用说明
 
-## 启动
+## 在线启动
 
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 docker compose up -d
 ```
+
+## 离线启动
+
+```bash
+cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
+./scripts/load-images.sh
+./scripts/use-offline-env.sh docker compose up -d
+```
+
+离线镜像包文件名为 `vulhunter-images-<arch>.tar.zst`，请放在 release 根目录或 `images/` 目录。
 
 ## 查看运行状态
 
@@ -43,6 +53,10 @@ docker compose restart backend
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`
 - `SANDBOX_RUNNER_IMAGE`
+
+离线模式的镜像覆盖文件位于：
+
+- `docker/env/backend/offline-images.env`
 
 ## 默认访问地址
 

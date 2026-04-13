@@ -1,5 +1,4 @@
-# Runtime Docker files and env templates needed by the release tree.
-docker/nexus-web.Dockerfile
+# Runtime env templates needed by the release tree.
 docker/env/backend/env.example
 
 # Bundled runtime assets retained in the generated release tree.
