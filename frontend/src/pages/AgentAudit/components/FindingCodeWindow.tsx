@@ -17,22 +17,31 @@ export type FindingCodeWindowDisplayPreset =
   | "project-browser";
 
 interface FindingCodeWindowProps {
-  code: string;
-  displayLines?: FindingCodeWindowDisplayLine[];
-  filePath?: string | null;
-  lineStart?: number | null;
-  lineEnd?: number | null;
-  highlightStartLine?: number | null;
-  highlightEndLine?: number | null;
-  focusLine?: number | null;
-  title?: string;
-  density?: "compact" | "detail";
-  chrome?: "editor" | "plain";
-  badges?: string[];
-  meta?: string[];
-  variant?: "default" | "detail";
-  appearance?: FindingCodeWindowAppearance;
-  displayPreset?: FindingCodeWindowDisplayPreset;
+	code: string;
+	displayLines?: FindingCodeWindowDisplayLine[];
+	filePath?: string | null;
+	lineStart?: number | null;
+	lineEnd?: number | null;
+	highlightStartLine?: number | null;
+	highlightEndLine?: number | null;
+	focusLine?: number | null;
+	selectionStartLine?: number | null;
+	selectionEndLine?: number | null;
+	persistedSelectionRanges?: Array<{
+		startLine: number;
+		endLine: number;
+	}>;
+	onLineSelectionStart?: (lineNumber: number) => void;
+	onLineSelectionExtend?: (lineNumber: number) => void;
+	onLineSelectionEnd?: (lineNumber: number) => void;
+	title?: string;
+	density?: "compact" | "detail";
+	chrome?: "editor" | "plain";
+	badges?: string[];
+	meta?: string[];
+	variant?: "default" | "detail";
+	appearance?: FindingCodeWindowAppearance;
+	displayPreset?: FindingCodeWindowDisplayPreset;
 }
 
 const TOKEN_CLASS_COLOR_GROUPS: Array<{ names: string[]; className: string }> = [
@@ -329,22 +338,28 @@ function getCodePaddingClasses(
 }
 
 export default function FindingCodeWindow({
-  code,
-  displayLines,
-  filePath,
-  lineStart,
-  lineEnd,
-  highlightStartLine,
-  highlightEndLine,
-  focusLine,
-  title = "命中代码",
-  density,
-  chrome = "editor",
-  badges = [],
-  meta = [],
-  variant = "default",
-  appearance = "native-explorer",
-  displayPreset = "default",
+	code,
+	displayLines,
+	filePath,
+	lineStart,
+	lineEnd,
+	highlightStartLine,
+	highlightEndLine,
+	focusLine,
+	selectionStartLine,
+	selectionEndLine,
+	persistedSelectionRanges = [],
+	onLineSelectionStart,
+	onLineSelectionExtend,
+	onLineSelectionEnd,
+	title = "命中代码",
+	density,
+	chrome = "editor",
+	badges = [],
+	meta = [],
+	variant = "default",
+	appearance = "native-explorer",
+	displayPreset = "default",
 }: FindingCodeWindowProps) {
   void title;
   void chrome;
@@ -371,6 +386,39 @@ export default function FindingCodeWindow({
     typeof focusLine === "number" && Number.isFinite(focusLine)
       ? focusLine
       : null;
+  const normalizedSelectionStart =
+    typeof selectionStartLine === "number" && Number.isFinite(selectionStartLine)
+      ? selectionStartLine
+      : null;
+  const normalizedSelectionEnd =
+    typeof selectionEndLine === "number" && Number.isFinite(selectionEndLine)
+      ? selectionEndLine
+      : normalizedSelectionStart;
+  const normalizedPersistedSelectionRanges = useMemo(
+    () =>
+      persistedSelectionRanges
+        .map((range) => {
+          const safeStart =
+            typeof range.startLine === "number" && Number.isFinite(range.startLine)
+              ? Math.trunc(range.startLine)
+              : null;
+          const safeEnd =
+            typeof range.endLine === "number" && Number.isFinite(range.endLine)
+              ? Math.trunc(range.endLine)
+              : safeStart;
+          if (safeStart === null || safeEnd === null) return null;
+          return {
+            startLine: Math.min(safeStart, safeEnd),
+            endLine: Math.max(safeStart, safeEnd),
+          };
+        })
+        .filter((range): range is { startLine: number; endLine: number } => Boolean(range)),
+    [persistedSelectionRanges],
+  );
+  const lineSelectionEnabled =
+    typeof onLineSelectionStart === "function" ||
+    typeof onLineSelectionExtend === "function" ||
+    typeof onLineSelectionEnd === "function";
   const resolvedDensity = density ?? (variant === "detail" ? "detail" : "compact");
   const isDetail = resolvedDensity === "detail";
   const gridColumns = getGridColumns(appearance, isDetail, displayPreset);
@@ -424,7 +472,7 @@ export default function FindingCodeWindow({
     if (!target) return;
     target.scrollIntoView({ block: "center", behavior: "smooth" });
     lastAutoScrolledTargetRef.current = focusTargetKey;
-  }, [focusTargetKey, normalizedFocusLine, renderedLines]);
+  }, [focusTargetKey, normalizedFocusLine]);
 
   return (
     <section
@@ -449,9 +497,9 @@ export default function FindingCodeWindow({
           </div>
           {meta.length > 0 ? (
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              {meta.map((metaItem, index) => (
+              {meta.map((metaItem) => (
                 <span
-                  key={`${metaItem}-${index}`}
+                  key={`meta-${metaItem}`}
                   className="rounded-full border border-white/12 bg-white/[0.04] px-2 py-0.5 text-[10px] tracking-[0.08em] text-white/62"
                 >
                   {metaItem}
@@ -477,18 +525,65 @@ export default function FindingCodeWindow({
             const isFocusLine = Boolean(line.isFocus);
             const isPlaceholder = line.kind === "placeholder" || line.lineNumber === null;
             const hasTokenSegments = Array.isArray(line.segments) && line.segments.length > 0;
+            const inPersistedSelectionRange =
+              !isPlaceholder &&
+              normalizedPersistedSelectionRanges.some(
+                (range) =>
+                  (line.lineNumber ?? -1) >= range.startLine &&
+                  (line.lineNumber ?? -1) <= range.endLine,
+              );
+            const inSelectionRange =
+              !isPlaceholder &&
+              normalizedSelectionStart !== null &&
+              normalizedSelectionEnd !== null &&
+              (line.lineNumber ?? -1) >= normalizedSelectionStart &&
+              (line.lineNumber ?? -1) <= normalizedSelectionEnd;
+            const interactiveLine =
+              lineSelectionEnabled && !isPlaceholder && line.lineNumber !== null;
+            const LineContainer = interactiveLine ? "button" : "div";
 
             return (
-              <div
+              <LineContainer
                 key={`${line.lineNumber ?? `placeholder-${index}`}-${index}`}
+                {...(interactiveLine ? { type: "button" as const } : {})}
                 data-line-number={line.lineNumber ?? undefined}
                 className={cn(
                   "grid",
                   gridColumns,
+                  interactiveLine && "w-full text-left",
                   isPlaceholder && "bg-white/[0.015]",
+                  lineSelectionEnabled &&
+                    !isPlaceholder &&
+                    "cursor-crosshair select-none",
+                  inPersistedSelectionRange && "bg-[#102218]",
+                  inSelectionRange && "bg-[#112316]",
                   inHighlightRange && "bg-white/[0.04]",
                   isFocusLine && "bg-white/[0.08]",
                 )}
+                onMouseDown={(event) => {
+                  if (isPlaceholder || line.lineNumber === null || !onLineSelectionStart) {
+                    return;
+                  }
+                  event.preventDefault();
+                  onLineSelectionStart(line.lineNumber);
+                }}
+                onMouseEnter={(event) => {
+                  if (
+                    isPlaceholder ||
+                    line.lineNumber === null ||
+                    !onLineSelectionExtend ||
+                    event.buttons !== 1
+                  ) {
+                    return;
+                  }
+                  onLineSelectionExtend(line.lineNumber);
+                }}
+                onMouseUp={() => {
+                  if (isPlaceholder || line.lineNumber === null || !onLineSelectionEnd) {
+                    return;
+                  }
+                  onLineSelectionEnd(line.lineNumber);
+                }}
               >
                 <div
                   className={cn(
@@ -496,9 +591,13 @@ export default function FindingCodeWindow({
                     "select-none text-right font-mono tabular-nums border-r border-white/8",
                     isPlaceholder && "bg-white/[0.02] text-white/20",
                     !isPlaceholder &&
+                      !inPersistedSelectionRange &&
                       !inHighlightRange &&
+                      !inSelectionRange &&
                       !isFocusLine &&
                       "bg-white/[0.03] text-white/42",
+                    inPersistedSelectionRange && "bg-[#15311d] text-[#c7f59a]",
+                    inSelectionRange && "bg-[#16301d] text-[#d5ff8a]",
                     inHighlightRange && "bg-[#131922] text-white/62",
                     isFocusLine && "bg-[#1a212b] text-white/84",
                   )}
@@ -511,6 +610,8 @@ export default function FindingCodeWindow({
                     getCodePaddingClasses(isDetail, displayPreset),
                     "overflow-visible whitespace-pre bg-transparent",
                     isPlaceholder ? "italic text-white/35" : "text-white/92",
+                    inPersistedSelectionRange && "bg-[#102319] text-white/96",
+                    inSelectionRange && "bg-[#122419] text-white",
                     inHighlightRange && "bg-[#101720] text-white/98",
                     isFocusLine && "bg-[#151d27] font-medium text-white shadow-[inset_3px_0_0_rgba(199,255,106,0.72)]",
                   )}
@@ -520,7 +621,7 @@ export default function FindingCodeWindow({
                     ? renderTokenizedLine(line.segments ?? [])
                     : line.content || " "}
                 </pre>
-              </div>
+              </LineContainer>
             );
           })}
         </div>

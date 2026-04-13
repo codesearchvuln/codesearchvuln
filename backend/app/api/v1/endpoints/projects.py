@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import projects_crud as _crud
+from app.api.v1.endpoints import projects_chat2rule as _chat2rule
 from app.api.v1.endpoints import projects_files as _files
 from app.api.v1.endpoints import projects_insights as _insights
 from app.api.v1.endpoints import projects_transfer as _transfer
@@ -12,6 +13,7 @@ router.include_router(_transfer.router)
 router.include_router(_insights.router)
 router.include_router(_uploads.router)
 router.include_router(_files.router)
+router.include_router(_chat2rule.router)
 router.include_router(_crud.router)
 
 create_project = _crud.create_project
@@ -34,6 +36,9 @@ get_project_file_content = _files.get_project_file_content
 get_cache_stats = _files.get_cache_stats
 clear_cache = _files.clear_cache
 invalidate_project_cache = _files.invalidate_project_cache
+
+chat2rule_opengrep_chat = _chat2rule.chat2rule_opengrep_chat
+chat2rule_opengrep_save = _chat2rule.chat2rule_opengrep_save
 
 generate_project_description_preview = _uploads.generate_project_description_preview
 generate_project_description_for_project = _uploads.generate_project_description_for_project
