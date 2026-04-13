@@ -292,6 +292,77 @@ def test_build_finding_markdown_report_keeps_vulnerability_type_values_without_e
     assert "memory\\_corruption" not in report
 
 
+def test_build_task_export_markdown_groups_findings_for_pdf_outline():
+    task = _make_task(task_id="task-1", report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    verified_finding = _make_finding(
+        id="finding-verified",
+        title="Verified Finding",
+        report="# 漏洞报告：Verified Finding\n\n## 漏洞概览\n\n概览正文\n\n## 修复建议\n\n尽快修复",
+    )
+    pending_finding = _make_finding(
+        id="finding-pending",
+        title="Pending Finding",
+        is_verified=False,
+        verdict="uncertain",
+        report=None,
+    )
+    false_positive_finding = _make_finding(
+        id="finding-fp",
+        title="False Positive Finding",
+        is_verified=False,
+        verdict="false_positive",
+        report=None,
+    )
+
+    markdown = reporting_endpoint._build_task_export_markdown(
+        task=task,
+        project=project,
+        findings=[verified_finding, pending_finding, false_positive_finding],
+        report_descriptions={},
+        export_statuses={
+            "finding-verified": "verified",
+            "finding-pending": "pending",
+            "finding-fp": reporting_endpoint.FindingStatus.FALSE_POSITIVE,
+        },
+        project_report_fallback="# 项目风险评估报告：Demo\n\n项目报告正文",
+        export_options=reporting_endpoint.DEFAULT_REPORT_EXPORT_OPTIONS,
+    )
+
+    findings_section_idx = markdown.find("\n## 漏洞报告\n")
+    verified_group_idx = markdown.find("\n### 确报\n")
+    verified_finding_idx = markdown.find("\n#### 漏洞报告 1: Verified Finding\n")
+    overview_idx = markdown.find("\n##### 漏洞概览\n")
+    remediation_idx = markdown.find("\n##### 修复建议\n")
+    pending_group_idx = markdown.find("\n### 待确认\n")
+    pending_finding_idx = markdown.find("\n#### 漏洞报告 2: Pending Finding\n")
+    false_positive_group_idx = markdown.find("\n### 误报\n")
+    false_positive_finding_idx = markdown.find("\n#### 漏洞报告 3: False Positive Finding\n")
+
+    assert findings_section_idx != -1
+    assert verified_group_idx != -1
+    assert verified_finding_idx != -1
+    assert overview_idx != -1
+    assert remediation_idx != -1
+    assert pending_group_idx != -1
+    assert pending_finding_idx != -1
+    assert false_positive_group_idx != -1
+    assert false_positive_finding_idx != -1
+    assert (
+        findings_section_idx
+        < verified_group_idx
+        < verified_finding_idx
+        < overview_idx
+        < remediation_idx
+        < pending_group_idx
+        < pending_finding_idx
+        < false_positive_group_idx
+        < false_positive_finding_idx
+    )
+    assert "\n#### 漏洞概览\n" not in markdown
+    assert "\n#### 修复建议\n" not in markdown
+
+
 def test_build_project_report_fallback_formats_risk_overview_as_nested_lists():
     markdown = reporting_endpoint._build_project_report_fallback(
         project=SimpleNamespace(name="Demo", description="演示项目"),
@@ -873,9 +944,13 @@ async def test_generate_report_exports_verified_pending_and_false_positive_secti
     )
 
     markdown_body = markdown_response.body.decode("utf-8")
-    assert "## 确报" not in markdown_body
-    assert "## 待确认" not in markdown_body
-    assert "## 误报" not in markdown_body
+    assert "\n## 漏洞报告\n" in markdown_body
+    assert "\n### 确报\n" in markdown_body
+    assert "\n### 待确认\n" in markdown_body
+    assert "\n### 误报\n" in markdown_body
+    assert "\n#### 漏洞报告 1: Verified Finding\n" in markdown_body
+    assert "\n#### 漏洞报告 2: Pending Finding\n" in markdown_body
+    assert "\n#### 漏洞报告 3: False Positive Finding\n" in markdown_body
     assert "Verified Finding" in markdown_body
     assert "Pending Finding" in markdown_body
     assert "False Positive Finding" in markdown_body

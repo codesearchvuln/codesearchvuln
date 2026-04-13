@@ -1703,6 +1703,14 @@ def _build_task_export_markdown(
             return _compact_markdown(content)
         return content
 
+    findings_section_level = 2 if lines else 1
+    findings_group_heading_level = min(findings_section_level + 1, 6)
+    finding_heading_level = min(findings_group_heading_level + 1, 6)
+    embedded_finding_heading_offset = max(finding_heading_level - 1, 0)
+
+    lines.append(f"{'#' * findings_section_level} 漏洞报告")
+    lines.append("")
+
     section_order = [
         (FindingStatus.VERIFIED, "确报"),
         ("pending", "待确认"),
@@ -1710,7 +1718,7 @@ def _build_task_export_markdown(
     ]
     finding_index = 1
 
-    for export_status, _section_title in section_order:
+    for export_status, section_title in section_order:
         section_findings = [
             finding_row
             for finding_row in findings
@@ -1718,6 +1726,9 @@ def _build_task_export_markdown(
         ]
         if not section_findings:
             continue
+
+        lines.append(f"{'#' * findings_group_heading_level} {section_title}")
+        lines.append("")
 
         for finding_row in section_findings:
             finding_report = None
@@ -1746,7 +1757,7 @@ def _build_task_export_markdown(
                     r"漏洞详情报告",
                     r"漏洞报告",
                 ],
-                level_offset=1,
+                level_offset=embedded_finding_heading_offset,
             )
             finding_report = _strip_finding_export_noise(finding_report)
             finding_report = _strip_report_export_footer(finding_report)
@@ -1756,10 +1767,11 @@ def _build_task_export_markdown(
             )
             if finding_title:
                 lines.append(
-                    f"### 漏洞报告 {finding_index}: {_render_markdown_heading_text(finding_title)}"
+                    f"{'#' * finding_heading_level} 漏洞报告 {finding_index}: "
+                    f"{_render_markdown_heading_text(finding_title)}"
                 )
             else:
-                lines.append(f"### 漏洞报告 {finding_index}")
+                lines.append(f"{'#' * finding_heading_level} 漏洞报告 {finding_index}")
             lines.append("")
             lines.append(str(finding_report).strip() if finding_report else "_无漏洞报告内容_")
             lines.append("")
