@@ -36,7 +36,8 @@ RUN --mount=type=cache,id=vulhunter-phpstan-runner-apt-lists,target=/var/lib/apt
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        php-cli; \
+        php-cli \
+        ripgrep; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_runtime_packages; then \

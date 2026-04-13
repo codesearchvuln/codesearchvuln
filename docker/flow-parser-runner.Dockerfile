@@ -42,7 +42,8 @@ RUN --mount=type=cache,id=vulhunter-flow-parser-runner-apt-lists,target=/var/lib
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
-        graphviz; \
+        graphviz \
+        ripgrep; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_runtime_packages; then \

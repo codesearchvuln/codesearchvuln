@@ -38,7 +38,8 @@ RUN --mount=type=cache,id=vulhunter-pmd-runner-apt-lists,target=/var/lib/apt/lis
         ca-certificates \
         curl \
         unzip \
-        openjdk-21-jre-headless; \
+        openjdk-21-jre-headless \
+        ripgrep; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_runtime_packages; then \

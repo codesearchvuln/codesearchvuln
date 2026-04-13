@@ -126,6 +126,7 @@ RUN --mount=type=cache,id=vulhunter-sandbox-runner-runtime-apt-lists,target=/var
         ca-certificates \
         curl \
         wget \
+        ripgrep \
         netcat-openbsd \
         dnsutils \
         iputils-ping \

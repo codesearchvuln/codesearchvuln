@@ -35,7 +35,8 @@ RUN --mount=type=cache,id=vulhunter-bandit-runner-apt-lists,target=/var/lib/apt/
     install_runtime_packages() { \
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates; \
+        ca-certificates \
+        ripgrep; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_runtime_packages; then \

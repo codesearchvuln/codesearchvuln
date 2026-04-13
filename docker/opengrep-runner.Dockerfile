@@ -42,7 +42,8 @@ RUN --mount=type=cache,id=vulhunter-opengrep-runner-apt-lists,target=/var/lib/ap
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
-        curl; \
+        curl \
+        ripgrep; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_runtime_packages; then \

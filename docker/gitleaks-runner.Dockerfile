@@ -35,7 +35,8 @@ RUN --mount=type=cache,id=vulhunter-gitleaks-runner-apt-lists,target=/var/lib/ap
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        tar; \
+        tar \
+        ripgrep; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_runtime_packages; then \

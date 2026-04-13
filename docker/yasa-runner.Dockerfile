@@ -349,7 +349,9 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-runtime-apt-lists,target=/var/li
     }; \
     install_runtime_packages() { \
       apt-get update && \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ripgrep; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
     if ! install_runtime_packages; then \
