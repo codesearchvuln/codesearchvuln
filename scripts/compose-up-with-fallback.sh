@@ -39,6 +39,7 @@ ensure_backend_docker_env_file "$REPO_ROOT"
 # 在读取 .env 之前，自动探测 Podman socket 并设置 DOCKER_SOCKET_PATH
 # （若 .env 中已有明确配置，此调用是无操作的）
 load_container_socket_env
+load_container_socket_gid_env
 
 # ─── 日志工具 ─────────────────────────────────────────────────────────────────
 log_info() {

@@ -63,6 +63,18 @@ EXTRA_EXCLUDE_PATTERNS = (
 )
 
 
+def _resolve_cython_nthreads() -> int:
+    raw = os.environ.get("CYTHON_NTHREADS", "").strip()
+    if raw:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            parsed = 0
+        if parsed > 0:
+            return parsed
+    return os.cpu_count() or 4
+
+
 def _matches_pattern(rel_path: str, pattern: str) -> bool:
     basename = Path(rel_path).name
     if fnmatch.fnmatch(rel_path, pattern):
@@ -133,7 +145,7 @@ ext_modules = cythonize(
         "boundscheck": True,         # 保持 Python 语义的边界检查
         "wraparound": True,          # 保持 Python 的负索引语义
     },
-    nthreads=os.cpu_count() or 4,
+    nthreads=_resolve_cython_nthreads(),
     quiet=False,
     include_path=[str(APP_DIR.parent)],  # 允许 cimport app.*
 )

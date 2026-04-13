@@ -233,12 +233,21 @@ jobs:
       - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
         run: |
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
           docker compose config >/dev/null
 
       - name: Smoke test release runtime
         working-directory: ${{ runner.temp }}/release-tree
         run: |
           set -euo pipefail
+
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
 
           service_cid() {
             docker compose ps -q "$1"

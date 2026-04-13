@@ -14,6 +14,8 @@ export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
 
+load_container_socket_env
+load_container_socket_gid_env
 ensure_backend_docker_env_file "$REPO_ROOT"
 
 echo "[INFO] Explicit local-build mode"

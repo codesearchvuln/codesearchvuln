@@ -209,7 +209,25 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置 Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v4
+
+      - name: Restore amd64 cache mounts
+        id: cache-mounts-amd64
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-mounts-runtime-release-amd64
+          key: ${{ runner.os }}-backend-runtime-release-amd64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/cython_build/setup.py', 'backend/cython_build/release_allowlist.txt', 'backend/cython_build/release_exclusion_list.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-backend-runtime-release-amd64-mounts-
+
+      - name: Inject amd64 cache mounts into BuildKit
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-dir: /tmp/.buildx-cache-mounts-runtime-release-amd64
+          dockerfile: docker/backend.Dockerfile
+          skip-extraction: ${{ steps.cache-mounts-amd64.outputs.cache-hit }}
 
       - name: 构建并推送 amd64 后端 Docker 镜像
         uses: docker/build-push-action@v7
@@ -222,12 +240,12 @@ jobs:
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           build-args: |
             DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+            BACKEND_CYTHON_JOBS=4
+            BACKEND_CYTHON_MAX_JOBS=4
           cache-from: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64
             type=gha,scope=backend-runtime-release-amd64
-          cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max
-            type=gha,mode=max,scope=backend-runtime-release-amd64
+          cache-to: type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max
 
       - name: 记录 amd64 后端镜像标签
         id: capture
@@ -262,7 +280,25 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 设置 Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v4
+
+      - name: Restore arm64 cache mounts
+        id: cache-mounts-arm64
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-mounts-runtime-release-arm64
+          key: ${{ runner.os }}-backend-runtime-release-arm64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/cython_build/setup.py', 'backend/cython_build/release_allowlist.txt', 'backend/cython_build/release_exclusion_list.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-backend-runtime-release-arm64-mounts-
+
+      - name: Inject arm64 cache mounts into BuildKit
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-dir: /tmp/.buildx-cache-mounts-runtime-release-arm64
+          dockerfile: docker/backend.Dockerfile
+          skip-extraction: ${{ steps.cache-mounts-arm64.outputs.cache-hit }}
 
       - name: 构建并推送 arm64 后端 Docker 镜像
         uses: docker/build-push-action@v7
@@ -275,12 +311,12 @@ jobs:
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           build-args: |
             DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+            BACKEND_CYTHON_JOBS=4
+            BACKEND_CYTHON_MAX_JOBS=4
           cache-from: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64
             type=gha,scope=backend-runtime-release-arm64
-          cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max
-            type=gha,mode=max,scope=backend-runtime-release-arm64
+          cache-to: type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max
 
       - name: 记录 arm64 后端镜像标签
         id: capture

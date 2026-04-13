@@ -31,6 +31,8 @@ _check_docker() {
 
 # ─── .env 准备 ────────────────────────────────────────────────────────────────
 _prepare_docker_env() {
+  load_container_socket_env
+  load_container_socket_gid_env
   ensure_backend_docker_env_file "${REPO_ROOT}"
 }
 

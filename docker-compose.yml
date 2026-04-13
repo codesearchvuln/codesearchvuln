@@ -44,6 +44,8 @@ services:
       - backend_runtime_data:/app/data/runtime
       - scan_workspace:/tmp/vulhunter/scans
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_SOCKET_GID:-1001}"
     ports:
       - "${VULHUNTER_BACKEND_PORT:-8000}:8000"
     env_file:

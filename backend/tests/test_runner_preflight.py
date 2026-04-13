@@ -292,6 +292,44 @@ def test_run_runner_preflight_sync_reports_timeout_and_removes_container(monkeyp
     assert seen["client_closed"] is True
 
 
+def test_run_runner_preflight_sync_surfaces_docker_socket_permission_hint(monkeypatch):
+    class _FakeImages:
+        def get(self, _image):
+            raise runner_preflight.DOCKER_EXCEPTION(
+                "Error while fetching server API version: "
+                "('Connection aborted.', PermissionError(13, 'Permission denied'))"
+            )
+
+    class _FakeClient:
+        def __init__(self):
+            self.images = _FakeImages()
+            self.containers = SimpleNamespace()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        runner_preflight.docker,
+        "from_env",
+        lambda: _FakeClient(),
+        raising=False,
+    )
+
+    spec = runner_preflight.RunnerPreflightSpec(
+        name="sandbox-runner",
+        image="vulhunter/sandbox-runner-local:latest",
+        command=["python3", "-c", "print('ok')"],
+        timeout_seconds=10,
+    )
+
+    result = runner_preflight.run_runner_preflight_sync(spec)
+
+    assert result.success is False
+    assert result.error is not None
+    assert "DOCKER_SOCKET_GID" in result.error
+    assert "Permission denied" in result.error
+
+
 @pytest.mark.asyncio
 async def test_check_agent_services_closes_docker_and_redis_clients(monkeypatch):
     from app import main

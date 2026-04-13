@@ -36,6 +36,7 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
     assert "NEXUS_WEB_PULL_POLICY" in compose_text
     assert "NEXUS_ITEM_DETAIL_PULL_POLICY" in compose_text
+    assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in compose_text
 
@@ -55,6 +56,7 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "nexus-web" not in hybrid_text
     assert "nexus-itemDetail" not in hybrid_text
     assert "-runner-local:latest" not in hybrid_text
+    assert "group_add:" in hybrid_text and '${DOCKER_SOCKET_GID:-1001}' in hybrid_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in hybrid_text
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in hybrid_text
 
@@ -128,18 +130,24 @@ def test_backend_release_publish_workflow_uses_runtime_release_and_optional_hard
     assert "runs-on: ubuntu-latest" in publish_backend_amd64_section
     assert "platforms: linux/amd64" in publish_backend_amd64_section
     assert "target: runtime-release" in publish_backend_amd64_section
+    assert "BACKEND_CYTHON_JOBS=4" in publish_backend_amd64_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64" in publish_backend_amd64_section
     assert "scope=backend-runtime-release-amd64" in publish_backend_amd64_section
     assert "vulhunter-backend:buildcache-runtime-release-amd64" in publish_backend_amd64_section
+    assert "actions/cache@v4" in publish_workflow_text
+    assert "buildkit-cache-dance" in publish_workflow_text
+    assert "type=gha,mode=max,scope=backend-runtime-release-amd64" not in publish_backend_amd64_section
 
     assert "if: ${{ inputs.build_backend && inputs.multi_arch }}" in publish_backend_arm64_section
     assert "runs-on: ubuntu-24.04-arm" in publish_backend_arm64_section
     assert "platforms: linux/arm64" in publish_backend_arm64_section
     assert "target: runtime-release" in publish_backend_arm64_section
+    assert "BACKEND_CYTHON_JOBS=4" in publish_backend_arm64_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64" in publish_backend_arm64_section
     assert "scope=backend-runtime-release-arm64" in publish_backend_arm64_section
     assert "vulhunter-backend:buildcache-runtime-release-arm64" in publish_backend_arm64_section
     assert "setup-qemu-action" not in publish_backend_arm64_section
+    assert "type=gha,mode=max,scope=backend-runtime-release-arm64" not in publish_backend_arm64_section
 
     assert "needs:" in publish_backend_section
     assert "publish-backend-amd64" in publish_backend_section
@@ -181,11 +189,15 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
     assert "FROM selective-cython-compiler AS runtime-release-app-assembler" in backend_text
     assert "removed cythonized source" in backend_text
     assert "remaining non-preserved .py count" in backend_text
+    assert "ARG BACKEND_CYTHON_MAX_JOBS=4" in backend_text
+    assert "ARG BACKEND_CYTHON_MEM_PER_JOB_MB=768" in backend_text
+    assert "export CYTHON_NTHREADS=" in backend_text
 
     assert "CYTHON_INCLUDE_PATTERNS_FILE" in setup_text
     assert "DEFAULT_RELEASE_EXCLUSION_FILE" in setup_text
     assert "CYTHON_EXCLUDE_PATTERNS_FILE" in setup_text
     assert "DEFAULT_RELEASE_ALLOWLIST_FILE" in setup_text
+    assert "CYTHON_NTHREADS" in setup_text
     assert 'module_name = f"app.' in setup_text
     assert "Extension(module_name" in setup_text
     assert "release-allowlist" in setup_text
@@ -206,9 +218,13 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
         "frontend",
         "nexus-web",
         "nexus-itemDetail",
+        "backend/.venv",
         "backend/tests",
         "backend/log",
         "backend/uploads",
+        "backend/**/__pycache__",
+        "backend/.pytest_cache",
+        "backend/.ruff_cache",
     ):
         assert ignored_path in dockerignore_text
 

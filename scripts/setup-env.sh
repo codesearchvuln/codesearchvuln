@@ -150,6 +150,19 @@ upsert_env_key() {
   fi
 }
 
+stat_group_id() {
+  local target="$1"
+  if stat -c '%g' "$target" >/dev/null 2>&1; then
+    stat -c '%g' "$target"
+    return 0
+  fi
+  if stat -f '%g' "$target" >/dev/null 2>&1; then
+    stat -f '%g' "$target"
+    return 0
+  fi
+  return 1
+}
+
 # ─── 主逻辑 ───────────────────────────────────────────────────────────────────
 log_info "detecting container runtime..."
 
@@ -213,6 +226,15 @@ else
     log_info "Docker runtime: DOCKER_SOCKET_PATH already set, keeping as-is"
   else
     log_info "Docker runtime: DOCKER_SOCKET_PATH not needed (default /var/run/docker.sock works)"
+  fi
+fi
+
+if [ -S "$SOCKET_PATH" ]; then
+  socket_gid="$(stat_group_id "$SOCKET_PATH" || true)"
+  if [ -n "${socket_gid:-}" ]; then
+    upsert_env_key "DOCKER_SOCKET_GID" "$socket_gid"
+  else
+    log_warn "could not detect group id for socket: ${SOCKET_PATH}"
   fi
 fi
 

@@ -14,6 +14,21 @@ DOCKER_EXCEPTION = getattr(getattr(docker, "errors", None), "DockerException", E
 DOCKER_NOT_FOUND = getattr(getattr(docker, "errors", None), "ImageNotFound", Exception)
 
 
+def _format_docker_error(exc: Exception) -> str:
+    message = str(exc).strip() or exc.__class__.__name__
+    lowered = message.lower()
+    if "permission denied" in lowered and (
+        "server api version" in lowered or "docker.sock" in lowered or "connection aborted" in lowered
+    ):
+        return (
+            f"{message}. Docker socket access was denied. "
+            "Ensure the backend container joins the Docker socket group by exporting "
+            "DOCKER_SOCKET_GID=$(stat -c '%g' ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}) "
+            "before running docker compose."
+        )
+    return message
+
+
 @dataclass
 class RunnerPreflightSpec:
     name: str
@@ -175,7 +190,7 @@ def run_runner_preflight_sync(spec: RunnerPreflightSpec) -> RunnerPreflightResul
             exit_code=1,
             stdout="",
             stderr="",
-            error=str(exc),
+            error=_format_docker_error(exc),
             container_id=container_id,
         )
     except Exception as exc:
@@ -188,7 +203,7 @@ def run_runner_preflight_sync(spec: RunnerPreflightSpec) -> RunnerPreflightResul
             exit_code=1,
             stdout="",
             stderr="",
-            error=str(exc),
+            error=_format_docker_error(exc),
             container_id=container_id,
         )
     finally:

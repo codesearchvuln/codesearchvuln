@@ -270,6 +270,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "gh release upload" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "docker compose config" in workflow_text
+    assert "DOCKER_SOCKET_GID" in workflow_text
+    assert "stat -c '%g'" in workflow_text
     assert "docker compose up -d db redis backend" in workflow_text
     assert "docker compose up -d frontend" in workflow_text
     assert "service_cid()" in workflow_text
@@ -421,6 +423,7 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "start_period: 180s" in compose_text
     assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
     assert "./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" in compose_text
+    assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
     assert compose_text.count("build:") == 2
     assert "image: ${NEXUS_WEB_IMAGE:-vulhunter/nexus-web-local:latest}" in compose_text
     assert "image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in compose_text

@@ -24,27 +24,36 @@ compose_env_log_error() {
   echo "[ERROR] $*" >&2
 }
 
-# ─── 自动注入 DOCKER_SOCKET_PATH（仅在运行时探测，不修改文件）────────────────
-# 供 compose-up-with-fallback.sh 等脚本调用：若 .env 未设置 DOCKER_SOCKET_PATH
-# 且当前 socket 是 Podman socket，则自动 export，使 compose 变量替换生效。
-# 已在 .env 中明确设置时直接跳过（优先级最高）。
-load_container_socket_env() {
-  # 若 .env 或调用方已设置，跳过探测
-  if [ -n "${DOCKER_SOCKET_PATH:-}" ]; then
+
+compose_env_stat_group_id() {
+  local target="${1:?target path required}"
+  if stat -c '%g' "$target" >/dev/null 2>&1; then
+    stat -c '%g' "$target"
+    return 0
+  fi
+  if stat -f '%g' "$target" >/dev/null 2>&1; then
+    stat -f '%g' "$target"
+    return 0
+  fi
+  return 1
+}
+
+
+resolve_container_socket_path() {
+  if [ -n "${DOCKER_SOCKET_PATH:-}" ] && [ -S "${DOCKER_SOCKET_PATH}" ]; then
+    printf '%s' "${DOCKER_SOCKET_PATH}"
     return 0
   fi
 
-  # 优先检查真 Docker socket
   local docker_candidates=("/var/run/docker.sock" "/run/docker.sock")
   local s
   for s in "${docker_candidates[@]}"; do
     if [ -S "$s" ]; then
-      # docker socket 存在且不是 Podman compat 层 → 默认值已经正确，无需设置
+      printf '%s' "$s"
       return 0
     fi
   done
 
-  # 找 Podman socket
   local uid
   uid="$(id -u)"
   local podman_candidates=(
@@ -62,20 +71,66 @@ load_container_socket_env() {
 
   for s in "${podman_candidates[@]}"; do
     if [ -S "$s" ]; then
-      export DOCKER_SOCKET_PATH="$s"
-      compose_env_log_info "auto-detected Podman socket: DOCKER_SOCKET_PATH=${s}"
+      printf '%s' "$s"
       return 0
     fi
   done
 
-  # 也尝试 DOCKER_HOST（用户可能已在 shell 中设置）
   if [ -n "${DOCKER_HOST:-}" ]; then
     local sock_from_env="${DOCKER_HOST#unix://}"
     if [ "$sock_from_env" != "$DOCKER_HOST" ] && [ -S "$sock_from_env" ]; then
-      export DOCKER_SOCKET_PATH="$sock_from_env"
-      compose_env_log_info "using DOCKER_HOST socket: DOCKER_SOCKET_PATH=${sock_from_env}"
+      printf '%s' "$sock_from_env"
+      return 0
     fi
   fi
+
+  return 1
+}
+
+# ─── 自动注入 DOCKER_SOCKET_PATH（仅在运行时探测，不修改文件）────────────────
+# 供 compose-up-with-fallback.sh 等脚本调用：若 .env 未设置 DOCKER_SOCKET_PATH
+# 且当前 socket 是 Podman socket，则自动 export，使 compose 变量替换生效。
+# 已在 .env 中明确设置时直接跳过（优先级最高）。
+load_container_socket_env() {
+  # 若 .env 或调用方已设置，跳过探测
+  if [ -n "${DOCKER_SOCKET_PATH:-}" ]; then
+    return 0
+  fi
+
+  local detected_socket
+  detected_socket="$(resolve_container_socket_path || true)"
+  case "${detected_socket}" in
+    ""|/var/run/docker.sock|/run/docker.sock)
+      return 0
+      ;;
+    *)
+      export DOCKER_SOCKET_PATH="${detected_socket}"
+      compose_env_log_info "auto-detected container socket: DOCKER_SOCKET_PATH=${detected_socket}"
+      return 0
+      ;;
+  esac
+}
+
+
+load_container_socket_gid_env() {
+  if [ -n "${DOCKER_SOCKET_GID:-}" ]; then
+    return 0
+  fi
+
+  local resolved_socket
+  resolved_socket="$(resolve_container_socket_path || true)"
+  if [ -z "${resolved_socket}" ] || [ ! -S "${resolved_socket}" ]; then
+    return 0
+  fi
+
+  local socket_gid
+  socket_gid="$(compose_env_stat_group_id "${resolved_socket}" 2>/dev/null || true)"
+  if [ -z "${socket_gid}" ]; then
+    return 0
+  fi
+
+  export DOCKER_SOCKET_GID="${socket_gid}"
+  compose_env_log_info "detected container socket gid: DOCKER_SOCKET_GID=${socket_gid}"
 }
 
 # ─── 自动探测 compose 命令（docker compose / podman compose）──────────────────

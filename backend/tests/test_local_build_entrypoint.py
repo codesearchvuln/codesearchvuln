@@ -19,6 +19,7 @@ def test_local_build_script_prefers_daocloud_defaults_for_local_builds() -> None
 
     assert 'export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}"' in script_text
     assert 'export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"' in script_text
+    assert "load_container_socket_gid_env" in script_text
 
 
 def test_local_build_script_builds_services_sequentially_before_up() -> None:

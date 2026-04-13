@@ -323,7 +323,9 @@ CMD ["python3", "-m", "app.runtime.container_startup", "dev"]
 FROM builder AS selective-cython-compiler
 
 ARG BACKEND_PYPI_INDEX_PRIMARY
-ARG BACKEND_CYTHON_JOBS=4
+ARG BACKEND_CYTHON_JOBS=0
+ARG BACKEND_CYTHON_MAX_JOBS=4
+ARG BACKEND_CYTHON_MEM_PER_JOB_MB=768
 RUN --mount=type=cache,id=vulhunter-runtime-release-cython-uv,target=/root/.cache/uv \
   VIRTUAL_ENV=/opt/backend-venv \
   UV_INDEX_URL="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}" \
@@ -338,8 +340,17 @@ RUN --mount=type=cache,id=vulhunter-runtime-release-cython-ccache,target=/root/.
   export CCACHE_DIR=/root/.ccache; \
   export CCACHE_MAXSIZE=2G; \
   export CYTHON_INCLUDE_PATTERNS_FILE=/build/cython_build/release_allowlist.txt; \
+  CPU_JOBS="$(nproc)"; \
+  MEM_MB="$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"; \
+  MEM_JOBS=$(( MEM_MB / BACKEND_CYTHON_MEM_PER_JOB_MB )); \
+  if [ "${MEM_JOBS}" -lt 1 ]; then MEM_JOBS=1; fi; \
   NPROC="${BACKEND_CYTHON_JOBS}"; \
-  echo "[RuntimeRelease] Selective Cython compile (jobs=${NPROC})"; \
+  if [ "${NPROC}" -le 0 ]; then NPROC="${CPU_JOBS}"; fi; \
+  if [ "${NPROC}" -gt "${CPU_JOBS}" ]; then NPROC="${CPU_JOBS}"; fi; \
+  if [ "${NPROC}" -gt "${BACKEND_CYTHON_MAX_JOBS}" ]; then NPROC="${BACKEND_CYTHON_MAX_JOBS}"; fi; \
+  if [ "${NPROC}" -gt "${MEM_JOBS}" ]; then NPROC="${MEM_JOBS}"; fi; \
+  export CYTHON_NTHREADS="${NPROC}"; \
+  echo "[RuntimeRelease] Selective Cython compile (jobs=${NPROC}, cpu=${CPU_JOBS}, mem_mb=${MEM_MB}, mem_jobs=${MEM_JOBS})"; \
   cd /build; \
   /opt/backend-venv/bin/python cython_build/setup.py build_ext \
   --build-lib /build/compiled \
@@ -475,7 +486,9 @@ FROM builder AS cython-compiler
 
 # 安装 Cython 和 setuptools（builder 使用 uv 管理 venv，无 pip，用 uv pip install）
 ARG BACKEND_PYPI_INDEX_PRIMARY
-ARG BACKEND_CYTHON_JOBS=4
+ARG BACKEND_CYTHON_JOBS=0
+ARG BACKEND_CYTHON_MAX_JOBS=4
+ARG BACKEND_CYTHON_MEM_PER_JOB_MB=768
 RUN --mount=type=cache,id=vulhunter-cython-uv,target=/root/.cache/uv \
   VIRTUAL_ENV=/opt/backend-venv \
   UV_INDEX_URL="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}" \
@@ -493,8 +506,17 @@ RUN --mount=type=cache,id=vulhunter-cython-ccache,target=/root/.ccache,sharing=s
   export CC="ccache gcc" CXX="ccache g++"; \
   export CCACHE_DIR=/root/.ccache; \
   export CCACHE_MAXSIZE=2G; \
+  CPU_JOBS="$(nproc)"; \
+  MEM_MB="$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"; \
+  MEM_JOBS=$(( MEM_MB / BACKEND_CYTHON_MEM_PER_JOB_MB )); \
+  if [ "${MEM_JOBS}" -lt 1 ]; then MEM_JOBS=1; fi; \
   NPROC="${BACKEND_CYTHON_JOBS}"; \
-  echo "[Cython] 并行编译（jobs=${NPROC}），ccache dir=${CCACHE_DIR}"; \
+  if [ "${NPROC}" -le 0 ]; then NPROC="${CPU_JOBS}"; fi; \
+  if [ "${NPROC}" -gt "${CPU_JOBS}" ]; then NPROC="${CPU_JOBS}"; fi; \
+  if [ "${NPROC}" -gt "${BACKEND_CYTHON_MAX_JOBS}" ]; then NPROC="${BACKEND_CYTHON_MAX_JOBS}"; fi; \
+  if [ "${NPROC}" -gt "${MEM_JOBS}" ]; then NPROC="${MEM_JOBS}"; fi; \
+  export CYTHON_NTHREADS="${NPROC}"; \
+  echo "[Cython] 并行编译（jobs=${NPROC}, cpu=${CPU_JOBS}, mem_mb=${MEM_MB}, mem_jobs=${MEM_JOBS}），ccache dir=${CCACHE_DIR}"; \
   cd /build; \
   /opt/backend-venv/bin/python cython_build/setup.py build_ext \
   --build-lib /build/compiled \

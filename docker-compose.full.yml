@@ -43,6 +43,8 @@ services:
       - backend_runtime_data:/app/data/runtime
       - scan_workspace:/tmp/vulhunter/scans
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+    group_add: !override
+      - "${DOCKER_SOCKET_GID:-1001}"
     environment: !override
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
       ASYNCPG_DSN: postgresql://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
