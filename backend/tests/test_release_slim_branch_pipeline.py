@@ -270,7 +270,9 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "gh release upload" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "docker compose config" in workflow_text
-    assert "docker compose up -d db redis backend frontend" in workflow_text
+    assert "docker compose up -d db redis backend" in workflow_text
+    assert "docker compose up -d frontend" in workflow_text
+    assert "dependency failed to start" not in workflow_text
     assert "/health" in workflow_text
     assert "http://127.0.0.1:3000/" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text

@@ -245,18 +245,36 @@ jobs:
           }
           trap cleanup EXIT
 
-          docker compose up -d db redis backend frontend
+          docker compose up -d db redis backend
+          backend_ready=false
           for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1 && \
-               curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then
-              exit 0
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              backend_ready=true
+              break
             fi
             sleep 5
           done
+          if [[ "${backend_ready}" != "true" ]]; then
+            docker compose logs backend
+            echo "::error::Release backend failed to become ready for generated release tree."
+            exit 1
+          fi
 
-          docker compose logs backend frontend
-          echo "::error::Release runtime smoke test failed for generated release tree."
-          exit 1
+          docker compose up -d frontend
+          frontend_ready=false
+          for attempt in $(seq 1 12); do
+            if curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then
+              frontend_ready=true
+              break
+            fi
+            sleep 5
+          done
+          if [[ "${frontend_ready}" != "true" ]]; then
+            docker compose logs frontend
+            echo "::error::Release frontend failed to become ready for generated release tree."
+            exit 1
+          fi
+          exit 0
 
   publish-release-assets-and-branch:
     needs:
