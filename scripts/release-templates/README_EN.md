@@ -1,16 +1,15 @@
-# VulHunter Release
+# VulHunter User Guide
 
-This branch is an auto-generated runtime-only distribution snapshot from `main`.
-It does not ship backend source code or frontend source code and does not support source-based rebuilds.
-The only supported startup command is:
+This release branch is intended for end users. Configure the environment and start the stack with:
 
 ```bash
-docker compose up
+cp docker/env/backend/env.example docker/env/backend/.env
+docker compose up -d
 ```
 
-## Before You Start
+## 1. Initial Configuration
 
-Bootstrap the backend Docker env file before the first run:
+Copy the backend environment template before the first run:
 
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
@@ -22,23 +21,46 @@ Set at least:
 - `LLM_PROVIDER`
 - `LLM_MODEL`
 
-## Runtime Mode
+If your deployment needs database, Redis, auth, or other runtime settings, edit `docker/env/backend/.env` accordingly.
 
-- `backend`, `frontend`, runner images, and sandbox use published digest-pinned OCI images.
-- `nexus-web` and `nexus-itemDetail` still build locally from the bundled static runtime assets.
-- You can override the default runtime images with `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `SANDBOX_IMAGE`, `SCANNER_*_IMAGE`, `FLOW_PARSER_RUNNER_IMAGE`, and `SANDBOX_RUNNER_IMAGE`.
+## 2. Start and Stop
 
-## Nexus Runtime Assets
+Start in the background:
 
-- The release snapshot keeps `nexus-web/dist/**`, `nexus-web/nginx.conf`, `nexus-itemDetail/dist/**`, and `nexus-itemDetail/nginx.conf`
-- The runtime-only release flow does not restore the legacy release artifact or deploy script pipeline
-- `nexus-web` listens on `http://localhost:5174` by default
-- `nexus-itemDetail` listens on `http://localhost:5175` by default
+```bash
+docker compose up -d
+```
 
-## Endpoints
+Follow logs:
+
+```bash
+docker compose logs -f
+```
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+Stop and remove volumes:
+
+```bash
+docker compose down -v
+```
+
+## 3. Service Endpoints
 
 - Frontend: `http://localhost:3000`
-- Backend: `http://localhost:8000`
-- OpenAPI: `http://localhost:8000/docs`
+- Backend API: `http://localhost:8000`
+- OpenAPI docs: `http://localhost:8000/docs`
+- `nexus-web`: `http://localhost:5174`
+- `nexus-itemDetail`: `http://localhost:5175`
 
-See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for compose details.
+## 4. Common Adjustments
+
+- If a port is already in use, update the relevant `ports` entry in `docker-compose.yml`
+- To override runtime images, set `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `SANDBOX_IMAGE`, `SCANNER_*_IMAGE`, `FLOW_PARSER_RUNNER_IMAGE`, or `SANDBOX_RUNNER_IMAGE` in `.env`
+- After changing configuration, run `docker compose up -d` again to apply it
+
+See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for compose-specific details.
