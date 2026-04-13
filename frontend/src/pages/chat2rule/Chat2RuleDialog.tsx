@@ -285,7 +285,7 @@ export default function Chat2RuleDialog({
 						<div className="space-y-2">
 							<DialogTitle className="flex items-center gap-2 text-left text-white">
 								<MessageSquareCode className="h-5 w-5 text-[#c7ff6a]" />
-								Chat2Rule · Opengrep
+								聊天生成规则 · Opengrep
 							</DialogTitle>
 							<DialogDescription className="text-left text-white/64">
 								片段需要先在代码浏览页添加；这里专注聊天生成、查看草案，以及在最后手动保存。
@@ -428,7 +428,7 @@ export default function Chat2RuleDialog({
 								<Textarea
 									value={composer}
 									onChange={(event) => setComposer(event.target.value)}
-									placeholder="例如：缩小匹配范围，只保留 Python；或者排除 helper 函数带来的误报..."
+									placeholder="例如：根据选中的代码片段，我想要一个规则来检测 Python 里使用 subprocess 模块时，shell 参数被设置为 True 的情况。"
 									className="min-h-[132px] border-white/10 bg-white/[0.03] text-white placeholder:text-white/28"
 								/>
 								<div className="flex items-center justify-between gap-3">

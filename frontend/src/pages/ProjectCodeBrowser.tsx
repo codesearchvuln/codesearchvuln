@@ -1126,7 +1126,7 @@ export function ProjectCodeBrowserContent({
 					</div>
 					<div className="flex flex-wrap items-center gap-2">
 						<Badge variant="outline" className="border-white/12 text-white/72">
-							Chat2Rule 片段 {chat2RuleSelections.length}
+							已选中片段片段 {chat2RuleSelections.length}
 						</Badge>
 						<Button
 							type="button"
