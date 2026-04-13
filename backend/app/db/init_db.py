@@ -36,9 +36,12 @@ try:
 except AttributeError:
     YAML_LOADER = yaml.SafeLoader
 
-ENABLE_RULE_IMPORT_PROGRESS = (
-    os.getenv("INIT_DB_PROGRESS", "false").strip().lower() in {"1", "true", "yes", "on"}
-)
+def _env_flag(name: str, default: bool = False) -> bool:
+    fallback = "true" if default else "false"
+    return os.getenv(name, fallback).strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_RULE_IMPORT_PROGRESS = _env_flag("INIT_DB_PROGRESS", default=False)
 
 
 def _load_yaml_fast(content: str):
@@ -733,8 +736,10 @@ async def init_db(db: AsyncSession) -> None:
     demo_user = await create_demo_user(db)
 
     # 不再创建历史演示项目，统一切换为 GitHub 预置样本项目
-    if demo_user:
+    if demo_user and _env_flag("INIT_DB_SEED_PROJECTS", default=True):
         await ensure_default_seed_projects(db, demo_user)
+    elif demo_user:
+        logger.info("跳过默认种子项目初始化（INIT_DB_SEED_PROJECTS=false）")
 
     await db.commit()
 

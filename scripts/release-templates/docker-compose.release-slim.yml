@@ -39,6 +39,7 @@ services:
       ASYNCPG_DSN: postgresql://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
       REDIS_URL: redis://redis:6379/0
       RESET_STATIC_SCAN_TABLES_ON_DEPLOY: "false"
+      INIT_DB_SEED_PROJECTS: "${INIT_DB_SEED_PROJECTS:-false}"
       AGENT_ENABLED: "true"
       SANDBOX_ENABLED: "true"
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-__SANDBOX_IMAGE_REF__}

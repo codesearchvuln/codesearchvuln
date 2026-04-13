@@ -396,4 +396,46 @@ async def test_init_db_uses_seed_project_initializer(monkeypatch):
     create_internal_rules_mock.assert_awaited_once_with(db)
     create_patch_rules_mock.assert_awaited_once_with(db)
     ensure_builtin_gitleaks_rules_mock.assert_awaited_once_with(db)
+
+
+@pytest.mark.asyncio
+async def test_init_db_can_skip_heavy_bootstrap_steps_via_env_flags(monkeypatch):
+    db = _make_db(existing_project=[])
+    user = SimpleNamespace(id="user-1")
+
+    create_demo_user_mock = AsyncMock(return_value=user)
+    ensure_default_seed_projects_mock = AsyncMock()
+    create_internal_rules_mock = AsyncMock()
+    create_patch_rules_mock = AsyncMock()
+    ensure_builtin_gitleaks_rules_mock = AsyncMock()
+    init_templates_mock = AsyncMock()
+
+    monkeypatch.setattr(init_db_module, "create_demo_user", create_demo_user_mock)
+    monkeypatch.setattr(init_db_module, "ensure_default_seed_projects", ensure_default_seed_projects_mock)
+    monkeypatch.setattr(init_db_module, "create_internal_opengrep_rules", create_internal_rules_mock)
+    monkeypatch.setattr(init_db_module, "create_patch_opengrep_rules", create_patch_rules_mock)
+    monkeypatch.setattr(init_db_module, "ensure_builtin_gitleaks_rules", ensure_builtin_gitleaks_rules_mock)
+
+    module = sys.modules.get("app.services.init_templates")
+    if module is None:
+        import app.services.init_templates as module
+    original = getattr(module, "init_templates_and_rules", None)
+    monkeypatch.setattr(module, "init_templates_and_rules", init_templates_mock)
+
+    monkeypatch.setenv("INIT_DB_SEED_PROJECTS", "false")
+
+    try:
+        await init_db_module.init_db(db)
+    finally:
+        if original is None:
+            delattr(module, "init_templates_and_rules")
+        else:
+            setattr(module, "init_templates_and_rules", original)
+
+    create_demo_user_mock.assert_awaited_once_with(db)
+    ensure_default_seed_projects_mock.assert_not_called()
+    create_internal_rules_mock.assert_awaited_once_with(db)
+    create_patch_rules_mock.assert_awaited_once_with(db)
+    ensure_builtin_gitleaks_rules_mock.assert_awaited_once_with(db)
+    init_templates_mock.assert_awaited_once_with(db)
     init_templates_mock.assert_awaited_once_with(db)

@@ -309,6 +309,8 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert manifest["images"]["flow_parser_runner"]["ref"] in compose_text
     assert "image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:" in compose_text
     assert "image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine}" in compose_text
+    assert 'INIT_DB_SEED_PROJECTS: "${INIT_DB_SEED_PROJECTS:-false}"' in compose_text
+    assert "start_period: 180s" in compose_text
     assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
     assert "./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" in compose_text
     assert compose_text.count("build:") == 2
