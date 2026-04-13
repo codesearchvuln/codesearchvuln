@@ -131,6 +131,11 @@ jobs:
     needs: detect-changes
     uses: ./.github/workflows/publish-runtime-images.yml
     secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     with:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'latest' }}
       build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}

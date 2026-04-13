@@ -25,6 +25,11 @@ jobs:
   publish-runtime-images:
     uses: ./.github/workflows/publish-runtime-images.yml
     secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     with:
       tag: latest
       build_frontend: true
