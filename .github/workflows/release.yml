@@ -99,6 +99,12 @@ jobs:
           ref: ${{ needs.prepare-release.outputs.source_ref }}
           fetch-depth: 0
 
+      - name: Setup pnpm for frontend release bundle
+        uses: pnpm/action-setup@v5
+        with:
+          package_json_file: frontend/package.json
+          run_install: false
+
       - name: Setup Node.js for frontend release bundle
         uses: actions/setup-node@v4
         with:
@@ -110,7 +116,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          corepack enable
           cd frontend
           pnpm install --frozen-lockfile
           pnpm build

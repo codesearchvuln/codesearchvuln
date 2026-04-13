@@ -143,6 +143,10 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "smoke-test-release-tree:" in workflow_text
     assert "publish-release-assets-and-branch:" in workflow_text
     assert "Setup Node.js for frontend release bundle" in workflow_text
+    assert "Setup pnpm for frontend release bundle" in workflow_text
+    assert "uses: pnpm/action-setup@v5" in workflow_text
+    assert "package_json_file: frontend/package.json" in workflow_text
+    assert workflow_text.index("uses: pnpm/action-setup@v5") < workflow_text.index("cache: pnpm")
     assert "pnpm install --frozen-lockfile" in workflow_text
     assert "pnpm build" in workflow_text
     assert "upload-artifact@v4" in workflow_text
