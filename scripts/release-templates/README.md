@@ -1,16 +1,16 @@
-# VulHunter 使用说明
+# VulHunter 部署指南
 
-这是面向最终用户的 VulHunter 运行包。它和源码仓库根目录的 compose 合同不是一回事：源码仓库里的主 frontend 仍沿用源码仓库自己的独立运行镜像合同；当前 release tree 的主 frontend 则是 `STATIC_FRONTEND_IMAGE` 加 `deploy/runtime/frontend/site` 与 `deploy/runtime/frontend/nginx/default.conf`。该 release tree 只包含运行时 compose 文件、环境模板和静态 bundle，不附带 `backend` / `frontend` 源码，也不支持在 release tree 内本地重建这些镜像。
+本目录用于部署 VulHunter 服务，包含启动所需的 Docker Compose 配置、环境变量模板、前端静态文件以及辅助脚本。按照本文档完成配置后，即可直接启动 Web 界面、后端服务、数据库、Redis 和默认扫描运行组件。
 
-## 1. 启动前配置
+## 1. 快速开始
 
-首次启动前，先复制环境变量模板：
+首次启动前，请先复制环境变量模板：
 
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 ```
 
-至少补齐以下配置：
+然后至少补齐以下配置：
 
 - `LLM_API_KEY`
 - `LLM_PROVIDER`
@@ -18,15 +18,33 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 如需数据库、Redis、鉴权或其他业务配置，请继续编辑 `docker/env/backend/.env`。
 
-## 2. 在线部署（默认）
+完成配置后，执行：
 
 ```bash
 docker compose up -d
 ```
 
-默认会拉取 digest 固定的 `backend`、sandbox 和各类 runner 运行镜像；主前端由 `STATIC_FRONTEND_IMAGE` 承载随包静态文件与 nginx 配置，不是 `vulhunter-frontend` 运行镜像；`db`、`redis` 以及两个 nexus 静态站点由当前 release tree 提供运行配置。
+## 2. 首次配置说明
 
-## 3. 离线部署（可选）
+`docker/env/backend/.env` 是 VulHunter 的主要运行配置文件。常见需要确认的项目包括：
+
+- LLM 提供方与模型
+- 访问密钥与 API 地址
+- 数据库连接参数
+- Redis 连接参数
+- 扫描相关开关与镜像覆盖项
+
+如果你暂时只想完成最小可用部署，通常只需要先填写 `LLM_API_KEY`、`LLM_PROVIDER` 和 `LLM_MODEL`。
+
+## 3. 在线部署（默认）
+
+```bash
+docker compose up -d
+```
+
+默认情况下，VulHunter 会拉取所需的运行镜像并启动全部服务。主界面的静态文件和默认 nginx 配置已经随包提供；`STATIC_FRONTEND_IMAGE` 用于承载这些静态文件。数据库、Redis、`nexus-web` 和 `nexus-itemDetail` 也会按当前目录中的配置一并启动。
+
+## 4. 离线部署（可选）
 
 先下载与你机器架构匹配的离线镜像包 `vulhunter-images-<arch>.tar.zst`，放到 release 根目录或 `images/` 目录，然后执行：
 
@@ -36,9 +54,9 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-离线模式会切换到本地 `vulhunter-local/*` 镜像标签，不再依赖在线拉取运行镜像；主前端仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，`offline-images.env` 里也不会提供源码仓库那套独立 frontend 运行镜像覆盖项。
+离线模式会先导入镜像包，再切换到本地 `vulhunter-local/*` 镜像标签运行，从而避免在线拉取。前端静态文件仍使用当前目录中自带的静态文件与 nginx 配置。
 
-## 4. 运行与维护
+## 5. 运行与维护
 
 查看日志：
 
@@ -60,15 +78,20 @@ docker compose down -v
 
 更新 `.env` 或 `offline-images.env` 后，再执行 `docker compose up -d` 使变更生效。
 
-## 5. 发布合同说明
+## 6. 常用配置项
 
-- 正式 release tree 只支持 `docker-compose.yml` 这一份 compose 入口
-- `backend` / runner / sandbox 镜像由发布流程预构建并固定到 digest
-- 主前端通过 `STATIC_FRONTEND_IMAGE` 承载随包静态资源和 nginx 配置，不使用源码仓库那套独立 frontend 运行镜像合同，也不支持在 release tree 内重建 frontend
-- `nexus-web` 与 `nexus-itemDetail` 仅从随包附带的静态产物组装本地 nginx 容器
-- 本地 build overlay、Dockerfile 和源码分发包不属于此 release contract
+如需覆盖默认运行镜像或接入已有环境，可根据实际需要在 `docker/env/backend/.env` 中调整：
 
-## 6. 访问入口
+- `BACKEND_IMAGE`
+- `STATIC_FRONTEND_IMAGE`
+- `SANDBOX_IMAGE`
+- `SCANNER_*_IMAGE`
+- `FLOW_PARSER_RUNNER_IMAGE`
+- `SANDBOX_RUNNER_IMAGE`
+
+其中 `STATIC_FRONTEND_IMAGE` 只负责提供 Web 界面的 nginx 基底镜像；实际静态文件已包含在当前目录中。
+
+## 7. 访问入口
 
 - 前端：`http://localhost:3000`
 - 后端 API：`http://localhost:8000`
@@ -76,4 +99,4 @@ docker compose down -v
 - `nexus-web`：`http://localhost:5174`
 - `nexus-itemDetail`：`http://localhost:5175`
 
-更多 compose 使用说明见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。
+更多 Docker Compose 相关操作见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。

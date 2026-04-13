@@ -1,8 +1,8 @@
-# VulHunter User Guide
+# VulHunter Deployment Guide
 
-This release tree is a runtime package for end users. It ships only the runtime compose contract, environment templates, and static bundles. It does not include `backend` / `frontend` source trees and does not support rebuilding those images inside the release tree.
+This package is used to deploy VulHunter with Docker Compose. It includes the startup configuration, environment templates, web UI static assets, and helper scripts required to launch the web interface, backend service, database, Redis, and the default runner components.
 
-## 1. Initial Configuration
+## 1. Quick Start
 
 Copy the backend environment template before the first run:
 
@@ -10,23 +10,41 @@ Copy the backend environment template before the first run:
 cp docker/env/backend/env.example docker/env/backend/.env
 ```
 
-Set at least:
+Then set at least:
 
 - `LLM_API_KEY`
 - `LLM_PROVIDER`
 - `LLM_MODEL`
 
-If your deployment needs database, Redis, auth, or other runtime settings, edit `docker/env/backend/.env` accordingly.
+If your deployment needs database, Redis, auth, or other runtime settings, update `docker/env/backend/.env` accordingly.
 
-## 2. Online Deployment (Default)
+Once configured, start VulHunter with:
 
 ```bash
 docker compose up -d
 ```
 
-This pulls digest-pinned runtime images for `backend`, sandbox, and runners. The main frontend, `db`, `redis`, and the two bundled nexus static sites are provided directly by the release tree.
+## 2. Configuration Overview
 
-## 3. Offline Deployment (Optional)
+`docker/env/backend/.env` is the main runtime configuration file for VulHunter. Typical settings include:
+
+- LLM provider and model
+- API keys and endpoints
+- database connection settings
+- Redis connection settings
+- scanner feature flags and image overrides
+
+For a minimal first deployment, `LLM_API_KEY`, `LLM_PROVIDER`, and `LLM_MODEL` are usually enough to get started.
+
+## 3. Online Deployment (Default)
+
+```bash
+docker compose up -d
+```
+
+By default, VulHunter pulls the required runtime images and starts the full stack. The main web UI static assets and the default nginx configuration are already included in this package; `STATIC_FRONTEND_IMAGE` provides the nginx base image that serves them. The deployment also starts `db`, `redis`, `nexus-web`, and `nexus-itemDetail`.
+
+## 4. Offline Deployment (Optional)
 
 Download the matching `vulhunter-images-<arch>.tar.zst` bundle for your machine and place it in the release root or the `images/` directory, then run:
 
@@ -36,9 +54,9 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-Offline mode switches runtime images to local `vulhunter-local/*` tags after the preload step. The main frontend static assets are always shipped inside the release tree.
+Offline mode imports the image bundle first and then switches runtime services to local `vulhunter-local/*` tags, so the stack can start without pulling images from the network. The web UI static assets are still served from the files shipped in this package.
 
-## 4. Run and Maintain
+## 5. Run and Maintain
 
 Follow logs:
 
@@ -60,15 +78,20 @@ docker compose down -v
 
 After changing `.env` or `offline-images.env`, rerun `docker compose up -d` to apply the update.
 
-## 5. Release Contract
+## 6. Common Image Overrides
 
-- The formal release tree exposes only one compose entrypoint: `docker-compose.yml`
-- `backend`, runner, and sandbox images are prebuilt by the release pipeline and pinned by digest
-- main frontend static assets and nginx config are shipped directly inside the release tree; rebuilding frontend from source is not supported there
-- `nexus-web` and `nexus-itemDetail` are assembled locally only from the bundled static assets
-- local-build overlays, Dockerfiles, and source distribution tarballs are outside this release contract
+If you need to point the stack to custom images or an existing runtime environment, you can override these values in `docker/env/backend/.env`:
 
-## 6. Service Endpoints
+- `BACKEND_IMAGE`
+- `STATIC_FRONTEND_IMAGE`
+- `SANDBOX_IMAGE`
+- `SCANNER_*_IMAGE`
+- `FLOW_PARSER_RUNNER_IMAGE`
+- `SANDBOX_RUNNER_IMAGE`
+
+`STATIC_FRONTEND_IMAGE` controls the nginx base image used to serve the packaged web UI static assets.
+
+## 7. Service Endpoints
 
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:8000`
@@ -76,4 +99,4 @@ After changing `.env` or `offline-images.env`, rerun `docker compose up -d` to a
 - `nexus-web`: `http://localhost:5174`
 - `nexus-itemDetail`: `http://localhost:5175`
 
-See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for compose-specific details.
+See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for Docker Compose operations and maintenance details.
