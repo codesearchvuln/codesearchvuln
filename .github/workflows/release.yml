@@ -1,13 +1,22 @@
 name: Release Branch
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - Docker Publish
     branches:
       - main
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       refresh_all_runtime_images:
         description: 'Rebuild runner and sandbox runtime images before generating release'
+        required: false
+        type: boolean
+        default: false
+      refresh_backend_image:
+        description: 'Rebuild the default backend image before generating release'
         required: false
         type: boolean
         default: false
@@ -18,7 +27,7 @@ on:
         default: false
 
 concurrency:
-  group: release-branch
+  group: release-branch-${{ github.event.workflow_run.head_branch || github.ref_name || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -27,7 +36,32 @@ permissions:
   actions: write
 
 jobs:
+  prepare-release:
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    runs-on: ubuntu-latest
+    outputs:
+      source_ref: ${{ steps.vars.outputs.source_ref }}
+      source_sha: ${{ steps.vars.outputs.source_sha }}
+      tag: ${{ steps.vars.outputs.tag }}
+
+    steps:
+      - name: 计算 release 源信息
+        id: vars
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            echo "source_ref=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            echo "source_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "source_ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "source_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "tag=latest" >> "$GITHUB_OUTPUT"
+
   publish-runtime-images:
+    needs: prepare-release
     uses: ./.github/workflows/publish-runtime-images.yml
     secrets: inherit
     permissions:
@@ -36,9 +70,9 @@ jobs:
       id-token: write
       attestations: write
     with:
-      tag: latest
+      tag: ${{ needs.prepare-release.outputs.tag }}
       build_frontend: false
-      build_backend: true
+      build_backend: ${{ github.event_name == 'workflow_dispatch' && (inputs.refresh_backend_image || inputs.refresh_all_runtime_images) || false }}
       publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
@@ -52,27 +86,18 @@ jobs:
       multi_arch: true
       emit_release_manifest: true
       require_complete_manifest: true
+      revision: ${{ needs.prepare-release.outputs.source_sha }}
 
-  generate-release-branch:
+  build-frontend-bundle:
+    needs: prepare-release
     runs-on: ubuntu-latest
-    needs: publish-runtime-images
 
     steps:
-      - name: Checkout main
+      - name: Checkout release source
         uses: actions/checkout@v6
         with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
           fetch-depth: 0
-
-      - name: 登录到 GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Write release-manifest.json
-        run: |
-          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
 
       - name: Setup Node.js for frontend release bundle
         uses: actions/setup-node@v4
@@ -96,6 +121,37 @@ jobs:
           cp -R dist/. "${FRONTEND_BUNDLE_DIR}/site/"
           cp nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
 
+      - name: Upload frontend release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-release-bundle
+          path: ${{ runner.temp }}/frontend-release-bundle
+          if-no-files-found: error
+
+  assemble-release-tree:
+    needs:
+      - prepare-release
+      - publish-runtime-images
+      - build-frontend-bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Download frontend release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-release-bundle
+          path: ${{ runner.temp }}/frontend-release-bundle
+
+      - name: Write release-manifest.json
+        run: |
+          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
+
       - name: Generate runtime release tree
         run: |
           ./scripts/generate-release-branch.sh \
@@ -104,11 +160,69 @@ jobs:
             --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
             --validate
 
-      - name: Package offline image bundles
+      - name: Upload release tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tree
+          path: ${{ runner.temp }}/release-tree
+          if-no-files-found: error
+
+  package-offline-images:
+    needs:
+      - prepare-release
+      - publish-runtime-images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+          fetch-depth: 0
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write release-manifest.json
+        run: |
+          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
+
+      - name: Package offline image bundle
         run: |
           ./scripts/package-release-images.sh \
             --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
-            --output-dir "${RUNNER_TEMP}/release-assets"
+            --output-dir "${RUNNER_TEMP}/release-assets" \
+            --arch ${{ matrix.arch }}
+
+      - name: Upload offline image bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/release-assets/vulhunter-images-${{ matrix.arch }}.tar.zst
+            ${{ runner.temp }}/release-assets/images-manifest-${{ matrix.arch }}.json
+          if-no-files-found: error
+
+  smoke-test-release-tree:
+    needs: assemble-release-tree
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release tree
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tree
+          path: ${{ runner.temp }}/release-tree
 
       - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
@@ -137,6 +251,39 @@ jobs:
           docker compose logs backend frontend
           echo "::error::Release runtime smoke test failed for generated release tree."
           exit 1
+
+  publish-release-assets-and-branch:
+    needs:
+      - prepare-release
+      - assemble-release-tree
+      - package-offline-images
+      - smoke-test-release-tree
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Download release tree
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tree
+          path: ${{ runner.temp }}/release-tree
+
+      - name: Download amd64 offline assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-amd64
+          path: ${{ runner.temp }}/release-assets
+
+      - name: Download arm64 offline assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-arm64
+          path: ${{ runner.temp }}/release-assets
 
       - name: Delete public release tags and releases
         env:
@@ -179,7 +326,7 @@ jobs:
             gh release delete "${ASSET_TAG}" --cleanup-tag --yes
           fi
 
-          git tag -f "${ASSET_TAG}" "${GITHUB_SHA}"
+          git tag -f "${ASSET_TAG}" "${{ needs.prepare-release.outputs.source_sha }}"
           git push --force origin "refs/tags/${ASSET_TAG}"
 
           gh release create "${ASSET_TAG}" \

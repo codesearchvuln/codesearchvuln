@@ -535,6 +535,7 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "\n    paths:\n" in workflow_text
     assert "\non:\n  push:\n" in workflow_text
     assert "workflow_dispatch:" in workflow_text
+    assert "concurrency:" in workflow_text
     assert "'v*.*.*'" not in workflow_text
     assert "detect-changes:" in workflow_text
     assert "dorny/paths-filter@v3" in workflow_text
@@ -565,6 +566,9 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "./docker/sandbox-runner.Dockerfile" in reusable_workflow_text
     assert "release-manifest.json" in reusable_workflow_text
     assert "docker manifest inspect" in reusable_workflow_text
+    assert "publish-backend-amd64:" in reusable_workflow_text
+    assert "publish-backend-arm64:" in reusable_workflow_text
+    assert "merge-backend-manifest" not in reusable_workflow_text
 
 
 def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
@@ -576,12 +580,19 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     assert "build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}" in workflow_text
     assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
     assert "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}" in workflow_text
+    assert "multi_arch: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
     assert "- 'frontend/**'" in workflow_text
     assert "- 'backend/**'" in workflow_text
     assert "- 'docker/frontend.Dockerfile'" in workflow_text
     assert "- 'docker/backend.Dockerfile'" in workflow_text
     assert "- '.github/workflows/docker-publish.yml'" in workflow_text
     assert "- 'frontend/yasa-engine-overrides/**'" in workflow_text
+    assert "- '.github/workflows/release.yml'" in workflow_text
+    assert "- 'scripts/generate-release-branch.sh'" in workflow_text
+    assert "- 'scripts/package-release-images.sh'" in workflow_text
+    assert "- 'scripts/release-templates/**'" in workflow_text
+    assert "- 'nexus-web/dist/**'" in workflow_text
+    assert "- 'nexus-itemDetail/dist/**'" in workflow_text
 
 
 def test_release_workflow_builds_manifest_driven_release_tree() -> None:
@@ -591,6 +602,8 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "build_frontend: false" in workflow_text
+    assert "workflow_run:" in workflow_text
+    assert "Docker Publish" in workflow_text
     assert "Setup Node.js for frontend release bundle" in workflow_text
     assert "pnpm install --frozen-lockfile" in workflow_text
     assert "pnpm build" in workflow_text
@@ -598,6 +611,7 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "--image-manifest" in workflow_text
     assert "--frontend-bundle" in workflow_text
     assert "--validate" in workflow_text
+    assert "--arch ${{ matrix.arch }}" in workflow_text
     assert "docker compose config" in workflow_text
     assert "docker compose up -d db redis backend frontend" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text

@@ -102,6 +102,14 @@ def test_backend_release_publish_workflow_uses_runtime_release_and_optional_hard
     )
     release_workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
+    publish_backend_amd64_section = publish_workflow_text.split("  publish-backend-amd64:\n", maxsplit=1)[1].split(
+        "\n  publish-backend-arm64:\n",
+        maxsplit=1,
+    )[0]
+    publish_backend_arm64_section = publish_workflow_text.split("  publish-backend-arm64:\n", maxsplit=1)[1].split(
+        "\n  publish-backend:\n",
+        maxsplit=1,
+    )[0]
     publish_backend_section = publish_workflow_text.split("  publish-backend:\n", maxsplit=1)[1].split(
         "\n  publish-backend-hardened:\n",
         maxsplit=1,
@@ -114,12 +122,32 @@ def test_backend_release_publish_workflow_uses_runtime_release_and_optional_hard
     assert "publish_backend_hardened:" in publish_workflow_text
     assert "default: false" in publish_workflow_text
 
-    assert "target: runtime-release" in publish_backend_section
-    assert "target: runtime-cython" not in publish_backend_section
+    assert "if: ${{ inputs.build_backend }}" in publish_backend_amd64_section
+    assert "runs-on: ubuntu-latest" in publish_backend_amd64_section
+    assert "platforms: linux/amd64" in publish_backend_amd64_section
+    assert "target: runtime-release" in publish_backend_amd64_section
+    assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64" in publish_backend_amd64_section
+    assert "scope=backend-runtime-release-amd64" in publish_backend_amd64_section
+    assert "vulhunter-backend:buildcache-runtime-release-amd64" in publish_backend_amd64_section
+
+    assert "if: ${{ inputs.build_backend && inputs.multi_arch }}" in publish_backend_arm64_section
+    assert "runs-on: ubuntu-24.04-arm" in publish_backend_arm64_section
+    assert "platforms: linux/arm64" in publish_backend_arm64_section
+    assert "target: runtime-release" in publish_backend_arm64_section
+    assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64" in publish_backend_arm64_section
+    assert "scope=backend-runtime-release-arm64" in publish_backend_arm64_section
+    assert "vulhunter-backend:buildcache-runtime-release-arm64" in publish_backend_arm64_section
+    assert "setup-qemu-action" not in publish_backend_arm64_section
+
+    assert "needs:" in publish_backend_section
+    assert "publish-backend-amd64" in publish_backend_section
+    assert "publish-backend-arm64" in publish_backend_section
+    assert "docker buildx imagetools create" in publish_backend_section
+    assert "docker buildx imagetools inspect" in publish_backend_section
+    assert "linux/amd64" in publish_backend_section
+    assert "linux/arm64" in publish_backend_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}" in publish_backend_section
-    assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-hardened" not in publish_backend_section
-    assert "scope=backend-runtime-release" in publish_backend_section
-    assert "vulhunter-backend:buildcache-runtime-release" in publish_backend_section
+    assert "ref=${IMAGE}@${DIGEST}" in publish_backend_section
 
     assert "if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}" in hardened_section
     assert "platforms: linux/amd64" in hardened_section
@@ -130,6 +158,7 @@ def test_backend_release_publish_workflow_uses_runtime_release_and_optional_hard
     assert 'IMAGE_TAG: ${{ format(\'{0}-hardened\', needs.prepare.outputs.tag) }}' in hardened_section
 
     assert "publish_backend_hardened:" in release_workflow_text
+    assert "refresh_backend_image:" in release_workflow_text
     assert (
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
         "inputs.publish_backend_hardened || false }}"

@@ -1,5 +1,7 @@
 # Compose 使用说明
 
+这里描述的是 generated release tree 的 compose 合同，不是源码仓库根目录那份 compose。源码仓库中的主 frontend 仍可继续使用 `FRONTEND_IMAGE` 指向 `vulhunter-frontend`；当前 release tree 不使用该变量。
+
 这个 release tree 只暴露一份运行时 compose 合同：`docker-compose.yml`。它不会附带本地 build overlay、Dockerfile 或可重新构建 `backend` / `frontend` 的源码；主前端静态文件与 nginx 配置已直接包含在 release tree 中。
 
 ## 在线启动
@@ -12,7 +14,7 @@ docker compose up -d
 在线模式下：
 
 - `backend`、sandbox 和 runner 使用发布流程预构建的 digest 固定镜像
-- 主前端使用 release tree 自带的静态文件与 nginx 配置，由通用 nginx 容器提供服务
+- 主前端使用 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，并挂载 release tree 自带的 `deploy/runtime/frontend/site` 与 `deploy/runtime/frontend/nginx/default.conf`；它不是 `vulhunter-frontend` 运行镜像
 - `db`、`redis` 由当前 compose 直接拉起
 - `nexus-web` 与 `nexus-itemDetail` 仅从当前目录内的静态 bundle 组装本地 nginx 容器
 
@@ -62,6 +64,8 @@ docker compose restart backend
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`
 - `SANDBOX_RUNNER_IMAGE`
+
+其中 `STATIC_FRONTEND_IMAGE` 只用于替换承载静态文件的 nginx 基底镜像；generated release tree 不支持 `FRONTEND_IMAGE`。
 
 离线模式的镜像覆盖文件位于：
 

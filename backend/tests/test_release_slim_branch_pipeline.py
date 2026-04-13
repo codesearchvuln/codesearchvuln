@@ -120,19 +120,33 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
 
     assert generator_path.exists()
     assert publish_workflow_path.exists()
-    assert "branches:" in workflow_text
-    assert "- main" in workflow_text
+    assert "workflow_run:" in workflow_text
+    assert "Docker Publish" in workflow_text
+    assert "types:" in workflow_text
+    assert "- completed" in workflow_text
+    assert "\n  push:\n" not in workflow_text
     assert "workflow_dispatch:" in workflow_text
+    assert "refresh_backend_image:" in workflow_text
     assert "publish_backend_hardened:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "build_frontend: false" in workflow_text
     assert (
+        "build_backend: ${{ github.event_name == 'workflow_dispatch' && (inputs.refresh_backend_image || inputs.refresh_all_runtime_images) || false }}"
+    ) in workflow_text
+    assert (
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
         "inputs.publish_backend_hardened || false }}"
     ) in workflow_text
+    assert "build-frontend-bundle:" in workflow_text
+    assert "assemble-release-tree:" in workflow_text
+    assert "package-offline-images:" in workflow_text
+    assert "smoke-test-release-tree:" in workflow_text
+    assert "publish-release-assets-and-branch:" in workflow_text
     assert "Setup Node.js for frontend release bundle" in workflow_text
     assert "pnpm install --frozen-lockfile" in workflow_text
     assert "pnpm build" in workflow_text
+    assert "upload-artifact@v4" in workflow_text
+    assert "download-artifact@v4" in workflow_text
     assert "--frontend-bundle" in workflow_text
     assert "release-manifest.json" in workflow_text
     assert "images-manifest-amd64.json" in workflow_text
@@ -140,6 +154,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "vulhunter-images-amd64.tar.zst" in workflow_text
     assert "vulhunter-images-arm64.tar.zst" in workflow_text
     assert "package-release-images.sh" in workflow_text
+    assert "--arch ${{ matrix.arch }}" in workflow_text
+    assert "matrix:" in workflow_text
     assert "gh release create" in workflow_text
     assert "gh release upload" in workflow_text
     assert "--image-manifest" in workflow_text
@@ -161,7 +177,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "publish_backend_hardened:" in publish_workflow_text
     assert "target: runtime-release" in publish_workflow_text
     assert "target: runtime-cython" in publish_workflow_text
-    assert "buildcache-runtime-release" in publish_workflow_text
+    assert "buildcache-runtime-release-amd64" in publish_workflow_text
+    assert "buildcache-runtime-release-arm64" in publish_workflow_text
     assert "buildcache-runtime-cython" in publish_workflow_text
     assert "-hardened" in publish_workflow_text
 
@@ -178,6 +195,7 @@ def test_scheduled_release_workflow_triggers_end_to_end_release_pipeline() -> No
     assert "docker-publish.yml" not in workflow_text
     assert "-f build_frontend=true" not in workflow_text
     assert "-f build_backend=true" not in workflow_text
+    assert "-f refresh_backend_image=true" not in workflow_text
 
 
 def test_release_helper_script_no_longer_creates_or_pushes_git_tags() -> None:
@@ -375,3 +393,17 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "docker tag" in load_script
     assert "docker/env/backend/offline-images.env" in use_offline_env_script
     assert "docker compose up -d" in use_offline_env_script
+
+
+def test_package_release_images_script_supports_single_arch_mode() -> None:
+    script_text = (REPO_ROOT / "scripts" / "package-release-images.sh").read_text(encoding="utf-8")
+
+    assert "Usage: package-release-images.sh --image-manifest <file> --output-dir <dir> --arch <amd64|arm64>" in script_text
+    assert 'ARCH=""' in script_text
+    assert "--arch)" in script_text
+    assert '[[ -n "$ARCH" ]] || die "--arch is required"' in script_text
+    assert '[[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "unsupported arch: $ARCH"' in script_text
+    assert 'python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$ARCH"' in script_text
+    assert 'bundle_path = output_dir / f"vulhunter-images-{arch}.tar.zst"' in script_text
+    assert 'metadata_path = output_dir / f"images-manifest-{arch}.json"' in script_text
+    assert 'for arch in ("amd64", "arm64"):' not in script_text

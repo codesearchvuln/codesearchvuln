@@ -20,9 +20,18 @@ on:
       - 'docker/pmd-runner.Dockerfile'
       - 'docker/sandbox.Dockerfile'
       - 'docker/sandbox-runner.Dockerfile'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/scheduled-release.yml'
       - 'frontend/**'
       - 'frontend/yasa-engine-overrides/**'
       - 'backend/**'
+      - 'scripts/generate-release-branch.sh'
+      - 'scripts/package-release-images.sh'
+      - 'scripts/release-templates/**'
+      - 'nexus-web/dist/**'
+      - 'nexus-web/nginx.conf'
+      - 'nexus-itemDetail/dist/**'
+      - 'nexus-itemDetail/nginx.conf'
   workflow_dispatch:
     inputs:
       tag:
@@ -91,6 +100,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   detect-changes:
     name: 检测镜像相关变更
@@ -158,6 +171,7 @@ jobs:
       build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_pmd_runner || false }}
       build_sandbox: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox || false }}
       build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox_runner || false }}
-      multi_arch: ${{ github.event_name == 'workflow_dispatch' }}
+      multi_arch: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}
       emit_release_manifest: false
       require_complete_manifest: false
+      revision: ${{ github.sha }}
