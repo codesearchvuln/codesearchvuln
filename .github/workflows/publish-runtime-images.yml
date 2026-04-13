@@ -997,7 +997,6 @@ jobs:
     name: Assemble release manifest
     needs:
       - prepare
-      - publish-frontend
       - publish-backend
       - publish-yasa-runner
       - publish-opengrep-runner
@@ -1058,7 +1057,6 @@ jobs:
           REQUIRE_COMPLETE_MANIFEST: ${{ inputs.require_complete_manifest }}
           GITHUB_SHA: ${{ github.sha }}
           BACKEND_REF: ${{ needs.publish-backend.outputs.ref }}
-          FRONTEND_REF: ${{ needs.publish-frontend.outputs.ref }}
           SANDBOX_REF: ${{ needs.publish-sandbox.outputs.ref }}
           SANDBOX_RUNNER_REF: ${{ needs.publish-sandbox-runner.outputs.ref }}
           SCANNER_YASA_REF: ${{ needs.publish-yasa-runner.outputs.ref }}
@@ -1094,7 +1092,6 @@ jobs:
           }
 
           export BACKEND_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend" "${BACKEND_REF}")"
-          export FRONTEND_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-frontend" "${FRONTEND_REF}")"
           export SANDBOX_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox" "${SANDBOX_REF}")"
           export SANDBOX_RUNNER_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}")"
           export SCANNER_YASA_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}")"
@@ -1125,7 +1122,6 @@ jobs:
               "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
               "images": {
                   "backend": {"ref": required("BACKEND_FINAL_REF")},
-                  "frontend": {"ref": required("FRONTEND_FINAL_REF")},
                   "sandbox": {"ref": required("SANDBOX_FINAL_REF")},
                   "sandbox_runner": {"ref": required("SANDBOX_RUNNER_FINAL_REF")},
                   "scanner_yasa": {"ref": required("SCANNER_YASA_FINAL_REF")},

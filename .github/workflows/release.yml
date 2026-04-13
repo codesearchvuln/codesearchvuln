@@ -37,7 +37,7 @@ jobs:
       attestations: write
     with:
       tag: latest
-      build_frontend: true
+      build_frontend: false
       build_backend: true
       publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
@@ -74,11 +74,34 @@ jobs:
         run: |
           printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
 
+      - name: Setup Node.js for frontend release bundle
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend static release bundle
+        run: |
+          set -euo pipefail
+
+          corepack enable
+          cd frontend
+          pnpm install --frozen-lockfile
+          pnpm build
+
+          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
+          rm -rf "${FRONTEND_BUNDLE_DIR}"
+          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
+          cp -R dist/. "${FRONTEND_BUNDLE_DIR}/site/"
+          cp nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
+
       - name: Generate runtime release tree
         run: |
           ./scripts/generate-release-branch.sh \
             --output "${RUNNER_TEMP}/release-tree" \
             --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
             --validate
 
       - name: Package offline image bundles
@@ -92,7 +115,7 @@ jobs:
         run: |
           docker compose config >/dev/null
 
-      - name: Smoke test backend runtime
+      - name: Smoke test release runtime
         working-directory: ${{ runner.temp }}/release-tree
         run: |
           set -euo pipefail
@@ -102,16 +125,17 @@ jobs:
           }
           trap cleanup EXIT
 
-          docker compose up -d db redis backend
+          docker compose up -d db redis backend frontend
           for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1 && \
+               curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then
               exit 0
             fi
             sleep 5
           done
 
-          docker compose logs backend
-          echo "::error::Backend health check failed for generated release tree."
+          docker compose logs backend frontend
+          echo "::error::Release runtime smoke test failed for generated release tree."
           exit 1
 
       - name: Delete public release tags and releases

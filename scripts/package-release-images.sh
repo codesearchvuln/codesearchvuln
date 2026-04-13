@@ -66,7 +66,7 @@ if not revision:
 
 contracts = {
     "backend": "vulhunter-local/backend",
-    "frontend": "vulhunter-local/frontend",
+    "static_frontend": "vulhunter-local/static-frontend-nginx",
     "sandbox": "vulhunter-local/sandbox",
     "sandbox_runner": "vulhunter-local/sandbox-runner",
     "scanner_yasa": "vulhunter-local/yasa-runner",
@@ -80,9 +80,12 @@ contracts = {
 
 images: list[tuple[str, str, str]] = []
 for logical_name, local_repo in contracts.items():
-    ref = str(manifest["images"][logical_name]["ref"]).strip()
-    if not ref:
-        raise SystemExit(f"missing required image ref: {logical_name}")
+    if logical_name == "static_frontend":
+        ref = "docker.m.daocloud.io/library/nginx:1.27-alpine"
+    else:
+        ref = str(manifest["images"][logical_name]["ref"]).strip()
+        if not ref:
+            raise SystemExit(f"missing required image ref: {logical_name}")
     images.append((logical_name, ref, f"{local_repo}:{revision}"))
 
 for arch in ("amd64", "arm64"):

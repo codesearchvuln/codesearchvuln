@@ -590,11 +590,16 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     )
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
+    assert "build_frontend: false" in workflow_text
+    assert "Setup Node.js for frontend release bundle" in workflow_text
+    assert "pnpm install --frozen-lockfile" in workflow_text
+    assert "pnpm build" in workflow_text
     assert "generate-release-branch.sh" in workflow_text
     assert "--image-manifest" in workflow_text
+    assert "--frontend-bundle" in workflow_text
     assert "--validate" in workflow_text
     assert "docker compose config" in workflow_text
-    assert "docker compose up -d db redis backend" in workflow_text
+    assert "docker compose up -d db redis backend frontend" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text

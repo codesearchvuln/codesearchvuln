@@ -1,6 +1,6 @@
 # VulHunter User Guide
 
-This release tree is an image-only runtime package for end users. It ships only the runtime compose contract, environment templates, and static bundles. It does not include `backend` / `frontend` source trees and does not support rebuilding those images inside the release tree.
+This release tree is a runtime package for end users. It ships only the runtime compose contract, environment templates, and static bundles. It does not include `backend` / `frontend` source trees and does not support rebuilding those images inside the release tree.
 
 ## 1. Initial Configuration
 
@@ -24,7 +24,7 @@ If your deployment needs database, Redis, auth, or other runtime settings, edit 
 docker compose up -d
 ```
 
-This pulls digest-pinned runtime images for `backend`, `frontend`, sandbox, and runners. The release tree still provides the compose definition for `db`, `redis`, and the two bundled nexus static sites.
+This pulls digest-pinned runtime images for `backend`, sandbox, and runners. The main frontend, `db`, `redis`, and the two bundled nexus static sites are provided directly by the release tree.
 
 ## 3. Offline Deployment (Optional)
 
@@ -36,7 +36,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-Offline mode switches runtime images to local `vulhunter-local/*` tags after the preload step.
+Offline mode switches runtime images to local `vulhunter-local/*` tags after the preload step. The main frontend static assets are always shipped inside the release tree.
 
 ## 4. Run and Maintain
 
@@ -63,7 +63,8 @@ After changing `.env` or `offline-images.env`, rerun `docker compose up -d` to a
 ## 5. Release Contract
 
 - The formal release tree exposes only one compose entrypoint: `docker-compose.yml`
-- `backend`, `frontend`, and runner images are prebuilt by the release pipeline and pinned by digest
+- `backend`, runner, and sandbox images are prebuilt by the release pipeline and pinned by digest
+- main frontend static assets and nginx config are shipped directly inside the release tree; rebuilding frontend from source is not supported there
 - `nexus-web` and `nexus-itemDetail` are assembled locally only from the bundled static assets
 - local-build overlays, Dockerfiles, and source distribution tarballs are outside this release contract
 

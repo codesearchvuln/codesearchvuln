@@ -16,35 +16,32 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "backend": {
                 "ref": "ghcr.io/acme-sec/vulhunter-backend@sha256:" + "1" * 64,
             },
-            "frontend": {
-                "ref": "ghcr.io/acme-sec/vulhunter-frontend@sha256:" + "2" * 64,
-            },
             "sandbox": {
-                "ref": "ghcr.io/acme-sec/vulhunter-sandbox@sha256:" + "3" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-sandbox@sha256:" + "2" * 64,
             },
             "sandbox_runner": {
-                "ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "4" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "3" * 64,
             },
             "scanner_yasa": {
-                "ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "5" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "4" * 64,
             },
             "scanner_opengrep": {
-                "ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "6" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "5" * 64,
             },
             "scanner_bandit": {
-                "ref": "ghcr.io/acme-sec/vulhunter-bandit-runner@sha256:" + "7" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-bandit-runner@sha256:" + "6" * 64,
             },
             "scanner_gitleaks": {
-                "ref": "ghcr.io/acme-sec/vulhunter-gitleaks-runner@sha256:" + "8" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-gitleaks-runner@sha256:" + "7" * 64,
             },
             "scanner_phpstan": {
-                "ref": "ghcr.io/acme-sec/vulhunter-phpstan-runner@sha256:" + "9" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-phpstan-runner@sha256:" + "8" * 64,
             },
             "scanner_pmd": {
-                "ref": "ghcr.io/acme-sec/vulhunter-pmd-runner@sha256:" + "a" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-pmd-runner@sha256:" + "9" * 64,
             },
             "flow_parser_runner": {
-                "ref": "ghcr.io/acme-sec/vulhunter-flow-parser-runner@sha256:" + "b" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-flow-parser-runner@sha256:" + "a" * 64,
             },
         },
     }
@@ -52,7 +49,29 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
     return manifest
 
 
-def _run_release_generator(output_dir: Path, manifest_path: Path) -> subprocess.CompletedProcess[str]:
+def _write_frontend_bundle(path: Path) -> Path:
+    site_dir = path / "site"
+    nginx_dir = path / "nginx"
+    site_dir.mkdir(parents=True, exist_ok=True)
+    nginx_dir.mkdir(parents=True, exist_ok=True)
+    (site_dir / "index.html").write_text("<!doctype html><title>release frontend</title>\n", encoding="utf-8")
+    (nginx_dir / "default.conf").write_text(
+        (
+            "server {\n"
+            "    listen 80;\n"
+            "    root /usr/share/nginx/html;\n"
+            "    location / { try_files $uri $uri/ /index.html; }\n"
+            "    location /api/ { proxy_pass http://backend:8000/api/; }\n"
+            "}\n"
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _run_release_generator(
+    output_dir: Path, manifest_path: Path, frontend_bundle_path: Path
+) -> subprocess.CompletedProcess[str]:
     script_path = REPO_ROOT / "scripts" / "generate-release-branch.sh"
     script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
 
@@ -66,6 +85,8 @@ def _run_release_generator(output_dir: Path, manifest_path: Path) -> subprocess.
             str(output_dir),
             "--image-manifest",
             str(manifest_path),
+            "--frontend-bundle",
+            str(frontend_bundle_path),
         ],
         cwd=REPO_ROOT,
         env=env,
@@ -104,10 +125,15 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "workflow_dispatch:" in workflow_text
     assert "publish_backend_hardened:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
+    assert "build_frontend: false" in workflow_text
     assert (
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
         "inputs.publish_backend_hardened || false }}"
     ) in workflow_text
+    assert "Setup Node.js for frontend release bundle" in workflow_text
+    assert "pnpm install --frozen-lockfile" in workflow_text
+    assert "pnpm build" in workflow_text
+    assert "--frontend-bundle" in workflow_text
     assert "release-manifest.json" in workflow_text
     assert "images-manifest-amd64.json" in workflow_text
     assert "images-manifest-arm64.json" in workflow_text
@@ -118,8 +144,9 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "gh release upload" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "docker compose config" in workflow_text
-    assert "docker compose up -d db redis backend" in workflow_text
+    assert "docker compose up -d db redis backend frontend" in workflow_text
     assert "/health" in workflow_text
+    assert "http://127.0.0.1:3000/" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
     assert "fetch-depth: 0" in workflow_text
     assert "git checkout --orphan" in workflow_text
@@ -179,8 +206,9 @@ def test_release_generator_requires_image_manifest(tmp_path: Path) -> None:
 def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> None:
     output_dir = tmp_path / "release-tree"
     manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
     _write_release_manifest(manifest_path)
-    result = _run_release_generator(output_dir, manifest_path)
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
     assert result.returncode == 0, combined_output
@@ -195,6 +223,8 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "scripts/use-offline-env.sh",
         "docker/env/backend/env.example",
         "docker/env/backend/offline-images.env.example",
+        "deploy/runtime/frontend/site/index.html",
+        "deploy/runtime/frontend/nginx/default.conf",
         "nexus-web/dist/index.html",
         "nexus-web/nginx.conf",
         "nexus-itemDetail/dist/index.html",
@@ -207,7 +237,6 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "backend",
         "frontend",
         ".github",
-        "deploy",
         "docs",
         "docker-compose.full.yml",
         "docker-compose.hybrid.yml",
@@ -216,6 +245,7 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "docker/frontend.Dockerfile",
         "scripts/compose-up-local-build.sh",
         "scripts/compose-up-with-fallback.sh",
+        "deploy/compose",
     ]
     for rel_path in forbidden_paths:
         assert not (output_dir / rel_path).exists(), rel_path
@@ -227,8 +257,9 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
 def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path) -> None:
     output_dir = tmp_path / "release-tree"
     manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
     manifest = _write_release_manifest(manifest_path)
-    result = _run_release_generator(output_dir, manifest_path)
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
     assert result.returncode == 0, combined_output
@@ -240,7 +271,6 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "docker-compose.self-contained.yml" not in compose_text
     assert "VULHUNTER_IMAGE_TAG" not in compose_text
     assert manifest["images"]["backend"]["ref"] in compose_text
-    assert manifest["images"]["frontend"]["ref"] in compose_text
     assert manifest["images"]["sandbox"]["ref"] in compose_text
     assert manifest["images"]["sandbox_runner"]["ref"] in compose_text
     assert manifest["images"]["scanner_yasa"]["ref"] in compose_text
@@ -251,7 +281,9 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert manifest["images"]["scanner_pmd"]["ref"] in compose_text
     assert manifest["images"]["flow_parser_runner"]["ref"] in compose_text
     assert "image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:" in compose_text
-    assert "image: ${FRONTEND_IMAGE:-ghcr.io/acme-sec/vulhunter-frontend@sha256:" in compose_text
+    assert "image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine}" in compose_text
+    assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
+    assert "./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" in compose_text
     assert compose_text.count("build:") == 2
     assert "image: ${NEXUS_WEB_IMAGE:-vulhunter/nexus-web-local:latest}" in compose_text
     assert "image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in compose_text
@@ -260,17 +292,18 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "dockerfile_inline: |" in compose_text
     assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
     assert "vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}" not in compose_text
-    assert "vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}" not in compose_text
+    assert "image: ${FRONTEND_IMAGE:-" not in compose_text
 
 
 def test_release_generator_rejects_incomplete_release_manifest(tmp_path: Path) -> None:
     output_dir = tmp_path / "release-tree"
     manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
     manifest = _write_release_manifest(manifest_path)
     del manifest["images"]["backend"]
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    result = _run_release_generator(output_dir, manifest_path)
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
     assert result.returncode != 0
@@ -280,8 +313,9 @@ def test_release_generator_rejects_incomplete_release_manifest(tmp_path: Path) -
 def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_path: Path) -> None:
     output_dir = tmp_path / "release-tree"
     manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
     _write_release_manifest(manifest_path)
-    result = _run_release_generator(output_dir, manifest_path)
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
     assert result.returncode == 0, combined_output
@@ -302,6 +336,7 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "docker/env/backend/env.example" in doc
         assert "docker/env/backend/.env" in doc
         assert "LLM_API_KEY" in doc
+        assert "STATIC_FRONTEND_IMAGE" in doc or "静态文件" in doc or "static assets" in doc
         assert "nexus-web" in doc
         assert "nexus-itemDetail" in doc
 
@@ -309,8 +344,9 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
 def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) -> None:
     output_dir = tmp_path / "release-tree"
     manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
     manifest = _write_release_manifest(manifest_path)
-    result = _run_release_generator(output_dir, manifest_path)
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
     assert result.returncode == 0, combined_output
@@ -326,10 +362,12 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert metadata["bundle_template"] == "images/vulhunter-images-{arch}.tar.zst"
     assert metadata["images"]["backend"]["source_ref"] == manifest["images"]["backend"]["ref"]
     assert metadata["images"]["backend"]["local_tag"] == f"vulhunter-local/backend:{manifest['revision']}"
-    assert metadata["images"]["frontend"]["local_tag"] == f"vulhunter-local/frontend:{manifest['revision']}"
+    assert metadata["images"]["static_frontend"]["source_ref"] == "docker.m.daocloud.io/library/nginx:1.27-alpine"
+    assert metadata["images"]["static_frontend"]["local_tag"] == f"vulhunter-local/static-frontend-nginx:{manifest['revision']}"
     assert metadata["images"]["scanner_yasa"]["local_tag"] == f"vulhunter-local/yasa-runner:{manifest['revision']}"
     assert f"BACKEND_IMAGE=vulhunter-local/backend:{manifest['revision']}" in offline_env
-    assert f"FRONTEND_IMAGE=vulhunter-local/frontend:{manifest['revision']}" in offline_env
+    assert f"STATIC_FRONTEND_IMAGE=vulhunter-local/static-frontend-nginx:{manifest['revision']}" in offline_env
+    assert "\nFRONTEND_IMAGE=" not in offline_env
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
     assert "vulhunter-images-${arch}.tar.zst" in load_script
     assert "images-manifest.json" in load_script

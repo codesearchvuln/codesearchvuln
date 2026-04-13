@@ -1,6 +1,6 @@
 # Compose 使用说明
 
-这个 release tree 只暴露一份运行时 compose 合同：`docker-compose.yml`。它不会附带本地 build overlay、Dockerfile 或可重新构建 `backend` / `frontend` 的源码。
+这个 release tree 只暴露一份运行时 compose 合同：`docker-compose.yml`。它不会附带本地 build overlay、Dockerfile 或可重新构建 `backend` / `frontend` 的源码；主前端静态文件与 nginx 配置已直接包含在 release tree 中。
 
 ## 在线启动
 
@@ -11,7 +11,8 @@ docker compose up -d
 
 在线模式下：
 
-- `backend`、`frontend`、sandbox 和 runner 使用发布流程预构建的 digest 固定镜像
+- `backend`、sandbox 和 runner 使用发布流程预构建的 digest 固定镜像
+- 主前端使用 release tree 自带的静态文件与 nginx 配置，由通用 nginx 容器提供服务
 - `db`、`redis` 由当前 compose 直接拉起
 - `nexus-web` 与 `nexus-itemDetail` 仅从当前目录内的静态 bundle 组装本地 nginx 容器
 
@@ -56,7 +57,7 @@ docker compose restart backend
 如果需要替换运行镜像，也可以在 `.env` 中设置：
 
 - `BACKEND_IMAGE`
-- `FRONTEND_IMAGE`
+- `STATIC_FRONTEND_IMAGE`
 - `SANDBOX_IMAGE`
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`

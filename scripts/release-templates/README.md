@@ -1,6 +1,6 @@
 # VulHunter 使用说明
 
-这是面向最终用户的 VulHunter image-only 运行包。该 release tree 只包含运行时 compose 文件、环境模板和静态 bundle，不附带 `backend` / `frontend` 源码，也不支持在 release tree 内本地重建这些镜像。
+这是面向最终用户的 VulHunter 运行包。该 release tree 只包含运行时 compose 文件、环境模板和静态 bundle，不附带 `backend` / `frontend` 源码，也不支持在 release tree 内本地重建这些镜像。
 
 ## 1. 启动前配置
 
@@ -24,7 +24,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 docker compose up -d
 ```
 
-默认会拉取 digest 固定的 `backend`、`frontend`、sandbox 和各类 runner 运行镜像；`db`、`redis` 以及两个 nexus 静态站点由当前 release tree 提供运行配置。
+默认会拉取 digest 固定的 `backend`、sandbox 和各类 runner 运行镜像；主前端、`db`、`redis` 以及两个 nexus 静态站点由当前 release tree 提供运行配置。
 
 ## 3. 离线部署（可选）
 
@@ -36,7 +36,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-离线模式会切换到本地 `vulhunter-local/*` 镜像标签，不再依赖在线拉取运行镜像。
+离线模式会切换到本地 `vulhunter-local/*` 镜像标签，不再依赖在线拉取运行镜像；主前端静态文件始终随 release tree 一起分发。
 
 ## 4. 运行与维护
 
@@ -63,7 +63,8 @@ docker compose down -v
 ## 5. 发布合同说明
 
 - 正式 release tree 只支持 `docker-compose.yml` 这一份 compose 入口
-- `backend` / `frontend` / runner 镜像由发布流程预构建并固定到 digest
+- `backend` / runner / sandbox 镜像由发布流程预构建并固定到 digest
+- 主前端静态资源和 nginx 配置直接随 release tree 分发，不支持在 release tree 内重建 frontend
 - `nexus-web` 与 `nexus-itemDetail` 仅从随包附带的静态产物组装本地 nginx 容器
 - 本地 build overlay、Dockerfile 和源码分发包不属于此 release contract
 

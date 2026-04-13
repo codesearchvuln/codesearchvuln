@@ -1,6 +1,8 @@
 # Image-only release tree allowlist.
 # Do not add backend/frontend source trees, Dockerfiles, deploy tooling, or
-# local-build compose overlays here.
+# local-build compose overlays here. Frontend runtime assets are copied in
+# separately by generate-release-branch.sh and must remain limited to the
+# generated deploy/runtime/frontend subtree.
 
 # Runtime env templates needed by the release tree.
 docker/env/backend/env.example

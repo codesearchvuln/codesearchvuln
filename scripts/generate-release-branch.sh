@@ -6,13 +6,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="$ROOT_DIR"
 OUTPUT_DIR=""
 IMAGE_MANIFEST=""
+FRONTEND_BUNDLE_DIR=""
 VALIDATE="false"
 ALLOWLIST_PATH="$ROOT_DIR/scripts/release-allowlist.txt"
 TEMPLATE_DIR="$ROOT_DIR/scripts/release-templates"
 
 usage() {
   cat <<'USAGE'
-Usage: generate-release-branch.sh --output <dir> --image-manifest <file> [--source <dir>] [--validate]
+Usage: generate-release-branch.sh --output <dir> --image-manifest <file> --frontend-bundle <dir> [--source <dir>] [--validate]
 
 Generate an image-only runtime release tree from the checked-out repository.
 The output intentionally excludes backend/frontend source code, local-build compose
@@ -21,6 +22,8 @@ overlays, Dockerfiles, and other development-only assets.
 Options:
   --output <dir>           Required. Destination directory for the generated release tree.
   --image-manifest <file>  Required. JSON manifest with digest-pinned runtime image refs.
+  --frontend-bundle <dir>  Required. Directory containing frontend runtime assets:
+                           site/** and nginx/default.conf.
   --source <dir>           Override the source repository root. Defaults to the current checkout.
   --validate               Validate the generated tree after copying.
   -h, --help               Show this help text.
@@ -103,7 +106,6 @@ manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
 required_keys = {
     "backend": "__BACKEND_IMAGE_REF__",
-    "frontend": "__FRONTEND_IMAGE_REF__",
     "sandbox": "__SANDBOX_IMAGE_REF__",
     "sandbox_runner": "__SANDBOX_RUNNER_IMAGE_REF__",
     "scanner_yasa": "__SCANNER_YASA_IMAGE_REF__",
@@ -141,6 +143,20 @@ output_path.write_text(compose_text, encoding="utf-8")
 PY
 }
 
+copy_frontend_runtime_bundle() {
+  local bundle_root="$1"
+  local source_site="$bundle_root/site"
+  local source_nginx="$bundle_root/nginx/default.conf"
+  local dest_root="$OUTPUT_DIR/deploy/runtime/frontend"
+
+  [[ -d "$source_site" ]] || die "frontend bundle missing site directory: $source_site"
+  [[ -f "$source_nginx" ]] || die "frontend bundle missing nginx config: $source_nginx"
+
+  mkdir -p "$dest_root/site" "$dest_root/nginx"
+  cp -R "$source_site/." "$dest_root/site/"
+  cp "$source_nginx" "$dest_root/nginx/default.conf"
+}
+
 overlay_release_templates() {
   mkdir -p \
     "$OUTPUT_DIR/scripts" \
@@ -173,7 +189,7 @@ if not revision:
 
 image_contracts = {
     "backend": ("BACKEND_IMAGE", "vulhunter-local/backend"),
-    "frontend": ("FRONTEND_IMAGE", "vulhunter-local/frontend"),
+    "static_frontend": ("STATIC_FRONTEND_IMAGE", "vulhunter-local/static-frontend-nginx"),
     "sandbox": ("SANDBOX_IMAGE", "vulhunter-local/sandbox"),
     "sandbox_runner": ("SANDBOX_RUNNER_IMAGE", "vulhunter-local/sandbox-runner"),
     "scanner_yasa": ("SCANNER_YASA_IMAGE", "vulhunter-local/yasa-runner"),
@@ -194,12 +210,15 @@ offline_env_lines = [
 ]
 
 for logical_name, (env_var, local_repo) in image_contracts.items():
-    try:
-        source_ref = str(manifest["images"][logical_name]["ref"]).strip()
-    except Exception as exc:  # pragma: no cover - defensive path
-        raise SystemExit(f"missing required image ref: {logical_name}") from exc
-    if not source_ref:
-        raise SystemExit(f"missing required image ref: {logical_name}")
+    if logical_name == "static_frontend":
+        source_ref = "docker.m.daocloud.io/library/nginx:1.27-alpine"
+    else:
+        try:
+            source_ref = str(manifest["images"][logical_name]["ref"]).strip()
+        except Exception as exc:  # pragma: no cover - defensive path
+            raise SystemExit(f"missing required image ref: {logical_name}") from exc
+        if not source_ref:
+            raise SystemExit(f"missing required image ref: {logical_name}")
 
     local_tag = f"{local_repo}:{revision}"
     images_payload[logical_name] = {
@@ -233,6 +252,8 @@ validate_release_tree() {
     "scripts/use-offline-env.sh"
     "docker/env/backend/env.example"
     "docker/env/backend/offline-images.env.example"
+    "deploy/runtime/frontend/site/index.html"
+    "deploy/runtime/frontend/nginx/default.conf"
     "nexus-web/dist/index.html"
     "nexus-web/nginx.conf"
     "nexus-itemDetail/dist/index.html"
@@ -242,7 +263,6 @@ validate_release_tree() {
     "backend"
     "frontend"
     ".github"
-    "deploy"
     "docs"
     "docker-compose.full.yml"
     "docker-compose.hybrid.yml"
@@ -260,6 +280,22 @@ validate_release_tree() {
   for rel_path in "${forbidden_paths[@]}"; do
     [[ ! -e "$OUTPUT_DIR/$rel_path" ]] || die "forbidden path present in release tree: $rel_path"
   done
+
+  [[ -d "$OUTPUT_DIR/deploy/runtime/frontend/site" ]] || die "missing frontend runtime site directory"
+  [[ -f "$OUTPUT_DIR/deploy/runtime/frontend/nginx/default.conf" ]] || die "missing frontend nginx config"
+  [[ ! -e "$OUTPUT_DIR/docker/frontend.Dockerfile" ]] || die "release tree leaked frontend Dockerfile"
+  [[ ! -e "$OUTPUT_DIR/frontend" ]] || die "release tree leaked frontend source directory"
+  if [[ -d "$OUTPUT_DIR/deploy" ]]; then
+    [[ "$(find "$OUTPUT_DIR/deploy" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]] || \
+      die "deploy directory contains unexpected top-level entries"
+    [[ -d "$OUTPUT_DIR/deploy/runtime" ]] || die "deploy directory missing runtime subtree"
+    [[ "$(find "$OUTPUT_DIR/deploy/runtime" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]] || \
+      die "deploy/runtime contains unexpected entries"
+    [[ -d "$OUTPUT_DIR/deploy/runtime/frontend" ]] || die "deploy/runtime missing frontend subtree"
+    [[ "$(find "$OUTPUT_DIR/deploy/runtime/frontend" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]] || \
+      die "deploy/runtime/frontend contains unexpected entries"
+    [[ ! -e "$OUTPUT_DIR/deploy/compose" ]] || die "release tree leaked deploy compose overlays"
+  fi
 
   for rel_path in nexus-web nexus-itemDetail; do
     [[ -d "$OUTPUT_DIR/$rel_path/dist" ]] || die "missing runtime bundle dist directory: $rel_path/dist"
@@ -288,6 +324,9 @@ validate_release_tree() {
     if grep -Fq "vulhunter-source-" "$OUTPUT_DIR/$doc_path"; then
       die "release docs still reference source artifact packaging: $doc_path"
     fi
+    if grep -Eq '(^|[^A-Z_])FRONTEND_IMAGE([^A-Z_]|$)' "$OUTPUT_DIR/$doc_path"; then
+      die "release docs still reference frontend runtime image override: $doc_path"
+    fi
   done
 }
 
@@ -301,6 +340,11 @@ while [[ $# -gt 0 ]]; do
     --image-manifest)
       [[ $# -ge 2 ]] || die "--image-manifest requires a value"
       IMAGE_MANIFEST="$2"
+      shift 2
+      ;;
+    --frontend-bundle)
+      [[ $# -ge 2 ]] || die "--frontend-bundle requires a value"
+      FRONTEND_BUNDLE_DIR="$2"
       shift 2
       ;;
     --source)
@@ -324,11 +368,13 @@ done
 
 [[ -n "$OUTPUT_DIR" ]] || die "--output is required"
 [[ -n "$IMAGE_MANIFEST" ]] || die "--image-manifest is required"
+[[ -n "$FRONTEND_BUNDLE_DIR" ]] || die "--frontend-bundle is required"
 [[ -f "$ALLOWLIST_PATH" ]] || die "allowlist not found: $ALLOWLIST_PATH"
 
 SOURCE_DIR="$(cd "$SOURCE_DIR" && pwd)"
 OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
 IMAGE_MANIFEST="$(cd "$(dirname "$IMAGE_MANIFEST")" && pwd)/$(basename "$IMAGE_MANIFEST")"
+FRONTEND_BUNDLE_DIR="$(cd "$FRONTEND_BUNDLE_DIR" && pwd)"
 
 [[ -f "$IMAGE_MANIFEST" ]] || die "image manifest not found: $IMAGE_MANIFEST"
 
@@ -351,6 +397,7 @@ done < "$ALLOWLIST_PATH"
 prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-web"
 prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-itemDetail"
 overlay_release_templates
+copy_frontend_runtime_bundle "$FRONTEND_BUNDLE_DIR"
 clean_generated_tree
 
 if [[ "$VALIDATE" == "true" ]]; then
