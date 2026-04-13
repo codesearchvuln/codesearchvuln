@@ -14,7 +14,9 @@ usage() {
   cat <<'USAGE'
 Usage: generate-release-branch.sh --output <dir> --image-manifest <file> [--source <dir>] [--validate]
 
-Generate a latest-only runtime release tree from the checked-out repository.
+Generate an image-only runtime release tree from the checked-out repository.
+The output intentionally excludes backend/frontend source code, local-build compose
+overlays, Dockerfiles, and other development-only assets.
 
 Options:
   --output <dir>           Required. Destination directory for the generated release tree.
@@ -187,6 +189,7 @@ images_payload: dict[str, dict[str, str]] = {}
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
     "# Then run ./scripts/load-images.sh and ./scripts/use-offline-env.sh docker compose up -d",
+    "# This release tree does not support rebuilding backend/frontend from source.",
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
 ]
 
@@ -218,7 +221,7 @@ PY
 }
 
 validate_release_tree() {
-  local required_paths forbidden_paths rel_path
+  local required_paths forbidden_paths rel_path doc_path
 
   required_paths=(
     "README.md"
@@ -274,6 +277,18 @@ validate_release_tree() {
     -print -quit | grep -q .; then
     die "release tree still contains source or dev residue"
   fi
+
+  for doc_path in "README.md" "README_EN.md" "scripts/README-COMPOSE.md"; do
+    if grep -Fq "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" "$OUTPUT_DIR/$doc_path"; then
+      die "release docs still reference hybrid local-build compose entrypoint: $doc_path"
+    fi
+    if grep -Fq "docker-compose.full.yml" "$OUTPUT_DIR/$doc_path"; then
+      die "release docs still reference full local-build compose overlay: $doc_path"
+    fi
+    if grep -Fq "vulhunter-source-" "$OUTPUT_DIR/$doc_path"; then
+      die "release docs still reference source artifact packaging: $doc_path"
+    fi
+  done
 }
 
 while [[ $# -gt 0 ]]; do

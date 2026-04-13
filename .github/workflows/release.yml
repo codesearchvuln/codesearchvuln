@@ -11,6 +11,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_backend_hardened:
+        description: 'Publish the hardened backend image variant alongside the default backend image'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release-branch
@@ -34,6 +39,7 @@ jobs:
       tag: latest
       build_frontend: true
       build_backend: true
+      publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}

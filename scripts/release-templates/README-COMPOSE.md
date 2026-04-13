@@ -1,11 +1,19 @@
 # Compose 使用说明
 
+这个 release tree 只暴露一份运行时 compose 合同：`docker-compose.yml`。它不会附带本地 build overlay、Dockerfile 或可重新构建 `backend` / `frontend` 的源码。
+
 ## 在线启动
 
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 docker compose up -d
 ```
+
+在线模式下：
+
+- `backend`、`frontend`、sandbox 和 runner 使用发布流程预构建的 digest 固定镜像
+- `db`、`redis` 由当前 compose 直接拉起
+- `nexus-web` 与 `nexus-itemDetail` 仅从当前目录内的静态 bundle 组装本地 nginx 容器
 
 ## 离线启动
 

@@ -8,6 +8,7 @@ on:
       - '.github/workflows/docker-publish.yml'
       - '.github/workflows/publish-runtime-images.yml'
       - '.dockerignore'
+      - 'docker/backend.Dockerfile.dockerignore'
       - 'docker/frontend.Dockerfile'
       - 'docker/backend.Dockerfile'
       - 'docker/yasa-runner.Dockerfile'
@@ -39,6 +40,11 @@ on:
         required: false
         type: boolean
         default: true
+      publish_backend_hardened:
+        description: '额外发布 hardened 后端镜像'
+        required: false
+        type: boolean
+        default: false
       build_yasa_runner:
         description: '构建 YASA runner 镜像'
         required: false
@@ -110,12 +116,14 @@ jobs:
             frontend:
               - '.github/workflows/docker-publish.yml'
               - '.github/workflows/publish-runtime-images.yml'
+              - 'docker/backend.Dockerfile.dockerignore'
               - 'docker/frontend.Dockerfile'
               - 'frontend/**'
             backend:
               - '.github/workflows/docker-publish.yml'
               - '.github/workflows/publish-runtime-images.yml'
               - '.dockerignore'
+              - 'docker/backend.Dockerfile.dockerignore'
               - 'docker/backend.Dockerfile'
               - 'backend/**'
               - 'frontend/yasa-engine-overrides/**'
@@ -140,6 +148,7 @@ jobs:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'latest' }}
       build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}
       build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}
+      publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_yasa_runner || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_opengrep_runner || false }}
       build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_bandit_runner || false }}

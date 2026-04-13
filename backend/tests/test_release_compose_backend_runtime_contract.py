@@ -63,6 +63,10 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
         encoding="utf-8"
     )
 
+    runtime_release_section = backend_text.split("FROM runtime-base AS runtime-release", maxsplit=1)[1].split(
+        "FROM builder AS cython-compiler",
+        maxsplit=1,
+    )[0]
     runtime_cython_section = backend_text.split("FROM runtime-base AS runtime-cython", maxsplit=1)[1].split(
         "FROM runtime-base AS runtime",
         maxsplit=1,
@@ -73,13 +77,99 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
     )[0]
     runtime_plain_section = backend_text.split("FROM runtime-base AS runtime-plain", maxsplit=1)[1]
 
-    for section in (runtime_cython_section, runtime_section, runtime_plain_section):
+    for section in (runtime_release_section, runtime_cython_section, runtime_section, runtime_plain_section):
         assert "/opt/backend-build-context" not in section
         assert "backend/docs/agent-tools" not in section
         assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in section
         assert "COPY backend/static /app/static" not in section
 
+    assert "COPY --from=runtime-release-app-assembler /final/app /app/app" in runtime_release_section
+    assert "COPY backend/app /app/app" not in runtime_release_section
+    assert "assert spec.origin.endswith('.so')" in runtime_release_section
+    assert "assert spec.origin.endswith('.pyc')" in runtime_release_section
+    assert "USER appuser" in runtime_release_section
+    assert "selective hardening verifications PASSED" in runtime_release_section
+
     assert "subprocess.run(" not in runner_preflight_text
     assert "falling back to local build" not in runner_preflight_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in runner_preflight_text
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in runner_preflight_text
+
+
+def test_backend_release_publish_workflow_uses_runtime_release_and_optional_hardened_lane() -> None:
+    publish_workflow_text = (REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml").read_text(
+        encoding="utf-8"
+    )
+    release_workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    publish_backend_section = publish_workflow_text.split("  publish-backend:\n", maxsplit=1)[1].split(
+        "\n  publish-backend-hardened:\n",
+        maxsplit=1,
+    )[0]
+    hardened_section = publish_workflow_text.split("  publish-backend-hardened:\n", maxsplit=1)[1].split(
+        "\n  publish-yasa-runner:\n",
+        maxsplit=1,
+    )[0]
+
+    assert "publish_backend_hardened:" in publish_workflow_text
+    assert "default: false" in publish_workflow_text
+
+    assert "target: runtime-release" in publish_backend_section
+    assert "target: runtime-cython" not in publish_backend_section
+    assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}" in publish_backend_section
+    assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-hardened" not in publish_backend_section
+    assert "scope=backend-runtime-release" in publish_backend_section
+    assert "vulhunter-backend:buildcache-runtime-release" in publish_backend_section
+
+    assert "if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}" in hardened_section
+    assert "platforms: linux/amd64" in hardened_section
+    assert "target: runtime-cython" in hardened_section
+    assert "tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-hardened" in hardened_section
+    assert "scope=backend-runtime-cython" in hardened_section
+    assert "vulhunter-backend:buildcache-runtime-cython" in hardened_section
+    assert 'IMAGE_TAG: ${{ format(\'{0}-hardened\', needs.prepare.outputs.tag) }}' in hardened_section
+
+    assert "publish_backend_hardened:" in release_workflow_text
+    assert (
+        "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.publish_backend_hardened || false }}"
+    ) in release_workflow_text
+
+
+def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> None:
+    backend_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
+    setup_text = (REPO_ROOT / "backend" / "cython_build" / "setup.py").read_text(encoding="utf-8")
+    allowlist_text = (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").read_text(encoding="utf-8")
+    dockerignore_text = (REPO_ROOT / "docker" / "backend.Dockerfile.dockerignore").read_text(encoding="utf-8")
+
+    assert "FROM builder AS selective-cython-compiler" in backend_text
+    assert "CYTHON_INCLUDE_PATTERNS_FILE=/build/cython_build/release_allowlist.txt" in backend_text
+    assert "FROM selective-cython-compiler AS runtime-release-app-assembler" in backend_text
+    assert "removed cythonized source" in backend_text
+    assert "remaining non-preserved .py count" in backend_text
+
+    assert "CYTHON_INCLUDE_PATTERNS_FILE" in setup_text
+    assert "DEFAULT_RELEASE_ALLOWLIST_FILE" in setup_text
+    assert 'module_name = f"app.' in setup_text
+    assert "Extension(module_name" in setup_text
+    assert "release-allowlist" in setup_text
+
+    assert "services/agent/*.py" in allowlist_text
+    assert "services/llm/*.py" in allowlist_text
+    assert "services/llm_rule/*.py" in allowlist_text
+    assert "services/scanner_runner.py" in allowlist_text
+    assert "db/*.py" in allowlist_text
+
+    for ignored_path in (
+        ".git",
+        ".github",
+        "docs",
+        "deploy",
+        "frontend",
+        "nexus-web",
+        "nexus-itemDetail",
+        "backend/tests",
+        "backend/log",
+        "backend/uploads",
+    ):
+        assert ignored_path in dockerignore_text

@@ -349,25 +349,24 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
     root_readme_en = (REPO_ROOT / "README_EN.md").read_text(encoding="utf-8")
     compose_readme = (REPO_ROOT / "scripts" / "README-COMPOSE.md").read_text(encoding="utf-8")
 
-    assert "docker compose up" in root_readme
-    assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" in root_readme
-    assert "docker-compose.full.yml" not in root_readme
-    assert "docker-compose.self-contained.yml" not in root_readme
-    assert "package-release-artifacts.sh" not in root_readme
+    for doc in (root_readme, root_readme_en, compose_readme):
+        assert "docker compose up -d" in doc
+        assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in doc
+        assert "docker-compose.full.yml" not in doc
+        assert "docker-compose.self-contained.yml" not in doc
+        assert "docker/env/backend/env.example" in doc
+        assert "offline-images.env.example" in doc
+        assert "load-images.sh" in doc
+        assert "use-offline-env.sh" in doc
+        assert "nexus-web" in doc
+        assert "nexus-itemDetail" in doc
+
     assert "scripts/README-COMPOSE.md" in root_readme
-    assert "docker compose up" in root_readme_en
-    assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" in root_readme_en
-    assert "docker-compose.full.yml" not in root_readme_en
-    assert "docker-compose.self-contained.yml" not in root_readme_en
-    assert "package-release-artifacts.sh" not in root_readme_en
     assert "scripts/README-COMPOSE.md" in root_readme_en
-    assert "docker compose up" in compose_readme
-    assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" in compose_readme
-    assert "docker-compose.full.yml" not in compose_readme
-    assert "docker-compose.self-contained.yml" not in compose_readme
+    assert "package-release-artifacts.sh" not in root_readme
+    assert "package-release-artifacts.sh" not in root_readme_en
     assert "package-release-artifacts.sh" not in compose_readme
     assert "deploy-release-artifacts.sh" not in compose_readme
-    assert "docker/env/backend/env.example" in compose_readme
 
 
 def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
@@ -574,9 +573,9 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     )
 
     assert "publish-runtime-images:" in workflow_text
-    assert "publish_latest_for_changed_push: true" in workflow_text
     assert "build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}" in workflow_text
     assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
+    assert "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}" in workflow_text
     assert "- 'frontend/**'" in workflow_text
     assert "- 'backend/**'" in workflow_text
     assert "- 'docker/frontend.Dockerfile'" in workflow_text

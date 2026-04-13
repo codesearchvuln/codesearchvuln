@@ -90,6 +90,9 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
+    publish_workflow_text = (REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml").read_text(
+        encoding="utf-8"
+    )
 
     generator_path = REPO_ROOT / "scripts" / "generate-release-branch.sh"
     publish_workflow_path = REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml"
@@ -99,7 +102,12 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "branches:" in workflow_text
     assert "- main" in workflow_text
     assert "workflow_dispatch:" in workflow_text
+    assert "publish_backend_hardened:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
+    assert (
+        "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.publish_backend_hardened || false }}"
+    ) in workflow_text
     assert "release-manifest.json" in workflow_text
     assert "images-manifest-amd64.json" in workflow_text
     assert "images-manifest-arm64.json" in workflow_text
@@ -123,6 +131,12 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "release-tag-cleanup.txt" in workflow_text
     assert 'release_id=""' in workflow_text
     assert "docker-publish.yml" not in workflow_text
+    assert "publish_backend_hardened:" in publish_workflow_text
+    assert "target: runtime-release" in publish_workflow_text
+    assert "target: runtime-cython" in publish_workflow_text
+    assert "buildcache-runtime-release" in publish_workflow_text
+    assert "buildcache-runtime-cython" in publish_workflow_text
+    assert "-hardened" in publish_workflow_text
 
 
 def test_scheduled_release_workflow_triggers_end_to_end_release_pipeline() -> None:
