@@ -127,7 +127,7 @@ metadata = {
         logical_name: {
             "source_ref": source_ref,
             "local_tag": local_tag,
-        },
+        }
         for logical_name, source_ref, local_tag in images
     },
 }

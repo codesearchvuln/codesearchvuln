@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -70,7 +71,7 @@ def _write_frontend_bundle(path: Path) -> Path:
 
 
 def _run_release_generator(
-    output_dir: Path, manifest_path: Path, frontend_bundle_path: Path
+    output_dir: Path, manifest_path: Path, frontend_bundle_path: Path, *, validate: bool = False
 ) -> subprocess.CompletedProcess[str]:
     script_path = REPO_ROOT / "scripts" / "generate-release-branch.sh"
     script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
@@ -78,16 +79,20 @@ def _run_release_generator(
     env = os.environ.copy()
     env["PATH"] = f"/usr/bin:/bin:{env['PATH']}"
 
+    command = [
+        str(script_path),
+        "--output",
+        str(output_dir),
+        "--image-manifest",
+        str(manifest_path),
+        "--frontend-bundle",
+        str(frontend_bundle_path),
+    ]
+    if validate:
+        command.append("--validate")
+
     return subprocess.run(
-        [
-            str(script_path),
-            "--output",
-            str(output_dir),
-            "--image-manifest",
-            str(manifest_path),
-            "--frontend-bundle",
-            str(frontend_bundle_path),
-        ],
+        command,
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -363,6 +368,25 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "nexus-itemDetail" in doc
 
 
+def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tmp_path: Path) -> None:
+    output_dir = tmp_path / "release-tree"
+    manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
+    _write_release_manifest(manifest_path)
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path, validate=True)
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+
+    assert result.returncode == 0, combined_output
+
+    docs = (
+        (output_dir / "README.md").read_text(encoding="utf-8"),
+        (output_dir / "README_EN.md").read_text(encoding="utf-8"),
+        (output_dir / "scripts" / "README-COMPOSE.md").read_text(encoding="utf-8"),
+    )
+    for doc in docs:
+        assert re.search(r"(^|[^A-Z_])FRONTEND_IMAGE([^A-Z_]|$)", doc) is None
+
+
 def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) -> None:
     output_dir = tmp_path / "release-tree"
     manifest_path = tmp_path / "release-manifest.json"
@@ -411,3 +435,12 @@ def test_package_release_images_script_supports_single_arch_mode() -> None:
     assert 'bundle_path = output_dir / f"vulhunter-images-{arch}.tar.zst"' in script_text
     assert 'metadata_path = output_dir / f"images-manifest-{arch}.json"' in script_text
     assert 'for arch in ("amd64", "arm64"):' not in script_text
+
+
+def test_package_release_images_embedded_python_compiles() -> None:
+    script_text = (REPO_ROOT / "scripts" / "package-release-images.sh").read_text(encoding="utf-8")
+    start_marker = "<<'PY'\n"
+    start = script_text.index(start_marker) + len(start_marker)
+    end = script_text.rindex("\nPY")
+
+    compile(script_text[start:end], str(REPO_ROOT / "scripts" / "package-release-images.sh"), "exec")

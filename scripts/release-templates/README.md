@@ -1,6 +1,6 @@
 # VulHunter 使用说明
 
-这是面向最终用户的 VulHunter 运行包。它和源码仓库根目录的 compose 合同不是一回事：源码仓库里的主 frontend 仍可通过 `FRONTEND_IMAGE` 指向 `vulhunter-frontend` 运行镜像；当前 release tree 的主 frontend 则是 `STATIC_FRONTEND_IMAGE` 加 `deploy/runtime/frontend/site` 与 `deploy/runtime/frontend/nginx/default.conf`。该 release tree 只包含运行时 compose 文件、环境模板和静态 bundle，不附带 `backend` / `frontend` 源码，也不支持在 release tree 内本地重建这些镜像。
+这是面向最终用户的 VulHunter 运行包。它和源码仓库根目录的 compose 合同不是一回事：源码仓库里的主 frontend 仍沿用源码仓库自己的独立运行镜像合同；当前 release tree 的主 frontend 则是 `STATIC_FRONTEND_IMAGE` 加 `deploy/runtime/frontend/site` 与 `deploy/runtime/frontend/nginx/default.conf`。该 release tree 只包含运行时 compose 文件、环境模板和静态 bundle，不附带 `backend` / `frontend` 源码，也不支持在 release tree 内本地重建这些镜像。
 
 ## 1. 启动前配置
 
@@ -36,7 +36,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-离线模式会切换到本地 `vulhunter-local/*` 镜像标签，不再依赖在线拉取运行镜像；主前端仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，`offline-images.env` 里也不会提供 `FRONTEND_IMAGE`。
+离线模式会切换到本地 `vulhunter-local/*` 镜像标签，不再依赖在线拉取运行镜像；主前端仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，`offline-images.env` 里也不会提供源码仓库那套独立 frontend 运行镜像覆盖项。
 
 ## 4. 运行与维护
 
@@ -64,7 +64,7 @@ docker compose down -v
 
 - 正式 release tree 只支持 `docker-compose.yml` 这一份 compose 入口
 - `backend` / runner / sandbox 镜像由发布流程预构建并固定到 digest
-- 主前端通过 `STATIC_FRONTEND_IMAGE` 承载随包静态资源和 nginx 配置，不使用 `FRONTEND_IMAGE` / `vulhunter-frontend` 运行镜像，也不支持在 release tree 内重建 frontend
+- 主前端通过 `STATIC_FRONTEND_IMAGE` 承载随包静态资源和 nginx 配置，不使用源码仓库那套独立 frontend 运行镜像合同，也不支持在 release tree 内重建 frontend
 - `nexus-web` 与 `nexus-itemDetail` 仅从随包附带的静态产物组装本地 nginx 容器
 - 本地 build overlay、Dockerfile 和源码分发包不属于此 release contract
 
