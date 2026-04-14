@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/data-table";
@@ -25,6 +26,7 @@ interface TaskActivitiesListTableProps {
 	nowMs: number;
 	emptyText?: string;
 	pageSize?: number;
+	onDeleteActivity?: (activity: TaskActivityItem) => Promise<void>;
 }
 
 function getDefectSummaryLabel(activity: TaskActivityItem): string {
@@ -42,6 +44,8 @@ function getDefectSummaryLabel(activity: TaskActivityItem): string {
 function getColumns(
 	nowMs: number,
 	currentRoute: string,
+	handleDelete: ((activity: TaskActivityItem) => Promise<void>) | null,
+	deletingActivityId: string | null,
 ): AppColumnDef<TaskActivityItem, unknown>[] {
 	return [
 		{
@@ -179,18 +183,35 @@ function getColumns(
 				label: "操作",
 				width: 120,
 			},
-			cell: ({ row }) => (
-				<Button
-					asChild
-					size="sm"
-					variant="outline"
-					className="cyber-btn-ghost h-8 px-3"
-				>
-					<Link to={appendReturnTo(row.original.route, currentRoute)}>
-						详情
-					</Link>
-				</Button>
-			),
+			cell: ({ row }) => {
+				const isDeleting = deletingActivityId === row.original.id;
+				return (
+					<div className="flex items-center gap-2">
+						<Button
+							asChild
+							size="sm"
+							variant="outline"
+							className="cyber-btn-ghost h-8 px-3"
+						>
+							<Link to={appendReturnTo(row.original.route, currentRoute)}>
+								详情
+							</Link>
+						</Button>
+						<Button
+							size="sm"
+							variant="destructive"
+							className="h-8 px-3"
+							disabled={!handleDelete || isDeleting}
+							onClick={() => {
+								if (!handleDelete) return;
+								void handleDelete(row.original);
+							}}
+						>
+							{isDeleting ? "删除中..." : "删除任务"}
+						</Button>
+					</div>
+				);
+			},
 		},
 	];
 }
@@ -201,13 +222,45 @@ export default function TaskActivitiesListTable({
 	nowMs,
 	emptyText = "暂无任务",
 	pageSize = 10,
+	onDeleteActivity,
 }: TaskActivitiesListTableProps) {
 	const location = useLocation();
 	const currentRoute = `${location.pathname}${location.search}`;
+	const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
+
+	const handleDelete =
+		onDeleteActivity == null
+			? null
+			: async (activity: TaskActivityItem) => {
+					const confirmed = window.confirm(
+						`确认删除任务「${activity.projectName} / ${getTaskStatusText(
+							activity.status,
+						)}」吗？`,
+					);
+					if (!confirmed) return;
+					setDeletingActivityId(activity.id);
+					try {
+						await onDeleteActivity(activity);
+						toast.success("任务已删除");
+					} catch (error) {
+						console.error("Failed to delete task:", error);
+						toast.error("删除任务失败");
+					} finally {
+						setDeletingActivityId((current) =>
+							current === activity.id ? null : current,
+						);
+					}
+			  };
 
 	const columns = useMemo<ColumnDef<TaskActivityItem>[]>(
-		() => getColumns(nowMs, currentRoute),
-		[currentRoute, nowMs],
+		() =>
+			getColumns(
+				nowMs,
+				currentRoute,
+				handleDelete,
+				deletingActivityId,
+			),
+		[currentRoute, deletingActivityId, handleDelete, nowMs],
 	);
 
 	const defaultState = useMemo<Partial<DataTableQueryState>>(

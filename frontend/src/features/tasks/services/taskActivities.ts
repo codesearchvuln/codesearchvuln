@@ -1,26 +1,43 @@
-import { type AgentTask, getAgentTasks } from "@/shared/api/agentTasks";
 import {
+	type AgentTask,
+	cancelAgentTask,
+	deleteAgentTask,
+	getAgentTasks,
+} from "@/shared/api/agentTasks";
+import {
+	deleteGitleaksScanTask,
 	type GitleaksScanTask,
 	getGitleaksScanTasks,
+	interruptGitleaksScanTask,
 } from "@/shared/api/gitleaks";
 import {
+	deleteBanditScanTask,
 	type BanditScanTask,
 	getBanditScanTasks,
+	interruptBanditScanTask,
 } from "@/shared/api/bandit";
 import {
+	deletePhpstanScanTask,
 	type PhpstanScanTask,
 	getPhpstanScanTasks,
+	interruptPhpstanScanTask,
 } from "@/shared/api/phpstan";
 import {
+	deletePmdScanTask,
 	type PmdScanTask,
 	getPmdScanTasks,
+	interruptPmdScanTask,
 } from "@/shared/api/pmd";
 import {
+	deleteYasaScanTask,
 	type YasaScanTask,
 	getYasaScanTasks,
+	interruptYasaScanTask,
 } from "@/shared/api/yasa";
 import {
+	deleteOpengrepScanTask,
 	getOpengrepScanTasks,
+	interruptOpengrepScanTask,
 	type OpengrepScanTask,
 } from "@/shared/api/opengrep";
 import type { Project } from "@/shared/types";
@@ -81,6 +98,13 @@ export interface TaskActivityItem {
 	completedAt?: string | null;
 	durationMs?: number | null;
 	route: string;
+	opengrepTaskId?: string;
+	gitleaksTaskId?: string;
+	banditTaskId?: string;
+	phpstanTaskId?: string;
+	pmdTaskId?: string;
+	yasaTaskId?: string;
+	agentTaskId?: string;
 }
 
 function normalizeTaskName(name: string | null | undefined): string {
@@ -442,6 +466,12 @@ function toRuleScanActivities(
 			completedAt,
 			durationMs,
 			route: `/static-analysis/${primaryTask.id}?${params.toString()}`,
+			opengrepTaskId: opengrepTask?.id,
+			gitleaksTaskId: gitleaksTask?.id,
+			banditTaskId: banditTask?.id,
+			phpstanTaskId: phpstanTask?.id,
+			pmdTaskId: pmdTask?.id,
+			yasaTaskId: yasaTask?.id,
 		};
 		return item;
 	})
@@ -467,7 +497,109 @@ function toAgentActivities(
 		startedAt: task.started_at,
 		completedAt: task.completed_at,
 		route: `/agent-audit/${task.id}?muteToast=1`,
+		agentTaskId: task.id,
 	}));
+}
+
+const AGENT_TERMINAL_STATUSES = new Set([
+	"completed",
+	"failed",
+	"cancelled",
+	"interrupted",
+]);
+
+async function interruptAndDeleteStaticTask(
+	taskId: string,
+	interruptFn: (taskId: string) => Promise<unknown>,
+	deleteFn: (taskId: string) => Promise<unknown>,
+): Promise<void> {
+	try {
+		await interruptFn(taskId);
+	} catch {
+		// Ignore interrupt errors and try hard delete anyway.
+	}
+	await deleteFn(taskId);
+}
+
+export async function deleteTaskActivity(activity: TaskActivityItem): Promise<void> {
+	if (activity.kind === "rule_scan") {
+		const operations: Array<() => Promise<void>> = [];
+		if (activity.opengrepTaskId) {
+			operations.push(() =>
+				interruptAndDeleteStaticTask(
+					activity.opengrepTaskId,
+					interruptOpengrepScanTask,
+					deleteOpengrepScanTask,
+				),
+			);
+		}
+		if (activity.gitleaksTaskId) {
+			operations.push(() =>
+				interruptAndDeleteStaticTask(
+					activity.gitleaksTaskId,
+					interruptGitleaksScanTask,
+					deleteGitleaksScanTask,
+				),
+			);
+		}
+		if (activity.banditTaskId) {
+			operations.push(() =>
+				interruptAndDeleteStaticTask(
+					activity.banditTaskId,
+					interruptBanditScanTask,
+					deleteBanditScanTask,
+				),
+			);
+		}
+		if (activity.phpstanTaskId) {
+			operations.push(() =>
+				interruptAndDeleteStaticTask(
+					activity.phpstanTaskId,
+					interruptPhpstanScanTask,
+					deletePhpstanScanTask,
+				),
+			);
+		}
+		if (activity.pmdTaskId) {
+			operations.push(() =>
+				interruptAndDeleteStaticTask(
+					activity.pmdTaskId,
+					interruptPmdScanTask,
+					deletePmdScanTask,
+				),
+			);
+		}
+		if (activity.yasaTaskId) {
+			operations.push(() =>
+				interruptAndDeleteStaticTask(
+					activity.yasaTaskId,
+					interruptYasaScanTask,
+					deleteYasaScanTask,
+				),
+			);
+		}
+		if (operations.length === 0) {
+			throw new Error("缺少可删除的静态任务标识");
+		}
+		for (const runOperation of operations) {
+			await runOperation();
+		}
+		return;
+	}
+
+	const taskId = activity.agentTaskId;
+	if (!taskId) {
+		throw new Error("缺少可删除的智能任务标识");
+	}
+	const normalizedStatus = String(activity.status || "").trim().toLowerCase();
+	if (!AGENT_TERMINAL_STATUSES.has(normalizedStatus)) {
+		try {
+			await cancelAgentTask(taskId);
+		} catch {
+			// Ignore cancel errors and try hard delete anyway.
+		}
+	}
+	await deleteAgentTask(taskId);
 }
 
 export async function fetchTaskActivities(

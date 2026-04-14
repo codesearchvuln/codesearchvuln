@@ -112,6 +112,13 @@ export async function interruptPmdScanTask(
   return response.data;
 }
 
+export async function deletePmdScanTask(
+  taskId: string,
+): Promise<{ message: string; task_id: string }> {
+  const response = await apiClient.delete(`/static-tasks/pmd/tasks/${taskId}`);
+  return response.data;
+}
+
 export async function getPmdFindings(params: {
   taskId: string;
   status?: string;

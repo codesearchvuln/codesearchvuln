@@ -11,6 +11,8 @@ import { PROJECT_ACTION_BTN_SUBTLE } from "../constants";
 interface ProjectsTableProps {
   rows: ProjectsPageRowViewModel[];
   onCreateScan: (projectId: string) => void;
+  onDeleteProject: (projectId: string, projectName: string) => void;
+  deletingProjectId?: string | null;
 }
 
 // const EXECUTION_COLUMNS = [
@@ -241,6 +243,8 @@ function MetricSummaryCell({
 
 function buildColumns(
   onCreateScan: (projectId: string) => void,
+  onDeleteProject: (projectId: string, projectName: string) => void,
+  deletingProjectId?: string | null,
 ): AppColumnDef<ProjectsPageRowViewModel, unknown>[] {
   return [
     {
@@ -433,6 +437,15 @@ function buildColumns(
           >
             创建扫描
           </Button>
+          <Button
+            size="lg"
+            variant="destructive"
+            className="h-8 px-2.5"
+            onClick={() => onDeleteProject(row.original.id, row.original.name)}
+            disabled={deletingProjectId === row.original.id}
+          >
+            {deletingProjectId === row.original.id ? "删除中..." : "删除项目"}
+          </Button>
         </div>
       ),
     },
@@ -442,8 +455,16 @@ function buildColumns(
 export default function ProjectsTable({
   rows,
   onCreateScan,
+  onDeleteProject,
+  deletingProjectId = null,
 }: ProjectsTableProps) {
-  const columns = buildColumns(onCreateScan) as ColumnDef<ProjectsPageRowViewModel>[];
+  const columns = buildColumns(
+    onCreateScan,
+    onDeleteProject,
+    deletingProjectId,
+  ) as ColumnDef<
+    ProjectsPageRowViewModel
+  >[];
 
   return (
     <DataTable

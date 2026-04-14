@@ -82,6 +82,13 @@ export async function interruptGitleaksScanTask(
     return response.data;
 }
 
+export async function deleteGitleaksScanTask(
+    taskId: string,
+): Promise<{ message: string; task_id: string }> {
+    const response = await apiClient.delete(`/static-tasks/gitleaks/tasks/${taskId}`);
+    return response.data;
+}
+
 export async function getGitleaksScanTasks(params?: {
     projectId?: string;
     skip?: number;

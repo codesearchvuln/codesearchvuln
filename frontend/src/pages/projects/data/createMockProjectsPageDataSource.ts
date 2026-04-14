@@ -127,6 +127,15 @@ export function createMockProjectsPageDataSource(
 			return this.createProject(input);
 		},
 
+		async deleteProject(projectId: string) {
+			await wait();
+			const projectIndex = getProjectIndex(projectId);
+			if (projectIndex < 0) {
+				throw new Error("项目不存在");
+			}
+			projects.splice(projectIndex, 1);
+		},
+
 		async updateProject(projectId, input, zipFile) {
 			await wait();
 			const projectIndex = getProjectIndex(projectId);

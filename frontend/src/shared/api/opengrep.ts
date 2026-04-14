@@ -367,6 +367,13 @@ export async function interruptOpengrepScanTask(
     return response.data;
 }
 
+export async function deleteOpengrepScanTask(
+    taskId: string,
+): Promise<{ message: string; task_id: string }> {
+    const response = await apiClient.delete(`/static-tasks/tasks/${taskId}`);
+    return response.data;
+}
+
 export async function getOpengrepScanProgress(
     taskId: string,
     includeLogs: boolean = false,

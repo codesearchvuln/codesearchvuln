@@ -83,6 +83,13 @@ export async function interruptBanditScanTask(
   return response.data;
 }
 
+export async function deleteBanditScanTask(
+  taskId: string,
+): Promise<{ message: string; task_id: string }> {
+  const response = await apiClient.delete(`/static-tasks/bandit/tasks/${taskId}`);
+  return response.data;
+}
+
 export async function getBanditScanTasks(params?: {
   projectId?: string;
   status?: string;

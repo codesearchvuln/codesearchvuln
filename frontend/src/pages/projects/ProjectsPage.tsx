@@ -124,6 +124,7 @@ export default function ProjectsPage({
 	const tableViewportRef = useRef<HTMLDivElement | null>(null);
 	const paginationRef = useRef<HTMLDivElement | null>(null);
 	const [projectPageSize, setProjectPageSize] = useState(PROJECT_PAGE_SIZE);
+	const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
 	const projectPageSizeRef = useRef(projectPageSize);
 
 	const filteredProjects = useMemo(
@@ -303,6 +304,26 @@ export default function ProjectsPage({
 		});
 	}
 
+	async function handleDeleteProject(projectId: string, projectName: string) {
+		const confirmed = window.confirm(
+			`确认删除项目「${projectName}」吗？该操作不可恢复。`,
+		);
+		if (!confirmed) return;
+
+		setDeletingProjectId(projectId);
+		try {
+			await data.deleteProject(projectId);
+			toast.success(`项目「${projectName}」已删除`);
+		} catch (error) {
+			console.error("Failed to delete project:", error);
+			toast.error("删除项目失败");
+		} finally {
+			setDeletingProjectId((current) =>
+				current === projectId ? null : current,
+			);
+		}
+	}
+
 	return (
 		<div className="p-6 bg-background min-h-screen font-mono relative flex flex-col gap-6">
 			<div className="absolute inset-0 cyber-grid-subtle pointer-events-none" />
@@ -358,6 +379,8 @@ export default function ProjectsPage({
 									navigateOnSuccess: true,
 								});
 							}}
+							onDeleteProject={handleDeleteProject}
+							deletingProjectId={deletingProjectId}
 						/>
 						<div ref={paginationRef}>
 							<ProjectsPagination

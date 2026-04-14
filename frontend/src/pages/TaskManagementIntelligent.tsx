@@ -9,7 +9,10 @@ import { Input } from "@/components/ui/input";
 import TaskActivitiesListTable from "@/features/tasks/components/TaskActivitiesListTable";
 import { useTaskActivitiesSnapshot } from "@/features/tasks/hooks/useTaskActivitiesSnapshot";
 import { useTaskClock } from "@/features/tasks/hooks/useTaskClock";
-import { filterIntelligentActivities } from "@/features/tasks/services/taskActivities";
+import {
+	deleteTaskActivity,
+	filterIntelligentActivities,
+} from "@/features/tasks/services/taskActivities";
 
 const CreateProjectScanDialog = lazy(
 	() => import("@/components/scan/CreateProjectScanDialog"),
@@ -159,6 +162,10 @@ export default function TaskManagementIntelligent() {
 						loading={loading}
 						nowMs={nowMs}
 						emptyText="暂无智能扫描任务"
+						onDeleteActivity={async (activity) => {
+							await deleteTaskActivity(activity);
+							await refresh();
+						}}
 					/>
 				</DeferredSection>
 			

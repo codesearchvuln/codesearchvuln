@@ -200,6 +200,25 @@ async def update_project(
     )
 
 
+@router.delete("/{id}")
+async def delete_project(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Delete project.
+    """
+    _ = current_user
+    project = await db.get(Project, id)
+    _raise_if_project_hidden(project)
+
+    await db.delete(project)
+    await db.commit()
+
+    return {"message": "项目已删除", "project_id": id}
+
+
 @router.post(
     "/{id}/metrics/recalculate",
     response_model=ProjectManagementMetricsResponse,

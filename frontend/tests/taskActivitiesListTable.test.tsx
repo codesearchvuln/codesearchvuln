@@ -73,6 +73,7 @@ test("TaskActivitiesListTable renders severity summaries for agent tasks and kee
   assert.match(markup, /严重 1 \/ 高危 1 \/ 中危 1 \/ 低危 1/);
   assert.match(markup, /严重 0 \/ 高危 2 \/ 中危 3 \/ 低危 5/);
   assert.match(markup, /Demo Hybrid[\s\S]*?">-<\/td>/);
+  assert.match(markup, /删除任务/);
 });
 
 test("TaskActivitiesListTable merges running progress into the status column", async () => {

@@ -9,7 +9,10 @@ import { Input } from "@/components/ui/input";
 import TaskActivitiesListTable from "@/features/tasks/components/TaskActivitiesListTable";
 import { useTaskActivitiesSnapshot } from "@/features/tasks/hooks/useTaskActivitiesSnapshot";
 import { useTaskClock } from "@/features/tasks/hooks/useTaskClock";
-import { filterHybridActivities } from "@/features/tasks/services/taskActivities";
+import {
+	deleteTaskActivity,
+	filterHybridActivities,
+} from "@/features/tasks/services/taskActivities";
 
 const CreateProjectScanDialog = lazy(
 	() => import("@/components/scan/CreateProjectScanDialog"),
@@ -160,6 +163,10 @@ export default function TaskManagementHybrid() {
 						loading={loading}
 						nowMs={nowMs}
 						emptyText="暂无混合扫描任务"
+						onDeleteActivity={async (activity) => {
+							await deleteTaskActivity(activity);
+							await refresh();
+						}}
 					/>
 				</DeferredSection>
 			{/* </div> */}

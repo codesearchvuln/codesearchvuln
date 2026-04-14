@@ -136,6 +136,46 @@ async def _load_defect_summaries(
         }
     return summaries
 
+
+_AGENT_TERMINAL_STATUSES = {
+    AgentTaskStatus.COMPLETED,
+    AgentTaskStatus.FAILED,
+    AgentTaskStatus.CANCELLED,
+    AgentTaskStatus.INTERRUPTED,
+}
+
+
+async def _cancel_agent_task_internal(
+    task: AgentTask,
+    db: AsyncSession,
+) -> None:
+    task_id = task.id
+
+    # 0. 立即标记任务为已取消（用于前置操作的取消检查）
+    _cancelled_tasks.add(task_id)
+    logger.info(f"[Cancel] Added task {task_id} to cancelled set")
+
+    # 1. 设置 Agent 的取消标志
+    runner = _running_tasks.get(task_id)
+    if runner:
+        runner.cancel()
+        logger.info(f"[Cancel] Set cancel flag for task {task_id}")
+
+    # 2. 强制取消 asyncio Task（立即中断 LLM 调用）
+    asyncio_task = _running_asyncio_tasks.get(task_id)
+    if asyncio_task and not asyncio_task.done():
+        asyncio_task.cancel()
+        logger.info(f"[Cancel] Cancelled asyncio task for {task_id}")
+
+    # 取消前固化运行时统计，避免中断后查询显示归零
+    orchestrator = _running_orchestrators.get(task_id)
+    _snapshot_runtime_stats_to_task(task, orchestrator)
+
+    task.status = AgentTaskStatus.CANCELLED
+    task.completed_at = datetime.now(timezone.utc)
+    await db.flush()
+
+
 @router.post("/", response_model=AgentTaskResponse)
 async def create_agent_task(
     request: AgentTaskCreate,
@@ -318,36 +358,49 @@ async def cancel_agent_task(
     if not project:
         raise HTTPException(status_code=403, detail="无权操作此任务")
 
-    if task.status in [AgentTaskStatus.COMPLETED, AgentTaskStatus.FAILED, AgentTaskStatus.CANCELLED, AgentTaskStatus.INTERRUPTED]:
+    if task.status in _AGENT_TERMINAL_STATUSES:
         raise HTTPException(status_code=400, detail="任务已结束，无法取消")
 
-    #  0. 立即标记任务为已取消（用于前置操作的取消检查）
-    _cancelled_tasks.add(task_id)
-    logger.info(f"[Cancel] Added task {task_id} to cancelled set")
-
-    #  1. 设置 Agent 的取消标志
-    runner = _running_tasks.get(task_id)
-    if runner:
-        runner.cancel()
-        logger.info(f"[Cancel] Set cancel flag for task {task_id}")
-
-    #  2. 强制取消 asyncio Task（立即中断 LLM 调用）
-    asyncio_task = _running_asyncio_tasks.get(task_id)
-    if asyncio_task and not asyncio_task.done():
-        asyncio_task.cancel()
-        logger.info(f"[Cancel] Cancelled asyncio task for {task_id}")
-
-    # 取消前固化运行时统计，避免中断后查询显示归零
-    orchestrator = _running_orchestrators.get(task_id)
-    _snapshot_runtime_stats_to_task(task, orchestrator)
-
-    # 更新状态
-    task.status = AgentTaskStatus.CANCELLED
-    task.completed_at = datetime.now(timezone.utc)
+    await _cancel_agent_task_internal(task, db)
     await db.commit()
 
     logger.info(f"[Cancel] Task {task_id} cancelled successfully")
     return {"message": "任务已取消", "task_id": task_id}
+
+
+@router.delete("/{task_id}")
+async def delete_agent_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    删除 Agent 任务。若任务仍在执行，先取消后删除。
+    """
+    _ = current_user
+    task = await db.get(AgentTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    project = await db.get(Project, task.project_id)
+    if not project:
+        raise HTTPException(status_code=403, detail="无权操作此任务")
+
+    if task.status not in _AGENT_TERMINAL_STATUSES:
+        await _cancel_agent_task_internal(task, db)
+
+    _running_tasks.pop(task_id, None)
+    _running_asyncio_tasks.pop(task_id, None)
+    _running_orchestrators.pop(task_id, None)
+    _running_event_managers.pop(task_id, None)
+    _cancelled_tasks.discard(task_id)
+
+    await db.delete(task)
+    await db.commit()
+    project_metrics_refresher.enqueue(project.id)
+
+    logger.info(f"[Delete] Task {task_id} deleted successfully")
+    return {"message": "任务已删除", "task_id": task_id}
 
 
 @router.get("/{task_id}/events")

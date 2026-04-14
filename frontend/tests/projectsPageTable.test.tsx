@@ -90,6 +90,7 @@ test("ProjectsTable renders hover metric popovers without nested trigger frames"
 				},
 			],
 			onCreateScan: () => {},
+			onDeleteProject: () => {},
 		})),
 	);
 
@@ -104,6 +105,7 @@ test("ProjectsTable renders hover metric popovers without nested trigger frames"
 	assert.match(markup, /查看详情/);
 	assert.match(markup, /代码浏览/);
 	assert.match(markup, /创建扫描/);
+	assert.match(markup, /删除项目/);
 	assert.match(markup, />29</);
 	assert.match(markup, />11</);
 	assert.match(markup, />6</);
@@ -153,6 +155,7 @@ test("ProjectsTable renders hover metric popovers without nested trigger frames"
 	assert.match(markup, /justify-center gap-2 text-\[16px\]/);
 	assert.ok(markup.indexOf("查看详情") < markup.indexOf("代码浏览"));
 	assert.ok(markup.indexOf("代码浏览") < markup.indexOf("创建扫描"));
+	assert.ok(markup.indexOf("创建扫描") < markup.indexOf("删除项目"));
 	assert.ok(!markup.includes(">状态<"));
 	assert.match(markup, /disabled/);
 });
@@ -229,6 +232,7 @@ test("ProjectsTable hides zero-count vulnerability severities and shows empty pl
 				},
 			],
 			onCreateScan: () => {},
+			onDeleteProject: () => {},
 		})),
 	);
 
@@ -280,6 +284,7 @@ test("ProjectsTable keeps metric popovers but removes the old outer trigger fram
 				},
 			],
 			onCreateScan: () => {},
+			onDeleteProject: () => {},
 		})),
 	);
 

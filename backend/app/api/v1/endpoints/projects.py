@@ -22,6 +22,7 @@ read_project = _crud.read_project
 download_project_archive = _crud.download_project_archive
 get_project_info = _crud.get_project_info
 update_project = _crud.update_project
+delete_project = _crud.delete_project
 
 export_project_bundle = _transfer.export_project_bundle
 import_project_bundle = _transfer.import_project_bundle

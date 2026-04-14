@@ -33,6 +33,7 @@ test("api projects data source fetches batches with metrics flag", async () => {
 			},
 			createProject: async () => ({ id: "new-project" }),
 			createProjectWithZip: async () => ({ id: "new-zip-project" }),
+			deleteProject: async () => {},
 			updateProject: async () => ({ id: "updated-project" }),
 		},
 	});
@@ -67,6 +68,7 @@ test("api projects data source keeps the trimmed projects-page surface", async (
 			getProjects: async () => [],
 			createProject: async () => ({ id: "new-project" }),
 			createProjectWithZip: async () => ({ id: "new-zip-project" }),
+			deleteProject: async () => {},
 			updateProject: async () => ({ id: "updated-project" }),
 		},
 	});
