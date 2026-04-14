@@ -46,7 +46,12 @@ docker compose up -d
 
 ## 4. 离线部署（可选）
 
-先下载与你机器架构匹配的离线镜像包 `vulhunter-images-<arch>.tar.zst`，放到 release 根目录或 `images/` 目录，然后执行：
+先下载与你机器架构匹配的两份离线镜像包：
+
+- `vulhunter-services-images-<arch>.tar.zst`
+- `vulhunter-scanner-images-<arch>.tar.zst`
+
+把它们放到 release 根目录或 `images/` 目录，然后执行：
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
@@ -54,7 +59,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-离线模式会先导入镜像包，再切换到本地 `vulhunter-local/*` 镜像标签运行，从而避免在线拉取。前端静态文件仍使用当前目录中自带的静态文件与 nginx 配置。
+离线模式会先同时导入 `services` 与 `scanner` 两个镜像包，再切换到本地 `vulhunter-local/*` 镜像标签运行，从而避免在线拉取。前端静态文件与 `nexus-*` 继续使用当前目录中自带的静态资源与本地静态加载路径，不包含在离线镜像包内。
 
 ## 5. 运行与维护
 
@@ -83,6 +88,10 @@ docker compose down -v
 如需覆盖默认运行镜像或接入已有环境，可根据实际需要在 `docker/env/backend/.env` 中调整：
 
 - `BACKEND_IMAGE`
+- `POSTGRES_IMAGE`
+- `REDIS_IMAGE`
+- `ADMINER_IMAGE`
+- `SCAN_WORKSPACE_INIT_IMAGE`
 - `STATIC_FRONTEND_IMAGE`
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`

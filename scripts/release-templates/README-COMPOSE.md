@@ -24,7 +24,12 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-离线镜像包文件名为 `vulhunter-images-<arch>.tar.zst`，请放在 release 根目录或 `images/` 目录。
+离线镜像包文件名为：
+
+- `vulhunter-services-images-<arch>.tar.zst`
+- `vulhunter-scanner-images-<arch>.tar.zst`
+
+请把这两份文件都放在 release 根目录或 `images/` 目录。前端与 `nexus-*` 继续走当前目录内的静态资源加载路径，不包含在离线镜像包内。
 
 ## 查看运行状态
 
@@ -62,6 +67,10 @@ docker compose restart backend
 如果需要替换运行镜像，也可以在 `.env` 中设置：
 
 - `BACKEND_IMAGE`
+- `POSTGRES_IMAGE`
+- `REDIS_IMAGE`
+- `ADMINER_IMAGE`
+- `SCAN_WORKSPACE_INIT_IMAGE`
 - `STATIC_FRONTEND_IMAGE`
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`

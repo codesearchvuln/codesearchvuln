@@ -46,7 +46,12 @@ By default, VulHunter pulls the required runtime images and starts the full stac
 
 ## 4. Offline Deployment (Optional)
 
-Download the matching `vulhunter-images-<arch>.tar.zst` bundle for your machine and place it in the release root or the `images/` directory, then run:
+Download both matching offline bundles for your machine:
+
+- `vulhunter-services-images-<arch>.tar.zst`
+- `vulhunter-scanner-images-<arch>.tar.zst`
+
+Place them in the release root or the `images/` directory, then run:
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
@@ -54,7 +59,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-Offline mode imports the image bundle first and then switches runtime services to local `vulhunter-local/*` tags, so the stack can start without pulling images from the network. The web UI static assets are still served from the files shipped in this package.
+Offline mode imports both `services` and `scanner` bundles first and then switches runtime services to local `vulhunter-local/*` tags, so the stack can start without pulling images from the network. The web UI and `nexus-*` static assets are still served from the files shipped in this package and are not included in the offline image bundles.
 
 ## 5. Run and Maintain
 
@@ -83,6 +88,10 @@ After changing `.env` or `offline-images.env`, rerun `docker compose up -d` to a
 If you need to point the stack to custom images or an existing runtime environment, you can override these values in `docker/env/backend/.env`:
 
 - `BACKEND_IMAGE`
+- `POSTGRES_IMAGE`
+- `REDIS_IMAGE`
+- `ADMINER_IMAGE`
+- `SCAN_WORKSPACE_INIT_IMAGE`
 - `STATIC_FRONTEND_IMAGE`
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`

@@ -1136,6 +1136,10 @@ jobs:
           IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
           REQUIRE_COMPLETE_MANIFEST: ${{ inputs.require_complete_manifest }}
           REVISION: ${{ inputs.revision != '' && inputs.revision || github.sha }}
+          POSTGRES_IMAGE: docker.io/library/postgres:15-alpine
+          REDIS_IMAGE: docker.io/library/redis:7-alpine
+          ADMINER_IMAGE: docker.io/library/adminer:latest
+          SCAN_WORKSPACE_INIT_IMAGE: docker.io/library/alpine:3.20
           BACKEND_REF: ${{ needs.publish-backend.outputs.ref }}
           SANDBOX_RUNNER_REF: ${{ needs.publish-sandbox-runner.outputs.ref }}
           SCANNER_YASA_REF: ${{ needs.publish-yasa-runner.outputs.ref }}
@@ -1170,7 +1174,28 @@ jobs:
             printf '%s@%s' "$image" "$resolved_digest"
           }
 
+          resolve_external_ref() {
+            local ref="$1"
+            local image="${ref%%@*}"
+            local resolved_digest
+
+            resolved_digest="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+            if [[ -z "$resolved_digest" ]]; then
+              if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
+                echo "::error::Failed to resolve digest for ${ref}" >&2
+                return 1
+              fi
+              return 0
+            fi
+
+            printf '%s@%s' "$image" "$resolved_digest"
+          }
+
           export BACKEND_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend" "${BACKEND_REF}")"
+          export POSTGRES_FINAL_REF="$(resolve_external_ref "${POSTGRES_IMAGE}")"
+          export REDIS_FINAL_REF="$(resolve_external_ref "${REDIS_IMAGE}")"
+          export ADMINER_FINAL_REF="$(resolve_external_ref "${ADMINER_IMAGE}")"
+          export SCAN_WORKSPACE_INIT_FINAL_REF="$(resolve_external_ref "${SCAN_WORKSPACE_INIT_IMAGE}")"
           export SANDBOX_RUNNER_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}")"
           export SCANNER_YASA_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}")"
           export SCANNER_OPENGREP_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner" "${SCANNER_OPENGREP_REF}")"
@@ -1200,6 +1225,10 @@ jobs:
               "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
               "images": {
                   "backend": {"ref": required("BACKEND_FINAL_REF")},
+                  "postgres": {"ref": required("POSTGRES_FINAL_REF")},
+                  "redis": {"ref": required("REDIS_FINAL_REF")},
+                  "adminer": {"ref": required("ADMINER_FINAL_REF")},
+                  "scan_workspace_init": {"ref": required("SCAN_WORKSPACE_INIT_FINAL_REF")},
                   "sandbox_runner": {"ref": required("SANDBOX_RUNNER_FINAL_REF")},
                   "scanner_yasa": {"ref": required("SCANNER_YASA_FINAL_REF")},
                   "scanner_opengrep": {"ref": required("SCANNER_OPENGREP_FINAL_REF")},

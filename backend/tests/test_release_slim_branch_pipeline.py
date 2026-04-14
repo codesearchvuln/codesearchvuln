@@ -18,6 +18,18 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "backend": {
                 "ref": "ghcr.io/acme-sec/vulhunter-backend@sha256:" + "1" * 64,
             },
+            "postgres": {
+                "ref": "ghcr.io/acme-sec/postgres@sha256:" + "a" * 64,
+            },
+            "redis": {
+                "ref": "ghcr.io/acme-sec/redis@sha256:" + "b" * 64,
+            },
+            "adminer": {
+                "ref": "ghcr.io/acme-sec/adminer@sha256:" + "c" * 64,
+            },
+            "scan_workspace_init": {
+                "ref": "ghcr.io/acme-sec/scan-workspace-init@sha256:" + "d" * 64,
+            },
             "sandbox_runner": {
                 "ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64,
             },
@@ -165,7 +177,7 @@ output_path.write_bytes(b"fake-zstd\\n" + sys.stdin.buffer.read())
 
 
 def _run_package_release_images(
-    tmp_path: Path, manifest_path: Path, *, arch: str = "amd64"
+    tmp_path: Path, manifest_path: Path, *, bundle: str, arch: str = "amd64"
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
     script_path = REPO_ROOT / "scripts" / "package-release-images.sh"
     script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
@@ -186,6 +198,8 @@ def _run_package_release_images(
             str(manifest_path),
             "--output-dir",
             str(output_dir),
+            "--bundle",
+            bundle,
             "--arch",
             arch,
         ],
@@ -256,11 +270,16 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "download-artifact@v4" in workflow_text
     assert "--frontend-bundle" in workflow_text
     assert "release-manifest.json" in workflow_text
-    assert "images-manifest-amd64.json" in workflow_text
-    assert "images-manifest-arm64.json" in workflow_text
-    assert "vulhunter-images-amd64.tar.zst" in workflow_text
-    assert "vulhunter-images-arm64.tar.zst" in workflow_text
+    assert "images-manifest-services-amd64.json" in workflow_text
+    assert "images-manifest-services-arm64.json" in workflow_text
+    assert "images-manifest-scanner-amd64.json" in workflow_text
+    assert "images-manifest-scanner-arm64.json" in workflow_text
+    assert "vulhunter-services-images-amd64.tar.zst" in workflow_text
+    assert "vulhunter-services-images-arm64.tar.zst" in workflow_text
+    assert "vulhunter-scanner-images-amd64.tar.zst" in workflow_text
+    assert "vulhunter-scanner-images-arm64.tar.zst" in workflow_text
     assert "package-release-images.sh" in workflow_text
+    assert "--bundle ${{ matrix.bundle }}" in workflow_text
     assert "--arch ${{ matrix.arch }}" in workflow_text
     assert "matrix:" in workflow_text
     assert "compression-level: 0" in workflow_text
@@ -354,7 +373,8 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "README.md",
         "README_EN.md",
         "docker-compose.yml",
-        "images-manifest.json",
+        "images-manifest-services.json",
+        "images-manifest-scanner.json",
         "scripts/README-COMPOSE.md",
         "scripts/load-images.sh",
         "scripts/use-offline-env.sh",
@@ -408,6 +428,10 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "docker-compose.self-contained.yml" not in compose_text
     assert "VULHUNTER_IMAGE_TAG" not in compose_text
     assert manifest["images"]["backend"]["ref"] in compose_text
+    assert manifest["images"]["postgres"]["ref"] in compose_text
+    assert manifest["images"]["redis"]["ref"] in compose_text
+    assert manifest["images"]["adminer"]["ref"] in compose_text
+    assert manifest["images"]["scan_workspace_init"]["ref"] in compose_text
     assert manifest["images"]["sandbox_runner"]["ref"] in compose_text
     assert manifest["images"]["scanner_yasa"]["ref"] in compose_text
     assert manifest["images"]["scanner_opengrep"]["ref"] in compose_text
@@ -469,6 +493,8 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "docker compose up" in doc
         assert "load-images.sh" in doc
         assert "offline-images.env" in doc
+        assert "vulhunter-services-images-" in doc
+        assert "vulhunter-scanner-images-" in doc
         assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in doc
         assert "在线" in doc or "offline" in doc or "离线" in doc or "online" in doc
         assert "docker-compose.full.yml" not in doc
@@ -510,30 +536,54 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
 
     assert result.returncode == 0, combined_output
 
-    metadata = json.loads((output_dir / "images-manifest.json").read_text(encoding="utf-8"))
+    services_metadata = json.loads((output_dir / "images-manifest-services.json").read_text(encoding="utf-8"))
+    scanner_metadata = json.loads((output_dir / "images-manifest-scanner.json").read_text(encoding="utf-8"))
     offline_env = (output_dir / "docker" / "env" / "backend" / "offline-images.env.example").read_text(
         encoding="utf-8"
     )
     load_script = (output_dir / "scripts" / "load-images.sh").read_text(encoding="utf-8")
     use_offline_env_script = (output_dir / "scripts" / "use-offline-env.sh").read_text(encoding="utf-8")
 
-    assert metadata["revision"] == manifest["revision"]
-    assert metadata["bundle_template"] == "images/vulhunter-images-{arch}.tar.zst"
-    assert metadata["images"]["backend"]["source_ref"] == manifest["images"]["backend"]["ref"]
-    assert metadata["images"]["backend"]["local_tag"] == f"vulhunter-local/backend:{manifest['revision']}"
-    assert "static_frontend" not in metadata["images"]
-    assert "sandbox" not in metadata["images"]
-    assert metadata["images"]["sandbox_runner"]["source_ref"] == manifest["images"]["sandbox_runner"]["ref"]
-    assert metadata["images"]["sandbox_runner"]["local_tag"] == f"vulhunter-local/sandbox-runner:{manifest['revision']}"
-    assert metadata["images"]["scanner_yasa"]["local_tag"] == f"vulhunter-local/yasa-runner:{manifest['revision']}"
+    assert services_metadata["revision"] == manifest["revision"]
+    assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
+    assert services_metadata["images"]["backend"]["source_ref"] == manifest["images"]["backend"]["ref"]
+    assert services_metadata["images"]["backend"]["local_tag"] == f"vulhunter-local/backend:{manifest['revision']}"
+    assert services_metadata["images"]["postgres"]["local_tag"] == f"vulhunter-local/postgres:{manifest['revision']}"
+    assert services_metadata["images"]["redis"]["local_tag"] == f"vulhunter-local/redis:{manifest['revision']}"
+    assert services_metadata["images"]["adminer"]["local_tag"] == f"vulhunter-local/adminer:{manifest['revision']}"
+    assert services_metadata["images"]["scan_workspace_init"]["local_tag"] == (
+        f"vulhunter-local/scan-workspace-init:{manifest['revision']}"
+    )
+    assert "sandbox_runner" not in services_metadata["images"]
+    assert "static_frontend" not in services_metadata["images"]
+    assert "nexus_web" not in services_metadata["images"]
+    assert "nexus_item_detail" not in services_metadata["images"]
+    assert scanner_metadata["revision"] == manifest["revision"]
+    assert scanner_metadata["bundle_template"] == "images/vulhunter-scanner-images-{arch}.tar.zst"
+    assert scanner_metadata["images"]["sandbox_runner"]["source_ref"] == manifest["images"]["sandbox_runner"]["ref"]
+    assert scanner_metadata["images"]["sandbox_runner"]["local_tag"] == (
+        f"vulhunter-local/sandbox-runner:{manifest['revision']}"
+    )
+    assert scanner_metadata["images"]["scanner_yasa"]["local_tag"] == f"vulhunter-local/yasa-runner:{manifest['revision']}"
+    assert "backend" not in scanner_metadata["images"]
+    assert "postgres" not in scanner_metadata["images"]
+    assert "redis" not in scanner_metadata["images"]
     assert f"BACKEND_IMAGE=vulhunter-local/backend:{manifest['revision']}" in offline_env
+    assert f"POSTGRES_IMAGE=vulhunter-local/postgres:{manifest['revision']}" in offline_env
+    assert f"REDIS_IMAGE=vulhunter-local/redis:{manifest['revision']}" in offline_env
+    assert f"ADMINER_IMAGE=vulhunter-local/adminer:{manifest['revision']}" in offline_env
+    assert f"SCAN_WORKSPACE_INIT_IMAGE=vulhunter-local/scan-workspace-init:{manifest['revision']}" in offline_env
     assert "\nSTATIC_FRONTEND_IMAGE=" not in offline_env
     assert "\nSANDBOX_IMAGE=" not in offline_env
     assert f"SANDBOX_RUNNER_IMAGE=vulhunter-local/sandbox-runner:{manifest['revision']}" in offline_env
+    assert "\nNEXUS_WEB_IMAGE=" not in offline_env
+    assert "\nNEXUS_ITEM_DETAIL_IMAGE=" not in offline_env
     assert "\nFRONTEND_IMAGE=" not in offline_env
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
-    assert "vulhunter-images-${arch}.tar.zst" in load_script
-    assert "images-manifest.json" in load_script
+    assert "vulhunter-services-images-${arch}.tar.zst" in load_script
+    assert "vulhunter-scanner-images-${arch}.tar.zst" in load_script
+    assert "images-manifest-services.json" in load_script
+    assert "images-manifest-scanner.json" in load_script
     assert "docker load" in load_script
     assert "docker tag" in load_script
     assert "docker/env/backend/offline-images.env" in use_offline_env_script
@@ -543,14 +593,21 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
 def test_package_release_images_script_supports_single_arch_mode() -> None:
     script_text = (REPO_ROOT / "scripts" / "package-release-images.sh").read_text(encoding="utf-8")
 
-    assert "Usage: package-release-images.sh --image-manifest <file> --output-dir <dir> --arch <amd64|arm64>" in script_text
+    assert (
+        "Usage: package-release-images.sh --image-manifest <file> --output-dir <dir> --bundle <services|scanner> --arch <amd64|arm64>"
+        in script_text
+    )
+    assert 'BUNDLE=""' in script_text
     assert 'ARCH=""' in script_text
+    assert "--bundle)" in script_text
+    assert '[[ -n "$BUNDLE" ]] || die "--bundle is required"' in script_text
+    assert '[[ "$BUNDLE" == "services" || "$BUNDLE" == "scanner" ]] || die "unsupported bundle: $BUNDLE"' in script_text
     assert "--arch)" in script_text
     assert '[[ -n "$ARCH" ]] || die "--arch is required"' in script_text
     assert '[[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "unsupported arch: $ARCH"' in script_text
-    assert 'python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$ARCH"' in script_text
-    assert 'bundle_path = output_dir / f"vulhunter-images-{arch}.tar.zst"' in script_text
-    assert 'metadata_path = output_dir / f"images-manifest-{arch}.json"' in script_text
+    assert 'python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$BUNDLE" "$ARCH"' in script_text
+    assert 'bundle_path = output_dir / f"vulhunter-{bundle}-images-{arch}.tar.zst"' in script_text
+    assert 'metadata_path = output_dir / f"images-manifest-{bundle}-{arch}.json"' in script_text
     assert 'for arch in ("amd64", "arm64"):' not in script_text
 
 
@@ -563,11 +620,13 @@ def test_package_release_images_embedded_python_compiles() -> None:
     compile(script_text[start:end], str(REPO_ROOT / "scripts" / "package-release-images.sh"), "exec")
 
 
-def test_package_release_images_script_logs_progress_and_preserves_expected_order(tmp_path: Path) -> None:
+def test_package_release_images_script_logs_progress_and_preserves_expected_services_order(tmp_path: Path) -> None:
     manifest_path = tmp_path / "release-manifest.json"
     manifest = _write_release_manifest(manifest_path)
 
-    result, output_dir, docker_log, zstd_log = _run_package_release_images(tmp_path, manifest_path)
+    result, output_dir, docker_log, zstd_log = _run_package_release_images(
+        tmp_path, manifest_path, bundle="services"
+    )
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
     assert result.returncode == 0, combined_output
@@ -575,7 +634,7 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_orde
         "package start:",
         "image order:",
         "pull start: backend",
-        "pull end: flow_parser_runner",
+        "pull end: scan_workspace_init",
         "all pulls complete",
         "bundle stream start:",
         "compression heartbeat:",
@@ -589,6 +648,49 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_orde
     pull_commands = [line for line in docker_commands if line.startswith("pull ")]
     expected_pulls = [
         f"pull --platform linux/amd64 {manifest['images']['backend']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['postgres']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['redis']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['adminer']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['scan_workspace_init']['ref']}",
+    ]
+    assert pull_commands == expected_pulls
+    assert zstd_log.read_text(encoding="utf-8").splitlines() == [
+        f"-T0 -3 -q -o {output_dir / 'vulhunter-services-images-amd64.tar.zst'}"
+    ]
+
+    bundle_path = output_dir / "vulhunter-services-images-amd64.tar.zst"
+    metadata = json.loads((output_dir / "images-manifest-services-amd64.json").read_text(encoding="utf-8"))
+    expected_checksum = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    assert metadata["bundle_sha256"] == expected_checksum
+
+
+def test_package_release_images_script_logs_progress_and_preserves_expected_scanner_order(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "release-manifest.json"
+    manifest = _write_release_manifest(manifest_path)
+
+    result, output_dir, docker_log, zstd_log = _run_package_release_images(
+        tmp_path, manifest_path, bundle="scanner"
+    )
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+
+    assert result.returncode == 0, combined_output
+    for marker in (
+        "package start:",
+        "image order:",
+        "pull start: sandbox_runner",
+        "pull end: flow_parser_runner",
+        "all pulls complete",
+        "bundle stream start:",
+        "compression heartbeat:",
+        "checksum start:",
+        "checksum end:",
+        "cleanup end",
+    ):
+        assert marker in combined_output
+
+    docker_commands = docker_log.read_text(encoding="utf-8").splitlines()
+    pull_commands = [line for line in docker_commands if line.startswith("pull ")]
+    expected_pulls = [
         f"pull --platform linux/amd64 {manifest['images']['sandbox_runner']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['scanner_yasa']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['scanner_opengrep']['ref']}",
@@ -601,11 +703,11 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_orde
     assert pull_commands == expected_pulls
     assert pull_commands[-1].endswith(manifest["images"]["flow_parser_runner"]["ref"])
     assert zstd_log.read_text(encoding="utf-8").splitlines() == [
-        f"-T0 -3 -q -o {output_dir / 'vulhunter-images-amd64.tar.zst'}"
+        f"-T0 -3 -q -o {output_dir / 'vulhunter-scanner-images-amd64.tar.zst'}"
     ]
 
-    bundle_path = output_dir / "vulhunter-images-amd64.tar.zst"
-    metadata = json.loads((output_dir / "images-manifest-amd64.json").read_text(encoding="utf-8"))
+    bundle_path = output_dir / "vulhunter-scanner-images-amd64.tar.zst"
+    metadata = json.loads((output_dir / "images-manifest-scanner-amd64.json").read_text(encoding="utf-8"))
     expected_checksum = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
     assert metadata["bundle_sha256"] == expected_checksum
 
@@ -616,7 +718,9 @@ def test_package_release_images_script_rejects_invalid_manifest_contract(tmp_pat
     del missing_manifest["images"]["backend"]
     missing_manifest_path.write_text(json.dumps(missing_manifest), encoding="utf-8")
 
-    missing_result, _, _, _ = _run_package_release_images(tmp_path / "missing", missing_manifest_path)
+    missing_result, _, _, _ = _run_package_release_images(
+        tmp_path / "missing", missing_manifest_path, bundle="services"
+    )
     missing_output = "\n".join(part for part in [missing_result.stdout, missing_result.stderr] if part)
     assert missing_result.returncode != 0
     assert "missing required image ref: backend" in missing_output
@@ -626,7 +730,9 @@ def test_package_release_images_script_rejects_invalid_manifest_contract(tmp_pat
     nondigest_manifest["images"]["backend"]["ref"] = "ghcr.io/acme-sec/vulhunter-backend:latest"
     nondigest_manifest_path.write_text(json.dumps(nondigest_manifest), encoding="utf-8")
 
-    nondigest_result, _, _, _ = _run_package_release_images(tmp_path / "nondigest", nondigest_manifest_path)
+    nondigest_result, _, _, _ = _run_package_release_images(
+        tmp_path / "nondigest", nondigest_manifest_path, bundle="services"
+    )
     nondigest_output = "\n".join(part for part in [nondigest_result.stdout, nondigest_result.stderr] if part)
     assert nondigest_result.returncode != 0
     assert "manifest image ref must be digest-pinned: backend" in nondigest_output

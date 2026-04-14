@@ -179,6 +179,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        bundle:
+          - services
+          - scanner
         arch:
           - amd64
           - arm64
@@ -206,16 +209,17 @@ jobs:
           ./scripts/package-release-images.sh \
             --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
             --output-dir "${RUNNER_TEMP}/release-assets" \
+            --bundle ${{ matrix.bundle }} \
             --arch ${{ matrix.arch }}
 
       - name: Upload offline image bundle
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets-${{ matrix.arch }}
+          name: release-assets-${{ matrix.bundle }}-${{ matrix.arch }}
           compression-level: 0
           path: |
-            ${{ runner.temp }}/release-assets/vulhunter-images-${{ matrix.arch }}.tar.zst
-            ${{ runner.temp }}/release-assets/images-manifest-${{ matrix.arch }}.json
+            ${{ runner.temp }}/release-assets/vulhunter-${{ matrix.bundle }}-images-${{ matrix.arch }}.tar.zst
+            ${{ runner.temp }}/release-assets/images-manifest-${{ matrix.bundle }}-${{ matrix.arch }}.json
           if-no-files-found: error
 
   smoke-test-release-tree:
@@ -348,16 +352,28 @@ jobs:
           name: release-tree
           path: ${{ runner.temp }}/release-tree
 
-      - name: Download amd64 offline assets
+      - name: Download services amd64 offline assets
         uses: actions/download-artifact@v4
         with:
-          name: release-assets-amd64
+          name: release-assets-services-amd64
           path: ${{ runner.temp }}/release-assets
 
-      - name: Download arm64 offline assets
+      - name: Download services arm64 offline assets
         uses: actions/download-artifact@v4
         with:
-          name: release-assets-arm64
+          name: release-assets-services-arm64
+          path: ${{ runner.temp }}/release-assets
+
+      - name: Download scanner amd64 offline assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-scanner-amd64
+          path: ${{ runner.temp }}/release-assets
+
+      - name: Download scanner arm64 offline assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-scanner-arm64
           path: ${{ runner.temp }}/release-assets
 
       - name: Delete public release tags and releases
@@ -409,10 +425,14 @@ jobs:
             --notes "Offline runtime image bundles for the latest release branch snapshot."
 
           gh release upload "${ASSET_TAG}" \
-            "${ASSET_DIR}/vulhunter-images-amd64.tar.zst" \
-            "${ASSET_DIR}/vulhunter-images-arm64.tar.zst" \
-            "${ASSET_DIR}/images-manifest-amd64.json" \
-            "${ASSET_DIR}/images-manifest-arm64.json" \
+            "${ASSET_DIR}/vulhunter-services-images-amd64.tar.zst" \
+            "${ASSET_DIR}/vulhunter-services-images-arm64.tar.zst" \
+            "${ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst" \
+            "${ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst" \
+            "${ASSET_DIR}/images-manifest-services-amd64.json" \
+            "${ASSET_DIR}/images-manifest-services-arm64.json" \
+            "${ASSET_DIR}/images-manifest-scanner-amd64.json" \
+            "${ASSET_DIR}/images-manifest-scanner-arm64.json" \
             --clobber
 
       - name: Publish release branch

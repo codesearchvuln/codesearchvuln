@@ -4,11 +4,12 @@ set -euo pipefail
 
 IMAGE_MANIFEST=""
 OUTPUT_DIR=""
+BUNDLE=""
 ARCH=""
 
 usage() {
   cat <<'USAGE'
-Usage: package-release-images.sh --image-manifest <file> --output-dir <dir> --arch <amd64|arm64>
+Usage: package-release-images.sh --image-manifest <file> --output-dir <dir> --bundle <services|scanner> --arch <amd64|arm64>
 
 Create a single-architecture offline runtime image bundle for release distribution.
 USAGE
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_DIR="$2"
       shift 2
       ;;
+    --bundle)
+      BUNDLE="$2"
+      shift 2
+      ;;
     --arch)
       ARCH="$2"
       shift 2
@@ -45,6 +50,8 @@ done
 
 [[ -n "$IMAGE_MANIFEST" ]] || die "--image-manifest is required"
 [[ -n "$OUTPUT_DIR" ]] || die "--output-dir is required"
+[[ -n "$BUNDLE" ]] || die "--bundle is required"
+[[ "$BUNDLE" == "services" || "$BUNDLE" == "scanner" ]] || die "unsupported bundle: $BUNDLE"
 [[ -n "$ARCH" ]] || die "--arch is required"
 [[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "unsupported arch: $ARCH"
 [[ -f "$IMAGE_MANIFEST" ]] || die "image manifest not found: $IMAGE_MANIFEST"
@@ -54,7 +61,7 @@ command -v zstd >/dev/null 2>&1 || die "zstd is required"
 OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
 IMAGE_MANIFEST="$(cd "$(dirname "$IMAGE_MANIFEST")" && pwd)/$(basename "$IMAGE_MANIFEST")"
 
-python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$ARCH" <<'PY'
+python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$BUNDLE" "$ARCH" <<'PY'
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -68,23 +75,32 @@ from pathlib import Path
 
 manifest_path = Path(sys.argv[1])
 output_dir = Path(sys.argv[2])
-arch = sys.argv[3]
+bundle = sys.argv[3]
+arch = sys.argv[4]
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 revision = str(manifest["revision"]).strip()
 if not revision:
     raise SystemExit("release manifest revision is required")
 
-MANIFEST_IMAGE_CONTRACTS = [
-    ("backend", "vulhunter-local/backend"),
-    ("sandbox_runner", "vulhunter-local/sandbox-runner"),
-    ("scanner_yasa", "vulhunter-local/yasa-runner"),
-    ("scanner_opengrep", "vulhunter-local/opengrep-runner"),
-    ("scanner_bandit", "vulhunter-local/bandit-runner"),
-    ("scanner_gitleaks", "vulhunter-local/gitleaks-runner"),
-    ("scanner_phpstan", "vulhunter-local/phpstan-runner"),
-    ("scanner_pmd", "vulhunter-local/pmd-runner"),
-    ("flow_parser_runner", "vulhunter-local/flow-parser-runner"),
-]
+BUNDLE_IMAGE_CONTRACTS = {
+    "services": [
+        ("backend", "vulhunter-local/backend"),
+        ("postgres", "vulhunter-local/postgres"),
+        ("redis", "vulhunter-local/redis"),
+        ("adminer", "vulhunter-local/adminer"),
+        ("scan_workspace_init", "vulhunter-local/scan-workspace-init"),
+    ],
+    "scanner": [
+        ("sandbox_runner", "vulhunter-local/sandbox-runner"),
+        ("scanner_yasa", "vulhunter-local/yasa-runner"),
+        ("scanner_opengrep", "vulhunter-local/opengrep-runner"),
+        ("scanner_bandit", "vulhunter-local/bandit-runner"),
+        ("scanner_gitleaks", "vulhunter-local/gitleaks-runner"),
+        ("scanner_phpstan", "vulhunter-local/phpstan-runner"),
+        ("scanner_pmd", "vulhunter-local/pmd-runner"),
+        ("flow_parser_runner", "vulhunter-local/flow-parser-runner"),
+    ],
+}
 CHECKSUM_PROGRESS_MIN_BYTES = 128 * 1024 * 1024
 CHECKSUM_CHUNK_SIZE = 1024 * 1024
 CHECKSUM_PROGRESS_INTERVAL_SECONDS = 30.0
@@ -163,19 +179,22 @@ def sha256_file(path: Path) -> str:
     return hexdigest
 
 
+if bundle not in BUNDLE_IMAGE_CONTRACTS:
+    raise SystemExit(f"unsupported bundle: {bundle}")
+
 images_section = manifest.get("images")
 images: list[tuple[str, str, str]] = []
-for logical_name, local_repo in MANIFEST_IMAGE_CONTRACTS:
+for logical_name, local_repo in BUNDLE_IMAGE_CONTRACTS[bundle]:
     ref = resolve_manifest_ref(images_section, logical_name)
     images.append((logical_name, ref, f"{local_repo}:{revision}"))
 
-bundle_path = output_dir / f"vulhunter-images-{arch}.tar.zst"
-metadata_path = output_dir / f"images-manifest-{arch}.json"
+bundle_path = output_dir / f"vulhunter-{bundle}-images-{arch}.tar.zst"
+metadata_path = output_dir / f"images-manifest-{bundle}-{arch}.json"
 local_tags = [local_tag for _, _, local_tag in images]
 
 log(
     "package start: "
-    f"arch={arch} revision={revision} bundle={bundle_path.name}"
+    f"bundle={bundle} arch={arch} revision={revision} bundle_file={bundle_path.name}"
 )
 log("image order: " + ", ".join(logical_name for logical_name, _, _ in images))
 
@@ -215,11 +234,12 @@ while True:
     time.sleep(COMPRESSION_POLL_INTERVAL_SECONDS)
 
 if save_rc != 0 or zstd_rc != 0:
-    raise SystemExit(f"failed to package images for {arch}")
+    raise SystemExit(f"failed to package images for {bundle}/{arch}")
 
 bundle_sha256 = sha256_file(bundle_path)
 metadata = {
     "revision": revision,
+    "bundle": bundle,
     "architecture": arch,
     "bundle_file": bundle_path.name,
     "bundle_sha256": bundle_sha256,

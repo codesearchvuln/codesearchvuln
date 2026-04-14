@@ -106,6 +106,10 @@ manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
 required_keys = {
     "backend": "__BACKEND_IMAGE_REF__",
+    "postgres": "__POSTGRES_IMAGE_REF__",
+    "redis": "__REDIS_IMAGE_REF__",
+    "adminer": "__ADMINER_IMAGE_REF__",
+    "scan_workspace_init": "__SCAN_WORKSPACE_INIT_IMAGE_REF__",
     "sandbox_runner": "__SANDBOX_RUNNER_IMAGE_REF__",
     "scanner_yasa": "__SCANNER_YASA_IMAGE_REF__",
     "scanner_opengrep": "__SCANNER_OPENGREP_IMAGE_REF__",
@@ -169,7 +173,11 @@ overlay_release_templates() {
   cp "$TEMPLATE_DIR/use-offline-env.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
   chmod +x "$OUTPUT_DIR/scripts/load-images.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
   render_release_compose
-  python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR/images-manifest.json" "$OUTPUT_DIR/docker/env/backend/offline-images.env.example" <<'PY'
+  python3 - \
+    "$IMAGE_MANIFEST" \
+    "$OUTPUT_DIR/images-manifest-services.json" \
+    "$OUTPUT_DIR/images-manifest-scanner.json" \
+    "$OUTPUT_DIR/docker/env/backend/offline-images.env.example" <<'PY'
 from __future__ import annotations
 
 import json
@@ -178,16 +186,24 @@ from pathlib import Path
 
 
 manifest_path = Path(sys.argv[1])
-metadata_path = Path(sys.argv[2])
-offline_env_path = Path(sys.argv[3])
+services_metadata_path = Path(sys.argv[2])
+scanner_metadata_path = Path(sys.argv[3])
+offline_env_path = Path(sys.argv[4])
 
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 revision = str(manifest["revision"]).strip()
 if not revision:
     raise SystemExit("release manifest revision is required")
 
-image_contracts = {
+service_image_contracts = {
     "backend": ("BACKEND_IMAGE", "vulhunter-local/backend"),
+    "postgres": ("POSTGRES_IMAGE", "vulhunter-local/postgres"),
+    "redis": ("REDIS_IMAGE", "vulhunter-local/redis"),
+    "adminer": ("ADMINER_IMAGE", "vulhunter-local/adminer"),
+    "scan_workspace_init": ("SCAN_WORKSPACE_INIT_IMAGE", "vulhunter-local/scan-workspace-init"),
+}
+
+scanner_image_contracts = {
     "sandbox_runner": ("SANDBOX_RUNNER_IMAGE", "vulhunter-local/sandbox-runner"),
     "scanner_yasa": ("SCANNER_YASA_IMAGE", "vulhunter-local/yasa-runner"),
     "scanner_opengrep": ("SCANNER_OPENGREP_IMAGE", "vulhunter-local/opengrep-runner"),
@@ -198,7 +214,8 @@ image_contracts = {
     "flow_parser_runner": ("FLOW_PARSER_RUNNER_IMAGE", "vulhunter-local/flow-parser-runner"),
 }
 
-images_payload: dict[str, dict[str, str]] = {}
+services_images_payload: dict[str, dict[str, str]] = {}
+scanner_images_payload: dict[str, dict[str, str]] = {}
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
     "# Then run ./scripts/load-images.sh and ./scripts/use-offline-env.sh docker compose up -d",
@@ -206,29 +223,42 @@ offline_env_lines = [
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
 ]
 
-for logical_name, (env_var, local_repo) in image_contracts.items():
-    try:
-        source_ref = str(manifest["images"][logical_name]["ref"]).strip()
-    except Exception as exc:  # pragma: no cover - defensive path
-        raise SystemExit(f"missing required image ref: {logical_name}") from exc
-    if not source_ref:
-        raise SystemExit(f"missing required image ref: {logical_name}")
+def build_payload(contracts: dict[str, tuple[str, str]]) -> dict[str, dict[str, str]]:
+    payload: dict[str, dict[str, str]] = {}
+    for logical_name, (env_var, local_repo) in contracts.items():
+        try:
+            source_ref = str(manifest["images"][logical_name]["ref"]).strip()
+        except Exception as exc:  # pragma: no cover - defensive path
+            raise SystemExit(f"missing required image ref: {logical_name}") from exc
+        if not source_ref:
+            raise SystemExit(f"missing required image ref: {logical_name}")
 
-    local_tag = f"{local_repo}:{revision}"
-    images_payload[logical_name] = {
-        "env_var": env_var,
-        "source_ref": source_ref,
-        "local_tag": local_tag,
-    }
-    offline_env_lines.append(f"{env_var}={local_tag}")
+        local_tag = f"{local_repo}:{revision}"
+        payload[logical_name] = {
+            "env_var": env_var,
+            "source_ref": source_ref,
+            "local_tag": local_tag,
+        }
+        offline_env_lines.append(f"{env_var}={local_tag}")
+    return payload
 
-metadata = {
+
+services_images_payload = build_payload(service_image_contracts)
+scanner_images_payload = build_payload(scanner_image_contracts)
+
+services_metadata = {
     "revision": revision,
-    "bundle_template": "images/vulhunter-images-{arch}.tar.zst",
-    "images": images_payload,
+    "bundle_template": "images/vulhunter-services-images-{arch}.tar.zst",
+    "images": services_images_payload,
+}
+scanner_metadata = {
+    "revision": revision,
+    "bundle_template": "images/vulhunter-scanner-images-{arch}.tar.zst",
+    "images": scanner_images_payload,
 }
 
-metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+services_metadata_path.write_text(json.dumps(services_metadata, indent=2) + "\n", encoding="utf-8")
+scanner_metadata_path.write_text(json.dumps(scanner_metadata, indent=2) + "\n", encoding="utf-8")
 offline_env_path.write_text("\n".join(offline_env_lines) + "\n", encoding="utf-8")
 PY
 }
@@ -240,7 +270,8 @@ validate_release_tree() {
     "README.md"
     "README_EN.md"
     "docker-compose.yml"
-    "images-manifest.json"
+    "images-manifest-services.json"
+    "images-manifest-scanner.json"
     "scripts/README-COMPOSE.md"
     "scripts/load-images.sh"
     "scripts/use-offline-env.sh"

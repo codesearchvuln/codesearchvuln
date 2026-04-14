@@ -1,6 +1,6 @@
 services:
   db:
-    image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/postgres:15-alpine
+    image: ${POSTGRES_IMAGE:-__POSTGRES_IMAGE_REF__}
     restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -20,7 +20,7 @@ services:
       - vulhunter-network
 
   scan-workspace-init:
-    image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/alpine:3.20
+    image: ${SCAN_WORKSPACE_INIT_IMAGE:-__SCAN_WORKSPACE_INIT_IMAGE_REF__}
     restart: "no"
     volumes:
       - scan_workspace:/tmp/vulhunter/scans
@@ -148,7 +148,7 @@ services:
       - vulhunter-network
 
   redis:
-    image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/redis:7-alpine
+    image: ${REDIS_IMAGE:-__REDIS_IMAGE_REF__}
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -163,7 +163,7 @@ services:
       - vulhunter-network
 
   adminer:
-    image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/adminer:latest
+    image: ${ADMINER_IMAGE:-__ADMINER_IMAGE_REF__}
     restart: unless-stopped
     profiles: [ "tools" ]
     ports:
