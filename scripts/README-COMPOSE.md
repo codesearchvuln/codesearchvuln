@@ -4,6 +4,15 @@
 
 generated release tree 只暴露一份运行时 compose 合同：`docker-compose.yml`。它不会附带本地 build overlay、Dockerfile，也不支持在 release tree 内本地重建 `backend` / `frontend`。
 
+## 运行前提与支持边界
+
+- 当前 release 合同仅面向宿主机部署，支持的宿主机环境为：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 11`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
+- `Windows 11` 宿主机场景需要使用 `Docker Desktop` 并启用 Linux containers。backend 容器必须能够访问宿主机 Docker Socket（默认 `/var/run/docker.sock`）；若实际路径或组 ID 不同，请自行设置 `DOCKER_SOCKET_PATH` 与 `DOCKER_SOCKET_GID`
+- release tree 是 GitHub Workflow 生成的 image-only 运行包，不支持非 Docker、Kubernetes、源码直跑或其他衍生部署方式
+- `load-images.sh` 与 `use-offline-env.sh` 是 Bash 脚本；离线路径额外依赖 `docker`、`python3`、`zstd`。`Windows 11` 下请通过 WSL Bash 或其他兼容 Bash 的环境执行
+- 推荐运行配置为 `8 核 CPU`、`16 GB 内存`。低于该配置时，镜像拉取、runner 预检、扫描任务和 LLM 交互可能明显变慢甚至失败
+- 浏览器支持范围为 `Safari`、`Chrome`、`Edge`，建议禁用所有浏览器插件 / 扩展。由插件、内容拦截器或不受支持浏览器导致的问题不在适配范围内
+
 ## 环境引导
 
 先复制后端环境模板：
@@ -19,10 +28,11 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ### `docker compose up -d`
 
-- 默认使用已发布且 digest 固定的 `backend`、scanner runner 和 `sandbox-runner` 镜像
+- 默认使用已发布且 digest 固定的运行镜像，包括 `backend`、`postgres`、`redis`、`scan-workspace-init`、scanner runners 与 `sandbox-runner`
 - 主 frontend 不是 `vulhunter-frontend` 运行镜像，而是 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，加上 `./deploy/runtime/frontend/site` 与 `./deploy/runtime/frontend/nginx/default.conf` 挂载内容
 - `db` 与 `redis` 仍由当前 compose 文件拉起
 - `nexus-web` 与 `nexus-itemDetail` 不再启动独立容器，而是作为本地静态页面挂载到主前端容器中
+- release 合同下的 runner preflight 只会校验并拉取声明的运行镜像，不会回退到本地构建
 
 ### 离线模式
 
@@ -32,11 +42,22 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-- `load-images.sh` 会加载 `vulhunter-images-<arch>.tar.zst`
+离线镜像包文件名固定为：
+
+- `vulhunter-services-images-<arch>.tar.zst`
+- `vulhunter-scanner-images-<arch>.tar.zst`
+- 两份文件都需要放在 release 根目录或 `images/` 目录，且必须与当前机器架构匹配（`amd64` / `arm64`）
+- `load-images.sh` 会先导入两份离线镜像包；`use-offline-env.sh` 会加载 `offline-images.env` 并执行后续命令
 - `use-offline-env.sh` 会切换到本地 `vulhunter-local/*` 镜像标签
 - 离线模式不会改变 compose 结构，只改变镜像来源；代码执行统一走本地 `sandbox-runner` 标签，主 frontend 仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，不会切回 `FRONTEND_IMAGE`
 
-## 访问地址
+## 数据、端口与访问地址
+
+- 默认暴露端口：`3000`、`8000`、`5432`、`6379`；`adminer` 仅在 `tools` profile 下通过 `8081` 暴露
+- 运行数据保存在 Docker volumes：`postgres_data`、`backend_uploads`、`backend_runtime_data`、`scan_workspace`、`redis_data`
+- 如执行 `docker compose down -v`，上述持久化数据会被一并删除
+
+默认访问地址：
 
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
