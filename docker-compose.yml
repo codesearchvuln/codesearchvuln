@@ -54,6 +54,28 @@ services:
     networks:
       - vulhunter-network
 
+  backend-uploads-init:
+    image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/alpine:3.20
+    restart: "no"
+    volumes:
+      - backend_uploads:/app/uploads
+    command:
+      - sh
+      - -ec
+      - |
+        mkdir -p /app/uploads/agent_memory/projects
+        chown -R 1001:1001 /app/uploads
+        chmod -R u+rwX,g+rwX /app/uploads
+        touch /app/uploads/.uploads-ready
+        sleep 15
+    healthcheck:
+      test: [ "CMD-SHELL", "test -f /app/uploads/.uploads-ready" ]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    networks:
+      - vulhunter-network
+
   backend:
     image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}
     restart: unless-stopped
@@ -144,6 +166,8 @@ services:
       redis:
         condition: service_healthy
       scan-workspace-init:
+        condition: service_healthy
+      backend-uploads-init:
         condition: service_healthy
     networks:
       - vulhunter-network
