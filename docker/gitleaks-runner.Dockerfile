@@ -5,7 +5,7 @@ ARG BACKEND_APT_MIRROR_FALLBACK=deb.debian.org
 ARG BACKEND_APT_SECURITY_FALLBACK=security.debian.org
 ARG GITLEAKS_VERSION=8.24.2
 
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim-trixie AS gitleaks-runner
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/debian:trixie-slim AS gitleaks-fetcher
 
 ARG BACKEND_APT_MIRROR_PRIMARY
 ARG BACKEND_APT_SECURITY_PRIMARY
@@ -13,39 +13,35 @@ ARG BACKEND_APT_MIRROR_FALLBACK
 ARG BACKEND_APT_SECURITY_FALLBACK
 ARG GITLEAKS_VERSION
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN --mount=type=cache,id=vulhunter-gitleaks-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    --mount=type=cache,id=vulhunter-gitleaks-runner-apt-cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=vulhunter-gitleaks-runner-tool-archive,target=/var/cache/vulhunter-tools \
+RUN --mount=type=cache,id=vulhunter-gitleaks-fetcher-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,id=vulhunter-gitleaks-fetcher-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=vulhunter-gitleaks-fetcher-tool-archive,target=/var/cache/vulhunter-tools \
     set -eux; \
     . /etc/os-release; \
-    CODENAME="${VERSION_CODENAME:-bookworm}"; \
+    CODENAME="${VERSION_CODENAME:-trixie}"; \
     write_sources() { \
       main_host="$1"; \
       security_host="$2"; \
       rm -f /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
-      printf 'deb https://%s/debian %s main\n' "${main_host}" "${CODENAME}" > /etc/apt/sources.list; \
-      printf 'deb https://%s/debian %s-updates main\n' "${main_host}" "${CODENAME}" >> /etc/apt/sources.list; \
-      printf 'deb https://%s/debian-security %s-security main\n' "${security_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+      printf 'deb http://%s/debian %s main\n' "${main_host}" "${CODENAME}" > /etc/apt/sources.list; \
+      printf 'deb http://%s/debian %s-updates main\n' "${main_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+      printf 'deb http://%s/debian-security %s-security main\n' "${security_host}" "${CODENAME}" >> /etc/apt/sources.list; \
     }; \
-    install_runtime_packages() { \
+    install_fetcher_packages() { \
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        tar \
-        ripgrep; \
+        tar; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
-    if ! install_runtime_packages; then \
+    if ! install_fetcher_packages; then \
       rm -rf /var/lib/apt/lists/*; \
       write_sources "${BACKEND_APT_MIRROR_FALLBACK}" "${BACKEND_APT_SECURITY_FALLBACK}"; \
-      install_runtime_packages; \
+      install_fetcher_packages; \
     fi; \
     rm -rf /var/lib/apt/lists/*; \
-    mkdir -p /var/cache/vulhunter-tools /scan; \
+    mkdir -p /var/cache/vulhunter-tools /tmp/gitleaks; \
     ARCH="$(uname -m)"; \
     case "${ARCH}" in \
       x86_64|amd64) GITLEAKS_ARCH="x64" ;; \
@@ -73,9 +69,48 @@ RUN --mount=type=cache,id=vulhunter-gitleaks-runner-apt-lists,target=/var/lib/ap
         "https://gh-proxy.org/https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
         "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz"; \
     fi; \
-    tar -xzf "${GITLEAKS_CACHE}" -C /usr/local/bin gitleaks; \
-    chmod +x /usr/local/bin/gitleaks; \
-    gitleaks version >/dev/null
+    tar -xzf "${GITLEAKS_CACHE}" -C /tmp/gitleaks gitleaks; \
+    chmod +x /tmp/gitleaks/gitleaks; \
+    /tmp/gitleaks/gitleaks version >/dev/null
+
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/debian:trixie-slim AS gitleaks-runner
+
+ARG BACKEND_APT_MIRROR_PRIMARY
+ARG BACKEND_APT_SECURITY_PRIMARY
+ARG BACKEND_APT_MIRROR_FALLBACK
+ARG BACKEND_APT_SECURITY_FALLBACK
+
+RUN --mount=type=cache,id=vulhunter-gitleaks-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,id=vulhunter-gitleaks-runner-apt-cache,target=/var/cache/apt,sharing=locked \
+    set -eux; \
+    . /etc/os-release; \
+    CODENAME="${VERSION_CODENAME:-trixie}"; \
+    write_sources() { \
+      main_host="$1"; \
+      security_host="$2"; \
+      rm -f /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+      printf 'deb http://%s/debian %s main\n' "${main_host}" "${CODENAME}" > /etc/apt/sources.list; \
+      printf 'deb http://%s/debian %s-updates main\n' "${main_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+      printf 'deb http://%s/debian-security %s-security main\n' "${security_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+    }; \
+    install_runtime_packages() { \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ripgrep; \
+    }; \
+    write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
+    if ! install_runtime_packages; then \
+      rm -rf /var/lib/apt/lists/*; \
+      write_sources "${BACKEND_APT_MIRROR_FALLBACK}" "${BACKEND_APT_SECURITY_FALLBACK}"; \
+      install_runtime_packages; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /scan
+
+COPY --from=gitleaks-fetcher /tmp/gitleaks/gitleaks /usr/local/bin/gitleaks
+
+RUN chmod +x /usr/local/bin/gitleaks && gitleaks version >/dev/null
 
 WORKDIR /scan
 

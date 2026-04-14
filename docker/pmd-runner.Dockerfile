@@ -5,7 +5,7 @@ ARG BACKEND_APT_MIRROR_FALLBACK=deb.debian.org
 ARG BACKEND_APT_SECURITY_FALLBACK=security.debian.org
 ARG PMD_VERSION=7.22.0
 
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim-trixie AS pmd-runner
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/debian:trixie-slim AS pmd-fetcher
 
 ARG BACKEND_APT_MIRROR_PRIMARY
 ARG BACKEND_APT_SECURITY_PRIMARY
@@ -13,42 +13,35 @@ ARG BACKEND_APT_MIRROR_FALLBACK
 ARG BACKEND_APT_SECURITY_FALLBACK
 ARG PMD_VERSION
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PMD_HOME=/opt/pmd-bin-${PMD_VERSION}
-ENV PATH=/opt/pmd-bin-${PMD_VERSION}/bin:${PATH}
-
-RUN --mount=type=cache,id=vulhunter-pmd-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
-    --mount=type=cache,id=vulhunter-pmd-runner-apt-cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,id=vulhunter-pmd-runner-tool-archive,target=/var/cache/vulhunter-tools \
+RUN --mount=type=cache,id=vulhunter-pmd-fetcher-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,id=vulhunter-pmd-fetcher-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=vulhunter-pmd-fetcher-tool-archive,target=/var/cache/vulhunter-tools \
     set -eux; \
     . /etc/os-release; \
-    CODENAME="${VERSION_CODENAME:-bookworm}"; \
+    CODENAME="${VERSION_CODENAME:-trixie}"; \
     write_sources() { \
       main_host="$1"; \
       security_host="$2"; \
       rm -f /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
-      printf 'deb https://%s/debian %s main\n' "${main_host}" "${CODENAME}" > /etc/apt/sources.list; \
-      printf 'deb https://%s/debian %s-updates main\n' "${main_host}" "${CODENAME}" >> /etc/apt/sources.list; \
-      printf 'deb https://%s/debian-security %s-security main\n' "${security_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+      printf 'deb http://%s/debian %s main\n' "${main_host}" "${CODENAME}" > /etc/apt/sources.list; \
+      printf 'deb http://%s/debian %s-updates main\n' "${main_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+      printf 'deb http://%s/debian-security %s-security main\n' "${security_host}" "${CODENAME}" >> /etc/apt/sources.list; \
     }; \
-    install_runtime_packages() { \
+    install_fetcher_packages() { \
       apt-get update && \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        unzip \
-        openjdk-21-jre-headless \
-        ripgrep; \
+        unzip; \
     }; \
     write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
-    if ! install_runtime_packages; then \
+    if ! install_fetcher_packages; then \
       rm -rf /var/lib/apt/lists/*; \
       write_sources "${BACKEND_APT_MIRROR_FALLBACK}" "${BACKEND_APT_SECURITY_FALLBACK}"; \
-      install_runtime_packages; \
+      install_fetcher_packages; \
     fi; \
     rm -rf /var/lib/apt/lists/*; \
-    mkdir -p /var/cache/vulhunter-tools /scan; \
+    mkdir -p /var/cache/vulhunter-tools; \
     download_with_fallback() { \
       output="$1"; \
       shift; \
@@ -70,10 +63,51 @@ RUN --mount=type=cache,id=vulhunter-pmd-runner-apt-lists,target=/var/lib/apt/lis
         "https://gh-proxy.org/https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
         "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip"; \
     fi; \
-    rm -rf "${PMD_HOME}"; \
-    unzip -q "${PMD_CACHE}" -d /opt; \
-    ln -sf "${PMD_HOME}/bin/pmd" /usr/local/bin/pmd; \
-    pmd --version >/dev/null
+    unzip -q "${PMD_CACHE}" -d /opt
+
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/debian:trixie-slim AS pmd-runner
+
+ARG BACKEND_APT_MIRROR_PRIMARY
+ARG BACKEND_APT_SECURITY_PRIMARY
+ARG BACKEND_APT_MIRROR_FALLBACK
+ARG BACKEND_APT_SECURITY_FALLBACK
+ARG PMD_VERSION
+
+ENV PMD_HOME=/opt/pmd-bin-${PMD_VERSION}
+ENV PATH=/opt/pmd-bin-${PMD_VERSION}/bin:${PATH}
+
+RUN --mount=type=cache,id=vulhunter-pmd-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,id=vulhunter-pmd-runner-apt-cache,target=/var/cache/apt,sharing=locked \
+    set -eux; \
+    . /etc/os-release; \
+    CODENAME="${VERSION_CODENAME:-trixie}"; \
+    write_sources() { \
+      main_host="$1"; \
+      security_host="$2"; \
+      rm -f /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+      printf 'deb http://%s/debian %s main\n' "${main_host}" "${CODENAME}" > /etc/apt/sources.list; \
+      printf 'deb http://%s/debian %s-updates main\n' "${main_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+      printf 'deb http://%s/debian-security %s-security main\n' "${security_host}" "${CODENAME}" >> /etc/apt/sources.list; \
+    }; \
+    install_runtime_packages() { \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        openjdk-21-jre-headless \
+        ripgrep; \
+    }; \
+    write_sources "${BACKEND_APT_MIRROR_PRIMARY}" "${BACKEND_APT_SECURITY_PRIMARY}"; \
+    if ! install_runtime_packages; then \
+      rm -rf /var/lib/apt/lists/*; \
+      write_sources "${BACKEND_APT_MIRROR_FALLBACK}" "${BACKEND_APT_SECURITY_FALLBACK}"; \
+      install_runtime_packages; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /scan
+
+COPY --from=pmd-fetcher /opt/pmd-bin-${PMD_VERSION} /opt/pmd-bin-${PMD_VERSION}
+
+RUN ln -sf "${PMD_HOME}/bin/pmd" /usr/local/bin/pmd && pmd --version >/dev/null
 
 WORKDIR /scan
 

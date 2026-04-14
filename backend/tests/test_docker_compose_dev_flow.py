@@ -469,14 +469,13 @@ def test_runner_dockerfiles_exist_for_all_migrated_scanners() -> None:
         REPO_ROOT / "docker" / "flow-parser-runner.Dockerfile"
     ).read_text(encoding="utf-8")
 
-    runner_texts = [
+    python_runner_texts = [
         opengrep_runner_text,
         bandit_runner_text,
-        gitleaks_runner_text,
         phpstan_runner_text,
-        pmd_runner_text,
         flow_parser_runner_text,
     ]
+    debian_runner_texts = [gitleaks_runner_text, pmd_runner_text]
 
     assert "WORKDIR /scan" in opengrep_runner_text
     assert "opengrep" in opengrep_runner_text
@@ -520,8 +519,12 @@ def test_runner_dockerfiles_exist_for_all_migrated_scanners() -> None:
     assert "WORKDIR /scan" in flow_parser_runner_text
     assert "flow_parser_runner.py" in flow_parser_runner_text
 
-    for runner_text in runner_texts:
+    for runner_text in python_runner_texts:
         assert "FROM ${DOCKERHUB_LIBRARY_MIRROR}/python:3.11-slim-trixie" in runner_text
+        assert 'rm -f /etc/apt/sources.list.d/debian.sources 2>/dev/null || true;' in runner_text
+
+    for runner_text in debian_runner_texts:
+        assert "FROM ${DOCKERHUB_LIBRARY_MIRROR}/debian:trixie-slim" in runner_text
         assert 'rm -f /etc/apt/sources.list.d/debian.sources 2>/dev/null || true;' in runner_text
 
 
@@ -636,11 +639,17 @@ def test_sandbox_runner_dockerfile_now_carries_the_heavy_runtime_contract() -> N
     sandbox_runner_text = (REPO_ROOT / "docker" / "sandbox-runner.Dockerfile").read_text(
         encoding="utf-8"
     )
+    sandbox_requirements_text = (REPO_ROOT / "docker" / "sandbox-runner.requirements.txt").read_text(
+        encoding="utf-8"
+    )
 
     assert "Sandboxed code execution environment for PoC verification (Python-focused)" in sandbox_runner_text
-    assert "requests httpx aiohttp websockets urllib3" in sandbox_runner_text
-    assert "numpy pandas" in sandbox_runner_text
-    assert "python-jose" in sandbox_runner_text
+    assert "COPY docker/sandbox-runner.requirements.txt /tmp/sandbox-runner.requirements.txt" in sandbox_runner_text
+    assert 'pip install -r /tmp/sandbox-runner.requirements.txt' in sandbox_runner_text
+    assert "requests" in sandbox_requirements_text
+    assert "aiohttp" in sandbox_requirements_text
+    assert "numpy" in sandbox_requirements_text
+    assert "python-jose" in sandbox_requirements_text
     assert "/workspace/.VulHunter/runtime/xdg-data" in sandbox_runner_text
     assert "build-essential" in sandbox_runner_text
     assert "Lightweight sandbox runner for on-demand code execution" not in sandbox_runner_text

@@ -274,8 +274,6 @@ RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/ap
   fi; \
   rm -rf /var/lib/apt/lists/*
 
-COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
-
 # 复制 docker CLI 及 buildx 插件，供 runner_preflight 以 subprocess 方式执行 docker build
 # buildx 是 Docker 23+ 执行 BuildKit 构建的必要插件（--mount=type=cache 等特性依赖它）
 COPY --from=docker-cli-src /usr/local/bin/docker /usr/local/bin/docker

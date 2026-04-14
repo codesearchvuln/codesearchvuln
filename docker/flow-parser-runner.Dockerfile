@@ -86,11 +86,12 @@ RUN --mount=type=cache,id=vulhunter-flow-parser-runner-pip,target=/root/.cache/p
 
 WORKDIR /opt/flow-parser
 
-COPY backend/app /opt/flow-parser/app
+RUN mkdir -p /opt/flow-parser/app/services /scan
+
+COPY backend/app/services/parser.py /opt/flow-parser/app/services/parser.py
 COPY backend/scripts/flow_parser_runner.py /opt/flow-parser/flow_parser_runner.py
 
 RUN set -eux; \
-    mkdir -p /scan; \
     command -v code2flow >/dev/null 2>&1; \
     code2flow --help >/dev/null 2>&1; \
     python3 /opt/flow-parser/flow_parser_runner.py --help >/dev/null 2>&1; \

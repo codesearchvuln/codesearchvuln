@@ -229,6 +229,53 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
         assert ignored_path in dockerignore_text
 
 
+def test_runner_dockerfile_specific_ignore_files_and_workflow_paths_contract() -> None:
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    expected_ignore_files = {
+        "docker/bandit-runner.Dockerfile.dockerignore": ["**"],
+        "docker/gitleaks-runner.Dockerfile.dockerignore": ["**"],
+        "docker/pmd-runner.Dockerfile.dockerignore": ["**"],
+        "docker/opengrep-runner.Dockerfile.dockerignore": [
+            "**",
+            "!backend/app/runtime/launchers/opengrep_launcher.py",
+        ],
+        "docker/phpstan-runner.Dockerfile.dockerignore": [
+            "**",
+            "!backend/app/runtime/launchers/phpstan_launcher.py",
+        ],
+        "docker/flow-parser-runner.Dockerfile.dockerignore": [
+            "**",
+            "!backend/scripts/package_source_selector.py",
+            "!backend/scripts/flow_parser_runner.py",
+            "!backend/app/services/parser.py",
+            "!docker/flow-parser-runner.requirements.txt",
+        ],
+        "docker/sandbox-runner.Dockerfile.dockerignore": [
+            "**",
+            "!docker/sandbox-runner.requirements.txt",
+        ],
+        "docker/yasa-runner.Dockerfile.dockerignore": [
+            "**",
+            "!backend/scripts/package_source_selector.py",
+            "!backend/app/runtime/launchers/yasa_engine_launcher.py",
+            "!backend/app/runtime/launchers/yasa_launcher.py",
+            "!backend/app/runtime/launchers/yasa_uast4py_launcher.py",
+            "!frontend/yasa-engine-overrides/**",
+        ],
+    }
+
+    for rel_path, expected_lines in expected_ignore_files.items():
+        content = (REPO_ROOT / rel_path).read_text(encoding="utf-8").splitlines()
+        assert content == expected_lines
+
+    assert "- 'docker/*.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/flow-parser-runner.requirements.txt'" in workflow_text
+    assert "- 'docker/sandbox-runner.requirements.txt'" in workflow_text
+
+
 def test_release_allowlist_excludes_pydantic_base_model_modules() -> None:
     allowlist_text = (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").read_text(encoding="utf-8")
     release_exclusion_text = (REPO_ROOT / "backend" / "cython_build" / "release_exclusion_list.txt").read_text(

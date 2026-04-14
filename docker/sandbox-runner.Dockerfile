@@ -22,7 +22,9 @@ ENV PIP_INDEX_URL=${SANDBOX_RUNNER_PYPI_INDEX_PRIMARY}
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-RUN set -eux; \
+RUN --mount=type=cache,id=vulhunter-sandbox-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
+  --mount=type=cache,id=vulhunter-sandbox-runner-apt-cache,target=/var/cache/apt,sharing=locked \
+  set -eux; \
   unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; \
   rm -f /etc/apt/apt.conf.d/proxy.conf 2>/dev/null || true; \
   { \
@@ -79,22 +81,13 @@ RUN set -eux; \
   npm config set registry "${SANDBOX_RUNNER_NPM_REGISTRY_PRIMARY}"; \
   node --version; npm --version
 
+COPY docker/sandbox-runner.requirements.txt /tmp/sandbox-runner.requirements.txt
+
 RUN --mount=type=cache,id=VulHunter-sandbox-runner-pip,target=/root/.cache/pip \
   set -eux; \
   pip_install_with_index() { \
   idx="$1"; \
-  PIP_INDEX_URL="${idx}" pip install --no-cache-dir \
-  requests httpx aiohttp websockets urllib3 \
-  beautifulsoup4 lxml html5lib chardet \
-  pycryptodome cryptography pyjwt python-jose \
-  paramiko \
-  sqlalchemy pymysql psycopg2-binary pymongo redis \
-  pyyaml toml msgpack \
-  flask fastapi uvicorn \
-  numpy pandas \
-  click rich colorama tabulate \
-  sqlparse \
-  python-dotenv tqdm retry tenacity; \
+  PIP_INDEX_URL="${idx}" pip install -r /tmp/sandbox-runner.requirements.txt; \
   }; \
   pip_install_with_index "${SANDBOX_RUNNER_PYPI_INDEX_PRIMARY}" || pip_install_with_index "${SANDBOX_RUNNER_PYPI_INDEX_FALLBACK}"
 
