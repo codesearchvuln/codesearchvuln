@@ -107,8 +107,8 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- tag: \`${{ steps.shared.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-  publish-frontend:
-    name: Publish frontend image
+  publish-frontend-amd64:
+    name: Publish frontend image (amd64)
     needs: prepare
     if: ${{ inputs.build_frontend }}
     runs-on: ubuntu-latest
@@ -118,8 +118,7 @@ jobs:
       id-token: write
       attestations: write
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      ref: ${{ steps.capture.outputs.ref }}
+      tag: ${{ steps.capture.outputs.tag }}
 
     steps:
       - name: 检出代码
@@ -132,24 +131,141 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 设置 QEMU
-        if: ${{ inputs.multi_arch }}
-        uses: docker/setup-qemu-action@v4
-
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: 构建并推送前端 Docker 镜像
-        id: build
+      - name: 构建并推送 amd64 前端 Docker 镜像
         uses: docker/build-push-action@v7
         with:
           context: ./frontend
           file: ./docker/frontend.Dockerfile
           push: true
-          platforms: ${{ needs.prepare.outputs.platforms }}
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}
-          cache-from: type=gha,scope=frontend
-          cache-to: type=gha,mode=max,scope=frontend
+          platforms: linux/amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          cache-from: type=gha,scope=frontend-runtime-amd64
+          cache-to: type=gha,mode=max,scope=frontend-runtime-amd64
+
+      - name: 记录 amd64 前端镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-frontend-arm64:
+    name: Publish frontend image (arm64)
+    needs: prepare
+    if: ${{ inputs.build_frontend && inputs.multi_arch }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.capture.outputs.tag }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 arm64 前端 Docker 镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          file: ./docker/frontend.Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          cache-from: type=gha,scope=frontend-runtime-arm64
+          cache-to: type=gha,mode=max,scope=frontend-runtime-arm64
+
+      - name: 记录 arm64 前端镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-frontend:
+    name: Publish frontend image
+    needs:
+      - prepare
+      - publish-frontend-amd64
+      - publish-frontend-arm64
+    if: ${{ always() && inputs.build_frontend && needs.publish-frontend-amd64.result == 'success' && (needs.publish-frontend-arm64.result == 'success' || needs.publish-frontend-arm64.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.capture.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 组装多架构前端 manifest
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}
+          AMD64_TAG: ${{ needs.publish-frontend-amd64.outputs.tag }}
+          ARM64_TAG: ${{ needs.publish-frontend-arm64.outputs.tag }}
+          MULTI_ARCH: ${{ inputs.multi_arch }}
+          EXPECTED_PLATFORMS: ${{ inputs.multi_arch && 'linux/amd64 linux/arm64' || 'linux/amd64' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${MULTI_ARCH}" == "true" ]]; then
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}" "${ARM64_TAG}"
+          else
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
+          fi
+
+          docker buildx imagetools inspect "${FINAL_TAG}" >/dev/null
+          raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
+          python3 - <<'PY' <<<"${raw_json}"
+          from __future__ import annotations
+
+          import json
+          import os
+          import sys
+
+          data = json.load(sys.stdin)
+          manifests = data.get("manifests", [])
+          platforms = {
+              f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
+              for entry in manifests
+          }
+          expected = set(os.environ["EXPECTED_PLATFORMS"].split())
+          missing = sorted(expected - platforms)
+          if missing:
+              raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
+          print(f"validated platforms: {', '.join(sorted(platforms))}")
+          PY
 
       - name: 设置前端 GHCR 包为公开可见性
         env:
@@ -164,20 +280,15 @@ jobs:
             echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
           fi
 
-      - name: 验证前端镜像可解析
-        run: |
-          set -euo pipefail
-          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-frontend:${IMAGE_TAG}" >/dev/null
-        env:
-          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
-
       - name: 记录前端镜像引用
         id: capture
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
           IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${IMAGE_TAG}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
 
   publish-backend-amd64:

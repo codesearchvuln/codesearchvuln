@@ -100,12 +100,24 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in runner_preflight_text
 
 
-def test_backend_release_publish_workflow_uses_runtime_release_and_optional_hardened_lane() -> None:
+def test_backend_release_publish_workflow_uses_split_runtime_release_and_optional_hardened_lane() -> None:
     publish_workflow_text = (REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml").read_text(
         encoding="utf-8"
     )
     release_workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
+    publish_frontend_amd64_section = publish_workflow_text.split("  publish-frontend-amd64:\n", maxsplit=1)[1].split(
+        "\n  publish-frontend-arm64:\n",
+        maxsplit=1,
+    )[0]
+    publish_frontend_arm64_section = publish_workflow_text.split("  publish-frontend-arm64:\n", maxsplit=1)[1].split(
+        "\n  publish-frontend:\n",
+        maxsplit=1,
+    )[0]
+    publish_frontend_section = publish_workflow_text.split("  publish-frontend:\n", maxsplit=1)[1].split(
+        "\n  publish-backend-amd64:\n",
+        maxsplit=1,
+    )[0]
     publish_backend_amd64_section = publish_workflow_text.split("  publish-backend-amd64:\n", maxsplit=1)[1].split(
         "\n  publish-backend-arm64:\n",
         maxsplit=1,
@@ -125,6 +137,46 @@ def test_backend_release_publish_workflow_uses_runtime_release_and_optional_hard
 
     assert "publish_backend_hardened:" in publish_workflow_text
     assert "default: false" in publish_workflow_text
+
+    assert "if: ${{ inputs.build_frontend }}" in publish_frontend_amd64_section
+    assert "runs-on: ubuntu-latest" in publish_frontend_amd64_section
+    assert "platforms: linux/amd64" in publish_frontend_amd64_section
+    assert (
+        "vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64"
+        in publish_frontend_amd64_section
+    )
+    assert "scope=frontend-runtime-amd64" in publish_frontend_amd64_section
+    assert "setup-qemu-action" not in publish_frontend_amd64_section
+
+    assert "if: ${{ inputs.build_frontend && inputs.multi_arch }}" in publish_frontend_arm64_section
+    assert "runs-on: ubuntu-24.04-arm" in publish_frontend_arm64_section
+    assert "platforms: linux/arm64" in publish_frontend_arm64_section
+    assert (
+        "vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64"
+        in publish_frontend_arm64_section
+    )
+    assert "scope=frontend-runtime-arm64" in publish_frontend_arm64_section
+    assert "setup-qemu-action" not in publish_frontend_arm64_section
+
+    assert "needs:" in publish_frontend_section
+    assert "publish-frontend-amd64" in publish_frontend_section
+    assert "publish-frontend-arm64" in publish_frontend_section
+    assert (
+        "if: ${{ always() && inputs.build_frontend && needs.publish-frontend-amd64.result == 'success' && "
+        "(needs.publish-frontend-arm64.result == 'success' || needs.publish-frontend-arm64.result == 'skipped') }}"
+        in publish_frontend_section
+    )
+    assert "docker buildx imagetools create" in publish_frontend_section
+    assert "docker buildx imagetools inspect" in publish_frontend_section
+    assert "AMD64_TAG: ${{ needs.publish-frontend-amd64.outputs.tag }}" in publish_frontend_section
+    assert "ARM64_TAG: ${{ needs.publish-frontend-arm64.outputs.tag }}" in publish_frontend_section
+    assert "EXPECTED_PLATFORMS: ${{ inputs.multi_arch && 'linux/amd64 linux/arm64' || 'linux/amd64' }}" in (
+        publish_frontend_section
+    )
+    assert "vulhunter-frontend:${{ needs.prepare.outputs.tag }}" in publish_frontend_section
+    assert "PACKAGE_NAME: vulhunter-frontend" in publish_frontend_section
+    assert "digest=${DIGEST}" in publish_frontend_section
+    assert "ref=${IMAGE}@${DIGEST}" in publish_frontend_section
 
     assert "if: ${{ inputs.build_backend }}" in publish_backend_amd64_section
     assert "runs-on: ubuntu-latest" in publish_backend_amd64_section
