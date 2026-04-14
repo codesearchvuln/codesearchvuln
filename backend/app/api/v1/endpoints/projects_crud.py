@@ -147,11 +147,11 @@ async def get_project_info(
 
     # 2. 检查权限
 
-    return await ensure_project_info_language_stats(
+    return await ensure_project_info_has_language_info(
         db,
         id,
         raise_on_error=True,
-        cloc_loader=get_cloc_stats,
+        language_info_loader=get_pygount_stats,
     )
 
 

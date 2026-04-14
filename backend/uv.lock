@@ -623,6 +623,15 @@ wheels = [
 ]
 
 [[package]]
+name = "chardet"
+version = "5.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/0d/f7b6ab21ec75897ed80c17d79b15951a719226b9fababf1e40ea74d69079/chardet-5.2.0.tar.gz", hash = "sha256:1b3b6ff479a8c414bc3fa2c0852995695c4a026dcd6d0633b2dd092ca39c1cf7", size = 2069618, upload-time = "2023-08-01T19:23:02.662Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/6f/f5fbc992a329ee4e0f288c1fe0e2ad9485ed064cac731ed2fe47dcc38cbf/chardet-5.2.0-py3-none-any.whl", hash = "sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970", size = 199385, upload-time = "2023-08-01T19:23:00.661Z" },
+]
+
+[[package]]
 name = "charset-normalizer"
 version = "3.4.4"
 source = { registry = "https://pypi.org/simple" }
@@ -3064,15 +3073,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pycloc"
-version = "0.0.1a0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b9/92/da038e21e9a019686954263802949952fd6147172e4f241e37908955537c/pycloc-0.0.1a0.tar.gz", hash = "sha256:df8320b513cb7c1a392fad1cf066835792f88a42a144994840505a9f681f2a68", size = 315876, upload-time = "2026-01-17T14:34:08.363Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/77/3b056f80816acdade4139009af8918b0c6b1b267466b28a2b2650799183e/pycloc-0.0.1a0-py3-none-any.whl", hash = "sha256:c472e6c8ea6f10d97a7455981cf01e828f5ba3bcf5855b0dbb463a61966ea084", size = 162550, upload-time = "2026-01-17T14:34:06.882Z" },
-]
-
-[[package]]
 name = "pycparser"
 version = "2.23"
 source = { registry = "https://pypi.org/simple" }
@@ -3280,6 +3280,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b0/77/a5b8c569bf593b0140bde72ea885a803b82086995367bf2037de0159d924/pygments-2.19.2.tar.gz", hash = "sha256:636cb2477cec7f8952536970bc533bc43743542f70392ae026374600add5b887", size = 4968631, upload-time = "2025-06-21T13:39:12.283Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl", hash = "sha256:86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b", size = 1225217, upload-time = "2025-06-21T13:39:07.939Z" },
+]
+
+[[package]]
+name = "pygount"
+version = "3.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "chardet" },
+    { name = "gitpython" },
+    { name = "pygments" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d8/5c/27b0bd8678ef5d7af67d925bbe22fb8f7e484151d284c52f0712c32a7ec1/pygount-3.2.0.tar.gz", hash = "sha256:27b03a6c6d791c4920003eec361a3c38ccd815637c51f5536efb9e47db1d452a", size = 983240, upload-time = "2026-04-08T12:42:21.075Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/56/6b92a522a91140977941ee212421760b4c6f84897fb2a3cc63cc934c7a23/pygount-3.2.0-py3-none-any.whl", hash = "sha256:c037bf293d92ccc3ed5728329fe330f992901d933a7d278cb997bbbbeb0cf965", size = 30973, upload-time = "2026-04-08T12:42:22.533Z" },
 ]
 
 [[package]]
@@ -4367,9 +4382,9 @@ dependencies = [
     { name = "litellm" },
     { name = "passlib", extra = ["bcrypt"] },
     { name = "py7zr" },
-    { name = "pycloc" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pygount" },
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
     { name = "rarfile" },
@@ -4438,9 +4453,9 @@ requires-dist = [
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.5.0" },
     { name = "py7zr", specifier = ">=0.20.0,!=1.1.2" },
-    { name = "pycloc", specifier = ">=0.0.1a0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
+    { name = "pygount", specifier = ">=3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },

@@ -50,18 +50,20 @@ async def generate_project_description_preview(
             if not success:
                 raise HTTPException(status_code=400, detail=f"解压失败: {error}")
 
-            description, language_info, source = await _resolve_project_description_bundle(
-                extracted_dir=temp_extract_dir,
-                extracted_files=extracted_files,
-                project_name=project_name,
-                db=db,
-                user_id=current_user.id,
+            description, language_info_json, description_source = (
+                await _resolve_project_description_bundle(
+                    extracted_dir=temp_extract_dir,
+                    extracted_files=extracted_files,
+                    project_name=project_name,
+                    db=db,
+                    user_id=current_user.id,
+                )
             )
 
             return ProjectDescriptionGenerateResponse(
                 description=description,
-                language_info=language_info,
-                source=source,
+                language_info=language_info_json,
+                source=description_source,
             )
         except HTTPException:
             raise
@@ -89,13 +91,13 @@ async def generate_project_description_for_project(
     if not zip_path or not os.path.exists(zip_path):
         raise HTTPException(status_code=404, detail="未找到项目压缩包")
 
-    project_info = await _get_or_prepare_project_info(db, id)
+    project_info_record = await _get_or_prepare_project_info(db, id)
 
     try:
-        project_info.status = "pending"
-        db.add(project_info)
+        project_info_record.status = "pending"
+        db.add(project_info_record)
         await db.commit()
-        await db.refresh(project_info)
+        await db.refresh(project_info_record)
 
         with tempfile.TemporaryDirectory(
             prefix="VulHunter_",
@@ -112,35 +114,37 @@ async def generate_project_description_for_project(
             if not success:
                 raise HTTPException(status_code=400, detail=f"解压失败: {error}")
 
-            description, language_info, source = await _resolve_project_description_bundle(
-                extracted_dir=extracted_dir,
-                extracted_files=extracted_files,
-                project_name=project.name,
-                db=db,
-                user_id=current_user.id,
+            description, language_info_json, description_source = (
+                await _resolve_project_description_bundle(
+                    extracted_dir=extracted_dir,
+                    extracted_files=extracted_files,
+                    project_name=project.name,
+                    db=db,
+                    user_id=current_user.id,
+                )
             )
 
             project.description = description
             project.updated_at = datetime.now(timezone.utc)
-            project_info.language_info = language_info
-            project_info.description = description
-            project_info.status = "completed"
+            project_info_record.language_info = language_info_json
+            project_info_record.description = description
+            project_info_record.status = "completed"
 
             db.add(project)
-            db.add(project_info)
+            db.add(project_info_record)
             await db.commit()
             await db.refresh(project)
-            await db.refresh(project_info)
+            await db.refresh(project_info_record)
 
             return ProjectDescriptionGenerateResponse(
                 description=description,
-                language_info=language_info,
-                source=source,
+                language_info=language_info_json,
+                source=description_source,
             )
     except HTTPException:
         try:
-            project_info.status = "failed"
-            db.add(project_info)
+            project_info_record.status = "failed"
+            db.add(project_info_record)
             await db.commit()
         except Exception:
             logger.exception("保存项目简介失败状态时出错")
@@ -148,8 +152,8 @@ async def generate_project_description_for_project(
     except Exception as e:
         logger.error(f"生成项目简介失败: {e}", exc_info=True)
         try:
-            project_info.status = "failed"
-            db.add(project_info)
+            project_info_record.status = "failed"
+            db.add(project_info_record)
             await db.commit()
         except Exception:
             logger.exception("保存项目简介失败状态时出错")

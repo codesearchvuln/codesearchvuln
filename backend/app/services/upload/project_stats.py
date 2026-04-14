@@ -1,26 +1,24 @@
-import os
-import json
-import subprocess
-import tempfile
-import re
 import ast
 import asyncio
+import json
+import logging
+import os
+import re
+import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime, timezone
-import logging
-from app.services.zip_storage import get_project_zip_path
-from app.services.upload.upload_manager import UploadManager
-from app.services.llm.service import LLMService
+from typing import Any, Dict, List, Optional
+
+from pygount import SourceAnalysis
+from pygount.analysis import SourceState
+
 from app.models.project_info import ProjectInfo
+from app.services.llm.service import LLMService
+from app.services.zip_storage import get_project_zip_path
+
 from .compression_factory import CompressionStrategyFactory
 
 logger = logging.getLogger(__name__)
-
-
-from pycloc import CLOC
-from pycloc.exceptions import CLOCCommandError, CLOCDependencyError
 
 FALLBACK_EXCLUDED_DIRS = {
     "__pycache__",
@@ -100,6 +98,34 @@ EXTENSION_LANGUAGE_MAP = {
     ".dockerfile": "Dockerfile",
 }
 
+PYGOUNT_LANGUAGE_ALIAS_MAP = {
+    "TSX": "TypeScript",
+    "JSX": "JavaScript",
+    "Bash": "Shell",
+    "Docker": "Dockerfile",
+    "Protocol Buffer": "Protocol Buffers",
+}
+
+
+def _should_skip_dir(dir_name: str) -> bool:
+    normalized_name = dir_name.lower()
+    return normalized_name in FALLBACK_EXCLUDED_DIRS or "test" in normalized_name
+
+
+def _normalize_language_name(language: str) -> str:
+    return PYGOUNT_LANGUAGE_ALIAS_MAP.get(language, language)
+
+
+def _iter_project_files(project_dir: str):
+    root_path = Path(project_dir)
+    if not root_path.exists():
+        return
+
+    for dirpath, dirnames, filenames in os.walk(root_path):
+        dirnames[:] = [d for d in dirnames if not _should_skip_dir(d)]
+        for filename in filenames:
+            yield Path(dirpath) / filename
+
 
 def _count_file_lines(file_path: Path) -> int:
     try:
@@ -119,9 +145,7 @@ def _build_suffix_fallback_payload(project_dir: str) -> str:
         return json.dumps({"total": 0, "total_files": 0, "languages": {}}, ensure_ascii=False)
 
     for dirpath, dirnames, filenames in os.walk(root_path):
-        dirnames[:] = [
-            d for d in dirnames if d not in FALLBACK_EXCLUDED_DIRS and "test" not in d.lower()
-        ]
+        dirnames[:] = [d for d in dirnames if not _should_skip_dir(d)]
 
         for filename in filenames:
             file_path = Path(dirpath) / filename
@@ -178,143 +202,118 @@ def _is_non_empty_language_payload(payload: str) -> bool:
     return total_files > 0
 
 
-def _build_cloc_payload(output: str, extracted_files: Optional[List[str]] = None) -> str:
-    # 解析 JSON 结果并转换为统一的 language_info 结构
-    cloc_result = json.loads(output)
-    exclude_fields = {"header", "SUM"}
-    language_stats: Dict[str, Dict[str, int]] = {}
+def _run_pygount_sync(project_dir: str) -> str:
+    """同步执行 pygount 统计（用于在线程池中运行）。"""
+    try:
+        language_stats: Dict[str, Dict[str, int]] = defaultdict(
+            lambda: {"loc_number": 0, "files_count": 0}
+        )
 
-    for key, value in cloc_result.items():
-        if key not in exclude_fields and isinstance(value, dict):
-            code_lines = value.get("code", 0) or 0
-            files_count = (
-                value.get("nFiles")
-                or value.get("files")
-                or value.get("file_count")
-                or 0
-            )
-            language_stats[key] = {
-                "loc_number": int(code_lines),
-                "files_count": int(files_count),
+        for file_path in _iter_project_files(project_dir) or []:
+            try:
+                analysis = SourceAnalysis.from_file(
+                    str(file_path),
+                    group="project",
+                    generated_regexes=[],
+                    generated_name_regexes=[],
+                )
+            except Exception as file_error:
+                logger.warning(f"pygount 分析文件失败 {file_path}: {file_error}")
+                continue
+
+            if analysis.state != SourceState.analyzed:
+                continue
+
+            normalized_language = _normalize_language_name(analysis.language)
+            language_stats[normalized_language]["files_count"] += 1
+            language_stats[normalized_language]["loc_number"] += int(analysis.source_count)
+
+        total_lines = sum(item["loc_number"] for item in language_stats.values())
+        total_files = sum(item["files_count"] for item in language_stats.values())
+        languages: Dict[str, Dict[str, float | int]] = {}
+        for language, stats in sorted(
+            language_stats.items(),
+            key=lambda pair: pair[1]["loc_number"],
+            reverse=True,
+        ):
+            loc_number = int(stats["loc_number"])
+            files_count = int(stats["files_count"])
+            proportion = (loc_number / total_lines) if total_lines > 0 else 0
+            languages[language] = {
+                "loc_number": loc_number,
+                "files_count": files_count,
+                "proportion": round(proportion, 4),
             }
 
-    total_lines = 0
-    if isinstance(cloc_result.get("SUM"), dict):
-        total_lines = cloc_result["SUM"].get("code", 0) or 0
-    if total_lines <= 0:
-        total_lines = sum(v.get("loc_number", 0) for v in language_stats.values())
-
-    total_files = sum(v.get("files_count", 0) for v in language_stats.values())
-    if total_files <= 0 and extracted_files:
-        total_files = len(
-            [
-                f
-                for f in extracted_files
-                if isinstance(f, str) and not f.endswith("/") and Path(f).suffix
-            ]
+        return json.dumps(
+            {
+                "total": int(total_lines),
+                "total_files": int(total_files),
+                "languages": languages,
+            },
+            ensure_ascii=False,
         )
-
-    languages: Dict[str, Dict[str, float | int]] = {}
-    for lang, stats in language_stats.items():
-        lines = stats.get("loc_number", 0)
-        files_count = stats.get("files_count", 0)
-        proportion = (lines / total_lines) if total_lines > 0 else 0
-        languages[lang] = {
-            "loc_number": lines,
-            "files_count": files_count,
-            "proportion": round(proportion, 4),
-        }
-
-    result_payload = {
-        "total": total_lines,
-        "total_files": total_files,
-        "languages": languages,
-    }
-    return json.dumps(result_payload, ensure_ascii=False)
-
-
-def _run_cloc_sync(project_dir: str) -> str:
-    """同步执行 CLOC（用于在线程池中运行）"""
-    try:
-        cloc = CLOC(
-            json=True,
-            quiet=True,
-            exclude_dir="__pycache__,node_modules,venv",
-        )
-        output = cloc(project_dir)
-        if not output or not str(output).strip():
-            logger.warning("pycloc 返回空输出，将使用后缀统计")
-            return "{}"
-        return str(output).strip()
-    except CLOCDependencyError as e:
-        logger.warning(f"pycloc 依赖错误（Perl不可用），将使用后缀统计: {e}")
-        return "{}"
-    except CLOCCommandError as e:
-        logger.warning(f"pycloc 命令执行失败（可能超时），将使用后缀统计: {e}")
-        return "{}"
     except Exception as e:
-        logger.warning(f"pycloc 执行异常（{type(e).__name__}），将使用后缀统计: {e}")
+        logger.warning(f"pygount 执行异常（{type(e).__name__}），将使用后缀统计: {e}")
         return "{}"
 
 
-async def _run_cloc_on_directory(project_dir: str, extracted_files: Optional[List[str]] = None) -> str:
-    """异步执行 CLOC，在线程池中运行避免阻塞事件循环"""
-    loop = asyncio.get_event_loop()
+async def _run_pygount_on_directory(project_dir: str, extracted_files: Optional[List[str]] = None) -> str:
+    """异步执行 pygount，在线程池中运行避免阻塞事件循环。"""
+    loop = asyncio.get_running_loop()
     try:
-        # 在线程池中执行 CLOC 命令
-        output_str = await loop.run_in_executor(None, _run_cloc_sync, project_dir)
-        
+        output_str = await loop.run_in_executor(None, _run_pygount_sync, project_dir)
+
         if not output_str or output_str == "{}":
             return "{}"
-        
-        # 验证输出是否是有效的 JSON
+
         try:
-            json.loads(output_str)  # 预验证 JSON 格式
+            json.loads(output_str)
         except json.JSONDecodeError as je:
-            logger.warning(f"pycloc 输出无效 JSON（可能超时或出错）: {str(output_str)[:200]}... 错误: {je}")
+            logger.warning(f"pygount 输出无效 JSON: {str(output_str)[:200]}... 错误: {je}")
             return "{}"
-        
-        return _build_cloc_payload(output_str, extracted_files=extracted_files)
+
+        return output_str
     except json.JSONDecodeError as je:
-        logger.warning(f"pycloc JSON解析失败: {je}")
+        logger.warning(f"pygount JSON 解析失败: {je}")
         return "{}"
     except Exception as e:
-        logger.warning(f"pycloc 异步执行异常（{type(e).__name__}），将使用后缀统计: {e}")
+        logger.warning(f"pygount 异步执行异常（{type(e).__name__}），将使用后缀统计: {e}")
         return "{}"
 
 
-async def get_cloc_stats_from_extracted_dir(
+async def get_pygount_stats_from_extracted_dir(
     extracted_dir: str, extracted_files: Optional[List[str]] = None
 ) -> str:
-    cloc_payload = await _run_cloc_on_directory(extracted_dir, extracted_files=extracted_files)
-    if _is_non_empty_language_payload(cloc_payload):
-        return cloc_payload
-    logger.info("cloc 统计结果为空，使用后缀统计进行代码行数统计")
+    stats_payload = await _run_pygount_on_directory(extracted_dir, extracted_files=extracted_files)
+    if _is_non_empty_language_payload(stats_payload):
+        return stats_payload
+    logger.info("pygount 统计结果为空，使用后缀统计进行代码行数统计")
     return _build_suffix_fallback_payload(extracted_dir)
 
 
-async def get_cloc_stats_from_archive(archive_path: str) -> str:
+async def get_pygount_stats_from_archive(archive_path: str) -> str:
     if not os.path.exists(archive_path):
         logger.warning(f"项目ZIP文件不存在: {archive_path}")
         return "{}"
 
-    with tempfile.TemporaryDirectory(prefix="VulHunter_", suffix="_cloc") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="VulHunter_", suffix="_pygount") as temp_dir:
         strategy = CompressionStrategyFactory.get_strategy(archive_path)
         extracted_files = await strategy.extract(archive_path, temp_dir)
         if not extracted_files:
             logger.error("解压失败：无文件被解压")
             return "{}"
-        cloc_payload = await _run_cloc_on_directory(temp_dir, extracted_files=extracted_files)
-        if _is_non_empty_language_payload(cloc_payload):
-            return cloc_payload
-        logger.info("cloc 统计结果为空，使用后缀统计进行代码行数统计")
+        stats_payload = await _run_pygount_on_directory(temp_dir, extracted_files=extracted_files)
+        if _is_non_empty_language_payload(stats_payload):
+            return stats_payload
+        logger.info("pygount 统计结果为空，使用后缀统计进行代码行数统计")
         return _build_suffix_fallback_payload(temp_dir)
 
 
-async def get_cloc_stats(project_info: ProjectInfo) -> str:
+async def get_pygount_stats(project_info: ProjectInfo) -> str:
     """获取项目代码统计（返回JSON字符串：总行数、总文件数、各语言文件数/行数/占比）"""
     zip_path = get_project_zip_path(project_info.project_id)
-    return await get_cloc_stats_from_archive(zip_path)
+    return await get_pygount_stats_from_archive(zip_path)
 
 
 def build_static_project_description(language_info_json: str, project_name: Optional[str] = None) -> str:

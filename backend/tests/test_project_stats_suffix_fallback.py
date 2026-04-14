@@ -1,4 +1,5 @@
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -27,18 +28,35 @@ def test_build_suffix_fallback_payload_counts_languages(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_cloc_stats_from_extracted_dir_uses_suffix_fallback_when_cloc_empty(
+async def test_get_pygount_stats_from_extracted_dir_uses_pygount_source_lines(tmp_path):
+    (tmp_path / "main.py").write_text("# comment\n\nprint('pygount')\n", encoding="utf-8")
+    (tmp_path / "component.tsx").write_text(
+        "// comment\nexport const Demo = () => <div />;\n",
+        encoding="utf-8",
+    )
+
+    payload = await project_stats.get_pygount_stats_from_extracted_dir(str(tmp_path))
+    parsed = json.loads(payload)
+
+    assert parsed["total"] == 2
+    assert parsed["total_files"] == 2
+    assert parsed["languages"]["Python"]["loc_number"] == 1
+    assert parsed["languages"]["TypeScript"]["loc_number"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_pygount_stats_from_extracted_dir_uses_suffix_fallback_when_stats_empty(
     tmp_path, monkeypatch
 ):
     (tmp_path / "main.py").write_text("print('fallback')\n", encoding="utf-8")
 
     monkeypatch.setattr(
         project_stats,
-        "_run_cloc_on_directory",
-        lambda *_args, **_kwargs: '{"total": 0, "total_files": 0, "languages": {}}',
+        "_run_pygount_on_directory",
+        AsyncMock(return_value='{"total": 0, "total_files": 0, "languages": {}}'),
     )
 
-    payload = await project_stats.get_cloc_stats_from_extracted_dir(str(tmp_path))
+    payload = await project_stats.get_pygount_stats_from_extracted_dir(str(tmp_path))
     parsed = json.loads(payload)
 
     assert parsed["total_files"] == 1

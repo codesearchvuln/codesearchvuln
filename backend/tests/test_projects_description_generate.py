@@ -129,7 +129,7 @@ async def test_upload_project_zip_generates_and_persists_project_description(mon
     )
     monkeypatch.setattr(
         shared_endpoint,
-        "get_cloc_stats_from_extracted_dir",
+        "get_pygount_stats_from_extracted_dir",
         AsyncMock(
             return_value='{"total": 42, "total_files": 2, "languages": {"TypeScript": {"loc_number": 42, "files_count": 2, "proportion": 1.0}}}'
         ),
@@ -196,7 +196,7 @@ async def test_generate_project_description_preview_llm_success(monkeypatch):
     )
     monkeypatch.setattr(
         shared_endpoint,
-        "get_cloc_stats_from_extracted_dir",
+        "get_pygount_stats_from_extracted_dir",
         AsyncMock(
             return_value='{"total": 10, "total_files": 1, "languages": {"Python": {"loc_number": 10, "files_count": 1, "proportion": 1.0}}}'
         ),
@@ -251,7 +251,7 @@ async def test_generate_project_description_preview_fallback_static(monkeypatch)
     )
     monkeypatch.setattr(
         shared_endpoint,
-        "get_cloc_stats_from_extracted_dir",
+        "get_pygount_stats_from_extracted_dir",
         AsyncMock(return_value='{"total": 2, "total_files": 1, "languages": {}}'),
     )
     monkeypatch.setattr(
@@ -321,7 +321,7 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
 
     monkeypatch.setattr(
         crud_endpoint,
-        "get_cloc_stats",
+        "get_pygount_stats",
         AsyncMock(return_value='{"total": 1, "total_files": 1, "languages": {}}'),
     )
 
@@ -368,9 +368,9 @@ async def test_get_project_info_repository_is_hidden(monkeypatch):
     db.refresh = AsyncMock()
 
     def _fail_if_called(*_args, **_kwargs):
-        raise AssertionError("get_cloc_stats should not be called for repository projects")
+        raise AssertionError("get_pygount_stats should not be called for repository projects")
 
-    monkeypatch.setattr(crud_endpoint, "get_cloc_stats", _fail_if_called)
+    monkeypatch.setattr(crud_endpoint, "get_pygount_stats", _fail_if_called)
 
     with pytest.raises(HTTPException) as exc_info:
         await get_project_info(

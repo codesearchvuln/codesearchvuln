@@ -529,33 +529,33 @@ async def get_dashboard_snapshot(
         if project_id
     }
 
-    project_info_result = await db.execute(
+    project_language_info_result = await db.execute(
         select(ProjectInfo.project_id, ProjectInfo.language_info, ProjectInfo.status)
     )
-    project_info_rows = list(project_info_result.all())
-    project_info_project_ids = {
+    project_language_info_rows = list(project_language_info_result.all())
+    project_language_info_project_ids = {
         str(project_id or "")
-        for project_id, _language_info, _status in project_info_rows
+        for project_id, _language_info, _status in project_language_info_rows
         if project_id
     }
-    missing_project_info_ids = [
+    missing_language_info_project_ids = [
         project_id
         for project_id, source_type in project_source_type_map.items()
         if project_id
         and source_type == "zip"
-        and project_id not in project_info_project_ids
+        and project_id not in project_language_info_project_ids
     ]
-    for project_id in missing_project_info_ids:
-        project_info = await ensure_project_info_language_stats(
+    for project_id in missing_language_info_project_ids:
+        project_info_record = await ensure_project_info_has_language_info(
             db,
             project_id,
             raise_on_error=False,
         )
-        project_info_rows.append(
+        project_language_info_rows.append(
             (
-                project_info.project_id,
-                project_info.language_info,
-                project_info.status,
+                project_info_record.project_id,
+                project_info_record.language_info,
+                project_info_record.status,
             )
         )
 
@@ -563,21 +563,21 @@ async def get_dashboard_snapshot(
     project_language_loc_map: Dict[str, Dict[str, int]] = {}
     language_project_sets: Dict[str, set[str]] = defaultdict(set)
     language_loc_totals: Dict[str, int] = defaultdict(int)
-    for project_id, language_info, info_status in project_info_rows:
+    for project_id, language_info_payload, info_status in project_language_info_rows:
         normalized_project_id = str(project_id or "")
         if not normalized_project_id:
             continue
         if _normalize_status_token(info_status) != "completed":
             continue
-        parsed_language_info = _parse_dashboard_language_info(language_info)
-        if not parsed_language_info:
+        parsed_language_stats = _parse_dashboard_language_info(language_info_payload)
+        if not parsed_language_stats:
             continue
         project_language_loc_map[normalized_project_id] = {
             language: _to_non_negative_int(stats.get("loc_number"))
-            for language, stats in parsed_language_info.items()
+            for language, stats in parsed_language_stats.items()
         }
         dominant_language = max(
-            parsed_language_info.items(),
+            parsed_language_stats.items(),
             key=lambda item: (
                 _to_non_negative_int(item[1].get("loc_number")),
                 _to_non_negative_int(item[1].get("files_count")),
@@ -585,7 +585,7 @@ async def get_dashboard_snapshot(
             ),
         )[0]
         project_dominant_language_map[normalized_project_id] = dominant_language
-        for language, stats in parsed_language_info.items():
+        for language, stats in parsed_language_stats.items():
             loc_number = _to_non_negative_int(stats.get("loc_number"))
             language_loc_totals[language] += loc_number
             language_project_sets[language].add(normalized_project_id)

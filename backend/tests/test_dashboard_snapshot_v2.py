@@ -986,7 +986,7 @@ async def test_dashboard_snapshot_v2_backfills_missing_project_info_for_language
     )
     monkeypatch.setattr(
         projects_insights,
-        "ensure_project_info_language_stats",
+        "ensure_project_info_has_language_info",
         backfill_mock,
         raising=False,
     )

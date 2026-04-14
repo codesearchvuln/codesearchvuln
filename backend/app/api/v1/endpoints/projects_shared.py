@@ -216,9 +216,9 @@ from app.services.upload.compression_factory import CompressionStrategyFactory
 from app.services.upload.language_detection import detect_languages_from_paths
 from app.services.upload.project_stats import (
     EXTENSION_LANGUAGE_MAP,
-    get_cloc_stats,
+    get_pygount_stats,
     build_static_project_description,
-    get_cloc_stats_from_extracted_dir,
+    get_pygount_stats_from_extracted_dir,
     generate_project_description_from_extracted_dir,
 )
 from app.services.project_metrics import ProjectMetricsService
@@ -528,15 +528,15 @@ async def _resolve_project_description_bundle(
     db: AsyncSession,
     user_id: Optional[str],
 ) -> tuple[str, str, Literal["llm", "static"]]:
-    language_info = await get_cloc_stats_from_extracted_dir(
+    language_info_json = await get_pygount_stats_from_extracted_dir(
         extracted_dir,
         extracted_files=extracted_files,
     )
     description = build_static_project_description(
-        language_info,
+        language_info_json,
         (project_name or "").strip() or None,
     )
-    source: Literal["llm", "static"] = "static"
+    description_source: Literal["llm", "static"] = "static"
 
     user_config = await _get_user_config(db, user_id)
     if user_config:
@@ -551,25 +551,25 @@ async def _resolve_project_description_bundle(
                 llm_description = str(llm_result.get("project_description") or "").strip()
             if llm_description:
                 description = llm_description
-                source = "llm"
+                description_source = "llm"
         except Exception as e:
             logger.warning(f"生成项目描述时 LLM 失败，已回退静态描述: {e}")
 
-    return description, language_info, source
+    return description, language_info_json, description_source
 
 
 async def _get_or_create_project_info(db: AsyncSession, project_id: str) -> ProjectInfo:
     result = await db.execute(select(ProjectInfo).where(ProjectInfo.project_id == project_id))
-    project_info = result.scalars().first()
-    if project_info:
-        return project_info
+    project_info_record = result.scalars().first()
+    if project_info_record:
+        return project_info_record
 
-    project_info = ProjectInfo(
+    project_info_record = ProjectInfo(
         project_id=project_id,
         created_at=datetime.now(timezone.utc),
     )
-    db.add(project_info)
-    return project_info
+    db.add(project_info_record)
+    return project_info_record
 
 
 async def find_duplicate_zip_project(
@@ -589,9 +589,9 @@ async def find_duplicate_zip_project(
 
 async def _get_or_prepare_project_info(db: AsyncSession, project_id: str) -> ProjectInfo:
     result = await db.execute(select(ProjectInfo).where(ProjectInfo.project_id == project_id))
-    project_info = result.scalars().first()
-    if project_info:
-        return project_info
+    project_info_record = result.scalars().first()
+    if project_info_record:
+        return project_info_record
 
     return ProjectInfo(
         project_id=project_id,
@@ -599,74 +599,86 @@ async def _get_or_prepare_project_info(db: AsyncSession, project_id: str) -> Pro
     )
 
 
-def _empty_language_info_json() -> str:
+def _default_language_info_json() -> str:
     return '{"total": 0, "total_files": 0, "languages": {}}'
 
 
-async def ensure_project_info_language_stats(
+async def ensure_project_info_has_language_info(
     db: AsyncSession,
     project_id: str,
     *,
     raise_on_error: bool = True,
-    cloc_loader: Optional[Callable[[ProjectInfo], Awaitable[str]]] = None,
+    language_info_loader: Optional[Callable[[ProjectInfo], Awaitable[str]]] = None,
 ) -> ProjectInfo:
-    project_info_result = await db.execute(
+    project_info_query_result = await db.execute(
         select(ProjectInfo).where(ProjectInfo.project_id == project_id)
     )
-    project_info = project_info_result.scalars().first()
-    empty_language_info = _empty_language_info_json()
+    project_info_record = project_info_query_result.scalars().first()
+    default_language_info_json = _default_language_info_json()
 
-    if project_info and project_info.status == "completed" and project_info.language_info:
-        project_info.description = project_info.description or ""
-        return project_info
+    if (
+        project_info_record
+        and project_info_record.status == "completed"
+        and project_info_record.language_info
+    ):
+        project_info_record.description = project_info_record.description or ""
+        return project_info_record
 
-    if project_info and project_info.status == "pending":
-        project_info.language_info = project_info.language_info or empty_language_info
-        project_info.description = project_info.description or ""
-        return project_info
+    if project_info_record and project_info_record.status == "pending":
+        project_info_record.language_info = (
+            project_info_record.language_info or default_language_info_json
+        )
+        project_info_record.description = project_info_record.description or ""
+        return project_info_record
 
-    if not project_info:
-        project_info = ProjectInfo(
+    if not project_info_record:
+        project_info_record = ProjectInfo(
             project_id=project_id,
             status="pending",
             created_at=datetime.now(timezone.utc),
-            language_info=empty_language_info,
+            language_info=default_language_info_json,
         )
-        db.add(project_info)
+        db.add(project_info_record)
         await db.commit()
-        await db.refresh(project_info)
+        await db.refresh(project_info_record)
 
     try:
-        project_info.status = "pending"
-        db.add(project_info)
+        project_info_record.status = "pending"
+        db.add(project_info_record)
         await db.commit()
-        await db.refresh(project_info)
+        await db.refresh(project_info_record)
 
-        cloc_result = await (cloc_loader or get_cloc_stats)(project_info)
-        project_info.language_info = cloc_result or empty_language_info
-        project_info.description = project_info.description or ""
-        project_info.status = "completed"
-        db.add(project_info)
+        language_info_json = await (
+            language_info_loader or get_pygount_stats
+        )(project_info_record)
+        project_info_record.language_info = (
+            language_info_json or default_language_info_json
+        )
+        project_info_record.description = project_info_record.description or ""
+        project_info_record.status = "completed"
+        db.add(project_info_record)
         await db.commit()
-        await db.refresh(project_info)
-        return project_info
+        await db.refresh(project_info_record)
+        return project_info_record
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"获取项目信息失败: {e}", exc_info=True)
         try:
-            project_info.status = "failed"
-            project_info.language_info = project_info.language_info or empty_language_info
-            project_info.description = project_info.description or ""
-            db.add(project_info)
+            project_info_record.status = "failed"
+            project_info_record.language_info = (
+                project_info_record.language_info or default_language_info_json
+            )
+            project_info_record.description = project_info_record.description or ""
+            db.add(project_info_record)
             await db.commit()
-            await db.refresh(project_info)
+            await db.refresh(project_info_record)
         except Exception:
             logger.exception("保存失败状态时出错")
 
         if raise_on_error:
             raise HTTPException(status_code=500, detail=f"获取项目信息失败: {str(e)}")
-        return project_info
+        return project_info_record
 
 
 def _serialize_programming_languages(
@@ -792,7 +804,7 @@ async def _store_uploaded_archive_for_project(
             detected_languages = detect_languages_from_paths(filtered_paths)
             project.programming_languages = _serialize_programming_languages(detected_languages)
             project.zip_file_hash = zip_hash
-            description, language_info, _source = await _resolve_project_description_bundle(
+            description, language_info_json, _description_source = await _resolve_project_description_bundle(
                 extracted_dir=temp_extract_dir,
                 extracted_files=extracted_files,
                 project_name=project.name,
@@ -801,13 +813,13 @@ async def _store_uploaded_archive_for_project(
             )
             project.description = description
 
-            project_info = await _get_or_prepare_project_info(db, project.id)
-            project_info.language_info = language_info
-            project_info.description = description
-            project_info.status = "completed"
+            project_info_record = await _get_or_prepare_project_info(db, project.id)
+            project_info_record.language_info = language_info_json
+            project_info_record.description = description
+            project_info_record.status = "completed"
             await ProjectMetricsService.ensure_base_metrics(db, project.id)
             db.add(project)
-            db.add(project_info)
+            db.add(project_info_record)
 
             if commit:
                 try:
