@@ -1,6 +1,14 @@
 import { buildApiUrl } from "@/shared/api/apiBase";
 import { apiClient } from "@/shared/api/serverClient";
 
+export type Chat2RuleEngineType =
+	| "opengrep"
+	| "gitleaks"
+	| "bandit"
+	| "phpstan"
+	| "pmd"
+	| "yasa";
+
 export interface Chat2RuleMessage {
 	role: "user" | "assistant";
 	content: string;
@@ -24,53 +32,61 @@ export interface Chat2RuleValidationResult {
 	} | null;
 }
 
-export interface Chat2RuleOpengrepChatResponse {
+export interface Chat2RuleChatResponse {
 	assistant_message: string;
 	rule_title: string;
 	rule_text: string;
 	explanation: string;
 	validation_result: Chat2RuleValidationResult;
 	usage: Record<string, number>;
+	engine_type: Chat2RuleEngineType;
+	save_supported: boolean;
 }
 
-export interface Chat2RuleOpengrepSaveResponse {
+export interface Chat2RuleSaveResponse {
 	rule_id: string;
 	name: string;
 	language: string;
 	severity: string;
 	message: string;
+	engine_type: Chat2RuleEngineType;
+	save_supported: boolean;
 }
 
 export type Chat2RuleStreamEvent =
-	| { type: "started" }
+	| { type: "started"; engine_type?: Chat2RuleEngineType; save_supported?: boolean }
 	| {
 			type: "draft";
 			assistant_message: string;
 			rule_title: string;
 			rule_text: string;
 			explanation: string;
+			engine_type?: Chat2RuleEngineType;
+			save_supported?: boolean;
 	  }
-	| ({ type: "result" } & Chat2RuleOpengrepChatResponse)
+	| ({ type: "result" } & Chat2RuleChatResponse)
 	| { type: "error"; message: string }
-	| { type: "done" };
+	| { type: "done"; engine_type?: Chat2RuleEngineType; save_supported?: boolean };
 
-export async function chatWithOpengrepRule(
+export async function chatWithRule(
 	projectId: string,
+	engineType: Chat2RuleEngineType,
 	params: {
 		messages: Chat2RuleMessage[];
 		selections: Chat2RuleSelection[];
 		draft_rule_text?: string;
 	},
-): Promise<Chat2RuleOpengrepChatResponse> {
+): Promise<Chat2RuleChatResponse> {
 	const response = await apiClient.post(
-		`/projects/${projectId}/chat2rule/opengrep/chat`,
+		`/projects/${projectId}/chat2rule/${engineType}/chat`,
 		params,
 	);
 	return response.data;
 }
 
-export async function streamChatWithOpengrepRule(
+export async function streamChatWithRule(
 	projectId: string,
+	engineType: Chat2RuleEngineType,
 	params: {
 		messages: Chat2RuleMessage[];
 		selections: Chat2RuleSelection[];
@@ -81,7 +97,7 @@ export async function streamChatWithOpengrepRule(
 		onEvent?: (event: Chat2RuleStreamEvent) => void;
 	},
 ): Promise<void> {
-	const response = await fetch(buildApiUrl(`/projects/${projectId}/chat2rule/opengrep/stream`), {
+	const response = await fetch(buildApiUrl(`/projects/${projectId}/chat2rule/${engineType}/stream`), {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
@@ -143,6 +159,52 @@ export async function streamChatWithOpengrepRule(
 	}
 }
 
+export async function saveRuleFromChat(
+	projectId: string,
+	engineType: Chat2RuleEngineType,
+	params: {
+		rule_text: string;
+		title?: string;
+		description?: string;
+	},
+): Promise<Chat2RuleSaveResponse> {
+	const response = await apiClient.post(
+		`/projects/${projectId}/chat2rule/${engineType}/save`,
+		params,
+	);
+	return response.data;
+}
+
+// Backward-compatible wrappers
+export type Chat2RuleOpengrepChatResponse = Chat2RuleChatResponse;
+export type Chat2RuleOpengrepSaveResponse = Chat2RuleSaveResponse;
+
+export async function chatWithOpengrepRule(
+	projectId: string,
+	params: {
+		messages: Chat2RuleMessage[];
+		selections: Chat2RuleSelection[];
+		draft_rule_text?: string;
+	},
+): Promise<Chat2RuleChatResponse> {
+	return chatWithRule(projectId, "opengrep", params);
+}
+
+export async function streamChatWithOpengrepRule(
+	projectId: string,
+	params: {
+		messages: Chat2RuleMessage[];
+		selections: Chat2RuleSelection[];
+		draft_rule_text?: string;
+	},
+	options?: {
+		signal?: AbortSignal;
+		onEvent?: (event: Chat2RuleStreamEvent) => void;
+	},
+): Promise<void> {
+	return streamChatWithRule(projectId, "opengrep", params, options);
+}
+
 export async function saveOpengrepRuleFromChat(
 	projectId: string,
 	params: {
@@ -150,10 +212,6 @@ export async function saveOpengrepRuleFromChat(
 		title?: string;
 		description?: string;
 	},
-): Promise<Chat2RuleOpengrepSaveResponse> {
-	const response = await apiClient.post(
-		`/projects/${projectId}/chat2rule/opengrep/save`,
-		params,
-	);
-	return response.data;
+): Promise<Chat2RuleSaveResponse> {
+	return saveRuleFromChat(projectId, "opengrep", params);
 }

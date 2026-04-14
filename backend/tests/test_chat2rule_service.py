@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy.future import select
 
+from app.models.gitleaks import GitleaksRule
 from app.models.opengrep import OpengrepRule
 from app.services.chat2rule.service import Chat2RuleService
 
@@ -80,6 +81,38 @@ class _FakeStreamingLLMService(_FakeLLMService):
             "content": content,
             "usage": result["usage"],
             "finish_reason": "stop",
+        }
+
+
+class _FakeGitleaksLLMService:
+    def __init__(self, user_config=None):
+        self.user_config = user_config
+
+    async def chat_completion_raw(self, messages, temperature=None, max_tokens=None):
+        del temperature, max_tokens
+        assert messages[0]["role"] == "system"
+        assert "Gitleaks" in messages[0]["content"]
+        return {
+            "content": json.dumps(
+                {
+                    "assistant_message": "已生成 gitleaks 规则草案。",
+                    "title": "gitleaks-github-token",
+                    "explanation": "检测疑似 GitHub token 泄露。",
+                    "rule_text": json.dumps(
+                        {
+                            "name": "gitleaks-github-token",
+                            "description": "Detect possible github token",
+                            "rule_id": "gitleaks-github-token",
+                            "secret_group": 0,
+                            "regex": "ghp_[A-Za-z0-9]{20,}",
+                            "keywords": ["ghp_"],
+                            "tags": ["github", "token"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ),
+            "usage": {"prompt_tokens": 8, "completion_tokens": 10, "total_tokens": 18},
         }
 
 
@@ -197,3 +230,60 @@ async def test_save_opengrep_rule_rejects_duplicate_yaml(db):
             rule_text=VALID_RULE_YAML,
             title="python-subprocess-shell-injection",
         )
+
+
+@pytest.mark.asyncio
+async def test_generate_gitleaks_draft_returns_engine_metadata(monkeypatch, tmp_path):
+    from app.services.chat2rule import service as service_module
+
+    zip_path = tmp_path / "demo.zip"
+    _build_zip(zip_path, {"src/app.py": "token = 'ghp_aaaaaaaaaaaaaaaaaaaa'\n"})
+
+    async def _fake_load_project_zip(_project_id):
+        return str(zip_path)
+
+    monkeypatch.setattr(service_module, "LLMService", _FakeGitleaksLLMService)
+    monkeypatch.setattr(service_module, "load_project_zip", _fake_load_project_zip)
+
+    service = Chat2RuleService(user_config={"llmConfig": {"llmModel": "fake"}}, engine_type="gitleaks")
+    result = await service.generate_draft(
+        project_id="project-1",
+        messages=[{"role": "user", "content": "生成 gitleaks 规则"}],
+        selections=[{"file_path": "src/app.py", "start_line": 1, "end_line": 1}],
+    )
+
+    assert result["engine_type"] == "gitleaks"
+    assert result["save_supported"] is True
+    assert result["validation_result"]["valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_save_gitleaks_rule_persists_rule(db):
+    service = Chat2RuleService(engine_type="gitleaks")
+    rule_text = json.dumps(
+        {
+            "name": "gitleaks-github-token",
+            "description": "Detect possible github token",
+            "rule_id": "gitleaks-github-token",
+            "secret_group": 0,
+            "regex": "ghp_[A-Za-z0-9]{20,}",
+            "keywords": ["ghp_"],
+            "tags": ["github", "token"],
+        },
+        ensure_ascii=False,
+    )
+
+    result = await service.save_rule(db=db, rule_text=rule_text)
+    assert result["engine_type"] == "gitleaks"
+
+    stored = await db.execute(select(GitleaksRule).where(GitleaksRule.id == result["rule_id"]))
+    rule = stored.scalar_one()
+    assert rule.rule_id == "gitleaks-github-token"
+    assert "ghp_" in rule.regex
+
+
+@pytest.mark.asyncio
+async def test_save_rule_rejects_bandit_engine(db):
+    service = Chat2RuleService(engine_type="bandit")
+    with pytest.raises(ValueError, match="不支持直接保存"):
+        await service.save_rule(db=db, rule_text="bandit draft")

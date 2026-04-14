@@ -24,8 +24,9 @@ import { Textarea } from "@/components/ui/textarea";
 import Chat2RuleSelectionPreview from "@/pages/chat2rule/Chat2RuleSelectionPreview";
 import type { Chat2RuleSelectionItem } from "@/pages/chat2rule/snippetUtils";
 import {
-	saveOpengrepRuleFromChat,
-	streamChatWithOpengrepRule,
+	saveRuleFromChat,
+	streamChatWithRule,
+	type Chat2RuleEngineType,
 	type Chat2RuleValidationResult,
 } from "@/shared/api/chat2rule";
 import { cn } from "@/shared/utils/utils";
@@ -54,6 +55,24 @@ type ChatTurn = {
 	artifact?: DraftSnapshot | null;
 };
 
+const CHAT2RULE_ENGINES: Array<{
+	value: Chat2RuleEngineType;
+	label: string;
+	saveSupported: boolean;
+	ruleTextLabel: string;
+}> = [
+	{ value: "opengrep", label: "Opengrep", saveSupported: true, ruleTextLabel: "规则 YAML" },
+	{ value: "gitleaks", label: "Gitleaks", saveSupported: true, ruleTextLabel: "规则 JSON" },
+	{ value: "bandit", label: "Bandit", saveSupported: false, ruleTextLabel: "规则草案" },
+	{ value: "phpstan", label: "PHPStan", saveSupported: false, ruleTextLabel: "规则草案" },
+	{ value: "pmd", label: "PMD", saveSupported: true, ruleTextLabel: "Ruleset XML" },
+	{ value: "yasa", label: "YASA", saveSupported: true, ruleTextLabel: "Rule Config JSON" },
+];
+
+function findEngineConfig(engineType: Chat2RuleEngineType) {
+	return CHAT2RULE_ENGINES.find((item) => item.value === engineType) || CHAT2RULE_ENGINES[0];
+}
+
 function normalizeApiError(error: unknown) {
 	if ((error as Error)?.name === "AbortError") {
 		return "已停止生成";
@@ -80,6 +99,8 @@ export default function Chat2RuleDialog({
 
 	const [turns, setTurns] = useState<ChatTurn[]>([]);
 	const [composer, setComposer] = useState("");
+	const [engineType, setEngineType] = useState<Chat2RuleEngineType>("opengrep");
+	const [saveSupported, setSaveSupported] = useState(true);
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [streamingAssistantMessage, setStreamingAssistantMessage] = useState("");
 	const [streamingDraft, setStreamingDraft] = useState<Partial<DraftSnapshot>>({});
@@ -102,6 +123,7 @@ export default function Chat2RuleDialog({
 			validationResult: isGenerating ? null : currentDraft?.validationResult ?? null,
 		};
 	}, [currentDraft, isGenerating, streamingDraft]);
+	const engineConfig = useMemo(() => findEngineConfig(engineType), [engineType]);
 	const saveTitleInputId = `${idPrefix}-save-title`;
 	const chatScrollVersion = useMemo(
 		() =>
@@ -121,6 +143,8 @@ export default function Chat2RuleDialog({
 
 		abortRef.current?.abort();
 		setComposer("");
+		setEngineType("opengrep");
+		setSaveSupported(true);
 		setTurns([]);
 		setCurrentDraft(null);
 		setStreamingDraft({});
@@ -139,7 +163,15 @@ export default function Chat2RuleDialog({
 		container.scrollTop = container.scrollHeight;
 	}, [chatScrollVersion]);
 
+	useEffect(() => {
+		setIsSavePanelOpen(false);
+	}, [engineType]);
+
 	const openSavePanel = () => {
+		if (!saveSupported) {
+			toast.error(`当前引擎 ${engineConfig.label} 仅支持生成草案，不支持直接保存`);
+			return;
+		}
 		if (!displayedDraft?.ruleText.trim()) {
 			toast.error("当前还没有可保存的规则草案");
 			return;
@@ -191,8 +223,9 @@ export default function Chat2RuleDialog({
 		abortRef.current = controller;
 
 		try {
-			await streamChatWithOpengrepRule(
+			await streamChatWithRule(
 				projectId,
+				engineType,
 				{
 					messages: nextTurns.map(({ role, content: messageContent }) => ({
 						role,
@@ -208,6 +241,12 @@ export default function Chat2RuleDialog({
 				{
 					signal: controller.signal,
 					onEvent: (event) => {
+						if (event.engine_type) {
+							setEngineType(event.engine_type);
+						}
+						if (typeof event.save_supported === "boolean") {
+							setSaveSupported(event.save_supported);
+						}
 						if (event.type === "draft") {
 							setStreamingAssistantMessage(event.assistant_message || "");
 							setStreamingDraft({
@@ -218,6 +257,8 @@ export default function Chat2RuleDialog({
 							return;
 						}
 						if (event.type === "result") {
+							setEngineType(event.engine_type);
+							setSaveSupported(event.save_supported);
 							const nextDraft: DraftSnapshot = {
 								ruleTitle: event.rule_title,
 								ruleText: event.rule_text,
@@ -254,12 +295,12 @@ export default function Chat2RuleDialog({
 
 	const handleSave = async () => {
 		if (!saveRuleText.trim()) {
-			toast.error("规则 YAML 不能为空");
+			toast.error("规则文本不能为空");
 			return;
 		}
 		setIsSaving(true);
 		try {
-			const response = await saveOpengrepRuleFromChat(projectId, {
+			const response = await saveRuleFromChat(projectId, engineType, {
 				rule_text: saveRuleText,
 				title: saveTitle.trim() || undefined,
 				description: saveDescription.trim() || undefined,
@@ -274,7 +315,7 @@ export default function Chat2RuleDialog({
 	};
 
 	const canSend = composer.trim().length > 0 && selections.length > 0 && !isGenerating;
-	const canOpenSavePanel = Boolean(displayedDraft?.ruleText.trim()) && !isGenerating;
+	const canOpenSavePanel = Boolean(displayedDraft?.ruleText.trim()) && !isGenerating && saveSupported;
 	const saveDisabled = !saveRuleText.trim() || isSaving;
 
 	return (
@@ -285,13 +326,31 @@ export default function Chat2RuleDialog({
 						<div className="space-y-2">
 							<DialogTitle className="flex items-center gap-2 text-left text-white">
 								<MessageSquareCode className="h-5 w-5 text-[#c7ff6a]" />
-								聊天生成规则 · Opengrep
+								聊天生成规则 · {engineConfig.label}
 							</DialogTitle>
 							<DialogDescription className="text-left text-white/64">
 								片段需要先在代码浏览页添加；这里专注聊天生成、查看草案，以及在最后手动保存。
 							</DialogDescription>
 						</div>
 						<div className="flex flex-wrap items-center gap-2 text-xs text-white/56">
+							<label className="flex items-center gap-2 rounded-md border border-white/12 bg-white/[0.03] px-2 py-1">
+								<span className="text-white/56">引擎</span>
+								<select
+									value={engineType}
+									onChange={(event) => {
+										const next = event.target.value as Chat2RuleEngineType;
+										setEngineType(next);
+										setSaveSupported(findEngineConfig(next).saveSupported);
+									}}
+									className="bg-transparent text-white outline-none"
+								>
+									{CHAT2RULE_ENGINES.map((engine) => (
+										<option key={engine.value} value={engine.value} className="bg-[#101010]">
+											{engine.label}
+										</option>
+									))}
+								</select>
+							</label>
 							{projectName ? (
 								<Badge variant="outline" className="border-white/12 text-white/72">
 									{projectName}
@@ -559,15 +618,22 @@ export default function Chat2RuleDialog({
 									)}
 
 									<div className="flex justify-end">
-										<Button
-											type="button"
-											onClick={openSavePanel}
-											disabled={!canOpenSavePanel}
-											className="bg-[#c7ff6a] text-black hover:bg-[#d6ff8d]"
-										>
-											<Save className="h-4 w-4" />
-											手动保存当前草案
-										</Button>
+										<div className="flex flex-col items-end gap-2">
+											<Button
+												type="button"
+												onClick={openSavePanel}
+												disabled={!canOpenSavePanel}
+												className="bg-[#c7ff6a] text-black hover:bg-[#d6ff8d]"
+											>
+												<Save className="h-4 w-4" />
+												手动保存当前草案
+											</Button>
+											{!saveSupported ? (
+												<p className="text-xs text-white/42">
+													{engineConfig.label} 当前仅支持生成草案，不支持直接保存。
+												</p>
+											) : null}
+										</div>
 									</div>
 								</section>
 
@@ -578,7 +644,7 @@ export default function Chat2RuleDialog({
 												保存表单
 											</Label>
 											<p className="mt-2 text-sm text-white/48">
-												现在才会真正提交保存；你可以补标题、说明，或者直接改 YAML。
+												现在才会真正提交保存；你可以补标题、说明，或者直接改规则文本。
 											</p>
 										</div>
 
@@ -609,12 +675,12 @@ export default function Chat2RuleDialog({
 
 										<div className="space-y-2">
 											<Label className="text-xs uppercase tracking-[0.18em] text-white/42">
-												规则 YAML
+												{engineConfig.ruleTextLabel}
 											</Label>
 											<Textarea
 												value={saveRuleText}
 												onChange={(event) => setSaveRuleText(event.target.value)}
-												placeholder="最终保存的 Opengrep 规则 YAML"
+												placeholder={`最终保存的 ${engineConfig.label} 规则内容`}
 												className="min-h-[260px] border-white/10 bg-black/70 text-white placeholder:text-white/28"
 											/>
 										</div>

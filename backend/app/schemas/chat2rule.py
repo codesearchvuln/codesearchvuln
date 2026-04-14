@@ -5,6 +5,9 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+Chat2RuleEngineType = Literal["opengrep", "gitleaks", "bandit", "phpstan", "pmd", "yasa"]
+
+
 class Chat2RuleSelectionInput(BaseModel):
     file_path: str = Field(..., description="相对项目根目录的文件路径")
     start_line: int = Field(..., ge=1, description="起始行号，从 1 开始")
@@ -59,3 +62,21 @@ class Chat2RuleOpengrepSaveResponse(BaseModel):
     language: str
     severity: str
     message: str
+
+
+class Chat2RuleChatRequest(Chat2RuleOpengrepChatRequest):
+    pass
+
+
+class Chat2RuleChatResponse(Chat2RuleOpengrepChatResponse):
+    engine_type: Chat2RuleEngineType
+    save_supported: bool
+
+
+class Chat2RuleSaveRequest(Chat2RuleOpengrepSaveRequest):
+    pass
+
+
+class Chat2RuleSaveResponse(Chat2RuleOpengrepSaveResponse):
+    engine_type: Chat2RuleEngineType
+    save_supported: bool
