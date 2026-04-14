@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import logging
 import sys
 import types
 from types import SimpleNamespace
@@ -40,6 +42,30 @@ sys.modules.setdefault("alembic.script", alembic_script_stub)
 
 
 from app.services import runner_preflight
+
+
+def _clear_file_handlers() -> None:
+    logger_names = [None, *logging.root.manager.loggerDict.keys()]
+    for logger_name in logger_names:
+        logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
+        for handler in list(logger.handlers):
+            if isinstance(handler, logging.FileHandler):
+                logger.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+
+
+def _import_main_with_writable_log_dir(monkeypatch, tmp_path):
+    from app.core import logging_setup
+
+    log_dir = tmp_path / "backend-log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(logging_setup, "get_backend_log_dir", lambda: log_dir)
+    _clear_file_handlers()
+    sys.modules.pop("app.main", None)
+    return importlib.import_module("app.main")
 
 
 def test_get_configured_runner_preflight_specs_do_not_include_local_build_metadata() -> None:
@@ -332,8 +358,8 @@ def test_run_runner_preflight_sync_surfaces_docker_socket_permission_hint(monkey
 
 
 @pytest.mark.asyncio
-async def test_check_agent_services_closes_docker_and_redis_clients(monkeypatch):
-    from app import main
+async def test_check_agent_services_closes_docker_and_redis_clients(monkeypatch, tmp_path):
+    main = _import_main_with_writable_log_dir(monkeypatch, tmp_path)
 
     events: list[str] = []
 
@@ -413,6 +439,7 @@ async def test_run_cache_cleanup_once_prunes_scan_progress_and_zip_cache(monkeyp
 
 @pytest.mark.asyncio
 async def test_run_configured_runner_preflights_obeys_strict_mode(monkeypatch):
+    _clear_file_handlers()
     specs = [
         runner_preflight.RunnerPreflightSpec(
             name="bandit",
@@ -451,8 +478,8 @@ async def test_run_configured_runner_preflights_obeys_strict_mode(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lifespan_runs_runner_preflight_before_agent_service_check(monkeypatch):
-    from app import main
+async def test_lifespan_runs_runner_preflight_before_agent_service_check(monkeypatch, tmp_path):
+    main = _import_main_with_writable_log_dir(monkeypatch, tmp_path)
 
     order: list[str] = []
 
