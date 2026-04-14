@@ -8,15 +8,16 @@ const homePagePath = path.resolve(
   "src/pages/AgentAudit/index.tsx",
 );
 
-test("AgentAudit 首页默认不自动挂载 nexus iframe，而是显式点击后再加载", () => {
+test("AgentAudit 首页仍保留惰性加载，但改为加载主前端承载的 Nexus 页面", () => {
   const source = fs.readFileSync(homePagePath, "utf8");
 
   assert.match(
     source,
     /const \[isNexusLoaded, setIsNexusLoaded\] = useState\(false\);/,
   );
-  assert.match(source, /\{isNexusLoaded \? \(/);
+  assert.match(source, /const iframePath = "\/nexus\/";/);
   assert.match(source, /setIsNexusLoaded\(true\)/);
-  assert.match(source, /加载 GitNexus/);
-  assert.doesNotMatch(source, /<iframe[\s\S]*src=\{`http:\/\/\$\{window\.location\.hostname\}:5174`\}/);
+  assert.match(source, /加载 GitNexus 页面/);
+  assert.match(source, /主前端承载本地静态产物/);
+  assert.doesNotMatch(source, /window\.location\.hostname\}:5174/);
 });

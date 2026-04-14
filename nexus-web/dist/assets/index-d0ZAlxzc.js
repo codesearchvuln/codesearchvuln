@@ -7977,7 +7977,7 @@ Error generating stack: ` + o.message + `
     ]);
     const kc = z.useRef(null), Nt = z.useRef(null);
     z.useEffect(() => {
-      const q = new Worker(new URL("/assets/ingestion.worker-BiTDjgSE.js", import.meta.url), {
+      const q = new Worker(new URL("/nexus/nexus/assets/ingestion.worker-BiTDjgSE.js", import.meta.url), {
         type: "module"
       }), ne = Vp(q);
       return kc.current = q, Nt.current = ne, () => {

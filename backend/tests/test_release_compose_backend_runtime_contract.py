@@ -28,14 +28,10 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
         "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
-    assert "nexus-web:\n    image: ${NEXUS_WEB_IMAGE:-vulhunter/nexus-web-local:latest}" in compose_text
-    assert "nexus-itemDetail:\n    image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in compose_text
-    assert "context: ./nexus-web" in compose_text
-    assert "context: ./nexus-itemDetail" in compose_text
-    assert "dockerfile_inline: |" in compose_text
-    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
-    assert "NEXUS_WEB_PULL_POLICY" in compose_text
-    assert "NEXUS_ITEM_DETAIL_PULL_POLICY" in compose_text
+    assert "\n  nexus-web:\n" not in compose_text
+    assert "\n  nexus-itemDetail:\n" not in compose_text
+    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
     assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in compose_text
@@ -53,8 +49,10 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
         "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in hybrid_text
-    assert "nexus-web" not in hybrid_text
-    assert "nexus-itemDetail" not in hybrid_text
+    assert "\n  nexus-web:\n" not in hybrid_text
+    assert "\n  nexus-itemDetail:\n" not in hybrid_text
+    assert "./nexus-web/dist:/app/public/nexus:ro" in hybrid_text
+    assert "./nexus-itemDetail/dist:/app/public/nexus-item-detail:ro" in hybrid_text
     assert "-runner-local:latest" not in hybrid_text
     assert "group_add:" in hybrid_text and '${DOCKER_SOCKET_GID:-1001}' in hybrid_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in hybrid_text

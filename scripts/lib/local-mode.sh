@@ -230,7 +230,7 @@ local_status() {
 
   _service_status "backend"  "$BACKEND_PORT"
   _service_status "frontend" "$FRONTEND_PORT"
-  _service_status "nexus"    "$NEXUS_PORT"
+  # _service_status "nexus"    "$NEXUS_PORT"
 
   echo ""
   # 数据库/Redis 探活
@@ -252,7 +252,7 @@ local_stop() {
   log_step "停止本地服务..."
   stop_by_pid "backend"
   stop_by_pid "frontend"
-  stop_by_pid "nexus"
+  # stop_by_pid "nexus"
   log_success "所有本地服务已停止"
 }
 
@@ -269,7 +269,7 @@ local_start() {
   local_generate_frontend_env
   local_run_migrations
   local_start_backend
-  # nexus 由 nexus.sh 的 nexus_start 函数处理，在 deploy-linux.sh 中调用
+  # nexus 由 nexus.sh 处理的本地预览路径已退役，暂不再启动
   local_start_frontend
   print_ready_banner
 }

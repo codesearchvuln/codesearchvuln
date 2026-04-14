@@ -50,7 +50,7 @@ Use this when you have preloaded the offline image bundle and want the same runt
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
-- `nexus-web`: `http://localhost:5174`
-- `nexus-itemDetail`: `http://localhost:5175`
+- `nexus-web` page: `http://localhost:3000/nexus/`
+- `nexus-itemDetail` page: `http://localhost:3000/nexus-item-detail/`
 
 See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for the compose contract.

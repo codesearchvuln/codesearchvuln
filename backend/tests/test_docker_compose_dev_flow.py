@@ -55,8 +55,8 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "\n  backend:\n" in compose_text
     assert "\n  scan-workspace-init:\n" in compose_text
     assert "\n  frontend:\n" in compose_text
-    assert "\n  nexus-web:\n" in compose_text
-    assert "\n  nexus-itemDetail:\n" in compose_text
+    assert "\n  nexus-web:\n" not in compose_text
+    assert "\n  nexus-itemDetail:\n" not in compose_text
     assert "./backend:/app" not in compose_text
     assert ".:/workspace:ro" not in compose_text
     assert "./frontend:/app" not in compose_text
@@ -143,18 +143,8 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "CODEX_SKILLS_AUTO_INSTALL" not in compose_text
     assert 'profiles: [ "tools" ]' in compose_text
     assert "adminer:" in compose_text
-    assert "image: ${NEXUS_WEB_IMAGE:-vulhunter/nexus-web-local:latest}" in compose_text
-    assert 'pull_policy: ${NEXUS_WEB_PULL_POLICY:-build}' in compose_text
-    assert "image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in compose_text
-    assert 'pull_policy: ${NEXUS_ITEM_DETAIL_PULL_POLICY:-build}' in compose_text
-    assert "build:\n      context: ./nexus-web" in compose_text
-    assert "build:\n      context: ./nexus-itemDetail" in compose_text
-    assert "dockerfile_inline: |" in compose_text
-    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
-    assert "COPY ./dist /usr/share/nginx/html" in compose_text
-    assert "COPY ./nginx.conf /etc/nginx/nginx.conf" in compose_text
-    assert "tags:\n        - ${NEXUS_WEB_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-web-local:latest}" in compose_text
-    assert "tags:\n        - ${NEXUS_ITEM_DETAIL_LOCAL_IMAGE_ALIAS:-vulhunter/nexus-item-detail-local:latest}" in compose_text
+    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
     assert "YASA_HOST_BIN_PATH" not in compose_text
     assert "YASA_HOST_RESOURCE_DIR" not in compose_text
     assert "YASA_BIN_PATH:" not in compose_text
@@ -206,10 +196,8 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "vulhunter/backend-local:latest" in full_overlay_text
     assert "vulhunter/backend-dev-local:latest" not in full_overlay_text
     assert "vulhunter/frontend-local:latest" in full_overlay_text
-    assert "image: ${NEXUS_WEB_IMAGE:-vulhunter/nexus-web-local:latest}" in full_overlay_text
-    assert 'pull_policy: ${NEXUS_WEB_PULL_POLICY:-build}' in full_overlay_text
-    assert "image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in full_overlay_text
-    assert 'pull_policy: ${NEXUS_ITEM_DETAIL_PULL_POLICY:-build}' in full_overlay_text
+    assert "./nexus-web/dist:/app/public/nexus:ro" in full_overlay_text
+    assert "./nexus-itemDetail/dist:/app/public/nexus-item-detail:ro" in full_overlay_text
     assert "context: ." in full_overlay_text
     assert "dockerfile: docker/backend.Dockerfile" in full_overlay_text
     assert "working_dir: !reset null" in full_overlay_text
@@ -266,14 +254,70 @@ def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
     assert 'CMD ["python3", "-m", "app.runtime.container_startup", "prod"]' in backend_text
 
 
-def test_nexus_web_build_is_inlined_into_root_compose() -> None:
+def test_root_compose_mounts_nexus_static_bundles_without_retired_service_stubs() -> None:
     compose_text = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
-    assert compose_text.count("dockerfile_inline: |") >= 2
-    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
-    assert "COPY ./dist /usr/share/nginx/html" in compose_text
-    assert "COPY ./nginx.conf /etc/nginx/nginx.conf" in compose_text
-    assert "EXPOSE 5174" in compose_text
+    assert "\n  nexus-web:\n" not in compose_text
+    assert "\n  nexus-itemDetail:\n" not in compose_text
+    assert "dockerfile_inline: |" not in compose_text
+    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
+
+
+def test_retired_nexus_container_dockerfiles_are_removed() -> None:
+    assert not (REPO_ROOT / "docker" / "nexus-web.Dockerfile").exists()
+    assert not (REPO_ROOT / "docker" / "nexus-web-itemDetail.Dockerfile").exists()
+
+
+def test_nexus_static_bundles_are_subpath_safe() -> None:
+    bundle_contracts = (
+        (
+            "nexus-web",
+            REPO_ROOT / "nexus-web" / "dist",
+            "/nexus/assets/",
+            "/nexus/wasm/",
+        ),
+        (
+            "nexus-itemDetail",
+            REPO_ROOT / "nexus-itemDetail" / "dist",
+            "/nexus-item-detail/assets/",
+            "/nexus-item-detail/wasm/",
+        ),
+    )
+
+    for bundle_name, dist_dir, assets_prefix, wasm_prefix in bundle_contracts:
+        index_html = (dist_dir / "index.html").read_text(encoding="utf-8")
+        assert assets_prefix in index_html, bundle_name
+        assert 'src="/assets/' not in index_html, bundle_name
+        assert 'href="/assets/' not in index_html, bundle_name
+
+        bad_tokens = ('"/assets/', '"/wasm/', "`/assets/", "`/wasm/")
+        offenders: list[str] = []
+        for path in sorted(dist_dir.rglob("*")):
+            if path.suffix not in {".html", ".js"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if any(token in text for token in bad_tokens):
+                offenders.append(str(path.relative_to(REPO_ROOT)))
+
+        assert not offenders, f"{bundle_name} still contains root-relative asset paths: {offenders}"
+
+        worker_files = sorted((dist_dir / "assets").glob("ingestion.worker-*.js"))
+        assert worker_files, bundle_name
+        worker_text = worker_files[0].read_text(encoding="utf-8")
+        assert assets_prefix in worker_text, bundle_name
+        assert wasm_prefix in worker_text, bundle_name
+
+
+def test_frontend_nginx_routes_nexus_static_mounts() -> None:
+    frontend_nginx = (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+    deploy_nginx = (REPO_ROOT / "deploy" / "frontend" / "default.conf").read_text(encoding="utf-8")
+
+    for nginx_text in (frontend_nginx, deploy_nginx):
+        assert "location /nexus/" in nginx_text
+        assert "try_files $uri $uri/ /nexus/index.html;" in nginx_text
+        assert "location /nexus-item-detail/" in nginx_text
+        assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in nginx_text
 
 
 def test_scripts_and_packaging_use_new_compose_layout() -> None:
@@ -342,8 +386,8 @@ def test_scripts_and_packaging_use_new_compose_layout() -> None:
     assert "compose-up-with-fallback.ps1" in compose_wrapper_ps1
     assert '"${COMPOSE[@]}" build backend' in local_build_script
     assert '"${COMPOSE[@]}" build frontend' in local_build_script
-    assert '"${COMPOSE[@]}" build nexus-web' in local_build_script
-    assert '"${COMPOSE[@]}" build nexus-itemDetail' in local_build_script
+    assert "build nexus-web" not in local_build_script
+    assert "build nexus-itemDetail" not in local_build_script
     assert '"${COMPOSE[@]}" up -d' in local_build_script
 
 
@@ -361,8 +405,8 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
         assert "offline-images.env.example" in doc
         assert "load-images.sh" in doc
         assert "use-offline-env.sh" in doc
-        assert "nexus-web" in doc
-        assert "nexus-itemDetail" in doc
+        assert "/nexus/" in doc
+        assert "/nexus-item-detail/" in doc
 
     assert "scripts/README-COMPOSE.md" in root_readme
     assert "scripts/README-COMPOSE.md" in root_readme_en

@@ -7,7 +7,7 @@
 # Runtime env templates needed by the release tree.
 docker/env/backend/env.example
 
-# Bundled runtime assets retained in the generated release tree.
+# Bundled local Nexus static pages retained for main frontend mounting.
 nexus-web/
 nexus-itemDetail/
 

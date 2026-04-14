@@ -42,9 +42,10 @@ export function HomeScanCards() {
   const { resolvedTheme } = useTheme();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isNexusLoaded, setIsNexusLoaded] = useState(false);
-  const iframeOrigin = `http://${window.location.hostname}:5174`;
+  const iframeOrigin = window.location.origin;
+  const iframePath = "/nexus/";
 
-  // 主题变化时通知 iframe
+  // GitNexus 不再通过独立容器暴露端口，改为由主前端承载本地 dist 页面。
   useEffect(() => {
     if (!isNexusLoaded) return;
     const iframe = iframeRef.current;
@@ -57,9 +58,7 @@ export function HomeScanCards() {
       );
     };
 
-    // iframe 加载完成后立即同步当前主题
     iframe.addEventListener("load", sendTheme);
-    // 主题变化时也发送
     sendTheme();
 
     return () => iframe.removeEventListener("load", sendTheme);
@@ -84,7 +83,7 @@ export function HomeScanCards() {
         {isNexusLoaded ? (
           <iframe
             ref={iframeRef}
-            src={iframeOrigin}
+            src={iframePath}
             title="GitNexus"
             className="w-full h-full border-0 pointer-events-auto"
           />
@@ -96,10 +95,10 @@ export function HomeScanCards() {
               className="pointer-events-auto rounded-2xl border border-primary/50 bg-background/80 px-6 py-4 text-left shadow-[0_0_40px_rgba(59,130,246,0.2)] backdrop-blur-md transition hover:scale-[1.02] hover:border-primary hover:bg-background/90"
             >
               <div className="text-sm font-semibold text-primary">
-                加载 GitNexus 预览
+                加载 GitNexus 页面
               </div>
               <div className="mt-2 max-w-md text-sm text-foreground/70">
-                首页默认不自动挂载可视化 iframe，避免长时间待机时维持第二套前端运行时。
+                GitNexus 现已由主前端承载本地静态产物，不再依赖独立的容器服务与 `5174` 端口。
               </div>
             </button>
           </div>

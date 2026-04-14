@@ -58,7 +58,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
-- `nexus-web`: `http://localhost:5174`
-- `nexus-itemDetail`: `http://localhost:5175`
+- `nexus-web` 页面：`http://localhost:3000/nexus/`
+- `nexus-itemDetail` 页面：`http://localhost:3000/nexus-item-detail/`
 
 补充说明见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。

@@ -22,7 +22,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 - 默认使用已发布且 digest 固定的 `backend`、scanner runner 和 `sandbox-runner` 镜像
 - 主 frontend 不是 `vulhunter-frontend` 运行镜像，而是 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，加上 `./deploy/runtime/frontend/site` 与 `./deploy/runtime/frontend/nginx/default.conf` 挂载内容
 - `db` 与 `redis` 仍由当前 compose 文件拉起
-- `nexus-web` 与 `nexus-itemDetail` 仅从随包附带的静态产物组装本地 nginx 容器
+- `nexus-web` 与 `nexus-itemDetail` 不再启动独立容器，而是作为本地静态页面挂载到主前端容器中
 
 ### 离线模式
 
@@ -41,5 +41,5 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
-- `nexus-web`: `http://localhost:5174`
-- `nexus-itemDetail`: `http://localhost:5175`
+- `nexus-web`: `http://localhost:3000/nexus/`
+- `nexus-itemDetail`: `http://localhost:3000/nexus-item-detail/`

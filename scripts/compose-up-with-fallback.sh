@@ -18,9 +18,7 @@
 #   DOCKERHUB_LIBRARY_MIRROR        — 指定 DockerHub 镜像源（跳过探测）
 #   GHCR_REGISTRY                   — 指定 GHCR registry（默认 ghcr.io）
 #   VULHUNTER_IMAGE_NAMESPACE       — backend/frontend/runner/sandbox 默认命名空间
-#   NEXUS_WEB_IMAGE_NAMESPACE       — nexus-web 默认命名空间
 #   VULHUNTER_IMAGE_TAG             — backend/frontend/runner/sandbox 默认 tag
-#   NEXUS_WEB_IMAGE_TAG             — nexus-web 默认 tag
 #   FRONTEND_NPM_REGISTRY           — 前端 NPM 镜像源
 #   BACKEND_PYPI_INDEX_PRIMARY      — Backend PyPI 主索引
 #   SANDBOX_PYPI_INDEX_PRIMARY      — Sandbox PyPI 主索引
@@ -676,7 +674,6 @@ run_with_retries() {
   local sandbox_image="$7"
   local backend_image_resolved=""
   local frontend_image_resolved=""
-  local nexus_web_image_resolved=""
 
   local attempt=1
   local rc=1
@@ -684,20 +681,16 @@ run_with_retries() {
   while [ "$attempt" -le "$retry_count" ]; do
     backend_image_resolved="${BACKEND_IMAGE:-${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${VULHUNTER_IMAGE_TAG}}"
     frontend_image_resolved="${FRONTEND_IMAGE:-${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-frontend:${VULHUNTER_IMAGE_TAG}}"
-    nexus_web_image_resolved="${NEXUS_WEB_IMAGE:-${ghcr_registry}/${NEXUS_WEB_IMAGE_NAMESPACE}/nexus-web:${NEXUS_WEB_IMAGE_TAG}}"
     log_info "Phase=${phase} attempt ${attempt}/${retry_count}"
     log_info "DOCKERHUB_LIBRARY_MIRROR=${dockerhub_mirror}"
     log_info "GHCR_REGISTRY=${ghcr_registry}"
     log_info "VULHUNTER_IMAGE_NAMESPACE=${VULHUNTER_IMAGE_NAMESPACE}"
-    log_info "NEXUS_WEB_IMAGE_NAMESPACE=${NEXUS_WEB_IMAGE_NAMESPACE}"
     log_info "VULHUNTER_IMAGE_TAG=${VULHUNTER_IMAGE_TAG}"
-    log_info "NEXUS_WEB_IMAGE_TAG=${NEXUS_WEB_IMAGE_TAG}"
     log_info "UV_IMAGE=${uv_image}"
     log_info "SANDBOX_BASE_IMAGE=${sandbox_base_image}"
     log_info "SANDBOX_RUNNER_IMAGE=${sandbox_image}"
     log_info "BACKEND_IMAGE_RESOLVED=${backend_image_resolved}"
     log_info "FRONTEND_IMAGE_RESOLVED=${frontend_image_resolved}"
-    log_info "NEXUS_WEB_IMAGE_RESOLVED=${nexus_web_image_resolved}"
     log_info "FRONTEND_NPM_REGISTRY=${FRONTEND_NPM_REGISTRY_SELECTED}"
     log_info "FRONTEND_NPM_REGISTRY_FALLBACK=${FRONTEND_NPM_REGISTRY_FALLBACK_SELECTED}"
     log_warn "GHCR registry host rewrites do not bypass private-package permissions; default remote mode expects anonymous pull access or an explicit full image override."
@@ -709,12 +702,10 @@ run_with_retries() {
     fi
 
     set +e
-    DOCKERHUB_LIBRARY_MIRROR="${dockerhub_mirror}" \
+      DOCKERHUB_LIBRARY_MIRROR="${dockerhub_mirror}" \
       GHCR_REGISTRY="${ghcr_registry}" \
       VULHUNTER_IMAGE_NAMESPACE="${VULHUNTER_IMAGE_NAMESPACE}" \
-      NEXUS_WEB_IMAGE_NAMESPACE="${NEXUS_WEB_IMAGE_NAMESPACE}" \
       VULHUNTER_IMAGE_TAG="${VULHUNTER_IMAGE_TAG}" \
-      NEXUS_WEB_IMAGE_TAG="${NEXUS_WEB_IMAGE_TAG}" \
       UV_IMAGE="${uv_image}" \
       SANDBOX_BASE_IMAGE="${sandbox_base_image}" \
       SANDBOX_RUNNER_IMAGE="${sandbox_image}" \
@@ -755,7 +746,6 @@ run_with_retries() {
     log_warn "anonymous GHCR pull failed or the image namespace/tag is incorrect"
     log_warn "resolved backend image: ${backend_image_resolved}"
     log_warn "resolved frontend image: ${frontend_image_resolved}"
-    log_warn "resolved nexus-web image: ${nexus_web_image_resolved}"
     if [ "$attempt" -lt "$retry_count" ]; then
       log_info "Retrying in ${RETRY_INTERVAL_SECONDS}s..."
       sleep "${RETRY_INTERVAL_SECONDS}"
@@ -871,9 +861,7 @@ run_local_build_fallback() {
   DOCKERHUB_LIBRARY_MIRROR="${dockerhub_mirror}" \
     GHCR_REGISTRY="${ghcr_registry}" \
     VULHUNTER_IMAGE_NAMESPACE="${VULHUNTER_IMAGE_NAMESPACE}" \
-    NEXUS_WEB_IMAGE_NAMESPACE="${NEXUS_WEB_IMAGE_NAMESPACE}" \
     VULHUNTER_IMAGE_TAG="${VULHUNTER_IMAGE_TAG}" \
-    NEXUS_WEB_IMAGE_TAG="${NEXUS_WEB_IMAGE_TAG}" \
     UV_IMAGE="${uv_image}" \
     SANDBOX_BASE_IMAGE="${sandbox_base_image}" \
     SANDBOX_RUNNER_IMAGE="${sandbox_image}" \
@@ -1084,9 +1072,7 @@ fi
 [ "$PHASE_COUNT" -ge 1 ] || PHASE_COUNT=1
 
 VULHUNTER_IMAGE_TAG="${VULHUNTER_IMAGE_TAG:-latest}"
-NEXUS_WEB_IMAGE_TAG="${NEXUS_WEB_IMAGE_TAG:-latest}"
 VULHUNTER_IMAGE_NAMESPACE="${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
-NEXUS_WEB_IMAGE_NAMESPACE="${NEXUS_WEB_IMAGE_NAMESPACE:-unbengable12}"
 
 log_info "Compose command: ${COMPOSE_BIN[*]}"
 log_info "Compose args: ${COMPOSE_ARGS[*]}"

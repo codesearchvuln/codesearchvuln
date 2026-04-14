@@ -42,7 +42,7 @@ For a minimal first deployment, `LLM_API_KEY`, `LLM_PROVIDER`, and `LLM_MODEL` a
 docker compose up -d
 ```
 
-By default, VulHunter pulls the required runtime images and starts the full stack. The main web UI static assets and the default nginx configuration are already included in this package; `STATIC_FRONTEND_IMAGE` provides the nginx base image that serves them. The deployment also starts `db`, `redis`, `nexus-web`, and `nexus-itemDetail`. Code execution now uses a single `SANDBOX_RUNNER_IMAGE`; the release contract no longer exposes a separate legacy sandbox image override.
+By default, VulHunter pulls the required runtime images and starts the full stack. The main web UI static assets and the default nginx configuration are already included in this package; `STATIC_FRONTEND_IMAGE` provides the nginx base image that serves them. The deployment starts `db` and `redis`. The `nexus-web` / `nexus-itemDetail` pages are now served by mounting the local static bundles into the main frontend container instead of starting dedicated containers. Code execution now uses a single `SANDBOX_RUNNER_IMAGE`; the release contract no longer exposes a separate legacy sandbox image override.
 
 ## 4. Offline Deployment (Optional)
 
@@ -104,7 +104,7 @@ If you need to point the stack to custom images or an existing runtime environme
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:8000`
 - OpenAPI docs: `http://localhost:8000/docs`
-- `nexus-web`: `http://localhost:5174`
-- `nexus-itemDetail`: `http://localhost:5175`
 
 See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for Docker Compose operations and maintenance details.
+- `nexus-web`: `http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus/`
+- `nexus-itemDetail`: `http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus-item-detail/`

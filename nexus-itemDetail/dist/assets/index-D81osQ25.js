@@ -6706,7 +6706,7 @@ const Yp = z.createContext(null), E0 = ({ children: e }) => {
   }, [s]);
   const xc = z.useRef(null), Rt = z.useRef(null);
   z.useEffect(() => {
-    const X = new Worker(new URL("/assets/ingestion.worker-B0B6xVwV.js", import.meta.url), { type: "module" }), te = Hp(X);
+    const X = new Worker(new URL("/nexus-item-detail/nexus-item-detail/assets/ingestion.worker-B0B6xVwV.js", import.meta.url), { type: "module" }), te = Hp(X);
     return xc.current = X, Rt.current = te, () => {
       X.terminate(), xc.current = null, Rt.current = null;
     };

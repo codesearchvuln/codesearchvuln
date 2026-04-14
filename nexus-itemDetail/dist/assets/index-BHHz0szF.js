@@ -6706,7 +6706,7 @@ const Wp = N.createContext(null), v0 = ({ children: e }) => {
   }, [s]);
   const Sc = N.useRef(null), Ft = N.useRef(null);
   N.useEffect(() => {
-    const Z = new Worker(new URL("/assets/ingestion.worker-BiTDjgSE.js", import.meta.url), { type: "module" }), ne = Mp(Z);
+    const Z = new Worker(new URL("/nexus-item-detail/nexus-item-detail/assets/ingestion.worker-BiTDjgSE.js", import.meta.url), { type: "module" }), ne = Mp(Z);
     return Sc.current = Z, Ft.current = ne, () => {
       Z.terminate(), Sc.current = null, Ft.current = null;
     };

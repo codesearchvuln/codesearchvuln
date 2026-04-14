@@ -14,7 +14,7 @@ docker compose up -d
 - `backend`、scanner runner 和 `sandbox-runner` 使用发布流程预构建的 digest 固定镜像
 - 主前端使用 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，并挂载当前目录中的 `deploy/runtime/frontend/site` 与 `deploy/runtime/frontend/nginx/default.conf`
 - `db`、`redis` 由当前 compose 直接拉起
-- `nexus-web` 与 `nexus-itemDetail` 仅从当前目录内的静态 bundle 组装本地 nginx 容器
+- `nexus-web` 与 `nexus-itemDetail` 现在由主前端容器直接挂载本地静态产物提供页面，不再单独启动容器
 
 ## 离线启动
 
@@ -83,8 +83,6 @@ docker compose restart backend
 - 前端：`http://localhost:3000`
 - 后端：`http://localhost:8000`
 - OpenAPI：`http://localhost:8000/docs`
-- `nexus-web`：`http://localhost:5174`
-- `nexus-itemDetail`：`http://localhost:5175`
 
 ## 常见操作
 
@@ -105,3 +103,5 @@ docker compose down -v
 ```bash
 docker compose up -d
 ```
+- `nexus-web`：`http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus/`
+- `nexus-itemDetail`：`http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus-item-detail/`

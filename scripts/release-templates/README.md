@@ -42,7 +42,7 @@ docker compose up -d
 docker compose up -d
 ```
 
-默认情况下，VulHunter 会拉取所需的运行镜像并启动全部服务。主界面的静态文件和默认 nginx 配置已经随包提供；`STATIC_FRONTEND_IMAGE` 用于承载这些静态文件。数据库、Redis、`nexus-web` 和 `nexus-itemDetail` 也会按当前目录中的配置一并启动。代码执行镜像统一为 `SANDBOX_RUNNER_IMAGE`，不再提供旧的独立沙箱镜像覆盖项。
+默认情况下，VulHunter 会拉取所需的运行镜像并启动全部服务。主界面的静态文件和默认 nginx 配置已经随包提供；`STATIC_FRONTEND_IMAGE` 用于承载这些静态文件。数据库和 Redis 会按当前目录中的配置一并启动。`nexus-web` / `nexus-itemDetail` 不再以独立容器运行，而是作为本地静态页面挂载到主前端容器。代码执行镜像统一为 `SANDBOX_RUNNER_IMAGE`，不再提供旧的独立沙箱镜像覆盖项。
 
 ## 4. 离线部署（可选）
 
@@ -104,7 +104,7 @@ docker compose down -v
 - 前端：`http://localhost:3000`
 - 后端 API：`http://localhost:8000`
 - OpenAPI 文档：`http://localhost:8000/docs`
-- `nexus-web`：`http://localhost:5174`
-- `nexus-itemDetail`：`http://localhost:5175`
 
 更多 Docker Compose 相关操作见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。
+- `nexus-web`：`http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus/`
+- `nexus-itemDetail`：`http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus-item-detail/`

@@ -72,6 +72,8 @@ def _write_frontend_bundle(path: Path) -> Path:
             "    listen 80;\n"
             "    root /usr/share/nginx/html;\n"
             "    location / { try_files $uri $uri/ /index.html; }\n"
+            "    location /nexus/ { try_files $uri $uri/ /nexus/index.html; }\n"
+            "    location /nexus-item-detail/ { try_files $uri $uri/ /nexus-item-detail/index.html; }\n"
             "    location /api/ { proxy_pass http://backend:8000/api/; }\n"
             "}\n"
         ),
@@ -448,15 +450,18 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
     assert "./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" in compose_text
     assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
-    assert compose_text.count("build:") == 2
-    assert "image: ${NEXUS_WEB_IMAGE:-vulhunter/nexus-web-local:latest}" in compose_text
-    assert "image: ${NEXUS_ITEM_DETAIL_IMAGE:-vulhunter/nexus-item-detail-local:latest}" in compose_text
-    assert "context: ./nexus-web" in compose_text
-    assert "context: ./nexus-itemDetail" in compose_text
-    assert "dockerfile_inline: |" in compose_text
-    assert "FROM ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:alpine" in compose_text
+    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
     assert "vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}" not in compose_text
     assert "image: ${FRONTEND_IMAGE:-" not in compose_text
+
+    generated_nginx = (output_dir / "deploy" / "runtime" / "frontend" / "nginx" / "default.conf").read_text(
+        encoding="utf-8"
+    )
+    assert "location /nexus/" in generated_nginx
+    assert "try_files $uri $uri/ /nexus/index.html;" in generated_nginx
+    assert "location /nexus-item-detail/" in generated_nginx
+    assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in generated_nginx
 
 
 def test_release_generator_rejects_incomplete_release_manifest(tmp_path: Path) -> None:
@@ -503,8 +508,8 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "docker/env/backend/.env" in doc
         assert "LLM_API_KEY" in doc
         assert "STATIC_FRONTEND_IMAGE" in doc or "静态文件" in doc or "static assets" in doc
-        assert "nexus-web" in doc
-        assert "nexus-itemDetail" in doc
+        assert "/nexus/" in doc
+        assert "/nexus-item-detail/" in doc
 
 
 def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tmp_path: Path) -> None:
