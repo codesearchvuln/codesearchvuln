@@ -143,8 +143,10 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "CODEX_SKILLS_AUTO_INSTALL" not in compose_text
     assert 'profiles: [ "tools" ]' in compose_text
     assert "adminer:" in compose_text
-    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
-    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
+    assert "./nexus-web/dist:/srv/nexus-web:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/srv/nexus-item-detail:ro" in compose_text
+    assert "/usr/share/nginx/html/nexus:ro" not in compose_text
+    assert "/usr/share/nginx/html/nexus-item-detail:ro" not in compose_text
     assert "YASA_HOST_BIN_PATH" not in compose_text
     assert "YASA_HOST_RESOURCE_DIR" not in compose_text
     assert "YASA_BIN_PATH:" not in compose_text
@@ -260,8 +262,10 @@ def test_root_compose_mounts_nexus_static_bundles_without_retired_service_stubs(
     assert "\n  nexus-web:\n" not in compose_text
     assert "\n  nexus-itemDetail:\n" not in compose_text
     assert "dockerfile_inline: |" not in compose_text
-    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
-    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
+    assert "./nexus-web/dist:/srv/nexus-web:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/srv/nexus-item-detail:ro" in compose_text
+    assert "/usr/share/nginx/html/nexus:ro" not in compose_text
+    assert "/usr/share/nginx/html/nexus-item-detail:ro" not in compose_text
 
 
 def test_retired_nexus_container_dockerfiles_are_removed() -> None:
@@ -315,8 +319,10 @@ def test_frontend_nginx_routes_nexus_static_mounts() -> None:
 
     for nginx_text in (frontend_nginx, deploy_nginx):
         assert "location /nexus/" in nginx_text
+        assert "alias /srv/nexus-web/;" in nginx_text
         assert "try_files $uri $uri/ /nexus/index.html;" in nginx_text
         assert "location /nexus-item-detail/" in nginx_text
+        assert "alias /srv/nexus-item-detail/;" in nginx_text
         assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in nginx_text
 
 

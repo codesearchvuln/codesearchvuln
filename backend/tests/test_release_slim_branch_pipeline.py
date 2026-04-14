@@ -72,8 +72,8 @@ def _write_frontend_bundle(path: Path) -> Path:
             "    listen 80;\n"
             "    root /usr/share/nginx/html;\n"
             "    location / { try_files $uri $uri/ /index.html; }\n"
-            "    location /nexus/ { try_files $uri $uri/ /nexus/index.html; }\n"
-            "    location /nexus-item-detail/ { try_files $uri $uri/ /nexus-item-detail/index.html; }\n"
+            "    location /nexus/ { alias /srv/nexus-web/; try_files $uri $uri/ /nexus/index.html; }\n"
+            "    location /nexus-item-detail/ { alias /srv/nexus-item-detail/; try_files $uri $uri/ /nexus-item-detail/index.html; }\n"
             "    location /api/ { proxy_pass http://backend:8000/api/; }\n"
             "}\n"
         ),
@@ -450,8 +450,10 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
     assert "./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" in compose_text
     assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
-    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
-    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
+    assert "./nexus-web/dist:/srv/nexus-web:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/srv/nexus-item-detail:ro" in compose_text
+    assert "/usr/share/nginx/html/nexus:ro" not in compose_text
+    assert "/usr/share/nginx/html/nexus-item-detail:ro" not in compose_text
     assert "vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}" not in compose_text
     assert "image: ${FRONTEND_IMAGE:-" not in compose_text
 
@@ -459,8 +461,10 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
         encoding="utf-8"
     )
     assert "location /nexus/" in generated_nginx
+    assert "alias /srv/nexus-web/;" in generated_nginx
     assert "try_files $uri $uri/ /nexus/index.html;" in generated_nginx
     assert "location /nexus-item-detail/" in generated_nginx
+    assert "alias /srv/nexus-item-detail/;" in generated_nginx
     assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in generated_nginx
 
 

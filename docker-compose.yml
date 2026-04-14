@@ -178,8 +178,8 @@ services:
     mem_limit: 512m
     pids_limit: 256
     volumes:
-      - ./nexus-web/dist:/usr/share/nginx/html/nexus:ro
-      - ./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro
+      - ./nexus-web/dist:/srv/nexus-web:ro
+      - ./nexus-itemDetail/dist:/srv/nexus-item-detail:ro
     ports:
       - "${VULHUNTER_FRONTEND_PORT:-3000}:80"
     environment:

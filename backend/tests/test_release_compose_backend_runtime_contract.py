@@ -30,8 +30,10 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     ) in compose_text
     assert "\n  nexus-web:\n" not in compose_text
     assert "\n  nexus-itemDetail:\n" not in compose_text
-    assert "./nexus-web/dist:/usr/share/nginx/html/nexus:ro" in compose_text
-    assert "./nexus-itemDetail/dist:/usr/share/nginx/html/nexus-item-detail:ro" in compose_text
+    assert "./nexus-web/dist:/srv/nexus-web:ro" in compose_text
+    assert "./nexus-itemDetail/dist:/srv/nexus-item-detail:ro" in compose_text
+    assert "/usr/share/nginx/html/nexus:ro" not in compose_text
+    assert "/usr/share/nginx/html/nexus-item-detail:ro" not in compose_text
     assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in compose_text
