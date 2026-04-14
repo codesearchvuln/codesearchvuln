@@ -42,7 +42,7 @@ For a minimal first deployment, `LLM_API_KEY`, `LLM_PROVIDER`, and `LLM_MODEL` a
 docker compose up -d
 ```
 
-By default, VulHunter pulls the required runtime images and starts the full stack. The main web UI static assets and the default nginx configuration are already included in this package; `STATIC_FRONTEND_IMAGE` provides the nginx base image that serves them. The deployment also starts `db`, `redis`, `nexus-web`, and `nexus-itemDetail`.
+By default, VulHunter pulls the required runtime images and starts the full stack. The main web UI static assets and the default nginx configuration are already included in this package; `STATIC_FRONTEND_IMAGE` provides the nginx base image that serves them. The deployment also starts `db`, `redis`, `nexus-web`, and `nexus-itemDetail`. Code execution now uses a single `SANDBOX_RUNNER_IMAGE`; the release contract no longer exposes a separate legacy sandbox image override.
 
 ## 4. Offline Deployment (Optional)
 
@@ -84,7 +84,6 @@ If you need to point the stack to custom images or an existing runtime environme
 
 - `BACKEND_IMAGE`
 - `STATIC_FRONTEND_IMAGE`
-- `SANDBOX_IMAGE`
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`
 - `SANDBOX_RUNNER_IMAGE`

@@ -106,7 +106,6 @@ manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
 required_keys = {
     "backend": "__BACKEND_IMAGE_REF__",
-    "sandbox": "__SANDBOX_IMAGE_REF__",
     "sandbox_runner": "__SANDBOX_RUNNER_IMAGE_REF__",
     "scanner_yasa": "__SCANNER_YASA_IMAGE_REF__",
     "scanner_opengrep": "__SCANNER_OPENGREP_IMAGE_REF__",
@@ -189,7 +188,6 @@ if not revision:
 
 image_contracts = {
     "backend": ("BACKEND_IMAGE", "vulhunter-local/backend"),
-    "sandbox": ("SANDBOX_IMAGE", "vulhunter-local/sandbox"),
     "sandbox_runner": ("SANDBOX_RUNNER_IMAGE", "vulhunter-local/sandbox-runner"),
     "scanner_yasa": ("SCANNER_YASA_IMAGE", "vulhunter-local/yasa-runner"),
     "scanner_opengrep": ("SCANNER_OPENGREP_IMAGE", "vulhunter-local/opengrep-runner"),

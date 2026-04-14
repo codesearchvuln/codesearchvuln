@@ -694,7 +694,7 @@ run_with_retries() {
     log_info "NEXUS_WEB_IMAGE_TAG=${NEXUS_WEB_IMAGE_TAG}"
     log_info "UV_IMAGE=${uv_image}"
     log_info "SANDBOX_BASE_IMAGE=${sandbox_base_image}"
-    log_info "SANDBOX_IMAGE=${sandbox_image}"
+    log_info "SANDBOX_RUNNER_IMAGE=${sandbox_image}"
     log_info "BACKEND_IMAGE_RESOLVED=${backend_image_resolved}"
     log_info "FRONTEND_IMAGE_RESOLVED=${frontend_image_resolved}"
     log_info "NEXUS_WEB_IMAGE_RESOLVED=${nexus_web_image_resolved}"
@@ -717,7 +717,7 @@ run_with_retries() {
       NEXUS_WEB_IMAGE_TAG="${NEXUS_WEB_IMAGE_TAG}" \
       UV_IMAGE="${uv_image}" \
       SANDBOX_BASE_IMAGE="${sandbox_base_image}" \
-      SANDBOX_IMAGE="${sandbox_image}" \
+      SANDBOX_RUNNER_IMAGE="${sandbox_image}" \
       FRONTEND_NPM_REGISTRY="${FRONTEND_NPM_REGISTRY_SELECTED}" \
       FRONTEND_NPM_REGISTRY_FALLBACK="${FRONTEND_NPM_REGISTRY_FALLBACK_SELECTED}" \
       BACKEND_PYPI_INDEX_PRIMARY="${BACKEND_PYPI_INDEX_PRIMARY_SELECTED}" \
@@ -845,7 +845,7 @@ run_local_build_fallback() {
   local ghcr_registry="${GHCR_REGISTRY_PRIMARY_SELECTED}"
   local uv_image="${UV_IMAGE:-${ghcr_registry}/astral-sh/uv:latest}"
   local sandbox_base_image="${SANDBOX_BASE_IMAGE:-${dockerhub_mirror}/python:3.11-slim}"
-  local sandbox_image="${SANDBOX_IMAGE:-vulhunter/sandbox-local:latest}"
+  local sandbox_image="${SANDBOX_RUNNER_IMAGE:-vulhunter/sandbox-runner-local:latest}"
 
   log_info "============================================================"
   log_info "LOCAL BUILD FALLBACK"
@@ -876,7 +876,7 @@ run_local_build_fallback() {
     NEXUS_WEB_IMAGE_TAG="${NEXUS_WEB_IMAGE_TAG}" \
     UV_IMAGE="${uv_image}" \
     SANDBOX_BASE_IMAGE="${sandbox_base_image}" \
-    SANDBOX_IMAGE="${sandbox_image}" \
+    SANDBOX_RUNNER_IMAGE="${sandbox_image}" \
     FRONTEND_NPM_REGISTRY="${FRONTEND_NPM_REGISTRY_SELECTED}" \
     FRONTEND_NPM_REGISTRY_FALLBACK="${FRONTEND_NPM_REGISTRY_FALLBACK_SELECTED}" \
     BACKEND_PYPI_INDEX_PRIMARY="${BACKEND_PYPI_INDEX_PRIMARY_SELECTED}" \
@@ -1120,10 +1120,10 @@ for ((phase_index = 0; phase_index < PHASE_COUNT; phase_index++)); do
     sandbox_base_image="${dockerhub_mirror}/python:3.11-slim"
   fi
 
-  if [ -n "${SANDBOX_IMAGE:-}" ]; then
-    sandbox_image="${SANDBOX_IMAGE}"
+  if [ -n "${SANDBOX_RUNNER_IMAGE:-}" ]; then
+    sandbox_image="${SANDBOX_RUNNER_IMAGE}"
   else
-    sandbox_image="${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox:${VULHUNTER_IMAGE_TAG}"
+    sandbox_image="${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner:${VULHUNTER_IMAGE_TAG}"
   fi
 
   phase_name="rank-$((phase_index + 1))"

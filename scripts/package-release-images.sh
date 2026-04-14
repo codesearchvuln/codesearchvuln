@@ -76,7 +76,6 @@ if not revision:
 
 MANIFEST_IMAGE_CONTRACTS = [
     ("backend", "vulhunter-local/backend"),
-    ("sandbox", "vulhunter-local/sandbox"),
     ("sandbox_runner", "vulhunter-local/sandbox-runner"),
     ("scanner_yasa", "vulhunter-local/yasa-runner"),
     ("scanner_opengrep", "vulhunter-local/opengrep-runner"),

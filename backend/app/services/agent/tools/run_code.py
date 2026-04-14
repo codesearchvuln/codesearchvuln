@@ -148,6 +148,26 @@ for payload in payloads:
     ) -> ToolResult:
         """执行用户编写的代码"""
 
+        language = language.lower().strip()
+        command = self._build_command(code, language)
+
+        if command is None:
+            return self._build_execution_tool_result(
+                success=False,
+                language=language,
+                command=None,
+                description=description,
+                result_payload={
+                    "success": False,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": "",
+                    "error": f"不支持的语言: {language}",
+                },
+                fallback_data="支持的语言: python, php, javascript, ruby, go, java, bash",
+                code=code,
+            )
+
         # 初始化沙箱
         try:
             await self.sandbox_manager.initialize()
@@ -168,27 +188,6 @@ for payload in payloads:
                     "error": "沙箱环境不可用 (Docker 未运行)",
                 },
                 fallback_data="请确保 Docker 已启动。如果无法使用沙箱，你可以通过静态分析代码来验证漏洞。",
-                code=code,
-            )
-
-        # 构建执行命令
-        language = language.lower().strip()
-        command = self._build_command(code, language)
-
-        if command is None:
-            return self._build_execution_tool_result(
-                success=False,
-                language=language,
-                command=None,
-                description=description,
-                result_payload={
-                    "success": False,
-                    "exit_code": -1,
-                    "stdout": "",
-                    "stderr": "",
-                    "error": f"不支持的语言: {language}",
-                },
-                fallback_data="支持的语言: python, php, javascript, ruby, go, java, bash",
                 code=code,
             )
 
@@ -350,7 +349,7 @@ for payload in payloads:
             {"label": "退出码", "value": str(exit_code)},
         ]
         if result_payload.get("image"):
-            artifacts.append({"label": "镜像", "value": str(result_payload["image"])})
+            artifacts.append({"label": "运行镜像", "value": str(result_payload["image"])})
         image_candidates = result_payload.get("image_candidates") or []
         if image_candidates:
             artifacts.append(

@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       refresh_all_runtime_images:
-        description: 'Rebuild runner and sandbox runtime images before generating release'
+        description: 'Rebuild runtime runner images before generating release'
         required: false
         type: boolean
         default: false
@@ -81,7 +81,6 @@ jobs:
       build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_sandbox: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       multi_arch: true
       emit_release_manifest: true

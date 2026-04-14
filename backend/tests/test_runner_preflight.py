@@ -46,6 +46,7 @@ def test_get_configured_runner_preflight_specs_do_not_include_local_build_metada
     specs = runner_preflight.get_configured_runner_preflight_specs()
 
     assert specs
+    assert not hasattr(runner_preflight.settings, "SANDBOX_IMAGE")
     for spec in specs:
         assert spec.image
         assert spec.command

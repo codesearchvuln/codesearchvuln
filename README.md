@@ -33,7 +33,7 @@ docker compose up -d
 ```
 
 用途：
-直接使用已发布且 digest 固定的 `backend`、runner 和 sandbox 镜像启动核心栈；主 frontend 由 `STATIC_FRONTEND_IMAGE` 承载随包静态文件与 nginx 配置。
+直接使用已发布且 digest 固定的 `backend`、scanner runner 与 `sandbox-runner` 镜像启动核心栈；主 frontend 由 `STATIC_FRONTEND_IMAGE` 承载随包静态文件与 nginx 配置。
 
 ### 2. 离线部署（可选）
 
@@ -44,7 +44,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ```
 
 用途：
-预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签启动同一套运行栈；主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。
+预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签启动同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。
 
 ## 明确不属于 release contract 的路径
 

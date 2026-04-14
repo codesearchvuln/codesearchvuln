@@ -11,7 +11,7 @@ docker compose up -d
 
 在线模式下：
 
-- `backend`、sandbox 和 runner 使用发布流程预构建的 digest 固定镜像
+- `backend`、scanner runner 和 `sandbox-runner` 使用发布流程预构建的 digest 固定镜像
 - 主前端使用 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，并挂载当前目录中的 `deploy/runtime/frontend/site` 与 `deploy/runtime/frontend/nginx/default.conf`
 - `db`、`redis` 由当前 compose 直接拉起
 - `nexus-web` 与 `nexus-itemDetail` 仅从当前目录内的静态 bundle 组装本地 nginx 容器
@@ -63,7 +63,6 @@ docker compose restart backend
 
 - `BACKEND_IMAGE`
 - `STATIC_FRONTEND_IMAGE`
-- `SANDBOX_IMAGE`
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`
 - `SANDBOX_RUNNER_IMAGE`

@@ -5,9 +5,11 @@
 """
 
 import os
-import pytest
 from pathlib import Path
 
+import pytest
+
+from app.core.config import settings
 from app.services.sandbox_runner_client import SandboxRunnerClient
 
 
@@ -18,17 +20,19 @@ def test_client_initialization(tmp_path):
     assert "sandbox-runner" in str(client.workspace_root)
 
 
-def test_image_candidates_selection():
-    """测试镜像选择逻辑"""
+def test_image_candidates_selection(monkeypatch):
+    """测试镜像选择逻辑只保留单一 sandbox-runner 镜像"""
+    monkeypatch.setattr(
+        settings,
+        "SANDBOX_RUNNER_IMAGE",
+        "registry.example.com/acme/sandbox-runner:test",
+        raising=False,
+    )
     client = SandboxRunnerClient()
     candidates = client._get_image_candidates()
 
-    assert len(candidates) > 0
-    assert all(isinstance(img, str) for img in candidates)
-    # 应该包含配置的镜像
-    assert any("sandbox" in img.lower() for img in candidates)
-    # 不应该有重复
-    assert len(candidates) == len(set(candidates))
+    assert candidates == ["registry.example.com/acme/sandbox-runner:test"]
+    assert client._select_image() == "registry.example.com/acme/sandbox-runner:test"
 
 
 def test_workspace_creation():
@@ -57,7 +61,7 @@ def test_profile_spec_building_isolated():
 
     assert spec.network_mode == "none"
     assert spec.working_dir == "/workspace"
-    assert spec.image is not None
+    assert spec.image == settings.SANDBOX_RUNNER_IMAGE
     # 应该挂载 input 和 output
     assert len(spec.volumes) == 2
 

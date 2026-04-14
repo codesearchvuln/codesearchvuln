@@ -4,7 +4,7 @@ Sandbox Runner Client - 高层客户端
 职责:
 1. Profile 到 spec 的映射 (isolated_exec, network_verify, tool_workdir)
 2. Workspace 生命周期管理
-3. 镜像选择与 fallback
+3. 单一 sandbox-runner 镜像选择
 4. 结果标准化
 """
 
@@ -41,42 +41,12 @@ class SandboxRunnerClient:
 
     def _get_image_candidates(self) -> List[str]:
         """
-        获取镜像候选列表 (优先级顺序)
-
-        优先级:
-        1. SANDBOX_RUNNER_IMAGE (如果配置了)
-        2. SANDBOX_IMAGE (fallback)
-        3. 默认本地镜像
+        获取唯一的 sandbox-runner 镜像候选列表
         """
-        candidates = []
-
-        # 1. 优先使用 SANDBOX_RUNNER_IMAGE (如果配置了)
-        if hasattr(settings, "SANDBOX_RUNNER_IMAGE") and settings.SANDBOX_RUNNER_IMAGE:
-            candidate = str(settings.SANDBOX_RUNNER_IMAGE).strip()
-            if candidate:
-                candidates.append(candidate)
-
-        # 2. Fallback 到 SANDBOX_IMAGE
-        if settings.SANDBOX_IMAGE:
-            candidate = str(settings.SANDBOX_IMAGE).strip()
-            if candidate:
-                candidates.append(candidate)
-
-        # 3. 最终 fallback (本地镜像)
-        candidates.extend([
-            "ghcr.io/vulhunter/vulhunter-sandbox:latest",
-            "vulhunter/sandbox:latest",
-        ])
-
-        # 去重并保持顺序
-        seen = set()
-        unique_candidates = []
-        for img in candidates:
-            if img and img not in seen:
-                seen.add(img)
-                unique_candidates.append(img)
-
-        return unique_candidates
+        candidate = str(getattr(settings, "SANDBOX_RUNNER_IMAGE", "") or "").strip()
+        if candidate:
+            return [candidate]
+        return ["ghcr.io/vulhunter/vulhunter-sandbox-runner:latest"]
 
     def _select_image(self) -> str:
         """
@@ -90,8 +60,7 @@ class SandboxRunnerClient:
         if candidates:
             return candidates[0]
 
-        # 最终 fallback
-        return "ghcr.io/vulhunter/vulhunter-sandbox:latest"
+        return "ghcr.io/vulhunter/vulhunter-sandbox-runner:latest"
 
     def _create_workspace(self, run_id: Optional[str] = None) -> Path:
         """

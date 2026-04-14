@@ -19,7 +19,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ### `docker compose up -d`
 
-- 默认使用已发布且 digest 固定的 `backend`、runner 和 sandbox 镜像
+- 默认使用已发布且 digest 固定的 `backend`、scanner runner 和 `sandbox-runner` 镜像
 - 主 frontend 不是 `vulhunter-frontend` 运行镜像，而是 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，加上 `./deploy/runtime/frontend/site` 与 `./deploy/runtime/frontend/nginx/default.conf` 挂载内容
 - `db` 与 `redis` 仍由当前 compose 文件拉起
 - `nexus-web` 与 `nexus-itemDetail` 仅从随包附带的静态产物组装本地 nginx 容器
@@ -34,7 +34,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 
 - `load-images.sh` 会加载 `vulhunter-images-<arch>.tar.zst`
 - `use-offline-env.sh` 会切换到本地 `vulhunter-local/*` 镜像标签
-- 离线模式不会改变 compose 结构，只改变镜像来源；主 frontend 仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，不会切回 `FRONTEND_IMAGE`
+- 离线模式不会改变 compose 结构，只改变镜像来源；代码执行统一走本地 `sandbox-runner` 标签，主 frontend 仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，不会切回 `FRONTEND_IMAGE`
 
 ## 访问地址
 

@@ -7,7 +7,7 @@
 #
 # 构建策略:
 #   本地构建 : frontend、backend
-#   云端拉取 : scanner runners、sandbox、db、redis（nexus-* 继续沿用基础 compose 本地 build）
+#   云端拉取 : scanner runners、sandbox-runner、db、redis（nexus-* 继续沿用基础 compose 本地 build）
 #
 # 适用场景: 仅修改了 frontend / backend 代码，无需重新构建所有 runner 镜像。
 
@@ -58,8 +58,6 @@ services:
       RESET_STATIC_SCAN_TABLES_ON_DEPLOY: "false"
       AGENT_ENABLED: "true"
       SANDBOX_ENABLED: "true"
-      # sandbox 使用云端镜像
-      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-sandbox:${VULHUNTER_IMAGE_TAG:-latest}}
       YASA_ENABLED: ${YASA_ENABLED:-true}
       SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}
       SCAN_WORKSPACE_VOLUME: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}
@@ -89,7 +87,6 @@ services:
       FLOW_PARSER_RUNNER_BATCH_MAX_FILES: "${FLOW_PARSER_RUNNER_BATCH_MAX_FILES:-100}"
       FLOW_PARSER_RUNNER_BATCH_MAX_BYTES: "${FLOW_PARSER_RUNNER_BATCH_MAX_BYTES:-8388608}"
       SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-sandbox-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      SANDBOX_RUNNER_ENABLED: "${SANDBOX_RUNNER_ENABLED:-true}"
       YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}
       GIT_MIRROR_ENABLED: ${GIT_MIRROR_ENABLED:-true}
       GIT_MIRROR_PREFIX: ${GIT_MIRROR_PREFIX:-https://gh-proxy.org}

@@ -18,7 +18,6 @@ on:
       - 'docker/phpstan-runner.Dockerfile'
       - 'docker/flow-parser-runner.Dockerfile'
       - 'docker/pmd-runner.Dockerfile'
-      - 'docker/sandbox.Dockerfile'
       - 'docker/sandbox-runner.Dockerfile'
       - '.github/workflows/release.yml'
       - '.github/workflows/scheduled-release.yml'
@@ -86,11 +85,6 @@ on:
         default: false
       build_pmd_runner:
         description: '构建 PMD runner 镜像'
-        required: false
-        type: boolean
-        default: false
-      build_sandbox:
-        description: '构建沙箱镜像'
         required: false
         type: boolean
         default: false
@@ -169,7 +163,6 @@ jobs:
       build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_phpstan_runner || false }}
       build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_flow_parser_runner || false }}
       build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_pmd_runner || false }}
-      build_sandbox: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox || false }}
       build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox_runner || false }}
       multi_arch: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}
       emit_release_manifest: false
