@@ -521,11 +521,10 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert metadata["bundle_template"] == "images/vulhunter-images-{arch}.tar.zst"
     assert metadata["images"]["backend"]["source_ref"] == manifest["images"]["backend"]["ref"]
     assert metadata["images"]["backend"]["local_tag"] == f"vulhunter-local/backend:{manifest['revision']}"
-    assert metadata["images"]["static_frontend"]["source_ref"] == "docker.m.daocloud.io/library/nginx:1.27-alpine"
-    assert metadata["images"]["static_frontend"]["local_tag"] == f"vulhunter-local/static-frontend-nginx:{manifest['revision']}"
+    assert "static_frontend" not in metadata["images"]
     assert metadata["images"]["scanner_yasa"]["local_tag"] == f"vulhunter-local/yasa-runner:{manifest['revision']}"
     assert f"BACKEND_IMAGE=vulhunter-local/backend:{manifest['revision']}" in offline_env
-    assert f"STATIC_FRONTEND_IMAGE=vulhunter-local/static-frontend-nginx:{manifest['revision']}" in offline_env
+    assert "\nSTATIC_FRONTEND_IMAGE=" not in offline_env
     assert "\nFRONTEND_IMAGE=" not in offline_env
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
     assert "vulhunter-images-${arch}.tar.zst" in load_script
@@ -570,7 +569,6 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_orde
     for marker in (
         "package start:",
         "image order:",
-        "using supplemental image source for static_frontend",
         "pull start: backend",
         "pull end: flow_parser_runner",
         "all pulls complete",
@@ -586,7 +584,6 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_orde
     pull_commands = [line for line in docker_commands if line.startswith("pull ")]
     expected_pulls = [
         f"pull --platform linux/amd64 {manifest['images']['backend']['ref']}",
-        "pull --platform linux/amd64 docker.m.daocloud.io/library/nginx:1.27-alpine",
         f"pull --platform linux/amd64 {manifest['images']['sandbox']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['sandbox_runner']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['scanner_yasa']['ref']}",

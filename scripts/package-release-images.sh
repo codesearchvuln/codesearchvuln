@@ -86,9 +86,6 @@ MANIFEST_IMAGE_CONTRACTS = [
     ("scanner_pmd", "vulhunter-local/pmd-runner"),
     ("flow_parser_runner", "vulhunter-local/flow-parser-runner"),
 ]
-SUPPLEMENTAL_IMAGE_CONTRACTS = [
-    ("static_frontend", "docker.m.daocloud.io/library/nginx:1.27-alpine", "vulhunter-local/static-frontend-nginx"),
-]
 CHECKSUM_PROGRESS_MIN_BYTES = 128 * 1024 * 1024
 CHECKSUM_CHUNK_SIZE = 1024 * 1024
 CHECKSUM_PROGRESS_INTERVAL_SECONDS = 30.0
@@ -172,13 +169,6 @@ images: list[tuple[str, str, str]] = []
 for logical_name, local_repo in MANIFEST_IMAGE_CONTRACTS:
     ref = resolve_manifest_ref(images_section, logical_name)
     images.append((logical_name, ref, f"{local_repo}:{revision}"))
-
-for logical_name, source_ref, local_repo in SUPPLEMENTAL_IMAGE_CONTRACTS:
-    log(
-        "using supplemental image source for "
-        f"{logical_name}: {source_ref} (outside release-manifest.json)"
-    )
-    images.insert(1, (logical_name, source_ref, f"{local_repo}:{revision}"))
 
 bundle_path = output_dir / f"vulhunter-images-{arch}.tar.zst"
 metadata_path = output_dir / f"images-manifest-{arch}.json"

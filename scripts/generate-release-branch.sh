@@ -189,7 +189,6 @@ if not revision:
 
 image_contracts = {
     "backend": ("BACKEND_IMAGE", "vulhunter-local/backend"),
-    "static_frontend": ("STATIC_FRONTEND_IMAGE", "vulhunter-local/static-frontend-nginx"),
     "sandbox": ("SANDBOX_IMAGE", "vulhunter-local/sandbox"),
     "sandbox_runner": ("SANDBOX_RUNNER_IMAGE", "vulhunter-local/sandbox-runner"),
     "scanner_yasa": ("SCANNER_YASA_IMAGE", "vulhunter-local/yasa-runner"),
@@ -210,15 +209,12 @@ offline_env_lines = [
 ]
 
 for logical_name, (env_var, local_repo) in image_contracts.items():
-    if logical_name == "static_frontend":
-        source_ref = "docker.m.daocloud.io/library/nginx:1.27-alpine"
-    else:
-        try:
-            source_ref = str(manifest["images"][logical_name]["ref"]).strip()
-        except Exception as exc:  # pragma: no cover - defensive path
-            raise SystemExit(f"missing required image ref: {logical_name}") from exc
-        if not source_ref:
-            raise SystemExit(f"missing required image ref: {logical_name}")
+    try:
+        source_ref = str(manifest["images"][logical_name]["ref"]).strip()
+    except Exception as exc:  # pragma: no cover - defensive path
+        raise SystemExit(f"missing required image ref: {logical_name}") from exc
+    if not source_ref:
+        raise SystemExit(f"missing required image ref: {logical_name}")
 
     local_tag = f"{local_repo}:{revision}"
     images_payload[logical_name] = {
