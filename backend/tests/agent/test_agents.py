@@ -231,14 +231,29 @@ class TestReconAgent:
 
         await agent.execute_tool("list_files", {"directory": "src"})
         await agent._update_coverage_from_last_tool("list_files", {"directory": "src"})
-        assert tracker._tree == ["src"]
-        assert tracker._directory_entries == {"src"}
+        assert tracker._tree == [
+            "src/cmd_vuln.py",
+            "src/path_vuln.py",
+            "src/safe_code.py",
+            "src/secrets.py",
+            "src/sql_vuln.py",
+            "src/xss_vuln.py",
+        ]
+        assert tracker._directory_entries == set()
         assert tracker._done == set()
 
         await agent.execute_tool("list_files", {"directory": "src/api"})
         await agent._update_coverage_from_last_tool("list_files", {"directory": "src/api"})
-        assert tracker._tree == ["src", "src/api/routes.py"]
-        assert tracker._directory_entries == {"src"}
+        assert tracker._tree == [
+            "src/api/routes.py",
+            "src/cmd_vuln.py",
+            "src/path_vuln.py",
+            "src/safe_code.py",
+            "src/secrets.py",
+            "src/sql_vuln.py",
+            "src/xss_vuln.py",
+        ]
+        assert tracker._directory_entries == set()
 
         await agent.execute_tool(
             "get_code_window",
@@ -262,10 +277,10 @@ class TestReconAgent:
         markdown = tracker._file_path.read_text(encoding="utf-8")
 
         assert status.success is True
-        assert tracker._done == {"src", "src/api/routes.py"}
-        assert "- [x] src/" in status.data
+        assert tracker._done == {"src/sql_vuln.py", "src/api/routes.py"}
+        assert "- [x] src/sql_vuln.py" in status.data
         assert "- [x] src/api/routes.py" in status.data
-        assert "- [x] src/" in markdown
+        assert "- [x] src/sql_vuln.py" in markdown
         assert "- [x] src/api/routes.py" in markdown
 
 

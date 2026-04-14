@@ -19,8 +19,6 @@ from .base import AgentTool, ToolResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_DIR = Path("./uploads/agent_memory/projects")
-
-
 def _normalize_path(path: str) -> str:
     """规范化文件路径：去除前导 ./ 和多余斜杠，统一为正斜杠。"""
     normalized = str(path or "").replace("\\", "/").strip()
@@ -40,8 +38,9 @@ def _compress_tree(files: List[str]) -> tuple[List[str], Set[str]]:
 
     规则：
     - 根目录下文件保留为文件项
-    - 同一目录下若存在多个直接文件，则仅保留该目录
     - 同一目录下若只有一个直接文件，则保留该文件而不保留目录
+    - 浅层目录（如 src、docs）默认保留文件明细，避免只看到顶层目录
+    - 深层目录下若存在多个直接文件，则折叠为目录项，控制清单长度
     """
     normalized_files: List[str] = []
     seen_files: Set[str] = set()
@@ -62,11 +61,13 @@ def _compress_tree(files: List[str]) -> tuple[List[str], Set[str]]:
     tree: List[str] = []
     directory_entries: Set[str] = set()
     for directory, directory_files in files_by_directory.items():
+        directory_files = sorted(directory_files)
         if not directory:
             tree.extend(directory_files)
             continue
-        if len(directory_files) == 1:
-            tree.append(directory_files[0])
+        directory_depth = len(directory.split("/"))
+        if len(directory_files) == 1 or directory_depth <= 1:
+            tree.extend(directory_files)
             continue
         tree.append(directory)
         directory_entries.add(directory)
@@ -183,10 +184,11 @@ class UpdateReconFileTreeTool(AgentTool):
 **三种操作（action 参数）**：
 
 1. **build** - 建立文件树清单（在初始 list_files 之后调用）
-   - 传入 files=[...] 列表，包含所有待侦查的代码文件路径
-   - 工具会自动压缩为更适合 Recon 的清单：
-     - 同目录下只有一个文件时，保留文件
-     - 同目录下有多个文件时，保留目录
+    - 传入 files=[...] 列表，包含所有待侦查的代码文件路径
+    - 工具会自动压缩为更适合 Recon 的清单：
+      - 同目录下只有一个文件时，保留文件
+      - 浅层目录（如 src/docs）通常保留文件，避免只剩顶层目录
+      - 深层目录同目录下有多个文件时，保留目录
    - 示例：{"action": "build", "files": ["src/auth/login.py", "src/api/routes.py", ...]}
 
 2. **mark_done** - 标记文件为已侦查（确认完成对某文件的侦查后调用）
