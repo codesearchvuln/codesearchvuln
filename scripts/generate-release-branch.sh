@@ -170,7 +170,9 @@ overlay_release_templates() {
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
   cp "$TEMPLATE_DIR/load-images.sh" "$OUTPUT_DIR/scripts/load-images.sh"
+  cp "$TEMPLATE_DIR/load-images.ps1" "$OUTPUT_DIR/scripts/load-images.ps1"
   cp "$TEMPLATE_DIR/use-offline-env.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
+  cp "$TEMPLATE_DIR/use-offline-env.ps1" "$OUTPUT_DIR/scripts/use-offline-env.ps1"
   chmod +x "$OUTPUT_DIR/scripts/load-images.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
   render_release_compose
   python3 - \
@@ -219,6 +221,7 @@ scanner_images_payload: dict[str, dict[str, str]] = {}
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
     "# Then run ./scripts/load-images.sh and ./scripts/use-offline-env.sh docker compose up -d",
+    "# On Windows PowerShell, use .\\scripts\\load-images.ps1 and .\\scripts\\use-offline-env.ps1 instead.",
     "# This release tree does not support rebuilding backend/frontend from source.",
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
 ]
@@ -274,7 +277,9 @@ validate_release_tree() {
     "images-manifest-scanner.json"
     "scripts/README-COMPOSE.md"
     "scripts/load-images.sh"
+    "scripts/load-images.ps1"
     "scripts/use-offline-env.sh"
+    "scripts/use-offline-env.ps1"
     "docker/env/backend/env.example"
     "docker/env/backend/offline-images.env.example"
     "deploy/runtime/frontend/site/index.html"

@@ -379,7 +379,9 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "images-manifest-scanner.json",
         "scripts/README-COMPOSE.md",
         "scripts/load-images.sh",
+        "scripts/load-images.ps1",
         "scripts/use-offline-env.sh",
+        "scripts/use-offline-env.ps1",
         "docker/env/backend/env.example",
         "docker/env/backend/offline-images.env.example",
         "deploy/runtime/frontend/site/index.html",
@@ -501,6 +503,7 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
     for doc in docs:
         assert "docker compose up" in doc
         assert "load-images.sh" in doc
+        assert "load-images.ps1" in doc
         assert "offline-images.env" in doc
         assert "vulhunter-services-images-" in doc
         assert "vulhunter-scanner-images-" in doc
@@ -514,6 +517,12 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "STATIC_FRONTEND_IMAGE" in doc or "静态文件" in doc or "static assets" in doc
         assert "/nexus/" in doc
         assert "/nexus-item-detail/" in doc
+        assert "Windows 10/11" in doc or ("Windows 10" in doc and "Windows 11" in doc)
+        assert "PowerShell" in doc
+        assert "WSL" in doc
+        assert "Copy-Item" in doc or "cp " in doc
+        assert ".\\scripts\\load-images.ps1" in doc or "./scripts/load-images.sh" in doc
+        assert ".\\scripts\\use-offline-env.ps1" in doc or "./scripts/use-offline-env.sh" in doc
 
 
 def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tmp_path: Path) -> None:
@@ -551,7 +560,9 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
         encoding="utf-8"
     )
     load_script = (output_dir / "scripts" / "load-images.sh").read_text(encoding="utf-8")
+    load_script_ps1 = (output_dir / "scripts" / "load-images.ps1").read_text(encoding="utf-8")
     use_offline_env_script = (output_dir / "scripts" / "use-offline-env.sh").read_text(encoding="utf-8")
+    use_offline_env_script_ps1 = (output_dir / "scripts" / "use-offline-env.ps1").read_text(encoding="utf-8")
 
     assert services_metadata["revision"] == manifest["revision"]
     assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
@@ -595,8 +606,22 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "images-manifest-scanner.json" in load_script
     assert "docker load" in load_script
     assert "docker tag" in load_script
+    assert "[offline-images]" in load_script_ps1
+    assert "vulhunter-services-images-$Arch.tar.zst" in load_script_ps1
+    assert "vulhunter-scanner-images-$Arch.tar.zst" in load_script_ps1
+    assert "images-manifest-services.json" in load_script_ps1
+    assert "images-manifest-scanner.json" in load_script_ps1
+    assert "docker load" in load_script_ps1
+    assert "docker tag" in load_script_ps1
+    assert "zstd" in load_script_ps1
+    assert "PROCESSOR_ARCHITECTURE" in load_script_ps1 or "RuntimeInformation" in load_script_ps1
     assert "docker/env/backend/offline-images.env" in use_offline_env_script
     assert "docker compose up -d" in use_offline_env_script
+    assert "[offline-env]" in use_offline_env_script_ps1
+    assert "OFFLINE_ENV_FILE" in use_offline_env_script_ps1
+    assert "docker/env/backend/offline-images.env" in use_offline_env_script_ps1
+    assert "docker compose up -d" in use_offline_env_script_ps1
+    assert "Split('=', 2)" in use_offline_env_script_ps1 or "-split '=', 2" in use_offline_env_script_ps1
 
 
 def test_package_release_images_script_supports_single_arch_mode() -> None:

@@ -27,10 +27,10 @@ docker compose up -d
 ## 2. 部署支持范围与声明
 
 - 当前 release 包仅面向宿主机部署，支持的宿主机环境为：
-  `Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 11`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
-- `Windows 11` 宿主机场景需要使用 `Docker Desktop` 并启用 Linux containers。release 运行依赖 Docker Engine / Docker Compose，且 backend 容器必须能够访问 Docker Socket（默认 `/var/run/docker.sock`）以执行 runner preflight 和实际扫描任务；若你的 Docker Socket 路径或组 ID 与默认值不同，请自行设置 `DOCKER_SOCKET_PATH` 与 `DOCKER_SOCKET_GID`。若 Docker Desktop 的 Linux 容器模式、WSL 集成、Docker Socket 挂载或权限 / 组 ID 配置异常导致失败，不属于当前 release 的适配范围。
+  `Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10`、`Windows 11`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
+- `Windows 10/11` 宿主机场景需要使用 `Docker Desktop` 并启用 Linux containers。release 运行依赖 Docker Engine / Docker Compose，且 backend 容器必须能够访问 Docker Socket（默认 `/var/run/docker.sock`）以执行 runner preflight 和实际扫描任务；若你的 Docker Socket 路径或组 ID 与默认值不同，请自行设置 `DOCKER_SOCKET_PATH` 与 `DOCKER_SOCKET_GID`。若 Docker Desktop 的 Linux 容器模式、WSL 集成、Docker Socket 挂载或权限 / 组 ID 配置异常导致失败，不属于当前 release 的适配范围。
 - 当前 release tree 由云端 GitHub Workflow 自动生成，属于 image-only 运行包，只包含运行时 `docker-compose.yml`、环境模板、静态资源和辅助脚本；不附带 `backend` / `frontend` 源码，不支持在 release 包内本地重建 `backend` / `frontend`，也不提供非 Docker、Kubernetes、源码直跑或其他衍生部署方式的适配。release 合同下的 runner preflight 只会校验并拉取声明的运行镜像，不会回退到本地构建。
-- 文档中的辅助脚本均为 Bash 脚本；离线辅助脚本额外依赖 `docker`、`python3`、`zstd`。`Windows 11` 宿主机场景下，如需使用 `./scripts/load-images.sh`、`./scripts/use-offline-env.sh` 等脚本，请通过 WSL Bash 或其他兼容 Bash 的环境执行；若自行改写为 PowerShell / CMD 命令，相关问题需自行处理。
+- 文档中同时提供 Bash 与 PowerShell 两套离线辅助脚本。离线路径额外依赖 `docker` 与 `zstd`；Bash 版本还依赖 `python3`。`Windows 10/11` 宿主机场景下可直接使用原生 PowerShell 脚本，也可继续通过 WSL Bash 执行 `.sh` 脚本。
 - 推荐运行配置为 `8 核 CPU`、`16 GB 内存`。低于该配置时，镜像拉取、runner 预检、扫描任务和 LLM 交互可能明显变慢甚至失败，因此不建议运行本系统。
 - 浏览器支持范围为 `Safari`、`Chrome`、`Edge`。前端运行依赖 `EventSource/SSE`、`iframe`、`localStorage`、`clipboard` 等浏览器能力；为保证运行效果，建议禁用所有浏览器插件 / 扩展。因插件、内容拦截器、企业安全插件或其他不受支持浏览器导致的问题，不再进行相关适配。
 - 联网为可选项，但在线部署默认需要联网拉取运行镜像；若调用云端 LLM API，也需要保证对应 API 可达。离线部署仅覆盖运行镜像导入，不会替代云端模型 API；如需离线启动，请使用与当前机器架构匹配的离线镜像包（`amd64` / `arm64`）。
@@ -71,6 +71,14 @@ docker compose up -d
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
 ./scripts/load-images.sh
 ./scripts/use-offline-env.sh docker compose up -d
+```
+
+在 `Windows 10/11 原生 PowerShell` 中，也可以直接执行：
+
+```powershell
+Copy-Item docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
+powershell -ExecutionPolicy Bypass -File .\scripts\load-images.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\use-offline-env.ps1 docker compose up -d
 ```
 
 离线模式会先同时导入 `services` 与 `scanner` 两个镜像包，再切换到本地 `vulhunter-local/*` 镜像标签运行，从而避免在线拉取。前端静态文件与 `nexus-*` 继续使用当前目录中自带的静态资源与本地静态加载路径，不包含在离线镜像包内。

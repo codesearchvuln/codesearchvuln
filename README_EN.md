@@ -37,6 +37,14 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
+On native `Windows 10/11 PowerShell`, you can also run:
+
+```powershell
+Copy-Item docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
+powershell -ExecutionPolicy Bypass -File .\scripts\load-images.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\use-offline-env.ps1 docker compose up -d
+```
+
 Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution.
 
 ## Explicitly outside the release contract
