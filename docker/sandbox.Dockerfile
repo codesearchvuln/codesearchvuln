@@ -55,6 +55,7 @@ RUN set -eux; \
   iputils-ping \
   git \
   jq \
+  ripgrep \
   unzip \
   build-essential \
   libffi-dev \
