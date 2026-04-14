@@ -198,6 +198,76 @@ class TestReconAgent:
         ]
         assert len(agent._risk_points_pushed) == 2
 
+    @pytest.mark.asyncio
+    async def test_recon_agent_auto_tracker_chain_respects_directory_collapse_rules(
+        self, temp_project_dir, mock_llm_service, mock_event_emitter
+    ):
+        from pathlib import Path
+
+        from app.services.agent.tools import CodeWindowTool, ListFilesTool, UpdateReconFileTreeTool
+
+        project_root = Path(temp_project_dir)
+        api_dir = project_root / "src" / "api"
+        api_dir.mkdir(parents=True, exist_ok=True)
+        (api_dir / "routes.py").write_text(
+            "def route():\n"
+            "    return 'ok'\n",
+            encoding="utf-8",
+        )
+
+        tracker = UpdateReconFileTreeTool(
+            task_id="recon-linkage",
+            base_dir=project_root / ".tracker_memory",
+        )
+        agent = ReconAgent(
+            llm_service=mock_llm_service,
+            tools={
+                "list_files": ListFilesTool(temp_project_dir),
+                "get_code_window": CodeWindowTool(temp_project_dir),
+                "update_recon_file_tree": tracker,
+            },
+            event_emitter=mock_event_emitter,
+        )
+
+        await agent.execute_tool("list_files", {"directory": "src"})
+        await agent._update_coverage_from_last_tool("list_files", {"directory": "src"})
+        assert tracker._tree == ["src"]
+        assert tracker._directory_entries == {"src"}
+        assert tracker._done == set()
+
+        await agent.execute_tool("list_files", {"directory": "src/api"})
+        await agent._update_coverage_from_last_tool("list_files", {"directory": "src/api"})
+        assert tracker._tree == ["src", "src/api/routes.py"]
+        assert tracker._directory_entries == {"src"}
+
+        await agent.execute_tool(
+            "get_code_window",
+            {"file_path": "src/sql_vuln.py", "anchor_line": 1},
+        )
+        await agent._update_coverage_from_last_tool(
+            "get_code_window",
+            {"file_path": "src/sql_vuln.py", "anchor_line": 1},
+        )
+
+        await agent.execute_tool(
+            "get_code_window",
+            {"file_path": "src/api/routes.py", "anchor_line": 1},
+        )
+        await agent._update_coverage_from_last_tool(
+            "get_code_window",
+            {"file_path": "src/api/routes.py", "anchor_line": 1},
+        )
+
+        status = await tracker.execute(action="status")
+        markdown = tracker._file_path.read_text(encoding="utf-8")
+
+        assert status.success is True
+        assert tracker._done == {"src", "src/api/routes.py"}
+        assert "- [x] src/" in status.data
+        assert "- [x] src/api/routes.py" in status.data
+        assert "- [x] src/" in markdown
+        assert "- [x] src/api/routes.py" in markdown
+
 
 class TestAnalysisAgent:
     """Analysis Agent 测试"""
