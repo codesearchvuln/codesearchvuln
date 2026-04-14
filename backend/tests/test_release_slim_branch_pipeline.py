@@ -18,32 +18,29 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "backend": {
                 "ref": "ghcr.io/acme-sec/vulhunter-backend@sha256:" + "1" * 64,
             },
-            "sandbox": {
-                "ref": "ghcr.io/acme-sec/vulhunter-sandbox@sha256:" + "2" * 64,
-            },
             "sandbox_runner": {
-                "ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "3" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64,
             },
             "scanner_yasa": {
-                "ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "4" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "3" * 64,
             },
             "scanner_opengrep": {
-                "ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "5" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "4" * 64,
             },
             "scanner_bandit": {
-                "ref": "ghcr.io/acme-sec/vulhunter-bandit-runner@sha256:" + "6" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-bandit-runner@sha256:" + "5" * 64,
             },
             "scanner_gitleaks": {
-                "ref": "ghcr.io/acme-sec/vulhunter-gitleaks-runner@sha256:" + "7" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-gitleaks-runner@sha256:" + "6" * 64,
             },
             "scanner_phpstan": {
-                "ref": "ghcr.io/acme-sec/vulhunter-phpstan-runner@sha256:" + "8" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-phpstan-runner@sha256:" + "7" * 64,
             },
             "scanner_pmd": {
-                "ref": "ghcr.io/acme-sec/vulhunter-pmd-runner@sha256:" + "9" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-pmd-runner@sha256:" + "8" * 64,
             },
             "flow_parser_runner": {
-                "ref": "ghcr.io/acme-sec/vulhunter-flow-parser-runner@sha256:" + "a" * 64,
+                "ref": "ghcr.io/acme-sec/vulhunter-flow-parser-runner@sha256:" + "9" * 64,
             },
         },
     }
@@ -242,6 +239,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
         "inputs.publish_backend_hardened || false }}"
     ) in workflow_text
+    assert "build_sandbox:" not in workflow_text
     assert "build-frontend-bundle:" in workflow_text
     assert "assemble-release-tree:" in workflow_text
     assert "package-offline-images:" in workflow_text
@@ -294,6 +292,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'release_id=""' in workflow_text
     assert "docker-publish.yml" not in workflow_text
     assert "publish_backend_hardened:" in publish_workflow_text
+    assert "build_sandbox:" not in publish_workflow_text
+    assert "publish-sandbox:" not in publish_workflow_text
     assert "target: runtime-release" in publish_workflow_text
     assert "target: runtime-cython" in publish_workflow_text
     assert "buildcache-runtime-release-amd64" in publish_workflow_text
@@ -408,7 +408,6 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "docker-compose.self-contained.yml" not in compose_text
     assert "VULHUNTER_IMAGE_TAG" not in compose_text
     assert manifest["images"]["backend"]["ref"] in compose_text
-    assert manifest["images"]["sandbox"]["ref"] in compose_text
     assert manifest["images"]["sandbox_runner"]["ref"] in compose_text
     assert manifest["images"]["scanner_yasa"]["ref"] in compose_text
     assert manifest["images"]["scanner_opengrep"]["ref"] in compose_text
@@ -419,6 +418,7 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert manifest["images"]["flow_parser_runner"]["ref"] in compose_text
     assert "image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:" in compose_text
     assert "image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine}" in compose_text
+    assert "SANDBOX_IMAGE" not in compose_text
     assert 'INIT_DB_SEED_PROJECTS: "${INIT_DB_SEED_PROJECTS:-false}"' in compose_text
     assert "start_period: 180s" in compose_text
     assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
@@ -523,9 +523,14 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert metadata["images"]["backend"]["local_tag"] == f"vulhunter-local/backend:{manifest['revision']}"
     assert metadata["images"]["static_frontend"]["source_ref"] == "docker.m.daocloud.io/library/nginx:1.27-alpine"
     assert metadata["images"]["static_frontend"]["local_tag"] == f"vulhunter-local/static-frontend-nginx:{manifest['revision']}"
+    assert "sandbox" not in metadata["images"]
+    assert metadata["images"]["sandbox_runner"]["source_ref"] == manifest["images"]["sandbox_runner"]["ref"]
+    assert metadata["images"]["sandbox_runner"]["local_tag"] == f"vulhunter-local/sandbox-runner:{manifest['revision']}"
     assert metadata["images"]["scanner_yasa"]["local_tag"] == f"vulhunter-local/yasa-runner:{manifest['revision']}"
     assert f"BACKEND_IMAGE=vulhunter-local/backend:{manifest['revision']}" in offline_env
     assert f"STATIC_FRONTEND_IMAGE=vulhunter-local/static-frontend-nginx:{manifest['revision']}" in offline_env
+    assert "\nSANDBOX_IMAGE=" not in offline_env
+    assert f"SANDBOX_RUNNER_IMAGE=vulhunter-local/sandbox-runner:{manifest['revision']}" in offline_env
     assert "\nFRONTEND_IMAGE=" not in offline_env
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
     assert "vulhunter-images-${arch}.tar.zst" in load_script
@@ -587,7 +592,6 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_orde
     expected_pulls = [
         f"pull --platform linux/amd64 {manifest['images']['backend']['ref']}",
         "pull --platform linux/amd64 docker.m.daocloud.io/library/nginx:1.27-alpine",
-        f"pull --platform linux/amd64 {manifest['images']['sandbox']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['sandbox_runner']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['scanner_yasa']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['scanner_opengrep']['ref']}",

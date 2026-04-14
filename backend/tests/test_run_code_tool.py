@@ -11,10 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.config import settings
 from app.services.agent.tools.run_code import RunCodeTool, RunCodeInput, ExtractFunctionTool
 from app.services.agent.tools.base import ToolResult
 from app.services.agent.tools.sandbox_tool import SandboxManager, SandboxConfig
 from app.services.agent.tools.sandbox_tool import SandboxTool
+import app.services.sandbox_runner_client as sandbox_runner_client_module
 
 
 class TestRunCodeInput:
@@ -96,39 +98,62 @@ class StubSandboxManager:
 
 
 class TestSandboxManagerImageResolution:
-    def test_image_candidates_prefer_explicit_then_local_then_remote(self, monkeypatch):
-        monkeypatch.setenv("GHCR_REGISTRY", "docker.m.daocloud.io")
-        monkeypatch.setenv("VULHUNTER_IMAGE_TAG", "latest")
-        manager = SandboxManager(SandboxConfig(image="custom/sandbox:latest"))
+    def test_sandbox_config_defaults_to_runner_image(self):
+        manager = SandboxManager(SandboxConfig())
 
-        candidates = manager._image_candidates()
+        assert manager.config.image == settings.SANDBOX_RUNNER_IMAGE
 
-        assert candidates == [
-            "custom/sandbox:latest",
-            "vulhunter/sandbox:latest",
-            "VulHunter/sandbox:latest",
-            "VulHunter-sandbox:latest",
-            "docker.m.daocloud.io/lintsinghua/vulhunter-sandbox:latest",
-        ]
+    @pytest.mark.asyncio
+    async def test_initialize_requires_runner_client(self, monkeypatch):
+        class FakeDockerClient:
+            def ping(self):
+                return None
 
-    def test_select_runtime_image_uses_local_legacy_fallback_when_present(self):
-        manager = SandboxManager(SandboxConfig(image="docker.m.daocloud.io/lintsinghua/vulhunter-sandbox:latest"))
-        manager._docker_client = SimpleNamespace(images=SimpleNamespace(get=lambda image: {"VulHunter/sandbox:latest": object()}[image]))
+        class ExplodingRunnerClient:
+            def __init__(self):
+                raise RuntimeError("runner bootstrap failed")
 
-        selected = manager._select_runtime_image(manager._image_candidates())
-
-        assert selected == "VulHunter/sandbox:latest"
-
-    def test_format_image_resolution_error_uses_root_sandbox_dockerfile_hint(self):
-        manager = SandboxManager(SandboxConfig(image="custom/sandbox:latest"))
-
-        message = manager._format_image_resolution_error(
-            ["custom/sandbox:latest"],
-            ["custom/sandbox:latest: not found"],
+        monkeypatch.setattr("docker.from_env", lambda: FakeDockerClient())
+        monkeypatch.setattr(
+            sandbox_runner_client_module,
+            "SandboxRunnerClient",
+            ExplodingRunnerClient,
         )
 
-        assert "docker build -f docker/sandbox.Dockerfile -t vulhunter/sandbox:latest ." in message
-        assert "cd docker/sandbox" not in message
+        manager = SandboxManager(SandboxConfig(image="custom/sandbox-runner:latest"))
+        await manager.initialize()
+
+        assert manager.is_available is False
+        assert "runner" in manager.get_diagnosis().lower()
+
+    @pytest.mark.asyncio
+    async def test_execute_command_fails_when_runner_client_is_missing(self):
+        manager = SandboxManager(SandboxConfig(image="custom/sandbox-runner:latest"))
+        manager._docker_client = SimpleNamespace(
+            containers=SimpleNamespace(run=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("legacy docker path used")))
+        )
+        manager._initialized = True
+        manager._init_error = "runner bootstrap failed"
+        manager._runner_client = None
+
+        result = await manager.execute_command("echo hello", timeout=5)
+
+        assert result["success"] is False
+        assert "runner" in (result["error"] or "").lower()
+
+    def test_format_image_resolution_error_uses_sandbox_runner_build_hint(self):
+        manager = SandboxManager(SandboxConfig(image="custom/sandbox-runner:latest"))
+
+        message = manager._format_image_resolution_error(
+            ["custom/sandbox-runner:latest"],
+            ["custom/sandbox-runner:latest: not found"],
+        )
+
+        assert (
+            "docker build -f docker/sandbox-runner.Dockerfile -t vulhunter/sandbox-runner:latest ."
+            in message
+        )
+        assert "vulhunter/sandbox:latest" not in message
 
 
 class TestBuildCommand:
@@ -364,8 +389,8 @@ class TestRunCodeToolExecution:
                 "exit_code": 0,
                 "stdout": "payload detected\\nproof line",
                 "stderr": "",
-                "image": "vulhunter/sandbox:latest",
-                "image_candidates": ["vulhunter/sandbox:latest"],
+                "image": "vulhunter/sandbox-runner:latest",
+                "image_candidates": ["vulhunter/sandbox-runner:latest"],
             }
         )
         tool = RunCodeTool(sandbox_manager=sandbox_manager, project_root="/test")
@@ -388,7 +413,7 @@ class TestRunCodeToolExecution:
         assert entry["description"] == "验证命令注入 harness"
         assert "python3 -c" in entry["execution_command"]
         assert entry["stdout_preview"].startswith("payload detected")
-        assert entry["runtime_image"] == "vulhunter/sandbox:latest"
+        assert entry["runtime_image"] == "vulhunter/sandbox-runner:latest"
         assert entry["code"]["language"] == "python"
         assert entry["code"]["lines"][0]["line_number"] == 1
 
@@ -739,8 +764,8 @@ async def test_sandbox_exec_returns_execution_result_metadata():
             "exit_code": 7,
             "stdout": "partial output",
             "stderr": "permission denied",
-            "image": "vulhunter/sandbox:latest",
-            "image_candidates": ["vulhunter/sandbox:latest", "VulHunter/sandbox:latest"],
+            "image": "vulhunter/sandbox-runner:latest",
+            "image_candidates": ["vulhunter/sandbox-runner:latest"],
         }
     )
     tool = SandboxTool(sandbox_manager=sandbox_manager)

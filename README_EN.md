@@ -27,7 +27,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 docker compose up -d
 ```
 
-Use this when you want the core stack to start from published, digest-pinned `backend`, `frontend`, runner, and sandbox images.
+Use this when you want the core stack to start from published, digest-pinned `backend`, scanner runner, and `sandbox-runner` images. The main frontend is still served via `STATIC_FRONTEND_IMAGE` plus the packaged static assets.
 
 ### 2. Offline deployment (optional)
 
@@ -37,7 +37,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ./scripts/use-offline-env.sh docker compose up -d
 ```
 
-Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags.
+Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution.
 
 ## Explicitly outside the release contract
 

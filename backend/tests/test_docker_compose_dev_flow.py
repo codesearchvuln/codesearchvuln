@@ -19,10 +19,6 @@ DEFAULT_FRONTEND_IMAGE = (
     "${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
     "/vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}}"
 )
-DEFAULT_SANDBOX_IMAGE = (
-    "${SANDBOX_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
-    "/vulhunter-sandbox:${VULHUNTER_IMAGE_TAG:-latest}}"
-)
 DEFAULT_SCANNER_PMD_IMAGE = (
     "${SCANNER_PMD_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
     "/vulhunter-pmd-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
@@ -85,6 +81,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "GHCR_REGISTRY: ${GHCR_REGISTRY:-ghcr.io}" in compose_text
     assert "VULHUNTER_IMAGE_NAMESPACE: ${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}" in compose_text
     assert "VULHUNTER_IMAGE_TAG: ${VULHUNTER_IMAGE_TAG:-latest}" in compose_text
+    assert "SANDBOX_IMAGE:" not in compose_text
     assert (
         "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
@@ -129,7 +126,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
         "SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
         "vulhunter-sandbox-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
-    assert 'SANDBOX_RUNNER_ENABLED: "${SANDBOX_RUNNER_ENABLED:-true}"' in compose_text
+    assert "SANDBOX_RUNNER_ENABLED:" not in compose_text
     assert "BACKEND_NPM_REGISTRY_PRIMARY" not in compose_text
     assert "BACKEND_NPM_REGISTRY_FALLBACK" not in compose_text
     assert "BACKEND_NPM_REGISTRY_CANDIDATES" not in compose_text
@@ -239,9 +236,9 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "BACKEND_PNPM_CMD_TIMEOUT_SECONDS" not in full_overlay_text
     assert "BACKEND_PNPM_INSTALL_OPTIONAL" not in full_overlay_text
     assert "MCP_REQUIRED_RUNTIME_DOMAIN" not in full_overlay_text
-    assert "SANDBOX_IMAGE: ${SANDBOX_IMAGE:-vulhunter/sandbox-local:latest}" in full_overlay_text
     assert "SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-vulhunter/sandbox-runner-local:latest}" in full_overlay_text
-    assert 'SANDBOX_RUNNER_ENABLED: "${SANDBOX_RUNNER_ENABLED:-true}"' in full_overlay_text
+    assert "SANDBOX_RUNNER_ENABLED:" not in full_overlay_text
+    assert "SANDBOX_IMAGE:" not in full_overlay_text
     assert "\n  frontend-dev:" not in full_overlay_text
 
 
@@ -253,6 +250,8 @@ def test_hybrid_overlay_uses_frontend_dev_without_default_polling_and_with_resou
     assert "CHOKIDAR_USEPOLLING: ${FRONTEND_CHOKIDAR_USEPOLLING:-false}" in hybrid_overlay_text
     assert "mem_limit: 1536m" in hybrid_overlay_text
     assert "pids_limit: 512" in hybrid_overlay_text
+    assert "SANDBOX_RUNNER_ENABLED:" not in hybrid_overlay_text
+    assert "SANDBOX_IMAGE:" not in hybrid_overlay_text
 
 
 def test_backend_dockerfile_builds_linux_arm64_yasa_from_source() -> None:
@@ -549,6 +548,7 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "build_phpstan_runner" in workflow_text
     assert "build_flow_parser_runner" in workflow_text
     assert "build_sandbox_runner" in workflow_text
+    assert "build_sandbox:" not in workflow_text
     assert "release_manifest" in workflow_text
     assert "build_nexus_web" not in workflow_text
     assert "./nexus-web/src" not in workflow_text
@@ -564,6 +564,7 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "./docker/flow-parser-runner.Dockerfile" in reusable_workflow_text
     assert "./docker/pmd-runner.Dockerfile" in reusable_workflow_text
     assert "./docker/sandbox-runner.Dockerfile" in reusable_workflow_text
+    assert "./docker/sandbox.Dockerfile" not in reusable_workflow_text
     assert "release-manifest.json" in reusable_workflow_text
     assert "docker manifest inspect" in reusable_workflow_text
     assert "publish-backend-amd64:" in reusable_workflow_text
@@ -585,6 +586,8 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     assert "- 'backend/**'" in workflow_text
     assert "- 'docker/frontend.Dockerfile'" in workflow_text
     assert "- 'docker/backend.Dockerfile'" in workflow_text
+    assert "- 'docker/sandbox-runner.Dockerfile'" in workflow_text
+    assert "- 'docker/sandbox.Dockerfile'" not in workflow_text
     assert "- '.github/workflows/docker-publish.yml'" in workflow_text
     assert "- 'frontend/yasa-engine-overrides/**'" in workflow_text
     assert "- '.github/workflows/release.yml'" in workflow_text
@@ -612,6 +615,7 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "--frontend-bundle" in workflow_text
     assert "--validate" in workflow_text
     assert "--arch ${{ matrix.arch }}" in workflow_text
+    assert "build_sandbox:" not in workflow_text
     assert "docker compose config" in workflow_text
     assert "docker compose up -d db redis backend" in workflow_text
     assert "docker compose up -d frontend" in workflow_text
@@ -622,3 +626,18 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "git push --force origin HEAD:release" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text
+
+
+def test_sandbox_runner_dockerfile_now_carries_the_heavy_runtime_contract() -> None:
+    sandbox_runner_text = (REPO_ROOT / "docker" / "sandbox-runner.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Sandboxed code execution environment for PoC verification (Python-focused)" in sandbox_runner_text
+    assert "requests httpx aiohttp websockets urllib3" in sandbox_runner_text
+    assert "numpy pandas" in sandbox_runner_text
+    assert "python-jose" in sandbox_runner_text
+    assert "/workspace/.VulHunter/runtime/xdg-data" in sandbox_runner_text
+    assert "build-essential" in sandbox_runner_text
+    assert "Lightweight sandbox runner for on-demand code execution" not in sandbox_runner_text
+    assert not (REPO_ROOT / "docker" / "sandbox.Dockerfile").exists()

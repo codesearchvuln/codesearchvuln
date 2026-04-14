@@ -162,12 +162,12 @@ test("AuditDetailContent 渲染 extract_function 与 run_code / sandbox_exec 结
           status: "passed",
           title: "Harness 执行结果",
           description: "验证命令注入 harness",
-          runtimeImage: "vulhunter/sandbox:latest",
+          runtimeImage: "vulhunter/sandbox-runner:latest",
           executionCommand: "cd /tmp && python3 -c 'print(1)'",
           stdoutPreview: "payload detected",
           stderrPreview: "",
           artifacts: [
-            { label: "镜像", value: "vulhunter/sandbox:latest" },
+            { label: "运行镜像", value: "vulhunter/sandbox-runner:latest" },
             { label: "退出码", value: "0" },
           ],
           code: {
@@ -198,7 +198,7 @@ test("AuditDetailContent 渲染 extract_function 与 run_code / sandbox_exec 结
           status: "failed",
           title: "沙箱命令执行",
           executionCommand: "bash -lc 'id'",
-          runtimeImage: "vulhunter/sandbox:latest",
+          runtimeImage: "vulhunter/sandbox-runner:latest",
           stdoutPreview: "uid=1000",
           stderrPreview: "permission denied",
           artifacts: [
@@ -232,9 +232,11 @@ test("AuditDetailContent 渲染 extract_function 与 run_code / sandbox_exec 结
   assert.match(extractMarkup, /guard/);
   assert.match(runCodeMarkup, /run_code -&gt; python3/);
   assert.match(runCodeMarkup, /print\(&#x27;payload detected&#x27;\)/);
+  assert.match(runCodeMarkup, /vulhunter\/sandbox-runner:latest/);
   // assert.match(runCodeMarkup, /查看原始数据/);
   assert.match(sandboxExecMarkup, /sandbox_exec -&gt; bash/);
   assert.match(sandboxExecMarkup, /permission denied/);
+  assert.match(sandboxExecMarkup, /vulhunter\/sandbox-runner:latest/);
 });
 
 test("AuditDetailContent 将原始事件元数据默认折叠", () => {

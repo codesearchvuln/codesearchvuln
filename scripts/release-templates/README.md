@@ -42,7 +42,7 @@ docker compose up -d
 docker compose up -d
 ```
 
-默认情况下，VulHunter 会拉取所需的运行镜像并启动全部服务。主界面的静态文件和默认 nginx 配置已经随包提供；`STATIC_FRONTEND_IMAGE` 用于承载这些静态文件。数据库、Redis、`nexus-web` 和 `nexus-itemDetail` 也会按当前目录中的配置一并启动。
+默认情况下，VulHunter 会拉取所需的运行镜像并启动全部服务。主界面的静态文件和默认 nginx 配置已经随包提供；`STATIC_FRONTEND_IMAGE` 用于承载这些静态文件。数据库、Redis、`nexus-web` 和 `nexus-itemDetail` 也会按当前目录中的配置一并启动。代码执行镜像统一为 `SANDBOX_RUNNER_IMAGE`，不再提供旧的独立沙箱镜像覆盖项。
 
 ## 4. 离线部署（可选）
 
@@ -84,7 +84,6 @@ docker compose down -v
 
 - `BACKEND_IMAGE`
 - `STATIC_FRONTEND_IMAGE`
-- `SANDBOX_IMAGE`
 - `SCANNER_*_IMAGE`
 - `FLOW_PARSER_RUNNER_IMAGE`
 - `SANDBOX_RUNNER_IMAGE`

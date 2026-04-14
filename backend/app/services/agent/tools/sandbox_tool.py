@@ -7,9 +7,7 @@ import asyncio
 import json
 import logging
 import re
-import tempfile
 import os
-import shutil
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from dataclasses import dataclass
@@ -30,7 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SandboxConfig:
     """沙箱配置"""
-    image: str = None  # 默认从 settings.SANDBOX_IMAGE 读取
+    image: str = None  # 默认从 settings.SANDBOX_RUNNER_IMAGE 读取
     memory_limit: str = "512m"
     cpu_limit: float = 1.0
     timeout: int = 60
@@ -40,14 +38,14 @@ class SandboxConfig:
 
     def __post_init__(self):
         if self.image is None:
-            self.image = settings.SANDBOX_IMAGE
+            self.image = settings.SANDBOX_RUNNER_IMAGE
 
 
 class SandboxManager:
     """
-    沙箱管理器 - 兼容门面 (Phase 1)
+    沙箱管理器
 
-    保持公开接口不变,内部委托给 SandboxRunnerClient
+    公开接口保持不变，但执行路径强制收敛到 SandboxRunnerClient。
     """
 
     def __init__(self, config: Optional[SandboxConfig] = None):
@@ -58,9 +56,7 @@ class SandboxManager:
         self._resolved_image = str(self.config.image or "").strip()
         self._last_image_candidates: List[str] = []
 
-        # Phase 1: 新增 runner client (如果启用)
         self._runner_client = None
-        self._use_new_runner = getattr(settings, "SANDBOX_RUNNER_ENABLED", True)
     
     async def initialize(self):
         """初始化 Docker 客户端和 Runner Client"""
@@ -68,60 +64,52 @@ class SandboxManager:
             logger.info("SandboxManager already initialized")
             return
 
+        docker_client = None
         try:
             import docker
-            logger.info(f"🔄 Attempting to connect to Docker... (lib: {docker.__file__})")
-            self._docker_client = docker.from_env()
-            # 测试连接
-            self._docker_client.ping()
+            logger.info(
+                "🔄 Attempting to connect to Docker... (lib: %s)",
+                getattr(docker, "__file__", "<module>"),
+            )
+            docker_client = docker.from_env()
+            docker_client.ping()
 
-            # 初始化 runner client (如果启用)
-            if self._use_new_runner:
-                try:
-                    from app.services.sandbox_runner_client import SandboxRunnerClient
-                    self._runner_client = SandboxRunnerClient()
-                    logger.info("✅ SandboxRunnerClient initialized successfully")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize SandboxRunnerClient: {e}")
-                    self._runner_client = None
+            from app.services.sandbox_runner_client import SandboxRunnerClient
+
+            self._docker_client = docker_client
+            self._runner_client = SandboxRunnerClient()
 
             self._initialized = True
             self._init_error = None
-            logger.info("Docker sandbox manager initialized successfully")
+            logger.info("Sandbox runner manager initialized successfully")
         except ImportError as e:
             logger.error(f"Docker library not installed: {e}")
             self._docker_client = None
             self._init_error = f"ImportError: {e}"
         except Exception as e:
-            logger.warning(f"Docker not available: {e}")
+            self._docker_client = docker_client
+            self._runner_client = None
+            self._initialized = True
+            stage = "Sandbox runner unavailable" if docker_client is not None else "Docker unavailable"
+            logger.warning(f"{stage}: {e}")
             import traceback
             logger.warning(f"Docker connection traceback: {traceback.format_exc()}")
-            self._docker_client = None
-            self._init_error = f"{type(e).__name__}: {str(e)}"
+            self._init_error = f"{stage}: {type(e).__name__}: {str(e)}"
     
     @property
     def is_available(self) -> bool:
-        """检查 Docker 是否可用"""
-        return self._docker_client is not None
+        """检查 sandbox-runner 是否可用"""
+        return self._runner_client is not None
         
     def get_diagnosis(self) -> str:
         """获取诊断信息"""
         if self.is_available:
-            return "Docker Service Available"
-        return f"Docker Service Unavailable. Error: {self._init_error or 'Not initialized'}"
+            return "Sandbox Runner Available"
+        return f"Sandbox Runner Unavailable. Error: {self._init_error or 'Not initialized'}"
 
     def _image_candidates(self) -> List[str]:
-        explicit_image = str(self.config.image or settings.SANDBOX_IMAGE or "").strip()
-        ghcr_registry = str(os.environ.get("GHCR_REGISTRY") or "docker.m.daocloud.io").strip() or "docker.m.daocloud.io"
-        image_tag = str(os.environ.get("VULHUNTER_IMAGE_TAG") or "latest").strip() or "latest"
-        remote_image = f"{ghcr_registry}/lintsinghua/vulhunter-sandbox:{image_tag}"
-        ordered_candidates = [
-            explicit_image,
-            "vulhunter/sandbox:latest",
-            "VulHunter/sandbox:latest",
-            "VulHunter-sandbox:latest",
-            remote_image,
-        ]
+        explicit_image = str(self.config.image or settings.SANDBOX_RUNNER_IMAGE or "").strip()
+        ordered_candidates = [explicit_image]
         deduped: List[str] = []
         for candidate in ordered_candidates:
             normalized = str(candidate or "").strip()
@@ -165,9 +153,9 @@ class SandboxManager:
     def _format_image_resolution_error(self, candidates: List[str], attempt_errors: List[str]) -> str:
         attempted = ", ".join(candidates) or str(self.config.image or "<unset>")
         detail_text = " | ".join(attempt_errors[-3:]) if attempt_errors else "镜像不存在或拉取失败"
-        build_hint = "docker build -f docker/sandbox.Dockerfile -t vulhunter/sandbox:latest ."
+        build_hint = "docker build -f docker/sandbox-runner.Dockerfile -t vulhunter/sandbox-runner:latest ."
         return (
-            f"未找到可用沙箱镜像。已尝试: {attempted}。"
+            f"未找到可用 sandbox-runner 镜像。已尝试: {attempted}。"
             f"详情: {detail_text}。"
             f"建议先构建本地镜像：{build_hint}"
         )
@@ -219,157 +207,26 @@ class SandboxManager:
         Returns:
             执行结果
         """
-        if not self.is_available:
+        if not self._initialized:
+            await self.initialize()
+
+        if not self._runner_client:
             return {
                 "success": False,
-                "error": "Docker 不可用",
+                "error": self.get_diagnosis(),
                 "stdout": "",
                 "stderr": "",
                 "exit_code": -1,
             }
 
-        # Phase 1: 如果启用了新 runner,使用新路径
-        if self._use_new_runner and self._runner_client:
-            return await self._execute_command_via_runner(
-                command=command,
-                working_dir=working_dir,
-                env=env,
-                timeout=timeout,
-                host_project_dir=host_project_dir,
-                project_root=project_root,
-            )
-
-        # 否则使用原始实现 (保持兼容)
-
-        timeout = timeout or self.config.timeout
-
-        # 禁用代理环境变量，防止 Docker 自动注入的代理干扰容器网络
-        no_proxy_env = {
-            "HTTP_PROXY": "",
-            "HTTPS_PROXY": "",
-            "http_proxy": "",
-            "https_proxy": "",
-            "NO_PROXY": "*",
-            "no_proxy": "*",
-        }
-        # 挂载项目目录时，将 PYTHONPATH 指向 /project，便于代码在沙箱内导入项目模块
-        project_env: Dict[str, str] = {}
-        if host_project_dir and os.path.isdir(host_project_dir):
-            project_env["PYTHONPATH"] = "/project"
-        # 合并用户传入的环境变量（用户变量优先）
-        container_env = {**no_proxy_env, **project_env, **(env or {})}
-
-        try:
-            # 确定 /workspace 挂载源：优先使用项目根目录（只读），否则使用临时目录（读写）
-            resolved_project_root = None
-            if project_root:
-                abs_root = os.path.abspath(project_root)
-                if os.path.isdir(abs_root):
-                    resolved_project_root = abs_root
-
-            # 创建临时目录（作为无项目源码时的 fallback 或作为沙箱写入区域）
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # 修复临时目录权限：确保沙箱用户（UID 1000）可访问
-                os.chmod(temp_dir, 0o777)
-
-                if resolved_project_root:
-                    # 有项目源码：只读挂载到 /workspace，临时目录挂载到 /sandbox_data
-                    volumes = {
-                        resolved_project_root: {"bind": "/workspace", "mode": "ro"},
-                        temp_dir: {"bind": "/sandbox_data", "mode": "rw"},
-                    }
-                else:
-                    # 无项目源码（降级模式）：临时目录挂载到 /workspace
-                    volumes = {
-                        temp_dir: {"bind": "/workspace", "mode": "rw"},
-                    }
-
-                # 挂载卷：workspace（可读写）+ 可选的项目目录（只读）
-                volumes: Dict[str, Any] = {
-                    temp_dir: {"bind": "/workspace", "mode": "rw"},
-                }
-                if host_project_dir and os.path.isdir(host_project_dir):
-                    volumes[os.path.realpath(host_project_dir)] = {"bind": "/project", "mode": "ro"}
-
-                # 准备容器配置
-                container_config = {
-                    "command": ["sh", "-c", command],
-                    "detach": True,
-                    "mem_limit": self.config.memory_limit,
-                    "cpu_period": 100000,
-                    "cpu_quota": int(100000 * self.config.cpu_limit),
-                    "network_mode": self.config.network_mode,
-                    "user": self.config.user,
-                    "read_only": self.config.read_only,
-                    "volumes": volumes,
-                    "tmpfs": {
-                            "/home/sandbox": "rw,exec,size=512m,mode=1777",
-                            "/tmp": "rw,exec,size=512m,mode=1777"
-                        },
-                    "working_dir": working_dir or "/workspace",
-                    "environment": container_env,
-                    # 安全配置
-                    "cap_drop": ["ALL"],
-                    "security_opt": ["no-new-privileges:true"],
-                }
-                
-                # 创建并启动容器
-                container, selected_image, image_candidates = await self._run_container_with_image_fallback(
-                    container_config
-                )
-                
-                try:
-                    # 等待执行完成
-                    result = await asyncio.wait_for(
-                        asyncio.to_thread(container.wait),
-                        timeout=timeout
-                    )
-                    
-                    # 获取日志
-                    stdout = await asyncio.to_thread(
-                        container.logs, stdout=True, stderr=False
-                    )
-                    stderr = await asyncio.to_thread(
-                        container.logs, stdout=False, stderr=True
-                    )
-                    
-                    return {
-                        "success": result["StatusCode"] == 0,
-                        "stdout": stdout.decode('utf-8', errors='ignore')[:10000],
-                        "stderr": stderr.decode('utf-8', errors='ignore')[:2000],
-                        "exit_code": result["StatusCode"],
-                        "error": None,
-                        "image": selected_image,
-                        "image_candidates": image_candidates,
-                    }
-                    
-                except asyncio.TimeoutError:
-                    await asyncio.to_thread(container.kill)
-                    return {
-                        "success": False,
-                        "error": f"执行超时 ({timeout}秒)",
-                        "stdout": "",
-                        "stderr": "",
-                        "exit_code": -1,
-                        "image": selected_image,
-                        "image_candidates": image_candidates,
-                    }
-                    
-                finally:
-                    # 清理容器
-                    await asyncio.to_thread(container.remove, force=True)
-                    
-        except Exception as e:
-            logger.error(f"Sandbox execution error: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "stdout": "",
-                "stderr": "",
-                "exit_code": -1,
-                "image": self._resolved_image,
-                "image_candidates": list(self._last_image_candidates),
-            }
+        return await self._execute_command_via_runner(
+            command=command,
+            working_dir=working_dir,
+            env=env,
+            timeout=timeout,
+            host_project_dir=host_project_dir,
+            project_root=project_root,
+        )
     
     async def execute_tool_command(
         self,
@@ -392,125 +249,25 @@ class SandboxManager:
         Returns:
             执行结果
         """
-        if not self.is_available:
+        if not self._initialized:
+            await self.initialize()
+
+        if not self._runner_client:
             return {
                 "success": False,
-                "error": "Docker 不可用",
+                "error": self.get_diagnosis(),
                 "stdout": "",
                 "stderr": "",
                 "exit_code": -1,
             }
 
-        # Phase 1: 如果启用了新 runner,使用新路径
-        if self._use_new_runner and self._runner_client:
-            return await self._execute_tool_command_via_runner(
-                command=command,
-                host_workdir=host_workdir,
-                timeout=timeout,
-                env=env,
-                network_mode=network_mode,
-            )
-
-        # 否则使用原始实现 (保持兼容)
-        timeout = timeout or self.config.timeout
-
-        # 禁用代理环境变量，防止 Docker 自动注入的代理干扰容器网络
-        no_proxy_env = {
-            "HTTP_PROXY": "",
-            "HTTPS_PROXY": "",
-            "http_proxy": "",
-            "https_proxy": "",
-            "NO_PROXY": "*",
-            "no_proxy": "*",
-        }
-        # 合并用户传入的环境变量（用户变量优先）
-        container_env = {**no_proxy_env, **(env or {})}
-
-        try:
-            # 清除代理环境变量：在命令前添加 unset（双重保险）
-            unset_proxy_prefix = "unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy 2>/dev/null; "
-            wrapped_command = unset_proxy_prefix + command
-
-            # 准备容器配置
-            container_config = {
-                "command": ["sh", "-c", wrapped_command],
-                "detach": True,
-                "mem_limit": self.config.memory_limit,
-                "cpu_period": 100000,
-                "cpu_quota": int(100000 * self.config.cpu_limit),
-                "network_mode": network_mode,
-                "user": self.config.user,
-                "read_only": self.config.read_only,
-                "volumes": {
-                    host_workdir: {"bind": "/workspace", "mode": "ro"}, # 只读挂载项目代码
-                },
-                "tmpfs": {
-                    "/home/sandbox": "rw,exec,size=512m,mode=1777",  # 添加 exec 允许执行，用于 opengrep 规则缓存
-                    "/tmp": "rw,exec,size=512m,mode=1777"  # 添加 exec 允许执行临时文件
-                },
-                "working_dir": "/workspace",
-                "environment": container_env,
-                "cap_drop": ["ALL"],
-                "security_opt": ["no-new-privileges:true"],
-            }
-            
-            # 创建并启动容器
-            container, selected_image, image_candidates = await self._run_container_with_image_fallback(
-                container_config
-            )
-            
-            try:
-                # 等待执行完成
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(container.wait),
-                    timeout=timeout
-                )
-                
-                # 获取日志
-                stdout = await asyncio.to_thread(
-                    container.logs, stdout=True, stderr=False
-                )
-                stderr = await asyncio.to_thread(
-                    container.logs, stdout=False, stderr=True
-                )
-                
-                return {
-                    "success": result["StatusCode"] == 0,
-                    "stdout": stdout.decode('utf-8', errors='ignore')[:50000], # 增大日志限制
-                    "stderr": stderr.decode('utf-8', errors='ignore')[:5000],
-                    "exit_code": result["StatusCode"],
-                    "error": None,
-                    "image": selected_image,
-                    "image_candidates": image_candidates,
-                }
-                
-            except asyncio.TimeoutError:
-                await asyncio.to_thread(container.kill)
-                return {
-                    "success": False,
-                    "error": f"执行超时 ({timeout}秒)",
-                    "stdout": "",
-                    "stderr": "",
-                    "exit_code": -1,
-                    "image": selected_image,
-                    "image_candidates": image_candidates,
-                }
-                
-            finally:
-                # 清理容器
-                await asyncio.to_thread(container.remove, force=True)
-                
-        except Exception as e:
-            logger.error(f"Tool execution error: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "stdout": "",
-                "stderr": "",
-                "exit_code": -1,
-                "image": self._resolved_image,
-                "image_candidates": list(self._last_image_candidates),
-            }
+        return await self._execute_tool_command_via_runner(
+            command=command,
+            host_workdir=host_workdir,
+            timeout=timeout,
+            env=env,
+            network_mode=network_mode,
+        )
     async def execute_python(
         self,
         code: str,

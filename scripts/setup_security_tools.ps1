@@ -604,7 +604,7 @@ function Install-DockerSandbox {
     Write-ColorOutput "Docker 已运行" "Success"
 
     # 构建沙盒镜像
-    $dockerfile = Join-Path $ProjectRoot "docker\sandbox.Dockerfile"
+    $dockerfile = Join-Path $ProjectRoot "docker\sandbox-runner.Dockerfile"
 
     if (-not (Test-Path $dockerfile)) {
         Write-ColorOutput "沙盒 Dockerfile 不存在: $dockerfile" "Warning"
@@ -618,14 +618,14 @@ function Install-DockerSandbox {
         for ($attempt = 1; $attempt -le $MAX_RETRIES; $attempt++) {
             Write-ColorOutput "构建镜像 (尝试 $attempt/$MAX_RETRIES)..." "Info"
 
-            docker build -t VulHunter-sandbox:latest -f docker/sandbox.Dockerfile . 2>&1
+            docker build -t VulHunter-sandbox-runner:latest -f docker/sandbox-runner.Dockerfile . 2>&1
 
             if ($LASTEXITCODE -eq 0) {
-                Write-ColorOutput "沙盒镜像构建成功: VulHunter-sandbox:latest" "Success"
+                Write-ColorOutput "sandbox-runner 镜像构建成功: VulHunter-sandbox-runner:latest" "Success"
 
                 # 验证
-                Write-ColorOutput "验证沙盒镜像..." "Info"
-                docker run --rm VulHunter-sandbox:latest python3 --version
+                Write-ColorOutput "验证 sandbox-runner 镜像..." "Info"
+                docker run --rm VulHunter-sandbox-runner:latest python3 --version
                 Write-ColorOutput "Python 环境正常" "Success"
 
                 return $true
@@ -749,12 +749,12 @@ function Test-Installation {
 
     # Docker 沙盒检查
     if (Test-Command "docker") {
-        $imageExists = docker image inspect VulHunter-sandbox:latest 2>&1
+        $imageExists = docker image inspect VulHunter-sandbox-runner:latest 2>&1
         if ($LASTEXITCODE -eq 0) {
-            Write-ColorOutput "Docker 沙盒镜像: VulHunter-sandbox:latest ✓" "Success"
+            Write-ColorOutput "Docker sandbox-runner 镜像: VulHunter-sandbox-runner:latest ✓" "Success"
         }
         else {
-            Write-ColorOutput "Docker 沙盒镜像未构建" "Warning"
+            Write-ColorOutput "Docker sandbox-runner 镜像未构建" "Warning"
         }
     }
 
@@ -792,7 +792,7 @@ function Update-EnvConfig {
 
     $envContent = Get-Content $envFile -Raw -ErrorAction SilentlyContinue
 
-    if ($envContent -match "SANDBOX_IMAGE") {
+    if ($envContent -match "SANDBOX_RUNNER_IMAGE") {
         Write-ColorOutput "沙盒配置已存在于 .env 文件中" "Info"
     }
     else {
@@ -803,7 +803,7 @@ function Update-EnvConfig {
 # =============================================
 # 沙盒配置 (自动添加)
 # =============================================
-SANDBOX_IMAGE=VulHunter-sandbox:latest
+SANDBOX_RUNNER_IMAGE=VulHunter-sandbox-runner:latest
 SANDBOX_MEMORY_LIMIT=512m
 SANDBOX_CPU_LIMIT=1.0
 SANDBOX_TIMEOUT=60

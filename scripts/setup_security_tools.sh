@@ -618,7 +618,7 @@ install_docker_sandbox() {
     log_success "Docker 已运行"
 
     # 构建沙盒镜像
-    local dockerfile="$PROJECT_ROOT/docker/sandbox.Dockerfile"
+    local dockerfile="$PROJECT_ROOT/docker/sandbox-runner.Dockerfile"
 
     if [[ ! -f "$dockerfile" ]]; then
         log_warning "沙盒 Dockerfile 不存在: ${dockerfile}"
@@ -633,15 +633,15 @@ install_docker_sandbox() {
     for attempt in $(seq 1 $MAX_RETRIES); do
         log_info "构建镜像 (尝试 $attempt/$MAX_RETRIES)..."
 
-        if docker build -t VulHunter-sandbox:latest -f docker/sandbox.Dockerfile . 2>&1; then
-            log_success "沙盒镜像构建成功: VulHunter-sandbox:latest"
+        if docker build -t VulHunter-sandbox-runner:latest -f docker/sandbox-runner.Dockerfile . 2>&1; then
+            log_success "sandbox-runner 镜像构建成功: VulHunter-sandbox-runner:latest"
 
             # 验证
-            log_info "验证沙盒镜像..."
-            if docker run --rm VulHunter-sandbox:latest python3 --version; then
+            log_info "验证 sandbox-runner 镜像..."
+            if docker run --rm VulHunter-sandbox-runner:latest python3 --version; then
                 log_success "Python 环境正常"
             fi
-            if docker run --rm VulHunter-sandbox:latest node --version 2>/dev/null; then
+            if docker run --rm VulHunter-sandbox-runner:latest node --version 2>/dev/null; then
                 log_success "Node.js 环境正常"
             fi
 
@@ -748,12 +748,12 @@ verify_installation() {
 
     # Docker 沙盒检查
     if command_exists docker && docker info &>/dev/null; then
-        if docker image inspect VulHunter-sandbox:latest &>/dev/null; then
+        if docker image inspect VulHunter-sandbox-runner:latest &>/dev/null; then
             echo ""
-            log_success "Docker 沙盒镜像: VulHunter-sandbox:latest ✓"
+            log_success "Docker sandbox-runner 镜像: VulHunter-sandbox-runner:latest ✓"
         else
             echo ""
-            log_warning "Docker 沙盒镜像未构建"
+            log_warning "Docker sandbox-runner 镜像未构建"
         fi
     fi
 
@@ -788,7 +788,7 @@ update_env_config() {
         return 0
     fi
 
-    if grep -q "SANDBOX_IMAGE" "$env_file"; then
+    if grep -q "SANDBOX_RUNNER_IMAGE" "$env_file"; then
         log_info "沙盒配置已存在于 .env 文件中"
     else
         log_info "添加沙盒配置到 .env 文件..."
@@ -797,7 +797,7 @@ update_env_config() {
 # =============================================
 # 沙盒配置 (自动添加)
 # =============================================
-SANDBOX_IMAGE=VulHunter-sandbox:latest
+SANDBOX_RUNNER_IMAGE=VulHunter-sandbox-runner:latest
 SANDBOX_MEMORY_LIMIT=512m
 SANDBOX_CPU_LIMIT=1.0
 SANDBOX_TIMEOUT=60
