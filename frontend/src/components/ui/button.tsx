@@ -12,7 +12,7 @@ const buttonVariants = cva(
         default:
           "bg-primary text-primary-foreground border border-primary/30 shadow-sm hover:shadow-md hover:-translate-y-px",
         destructive:
-          "bg-secondary text-secondary-foreground border border-secondary/30 shadow-sm hover:shadow-md hover:-translate-y-px",
+          "border border-rose-500/35 bg-rose-500/10 text-rose-700 shadow-sm hover:-translate-y-px hover:border-rose-500/55 hover:bg-rose-500/15 hover:text-rose-800 hover:shadow-md dark:border-rose-500/30 dark:bg-rose-500/12 dark:text-rose-200 dark:hover:bg-rose-500/18 dark:hover:text-rose-100",
         outline:
           "border border-border bg-transparent shadow-sm hover:bg-muted hover:shadow-md",
         secondary:

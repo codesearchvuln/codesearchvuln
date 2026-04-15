@@ -181,17 +181,18 @@ function getColumns(
 			enableSorting: false,
 			meta: {
 				label: "操作",
-				width: 120,
+				width: 196,
+				minWidth: 196,
 			},
 			cell: ({ row }) => {
 				const isDeleting = deletingActivityId === row.original.id;
 				return (
-					<div className="flex items-center gap-2">
+					<div className="flex flex-nowrap items-center gap-2 whitespace-nowrap">
 						<Button
 							asChild
 							size="sm"
 							variant="outline"
-							className="cyber-btn-ghost h-8 px-3"
+							className="cyber-btn-ghost h-8 shrink-0 whitespace-nowrap px-3"
 						>
 							<Link to={appendReturnTo(row.original.route, currentRoute)}>
 								详情
@@ -200,7 +201,7 @@ function getColumns(
 						<Button
 							size="sm"
 							variant="destructive"
-							className="h-8 px-3"
+							className="h-8 shrink-0 whitespace-nowrap px-3"
 							disabled={!handleDelete || isDeleting}
 							onClick={() => {
 								if (!handleDelete) return;
