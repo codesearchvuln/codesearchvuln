@@ -110,6 +110,7 @@ required_keys = {
     "redis": "__REDIS_IMAGE_REF__",
     "adminer": "__ADMINER_IMAGE_REF__",
     "scan_workspace_init": "__SCAN_WORKSPACE_INIT_IMAGE_REF__",
+    "static_frontend": "__STATIC_FRONTEND_IMAGE_REF__",
     "sandbox_runner": "__SANDBOX_RUNNER_IMAGE_REF__",
     "scanner_yasa": "__SCANNER_YASA_IMAGE_REF__",
     "scanner_opengrep": "__SCANNER_OPENGREP_IMAGE_REF__",
@@ -203,6 +204,7 @@ service_image_contracts = {
     "redis": ("REDIS_IMAGE", "vulhunter-local/redis"),
     "adminer": ("ADMINER_IMAGE", "vulhunter-local/adminer"),
     "scan_workspace_init": ("SCAN_WORKSPACE_INIT_IMAGE", "vulhunter-local/scan-workspace-init"),
+    "static_frontend": ("STATIC_FRONTEND_IMAGE", "vulhunter-local/static-frontend"),
 }
 
 scanner_image_contracts = {

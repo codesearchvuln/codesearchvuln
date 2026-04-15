@@ -22,6 +22,7 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "redis": {"ref": "ghcr.io/acme-sec/redis@sha256:" + "b" * 64},
             "adminer": {"ref": "ghcr.io/acme-sec/adminer@sha256:" + "c" * 64},
             "scan_workspace_init": {"ref": "ghcr.io/acme-sec/scan-workspace-init@sha256:" + "d" * 64},
+            "static_frontend": {"ref": "ghcr.io/acme-sec/nginx@sha256:" + "e" * 64},
             "sandbox_runner": {"ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64},
             "scanner_yasa": {"ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "3" * 64},
             "scanner_opengrep": {"ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "4" * 64},
@@ -92,6 +93,22 @@ def _write_fake_windows_tools(bin_dir: Path) -> None:
     docker_ps1.write_text(
         "Add-Content -Path $env:FAKE_DOCKER_LOG -Value ($args -join ' ')\r\n"
         "if ($args.Count -ge 2 -and $args[0] -eq 'compose' -and $args[1] -eq 'version') { exit 0 }\r\n"
+        "if ($args.Count -ge 2 -and $args[0] -eq 'compose' -and $args[1] -eq 'config') {\r\n"
+        "  Write-Output 'services:'\r\n"
+        "  Write-Output '  backend:'\r\n"
+        "  if ($env:BACKEND_IMAGE) { Write-Output ('    image: ' + $env:BACKEND_IMAGE) } else { Write-Output ('    image: ' + 'ghcr.io/acme-sec/vulhunter-backend@sha256:' + ('1' * 64)) }\r\n"
+        "  Write-Output '  db:'\r\n"
+        "  if ($env:POSTGRES_IMAGE) { Write-Output ('    image: ' + $env:POSTGRES_IMAGE) } else { Write-Output ('    image: ' + 'ghcr.io/acme-sec/postgres@sha256:' + ('a' * 64)) }\r\n"
+        "  Write-Output '  redis:'\r\n"
+        "  if ($env:REDIS_IMAGE) { Write-Output ('    image: ' + $env:REDIS_IMAGE) } else { Write-Output ('    image: ' + 'ghcr.io/acme-sec/redis@sha256:' + ('b' * 64)) }\r\n"
+        "  Write-Output '  adminer:'\r\n"
+        "  if ($env:ADMINER_IMAGE) { Write-Output ('    image: ' + $env:ADMINER_IMAGE) } else { Write-Output ('    image: ' + 'ghcr.io/acme-sec/adminer@sha256:' + ('c' * 64)) }\r\n"
+        "  Write-Output '  scan-workspace-init:'\r\n"
+        "  if ($env:SCAN_WORKSPACE_INIT_IMAGE) { Write-Output ('    image: ' + $env:SCAN_WORKSPACE_INIT_IMAGE) } else { Write-Output ('    image: ' + 'ghcr.io/acme-sec/scan-workspace-init@sha256:' + ('d' * 64)) }\r\n"
+        "  Write-Output '  frontend:'\r\n"
+        "  if ($env:STATIC_FRONTEND_IMAGE) { Write-Output ('    image: ' + $env:STATIC_FRONTEND_IMAGE) } else { Write-Output ('    image: ' + 'docker.m.daocloud.io/library/nginx:1.27-alpine') }\r\n"
+        "  exit 0\r\n"
+        "}\r\n"
         "if ($args.Count -ge 2 -and $args[0] -eq 'version' -and $args[1] -eq '--format') { Write-Output 'amd64'; exit 0 }\r\n"
         "if ($args.Count -ge 2 -and $args[0] -eq 'image' -and $args[1] -eq 'inspect') { exit 0 }\r\n"
         "if ($args.Count -ge 1 -and $args[0] -eq 'tag') { exit 0 }\r\n"
@@ -234,3 +251,58 @@ def test_offline_up_powershell_preserves_crlf_env_and_requires_gid_when_missing(
 
     assert result.returncode != 0
     assert "DOCKER_SOCKET_GID" in (result.stdout + result.stderr)
+
+
+@pytest.mark.skipif(not _powershell_available(), reason="powershell.exe not available in this environment")
+def test_offline_up_powershell_fails_when_compose_runtime_escapes_two_bundle_contract(tmp_path: Path) -> None:
+    output_dir = tmp_path / "release-tree"
+    manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
+    _write_release_manifest(manifest_path)
+    _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
+
+    script_path = output_dir / "scripts" / "offline-up.ps1"
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        "RUNNER_PREFLIGHT_OFFLINE_MODE=true\r\n"
+        "BACKEND_IMAGE=vulhunter-local/backend:test\r\n",
+        encoding="utf-8",
+    )
+
+    fake_bin = tmp_path / "winbin"
+    fake_bin.mkdir()
+    _write_fake_windows_tools(fake_bin)
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+
+    env = os.environ.copy()
+    env["PATH"] = _windows_path_env()
+    command = (
+        f"$env:FAKE_DOCKER_LOG='{_wsl_to_windows(docker_log)}'; "
+        f"$env:FAKE_ZSTD_LOG='{_wsl_to_windows(zstd_log)}'; "
+        f"$env:DOCKER_BIN='{_wsl_to_windows(fake_bin / 'docker.ps1')}'; "
+        "$env:DOCKER_SERVER_ARCH='amd64'; "
+        "$env:DOCKER_SOCKET_GID='1234'; "
+        f"& '{_wsl_to_windows(script_path)}'"
+    )
+
+    result = subprocess.run(
+        [
+            _powershell_exe(),
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command,
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode != 0
+    assert "STATIC_FRONTEND_IMAGE" in (result.stdout + result.stderr) or "two bundles" in (result.stdout + result.stderr) or "not covered" in (result.stdout + result.stderr)

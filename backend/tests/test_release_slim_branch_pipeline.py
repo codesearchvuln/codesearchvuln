@@ -30,6 +30,9 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "scan_workspace_init": {
                 "ref": "ghcr.io/acme-sec/scan-workspace-init@sha256:" + "d" * 64,
             },
+            "static_frontend": {
+                "ref": "ghcr.io/acme-sec/static-frontend@sha256:" + "e" * 64,
+            },
             "sandbox_runner": {
                 "ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64,
             },
@@ -439,6 +442,7 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert manifest["images"]["redis"]["ref"] in compose_text
     assert manifest["images"]["adminer"]["ref"] in compose_text
     assert manifest["images"]["scan_workspace_init"]["ref"] in compose_text
+    assert manifest["images"]["static_frontend"]["ref"] in compose_text
     assert manifest["images"]["sandbox_runner"]["ref"] in compose_text
     assert manifest["images"]["scanner_yasa"]["ref"] in compose_text
     assert manifest["images"]["scanner_opengrep"]["ref"] in compose_text
@@ -448,7 +452,7 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert manifest["images"]["scanner_pmd"]["ref"] in compose_text
     assert manifest["images"]["flow_parser_runner"]["ref"] in compose_text
     assert "image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:" in compose_text
-    assert "image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine}" in compose_text
+    assert "image: ${STATIC_FRONTEND_IMAGE:-ghcr.io/acme-sec/static-frontend@sha256:" in compose_text
     assert "SANDBOX_IMAGE" not in compose_text
     assert 'INIT_DB_SEED_PROJECTS: "${INIT_DB_SEED_PROJECTS:-false}"' in compose_text
     assert "start_period: 180s" in compose_text
@@ -478,14 +482,29 @@ def test_release_generator_rejects_incomplete_release_manifest(tmp_path: Path) -
     manifest_path = tmp_path / "release-manifest.json"
     frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
     manifest = _write_release_manifest(manifest_path)
-    del manifest["images"]["backend"]
+    del manifest["images"]["static_frontend"]
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
     assert result.returncode != 0
-    assert "missing required image ref: backend" in combined_output
+    assert "missing required image ref: static_frontend" in combined_output
+
+
+def test_release_generator_rejects_nondigest_static_frontend_ref(tmp_path: Path) -> None:
+    output_dir = tmp_path / "release-tree"
+    manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
+    manifest = _write_release_manifest(manifest_path)
+    manifest["images"]["static_frontend"]["ref"] = "ghcr.io/acme-sec/static-frontend:latest"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+
+    assert result.returncode != 0
+    assert "image ref must be digest-pinned: static_frontend" in combined_output
 
 
 def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_path: Path) -> None:
@@ -584,8 +603,12 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert services_metadata["images"]["scan_workspace_init"]["local_tag"] == (
         f"vulhunter-local/scan-workspace-init:{manifest['revision']}"
     )
+    assert services_metadata["images"]["static_frontend"]["env_var"] == "STATIC_FRONTEND_IMAGE"
+    assert services_metadata["images"]["static_frontend"]["source_ref"] == manifest["images"]["static_frontend"]["ref"]
+    assert services_metadata["images"]["static_frontend"]["local_tag"] == (
+        f"vulhunter-local/static-frontend:{manifest['revision']}"
+    )
     assert "sandbox_runner" not in services_metadata["images"]
-    assert "static_frontend" not in services_metadata["images"]
     assert "nexus_web" not in services_metadata["images"]
     assert "nexus_item_detail" not in services_metadata["images"]
     assert scanner_metadata["revision"] == manifest["revision"]
@@ -603,7 +626,7 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert f"REDIS_IMAGE=vulhunter-local/redis:{manifest['revision']}" in offline_env
     assert f"ADMINER_IMAGE=vulhunter-local/adminer:{manifest['revision']}" in offline_env
     assert f"SCAN_WORKSPACE_INIT_IMAGE=vulhunter-local/scan-workspace-init:{manifest['revision']}" in offline_env
-    assert "\nSTATIC_FRONTEND_IMAGE=" not in offline_env
+    assert f"STATIC_FRONTEND_IMAGE=vulhunter-local/static-frontend:{manifest['revision']}" in offline_env
     assert "\nSANDBOX_IMAGE=" not in offline_env
     assert f"SANDBOX_RUNNER_IMAGE=vulhunter-local/sandbox-runner:{manifest['revision']}" in offline_env
     assert "\nNEXUS_WEB_IMAGE=" not in offline_env
@@ -673,7 +696,7 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_serv
         "package start:",
         "image order:",
         "pull start: backend",
-        "pull end: scan_workspace_init",
+        "pull end: static_frontend",
         "all pulls complete",
         "bundle stream start:",
         "compression heartbeat:",
@@ -691,8 +714,10 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_serv
         f"pull --platform linux/amd64 {manifest['images']['redis']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['adminer']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['scan_workspace_init']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['static_frontend']['ref']}",
     ]
     assert pull_commands == expected_pulls
+    assert pull_commands[-1].endswith(manifest["images"]["static_frontend"]["ref"])
     assert zstd_log.read_text(encoding="utf-8").splitlines() == [
         f"-T0 -3 -q -o {output_dir / 'vulhunter-services-images-amd64.tar.zst'}"
     ]
@@ -775,6 +800,40 @@ def test_package_release_images_script_rejects_invalid_manifest_contract(tmp_pat
     nondigest_output = "\n".join(part for part in [nondigest_result.stdout, nondigest_result.stderr] if part)
     assert nondigest_result.returncode != 0
     assert "manifest image ref must be digest-pinned: backend" in nondigest_output
+
+    missing_static_frontend_manifest_path = tmp_path / "missing-static-frontend-manifest.json"
+    missing_static_frontend_manifest = _write_release_manifest(missing_static_frontend_manifest_path)
+    del missing_static_frontend_manifest["images"]["static_frontend"]
+    missing_static_frontend_manifest_path.write_text(
+        json.dumps(missing_static_frontend_manifest), encoding="utf-8"
+    )
+
+    missing_static_frontend_result, _, _, _ = _run_package_release_images(
+        tmp_path / "missing-static-frontend", missing_static_frontend_manifest_path, bundle="services"
+    )
+    missing_static_frontend_output = "\n".join(
+        part for part in [missing_static_frontend_result.stdout, missing_static_frontend_result.stderr] if part
+    )
+    assert missing_static_frontend_result.returncode != 0
+    assert "missing required image ref: static_frontend" in missing_static_frontend_output
+
+    nondigest_static_frontend_manifest_path = tmp_path / "nondigest-static-frontend-manifest.json"
+    nondigest_static_frontend_manifest = _write_release_manifest(nondigest_static_frontend_manifest_path)
+    nondigest_static_frontend_manifest["images"]["static_frontend"]["ref"] = (
+        "ghcr.io/acme-sec/static-frontend:latest"
+    )
+    nondigest_static_frontend_manifest_path.write_text(
+        json.dumps(nondigest_static_frontend_manifest), encoding="utf-8"
+    )
+
+    nondigest_static_frontend_result, _, _, _ = _run_package_release_images(
+        tmp_path / "nondigest-static-frontend", nondigest_static_frontend_manifest_path, bundle="services"
+    )
+    nondigest_static_frontend_output = "\n".join(
+        part for part in [nondigest_static_frontend_result.stdout, nondigest_static_frontend_result.stderr] if part
+    )
+    assert nondigest_static_frontend_result.returncode != 0
+    assert "manifest image ref must be digest-pinned: static_frontend" in nondigest_static_frontend_output
 
 
 def test_package_release_images_script_uses_streaming_checksum_implementation() -> None:

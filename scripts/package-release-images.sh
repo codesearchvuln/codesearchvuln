@@ -89,6 +89,7 @@ BUNDLE_IMAGE_CONTRACTS = {
         ("redis", "vulhunter-local/redis"),
         ("adminer", "vulhunter-local/adminer"),
         ("scan_workspace_init", "vulhunter-local/scan-workspace-init"),
+        ("static_frontend", "vulhunter-local/static-frontend"),
     ],
     "scanner": [
         ("sandbox_runner", "vulhunter-local/sandbox-runner"),

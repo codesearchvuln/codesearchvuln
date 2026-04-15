@@ -132,7 +132,7 @@ services:
       - vulhunter-network
 
   frontend:
-    image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine}
+    image: ${STATIC_FRONTEND_IMAGE:-__STATIC_FRONTEND_IMAGE_REF__}
     restart: unless-stopped
     volumes:
       - ./deploy/runtime/frontend/site:/usr/share/nginx/html:ro

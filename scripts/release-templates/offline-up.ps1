@@ -201,6 +201,40 @@ function Ensure-ImagesReady {
     }
 }
 
+function Validate-ComposeImagesCoveredByBundles {
+    $allowed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($metadataPath in @($ServicesMetadataFile, $ScannerMetadataFile)) {
+        $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        foreach ($property in $metadata.images.PSObject.Properties) {
+            [void]$allowed.Add([string]$property.Value.local_tag)
+        }
+    }
+
+    $composeArgs = @()
+    if ($ComposeCommand.Count -gt 1) {
+        $composeArgs += $ComposeCommand[1..($ComposeCommand.Count - 1)]
+    }
+    $composeArgs += "config"
+    $composeOutput = & $ComposeCommand[0] @composeArgs
+    if ($LASTEXITCODE -ne 0) {
+        Fail "docker compose config failed"
+    }
+
+    $violations = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in @($composeOutput)) {
+        if ($line -match '^\s*image:\s*(\S+)\s*$') {
+            $imageRef = $matches[1].Trim()
+            if (-not $allowed.Contains($imageRef)) {
+                $violations.Add($imageRef)
+            }
+        }
+    }
+
+    if ($violations.Count -gt 0) {
+        Fail ("compose images not covered by services/scanner bundles: " + ($violations -join ", "))
+    }
+}
+
 function Resolve-DockerSocketPath {
     if ($env:DOCKER_SOCKET_PATH) {
         return $env:DOCKER_SOCKET_PATH
@@ -286,6 +320,7 @@ Load-Bundle -BundlePath $ServicesBundlePath
 Load-Bundle -BundlePath $ScannerBundlePath
 Ensure-ImagesReady
 Parse-And-ExportOfflineEnv
+Validate-ComposeImagesCoveredByBundles
 
 Log-Info "starting docker compose up -d"
 $command = $ComposeCommand[0]

@@ -20,6 +20,7 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "redis": {"ref": "ghcr.io/acme-sec/redis@sha256:" + "b" * 64},
             "adminer": {"ref": "ghcr.io/acme-sec/adminer@sha256:" + "c" * 64},
             "scan_workspace_init": {"ref": "ghcr.io/acme-sec/scan-workspace-init@sha256:" + "d" * 64},
+            "static_frontend": {"ref": "ghcr.io/acme-sec/nginx@sha256:" + "e" * 64},
             "sandbox_runner": {"ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64},
             "scanner_yasa": {"ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "3" * 64},
             "scanner_opengrep": {"ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "4" * 64},
@@ -87,6 +88,25 @@ printf '%s\\n' "$*" >>"$log"
 
 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then
   echo "Docker Compose version fake"
+  exit 0
+fi
+
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "config" ]; then
+  cat <<EOF
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:$(printf '1%.0s' {1..64})}
+  db:
+    image: ${POSTGRES_IMAGE:-ghcr.io/acme-sec/postgres@sha256:$(printf 'a%.0s' {1..64})}
+  redis:
+    image: ${REDIS_IMAGE:-ghcr.io/acme-sec/redis@sha256:$(printf 'b%.0s' {1..64})}
+  adminer:
+    image: ${ADMINER_IMAGE:-ghcr.io/acme-sec/adminer@sha256:$(printf 'c%.0s' {1..64})}
+  scan-workspace-init:
+    image: ${SCAN_WORKSPACE_INIT_IMAGE:-ghcr.io/acme-sec/scan-workspace-init@sha256:$(printf 'd%.0s' {1..64})}
+  frontend:
+    image: ${STATIC_FRONTEND_IMAGE:-docker.m.daocloud.io/library/nginx:1.27-alpine}
+EOF
   exit 0
 fi
 
@@ -197,9 +217,9 @@ def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(t
     env_dir = output_dir / "docker" / "env" / "backend"
     env_dir.mkdir(parents=True, exist_ok=True)
     (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
-    (env_dir / "offline-images.env").write_bytes(
-        b"\xef\xbb\xbfRUNNER_PREFLIGHT_OFFLINE_MODE=true\r\nBACKEND_IMAGE=vulhunter-local/backend:test\r\nFOO=a=b\r\n"
-    )
+    offline_example = (env_dir / "offline-images.env.example").read_text(encoding="utf-8")
+    offline_crlf = "\ufeff" + offline_example.replace("\n", "\r\n") + "FOO=a=b\r\n"
+    (env_dir / "offline-images.env").write_text(offline_crlf, encoding="utf-8")
 
     before_offline_env = (env_dir / "offline-images.env").read_text(encoding="utf-8-sig")
     socket_path = tmp_path / "docker.sock"
@@ -228,3 +248,44 @@ def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(t
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
     assert (env_dir / "offline-images.env").read_text(encoding="utf-8-sig") == before_offline_env
+
+
+def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        "RUNNER_PREFLIGHT_OFFLINE_MODE=true\n"
+        "BACKEND_IMAGE=vulhunter-local/backend:test\n",
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "STATIC_FRONTEND_IMAGE" in combined_output or "two bundles" in combined_output or "not covered" in combined_output

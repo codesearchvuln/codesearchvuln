@@ -148,6 +148,42 @@ ensure_images_ready() {
   done < <(emit_manifest_images)
 }
 
+validate_compose_images_local_only() {
+  local compose_output
+  compose_output="$(
+    cd "$ROOT_DIR"
+    docker compose config
+  )"
+
+  COMPOSE_CONFIG="$compose_output" python3 - "$SERVICES_METADATA_FILE" "$SCANNER_METADATA_FILE" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+
+allowed: set[str] = set()
+for metadata_path in sys.argv[1:]:
+    with open(metadata_path, encoding="utf-8") as handle:
+        metadata = json.load(handle)
+    for image in metadata["images"].values():
+        allowed.add(str(image["local_tag"]).strip())
+
+violations: list[str] = []
+for line in os.environ.get("COMPOSE_CONFIG", "").splitlines():
+    match = re.match(r"^\s*image:\s*(\S+)\s*$", line)
+    if not match:
+        continue
+    image_ref = match.group(1).strip()
+    if image_ref not in allowed:
+        violations.append(image_ref)
+
+if violations:
+    raise SystemExit("compose images not covered by services/scanner bundles: " + ", ".join(violations))
+PY
+}
+
 parse_and_export_offline_env() {
   local line_no=0 raw_line trimmed_line raw_name name value
 
@@ -223,6 +259,7 @@ main() {
   load_bundle "$scanner_bundle"
   ensure_images_ready
   parse_and_export_offline_env
+  validate_compose_images_local_only
 
   log_info "starting docker compose up -d"
   (
