@@ -140,6 +140,8 @@ jobs:
     permissions:
       contents: write
       packages: read
+    env:
+      GH_REPO: ${{ github.repository }}
     strategy:
       fail-fast: false
       matrix:
@@ -198,6 +200,8 @@ jobs:
     permissions:
       contents: write
       packages: read
+    env:
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Checkout release source
