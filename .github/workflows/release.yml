@@ -205,6 +205,88 @@ jobs:
           ref: ${{ needs.prepare-release.outputs.source_ref }}
           fetch-depth: 0
 
+      - name: Finalize preflight
+        env:
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SNAPSHOT_TAG}" ]] || { echo "::error::snapshot_tag is required."; exit 1; }
+          [[ -n "${SNAPSHOT_RELEASE_ID}" ]] || { echo "::error::snapshot_release_id is required."; exit 1; }
+          [[ "${SNAPSHOT_RELEASE_ID}" =~ ^[0-9]+$ ]] || {
+            echo "::error::snapshot_release_id must be numeric, got ${SNAPSHOT_RELEASE_ID}."
+            exit 1
+          }
+
+      - name: Inspect snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}
+        run: |
+          set -euo pipefail
+
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${SNAPSHOT_RELEASE_ID}")"
+          RELEASE_JSON="${release_json}" \
+          SNAPSHOT_TAG="${SNAPSHOT_TAG}" \
+          SNAPSHOT_RELEASE_ID="${SNAPSHOT_RELEASE_ID}" \
+          GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}" \
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import sys
+
+
+          release = json.loads(os.environ["RELEASE_JSON"])
+          expected_tag = os.environ["SNAPSHOT_TAG"]
+          release_id = os.environ["SNAPSHOT_RELEASE_ID"]
+          actual_tag = str(release.get("tag_name") or "").strip()
+          draft = release.get("draft")
+          assets = release.get("assets")
+          asset_names = []
+          if isinstance(assets, list):
+              asset_names = [str(item.get("name") or "").strip() for item in assets if isinstance(item, dict)]
+
+          if actual_tag != expected_tag:
+              raise SystemExit(
+                  f"snapshot release tag mismatch: expected {expected_tag}, got {actual_tag or '(empty)'}"
+              )
+          if draft is not True:
+              raise SystemExit(f"snapshot release must remain draft before finalize-download; got draft={draft!r}")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write("## Finalize Snapshot Preflight\n")
+              handle.write(f"- release_id: `{release_id}`\n")
+              handle.write(f"- snapshot_tag: `{expected_tag}`\n")
+              handle.write(f"- draft: `{draft}`\n")
+              handle.write(f"- asset_count: `{len(asset_names)}`\n")
+              if asset_names:
+                  handle.write(f"- available_assets: `{', '.join(asset_names)}`\n")
+          PY
+
+      - name: Download snapshot draft release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+        run: |
+          set -euo pipefail
+
+          rm -rf "${SNAPSHOT_ASSET_DIR}"
+          python3 ./scripts/download-release-assets.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            --release-id "${SNAPSHOT_RELEASE_ID}" \
+            --tag "${SNAPSHOT_TAG}" \
+            --output-dir "${SNAPSHOT_ASSET_DIR}"
+
+      - name: Write release-manifest.json
+        run: |
+          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
+
       - name: Setup pnpm for frontend release bundle
         uses: pnpm/action-setup@v5
         with:
@@ -231,10 +313,6 @@ jobs:
           cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
           cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
 
-      - name: Write release-manifest.json
-        run: |
-          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
-
       - name: Generate runtime release tree
         run: |
           ./scripts/generate-release-branch.sh \
@@ -243,36 +321,10 @@ jobs:
             --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
             --validate
 
-      - name: Download snapshot draft release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
-          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
-        run: |
-          set -euo pipefail
-
-          mkdir -p "${SNAPSHOT_ASSET_DIR}"
-          assets=(
-            "vulhunter-services-images-amd64.tar.zst"
-            "vulhunter-services-images-arm64.tar.zst"
-            "vulhunter-scanner-images-amd64.tar.zst"
-            "vulhunter-scanner-images-arm64.tar.zst"
-            "images-manifest-services-amd64.json"
-            "images-manifest-services-arm64.json"
-            "images-manifest-scanner-amd64.json"
-            "images-manifest-scanner-arm64.json"
-          )
-
-          for asset in "${assets[@]}"; do
-            gh release download "${SNAPSHOT_TAG}" \
-              --pattern "${asset}" \
-              --dir "${SNAPSHOT_ASSET_DIR}" \
-              --clobber
-          done
-
       - name: Validate snapshot assets and write release-snapshot-lock.json
         env:
           SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
         run: |
           set -euo pipefail
 
@@ -280,7 +332,7 @@ jobs:
             --release-tree "${RUNNER_TEMP}/release-tree" \
             --release-manifest "${RUNNER_TEMP}/release-manifest.json" \
             --snapshot-tag "${SNAPSHOT_TAG}" \
-            --asset-dir "${RUNNER_TEMP}/snapshot-assets"
+            --asset-dir "${SNAPSHOT_ASSET_DIR}"
 
       - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
@@ -357,8 +409,12 @@ jobs:
           trap cleanup EXIT
 
           cd "${PUBLISH_DIR}"
-
-          git checkout --orphan "release-publish-${GITHUB_RUN_ID}"
+          if git ls-remote --exit-code --heads origin release >/dev/null 2>&1; then
+            git fetch --force origin release:refs/remotes/origin/release
+            git checkout -B release origin/release
+          else
+            git checkout --orphan "release-publish-${GITHUB_RUN_ID}"
+          fi
 
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a "${RELEASE_DIR}/." .
@@ -367,9 +423,15 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
 
+          if git diff --cached --quiet --ignore-submodules --; then
+            echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            echo "Release branch is already up to date; skipping push."
+            exit 0
+          fi
+
           git commit -m "chore: refresh release branch snapshot"
           echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          git push --force origin HEAD:release
+          git push origin HEAD:release
 
       - name: Resolve semantic release version
         id: resolve_semantic_version

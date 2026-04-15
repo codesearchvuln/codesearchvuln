@@ -712,7 +712,9 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "service_health()" not in workflow_text
     assert "http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
     assert "dashboard_status_code=" in workflow_text
-    assert "git push --force origin HEAD:release" in workflow_text
+    assert "git push origin HEAD:release" in workflow_text
+    assert "git ls-remote --exit-code --heads origin release" in workflow_text
+    assert "git checkout -B release origin/release" in workflow_text
     assert "./scripts/release_version.py" in workflow_text
     assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
     assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text

@@ -257,6 +257,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "runtime_tag" in workflow_text
     assert "snapshot_tag" in workflow_text
     assert "snapshot_title" in workflow_text
+    assert "snapshot_release_id" in workflow_text
     assert "release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" in workflow_text
     assert "build-frontend-bundle:" not in workflow_text
     assert "assemble-release-tree:" not in workflow_text
@@ -303,13 +304,14 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "--draft=false" not in workflow_text
     assert workflow_text.count("--latest=false") >= 3
     assert 'gh release upload "${SNAPSHOT_TAG}"' in workflow_text
-    assert 'gh release download "${SNAPSHOT_TAG}"' in workflow_text
+    assert 'gh release download "${SNAPSHOT_TAG}"' not in workflow_text
     assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release edit "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release upload "${SEMANTIC_TAG}"' in workflow_text
     assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
     assert "generated_by=release.yml" in workflow_text
     assert "./scripts/release_version.py" in workflow_text
+    assert "./scripts/download-release-assets.py" in workflow_text
     assert "--github-output \"$GITHUB_OUTPUT\"" in workflow_text
     assert "write-release-snapshot-lock.py" in workflow_text
     assert "--image-manifest" in workflow_text
@@ -320,6 +322,9 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'cp "${SNAPSHOT_ASSET_DIR}/"*' in workflow_text
     assert "bash ./scripts/offline-up.sh" in workflow_text
     assert "SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets" in workflow_text
+    assert "SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}" in workflow_text
+    assert "Finalize preflight" in workflow_text
+    assert "Inspect snapshot draft release" in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text
     assert "service_cid()" not in workflow_text
@@ -335,20 +340,27 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "502|503|504|000)" in workflow_text
     assert "/api/v1/projects/dashboard-snapshot" in workflow_text
     assert "http://127.0.0.1:3000/" in workflow_text
-    assert "git push --force origin HEAD:release" in workflow_text
-    assert workflow_text.index("write-release-snapshot-lock.py") < workflow_text.index(
-        'git push --force origin HEAD:release'
+    assert "git push origin HEAD:release" in workflow_text
+    assert workflow_text.index("- name: Download snapshot draft release assets") < workflow_text.index(
+        "uses: pnpm/action-setup@v5"
     )
-    assert workflow_text.index('git push --force origin HEAD:release') < workflow_text.index(
+    assert workflow_text.index("./scripts/download-release-assets.py") < workflow_text.index(
+        "pnpm --dir frontend install --frozen-lockfile"
+    )
+    assert workflow_text.index("write-release-snapshot-lock.py") < workflow_text.index(
+        'git push origin HEAD:release'
+    )
+    assert workflow_text.index('git push origin HEAD:release') < workflow_text.index(
         '- name: Resolve semantic release version'
     )
     assert "fetch-depth: 0" in workflow_text
     assert "git checkout --orphan" in workflow_text
-    assert "origin/release" not in workflow_text
-    assert "git fetch origin release" not in workflow_text
-    assert "git checkout -B release origin/release" not in workflow_text
+    assert "git ls-remote --exit-code --heads origin release" in workflow_text
+    assert "git fetch --force origin release:refs/remotes/origin/release" in workflow_text
+    assert "git checkout -B release origin/release" in workflow_text
     assert "git fetch --force --tags origin" in workflow_text
     assert "git push origin --delete" not in workflow_text
+    assert "git push --force origin HEAD:release" not in workflow_text
     assert "release-tag-cleanup.txt" not in workflow_text
     assert "release-assets-latest" not in workflow_text
     assert "docker-publish.yml" not in workflow_text
