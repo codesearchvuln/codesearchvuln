@@ -562,7 +562,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes
+          gh release delete "${SNAPSHOT_TAG}" --yes
 
   cleanup-draft-release:
     if: ${{ failure() || cancelled() }}
@@ -601,4 +601,4 @@ jobs:
             exit 0
           fi
 
-          gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes
+          gh release delete "${SNAPSHOT_TAG}" --yes
