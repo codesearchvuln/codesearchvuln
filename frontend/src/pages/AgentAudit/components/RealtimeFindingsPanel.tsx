@@ -33,6 +33,7 @@ import {
 	getAgentAuditFindingDisplayStatus,
 	getAgentAuditFindingStatusBadgeClass,
 	getAgentAuditFindingStatusLabel,
+	isAgentAuditFindingDetailDisabled,
 	type AgentAuditFindingDisplayStatus,
 	resolveAgentAuditPaginationTransition,
 	shouldSyncFindingPageFromTableState,
@@ -408,6 +409,9 @@ export default function RealtimeFindingsPanel(props: {
 								<TableBody>
 									{tableState.rows.map((row, index) => {
 										const findingItem = row.raw as RealtimeMergedFindingItem;
+										const detailDisabled = isAgentAuditFindingDetailDisabled(
+											props.isRunning,
+										);
 										const statusValue =
 											props.getDisplayStatus?.(findingItem) ??
 											row.statusValue ??
@@ -475,7 +479,16 @@ export default function RealtimeFindingsPanel(props: {
 															size="sm"
 															variant="outline"
 															className="cyber-btn-ghost h-8 px-3"
-															onClick={() => props.onOpenDetail(findingItem)}
+															disabled={detailDisabled}
+															title={
+																detailDisabled
+																	? "扫描结束后可查看详情"
+																	: undefined
+															}
+															onClick={() => {
+																if (detailDisabled) return;
+																props.onOpenDetail(findingItem);
+															}}
 														>
 															{getActionLabel(findingItem)}
 														</Button>

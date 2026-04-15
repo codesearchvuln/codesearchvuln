@@ -498,6 +498,10 @@ export function getAgentAuditFindingStatusBadgeClass(
   return "border-border bg-muted text-muted-foreground";
 }
 
+export function isAgentAuditFindingDetailDisabled(isRunning: boolean): boolean {
+  return isRunning;
+}
+
 function normalizeSeverityKey(item: RealtimeFindingLike): string {
   const display = String(item.display_severity || "").trim().toLowerCase();
   if (display) return display;
