@@ -28,6 +28,11 @@ from app.models.project import Project
 from app.core.config import settings
 from app.core.encryption import encrypt_sensitive_data, decrypt_sensitive_data
 from app.services.agent.skills.scan_core import build_scan_core_skill_availability
+from app.services.agent.workflow.user_runtime_config import (
+    AgentWorkflowConfigSource,
+    load_user_agent_workflow_config,
+    save_user_agent_workflow_config,
+)
 from app.services.llm.config_utils import (
     normalize_llm_base_url,
     parse_llm_custom_headers,
@@ -473,6 +478,7 @@ def _sanitize_other_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
     for retired_key in ("githubToken", "gitlabToken", "giteaToken", "outputLanguage"):
         candidate.pop(retired_key, None)
+    candidate.pop("mcpConfig", None)
     candidate.pop("toolRuntimeConfig", None)
     return candidate
 
@@ -480,6 +486,7 @@ def _strip_runtime_config(raw_other_config: Any) -> dict:
     candidate = dict(raw_other_config) if isinstance(raw_other_config, dict) else {}
     for retired_key in ("githubToken", "gitlabToken", "giteaToken", "outputLanguage"):
         candidate.pop(retired_key, None)
+    candidate.pop("mcpConfig", None)
     candidate.pop("toolRuntimeConfig", None)
     return candidate
 
@@ -633,6 +640,21 @@ class UserConfigResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class AgentWorkflowConfigResponse(BaseModel):
+    analysis_count: int = Field(..., ge=1, le=32)
+    verification_count: int = Field(..., ge=1, le=32)
+    default_analysis_count: int = Field(..., ge=1, le=32)
+    default_verification_count: int = Field(..., ge=1, le=32)
+    default_source: AgentWorkflowConfigSource
+    source: AgentWorkflowConfigSource
+    has_user_override: bool
+
+
+class AgentWorkflowConfigUpdateRequest(BaseModel):
+    analysis_count: int = Field(..., ge=1, le=32)
+    verification_count: int = Field(..., ge=1, le=32)
+
 def get_default_config() -> dict:
     """获取系统默认配置"""
     return {
@@ -675,6 +697,32 @@ def get_default_config() -> dict:
 async def get_default_config_endpoint() -> Any:
     """获取系统默认配置（无需认证）"""
     return get_default_config()
+
+
+@router.get("/agent-workflow", response_model=AgentWorkflowConfigResponse)
+async def get_agent_workflow_config(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """获取当前用户的智能引擎 workflow 并发配置。"""
+    return await load_user_agent_workflow_config(
+        db,
+        user_id=str(current_user.id),
+    )
+
+
+@router.put("/agent-workflow", response_model=AgentWorkflowConfigResponse)
+async def update_agent_workflow_config(
+    payload: AgentWorkflowConfigUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """更新当前用户的智能引擎 workflow 并发配置。"""
+    return await save_user_agent_workflow_config(
+        db,
+        user_id=str(current_user.id),
+        runtime_config=payload.model_dump(),
+    )
 
 @router.get("/me", response_model=UserConfigResponse)
 async def get_my_config(
@@ -736,8 +784,12 @@ async def update_my_config(
     config = result.scalar_one_or_none()
     
     # 准备要保存的配置数据（加密敏感字段）
-    llm_data = config_in.llmConfig.dict(exclude_none=True) if config_in.llmConfig else {}
-    other_data = config_in.otherConfig.dict(exclude_none=True) if config_in.otherConfig else {}
+    llm_data = config_in.llmConfig.model_dump(exclude_none=True) if config_in.llmConfig else {}
+    other_data = (
+        config_in.otherConfig.model_dump(exclude_none=True)
+        if config_in.otherConfig
+        else {}
+    )
     if llm_data:
         if "llmProvider" in llm_data:
             provider_id, _ = _resolve_llm_runtime_provider(llm_data.get("llmProvider"))

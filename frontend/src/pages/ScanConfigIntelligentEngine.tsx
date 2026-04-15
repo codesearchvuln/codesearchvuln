@@ -1,5 +1,5 @@
 import { Brain, KeyRound, Settings, Zap } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
 	LlmModelStatsSource,
@@ -9,7 +9,15 @@ import {
 	SystemConfig,
 	useSystemConfigDraftState,
 } from "@/components/system/SystemConfig";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import {
+	api,
+	type AgentWorkflowConfigPayload,
+	type AgentWorkflowConfigSource,
+} from "@/shared/api/database";
+import { toast } from "sonner";
 
 type LlmSummaryState = {
 	providerLabel: string;
@@ -22,12 +30,31 @@ type LlmSummaryState = {
 	shouldPreferOnlineStats: boolean;
 };
 
+type WorkflowDraftState = {
+	analysisCount: string;
+	verificationCount: string;
+};
+
+const WORKFLOW_SOURCE_LABELS: Record<AgentWorkflowConfigSource, string> = {
+	user_override: "用户覆盖",
+	local_file: "本地 config.yml",
+	settings_default: "系统默认",
+};
+
 export default function ScanConfigIntelligentEngine() {
 	const sharedDraftState = useSystemConfigDraftState();
 	const summaryConfig = sharedDraftState.config;
 	const [summaryState, setSummaryState] = useState<LlmSummaryState | null>(
 		null,
 	);
+	const [workflowConfig, setWorkflowConfig] =
+		useState<AgentWorkflowConfigPayload | null>(null);
+	const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraftState>({
+		analysisCount: "",
+		verificationCount: "",
+	});
+	const [workflowLoading, setWorkflowLoading] = useState(true);
+	const [workflowSaving, setWorkflowSaving] = useState(false);
 	const summary: LlmSummaryState = {
 		providerLabel:
 			summaryState?.providerLabel || summaryConfig?.llmProvider || "--",
@@ -47,6 +74,99 @@ export default function ScanConfigIntelligentEngine() {
 			: summary.modelStatsStatus === "empty"
 				? "--"
 				: `${summary.availableModelCount}`;
+
+	useEffect(() => {
+		let active = true;
+
+		const loadWorkflowConfig = async () => {
+			try {
+				setWorkflowLoading(true);
+				const response = await api.getAgentWorkflowConfig();
+				if (!active) return;
+				setWorkflowConfig(response);
+				setWorkflowDraft({
+					analysisCount: String(response.analysis_count),
+					verificationCount: String(response.verification_count),
+				});
+			} catch (error) {
+				if (!active) return;
+				console.error("Failed to load agent workflow config:", error);
+				toast.error("加载智能引擎并发配置失败");
+			} finally {
+				if (active) setWorkflowLoading(false);
+			}
+		};
+
+		void loadWorkflowConfig();
+		return () => {
+			active = false;
+		};
+	}, []);
+
+	const updateWorkflowDraft = (
+		key: keyof WorkflowDraftState,
+		value: string,
+	) => {
+		setWorkflowDraft((prev) => ({
+			...prev,
+			[key]: value,
+		}));
+	};
+
+	const applyWorkflowDefaults = () => {
+		if (!workflowConfig) return;
+		setWorkflowDraft({
+			analysisCount: String(workflowConfig.default_analysis_count),
+			verificationCount: String(workflowConfig.default_verification_count),
+		});
+	};
+
+	const saveWorkflowConfig = async () => {
+		const analysisCount = Number.parseInt(workflowDraft.analysisCount, 10);
+		const verificationCount = Number.parseInt(
+			workflowDraft.verificationCount,
+			10,
+		);
+
+		if (!Number.isInteger(analysisCount) || analysisCount < 1 || analysisCount > 32) {
+			toast.error("Analysis 并发数必须是 1 到 32 的整数");
+			return;
+		}
+		if (
+			!Number.isInteger(verificationCount) ||
+			verificationCount < 1 ||
+			verificationCount > 32
+		) {
+			toast.error("Verification 并发数必须是 1 到 32 的整数");
+			return;
+		}
+
+		try {
+			setWorkflowSaving(true);
+			const response = await api.updateAgentWorkflowConfig({
+				analysis_count: analysisCount,
+				verification_count: verificationCount,
+			});
+			setWorkflowConfig(response);
+			setWorkflowDraft({
+				analysisCount: String(response.analysis_count),
+				verificationCount: String(response.verification_count),
+			});
+			toast.success("智能引擎并发配置已保存");
+		} catch (error) {
+			console.error("Failed to save agent workflow config:", error);
+			toast.error("保存智能引擎并发配置失败");
+		} finally {
+			setWorkflowSaving(false);
+		}
+	};
+
+	const workflowSourceLabel = workflowConfig
+		? WORKFLOW_SOURCE_LABELS[workflowConfig.source]
+		: "--";
+	const workflowDefaultSourceLabel = workflowConfig
+		? WORKFLOW_SOURCE_LABELS[workflowConfig.default_source]
+		: "--";
 
 	return (
 		<div className="space-y-6 p-6 bg-background min-h-screen relative">
@@ -114,6 +234,120 @@ export default function ScanConfigIntelligentEngine() {
 						sharedDraftState={sharedDraftState}
 						onLlmSummaryChange={setSummaryState}
 					/>
+
+					<div className="section-header mb-0">
+						<Zap className="w-4 h-4 text-primary" />
+						<div className="font-mono font-bold uppercase text-sm text-foreground">
+							Workflow 并发控制
+						</div>
+					</div>
+					<div className="cyber-card p-4 space-y-4">
+						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
+								<div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+									当前来源
+								</div>
+								<div className="mt-2 text-lg font-semibold text-foreground">
+									{workflowLoading ? "加载中..." : workflowSourceLabel}
+								</div>
+								<div className="mt-2 text-xs leading-5 text-muted-foreground">
+									未单独设置时，默认取自 {workflowDefaultSourceLabel}
+								</div>
+							</div>
+							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
+								<div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+									Analysis 共享池
+								</div>
+								<div className="mt-2 text-2xl font-semibold text-foreground">
+									{workflowLoading ? "--" : workflowConfig?.analysis_count ?? "--"}
+								</div>
+								<div className="mt-2 text-xs leading-5 text-muted-foreground">
+									同时作用于 Analysis 与 Business Logic Analysis
+								</div>
+							</div>
+							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
+								<div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+									Verification 池
+								</div>
+								<div className="mt-2 text-2xl font-semibold text-foreground">
+									{workflowLoading
+										? "--"
+										: workflowConfig?.verification_count ?? "--"}
+								</div>
+								<div className="mt-2 text-xs leading-5 text-muted-foreground">
+									控制漏洞验证阶段的并发 worker 数
+								</div>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+							<div className="space-y-2">
+								<Label htmlFor="workflow-analysis-count">
+									Analysis 并发数
+								</Label>
+								<Input
+									id="workflow-analysis-count"
+									type="number"
+									min={1}
+									max={32}
+									step={1}
+									value={workflowDraft.analysisCount}
+									onChange={(event) =>
+										updateWorkflowDraft("analysisCount", event.target.value)
+									}
+									disabled={workflowLoading || workflowSaving}
+								/>
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="workflow-verification-count">
+									Verification 并发数
+								</Label>
+								<Input
+									id="workflow-verification-count"
+									type="number"
+									min={1}
+									max={32}
+									step={1}
+									value={workflowDraft.verificationCount}
+									onChange={(event) =>
+										updateWorkflowDraft("verificationCount", event.target.value)
+									}
+									disabled={workflowLoading || workflowSaving}
+								/>
+							</div>
+						</div>
+
+						<div className="rounded-sm border border-dashed border-border/50 bg-background/10 p-3 text-sm leading-6 text-muted-foreground">
+							这里配置的是智能扫描 workflow 的 worker 池大小。保存后会作用于当前用户后续新发起的智能扫描 / 混合扫描任务，不会追溯修改正在运行的任务。
+						</div>
+
+						<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+							<div className="text-xs leading-5 text-muted-foreground">
+								本地默认值：Analysis{" "}
+								{workflowConfig?.default_analysis_count ?? "--"} / Verification{" "}
+								{workflowConfig?.default_verification_count ?? "--"}
+							</div>
+							<div className="flex flex-col-reverse gap-2 sm:flex-row">
+								<Button
+									type="button"
+									variant="outline"
+									className="cyber-btn-ghost"
+									onClick={applyWorkflowDefaults}
+									disabled={workflowLoading || workflowSaving || !workflowConfig}
+								>
+									填回本地默认
+								</Button>
+								<Button
+									type="button"
+									className="cyber-btn"
+									onClick={saveWorkflowConfig}
+									disabled={workflowLoading || workflowSaving}
+								>
+									{workflowSaving ? "保存中..." : "保存并发配置"}
+								</Button>
+							</div>
+						</div>
+					</div>
 
 					{/* <div className="section-header mb-0">
 						<Zap className="w-4 h-4 text-primary" />

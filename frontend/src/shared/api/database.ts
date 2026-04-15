@@ -26,6 +26,21 @@ interface UserConfigPayload {
   updated_at?: string;
 }
 
+export type AgentWorkflowConfigSource =
+  | "user_override"
+  | "local_file"
+  | "settings_default";
+
+export interface AgentWorkflowConfigPayload {
+  analysis_count: number;
+  verification_count: number;
+  default_analysis_count: number;
+  default_verification_count: number;
+  default_source: AgentWorkflowConfigSource;
+  source: AgentWorkflowConfigSource;
+  has_user_override: boolean;
+}
+
 interface LlmQuickConfigSnapshotPayload {
   provider: string;
   model: string;
@@ -834,6 +849,22 @@ export const api = {
     otherConfig?: ConfigObject;
   }): Promise<UserConfigPayload> {
     const res = await apiClient.put('/config/me', config);
+    return res.data;
+  },
+
+  async getAgentWorkflowConfig(): Promise<AgentWorkflowConfigPayload> {
+    const res = await apiClient.get<AgentWorkflowConfigPayload>("/config/agent-workflow");
+    return res.data;
+  },
+
+  async updateAgentWorkflowConfig(payload: {
+    analysis_count: number;
+    verification_count: number;
+  }): Promise<AgentWorkflowConfigPayload> {
+    const res = await apiClient.put<AgentWorkflowConfigPayload>(
+      "/config/agent-workflow",
+      payload,
+    );
     return res.data;
   },
 

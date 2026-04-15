@@ -27,6 +27,9 @@ from app.models.project import Project
 from app.models.prompt_skill import PromptSkill
 from app.services.project_metrics import project_metrics_refresher
 from app.services.agent.write_scope import TaskWriteScopeGuard
+from app.services.agent.workflow.user_runtime_config import (
+    resolve_effective_agent_workflow_config,
+)
 from app.services.agent.skills.prompt_skills import (
     PROMPT_SKILL_AGENT_KEYS,
     PROMPT_SKILL_BUILTIN_STATE_CONFIG_KEY,
@@ -63,6 +66,24 @@ def _normalize_terminal_agent_findings(
         item.verification_result = verification_result
     return findings
 
+
+def _build_workflow_config_from_user_config(user_config: Optional[Dict[str, Any]]):
+    from app.core.config import settings
+    from app.services.agent.workflow.models import WorkflowConfig
+
+    other_config = user_config.get("otherConfig") if isinstance(user_config, dict) else {}
+    runtime_config = resolve_effective_agent_workflow_config(other_config)
+
+    return WorkflowConfig(
+        enable_parallel_analysis=settings.ENABLE_PARALLEL_ANALYSIS,
+        enable_parallel_verification=settings.ENABLE_PARALLEL_VERIFICATION,
+        enable_parallel_report=settings.ENABLE_PARALLEL_REPORT,
+        analysis_max_workers=runtime_config["analysis_count"],
+        verification_max_workers=runtime_config["verification_count"],
+        report_max_workers=settings.REPORT_MAX_WORKERS,
+        use_agent_count_config_file=False,
+    )
+
 async def _execute_agent_task(task_id: str):
     """
     在后台执行 Agent 任务 - 使用动态 Agent 树架构
@@ -71,7 +92,6 @@ async def _execute_agent_task(task_id: str):
     """
     from app.services.agent.agents import OrchestratorAgent, ReconAgent, AnalysisAgent, VerificationAgent, ReportAgent, BusinessLogicReconAgent, BusinessLogicAnalysisAgent
     from app.services.agent.workflow import WorkflowOrchestratorAgent
-    from app.services.agent.workflow.models import WorkflowConfig
     from app.services.agent.event_manager import EventManager, AgentEventEmitter
     from app.services.llm.service import LLMService, LLMConfigError
     from app.services.agent.core import agent_registry
@@ -363,18 +383,9 @@ async def _execute_agent_task(task_id: str):
                 if hasattr(agent, "set_write_scope_guard"):
                     agent.set_write_scope_guard(write_scope_guard)
 
-            # 创建 Workflow 配置（基础值来自 settings；
-            # analysis / verification worker 数可由 workflow/config.yml 覆盖）
-            from app.core.config import settings
-            workflow_config = WorkflowConfig(
-                enable_parallel_analysis=settings.ENABLE_PARALLEL_ANALYSIS,
-                enable_parallel_verification=settings.ENABLE_PARALLEL_VERIFICATION,
-                enable_parallel_report=settings.ENABLE_PARALLEL_REPORT,
-                analysis_max_workers=settings.ANALYSIS_MAX_WORKERS,
-                verification_max_workers=settings.VERIFICATION_MAX_WORKERS,
-                report_max_workers=settings.REPORT_MAX_WORKERS,
-                use_agent_count_config_file=True,
-            )
+            # Workflow 并发配置优先使用当前用户在“扫描配置-智能引擎”中保存的值；
+            # 若用户未覆盖，则回退到 workflow/config.yml 或 settings 默认值。
+            workflow_config = _build_workflow_config_from_user_config(user_config)
 
             # 创建 Orchestrator Agent（使用确定性 Workflow 版本，注入两个队列服务）
             orchestrator = WorkflowOrchestratorAgent(
