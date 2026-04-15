@@ -163,17 +163,17 @@ copy_frontend_runtime_bundle() {
 overlay_release_templates() {
   mkdir -p \
     "$OUTPUT_DIR/scripts" \
+    "$OUTPUT_DIR/scripts/lib" \
     "$OUTPUT_DIR/docker" \
     "$OUTPUT_DIR/docker/env/backend"
 
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
-  cp "$TEMPLATE_DIR/load-images.sh" "$OUTPUT_DIR/scripts/load-images.sh"
-  cp "$TEMPLATE_DIR/load-images.ps1" "$OUTPUT_DIR/scripts/load-images.ps1"
-  cp "$TEMPLATE_DIR/use-offline-env.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
-  cp "$TEMPLATE_DIR/use-offline-env.ps1" "$OUTPUT_DIR/scripts/use-offline-env.ps1"
-  chmod +x "$OUTPUT_DIR/scripts/load-images.sh" "$OUTPUT_DIR/scripts/use-offline-env.sh"
+  cp "$TEMPLATE_DIR/offline-up.sh" "$OUTPUT_DIR/scripts/offline-up.sh"
+  cp "$TEMPLATE_DIR/offline-up.ps1" "$OUTPUT_DIR/scripts/offline-up.ps1"
+  cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/lib/compose-env.sh"
+  chmod +x "$OUTPUT_DIR/scripts/offline-up.sh"
   render_release_compose
   python3 - \
     "$IMAGE_MANIFEST" \
@@ -220,8 +220,8 @@ services_images_payload: dict[str, dict[str, str]] = {}
 scanner_images_payload: dict[str, dict[str, str]] = {}
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
-    "# Then run ./scripts/load-images.sh and ./scripts/use-offline-env.sh docker compose up -d",
-    "# On Windows PowerShell, use .\\scripts\\load-images.ps1 and .\\scripts\\use-offline-env.ps1 instead.",
+    "# Then run bash ./scripts/offline-up.sh.",
+    "# On Windows PowerShell, use powershell -ExecutionPolicy Bypass -File .\\scripts\\offline-up.ps1 instead.",
     "# This release tree does not support rebuilding backend/frontend from source.",
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
 ]
@@ -276,10 +276,9 @@ validate_release_tree() {
     "images-manifest-services.json"
     "images-manifest-scanner.json"
     "scripts/README-COMPOSE.md"
-    "scripts/load-images.sh"
-    "scripts/load-images.ps1"
-    "scripts/use-offline-env.sh"
-    "scripts/use-offline-env.ps1"
+    "scripts/offline-up.sh"
+    "scripts/offline-up.ps1"
+    "scripts/lib/compose-env.sh"
     "docker/env/backend/env.example"
     "docker/env/backend/offline-images.env.example"
     "deploy/runtime/frontend/site/index.html"
@@ -301,6 +300,10 @@ validate_release_tree() {
     "docker/frontend.Dockerfile"
     "scripts/compose-up-local-build.sh"
     "scripts/compose-up-with-fallback.sh"
+    "scripts/load-images.sh"
+    "scripts/load-images.ps1"
+    "scripts/use-offline-env.sh"
+    "scripts/use-offline-env.ps1"
   )
 
   for rel_path in "${required_paths[@]}"; do

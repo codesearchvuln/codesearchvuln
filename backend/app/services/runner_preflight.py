@@ -125,11 +125,11 @@ def _ensure_runner_image(client, spec: RunnerPreflightSpec) -> None:
         if bool(getattr(settings, "RUNNER_PREFLIGHT_OFFLINE_MODE", False)):
             raise RuntimeError(
                 f"offline runner image unavailable for {spec.name}: {spec.image}. "
-                "Run ./scripts/load-images.sh and retry the startup command."
+                "Run ./scripts/offline-up.sh and retry the startup command."
             ) from exc
         raise RuntimeError(
             f"pull failed for {spec.name}: {exc}. "
-            "If you intended to run offline, preload images with ./scripts/load-images.sh first."
+            "If you intended to run offline, use ./scripts/offline-up.sh first."
         ) from exc
 
 

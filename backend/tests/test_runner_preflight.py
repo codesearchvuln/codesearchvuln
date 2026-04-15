@@ -125,7 +125,7 @@ def test_ensure_runner_image_raises_when_cloud_pull_fails(monkeypatch):
         runner_preflight._ensure_runner_image(SimpleNamespace(images=_FakeImages()), spec)
 
 
-def test_ensure_runner_image_offline_mode_points_to_load_script(monkeypatch):
+def test_ensure_runner_image_offline_mode_points_to_offline_up(monkeypatch):
     class _FakeImages:
         def get(self, _image):
             raise runner_preflight.DOCKER_NOT_FOUND("missing")
@@ -142,7 +142,7 @@ def test_ensure_runner_image_offline_mode_points_to_load_script(monkeypatch):
         timeout_seconds=10,
     )
 
-    with pytest.raises(RuntimeError, match="scripts/load-images.sh"):
+    with pytest.raises(RuntimeError, match=r"scripts/offline-up\.sh"):
         runner_preflight._ensure_runner_image(SimpleNamespace(images=_FakeImages()), spec)
 
 

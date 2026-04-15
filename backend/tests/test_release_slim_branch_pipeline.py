@@ -378,10 +378,9 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "images-manifest-services.json",
         "images-manifest-scanner.json",
         "scripts/README-COMPOSE.md",
-        "scripts/load-images.sh",
-        "scripts/load-images.ps1",
-        "scripts/use-offline-env.sh",
-        "scripts/use-offline-env.ps1",
+        "scripts/offline-up.sh",
+        "scripts/offline-up.ps1",
+        "scripts/lib/compose-env.sh",
         "docker/env/backend/env.example",
         "docker/env/backend/offline-images.env.example",
         "deploy/runtime/frontend/site/index.html",
@@ -406,6 +405,10 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "docker/frontend.Dockerfile",
         "scripts/compose-up-local-build.sh",
         "scripts/compose-up-with-fallback.sh",
+        "scripts/load-images.sh",
+        "scripts/load-images.ps1",
+        "scripts/use-offline-env.sh",
+        "scripts/use-offline-env.ps1",
         "deploy/compose",
     ]
     for rel_path in forbidden_paths:
@@ -502,8 +505,11 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
     )
     for doc in docs:
         assert "docker compose up" in doc
-        assert "load-images.sh" in doc
-        assert "load-images.ps1" in doc
+        assert "offline-up.sh" in doc or "offline-up.ps1" in doc
+        assert "load-images.sh" not in doc
+        assert "load-images.ps1" not in doc
+        assert "use-offline-env.sh" not in doc
+        assert "use-offline-env.ps1" not in doc
         assert "offline-images.env" in doc
         assert "vulhunter-services-images-" in doc
         assert "vulhunter-scanner-images-" in doc
@@ -521,8 +527,13 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "PowerShell" in doc
         assert "WSL" in doc
         assert "Copy-Item" in doc or "cp " in doc
-        assert ".\\scripts\\load-images.ps1" in doc or "./scripts/load-images.sh" in doc
-        assert ".\\scripts\\use-offline-env.ps1" in doc or "./scripts/use-offline-env.sh" in doc
+        assert ".\\scripts\\offline-up.ps1" in doc or "./scripts/offline-up.sh" in doc
+        assert "Choose exactly one shell path" in doc or "只选一种" in doc or "不要混用" in doc
+        assert "LLM_API_KEY" in doc
+        assert "cloud" in doc.lower() or "云端" in doc
+        assert "chmod +x" not in doc
+        assert "chmod 666" not in doc
+        assert "docker compose down" not in doc or "down -v" in doc
 
 
 def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tmp_path: Path) -> None:
@@ -559,10 +570,9 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     offline_env = (output_dir / "docker" / "env" / "backend" / "offline-images.env.example").read_text(
         encoding="utf-8"
     )
-    load_script = (output_dir / "scripts" / "load-images.sh").read_text(encoding="utf-8")
-    load_script_ps1 = (output_dir / "scripts" / "load-images.ps1").read_text(encoding="utf-8")
-    use_offline_env_script = (output_dir / "scripts" / "use-offline-env.sh").read_text(encoding="utf-8")
-    use_offline_env_script_ps1 = (output_dir / "scripts" / "use-offline-env.ps1").read_text(encoding="utf-8")
+    offline_up_script = (output_dir / "scripts" / "offline-up.sh").read_text(encoding="utf-8")
+    offline_up_script_ps1 = (output_dir / "scripts" / "offline-up.ps1").read_text(encoding="utf-8")
+    compose_env_helper = (output_dir / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8")
 
     assert services_metadata["revision"] == manifest["revision"]
     assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
@@ -600,28 +610,23 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "\nNEXUS_ITEM_DETAIL_IMAGE=" not in offline_env
     assert "\nFRONTEND_IMAGE=" not in offline_env
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
-    assert "vulhunter-services-images-${arch}.tar.zst" in load_script
-    assert "vulhunter-scanner-images-${arch}.tar.zst" in load_script
-    assert "images-manifest-services.json" in load_script
-    assert "images-manifest-scanner.json" in load_script
-    assert "docker load" in load_script
-    assert "docker tag" in load_script
-    assert "[offline-images]" in load_script_ps1
-    assert "vulhunter-services-images-$Arch.tar.zst" in load_script_ps1
-    assert "vulhunter-scanner-images-$Arch.tar.zst" in load_script_ps1
-    assert "images-manifest-services.json" in load_script_ps1
-    assert "images-manifest-scanner.json" in load_script_ps1
-    assert "docker load" in load_script_ps1
-    assert "docker tag" in load_script_ps1
-    assert "zstd" in load_script_ps1
-    assert "PROCESSOR_ARCHITECTURE" in load_script_ps1 or "RuntimeInformation" in load_script_ps1
-    assert "docker/env/backend/offline-images.env" in use_offline_env_script
-    assert "docker compose up -d" in use_offline_env_script
-    assert "[offline-env]" in use_offline_env_script_ps1
-    assert "OFFLINE_ENV_FILE" in use_offline_env_script_ps1
-    assert "docker/env/backend/offline-images.env" in use_offline_env_script_ps1
-    assert "docker compose up -d" in use_offline_env_script_ps1
-    assert "Split('=', 2)" in use_offline_env_script_ps1 or "-split '=', 2" in use_offline_env_script_ps1
+    assert "offline-up" in offline_env
+    assert "[offline-up]" in offline_up_script
+    assert "images-manifest-services.json" in offline_up_script
+    assert "images-manifest-scanner.json" in offline_up_script
+    assert "docker/env/backend/offline-images.env" in offline_up_script
+    assert "docker compose up -d" in offline_up_script
+    assert "load_container_socket_env" in offline_up_script
+    assert "load_container_socket_gid_env" in offline_up_script
+    assert "[offline-up]" in offline_up_script_ps1
+    assert "images-manifest-services.json" in offline_up_script_ps1
+    assert "images-manifest-scanner.json" in offline_up_script_ps1
+    assert "docker/env/backend/offline-images.env" in offline_up_script_ps1
+    assert "docker compose up -d" in offline_up_script_ps1
+    assert "docker-compose" in offline_up_script_ps1
+    assert "Split('=', 2)" in offline_up_script_ps1 or "-split '=', 2" in offline_up_script_ps1
+    assert "load_container_socket_env" in compose_env_helper
+    assert "load_container_socket_gid_env" in compose_env_helper
 
 
 def test_package_release_images_script_supports_single_arch_mode() -> None:

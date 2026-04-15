@@ -14,9 +14,9 @@ cat >&2 <<'MSG'
 [deploy-release]     docker compose up -d
 [deploy-release]
 [deploy-release]   Offline:
-[deploy-release]     cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-[deploy-release]     ./scripts/load-images.sh
-[deploy-release]     ./scripts/use-offline-env.sh docker compose up -d
+[deploy-release]     bash ./scripts/offline-up.sh
+[deploy-release]     # Or on Windows PowerShell:
+[deploy-release]     powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
 [deploy-release]
 [deploy-release] If you still depend on the old source tarball flow, migrate that automation before the next release cut.
 MSG

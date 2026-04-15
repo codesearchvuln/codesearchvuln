@@ -1,89 +1,109 @@
 # VulHunter 部署指南
 
-本目录用于部署 VulHunter 服务，包含启动所需的 Docker Compose 配置、环境变量模板、前端静态文件以及辅助脚本。按照本文档完成配置后，即可直接启动 Web 界面、后端服务、数据库、Redis 和默认扫描运行组件。
+本目录是 VulHunter 的 image-only release 运行包，包含 `docker-compose.yml`、环境模板、前端静态资源、`nexus-*` 静态页面和离线辅助脚本。它不包含 `backend` / `frontend` 源码，也不支持在 release 包内本地重建前后端。
 
-## 1. 快速开始
+## 1. 支持范围与前提
 
-首次启动前，请先复制环境变量模板：
+- 支持的宿主机环境：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10`、`Windows 11`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
+- `Windows 10/11` 宿主机需要使用 `Docker Desktop` 并启用 Linux containers
+- 离线路径需要宿主机预装：`docker`、`zstd`；`Bash/WSL` 路径额外需要 `python3`
+- 浏览器支持：`Safari`、`Chrome`、`Edge`
+- 推荐配置：`8 核 CPU`、`16 GB 内存`
+
+离线仅表示运行镜像会先导入本地并切换到本地标签，不表示云端模型 API 也会离线。如果你的 `LLM_PROVIDER` / `LLM_MODEL` 仍然依赖 cloud API，运行时仍然需要网络连通性。
+
+## 2. 首次配置
+
+推荐先在 release 根目录执行：
 
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 ```
 
-然后至少补齐以下配置：
+至少确认这些配置：
 
 - `LLM_API_KEY`
 - `LLM_PROVIDER`
 - `LLM_MODEL`
 
-如需数据库、Redis、鉴权或其他业务配置，请继续编辑 `docker/env/backend/.env`。
+如果你直接执行离线单入口脚本，而 `docker/env/backend/.env` 不存在，脚本会自动从 `docker/env/backend/env.example` 复制一份并继续执行；但这不代表配置已经可用于生产，请至少确认上面三个字段。
 
-完成配置后，执行：
-
-```bash
-docker compose up -d
-```
-
-## 2. 部署支持范围与声明
-
-- 当前 release 包仅面向宿主机部署，支持的宿主机环境为：
-  `Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10`、`Windows 11`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
-- `Windows 10/11` 宿主机场景需要使用 `Docker Desktop` 并启用 Linux containers。release 运行依赖 Docker Engine / Docker Compose，且 backend 容器必须能够访问 Docker Socket（默认 `/var/run/docker.sock`）以执行 runner preflight 和实际扫描任务；若你的 Docker Socket 路径或组 ID 与默认值不同，请自行设置 `DOCKER_SOCKET_PATH` 与 `DOCKER_SOCKET_GID`。若 Docker Desktop 的 Linux 容器模式、WSL 集成、Docker Socket 挂载或权限 / 组 ID 配置异常导致失败，不属于当前 release 的适配范围。
-- 当前 release tree 由云端 GitHub Workflow 自动生成，属于 image-only 运行包，只包含运行时 `docker-compose.yml`、环境模板、静态资源和辅助脚本；不附带 `backend` / `frontend` 源码，不支持在 release 包内本地重建 `backend` / `frontend`，也不提供非 Docker、Kubernetes、源码直跑或其他衍生部署方式的适配。release 合同下的 runner preflight 只会校验并拉取声明的运行镜像，不会回退到本地构建。
-- 文档中同时提供 Bash 与 PowerShell 两套离线辅助脚本。离线路径额外依赖 `docker` 与 `zstd`；Bash 版本还依赖 `python3`。`Windows 10/11` 宿主机场景下可直接使用原生 PowerShell 脚本，也可继续通过 WSL Bash 执行 `.sh` 脚本。
-- 推荐运行配置为 `8 核 CPU`、`16 GB 内存`。低于该配置时，镜像拉取、runner 预检、扫描任务和 LLM 交互可能明显变慢甚至失败，因此不建议运行本系统。
-- 浏览器支持范围为 `Safari`、`Chrome`、`Edge`。前端运行依赖 `EventSource/SSE`、`iframe`、`localStorage`、`clipboard` 等浏览器能力；为保证运行效果，建议禁用所有浏览器插件 / 扩展。因插件、内容拦截器、企业安全插件或其他不受支持浏览器导致的问题，不再进行相关适配。
-- 联网为可选项，但在线部署默认需要联网拉取运行镜像；若调用云端 LLM API，也需要保证对应 API 可达。离线部署仅覆盖运行镜像导入，不会替代云端模型 API；如需离线启动，请使用与当前机器架构匹配的离线镜像包（`amd64` / `arm64`）。
-- 默认会暴露 `3000`、`8000`、`5432`、`6379` 端口，以及 `tools` profile 下的 `8081` 端口。若宿主机端口冲突、防火墙策略、本机安全软件或企业网络策略导致访问失败，需由部署者自行处理。
-- 运行数据会写入 Docker volumes（如 `postgres_data`、`backend_uploads`、`backend_runtime_data`、`scan_workspace`、`redis_data`）。清理容器或执行 `docker compose down -v` 会移除相关数据，备份、迁移和保留策略需由部署者自行负责。
-- 除上述环境与路径外，其他宿主机、虚拟化方案、容器运行时、浏览器组合和代理 / 镜像源策略均未在当前 release 合同中验证。若在未声明环境中运行并出现问题，请自行排查处理，项目方不再追加相关测试环境适配。
-
-## 3. 首次配置说明
-
-`docker/env/backend/.env` 是 VulHunter 的主要运行配置文件。常见需要确认的项目包括：
-
-- LLM 提供方与模型
-- 访问密钥与 API 地址
-- 数据库连接参数
-- Redis 连接参数
-- 扫描相关开关与镜像覆盖项
-
-如果你暂时只想完成最小可用部署，通常只需要先填写 `LLM_API_KEY`、`LLM_PROVIDER` 和 `LLM_MODEL`。
-
-## 4. 在线部署（默认）
+## 3. 在线启动
 
 ```bash
 docker compose up -d
 ```
 
-默认情况下，VulHunter 会拉取所需的运行镜像并启动全部服务。主界面的静态文件和默认 nginx 配置已经随包提供；`STATIC_FRONTEND_IMAGE` 用于承载这些静态文件。数据库和 Redis 会按当前目录中的配置一并启动。`nexus-web` / `nexus-itemDetail` 不再以独立容器运行，而是作为本地静态页面挂载到主前端容器。代码执行镜像统一为 `SANDBOX_RUNNER_IMAGE`，不再提供旧的独立沙箱镜像覆盖项。
+在线启动会直接使用发布的运行镜像。主前端通过 `STATIC_FRONTEND_IMAGE` 提供 nginx 基底镜像，再挂载当前目录中的静态文件；`nexus-web` 与 `nexus-itemDetail` 也通过本地静态资源提供页面：
 
-## 5. 离线部署（可选）
+- `http://localhost:3000/`
+- `http://localhost:3000/nexus/`
+- `http://localhost:3000/nexus-item-detail/`
 
-先下载与你机器架构匹配的两份离线镜像包：
+## 4. 离线启动
+
+先准备与你当前 Docker server 架构匹配的两份离线镜像包，并放到 release 根目录或 `images/` 目录：
 
 - `vulhunter-services-images-<arch>.tar.zst`
 - `vulhunter-scanner-images-<arch>.tar.zst`
 
-把它们放到 release 根目录或 `images/` 目录，然后执行：
+Choose exactly one shell path.
+
+### Bash / WSL
+
+在 `WSL` 或 Linux `Bash` 中运行：
 
 ```bash
-cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-./scripts/load-images.sh
-./scripts/use-offline-env.sh docker compose up -d
+bash ./scripts/offline-up.sh
 ```
 
-在 `Windows 10/11 原生 PowerShell` 中，也可以直接执行：
+### Windows PowerShell
+
+在 `Windows 10/11` 原生 `PowerShell` 中运行：
 
 ```powershell
-Copy-Item docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-powershell -ExecutionPolicy Bypass -File .\scripts\load-images.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\use-offline-env.ps1 docker compose up -d
+powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
 ```
 
-离线模式会先同时导入 `services` 与 `scanner` 两个镜像包，再切换到本地 `vulhunter-local/*` 镜像标签运行，从而避免在线拉取。前端静态文件与 `nexus-*` 继续使用当前目录中自带的静态资源与本地静态加载路径，不包含在离线镜像包内。
+不要混用 Bash 和 PowerShell 命令。不要手工修改脚本执行位，不要手工放宽 `/var/run/docker.sock` 权限，也不要把首次启动写成先 `docker compose down`。
 
-## 6. 运行与维护
+离线单入口脚本会自动完成以下动作：
+
+- 缺少 `docker/env/backend/.env` 时，从 `env.example` 自动复制
+- 缺少 `docker/env/backend/offline-images.env` 时，从 `offline-images.env.example` 自动复制
+- 检查 `docker`、`docker compose`、镜像 manifest 和离线镜像包
+- 导入 `services` 与 `scanner` 两份离线镜像包
+- 切换到 `vulhunter-local/*` 镜像标签
+- 自动启动 `docker compose up -d`
+
+`offline-images.env` 自动复制后通常可以直接继续运行；只有你需要自定义离线镜像覆盖时，才需要手工编辑它。
+
+## 5. Offline Means / Does Not Mean
+
+- Offline means：运行镜像会先导入本地，并使用 `offline-images.env` 中的本地标签
+- Offline does not mean：cloud LLM provider / API 也会变成本地
+- 前端静态资源与 `nexus-*` 页面已经随 release 附带，不依赖 `offline-images.env` 覆盖前端镜像变量
+- 离线脚本不会修改你的 Docker daemon 配置，也不会自动放宽 Docker socket 权限
+
+## 6. 重试、重启与维护
+
+以下场景都继续使用同一个单入口命令：
+
+- 首次离线启动失败后重试
+- 修改 `docker/env/backend/.env` 之后重启
+- 修改 `docker/env/backend/offline-images.env` 之后重启
+
+推荐重试方式：
+
+```bash
+bash ./scripts/offline-up.sh
+```
+
+或在 `Windows PowerShell` 中：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
+```
 
 查看日志：
 
@@ -97,17 +117,17 @@ docker compose logs -f
 docker compose down
 ```
 
-如需连同数据库卷一起清理：
+如需删除持久化数据卷：
 
 ```bash
 docker compose down -v
 ```
 
-更新 `.env` 或 `offline-images.env` 后，再执行 `docker compose up -d` 使变更生效。
+`docker compose down -v` 会删除 `postgres_data`、`backend_uploads`、`backend_runtime_data`、`scan_workspace`、`redis_data` 等持久化数据，请仅在明确需要清理数据时使用。
 
 ## 7. 常用配置项
 
-如需覆盖默认运行镜像或接入已有环境，可根据实际需要在 `docker/env/backend/.env` 中调整：
+如需覆盖默认运行镜像或接入已有环境，可在 `docker/env/backend/.env` 中调整：
 
 - `BACKEND_IMAGE`
 - `POSTGRES_IMAGE`
@@ -119,14 +139,14 @@ docker compose down -v
 - `FLOW_PARSER_RUNNER_IMAGE`
 - `SANDBOX_RUNNER_IMAGE`
 
-其中 `STATIC_FRONTEND_IMAGE` 只负责提供 Web 界面的 nginx 基底镜像；实际静态文件已包含在当前目录中。
+其中 `STATIC_FRONTEND_IMAGE` 只负责 Web 界面 nginx 基底镜像；实际 static assets 已随当前 release 包提供。
 
 ## 8. 访问入口
 
 - 前端：`http://localhost:3000`
 - 后端 API：`http://localhost:8000`
 - OpenAPI 文档：`http://localhost:8000/docs`
-
-更多 Docker Compose 相关操作见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。
 - `nexus-web`：`http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus/`
 - `nexus-itemDetail`：`http://localhost:${VULHUNTER_FRONTEND_PORT:-3000}/nexus-item-detail/`
+
+更多 Docker Compose 运维说明见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。
