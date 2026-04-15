@@ -5,6 +5,9 @@ Recon 文件侦查追踪工具
 - action="build"：Agent 完成初始 list_files 后调用，建立侦查清单
 - action="mark_done"：Agent 认为某文件侦查完成后调用
 - action="status"：查看当前进度
+构建时会过滤：
+- 文件名或目录名中包含 test 的路径
+- 后缀不属于常见代码/配置语言的文件
 持久化路径：uploads/agent_memory/projects/{task_id}/recon_file_tree.md
 """
 
@@ -19,6 +22,65 @@ from .base import AgentTool, ToolResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_DIR = Path("./uploads/agent_memory/projects")
+_RECON_ALLOWED_EXTENSIONS = {
+    ".py",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".java",
+    ".go",
+    ".rs",
+    ".c",
+    ".h",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".hh",
+    ".hpp",
+    ".hxx",
+    ".cs",
+    ".php",
+    ".rb",
+    ".swift",
+    ".kt",
+    ".kts",
+    ".scala",
+    ".vue",
+    ".svelte",
+    ".m",
+    ".mm",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".ps1",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".html",
+    ".htm",
+    ".css",
+    ".scss",
+    ".less",
+    ".dart",
+    ".lua",
+    ".r",
+    ".pl",
+    ".pm",
+    ".ex",
+    ".exs",
+    ".erl",
+    ".hrl",
+    ".proto",
+    ".gradle",
+    ".properties",
+    ".toml",
+}
+
+
 def _normalize_path(path: str) -> str:
     """规范化文件路径：去除前导 ./ 和多余斜杠，统一为正斜杠。"""
     normalized = str(path or "").replace("\\", "/").strip()
@@ -33,6 +95,33 @@ def _normalize_path(path: str) -> str:
     return normalized
 
 
+def _contains_test_segment(path: str) -> bool:
+    """任一路径段包含 test 时，跳过该项。"""
+    normalized = _normalize_path(path)
+    if not normalized:
+        return False
+    return any("test" in part.lower() for part in normalized.split("/") if part)
+
+
+def _has_allowed_source_suffix(path: str) -> bool:
+    """仅保留常见代码/配置语言后缀，避免 Recon 清单混入噪声文件。"""
+    filename = _normalize_path(path).rsplit("/", 1)[-1]
+    if not filename:
+        return False
+    return Path(filename).suffix.lower() in _RECON_ALLOWED_EXTENSIONS
+
+
+def _should_include_in_recon_tree(path: str) -> bool:
+    normalized = _normalize_path(path)
+    if not normalized:
+        return False
+    if _contains_test_segment(normalized):
+        return False
+    if not _has_allowed_source_suffix(normalized):
+        return False
+    return True
+
+
 def _compress_tree(files: List[str]) -> tuple[List[str], Set[str]]:
     """将文件列表压缩为侦查项。
 
@@ -41,12 +130,13 @@ def _compress_tree(files: List[str]) -> tuple[List[str], Set[str]]:
     - 同一目录下若只有一个直接文件，则保留该文件而不保留目录
     - 浅层目录（如 src、docs）默认保留文件明细，避免只看到顶层目录
     - 深层目录下若存在多个直接文件，则折叠为目录项，控制清单长度
+    - 自动过滤测试路径与非常见代码后缀文件，减少 Recon 噪声
     """
     normalized_files: List[str] = []
     seen_files: Set[str] = set()
     for file_path in files:
         normalized = _normalize_path(file_path)
-        if not normalized or normalized in seen_files:
+        if not _should_include_in_recon_tree(normalized) or normalized in seen_files:
             continue
         seen_files.add(normalized)
         normalized_files.append(normalized)
@@ -186,6 +276,8 @@ class UpdateReconFileTreeTool(AgentTool):
 1. **build** - 建立文件树清单（在初始 list_files 之后调用）
     - 传入 files=[...] 列表，包含所有待侦查的代码文件路径
     - 工具会自动压缩为更适合 Recon 的清单：
+      - 自动过滤文件名/目录名含 test 的路径
+      - 自动过滤非常见代码/配置后缀文件
       - 同目录下只有一个文件时，保留文件
       - 浅层目录（如 src/docs）通常保留文件，避免只剩顶层目录
       - 深层目录同目录下有多个文件时，保留目录

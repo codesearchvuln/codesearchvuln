@@ -22,20 +22,18 @@ async def test_recon_file_tree_build_collapses_multi_file_directories(tmp_path):
 
     assert result.success is True
     assert tool._tree == [
-        "README.md",
-        "docs/guide.md",
-        "docs/index.md",
-        "package.json",
         "src/a.py",
         "src/api/routes.py",
         "src/b.py",
     ]
     assert tool._directory_entries == set()
-    assert "- [ ] docs/guide.md" in result.data
-    assert "- [ ] docs/index.md" in result.data
     assert "- [ ] src/a.py" in result.data
     assert "- [ ] src/b.py" in result.data
     assert "- [ ] src/api/routes.py" in result.data
+    assert "README.md" not in result.data
+    assert "docs/guide.md" not in result.data
+    assert "docs/index.md" not in result.data
+    assert "package.json" not in result.data
     assert "\n- [ ] docs/\n" not in result.data
     assert "\n- [ ] src/\n" not in result.data
     assert "- [ ] ." not in result.data
@@ -111,3 +109,40 @@ async def test_recon_file_tree_build_collapses_deep_multi_file_directories(tmp_p
     assert done_result.success is True
     assert "src/modules/auth" in tool._done
     assert "已标记「src/modules/auth/」为侦查完成" in done_result.data
+
+
+@pytest.mark.asyncio
+async def test_recon_file_tree_build_filters_test_paths_and_non_code_suffixes(tmp_path):
+    tool = UpdateReconFileTreeTool(task_id="task-5", base_dir=tmp_path)
+
+    result = await tool.execute(
+        action="build",
+        files=[
+            "src/app.py",
+            "src/helpers/util.ts",
+            "src/tests/auth_test.py",
+            "src/contest/service.py",
+            "src/docs/readme.md",
+            "package.json",
+            "scripts/deploy.sh",
+            "tests/e2e/login.ts",
+            "src/config/settings.yaml",
+        ],
+    )
+
+    assert result.success is True
+    assert tool._tree == [
+        "scripts/deploy.sh",
+        "src/app.py",
+        "src/config/settings.yaml",
+        "src/helpers/util.ts",
+    ]
+    assert "- [ ] src/app.py" in result.data
+    assert "- [ ] src/helpers/util.ts" in result.data
+    assert "- [ ] scripts/deploy.sh" in result.data
+    assert "- [ ] src/config/settings.yaml" in result.data
+    assert "auth_test.py" not in result.data
+    assert "contest/service.py" not in result.data
+    assert "readme.md" not in result.data
+    assert "package.json" not in result.data
+    assert "tests/e2e/login.ts" not in result.data
