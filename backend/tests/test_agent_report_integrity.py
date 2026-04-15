@@ -29,6 +29,11 @@ class _ScalarListResult:
     def all(self):
         return self._rows
 
+    def scalar_one_or_none(self):
+        if not self._rows:
+            return None
+        return self._rows[0]
+
 
 def _make_task(task_id: str = "task-1", report: str | None = None) -> SimpleNamespace:
     return SimpleNamespace(
@@ -50,6 +55,7 @@ def _make_task(task_id: str = "task-1", report: str | None = None) -> SimpleName
 def _make_finding(**overrides) -> SimpleNamespace:
     payload = {
         "id": "finding-1",
+        "task_id": "task-1",
         "severity": "high",
         "title": "Sample Finding",
         "vulnerability_type": "xss",
@@ -290,6 +296,28 @@ def test_build_finding_markdown_report_keeps_vulnerability_type_values_without_e
     assert "内存破坏漏洞" in report
     assert "memory_corruption" not in report
     assert "memory\\_corruption" not in report
+
+
+def test_build_finding_markdown_report_hides_verifier_prefixed_verification_evidence():
+    task = _make_task(task_id="task-1")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    report = reporting_endpoint._build_finding_markdown_report(
+        task=task,
+        project=project,
+        finding_id="finding-1",
+        finding_data={
+            "display_title": "Verification Hidden Finding",
+            "severity": "high",
+            "vulnerability_type": "command_injection",
+            "verification_evidence": (
+                "verifier=Verification; mode=llm_or_fallback; "
+                "reason=auto_generated"
+            ),
+        },
+    )
+
+    assert "## 验证证据" not in report
+    assert "verifier=Verification" not in report
 
 
 def test_build_task_export_markdown_groups_findings_for_pdf_outline():
@@ -988,6 +1016,88 @@ async def test_generate_report_exports_verified_pending_and_false_positive_secti
         False,
         False,
     ]
+
+
+@pytest.mark.asyncio
+async def test_generate_report_json_hides_verifier_prefixed_verification_evidence():
+    task = _make_task(report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-hidden-evidence",
+        title="Hidden Evidence Finding",
+        description="命令参数进入危险调用点。",
+        verification_evidence=(
+            "verifier=Verification; mode=llm_or_fallback; reason=auto_generated"
+        ),
+        verification_result={
+            "verification_evidence": (
+                "verifier=Verification; mode=llm_or_fallback; reason=auto_generated"
+            ),
+            "verification_details": (
+                "verifier=Verification; mode=llm_or_fallback; reason=auto_generated"
+            ),
+            "evidence": (
+                "verifier=Verification; mode=llm_or_fallback; reason=auto_generated"
+            ),
+            "flow": {"nodes": ["a", "b"]},
+        },
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    payload = await generate_audit_report(
+        task_id="task-hidden-evidence",
+        format="json",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    exported = payload["findings"][0]
+    assert exported["verification_result"]["verification_evidence"] is None
+    assert exported["verification_result"]["verification_details"] is None
+    assert exported["verification_result"]["evidence"] is None
+    assert exported["flow"] == {"nodes": ["a", "b"]}
+    assert "verifier=Verification" not in (exported["description_markdown"] or "")
+
+
+@pytest.mark.asyncio
+async def test_get_finding_report_strips_hidden_verification_evidence_section_from_stored_report():
+    task = _make_task(task_id="task-1")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-1",
+        report=(
+            "# 漏洞报告：Hidden Evidence Finding\n\n"
+            "## 漏洞概览\n\n"
+            "- 严重程度: 高危\n\n"
+            "## 验证证据\n\n"
+            "verifier=Verification; mode=llm_or_fallback; reason=auto_generated\n\n"
+            "## 修复建议\n\n"
+            "尽快修复"
+        ),
+        verification_evidence=(
+            "verifier=Verification; mode=llm_or_fallback; reason=auto_generated"
+        ),
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await reporting_endpoint.get_finding_report(
+        task_id="task-1",
+        finding_id="finding-1",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "## 验证证据" not in body
+    assert "verifier=Verification" not in body
+    assert "## 修复建议" in body
 
 
 @pytest.mark.asyncio

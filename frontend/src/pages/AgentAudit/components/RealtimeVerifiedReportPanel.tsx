@@ -29,6 +29,7 @@ const SEVERITY_BADGE_CLASS: Record<string, string> = {
   low: "bg-sky-500/20 text-sky-600 dark:text-sky-300 border-sky-500/40",
   info: "bg-zinc-500/20 text-zinc-700 dark:text-zinc-300 border-zinc-500/40",
 };
+const HIDDEN_REPORT_VERIFICATION_EVIDENCE_PREFIX = "verifier=verification";
 
 function normalizeSeverity(value: string): string {
   const key = String(value || "").trim().toLowerCase();
@@ -62,6 +63,15 @@ function formatLocation(item: AgentFinding): string {
   }
   if (item.line_start) return `${item.file_path}:${item.line_start}`;
   return item.file_path;
+}
+
+function getVisibleVerificationEvidence(value: string | null | undefined): string | null {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (text.toLowerCase().startsWith(HIDDEN_REPORT_VERIFICATION_EVIDENCE_PREFIX)) {
+    return null;
+  }
+  return text;
 }
 
 export default function RealtimeVerifiedReportPanel(props: {
@@ -124,13 +134,31 @@ export default function RealtimeVerifiedReportPanel(props: {
     if (format === "json") {
       if (displayPersisted) {
         downloadTextFile(
-          JSON.stringify(sortedPersisted, null, 2),
+          JSON.stringify(
+            sortedPersisted.map((finding) => ({
+              ...finding,
+              verification_evidence: getVisibleVerificationEvidence(
+                finding.verification_evidence,
+              ),
+            })),
+            null,
+            2,
+          ),
           `${base}.json`,
           "application/json",
         );
       } else {
         downloadTextFile(
-          JSON.stringify(sortedRealtime, null, 2),
+          JSON.stringify(
+            sortedRealtime.map((finding) => ({
+              ...finding,
+              verification_evidence: getVisibleVerificationEvidence(
+                finding.verification_evidence,
+              ),
+            })),
+            null,
+            2,
+          ),
           `${base}.json`,
           "application/json",
         );
@@ -172,11 +200,14 @@ export default function RealtimeVerifiedReportPanel(props: {
         if (f.description) {
           lines.push(`- 描述: ${f.description}`);
         }
-        if (f.verification_evidence) {
+        const verificationEvidence = getVisibleVerificationEvidence(
+          f.verification_evidence,
+        );
+        if (verificationEvidence) {
           lines.push("");
           lines.push("验证证据:");
           lines.push("```text");
-          lines.push(String(f.verification_evidence));
+          lines.push(verificationEvidence);
           lines.push("```");
         }
         if (f.suggestion) {

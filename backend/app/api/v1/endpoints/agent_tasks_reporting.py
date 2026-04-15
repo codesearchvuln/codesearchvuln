@@ -38,6 +38,7 @@ class ReportExportOptions:
 
 DEFAULT_REPORT_EXPORT_OPTIONS = ReportExportOptions()
 REPORT_EXPORT_FOOTER = "*本报告由自动化安全审计系统自动生成*"
+HIDDEN_REPORT_VERIFICATION_EVIDENCE_PREFIX = "verifier=verification"
 
 
 def _uses_default_report_export_options(options: ReportExportOptions) -> bool:
@@ -48,6 +49,26 @@ def _compact_markdown(markdown_text: str) -> str:
     normalized = str(markdown_text or "").replace("\r\n", "\n").replace("\r", "\n")
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized.strip()
+
+
+def _normalize_report_export_verification_evidence(value: Any) -> Optional[str]:
+    text = _normalize_optional_text(value)
+    if not text:
+        return None
+    if text.lstrip().lower().startswith(HIDDEN_REPORT_VERIFICATION_EVIDENCE_PREFIX):
+        return None
+    return text
+
+
+def _sanitize_report_export_verification_result(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+
+    sanitized = dict(value)
+    for key in ("verification_evidence", "verification_details", "evidence", "details"):
+        if key in sanitized:
+            sanitized[key] = _normalize_report_export_verification_evidence(sanitized.get(key))
+    return sanitized
 
 
 def _resolve_query_bool(value: Any, default: bool) -> bool:
@@ -999,8 +1020,68 @@ def _section_is_placeholder_poc(body: str) -> bool:
     return _section_body_is_empty_markdown(normalized)
 
 
-def _strip_finding_export_noise(markdown_text: Optional[str]) -> str:
+def _section_has_hidden_verification_evidence(body: str) -> bool:
+    normalized = re.sub(r"```[^\n]*\n?", "", str(body or ""))
+    for raw_line in normalized.splitlines():
+        stripped = raw_line.strip()
+        if stripped:
+            return stripped.lower().startswith(HIDDEN_REPORT_VERIFICATION_EVIDENCE_PREFIX)
+    return False
+
+
+def _strip_hidden_verification_evidence_sections(markdown_text: Optional[str]) -> str:
     content = _normalize_optional_text(markdown_text)
+    if not content:
+        return ""
+
+    lines = str(content).split("\n")
+    headings: List[Tuple[int, int, str]] = []
+    in_code_block = False
+
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        matched = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if matched:
+            headings.append((index, len(matched.group(1)), matched.group(2).strip()))
+
+    if not headings:
+        return content
+
+    remove_ranges: List[Tuple[int, int]] = []
+    for heading_index, (start_line, level, title) in enumerate(headings):
+        end_line = len(lines)
+        for next_start, next_level, _next_title in headings[heading_index + 1 :]:
+            if next_level <= level:
+                end_line = next_start
+                break
+
+        normalized_title = _normalize_markdown_section_title(title)
+        body = "\n".join(lines[start_line + 1 : end_line]).strip()
+        if normalized_title == "验证证据" and _section_has_hidden_verification_evidence(body):
+            remove_ranges.append((start_line, end_line))
+
+    if not remove_ranges:
+        return content
+
+    cleaned_lines: List[str] = []
+    cursor = 0
+    for start_line, end_line in remove_ranges:
+        cleaned_lines.extend(lines[cursor:start_line])
+        cursor = end_line
+    cleaned_lines.extend(lines[cursor:])
+
+    cleaned = "\n".join(cleaned_lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _strip_finding_export_noise(markdown_text: Optional[str]) -> str:
+    content = _strip_hidden_verification_evidence_sections(markdown_text)
     if not content:
         return ""
 
@@ -1136,11 +1217,13 @@ def _build_finding_markdown_report(
         sections.append("```")
         sections.append("")
 
-    verification_evidence = finding_data.get("verification_evidence")
+    verification_evidence = _normalize_report_export_verification_evidence(
+        finding_data.get("verification_evidence")
+    )
     if verification_evidence:
         sections.append("## 验证证据")
         sections.append("")
-        sections.append(str(verification_evidence))
+        sections.append(verification_evidence)
         sections.append("")
 
     suggestion = finding_data.get("suggestion")
@@ -1190,12 +1273,15 @@ def _build_finding_payload_from_row(
 ) -> Dict[str, Any]:
     finding_id = str(getattr(finding_row, "id", "") or "")
     verification_payload = (
-        getattr(finding_row, "verification_result", None)
-        if isinstance(getattr(finding_row, "verification_result", None), dict)
-        else {}
+        _sanitize_report_export_verification_result(
+            getattr(finding_row, "verification_result", None)
+        )
+        or {}
     )
     evidence = (
-        getattr(finding_row, "verification_evidence", None)
+        _normalize_report_export_verification_evidence(
+            getattr(finding_row, "verification_evidence", None)
+        )
         or verification_payload.get("evidence")
         or verification_payload.get("verification_evidence")
         or verification_payload.get("verification_details")
@@ -1869,7 +1955,10 @@ async def generate_audit_report(
         finding_row: AgentFinding,
     ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         function_context = _extract_report_function_context(finding_row)
-        verification_payload = function_context["verification_payload"]
+        verification_payload = (
+            _sanitize_report_export_verification_result(function_context["verification_payload"])
+            or {}
+        )
         function_trigger_flow = function_context["function_trigger_flow"]
         function_name = function_context["function_name"]
         display_title = _build_export_finding_display_title(
@@ -1877,9 +1966,12 @@ async def generate_audit_report(
             function_name=function_name,
         )
         verification_evidence = (
-            verification_payload.get("evidence")
+            _normalize_report_export_verification_evidence(
+                getattr(finding_row, "verification_evidence", None)
+            )
             or verification_payload.get("verification_evidence")
             or verification_payload.get("verification_details")
+            or verification_payload.get("evidence")
             or verification_payload.get("details")
         )
 
@@ -2041,19 +2133,25 @@ async def generate_audit_report(
                         f.fix_code if export_options.include_remediation else None
                     ),
                     "verification_result": (
-                        getattr(f, "verification_result", None)
-                        if isinstance(getattr(f, "verification_result", None), dict)
-                        else None
+                        _sanitize_report_export_verification_result(
+                            getattr(f, "verification_result", None)
+                        )
                     ),
                     "flow": (
-                        getattr(f, "verification_result", {}).get("flow")
-                        if isinstance(getattr(f, "verification_result", None), dict)
-                        else None
+                        (
+                            _sanitize_report_export_verification_result(
+                                getattr(f, "verification_result", None)
+                            )
+                            or {}
+                        ).get("flow")
                     ),
                     "logic_authz": (
-                        getattr(f, "verification_result", {}).get("logic_authz")
-                        if isinstance(getattr(f, "verification_result", None), dict)
-                        else None
+                        (
+                            _sanitize_report_export_verification_result(
+                                getattr(f, "verification_result", None)
+                            )
+                            or {}
+                        ).get("logic_authz")
                     ),
                     "created_at": (
                         f.created_at.isoformat()
@@ -2425,7 +2523,17 @@ async def get_finding_report(
         raise HTTPException(status_code=404, detail="漏洞不存在或已被过滤")
 
     finding_data = serialized[0].model_dump()
-    stored_report = _normalize_optional_text(finding_data.get("report"))
+    finding_data["verification_evidence"] = _normalize_report_export_verification_evidence(
+        finding_data.get("verification_evidence")
+    )
+    if isinstance(finding_data.get("verification_result"), dict):
+        finding_data["verification_result"] = _sanitize_report_export_verification_result(
+            finding_data.get("verification_result")
+        )
+    stored_report = _strip_hidden_verification_evidence_sections(
+        _normalize_optional_text(finding_data.get("report"))
+    )
+    finding_data["report"] = stored_report or None
 
     if format == "json":
         return {
