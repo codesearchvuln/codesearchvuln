@@ -42,13 +42,7 @@ def _write_frontend_bundle(path: Path) -> Path:
     nginx_dir.mkdir(parents=True, exist_ok=True)
     (site_dir / "index.html").write_text("<!doctype html><title>release frontend</title>\n", encoding="utf-8")
     (nginx_dir / "default.conf").write_text(
-        (
-            "server {\n"
-            "    listen 80;\n"
-            "    root /usr/share/nginx/html;\n"
-            "    location / { try_files $uri $uri/ /index.html; }\n"
-            "}\n"
-        ),
+        (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     return path
@@ -107,6 +101,64 @@ services:
   frontend:
     image: ${STATIC_FRONTEND_IMAGE:-docker.m.daocloud.io/library/nginx:1.27-alpine}
 EOF
+  exit 0
+fi
+
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "ps" ] && [ "${3:-}" = "-q" ]; then
+  case "${4:-}" in
+    backend) echo fake-backend ;;
+    frontend) echo fake-frontend ;;
+    *) ;;
+  esac
+  exit 0
+fi
+
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "ps" ]; then
+  echo "NAME                STATUS"
+  echo "backend             running"
+  echo "frontend            running"
+  exit 0
+fi
+
+if [ "${1:-}" = "inspect" ] && [ "${2:-}" = "--format" ]; then
+  format="${3:-}"
+  target="${4:-}"
+  if [[ "$format" == *".State.Health"* ]]; then
+    case "$target" in
+      fake-backend) echo "${FAKE_BACKEND_HEALTH:-healthy}" ;;
+      fake-frontend) echo "${FAKE_FRONTEND_HEALTH:-none}" ;;
+      *) echo "unknown" ;;
+    esac
+    exit 0
+  fi
+  case "$target" in
+    fake-backend) echo "${FAKE_BACKEND_STATUS:-running}" ;;
+    fake-frontend) echo "${FAKE_FRONTEND_STATUS:-running}" ;;
+    *) echo "unknown" ;;
+  esac
+  exit 0
+fi
+
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "exec" ]; then
+  command="$*"
+  if [[ "$command" == *"http://backend:8000/health"* ]]; then
+    [ "${FAKE_BACKEND_PROBE_STATUS:-200}" = "200" ] && exit 0
+    exit 1
+  fi
+  if [[ "$command" == *"http://127.0.0.1/api/v1/openapi.json"* ]]; then
+    [ "${FAKE_FRONTEND_PROXY_STATUS:-200}" = "200" ] && exit 0
+    exit 1
+  fi
+  if [[ "$command" == *"http://127.0.0.1/"* ]]; then
+    [ "${FAKE_FRONTEND_ROOT_STATUS:-200}" = "200" ] && exit 0
+    exit 1
+  fi
+  exit 0
+fi
+
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "logs" ]; then
+  [ -n "${FAKE_BACKEND_LOG_HINT:-}" ] && echo "${FAKE_BACKEND_LOG_HINT}"
+  [ -n "${FAKE_FRONTEND_LOG_HINT:-}" ] && echo "${FAKE_FRONTEND_LOG_HINT}"
   exit 0
 fi
 
@@ -208,6 +260,13 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     docker_commands = docker_log.read_text(encoding="utf-8")
     assert "load" in docker_commands
     assert "compose up -d" in docker_commands
+    assert "compose ps -q backend" in docker_commands
+    assert "compose ps -q frontend" in docker_commands
+    assert "inspect --format" in docker_commands
+    assert "compose exec -T frontend sh -lc" in docker_commands
+    assert "http://backend:8000/health" in docker_commands
+    assert "http://127.0.0.1/" in docker_commands
+    assert "http://127.0.0.1/api/v1/openapi.json" in docker_commands
 
 
 def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(tmp_path: Path) -> None:
@@ -289,3 +348,53 @@ def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode != 0
     assert "STATIC_FRONTEND_IMAGE" in combined_output or "two bundles" in combined_output or "not covered" in combined_output
+
+
+def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["FAKE_FRONTEND_PROXY_STATUS"] = "502"
+    env["FAKE_BACKEND_LOG_HINT"] = "offline runner image unavailable"
+    env["FAKE_FRONTEND_LOG_HINT"] = "Docker socket access was denied"
+    env["OFFLINE_UP_MAX_ATTEMPTS"] = "1"
+    env["OFFLINE_UP_RETRY_DELAY_SECONDS"] = "0"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "release readiness probe failed" in combined_output
+    assert "offline runner image unavailable" in combined_output
+    assert "Docker socket access was denied" in combined_output
+    docker_commands = docker_log.read_text(encoding="utf-8")
+    assert "compose ps" in docker_commands
+    assert "compose logs backend frontend --tail=100" in docker_commands

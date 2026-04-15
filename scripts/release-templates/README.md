@@ -1,16 +1,13 @@
 # VulHunter 部署指南
 
-本目录是 VulHunter 的 release 运行包。请在 release 根目录执行下面的命令。
+本目录是 VulHunter 的 generated release tree 运行包，不是源码仓库运行目录。请只在当前 release 根目录执行下面的命令；不要把源码仓库里的 local-build、hybrid overlay、`use-offline-env` 一类命令直接套到这里。
 
 ## 1. 部署前准备
 
-- 宿主机支持：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10`、`Windows 11`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
-- `Windows 10/11` 需要使用 `Docker Desktop` 并启用 Linux containers
+- 宿主机支持：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
 - 离线部署需要：`docker`、`zstd`
 - `Bash/WSL` 路径额外需要：`python3`
 - 浏览器建议：`Safari`、`Chrome`、`Edge`
-
-Choose exactly one shell path。
 
 ## 2. 配置
 
@@ -44,6 +41,8 @@ docker compose up -d
 docker compose ps
 ```
 
+`http://localhost:3000/` 只代表前端静态首页可访问，不代表 dashboard API 代理已经可用。上线验收仍然必须检查同源 `/api/v1/...`。
+
 ## 4. 离线部署
 
 先准备两份与你当前 Docker server 架构匹配的离线镜像包，并放到 release 根目录或 `images/`：
@@ -59,15 +58,7 @@ docker compose ps
 bash ./scripts/offline-up.sh
 ```
 
-### Windows PowerShell
-
-在原生 `Windows PowerShell` 中运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
-```
-
-不要混用 Bash 和 PowerShell 命令。不要手工修改脚本执行位。不要手工放宽 Docker Socket 权限。
+当前离线路径只支持 `WSL` 或 Linux `Bash`。不再提供 `Windows PowerShell` 兼容层。
 
 离线脚本会自动：
 
@@ -75,6 +66,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
 - 自动复制缺失的 `docker/env/backend/offline-images.env`
 - 导入 `services` 与 `scanner` 两份离线镜像包
 - 启动 `docker compose up -d`
+- 等待 backend `/health`、frontend `/`、以及 proxied `http://127.0.0.1/api/v1/openapi.json` 全部成功后才报告 ready
 
 如果你需要手工检查离线镜像映射，查看：
 
@@ -92,7 +84,25 @@ powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
 
 主站静态文件和 `nexus-*` 静态页面都已随 release 包附带，并由前端服务直接提供。
 
-## 6. 常用维护命令
+## 6. 部署后验收
+
+至少执行下面三步，不要只看首页是否打开：
+
+```bash
+docker compose ps
+docker compose logs backend frontend --tail=100
+curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+```
+
+可选再补一条 dashboard 代理链路检查：
+
+```bash
+curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
+```
+
+这条 dashboard 探针返回 `200` / `401` / `403` 都说明代理链路仍在工作；如果是 `502` / `503` / `504`，说明前端到 backend 的 release 代理链路仍然异常。
+
+## 7. 常用维护命令
 
 查看日志：
 

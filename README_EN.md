@@ -33,19 +33,10 @@ Use this when you want the core stack to start from published, digest-pinned `ba
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-./scripts/load-images.sh
-./scripts/use-offline-env.sh docker compose up -d
+bash ./scripts/offline-up.sh
 ```
 
-On native `Windows 10/11 PowerShell`, you can also run:
-
-```powershell
-Copy-Item docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-powershell -ExecutionPolicy Bypass -File .\scripts\load-images.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\use-offline-env.ps1 docker compose up -d
-```
-
-Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution.
+Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution. The offline path is now Bash/WSL-only; native Windows PowerShell is no longer part of the release contract.
 
 ## Explicitly outside the release contract
 

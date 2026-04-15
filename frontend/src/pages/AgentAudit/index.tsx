@@ -41,13 +41,12 @@ export function HomeScanCards() {
   const { logoSrc, cycleLogoVariant } = useLogoVariant();
   const { resolvedTheme } = useTheme();
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [isNexusLoaded, setIsNexusLoaded] = useState(false);
+  const [isNexusReady, setIsNexusReady] = useState(false);
   const iframeOrigin = window.location.origin;
   const iframePath = "/nexus/";
 
   // GitNexus 不再通过独立容器暴露端口，改为由主前端承载本地 dist 页面。
   useEffect(() => {
-    if (!isNexusLoaded) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
 
@@ -62,47 +61,25 @@ export function HomeScanCards() {
     sendTheme();
 
     return () => iframe.removeEventListener("load", sendTheme);
-  }, [iframeOrigin, isNexusLoaded, resolvedTheme]);
-
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setIsNexusLoaded(false);
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
+  }, [iframeOrigin, resolvedTheme]);
 
   return (
     <div className="min-h-[100dvh] relative overflow-hidden">
       <div className="absolute inset-0 z-10">
-        {isNexusLoaded ? (
-          <iframe
-            ref={iframeRef}
-            src={iframePath}
-            title="GitNexus"
-            className="w-full h-full border-0 pointer-events-auto"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.22),_transparent_55%),linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.98))]">
-            <button
-              type="button"
-              onClick={() => setIsNexusLoaded(true)}
-              className="pointer-events-auto rounded-2xl border border-primary/50 bg-background/80 px-6 py-4 text-left shadow-[0_0_40px_rgba(59,130,246,0.2)] backdrop-blur-md transition hover:scale-[1.02] hover:border-primary hover:bg-background/90"
-            >
-              <div className="text-sm font-semibold text-primary">
-                加载 GitNexus 页面
-              </div>
-              <div className="mt-2 max-w-md text-sm text-foreground/70">
-                GitNexus 现已由主前端承载本地静态产物，不再依赖独立的容器服务与 `5174` 端口。
-              </div>
-            </button>
+        <iframe
+          ref={iframeRef}
+          src={iframePath}
+          title="GitNexus"
+          className="w-full h-full border-0 pointer-events-auto"
+          onLoad={() => setIsNexusReady(true)}
+        />
+        {!isNexusReady ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.14),_transparent_55%),linear-gradient(180deg,rgba(15,23,42,0.58),rgba(2,6,23,0.78))] backdrop-blur-sm">
+            <div className="rounded-2xl border border-primary/30 bg-background/70 px-5 py-3 text-sm font-medium text-primary/90 shadow-[0_0_24px_rgba(59,130,246,0.18)]">
+              GitNexus 正在加载…
+            </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="relative z-20 w-full max-w-[1200px] mx-auto px-6 text-center pointer-events-none min-h-[100dvh] flex flex-col">

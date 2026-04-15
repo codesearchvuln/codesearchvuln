@@ -39,20 +39,11 @@ docker compose up -d
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-./scripts/load-images.sh
-./scripts/use-offline-env.sh docker compose up -d
-```
-
-在 `Windows 10/11 原生 PowerShell` 中，也可以执行：
-
-```powershell
-Copy-Item docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-powershell -ExecutionPolicy Bypass -File .\scripts\load-images.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\use-offline-env.ps1 docker compose up -d
+bash ./scripts/offline-up.sh
 ```
 
 用途：
-预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签启动同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。
+预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签启动同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层。
 
 ## 明确不属于 release contract 的路径
 

@@ -70,16 +70,7 @@ def _write_frontend_bundle(path: Path) -> Path:
     nginx_dir.mkdir(parents=True, exist_ok=True)
     (site_dir / "index.html").write_text("<!doctype html><title>release frontend</title>\n", encoding="utf-8")
     (nginx_dir / "default.conf").write_text(
-        (
-            "server {\n"
-            "    listen 80;\n"
-            "    root /usr/share/nginx/html;\n"
-            "    location / { try_files $uri $uri/ /index.html; }\n"
-            "    location /nexus/ { alias /srv/nexus-web/; try_files $uri $uri/ /nexus/index.html; }\n"
-            "    location /nexus-item-detail/ { alias /srv/nexus-item-detail/; try_files $uri $uri/ /nexus-item-detail/index.html; }\n"
-            "    location /api/ { proxy_pass http://backend:8000/api/; }\n"
-            "}\n"
-        ),
+        (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     return path
@@ -269,8 +260,11 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "uses: pnpm/action-setup@v5" in workflow_text
     assert "package_json_file: frontend/package.json" in workflow_text
     assert workflow_text.index("uses: pnpm/action-setup@v5") < workflow_text.index("cache: pnpm")
-    assert "pnpm install --frozen-lockfile" in workflow_text
-    assert "pnpm build" in workflow_text
+    assert "pnpm --dir frontend install --frozen-lockfile" in workflow_text
+    assert "pnpm --dir frontend build" in workflow_text
+    assert "cp -R frontend/dist/. " in workflow_text
+    assert "cp frontend/nginx.conf " in workflow_text
+    assert "deploy/frontend/default.conf" not in workflow_text
     assert "upload-artifact@v4" in workflow_text
     assert "download-artifact@v4" in workflow_text
     assert "--frontend-bundle" in workflow_text
@@ -302,6 +296,12 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "docker inspect --format" in workflow_text
     assert "curl -fsS http://127.0.0.1:8000/health" in workflow_text
     assert "curl -fsS http://127.0.0.1:3000/" in workflow_text
+    assert "curl -fsS http://127.0.0.1:3000/api/v1/openapi.json" in workflow_text
+    assert "dashboard_status_code=" in workflow_text
+    assert "http://127.0.0.1:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14" in workflow_text
+    assert 'case "${dashboard_status_code}" in' in workflow_text
+    assert "200|401|403)" in workflow_text
+    assert "502|503|504|000)" in workflow_text
     assert "/health" in workflow_text
     assert "http://127.0.0.1:3000/" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
@@ -382,7 +382,6 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "images-manifest-scanner.json",
         "scripts/README-COMPOSE.md",
         "scripts/offline-up.sh",
-        "scripts/offline-up.ps1",
         "scripts/lib/compose-env.sh",
         "docker/env/backend/env.example",
         "docker/env/backend/offline-images.env.example",
@@ -409,9 +408,7 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "scripts/compose-up-local-build.sh",
         "scripts/compose-up-with-fallback.sh",
         "scripts/load-images.sh",
-        "scripts/load-images.ps1",
         "scripts/use-offline-env.sh",
-        "scripts/use-offline-env.ps1",
         "deploy/compose",
     ]
     for rel_path in forbidden_paths:
@@ -469,6 +466,10 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     generated_nginx = (output_dir / "deploy" / "runtime" / "frontend" / "nginx" / "default.conf").read_text(
         encoding="utf-8"
     )
+    source_nginx = (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+    assert generated_nginx == source_nginx
+    assert "location /api/" in generated_nginx
+    assert "proxy_pass http://backend:8000/api/;" in generated_nginx
     assert "location /nexus/" in generated_nginx
     assert "alias /srv/nexus-web/;" in generated_nginx
     assert "try_files $uri $uri/ /nexus/index.html;" in generated_nginx
@@ -524,11 +525,9 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
     )
     for doc in docs:
         assert "docker compose up" in doc
-        assert "offline-up.sh" in doc or "offline-up.ps1" in doc
+        assert "offline-up.sh" in doc
         assert "load-images.sh" not in doc
-        assert "load-images.ps1" not in doc
         assert "use-offline-env.sh" not in doc
-        assert "use-offline-env.ps1" not in doc
         assert "offline-images.env" in doc
         assert "vulhunter-services-images-" in doc
         assert "vulhunter-scanner-images-" in doc
@@ -540,14 +539,15 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "docker/env/backend/.env" in doc
         assert "LLM_API_KEY" in doc
         assert "STATIC_FRONTEND_IMAGE" in doc or "静态文件" in doc or "static assets" in doc
+        assert "/api/v1/openapi.json" in doc
+        assert "http://localhost:3000/" in doc
+        assert "http://localhost:3000/api/v1" in doc
+        assert "generated release tree" in doc or "release 包" in doc or "release tree" in doc
         assert "/nexus/" in doc
         assert "/nexus-item-detail/" in doc
-        assert "Windows 10/11" in doc or ("Windows 10" in doc and "Windows 11" in doc)
-        assert "PowerShell" in doc
-        assert "WSL" in doc
-        assert "Copy-Item" in doc or "cp " in doc
-        assert ".\\scripts\\offline-up.ps1" in doc or "./scripts/offline-up.sh" in doc
-        assert "Choose exactly one shell path" in doc or "只选一种" in doc or "不要混用" in doc
+        assert "WSL" in doc or "Bash" in doc
+        assert "cp " in doc
+        assert "./scripts/offline-up.sh" in doc
         assert "LLM_API_KEY" in doc
         assert "cloud" in doc.lower() or "云端" in doc
         assert "chmod +x" not in doc
@@ -590,7 +590,6 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
         encoding="utf-8"
     )
     offline_up_script = (output_dir / "scripts" / "offline-up.sh").read_text(encoding="utf-8")
-    offline_up_script_ps1 = (output_dir / "scripts" / "offline-up.ps1").read_text(encoding="utf-8")
     compose_env_helper = (output_dir / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8")
 
     assert services_metadata["revision"] == manifest["revision"]
@@ -641,13 +640,6 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "docker compose up -d" in offline_up_script
     assert "load_container_socket_env" in offline_up_script
     assert "load_container_socket_gid_env" in offline_up_script
-    assert "[offline-up]" in offline_up_script_ps1
-    assert "images-manifest-services.json" in offline_up_script_ps1
-    assert "images-manifest-scanner.json" in offline_up_script_ps1
-    assert "docker/env/backend/offline-images.env" in offline_up_script_ps1
-    assert "docker compose up -d" in offline_up_script_ps1
-    assert "docker-compose" in offline_up_script_ps1
-    assert "Split('=', 2)" in offline_up_script_ps1 or "-split '=', 2" in offline_up_script_ps1
     assert "load_container_socket_env" in compose_env_helper
     assert "load_container_socket_gid_env" in compose_env_helper
 

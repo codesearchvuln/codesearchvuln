@@ -315,15 +315,13 @@ def test_nexus_static_bundles_are_subpath_safe() -> None:
 
 def test_frontend_nginx_routes_nexus_static_mounts() -> None:
     frontend_nginx = (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
-    deploy_nginx = (REPO_ROOT / "deploy" / "frontend" / "default.conf").read_text(encoding="utf-8")
-
-    for nginx_text in (frontend_nginx, deploy_nginx):
-        assert "location /nexus/" in nginx_text
-        assert "alias /srv/nexus-web/;" in nginx_text
-        assert "try_files $uri $uri/ /nexus/index.html;" in nginx_text
-        assert "location /nexus-item-detail/" in nginx_text
-        assert "alias /srv/nexus-item-detail/;" in nginx_text
-        assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in nginx_text
+    assert not (REPO_ROOT / "deploy" / "frontend" / "default.conf").exists()
+    assert "location /nexus/" in frontend_nginx
+    assert "alias /srv/nexus-web/;" in frontend_nginx
+    assert "try_files $uri $uri/ /nexus/index.html;" in frontend_nginx
+    assert "location /nexus-item-detail/" in frontend_nginx
+    assert "alias /srv/nexus-item-detail/;" in frontend_nginx
+    assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in frontend_nginx
 
 
 def test_scripts_and_packaging_use_new_compose_layout() -> None:
@@ -409,8 +407,8 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
         assert "docker-compose.self-contained.yml" not in doc
         assert "docker/env/backend/env.example" in doc
         assert "offline-images.env.example" in doc
-        assert "load-images.sh" in doc
-        assert "use-offline-env.sh" in doc
+        assert "offline-up.sh" in doc
+        assert "offline-up.ps1" not in doc
         assert "/nexus/" in doc
         assert "/nexus-item-detail/" in doc
 
@@ -668,8 +666,9 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "workflow_run:" in workflow_text
     assert "Docker Publish" in workflow_text
     assert "Setup Node.js for frontend release bundle" in workflow_text
-    assert "pnpm install --frozen-lockfile" in workflow_text
-    assert "pnpm build" in workflow_text
+    assert "pnpm --dir frontend install --frozen-lockfile" in workflow_text
+    assert "pnpm --dir frontend build" in workflow_text
+    assert "cp frontend/nginx.conf" in workflow_text
     assert "generate-release-branch.sh" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "--frontend-bundle" in workflow_text
@@ -683,6 +682,8 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "docker compose ps -q \"$1\"" in workflow_text
     assert "service_health()" in workflow_text
     assert "docker inspect --format" in workflow_text
+    assert "http://127.0.0.1:3000/api/v1/openapi.json" in workflow_text
+    assert "dashboard_status_code=" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text

@@ -15,8 +15,8 @@ cat >&2 <<'MSG'
 [deploy-release]
 [deploy-release]   Offline:
 [deploy-release]     bash ./scripts/offline-up.sh
-[deploy-release]     # Or on Windows PowerShell:
-[deploy-release]     powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
+[deploy-release]     # Current release contract keeps only the Bash/WSL entrypoint:
+[deploy-release]     bash ./scripts/offline-up.sh
 [deploy-release]
 [deploy-release] If you still depend on the old source tarball flow, migrate that automation before the next release cut.
 MSG

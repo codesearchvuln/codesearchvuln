@@ -1,8 +1,8 @@
 # Docker Compose 命令说明
 
-本文档只说明 release 包里的常用 Compose 命令。
+本文档只说明 generated release tree 里的 Compose 命令，不覆盖源码仓库根目录的 `docker compose up` / `docker-compose.hybrid.yml` 合同。
 
-支持宿主机：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10/11`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`。
+支持宿主机：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`。
 
 ## 1. 启动前
 
@@ -26,6 +26,8 @@ Choose exactly one shell path。
 docker compose up -d
 ```
 
+注意：`http://localhost:3000/` 可访问并不等价于 dashboard 已恢复，仍然需要验证同源 `/api/v1/...`。
+
 ## 3. 离线启动
 
 先把下面两份离线镜像包放到 release 根目录或 `images/`：
@@ -39,13 +41,9 @@ docker compose up -d
 bash ./scripts/offline-up.sh
 ```
 
-### Windows PowerShell
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
-```
-
 离线脚本会自动复制缺失的 `.env` / `offline-images.env`，导入离线镜像包，然后启动服务。
+脚本会继续等待 backend `/health`、frontend `/`、和 proxied `http://127.0.0.1/api/v1/openapi.json` 成功后才报告 ready。
+当前 release tree 不再提供 `Windows PowerShell` 兼容层。
 
 如果你使用 cloud 模型接口，运行时仍然需要访问对应 API。离线部署只表示运行镜像来自本地。
 
@@ -67,7 +65,18 @@ docker compose logs -f
 
 主站静态文件与 `nexus-*` 页面已经随 release tree 附带。
 
-## 5. 停止与清理
+## 5. 验收代理链路
+
+```bash
+docker compose ps
+docker compose logs backend frontend --tail=100
+curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
+```
+
+`dashboard-snapshot` 返回 `200` / `401` / `403` 都说明代理链路正常；`502` / `503` / `504` 说明 release frontend 到 backend 的代理链路仍异常。
+
+## 6. 停止与清理
 
 停止服务：
 
@@ -83,7 +92,7 @@ docker compose down -v
 
 `docker compose down -v` 会删除持久化数据，请谨慎使用。
 
-## 6. 修改配置后重启
+## 7. 修改配置后重启
 
 - 在线路径：修改 `.env` 后重新执行 `docker compose up -d`
 - 离线路径：修改 `.env` 或 `offline-images.env` 后，重新执行同一个 `offline-up` 命令

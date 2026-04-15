@@ -184,6 +184,98 @@ if violations:
 PY
 }
 
+compose() {
+  (
+    cd "$ROOT_DIR"
+    docker compose "$@"
+  )
+}
+
+service_cid() {
+  compose ps -q "$1"
+}
+
+service_status() {
+  local cid="$1"
+  [[ -n "$cid" ]] || {
+    printf 'missing'
+    return 0
+  }
+  docker inspect --format '{{.State.Status}}' "$cid" 2>/dev/null || printf 'unknown'
+}
+
+service_health() {
+  local cid="$1"
+  [[ -n "$cid" ]] || {
+    printf 'missing'
+    return 0
+  }
+  docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || printf 'unknown'
+}
+
+probe_frontend_url() {
+  local url="$1"
+  compose exec -T frontend sh -lc "wget -q -O- '$url' >/dev/null"
+}
+
+emit_failure_hints() {
+  local logs="$1"
+  log_warn "Hint: a release tree is only ready after backend health, frontend /, and proxied /api/v1/openapi.json all succeed."
+  if grep -Eiq 'offline runner image unavailable|pull failed for|image missing after load' <<<"$logs"; then
+    log_warn "Hint: runner images are missing from the offline bundles. Rebuild and reload both services/scanner image bundles."
+  else
+    log_warn "Hint: if logs mention 'offline runner image unavailable' or 'pull failed for', rebuild and reload both offline bundles."
+  fi
+  if grep -Eiq 'runner preflight|preflight' <<<"$logs"; then
+    log_warn "Hint: runner preflight is blocking backend readiness. Review the backend preflight errors before retrying."
+  else
+    log_warn "Hint: if backend startup stalls before /health turns green, inspect runner preflight output first."
+  fi
+  if grep -Eiq 'Docker socket access was denied|permission denied|permissionerror' <<<"$logs"; then
+    log_warn "Hint: Docker socket access failed. Ensure DOCKER_SOCKET_GID matches the host docker.sock group."
+  else
+    log_warn "Hint: if logs mention 'Docker socket access was denied', set DOCKER_SOCKET_GID to the host docker.sock group."
+  fi
+  if grep -Eiq '数据库迁移版本与代码不一致|alembic' <<<"$logs"; then
+    log_warn "Hint: database migration state is behind the code. Repair the DB migration state before retrying."
+  else
+    log_warn "Hint: if logs mention '数据库迁移版本与代码不一致' or Alembic failures, repair the database migration state."
+  fi
+}
+
+wait_for_release_readiness() {
+  local max_attempts="${OFFLINE_UP_MAX_ATTEMPTS:-60}"
+  local retry_delay="${OFFLINE_UP_RETRY_DELAY_SECONDS:-5}"
+  local attempt=0
+
+  while (( attempt < max_attempts )); do
+    attempt=$((attempt + 1))
+    local backend_cid frontend_cid backend_status_value backend_health_value frontend_status_value
+    backend_cid="$(service_cid backend)"
+    frontend_cid="$(service_cid frontend)"
+    backend_status_value="$(service_status "$backend_cid")"
+    backend_health_value="$(service_health "$backend_cid")"
+    frontend_status_value="$(service_status "$frontend_cid")"
+
+    if [[ "$backend_status_value" == "running" ]] && \
+       [[ "$backend_health_value" == "healthy" ]] && \
+       [[ "$frontend_status_value" == "running" ]] && \
+       probe_frontend_url "http://backend:8000/health" && \
+       probe_frontend_url "http://127.0.0.1/" && \
+       probe_frontend_url "http://127.0.0.1/api/v1/openapi.json"; then
+      return 0
+    fi
+
+    if [[ "$backend_status_value" == "exited" || "$backend_status_value" == "dead" || "$backend_health_value" == "unhealthy" || "$frontend_status_value" == "exited" || "$frontend_status_value" == "dead" ]]; then
+      break
+    fi
+
+    sleep "$retry_delay"
+  done
+
+  return 1
+}
+
 parse_and_export_offline_env() {
   local line_no=0 raw_line trimmed_line raw_name name value
 
@@ -262,10 +354,17 @@ main() {
   validate_compose_images_local_only
 
   log_info "starting docker compose up -d"
-  (
-    cd "$ROOT_DIR"
-    docker compose up -d
-  )
+  compose up -d
+
+  if ! wait_for_release_readiness; then
+    log_warn "release readiness probe failed"
+    compose ps || true
+    logs_output="$(compose logs backend frontend --tail=100 2>&1 || true)"
+    printf '%s\n' "$logs_output" >&2
+    emit_failure_hints "$logs_output"
+    die "release services failed readiness checks"
+  fi
+
   log_info "offline startup ready"
 }
 

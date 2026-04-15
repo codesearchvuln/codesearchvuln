@@ -172,7 +172,6 @@ overlay_release_templates() {
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
   cp "$TEMPLATE_DIR/offline-up.sh" "$OUTPUT_DIR/scripts/offline-up.sh"
-  cp "$TEMPLATE_DIR/offline-up.ps1" "$OUTPUT_DIR/scripts/offline-up.ps1"
   cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/lib/compose-env.sh"
   chmod +x "$OUTPUT_DIR/scripts/offline-up.sh"
   render_release_compose
@@ -223,7 +222,6 @@ scanner_images_payload: dict[str, dict[str, str]] = {}
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
     "# Then run bash ./scripts/offline-up.sh.",
-    "# On Windows PowerShell, use powershell -ExecutionPolicy Bypass -File .\\scripts\\offline-up.ps1 instead.",
     "# This release tree does not support rebuilding backend/frontend from source.",
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
 ]
@@ -279,7 +277,6 @@ validate_release_tree() {
     "images-manifest-scanner.json"
     "scripts/README-COMPOSE.md"
     "scripts/offline-up.sh"
-    "scripts/offline-up.ps1"
     "scripts/lib/compose-env.sh"
     "docker/env/backend/env.example"
     "docker/env/backend/offline-images.env.example"

@@ -115,15 +115,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          cd frontend
-          pnpm install --frozen-lockfile
-          pnpm build
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
 
           FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
           rm -rf "${FRONTEND_BUNDLE_DIR}"
           mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
-          cp -R dist/. "${FRONTEND_BUNDLE_DIR}/site/"
-          cp nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
+          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
+          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
 
       - name: Upload frontend release bundle
         uses: actions/upload-artifact@v4
@@ -315,7 +314,8 @@ jobs:
             frontend_status="$(service_status frontend)"
             if [[ "${backend_status}" == "running" && "${backend_health}" == "healthy" ]] && \
                curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1 && \
-               curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1; then
+               curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1 && \
+               curl -fsS http://127.0.0.1:3000/api/v1/openapi.json >/dev/null 2>&1; then
               frontend_ready=true
               break
             fi
@@ -329,6 +329,25 @@ jobs:
             echo "::error::Release frontend/backend failed readiness verification for generated release tree."
             exit 1
           fi
+
+          dashboard_status_code="$(
+            curl -sS -o /tmp/vulhunter-dashboard-snapshot.json -w '%{http_code}' \
+              'http://127.0.0.1:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14' || true
+          )"
+          case "${dashboard_status_code}" in
+            200|401|403)
+              ;;
+            502|503|504|000)
+              dump_debug
+              echo "::error::Release proxied dashboard API returned gateway failure (${dashboard_status_code})."
+              exit 1
+              ;;
+            *)
+              dump_debug
+              echo "::error::Release proxied dashboard API returned unexpected status (${dashboard_status_code})."
+              exit 1
+              ;;
+          esac
           exit 0
 
   publish-release-assets-and-branch:

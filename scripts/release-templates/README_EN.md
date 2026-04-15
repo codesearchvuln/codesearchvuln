@@ -1,16 +1,13 @@
 # VulHunter Deployment Guide
 
-This directory is the VulHunter release runtime package. Run the commands below from the release root.
+This directory is the generated release tree runtime package, not the source-repo runtime directory. Run the commands below only from this release root; do not reuse source-repo local-build, hybrid overlay, or `use-offline-env` style commands here.
 
 ## 1. Before You Start
 
-- Supported hosts: `Ubuntu 22.04 LTS`, `Ubuntu 24.04 LTS`, `Windows 10`, `Windows 11`, `Windows 10 WSL2 + Ubuntu 22.04 LTS`, `Windows 11 WSL2 + Ubuntu 22.04 LTS`
-- `Windows 10/11` must use `Docker Desktop` with Linux containers enabled
+- Supported hosts: `Ubuntu 22.04 LTS`, `Ubuntu 24.04 LTS`, `Windows 10 WSL2 + Ubuntu 22.04 LTS`, `Windows 11 WSL2 + Ubuntu 22.04 LTS`
 - Offline deployment requires: `docker`, `zstd`
 - The `Bash/WSL` path also requires: `python3`
 - Recommended browsers: `Safari`, `Chrome`, `Edge`
-
-Choose exactly one shell path.
 
 ## 2. Configuration
 
@@ -44,6 +41,8 @@ Check status:
 docker compose ps
 ```
 
+`http://localhost:3000/` only proves the static frontend is reachable. It does not prove the dashboard API proxy is healthy. Release acceptance still requires checking same-origin `/api/v1/...`.
+
 ## 4. Offline Deployment
 
 Download both offline bundles for your current Docker server architecture and place them in the release root or `images/`:
@@ -59,15 +58,7 @@ Run in `WSL` or Linux `Bash`:
 bash ./scripts/offline-up.sh
 ```
 
-### Windows PowerShell
-
-Run in native `Windows PowerShell`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\offline-up.ps1
-```
-
-Do not mix Bash and PowerShell commands. Do not manually change script execute permissions. Do not manually broaden Docker socket permissions.
+The offline path now supports `WSL` or Linux `Bash` only. Native `Windows PowerShell` is no longer part of the release contract.
 
 The offline script will automatically:
 
@@ -75,6 +66,7 @@ The offline script will automatically:
 - auto-copy missing `docker/env/backend/offline-images.env`
 - load the `services` and `scanner` offline bundles
 - start `docker compose up -d`
+- wait for backend `/health`, frontend `/`, and proxied `http://127.0.0.1/api/v1/openapi.json` before reporting ready
 
 If you want to inspect the offline image mapping, check:
 
@@ -92,7 +84,25 @@ After editing `.env` or `offline-images.env`, rerun the same offline command.
 
 The main static assets and bundled `nexus-*` static pages are already included in the release package and served by the frontend service.
 
-## 6. Common Maintenance Commands
+## 6. Post-Deploy Verification
+
+Run at least these checks; do not stop at “the homepage opens”:
+
+```bash
+docker compose ps
+docker compose logs backend frontend --tail=100
+curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+```
+
+Optional dashboard proxy probe:
+
+```bash
+curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
+```
+
+For this dashboard probe, `200`, `401`, or `403` all mean the proxy path is still alive. `502`, `503`, or `504` mean the release frontend can no longer reach the backend through the bundled proxy contract.
+
+## 7. Common Maintenance Commands
 
 Follow logs:
 
