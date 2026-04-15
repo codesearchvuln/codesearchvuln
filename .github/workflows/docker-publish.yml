@@ -12,32 +12,10 @@ on:
       - 'docker/*.Dockerfile.dockerignore'
       - 'docker/frontend.Dockerfile'
       - 'docker/backend.Dockerfile'
-      - 'docker/yasa-runner.Dockerfile'
-      - 'docker/opengrep-runner.Dockerfile'
-      - 'docker/bandit-runner.Dockerfile'
-      - 'docker/gitleaks-runner.Dockerfile'
-      - 'docker/phpstan-runner.Dockerfile'
-      - 'docker/flow-parser-runner.Dockerfile'
-      - 'docker/pmd-runner.Dockerfile'
-      - 'docker/sandbox-runner.Dockerfile'
       - 'docker/flow-parser-runner.requirements.txt'
       - 'docker/sandbox-runner.requirements.txt'
-      - '.github/workflows/release.yml'
-      - '.github/workflows/scheduled-release.yml'
       - 'frontend/**'
-      - 'frontend/yasa-engine-overrides/**'
       - 'backend/**'
-      - 'scripts/generate-release-branch.sh'
-      - 'scripts/package-release-images.sh'
-      - 'scripts/write-release-snapshot-lock.py'
-      - 'scripts/release-bundle-contract.json'
-      - 'scripts/release-allowlist.txt'
-      - 'scripts/lib/compose-env.sh'
-      - 'scripts/release-templates/**'
-      - 'nexus-web/dist/**'
-      - 'nexus-web/nginx.conf'
-      - 'nexus-itemDetail/dist/**'
-      - 'nexus-itemDetail/nginx.conf'
   workflow_dispatch:
     inputs:
       tag:
@@ -101,6 +79,9 @@ on:
         type: boolean
         default: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: docker-publish-${{ github.ref }}
   cancel-in-progress: true
@@ -109,6 +90,7 @@ jobs:
   detect-changes:
     name: 检测镜像相关变更
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     outputs:
       frontend: ${{ steps.filter.outputs.frontend || steps.manual.outputs.frontend }}
@@ -119,7 +101,7 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: 识别前后端相关变更
         id: filter

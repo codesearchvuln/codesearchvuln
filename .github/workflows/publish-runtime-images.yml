@@ -81,6 +81,7 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       tag: ${{ steps.shared.outputs.tag }}
       platforms: ${{ steps.shared.outputs.platforms }}
@@ -112,6 +113,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_frontend }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -158,6 +160,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_frontend && inputs.multi_arch }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -207,6 +210,7 @@ jobs:
       - publish-frontend-arm64
     if: ${{ always() && inputs.build_frontend && needs.publish-frontend-amd64.result == 'success' && (needs.publish-frontend-arm64.result == 'success' || needs.publish-frontend-arm64.result == 'skipped') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
@@ -246,11 +250,14 @@ jobs:
             docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
           fi
 
+          digest="$(docker buildx imagetools inspect "${FINAL_TAG}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+
           raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
-          RAW_JSON="${raw_json}" python3 - <<'PY'
+          RAW_JSON="${raw_json}" EXPECTED_PLATFORMS="${EXPECTED_PLATFORMS}" python3 - <<'PY'
           from __future__ import annotations
 
-          import hashlib
           import json
           import os
 
@@ -265,10 +272,6 @@ jobs:
           missing = sorted(expected - platforms)
           if missing:
               raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
-          digest = f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              print(f"digest={digest}", file=output)
-              print(f"ref={os.environ['IMAGE']}@{digest}", file=output)
           print(f"validated platforms: {', '.join(sorted(platforms))}")
           PY
 
@@ -277,6 +280,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_backend }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -351,6 +355,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_backend && inputs.multi_arch }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -428,6 +433,7 @@ jobs:
       - publish-backend-arm64
     if: ${{ always() && inputs.build_backend && needs.publish-backend-amd64.result == 'success' && (needs.publish-backend-arm64.result == 'success' || needs.publish-backend-arm64.result == 'skipped') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
@@ -467,11 +473,14 @@ jobs:
             docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
           fi
 
+          digest="$(docker buildx imagetools inspect "${FINAL_TAG}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+
           raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
-          RAW_JSON="${raw_json}" python3 - <<'PY'
+          RAW_JSON="${raw_json}" EXPECTED_PLATFORMS="${EXPECTED_PLATFORMS}" python3 - <<'PY'
           from __future__ import annotations
 
-          import hashlib
           import json
           import os
 
@@ -486,10 +495,6 @@ jobs:
           missing = sorted(expected - platforms)
           if missing:
               raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
-          digest = f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              print(f"digest={digest}", file=output)
-              print(f"ref={os.environ['IMAGE']}@{digest}", file=output)
           print(f"validated platforms: {', '.join(sorted(platforms))}")
           PY
 
@@ -498,6 +503,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -562,6 +568,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_yasa_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -622,6 +629,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_opengrep_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -682,6 +690,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_bandit_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -742,6 +751,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_gitleaks_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -802,6 +812,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_phpstan_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -862,6 +873,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_flow_parser_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -922,6 +934,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_pmd_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -982,6 +995,7 @@ jobs:
     needs: prepare
     if: ${{ inputs.build_sandbox_runner }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -1053,6 +1067,7 @@ jobs:
       - publish-sandbox-runner
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       packages: write
 
@@ -1141,6 +1156,7 @@ jobs:
       - publish-sandbox-runner
     if: ${{ always() && inputs.emit_release_manifest && !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read

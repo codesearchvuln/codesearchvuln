@@ -11,12 +11,17 @@ on:
       - "backend/**"
       - ".github/workflows/backend-migration-smoke.yml"
 
+concurrency:
+  group: migration-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   migration-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:15

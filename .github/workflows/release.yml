@@ -21,6 +21,9 @@ on:
         type: boolean
         default: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: release-branch-${{ github.event.workflow_run.head_branch || github.ref_name || github.run_id }}
   cancel-in-progress: true
@@ -32,6 +35,7 @@ jobs:
   prepare-release:
     if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       source_ref: ${{ steps.vars.outputs.source_ref }}
       source_sha: ${{ steps.vars.outputs.source_sha }}
@@ -64,6 +68,7 @@ jobs:
   create-draft-release:
     needs: prepare-release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     env:
@@ -151,6 +156,7 @@ jobs:
       - create-draft-release
       - publish-runtime-images
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       packages: read
@@ -171,7 +177,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare-release.outputs.source_ref }}
-          fetch-depth: 0
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -218,6 +223,7 @@ jobs:
       - publish-runtime-images
       - package-offline-images
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: write
       packages: read
@@ -396,7 +402,9 @@ jobs:
           trap cleanup EXIT
 
           mkdir -p "${RUNNER_TEMP}/release-tree/images"
-          cp "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"
+          for f in "${SNAPSHOT_ASSET_DIR}/"*; do
+            ln -sf "$f" "${RUNNER_TEMP}/release-tree/images/$(basename "$f")"
+          done
 
           if ! bash ./scripts/offline-up.sh; then
             dump_debug
@@ -448,6 +456,7 @@ jobs:
 
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a "${RELEASE_DIR}/." .
+          rm -rf ./images
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -566,6 +575,7 @@ jobs:
       - package-offline-images
       - finalize-release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     env:
@@ -580,12 +590,15 @@ jobs:
           set -euo pipefail
 
           [[ -n "${SNAPSHOT_TAG}" ]] || exit 0
-          if ! gh release view "${SNAPSHOT_TAG}" --json isDraft >/dev/null 2>&1; then
+
+          is_draft="$(gh release view "${SNAPSHOT_TAG}" --json isDraft --jq '.isDraft' 2>/dev/null || echo "not_found")"
+
+          if [[ "${is_draft}" == "not_found" ]]; then
             echo "Snapshot draft release not found; skipping cleanup."
             exit 0
           fi
 
-          if [[ "$(gh release view "${SNAPSHOT_TAG}" --json isDraft --jq '.isDraft')" != "true" ]]; then
+          if [[ "${is_draft}" != "true" ]]; then
             echo "Snapshot release is already published; skipping cleanup."
             exit 0
           fi
