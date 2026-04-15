@@ -1,0 +1,1313 @@
+name: Publish Runtime Images
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Runtime image tag to publish or resolve.
+        required: false
+        type: string
+        default: latest
+      build_frontend:
+        required: false
+        type: boolean
+        default: false
+      build_backend:
+        required: false
+        type: boolean
+        default: false
+      publish_backend_hardened:
+        required: false
+        type: boolean
+        default: false
+      build_yasa_runner:
+        required: false
+        type: boolean
+        default: false
+      build_opengrep_runner:
+        required: false
+        type: boolean
+        default: false
+      build_bandit_runner:
+        required: false
+        type: boolean
+        default: false
+      build_gitleaks_runner:
+        required: false
+        type: boolean
+        default: false
+      build_phpstan_runner:
+        required: false
+        type: boolean
+        default: false
+      build_flow_parser_runner:
+        required: false
+        type: boolean
+        default: false
+      build_pmd_runner:
+        required: false
+        type: boolean
+        default: false
+      build_sandbox_runner:
+        required: false
+        type: boolean
+        default: false
+      multi_arch:
+        required: false
+        type: boolean
+        default: false
+      emit_release_manifest:
+        required: false
+        type: boolean
+        default: false
+      require_complete_manifest:
+        required: false
+        type: boolean
+        default: false
+      revision:
+        required: false
+        type: string
+        default: ""
+    outputs:
+      release_manifest:
+        description: Machine-readable manifest with digest-pinned runtime refs.
+        value: ${{ jobs.assemble-release-manifest.outputs.release_manifest }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  GHCR_REGISTRY: ghcr.io
+  VULHUNTER_IMAGE_NAMESPACE: unbengable12
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.shared.outputs.tag }}
+      platforms: ${{ steps.shared.outputs.platforms }}
+
+    steps:
+      - name: 计算共享构建参数
+        id: shared
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          MULTI_ARCH: ${{ inputs.multi_arch }}
+        run: |
+          set -euo pipefail
+
+          echo "tag=${INPUT_TAG:-latest}" >> "$GITHUB_OUTPUT"
+          if [[ "${MULTI_ARCH}" == "true" ]]; then
+            echo "platforms=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "platforms=linux/amd64" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 输出发布摘要
+        run: |
+          echo "## Runtime image publish" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tag: \`${{ steps.shared.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-frontend-amd64:
+    name: Publish frontend image (amd64)
+    needs: prepare
+    if: ${{ inputs.build_frontend }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.capture.outputs.tag }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 amd64 前端 Docker 镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          file: ./docker/frontend.Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          cache-from: type=gha,scope=frontend-runtime-amd64
+          cache-to: type=gha,mode=max,scope=frontend-runtime-amd64
+
+      - name: 记录 amd64 前端镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-frontend-arm64:
+    name: Publish frontend image (arm64)
+    needs: prepare
+    if: ${{ inputs.build_frontend && inputs.multi_arch }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.capture.outputs.tag }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 arm64 前端 Docker 镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          file: ./docker/frontend.Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          cache-from: type=gha,scope=frontend-runtime-arm64
+          cache-to: type=gha,mode=max,scope=frontend-runtime-arm64
+
+      - name: 记录 arm64 前端镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-frontend:
+    name: Publish frontend image
+    needs:
+      - prepare
+      - publish-frontend-amd64
+      - publish-frontend-arm64
+    if: ${{ always() && inputs.build_frontend && needs.publish-frontend-amd64.result == 'success' && (needs.publish-frontend-arm64.result == 'success' || needs.publish-frontend-arm64.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.assemble.outputs.digest }}
+      ref: ${{ steps.assemble.outputs.ref }}
+
+    steps:
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 组装多架构前端 manifest
+        id: assemble
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}
+          AMD64_TAG: ${{ needs.publish-frontend-amd64.outputs.tag }}
+          ARM64_TAG: ${{ needs.publish-frontend-arm64.outputs.tag }}
+          MULTI_ARCH: ${{ inputs.multi_arch }}
+          EXPECTED_PLATFORMS: ${{ inputs.multi_arch && 'linux/amd64 linux/arm64' || 'linux/amd64' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${MULTI_ARCH}" == "true" ]]; then
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}" "${ARM64_TAG}"
+          else
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
+          fi
+
+          raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
+          RAW_JSON="${raw_json}" python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+
+          raw = os.environ["RAW_JSON"]
+          data = json.loads(raw)
+          manifests = data.get("manifests", [])
+          platforms = {
+              f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
+              for entry in manifests
+          }
+          expected = set(os.environ["EXPECTED_PLATFORMS"].split())
+          missing = sorted(expected - platforms)
+          if missing:
+              raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
+          digest = f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"digest={digest}", file=output)
+              print(f"ref={os.environ['IMAGE']}@{digest}", file=output)
+          print(f"validated platforms: {', '.join(sorted(platforms))}")
+          PY
+
+  publish-backend-amd64:
+    name: Publish backend image (amd64)
+    needs: prepare
+    if: ${{ inputs.build_backend }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.capture.outputs.tag }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Restore amd64 cache mounts
+        id: cache-mounts-amd64
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-mounts-runtime-release-amd64
+          key: ${{ runner.os }}-backend-runtime-release-amd64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/cython_build/setup.py', 'backend/cython_build/release_allowlist.txt', 'backend/cython_build/release_exclusion_list.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-backend-runtime-release-amd64-mounts-
+
+      - name: Inject amd64 cache mounts into BuildKit
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-dir: /tmp/.buildx-cache-mounts-runtime-release-amd64
+          dockerfile: docker/backend.Dockerfile
+          skip-extraction: ${{ steps.cache-mounts-amd64.outputs.cache-hit }}
+
+      - name: 构建并推送 amd64 后端 Docker 镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/backend.Dockerfile
+          target: runtime-release
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          build-args: |
+            DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+            BACKEND_CYTHON_JOBS=4
+            BACKEND_CYTHON_MAX_JOBS=4
+            VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64
+            type=gha,scope=backend-runtime-release-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max
+            type=gha,mode=max,scope=backend-runtime-release-amd64
+
+      - name: 记录 amd64 后端镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-backend-arm64:
+    name: Publish backend image (arm64)
+    needs: prepare
+    if: ${{ inputs.build_backend && inputs.multi_arch }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.capture.outputs.tag }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Restore arm64 cache mounts
+        id: cache-mounts-arm64
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-mounts-runtime-release-arm64
+          key: ${{ runner.os }}-backend-runtime-release-arm64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/cython_build/setup.py', 'backend/cython_build/release_allowlist.txt', 'backend/cython_build/release_exclusion_list.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-backend-runtime-release-arm64-mounts-
+
+      - name: Inject arm64 cache mounts into BuildKit
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-dir: /tmp/.buildx-cache-mounts-runtime-release-arm64
+          dockerfile: docker/backend.Dockerfile
+          skip-extraction: ${{ steps.cache-mounts-arm64.outputs.cache-hit }}
+
+      - name: 构建并推送 arm64 后端 Docker 镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/backend.Dockerfile
+          target: runtime-release
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          build-args: |
+            DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+            BACKEND_CYTHON_JOBS=4
+            BACKEND_CYTHON_MAX_JOBS=4
+            VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64
+            type=gha,scope=backend-runtime-release-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max
+            type=gha,mode=max,scope=backend-runtime-release-arm64
+
+      - name: 记录 arm64 后端镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-backend:
+    name: Publish backend image
+    needs:
+      - prepare
+      - publish-backend-amd64
+      - publish-backend-arm64
+    if: ${{ always() && inputs.build_backend && needs.publish-backend-amd64.result == 'success' && (needs.publish-backend-arm64.result == 'success' || needs.publish-backend-arm64.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.assemble.outputs.digest }}
+      ref: ${{ steps.assemble.outputs.ref }}
+
+    steps:
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 组装多架构后端 manifest
+        id: assemble
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}
+          AMD64_TAG: ${{ needs.publish-backend-amd64.outputs.tag }}
+          ARM64_TAG: ${{ needs.publish-backend-arm64.outputs.tag }}
+          MULTI_ARCH: ${{ inputs.multi_arch }}
+          EXPECTED_PLATFORMS: ${{ inputs.multi_arch && 'linux/amd64 linux/arm64' || 'linux/amd64' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${MULTI_ARCH}" == "true" ]]; then
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}" "${ARM64_TAG}"
+          else
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
+          fi
+
+          raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
+          RAW_JSON="${raw_json}" python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+
+          raw = os.environ["RAW_JSON"]
+          data = json.loads(raw)
+          manifests = data.get("manifests", [])
+          platforms = {
+              f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
+              for entry in manifests
+          }
+          expected = set(os.environ["EXPECTED_PLATFORMS"].split())
+          missing = sorted(expected - platforms)
+          if missing:
+              raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
+          digest = f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"digest={digest}", file=output)
+              print(f"ref={os.environ['IMAGE']}@{digest}", file=output)
+          print(f"validated platforms: {', '.join(sorted(platforms))}")
+          PY
+
+  publish-backend-hardened:
+    name: Publish hardened backend image
+    needs: prepare
+    if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 hardened 后端 Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/backend.Dockerfile
+          target: runtime-cython
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-hardened
+          build-args: |
+            DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+            VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-cython
+            type=gha,scope=backend-runtime-cython
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-cython,mode=max
+            type=gha,mode=max,scope=backend-runtime-cython
+
+      - name: 验证 hardened 后端镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ format('{0}-hardened', needs.prepare.outputs.tag) }}
+
+      - name: 记录 hardened 后端镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-yasa-runner:
+    name: Publish YASA runner image
+    needs: prepare
+    if: ${{ inputs.build_yasa_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 YASA runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/yasa-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=yasa-runner
+          cache-to: type=gha,mode=max,scope=yasa-runner
+
+      - name: 验证 YASA runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 YASA runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-opengrep-runner:
+    name: Publish OpenGrep runner image
+    needs: prepare
+    if: ${{ inputs.build_opengrep_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 OpenGrep runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/opengrep-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=opengrep-runner
+          cache-to: type=gha,mode=max,scope=opengrep-runner
+
+      - name: 验证 OpenGrep runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 OpenGrep runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-bandit-runner:
+    name: Publish Bandit runner image
+    needs: prepare
+    if: ${{ inputs.build_bandit_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 Bandit runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/bandit-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=bandit-runner
+          cache-to: type=gha,mode=max,scope=bandit-runner
+
+      - name: 验证 Bandit runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-bandit-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 Bandit runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-gitleaks-runner:
+    name: Publish Gitleaks runner image
+    needs: prepare
+    if: ${{ inputs.build_gitleaks_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 Gitleaks runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/gitleaks-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=gitleaks-runner
+          cache-to: type=gha,mode=max,scope=gitleaks-runner
+
+      - name: 验证 Gitleaks runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-gitleaks-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 Gitleaks runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-phpstan-runner:
+    name: Publish PHPStan runner image
+    needs: prepare
+    if: ${{ inputs.build_phpstan_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 PHPStan runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/phpstan-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=phpstan-runner
+          cache-to: type=gha,mode=max,scope=phpstan-runner
+
+      - name: 验证 PHPStan runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-phpstan-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 PHPStan runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-flow-parser-runner:
+    name: Publish flow/parser runner image
+    needs: prepare
+    if: ${{ inputs.build_flow_parser_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 flow/parser runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/flow-parser-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=flow-parser-runner
+          cache-to: type=gha,mode=max,scope=flow-parser-runner
+
+      - name: 验证 flow/parser runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-flow-parser-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 flow/parser runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-pmd-runner:
+    name: Publish PMD runner image
+    needs: prepare
+    if: ${{ inputs.build_pmd_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 PMD runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/pmd-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=pmd-runner
+          cache-to: type=gha,mode=max,scope=pmd-runner
+
+      - name: 验证 PMD runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-pmd-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 PMD runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-sandbox-runner:
+    name: Publish sandbox-runner image
+    needs: prepare
+    if: ${{ inputs.build_sandbox_runner }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      ref: ${{ steps.capture.outputs.ref }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 QEMU
+        if: ${{ inputs.multi_arch }}
+        uses: docker/setup-qemu-action@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 sandbox-runner Docker 镜像
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/sandbox-runner.Dockerfile
+          push: true
+          platforms: ${{ needs.prepare.outputs.platforms }}
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}
+          cache-from: type=gha,scope=sandbox-runner
+          cache-to: type=gha,mode=max,scope=sandbox-runner
+
+      - name: 验证 sandbox-runner 镜像可解析
+        run: |
+          set -euo pipefail
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner:${IMAGE_TAG}" >/dev/null
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+      - name: 记录 sandbox-runner 镜像引用
+        id: capture
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-package-visibility:
+    name: Update published GHCR package visibility
+    needs:
+      - publish-frontend
+      - publish-backend
+      - publish-backend-hardened
+      - publish-yasa-runner
+      - publish-opengrep-runner
+      - publish-bandit-runner
+      - publish-gitleaks-runner
+      - publish-phpstan-runner
+      - publish-flow-parser-runner
+      - publish-pmd-runner
+      - publish-sandbox-runner
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - name: 汇总本次发布的 GHCR 包
+        id: packages
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+
+          mapping = {
+              "publish-frontend": "vulhunter-frontend",
+              "publish-backend": "vulhunter-backend",
+              "publish-backend-hardened": "vulhunter-backend",
+              "publish-yasa-runner": "vulhunter-yasa-runner",
+              "publish-opengrep-runner": "vulhunter-opengrep-runner",
+              "publish-bandit-runner": "vulhunter-bandit-runner",
+              "publish-gitleaks-runner": "vulhunter-gitleaks-runner",
+              "publish-phpstan-runner": "vulhunter-phpstan-runner",
+              "publish-flow-parser-runner": "vulhunter-flow-parser-runner",
+              "publish-pmd-runner": "vulhunter-pmd-runner",
+              "publish-sandbox-runner": "vulhunter-sandbox-runner",
+          }
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          packages = sorted(
+              {
+                  package
+                  for job_name, package in mapping.items()
+                  if needs.get(job_name, {}).get("result") == "success"
+              }
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print("names<<EOF", file=output)
+              for package in packages:
+                  print(package, file=output)
+              print("EOF", file=output)
+
+          if packages:
+              print(f"Will update visibility for: {', '.join(packages)}")
+          else:
+              print("No GHCR packages were published in this run.")
+          PY
+
+      - name: 更新 GHCR 包可见性
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGES: ${{ steps.packages.outputs.names }}
+        run: |
+          set -u
+
+          if [[ -z "${PACKAGES:-}" ]]; then
+            echo "No GHCR packages were published in this run."
+            exit 0
+          fi
+
+          while IFS= read -r PACKAGE_NAME; do
+            [[ -n "${PACKAGE_NAME}" ]] || continue
+
+            if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
+              echo "${PACKAGE_NAME} set to public successfully"
+            else
+              echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
+            fi
+          done <<< "${PACKAGES}"
+
+  assemble-release-manifest:
+    name: Assemble release manifest
+    needs:
+      - prepare
+      - publish-backend
+      - publish-yasa-runner
+      - publish-opengrep-runner
+      - publish-bandit-runner
+      - publish-gitleaks-runner
+      - publish-phpstan-runner
+      - publish-flow-parser-runner
+      - publish-pmd-runner
+      - publish-sandbox-runner
+    if: ${{ always() && inputs.emit_release_manifest && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      release_manifest: ${{ steps.release-manifest.outputs.json }}
+
+    steps:
+      - name: 检查依赖镜像 job 状态
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failures = {
+              name: data["result"]
+              for name, data in needs.items()
+              if name != "prepare" and data["result"] in {"failure", "cancelled"}
+          }
+
+          if failures:
+              for name, result in failures.items():
+                  print(f"::error::Dependency job {name} finished with {result}")
+              sys.exit(1)
+          PY
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 生成 release-manifest.json
+        id: release-manifest
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+          REQUIRE_COMPLETE_MANIFEST: ${{ inputs.require_complete_manifest }}
+          REVISION: ${{ inputs.revision != '' && inputs.revision || github.sha }}
+          POSTGRES_IMAGE: docker.io/library/postgres:15-alpine
+          REDIS_IMAGE: docker.io/library/redis:7-alpine
+          ADMINER_IMAGE: docker.io/library/adminer:latest
+          SCAN_WORKSPACE_INIT_IMAGE: docker.io/library/alpine:3.20
+          STATIC_FRONTEND_IMAGE: docker.io/library/nginx:1.27-alpine
+          BACKEND_REF: ${{ needs.publish-backend.outputs.ref }}
+          SANDBOX_RUNNER_REF: ${{ needs.publish-sandbox-runner.outputs.ref }}
+          SCANNER_YASA_REF: ${{ needs.publish-yasa-runner.outputs.ref }}
+          SCANNER_OPENGREP_REF: ${{ needs.publish-opengrep-runner.outputs.ref }}
+          SCANNER_BANDIT_REF: ${{ needs.publish-bandit-runner.outputs.ref }}
+          SCANNER_GITLEAKS_REF: ${{ needs.publish-gitleaks-runner.outputs.ref }}
+          SCANNER_PHPSTAN_REF: ${{ needs.publish-phpstan-runner.outputs.ref }}
+          SCANNER_PMD_REF: ${{ needs.publish-pmd-runner.outputs.ref }}
+          FLOW_PARSER_RUNNER_REF: ${{ needs.publish-flow-parser-runner.outputs.ref }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" && -z "${BACKEND_REF}" ]]; then
+            echo "::error::Release manifest requires a freshly built backend image ref; refusing to fall back to ${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${IMAGE_TAG}" >&2
+            exit 1
+          fi
+
+          resolve_ref() {
+            local image="$1"
+            local ref="$2"
+            local resolved_digest
+
+            if [[ -n "$ref" ]]; then
+              printf '%s' "$ref"
+              return 0
+            fi
+
+            resolved_digest="$(docker buildx imagetools inspect "${image}:${IMAGE_TAG}" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+            if [[ -z "$resolved_digest" ]]; then
+              if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
+                echo "::error::Failed to resolve digest for ${image}:${IMAGE_TAG}" >&2
+                return 1
+              fi
+              return 0
+            fi
+
+            printf '%s@%s' "$image" "$resolved_digest"
+          }
+
+          resolve_external_ref() {
+            local ref="$1"
+            local image="${ref%%@*}"
+            local resolved_digest
+
+            resolved_digest="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+            if [[ -z "$resolved_digest" ]]; then
+              if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
+                echo "::error::Failed to resolve digest for ${ref}" >&2
+                return 1
+              fi
+              return 0
+            fi
+
+            printf '%s@%s' "$image" "$resolved_digest"
+          }
+
+          export BACKEND_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend" "${BACKEND_REF}")"
+          export POSTGRES_FINAL_REF="$(resolve_external_ref "${POSTGRES_IMAGE}")"
+          export REDIS_FINAL_REF="$(resolve_external_ref "${REDIS_IMAGE}")"
+          export ADMINER_FINAL_REF="$(resolve_external_ref "${ADMINER_IMAGE}")"
+          export SCAN_WORKSPACE_INIT_FINAL_REF="$(resolve_external_ref "${SCAN_WORKSPACE_INIT_IMAGE}")"
+          export STATIC_FRONTEND_FINAL_REF="$(resolve_external_ref "${STATIC_FRONTEND_IMAGE}")"
+          export SANDBOX_RUNNER_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}")"
+          export SCANNER_YASA_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}")"
+          export SCANNER_OPENGREP_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner" "${SCANNER_OPENGREP_REF}")"
+          export SCANNER_BANDIT_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-bandit-runner" "${SCANNER_BANDIT_REF}")"
+          export SCANNER_GITLEAKS_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-gitleaks-runner" "${SCANNER_GITLEAKS_REF}")"
+          export SCANNER_PHPSTAN_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-phpstan-runner" "${SCANNER_PHPSTAN_REF}")"
+          export SCANNER_PMD_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-pmd-runner" "${SCANNER_PMD_REF}")"
+          export FLOW_PARSER_RUNNER_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-flow-parser-runner" "${FLOW_PARSER_RUNNER_REF}")"
+
+          manifest_json="$(python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from datetime import datetime, timezone
+
+
+          def required(name: str) -> str:
+              value = os.environ.get(name, "").strip()
+              if not value and os.environ.get("REQUIRE_COMPLETE_MANIFEST", "false") == "true":
+                  raise SystemExit(f"missing manifest ref: {name}")
+              return value
+
+
+          payload = {
+              "revision": os.environ["REVISION"],
+              "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "images": {
+                  "backend": {"ref": required("BACKEND_FINAL_REF")},
+                  "postgres": {"ref": required("POSTGRES_FINAL_REF")},
+                  "redis": {"ref": required("REDIS_FINAL_REF")},
+                  "adminer": {"ref": required("ADMINER_FINAL_REF")},
+                  "scan_workspace_init": {"ref": required("SCAN_WORKSPACE_INIT_FINAL_REF")},
+                  "static_frontend": {"ref": required("STATIC_FRONTEND_FINAL_REF")},
+                  "sandbox_runner": {"ref": required("SANDBOX_RUNNER_FINAL_REF")},
+                  "scanner_yasa": {"ref": required("SCANNER_YASA_FINAL_REF")},
+                  "scanner_opengrep": {"ref": required("SCANNER_OPENGREP_FINAL_REF")},
+                  "scanner_bandit": {"ref": required("SCANNER_BANDIT_FINAL_REF")},
+                  "scanner_gitleaks": {"ref": required("SCANNER_GITLEAKS_FINAL_REF")},
+                  "scanner_phpstan": {"ref": required("SCANNER_PHPSTAN_FINAL_REF")},
+                  "scanner_pmd": {"ref": required("SCANNER_PMD_FINAL_REF")},
+                  "flow_parser_runner": {"ref": required("FLOW_PARSER_RUNNER_FINAL_REF")},
+              },
+          }
+          print(json.dumps(payload, separators=(",", ":")))
+          PY
+          )"
+
+          printf '%s\n' "${manifest_json}" > release-manifest.json
+          {
+            echo "json=${manifest_json}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 更新摘要
+        run: |
+          echo "- release-manifest.json generated" >> "$GITHUB_STEP_SUMMARY"
