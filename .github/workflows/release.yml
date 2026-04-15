@@ -281,7 +281,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ./scripts/write-release-snapshot-lock.py \
+          python3 ./scripts/write-release-snapshot-lock.py \
             --release-tree "${RUNNER_TEMP}/release-tree" \
             --release-manifest "${RUNNER_TEMP}/release-manifest.json" \
             --snapshot-tag "${SNAPSHOT_TAG}" \
