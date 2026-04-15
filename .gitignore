@@ -139,6 +139,7 @@ backend/alembic.ini.bak
 frontend/node_modules/
 frontend/dist/
 frontend/build/
+frontend/.pnpm-store/
 frontend/.vite/
 frontend/.next/
 frontend/.nuxt/
@@ -241,3 +242,4 @@ backend/data/
 !nexus-itemDetail/dist/
 
 backend/pytest*
+backend/log/

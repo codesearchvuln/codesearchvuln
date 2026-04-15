@@ -659,6 +659,9 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
+    reusable_workflow_text = (
+        REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml"
+    ).read_text(encoding="utf-8")
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "build_frontend: false" in workflow_text
@@ -683,6 +686,9 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "git push --force origin HEAD:release" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text
+    assert "STATIC_FRONTEND_IMAGE" in reusable_workflow_text
+    assert "STATIC_FRONTEND_FINAL_REF" in reusable_workflow_text
+    assert '"static_frontend": {"ref": required("STATIC_FRONTEND_FINAL_REF")}' in reusable_workflow_text
 
 
 def test_sandbox_runner_dockerfile_now_carries_the_heavy_runtime_contract() -> None:

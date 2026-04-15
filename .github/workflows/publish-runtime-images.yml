@@ -1251,6 +1251,7 @@ jobs:
           REDIS_IMAGE: docker.io/library/redis:7-alpine
           ADMINER_IMAGE: docker.io/library/adminer:latest
           SCAN_WORKSPACE_INIT_IMAGE: docker.io/library/alpine:3.20
+          STATIC_FRONTEND_IMAGE: docker.io/library/nginx:1.27-alpine
           BACKEND_REF: ${{ needs.publish-backend.outputs.ref }}
           SANDBOX_RUNNER_REF: ${{ needs.publish-sandbox-runner.outputs.ref }}
           SCANNER_YASA_REF: ${{ needs.publish-yasa-runner.outputs.ref }}
@@ -1307,6 +1308,7 @@ jobs:
           export REDIS_FINAL_REF="$(resolve_external_ref "${REDIS_IMAGE}")"
           export ADMINER_FINAL_REF="$(resolve_external_ref "${ADMINER_IMAGE}")"
           export SCAN_WORKSPACE_INIT_FINAL_REF="$(resolve_external_ref "${SCAN_WORKSPACE_INIT_IMAGE}")"
+          export STATIC_FRONTEND_FINAL_REF="$(resolve_external_ref "${STATIC_FRONTEND_IMAGE}")"
           export SANDBOX_RUNNER_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}")"
           export SCANNER_YASA_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}")"
           export SCANNER_OPENGREP_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner" "${SCANNER_OPENGREP_REF}")"
@@ -1340,6 +1342,7 @@ jobs:
                   "redis": {"ref": required("REDIS_FINAL_REF")},
                   "adminer": {"ref": required("ADMINER_FINAL_REF")},
                   "scan_workspace_init": {"ref": required("SCAN_WORKSPACE_INIT_FINAL_REF")},
+                  "static_frontend": {"ref": required("STATIC_FRONTEND_FINAL_REF")},
                   "sandbox_runner": {"ref": required("SANDBOX_RUNNER_FINAL_REF")},
                   "scanner_yasa": {"ref": required("SCANNER_YASA_FINAL_REF")},
                   "scanner_opengrep": {"ref": required("SCANNER_OPENGREP_FINAL_REF")},
