@@ -242,6 +242,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "publish_backend_hardened:" in workflow_text
     assert "prepare-release:" in workflow_text
     assert "create-draft-release:" in workflow_text
+    assert "GH_REPO: ${{ github.repository }}" in workflow_text
     assert "publish-runtime-images:" in workflow_text
     assert "package-offline-images:" in workflow_text
     assert "finalize-release:" in workflow_text
@@ -346,6 +347,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "docker-publish.yml" not in workflow_text
     assert "actions: write" not in workflow_text
     assert "if: ${{ failure() || cancelled() }}" in workflow_text
+    assert workflow_text.count("GH_REPO: ${{ github.repository }}") == 2
     assert "isDraft" in workflow_text
     assert 'gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes' in workflow_text
     assert "publish_backend_hardened:" in publish_workflow_text

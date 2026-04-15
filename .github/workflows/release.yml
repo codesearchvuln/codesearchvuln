@@ -69,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
     outputs:
       snapshot_tag: ${{ needs.prepare-release.outputs.snapshot_tag }}
       snapshot_url: ${{ steps.capture.outputs.snapshot_url }}
@@ -446,6 +448,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Delete failed snapshot draft release
