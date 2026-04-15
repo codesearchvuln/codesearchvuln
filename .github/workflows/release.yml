@@ -42,11 +42,13 @@ jobs:
     steps:
       - name: 计算 release 源信息
         id: vars
+        env:
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
-            source_ref="${{ github.event.workflow_run.head_sha }}"
+            source_ref="${WORKFLOW_RUN_HEAD_SHA}"
           else
             source_ref="${GITHUB_SHA}"
           fi
@@ -89,10 +91,10 @@ jobs:
             --title "${SNAPSHOT_TITLE}" \
             --notes "Offline runtime image snapshot for ${SOURCE_SHA}."
 
-          release_json="$(gh release view "${SNAPSHOT_TAG}" --json id,htmlUrl,isDraft,tagName)"
+          release_json="$(gh release view "${SNAPSHOT_TAG}" --json databaseId,url,isDraft,tagName)"
 
-          release_id="$(printf '%s' "${release_json}" | jq -r '.id')"
-          html_url="$(printf '%s' "${release_json}" | jq -r '.htmlUrl')"
+          release_id="$(printf '%s' "${release_json}" | jq -r '.databaseId')"
+          html_url="$(printf '%s' "${release_json}" | jq -r '.url')"
           is_draft="$(printf '%s' "${release_json}" | jq -r '.isDraft')"
           actual_tag="$(printf '%s' "${release_json}" | jq -r '.tagName')"
 
