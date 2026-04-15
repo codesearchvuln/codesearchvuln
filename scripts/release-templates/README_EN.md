@@ -4,6 +4,8 @@ This directory is the generated release tree runtime package, not the source-rep
 
 The release branch is only the channel for the latest generated release tree. It is not a catalog of historical snapshots. If you are deploying offline, keep this release tree and the two offline tarballs from the same snapshot.
 
+The default release backend image now always comes from the Docker `runtime-plain` target. Offline deployment no longer depends on `runtime-release` or any other selective source-hardening target; `runtime-cython` remains only as an extra optional hardened variant.
+
 ## 1. Before You Start
 
 - Supported hosts: `Ubuntu 22.04 LTS`, `Ubuntu 24.04 LTS`, `Windows 10 WSL2 + Ubuntu 22.04 LTS`, `Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -36,6 +38,8 @@ Start the stack:
 ```bash
 docker compose up -d
 ```
+
+The default backend started here is also the `runtime-plain` artifact, not a release-only selective `.so` / Cython assembly path.
 
 Check status:
 

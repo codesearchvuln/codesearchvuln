@@ -4,6 +4,8 @@
 
 当前 release branch 只表示“最新一份 generated release tree 下载通道”，不是历史 snapshot 列表。若你要离线部署某个 snapshot，请确保当前 release tree 与两份离线 tar 包来自同一个 snapshot。
 
+当前默认 release backend 镜像固定来自 Docker `runtime-plain` target。离线部署不依赖 `runtime-release` 或其他选择性源码加固 target；`runtime-cython` 仅作为额外可选的 hardened 变体存在。
+
 ## 1. 部署前准备
 
 - 宿主机支持：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -36,6 +38,8 @@ cp docker/env/backend/env.example docker/env/backend/.env
 ```bash
 docker compose up -d
 ```
+
+这里启动的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。
 
 查看状态：
 

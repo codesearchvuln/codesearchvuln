@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       publish_backend_hardened:
-        description: 'Publish the hardened backend image variant alongside the default backend image'
+        description: 'Publish the optional hardened backend image variant in addition to the default runtime-plain backend image'
         required: false
         type: boolean
         default: false

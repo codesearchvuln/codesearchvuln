@@ -2,7 +2,6 @@
 Cython 编译脚本 - 将 backend/app/ 下可编译的 Python 模块编译为 .so 扩展
 
 默认策略：排除法（排除已知不可编译的文件，其余全量编译）
-Release 策略：通过 CYTHON_INCLUDE_PATTERNS_FILE 指定 allowlist，仅编译高价值模块
 
 使用方式：
     cd /build
@@ -24,8 +23,6 @@ Options.annotate = False     # 不生成 HTML 注解文件
 BUILD_DIR = Path(__file__).resolve().parent
 APP_DIR = BUILD_DIR.parent / "app"
 EXCLUSION_LIST_FILE = BUILD_DIR / "exclusion_list.txt"
-DEFAULT_RELEASE_ALLOWLIST_FILE = BUILD_DIR / "release_allowlist.txt"
-DEFAULT_RELEASE_EXCLUSION_FILE = BUILD_DIR / "release_exclusion_list.txt"
 
 
 def _load_patterns(pattern_file: Path) -> list[str]:
@@ -40,27 +37,6 @@ def _load_patterns(pattern_file: Path) -> list[str]:
 
 
 EXCLUDE_PATTERNS = _load_patterns(EXCLUSION_LIST_FILE)
-
-include_patterns_file = os.environ.get("CYTHON_INCLUDE_PATTERNS_FILE", "").strip()
-if include_patterns_file:
-    INCLUDE_PATTERNS_FILE = Path(include_patterns_file)
-elif os.environ.get("CYTHON_BUILD_MODE", "").strip().lower() == "release":
-    INCLUDE_PATTERNS_FILE = DEFAULT_RELEASE_ALLOWLIST_FILE
-else:
-    INCLUDE_PATTERNS_FILE = None
-
-INCLUDE_PATTERNS = _load_patterns(INCLUDE_PATTERNS_FILE) if INCLUDE_PATTERNS_FILE is not None else []
-exclude_patterns_file = os.environ.get("CYTHON_EXCLUDE_PATTERNS_FILE", "").strip()
-if exclude_patterns_file:
-    EXTRA_EXCLUDE_PATTERNS_FILE = Path(exclude_patterns_file)
-elif INCLUDE_PATTERNS_FILE is not None:
-    EXTRA_EXCLUDE_PATTERNS_FILE = DEFAULT_RELEASE_EXCLUSION_FILE
-else:
-    EXTRA_EXCLUDE_PATTERNS_FILE = None
-
-EXTRA_EXCLUDE_PATTERNS = (
-    _load_patterns(EXTRA_EXCLUDE_PATTERNS_FILE) if EXTRA_EXCLUDE_PATTERNS_FILE is not None else []
-)
 
 
 def _resolve_cython_nthreads() -> int:
@@ -86,16 +62,7 @@ def _matches_pattern(rel_path: str, pattern: str) -> bool:
 
 def should_exclude(rel_path: str) -> bool:
     """判断文件是否应排除编译（相对于 app/ 的路径）"""
-    for pattern in [*EXCLUDE_PATTERNS, *EXTRA_EXCLUDE_PATTERNS]:
-        if _matches_pattern(rel_path, pattern):
-            return True
-    return False
-
-
-def should_include(rel_path: str) -> bool:
-    if not INCLUDE_PATTERNS:
-        return True
-    for pattern in INCLUDE_PATTERNS:
+    for pattern in EXCLUDE_PATTERNS:
         if _matches_pattern(rel_path, pattern):
             return True
     return False
@@ -106,30 +73,22 @@ def collect_extensions() -> list[Extension]:
     all_py = sorted(APP_DIR.rglob("*.py"))
     result: list[Extension] = []
     excluded = []
-    skipped = []
 
     for f in all_py:
         rel = str(f.relative_to(APP_DIR))
         if should_exclude(rel):
             excluded.append(rel)
-        elif not should_include(rel):
-            skipped.append(rel)
         else:
             module_name = f"app.{Path(rel).with_suffix('').as_posix().replace('/', '.')}"
             result.append(Extension(module_name, [str(f)]))
 
-    mode = "release-allowlist" if INCLUDE_PATTERNS else "full-exclusion"
     print(
-        f"[Cython] 模式: {mode}, 待编译模块数: {len(result)}, "
-        f"排除模块数: {len(excluded)}, 跳过模块数: {len(skipped)}"
+        f"[Cython] 模式: full-exclusion, 待编译模块数: {len(result)}, "
+        f"排除模块数: {len(excluded)}"
     )
     if excluded:
         print("[Cython] 排除列表（前20条）:")
         for e in excluded[:20]:
-            print(f"  - {e}")
-    if skipped:
-        print("[Cython] allowlist 跳过列表（前20条）:")
-        for e in skipped[:20]:
             print(f"  - {e}")
     return result
 

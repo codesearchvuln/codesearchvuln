@@ -632,10 +632,10 @@ def test_runtime_image_publish_workflow_centralizes_manifest_inspection_and_visi
         REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml"
     ).read_text(encoding="utf-8")
 
-    assert "type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max" in workflow_text
-    assert "type=gha,mode=max,scope=backend-runtime-release-amd64" in workflow_text
-    assert "type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max" in workflow_text
-    assert "type=gha,mode=max,scope=backend-runtime-release-arm64" in workflow_text
+    assert "type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-amd64,mode=max" in workflow_text
+    assert "type=gha,mode=max,scope=backend-runtime-plain-amd64" in workflow_text
+    assert "type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-arm64,mode=max" in workflow_text
+    assert "type=gha,mode=max,scope=backend-runtime-plain-arm64" in workflow_text
     assert workflow_text.count('raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"') == 2
     assert 'docker buildx imagetools inspect "${FINAL_TAG}" >/dev/null' not in workflow_text
     assert workflow_text.count('docker buildx imagetools inspect "${IMAGE}:${IMAGE_TAG}" --format \'{{.Manifest.Digest}}\'') == 0
@@ -668,16 +668,16 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     assert "- 'backend/**'" in workflow_text
     assert "- 'docker/frontend.Dockerfile'" in workflow_text
     assert "- 'docker/backend.Dockerfile'" in workflow_text
-    assert "- 'docker/sandbox-runner.Dockerfile'" in workflow_text
+    assert "- 'docker/sandbox-runner.Dockerfile'" not in workflow_text
     assert "- 'docker/sandbox.Dockerfile'" not in workflow_text
     assert "- '.github/workflows/docker-publish.yml'" in workflow_text
     assert "- 'frontend/yasa-engine-overrides/**'" in workflow_text
-    assert "- '.github/workflows/release.yml'" in workflow_text
-    assert "- 'scripts/generate-release-branch.sh'" in workflow_text
-    assert "- 'scripts/package-release-images.sh'" in workflow_text
-    assert "- 'scripts/release-templates/**'" in workflow_text
-    assert "- 'nexus-web/dist/**'" in workflow_text
-    assert "- 'nexus-itemDetail/dist/**'" in workflow_text
+    assert "- '.github/workflows/release.yml'" not in workflow_text
+    assert "- 'scripts/generate-release-branch.sh'" not in workflow_text
+    assert "- 'scripts/package-release-images.sh'" not in workflow_text
+    assert "- 'scripts/release-templates/**'" not in workflow_text
+    assert "- 'nexus-web/dist/**'" not in workflow_text
+    assert "- 'nexus-itemDetail/dist/**'" not in workflow_text
 
 
 def test_release_workflow_builds_manifest_driven_release_tree() -> None:
@@ -700,7 +700,8 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "--image-manifest" in workflow_text
     assert "--frontend-bundle" in workflow_text
     assert "--validate" in workflow_text
-    assert "--arch ${{ matrix.arch }}" in workflow_text
+    assert "ARCH: ${{ matrix.arch }}" in workflow_text
+    assert '--arch "${ARCH}"' in workflow_text
     assert "build_sandbox:" not in workflow_text
     assert "docker compose config" in workflow_text
     assert "bash ./scripts/offline-up.sh" in workflow_text
@@ -715,13 +716,13 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "git push origin HEAD:release" in workflow_text
     assert "git ls-remote --exit-code --heads origin release" in workflow_text
     assert "git checkout -B release origin/release" in workflow_text
-    assert 'repos/${GITHUB_REPOSITORY}/releases?per_page=30' in workflow_text
+    assert 'repos/${GITHUB_REPOSITORY}/releases/${SNAPSHOT_RELEASE_ID}' in workflow_text
     assert 'repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}' not in workflow_text
     assert "./scripts/release_version.py" in workflow_text
     assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
     assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release upload "${SEMANTIC_TAG}"' in workflow_text
-    assert 'gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes' in workflow_text
+    assert 'gh release delete "${SNAPSHOT_TAG}" --yes' in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text
     assert "STATIC_FRONTEND_IMAGE" in reusable_workflow_text

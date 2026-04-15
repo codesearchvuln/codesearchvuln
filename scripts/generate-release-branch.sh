@@ -19,6 +19,8 @@ Usage: generate-release-branch.sh --output <dir> --image-manifest <file> --front
 Generate an image-only runtime release tree from the checked-out repository.
 The output intentionally excludes backend/frontend source code, local-build compose
 overlays, Dockerfiles, and other development-only assets.
+The default backend image in the generated release tree is expected to come from
+the runtime-plain Docker target; optional hardened variants are out of band.
 
 Options:
   --output <dir>           Required. Destination directory for the generated release tree.
@@ -216,6 +218,7 @@ offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
     "# Then run bash ./scripts/offline-up.sh.",
     "# This release tree does not support rebuilding backend/frontend from source.",
+    "# The default backend runtime image in this release tree comes from the runtime-plain target.",
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
 ]
 

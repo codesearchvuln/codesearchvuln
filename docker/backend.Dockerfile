@@ -320,172 +320,6 @@ EXPOSE 8000
 CMD ["python3", "-m", "app.runtime.container_startup", "dev"]
 
 # ============================================================
-# Selective Cython 编译阶段：仅编译高价值模块给默认 release 镜像
-# ============================================================
-FROM builder AS selective-cython-compiler
-
-ARG BACKEND_PYPI_INDEX_PRIMARY
-ARG BACKEND_CYTHON_JOBS=0
-ARG BACKEND_CYTHON_MAX_JOBS=4
-ARG BACKEND_CYTHON_MEM_PER_JOB_MB=768
-RUN --mount=type=cache,id=vulhunter-runtime-release-cython-uv,target=/root/.cache/uv \
-  VIRTUAL_ENV=/opt/backend-venv \
-  UV_INDEX_URL="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}" \
-  uv pip install "Cython>=3.0.0,<4.0.0" "setuptools>=68"
-
-COPY backend/app /build/app
-COPY backend/cython_build /build/cython_build
-
-RUN --mount=type=cache,id=vulhunter-runtime-release-cython-ccache,target=/root/.ccache,sharing=shared \
-  set -eux; \
-  export CC="ccache gcc" CXX="ccache g++"; \
-  export CCACHE_DIR=/root/.ccache; \
-  export CCACHE_MAXSIZE=2G; \
-  export CYTHON_INCLUDE_PATTERNS_FILE=/build/cython_build/release_allowlist.txt; \
-  CPU_JOBS="$(nproc)"; \
-  MEM_MB="$(awk '/MemAvailable:/ {print int($2/1024)}' /proc/meminfo)"; \
-  MEM_JOBS=$(( MEM_MB / BACKEND_CYTHON_MEM_PER_JOB_MB )); \
-  if [ "${MEM_JOBS}" -lt 1 ]; then MEM_JOBS=1; fi; \
-  NPROC="${BACKEND_CYTHON_JOBS}"; \
-  if [ "${NPROC}" -le 0 ]; then NPROC="${CPU_JOBS}"; fi; \
-  if [ "${NPROC}" -gt "${CPU_JOBS}" ]; then NPROC="${CPU_JOBS}"; fi; \
-  if [ "${NPROC}" -gt "${BACKEND_CYTHON_MAX_JOBS}" ]; then NPROC="${BACKEND_CYTHON_MAX_JOBS}"; fi; \
-  if [ "${NPROC}" -gt "${MEM_JOBS}" ]; then NPROC="${MEM_JOBS}"; fi; \
-  export CYTHON_NTHREADS="${NPROC}"; \
-  echo "[RuntimeRelease] Selective Cython compile (jobs=${NPROC}, cpu=${CPU_JOBS}, mem_mb=${MEM_MB}, mem_jobs=${MEM_JOBS})"; \
-  cd /build; \
-  /opt/backend-venv/bin/python cython_build/setup.py build_ext \
-  --build-lib /build/compiled \
-  --build-temp /build/tmp \
-  --parallel "${NPROC}"; \
-  SO_COUNT=$(find /build/compiled -name "*.so" | wc -l); \
-  echo "[RuntimeRelease] 编译完成，.so 文件数: ${SO_COUNT}"; \
-  ccache --show-stats; \
-  test "${SO_COUNT}" -gt 20
-
-# ============================================================
-# runtime-release 组装：高价值模块 .so，其余运行代码 .pyc + 删除源码
-# ============================================================
-FROM selective-cython-compiler AS runtime-release-app-assembler
-
-RUN set -eux; \
-  mkdir -p /final/app; \
-  cp -r /build/app/. /final/app/; \
-  cp -r /build/compiled/app/. /final/app/; \
-  find /final/app -name "*.py" ! -name "__init__.py" | while IFS= read -r f; do \
-  rel="${f#/final/app/}"; \
-  dir="$(dirname "${f}")"; \
-  base="$(basename "${f%.py}")"; \
-  if find "${dir}" -maxdepth 1 -name "${base}.cpython-*.so" -print -quit | grep -q .; then \
-  rm -f "${f}"; \
-  echo "[RuntimeRelease] removed cythonized source: ${rel}"; \
-  fi; \
-  done; \
-  SO_COUNT=$(find /final/app -name "*.so" | wc -l); \
-  echo "[RuntimeRelease] strip ${SO_COUNT} selective .so files"; \
-  find /final/app -name "*.so" -exec strip --strip-all --remove-section=.comment {} \; ; \
-  TARGET_LIST=/tmp/runtime-release-pyc-targets.txt; \
-  : > "${TARGET_LIST}"; \
-  find /final/app -name "*.py" ! -name "__init__.py" | while IFS= read -r f; do \
-  rel="${f#/final/app/}"; \
-  case "${rel}" in \
-  db/schema_snapshots/*|db/patches/*) continue ;; \
-  esac; \
-  printf '%s\n' "${f}" >> "${TARGET_LIST}"; \
-  done; \
-  TARGET_COUNT="$(wc -l < "${TARGET_LIST}")"; \
-  while IFS= read -r src; do \
-  [ -n "${src}" ] || continue; \
-  /opt/backend-venv/bin/python -m compileall -q -b "${src}"; \
-  test -f "${src}c"; \
-  rm -f "${src}"; \
-  echo "[RuntimeRelease] bytecode protected: ${src#/final/}"; \
-  done < "${TARGET_LIST}"; \
-  PY_REMAINING=$(find /final/app -name "*.py" ! -name "__init__.py" ! -path "/final/app/db/schema_snapshots/*" ! -path "/final/app/db/patches/*" | wc -l); \
-  echo "[RuntimeRelease] selective .so count: ${SO_COUNT}"; \
-  echo "[RuntimeRelease] bytecode protected count: ${TARGET_COUNT}"; \
-  echo "[RuntimeRelease] remaining non-preserved .py count: ${PY_REMAINING}"; \
-  test "${PY_REMAINING}" -eq 0
-
-# ============================================================
-# runtime-release: 默认发布 target
-# 选择性 Cython + 全量 .pyc 收口，兼顾公开镜像源码收敛与构建时长
-# ============================================================
-FROM runtime-base AS runtime-release
-
-ARG VCS_REF=""
-LABEL org.opencontainers.image.revision="${VCS_REF}"
-
-COPY --from=builder /opt/backend-venv /opt/backend-venv
-
-RUN set -eux; \
-  for site_packages_dir in $(python3 -c 'import site; [print(path) for path in site.getsitepackages() if "site-packages" in path]'); do \
-  find "${site_packages_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +; \
-  done; \
-  rm -rf /root/.cache/pip; \
-  rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11
-
-ENV VIRTUAL_ENV=/opt/backend-venv
-ENV PATH=/opt/backend-venv/bin:${PATH}
-ENV PYTHONNOUSERSITE=1
-ENV XDG_DATA_HOME=/app/data/runtime/xdg-data
-ENV XDG_CACHE_HOME=/app/data/runtime/xdg-cache
-ENV XDG_CONFIG_HOME=/app/data/runtime/xdg-config
-RUN mkdir -p /app/data/runtime/xdg-data /app/data/runtime/xdg-cache /app/data/runtime/xdg-config
-
-COPY --from=runtime-release-app-assembler /final/app /app/app
-RUN find /app/app -name "*.c" -delete 2>/dev/null || true
-COPY backend/alembic /app/alembic
-COPY backend/alembic.ini /app/alembic.ini
-COPY backend/scripts/reset_static_scan_tables.py /app/scripts/reset_static_scan_tables.py
-
-RUN mkdir -p \
-  /app/uploads/zip_files \
-  /app/data/runtime \
-  /app/data/runtime/xdg-config
-
-RUN groupadd --gid 1001 appgroup && \
-  useradd --uid 1001 --gid appgroup \
-  --no-create-home --shell /usr/sbin/nologin appuser && \
-  chown -R appuser:appgroup \
-  /app \
-  /opt/backend-venv
-
-USER appuser
-
-EXPOSE 8000
-
-RUN /opt/backend-venv/bin/python - <<'PYEOF'
-import importlib.util
-cython_mods = ['app.db.session']
-for mod_name in cython_mods:
-    spec = importlib.util.find_spec(mod_name)
-    assert spec is not None, 'Module ' + mod_name + ' not found'
-    assert spec.origin.endswith('.so'), 'Expected .so for ' + mod_name + ', got ' + spec.origin
-    print('[RuntimeRelease][Cython] ' + mod_name + ': OK (' + spec.origin.split('/')[-1] + ')')
-pyc_mods = [
-    'app.main',
-    'app.runtime.container_startup',
-    'app.core.config',
-    'app.services.agent.config',
-    'app.services.agent.core.state',
-    'app.services.agent.tools.finish_tool',
-    'app.api.v1.endpoints.agent_tasks_execution',
-    'app.models.project',
-    'app.schemas.search',
-    'app.utils.security',
-]
-for mod_name in pyc_mods:
-    spec = importlib.util.find_spec(mod_name)
-    assert spec is not None, 'Module ' + mod_name + ' not found'
-    assert spec.origin.endswith('.pyc'), 'Expected .pyc for ' + mod_name + ', got ' + spec.origin
-    print('[RuntimeRelease][Bytecode] ' + mod_name + ': OK (' + spec.origin.split('/')[-1] + ')')
-print('[RuntimeRelease] selective hardening verifications PASSED')
-PYEOF
-
-CMD ["python3", "-m", "app.runtime.container_startup", "prod"]
-
-# ============================================================
 # Cython 编译阶段：将 Python 源码编译为 .so 扩展（代码混淆）
 # 基于 builder 阶段（已含 gcc、Python 头文件、完整 venv）
 # ============================================================
@@ -713,7 +547,7 @@ CMD ["python3", "-m", "app.runtime.container_startup", "prod"]
 # ============================================================
 # runtime: 平衡型生产 target
 # 跳过全量 Cython，保留轻量混淆（legacy .pyc）+ 非 root 运行
-# 默认推荐此 target，避免全量 Cython 在构建阶段占满 CPU / 内存
+# 作为可选生产 target 保留，不参与默认 release 发布链
 # ============================================================
 FROM runtime-base AS runtime
 
@@ -813,8 +647,8 @@ PYEOF
 CMD ["python3", "-m", "app.runtime.container_startup", "prod"]
 
 # ============================================================
-# runtime-plain: 跳过 Cython 编译，直接使用 Python 源码
-# 用于本地开发构建（hybrid / full compose），节省 ~20 分钟构建时间
+# runtime-plain: 默认 release backend target
+# 跳过 Cython 编译，直接使用 Python 源码，避免 release 路径依赖选择性 .so 产物
 # ============================================================
 FROM runtime-base AS runtime-plain
 
@@ -851,6 +685,31 @@ RUN mkdir -p \
   /app/data/runtime \
   /app/data/runtime/xdg-config
 
+RUN groupadd --gid 1001 appgroup && \
+  useradd --uid 1001 --gid appgroup \
+  --no-create-home --shell /usr/sbin/nologin appuser && \
+  chown -R appuser:appgroup \
+  /app \
+  /opt/backend-venv
+
+USER appuser
+
 EXPOSE 8000
+
+RUN /opt/backend-venv/bin/python - <<'PYEOF'
+import importlib.util
+source_mods = [
+    'app.main',
+    'app.runtime.container_startup',
+    'app.core.config',
+    'app.db.session',
+]
+for mod_name in source_mods:
+    spec = importlib.util.find_spec(mod_name)
+    assert spec is not None, 'Module ' + mod_name + ' not found'
+    assert spec.origin.endswith('.py'), 'Expected .py for ' + mod_name + ', got ' + spec.origin
+    print('[RuntimePlain][Source] ' + mod_name + ': OK (' + spec.origin.split('/')[-1] + ')')
+print('[RuntimePlain] source runtime verifications PASSED')
+PYEOF
 
 CMD ["python3", "-m", "app.runtime.container_startup", "prod"]

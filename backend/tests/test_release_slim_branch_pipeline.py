@@ -258,7 +258,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "snapshot_tag" in workflow_text
     assert "snapshot_title" in workflow_text
     assert "snapshot_release_id" in workflow_text
-    assert 'repos/${GITHUB_REPOSITORY}/releases?per_page=30' in workflow_text
+    assert 'repos/${GITHUB_REPOSITORY}/releases/${SNAPSHOT_RELEASE_ID}' in workflow_text
     assert 'repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}' not in workflow_text
     assert "release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" in workflow_text
     assert "build-frontend-bundle:" not in workflow_text
@@ -295,8 +295,10 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "vulhunter-scanner-images-amd64.tar.zst" in workflow_text
     assert "vulhunter-scanner-images-arm64.tar.zst" in workflow_text
     assert "package-release-images.sh" in workflow_text
-    assert "--bundle ${{ matrix.bundle }}" in workflow_text
-    assert "--arch ${{ matrix.arch }}" in workflow_text
+    assert "BUNDLE: ${{ matrix.bundle }}" in workflow_text
+    assert '--bundle "${BUNDLE}"' in workflow_text
+    assert "ARCH: ${{ matrix.arch }}" in workflow_text
+    assert '--arch "${ARCH}"' in workflow_text
     assert "matrix:" in workflow_text
     assert "compression-level: 0" not in workflow_text
     assert "gh release create" in workflow_text
@@ -322,7 +324,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "DOCKER_SOCKET_GID" in workflow_text
     assert "stat -c '%g'" in workflow_text
     assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
-    assert 'cp "${SNAPSHOT_ASSET_DIR}/"*' in workflow_text
+    assert 'cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"' in workflow_text
     assert "bash ./scripts/offline-up.sh" in workflow_text
     assert "SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets" in workflow_text
     assert "SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}" in workflow_text
@@ -371,33 +373,24 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "if: ${{ failure() || cancelled() }}" in workflow_text
     assert workflow_text.count("GH_REPO: ${{ github.repository }}") == 4
     assert "isDraft" in workflow_text
-    assert 'gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes' in workflow_text
+    assert 'gh release delete "${SNAPSHOT_TAG}" --yes' in workflow_text
     assert 'gh release edit "${SNAPSHOT_TAG}"' not in workflow_text
     assert "publish_backend_hardened:" in publish_workflow_text
     assert "build_sandbox:" not in publish_workflow_text
     assert "publish-sandbox:" not in publish_workflow_text
-    assert "target: runtime-release" in publish_workflow_text
+    assert "target: runtime-plain" in publish_workflow_text
     assert "target: runtime-cython" in publish_workflow_text
     assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
-    assert "buildcache-runtime-release-amd64" in publish_workflow_text
-    assert "buildcache-runtime-release-arm64" in publish_workflow_text
+    assert "buildcache-runtime-plain-amd64" in publish_workflow_text
+    assert "buildcache-runtime-plain-arm64" in publish_workflow_text
     assert "buildcache-runtime-cython" in publish_workflow_text
     assert "-hardened" in publish_workflow_text
 
 
-def test_scheduled_release_workflow_triggers_end_to_end_release_pipeline() -> None:
-    workflow_text = (REPO_ROOT / ".github" / "workflows" / "scheduled-release.yml").read_text(
-        encoding="utf-8"
-    )
+def test_scheduled_release_workflow_has_been_removed() -> None:
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "scheduled-release.yml"
 
-    assert "git describe --tags" not in workflow_text
-    assert "git tag -a" not in workflow_text
-    assert "git push origin ${{ steps.check.outputs.version }}" not in workflow_text
-    assert "gh workflow run release.yml" in workflow_text
-    assert "docker-publish.yml" not in workflow_text
-    assert "-f build_frontend=true" not in workflow_text
-    assert "-f build_backend=true" not in workflow_text
-    assert "-f refresh_backend_image=true" not in workflow_text
+    assert not workflow_path.exists()
 
 
 def test_release_helper_script_no_longer_creates_or_pushes_git_tags() -> None:

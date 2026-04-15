@@ -34,7 +34,7 @@ on:
         type: boolean
         default: true
       publish_backend_hardened:
-        description: '额外发布 hardened 后端镜像'
+        description: '额外发布可选 hardened 后端镜像（默认 backend 仍为 runtime-plain）'
         required: false
         type: boolean
         default: false

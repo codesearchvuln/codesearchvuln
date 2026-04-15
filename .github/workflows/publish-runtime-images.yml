@@ -17,6 +17,7 @@ on:
         type: boolean
         default: false
       publish_backend_hardened:
+        description: Publish the optional hardened backend image variant alongside the default runtime-plain backend image.
         required: false
         type: boolean
         default: false
@@ -308,16 +309,16 @@ jobs:
         id: cache-mounts-amd64
         uses: actions/cache@v4
         with:
-          path: /tmp/.buildx-cache-mounts-runtime-release-amd64
-          key: ${{ runner.os }}-backend-runtime-release-amd64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/cython_build/setup.py', 'backend/cython_build/release_allowlist.txt', 'backend/cython_build/release_exclusion_list.txt') }}
+          path: /tmp/.buildx-cache-mounts-runtime-plain-amd64
+          key: ${{ runner.os }}-backend-runtime-plain-amd64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/README.md') }}
           restore-keys: |
-            ${{ runner.os }}-backend-runtime-release-amd64-mounts-
+            ${{ runner.os }}-backend-runtime-plain-amd64-mounts-
 
       - name: Inject amd64 cache mounts into BuildKit
         uses: reproducible-containers/buildkit-cache-dance@v3
         with:
           builder: ${{ steps.buildx.outputs.name }}
-          cache-dir: /tmp/.buildx-cache-mounts-runtime-release-amd64
+          cache-dir: /tmp/.buildx-cache-mounts-runtime-plain-amd64
           dockerfile: docker/backend.Dockerfile
           skip-extraction: ${{ steps.cache-mounts-amd64.outputs.cache-hit }}
 
@@ -326,21 +327,19 @@ jobs:
         with:
           context: .
           file: ./docker/backend.Dockerfile
-          target: runtime-release
+          target: runtime-plain
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           build-args: |
             DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-            BACKEND_CYTHON_JOBS=4
-            BACKEND_CYTHON_MAX_JOBS=4
             VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64
-            type=gha,scope=backend-runtime-release-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-amd64
+            type=gha,scope=backend-runtime-plain-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max
-            type=gha,mode=max,scope=backend-runtime-release-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-amd64,mode=max
+            type=gha,mode=max,scope=backend-runtime-plain-amd64
 
       - name: 记录 amd64 后端镜像标签
         id: capture
@@ -383,16 +382,16 @@ jobs:
         id: cache-mounts-arm64
         uses: actions/cache@v4
         with:
-          path: /tmp/.buildx-cache-mounts-runtime-release-arm64
-          key: ${{ runner.os }}-backend-runtime-release-arm64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/cython_build/setup.py', 'backend/cython_build/release_allowlist.txt', 'backend/cython_build/release_exclusion_list.txt') }}
+          path: /tmp/.buildx-cache-mounts-runtime-plain-arm64
+          key: ${{ runner.os }}-backend-runtime-plain-arm64-mounts-${{ hashFiles('docker/backend.Dockerfile', 'backend/pyproject.toml', 'backend/uv.lock', 'backend/README.md') }}
           restore-keys: |
-            ${{ runner.os }}-backend-runtime-release-arm64-mounts-
+            ${{ runner.os }}-backend-runtime-plain-arm64-mounts-
 
       - name: Inject arm64 cache mounts into BuildKit
         uses: reproducible-containers/buildkit-cache-dance@v3
         with:
           builder: ${{ steps.buildx.outputs.name }}
-          cache-dir: /tmp/.buildx-cache-mounts-runtime-release-arm64
+          cache-dir: /tmp/.buildx-cache-mounts-runtime-plain-arm64
           dockerfile: docker/backend.Dockerfile
           skip-extraction: ${{ steps.cache-mounts-arm64.outputs.cache-hit }}
 
@@ -401,21 +400,19 @@ jobs:
         with:
           context: .
           file: ./docker/backend.Dockerfile
-          target: runtime-release
+          target: runtime-plain
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           build-args: |
             DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-            BACKEND_CYTHON_JOBS=4
-            BACKEND_CYTHON_MAX_JOBS=4
             VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64
-            type=gha,scope=backend-runtime-release-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-arm64
+            type=gha,scope=backend-runtime-plain-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max
-            type=gha,mode=max,scope=backend-runtime-release-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-arm64,mode=max
+            type=gha,mode=max,scope=backend-runtime-plain-arm64
 
       - name: 记录 arm64 后端镜像标签
         id: capture
@@ -499,7 +496,7 @@ jobs:
           PY
 
   publish-backend-hardened:
-    name: Publish hardened backend image
+    name: Publish optional hardened backend image
     needs: prepare
     if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}
     runs-on: ubuntu-latest
@@ -527,7 +524,7 @@ jobs:
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: 构建并推送 hardened 后端 Docker 镜像
+      - name: 构建并推送可选 hardened 后端 Docker 镜像
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -547,14 +544,14 @@ jobs:
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-cython,mode=max
             type=gha,mode=max,scope=backend-runtime-cython
 
-      - name: 验证 hardened 后端镜像可解析
+      - name: 验证可选 hardened 后端镜像可解析
         run: |
           set -euo pipefail
           docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${IMAGE_TAG}" >/dev/null
         env:
           IMAGE_TAG: ${{ format('{0}-hardened', needs.prepare.outputs.tag) }}
 
-      - name: 记录 hardened 后端镜像引用
+      - name: 记录可选 hardened 后端镜像引用
         id: capture
         env:
           DIGEST: ${{ steps.build.outputs.digest }}

@@ -67,10 +67,6 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
         encoding="utf-8"
     )
 
-    runtime_release_section = backend_text.split("FROM runtime-base AS runtime-release", maxsplit=1)[1].split(
-        "FROM builder AS cython-compiler",
-        maxsplit=1,
-    )[0]
     runtime_cython_section = backend_text.split("FROM runtime-base AS runtime-cython", maxsplit=1)[1].split(
         "FROM runtime-base AS runtime",
         maxsplit=1,
@@ -81,18 +77,18 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
     )[0]
     runtime_plain_section = backend_text.split("FROM runtime-base AS runtime-plain", maxsplit=1)[1]
 
-    for section in (runtime_release_section, runtime_cython_section, runtime_section, runtime_plain_section):
+    assert "FROM runtime-base AS runtime-release" not in backend_text
+    assert "FROM selective-cython-compiler AS runtime-release-app-assembler" not in backend_text
+
+    for section in (runtime_cython_section, runtime_section, runtime_plain_section):
         assert "/opt/backend-build-context" not in section
         assert "backend/docs/agent-tools" not in section
         assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in section
         assert "COPY backend/static /app/static" not in section
 
-    assert "COPY --from=runtime-release-app-assembler /final/app /app/app" in runtime_release_section
-    assert "COPY backend/app /app/app" not in runtime_release_section
-    assert "assert spec.origin.endswith('.so')" in runtime_release_section
-    assert "assert spec.origin.endswith('.pyc')" in runtime_release_section
-    assert "USER appuser" in runtime_release_section
-    assert "selective hardening verifications PASSED" in runtime_release_section
+    assert "COPY backend/app /app/app" in runtime_plain_section
+    assert "COPY --from=runtime-release-app-assembler /final/app /app/app" not in runtime_plain_section
+    assert "selective hardening verifications PASSED" not in runtime_plain_section
 
     assert "subprocess.run(" not in runner_preflight_text
     assert "falling back to local build" not in runner_preflight_text
@@ -100,7 +96,7 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in runner_preflight_text
 
 
-def test_backend_release_publish_workflow_uses_split_runtime_release_and_optional_hardened_lane() -> None:
+def test_backend_release_publish_workflow_uses_runtime_plain_by_default_and_optional_hardened_lane() -> None:
     publish_workflow_text = (REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml").read_text(
         encoding="utf-8"
     )
@@ -174,31 +170,29 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
         publish_frontend_section
     )
     assert "vulhunter-frontend:${{ needs.prepare.outputs.tag }}" in publish_frontend_section
-    assert 'print(f"digest={digest}", file=output)' in publish_frontend_section
-    assert 'print(f"ref={os.environ[\'IMAGE\']}@{digest}", file=output)' in publish_frontend_section
+    assert 'echo "digest=${digest}" >> "$GITHUB_OUTPUT"' in publish_frontend_section
+    assert 'echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"' in publish_frontend_section
 
     assert "if: ${{ inputs.build_backend }}" in publish_backend_amd64_section
     assert "runs-on: ubuntu-latest" in publish_backend_amd64_section
     assert "platforms: linux/amd64" in publish_backend_amd64_section
-    assert "target: runtime-release" in publish_backend_amd64_section
-    assert "BACKEND_CYTHON_JOBS=4" in publish_backend_amd64_section
+    assert "target: runtime-plain" in publish_backend_amd64_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64" in publish_backend_amd64_section
-    assert "scope=backend-runtime-release-amd64" in publish_backend_amd64_section
-    assert "vulhunter-backend:buildcache-runtime-release-amd64" in publish_backend_amd64_section
+    assert "scope=backend-runtime-plain-amd64" in publish_backend_amd64_section
+    assert "vulhunter-backend:buildcache-runtime-plain-amd64" in publish_backend_amd64_section
     assert "actions/cache@v4" in publish_workflow_text
     assert "buildkit-cache-dance" in publish_workflow_text
-    assert "type=gha,mode=max,scope=backend-runtime-release-amd64" in publish_backend_amd64_section
+    assert "type=gha,mode=max,scope=backend-runtime-plain-amd64" in publish_backend_amd64_section
 
     assert "if: ${{ inputs.build_backend && inputs.multi_arch }}" in publish_backend_arm64_section
     assert "runs-on: ubuntu-24.04-arm" in publish_backend_arm64_section
     assert "platforms: linux/arm64" in publish_backend_arm64_section
-    assert "target: runtime-release" in publish_backend_arm64_section
-    assert "BACKEND_CYTHON_JOBS=4" in publish_backend_arm64_section
+    assert "target: runtime-plain" in publish_backend_arm64_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64" in publish_backend_arm64_section
-    assert "scope=backend-runtime-release-arm64" in publish_backend_arm64_section
-    assert "vulhunter-backend:buildcache-runtime-release-arm64" in publish_backend_arm64_section
+    assert "scope=backend-runtime-plain-arm64" in publish_backend_arm64_section
+    assert "vulhunter-backend:buildcache-runtime-plain-arm64" in publish_backend_arm64_section
     assert "setup-qemu-action" not in publish_backend_arm64_section
-    assert "type=gha,mode=max,scope=backend-runtime-release-arm64" in publish_backend_arm64_section
+    assert "type=gha,mode=max,scope=backend-runtime-plain-arm64" in publish_backend_arm64_section
 
     assert "needs:" in publish_backend_section
     assert "publish-backend-amd64" in publish_backend_section
@@ -208,8 +202,8 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
     assert "linux/amd64" in publish_backend_section
     assert "linux/arm64" in publish_backend_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}" in publish_backend_section
-    assert 'print(f"digest={digest}", file=output)' in publish_backend_section
-    assert 'print(f"ref={os.environ[\'IMAGE\']}@{digest}", file=output)' in publish_backend_section
+    assert 'echo "digest=${digest}" >> "$GITHUB_OUTPUT"' in publish_backend_section
+    assert 'echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"' in publish_backend_section
     assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
 
     assert "if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}" in hardened_section
@@ -228,42 +222,19 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
     ) in release_workflow_text
 
 
-def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> None:
+def test_backend_release_defaults_do_not_depend_on_release_only_cython_inputs() -> None:
     backend_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
-    setup_text = (REPO_ROOT / "backend" / "cython_build" / "setup.py").read_text(encoding="utf-8")
-    allowlist_text = (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").read_text(encoding="utf-8")
-    release_exclusion_text = (REPO_ROOT / "backend" / "cython_build" / "release_exclusion_list.txt").read_text(
-        encoding="utf-8"
-    )
     dockerignore_text = (REPO_ROOT / "docker" / "backend.Dockerfile.dockerignore").read_text(encoding="utf-8")
 
-    assert "FROM builder AS selective-cython-compiler" in backend_text
-    assert 'ARG VCS_REF=""' in backend_text
-    assert 'LABEL org.opencontainers.image.revision="${VCS_REF}"' in backend_text
-    assert "CYTHON_INCLUDE_PATTERNS_FILE=/build/cython_build/release_allowlist.txt" in backend_text
-    assert "FROM selective-cython-compiler AS runtime-release-app-assembler" in backend_text
-    assert "removed cythonized source" in backend_text
-    assert "remaining non-preserved .py count" in backend_text
-    assert "ARG BACKEND_CYTHON_MAX_JOBS=4" in backend_text
-    assert "ARG BACKEND_CYTHON_MEM_PER_JOB_MB=768" in backend_text
-    assert "export CYTHON_NTHREADS=" in backend_text
-
-    assert "CYTHON_INCLUDE_PATTERNS_FILE" in setup_text
-    assert "DEFAULT_RELEASE_EXCLUSION_FILE" in setup_text
-    assert "CYTHON_EXCLUDE_PATTERNS_FILE" in setup_text
-    assert "DEFAULT_RELEASE_ALLOWLIST_FILE" in setup_text
-    assert "CYTHON_NTHREADS" in setup_text
-    assert 'module_name = f"app.' in setup_text
-    assert "Extension(module_name" in setup_text
-    assert "release-allowlist" in setup_text
-
-    assert "services/agent/*.py" in allowlist_text
-    assert "services/llm/*.py" in allowlist_text
-    assert "services/llm_rule/*.py" in allowlist_text
-    assert "services/scanner_runner.py" in allowlist_text
-    assert "db/*.py" in allowlist_text
-    assert "services/agent/core/state.py" in release_exclusion_text
-    assert "services/agent/tools/*.py" in release_exclusion_text
+    assert "FROM builder AS selective-cython-compiler" not in backend_text
+    assert "FROM selective-cython-compiler AS runtime-release-app-assembler" not in backend_text
+    assert "FROM runtime-base AS runtime-release" not in backend_text
+    assert "CYTHON_INCLUDE_PATTERNS_FILE=/build/cython_build/release_allowlist.txt" not in backend_text
+    assert "removed cythonized source" not in backend_text
+    assert "remaining non-preserved .py count" not in backend_text
+    assert "selective hardening verifications PASSED" not in backend_text
+    assert not (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").exists()
+    assert not (REPO_ROOT / "backend" / "cython_build" / "release_exclusion_list.txt").exists()
 
     for ignored_path in (
         ".git",
@@ -329,49 +300,3 @@ def test_runner_dockerfile_specific_ignore_files_and_workflow_paths_contract() -
     assert "- 'docker/*.Dockerfile.dockerignore'" in workflow_text
     assert "- 'docker/flow-parser-runner.requirements.txt'" in workflow_text
     assert "- 'docker/sandbox-runner.requirements.txt'" in workflow_text
-
-
-def test_release_allowlist_excludes_pydantic_base_model_modules() -> None:
-    allowlist_text = (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").read_text(encoding="utf-8")
-    release_exclusion_text = (REPO_ROOT / "backend" / "cython_build" / "release_exclusion_list.txt").read_text(
-        encoding="utf-8"
-    )
-    allow_patterns = [
-        line.strip()
-        for line in allowlist_text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
-    exclude_patterns = [
-        line.strip()
-        for line in release_exclusion_text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
-    app_root = REPO_ROOT / "backend" / "app"
-
-    compiled_base_model_modules: list[str] = []
-    for path in sorted(app_root.rglob("*.py")):
-        rel_path = path.relative_to(app_root).as_posix()
-        if not any(fnmatch.fnmatch(rel_path, pattern) for pattern in allow_patterns):
-            continue
-        if any(fnmatch.fnmatch(rel_path, pattern) for pattern in exclude_patterns):
-            continue
-
-        module = ast.parse(path.read_text(encoding="utf-8"))
-        base_model_aliases = {
-            alias.asname or alias.name
-            for node in module.body
-            if isinstance(node, ast.ImportFrom) and node.module == "pydantic"
-            for alias in node.names
-            if alias.name == "BaseModel"
-        }
-        if not base_model_aliases:
-            continue
-
-        if any(
-            isinstance(node, ast.ClassDef)
-            and any(isinstance(base, ast.Name) and base.id in base_model_aliases for base in node.bases)
-            for node in module.body
-        ):
-            compiled_base_model_modules.append(rel_path)
-
-    assert compiled_base_model_modules == []

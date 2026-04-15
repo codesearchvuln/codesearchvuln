@@ -4,6 +4,8 @@
 
 release branch 只提供最新一份 generated release tree 的下载通道，不是历史 snapshot 列表。离线部署时，请保证 release tree 与两份离线 tar 包来自同一个 snapshot。
 
+当前默认 release backend 镜像固定来自 Docker `runtime-plain` target。离线部署与 release tree 验收都不依赖 `runtime-release` 或其他选择性源码加固 target；如需额外发布 `runtime-cython`，它仅作为可选 hardened 变体存在。
+
 支持宿主机：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`。
 
 ## 1. 启动前
@@ -27,6 +29,8 @@ Choose exactly one shell path。
 ```bash
 docker compose up -d
 ```
+
+这里启动的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。
 
 注意：`http://localhost:3000/` 可访问并不等价于 dashboard 已恢复，仍然需要验证同源 `/api/v1/...`。
 
