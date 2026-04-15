@@ -41,12 +41,19 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 bash ./scripts/offline-up.sh
 ```
 
+如需直接附着启动日志：
+
+```bash
+bash ./scripts/offline-up.sh --attach-logs
+```
+
 离线镜像包文件名固定为：
 
 - `vulhunter-services-images-<arch>.tar.zst`
 - `vulhunter-scanner-images-<arch>.tar.zst`
 - 两份文件都需要放在 release 根目录或 `images/` 目录，且必须与当前机器架构匹配（`amd64` / `arm64`）
 - `offline-up.sh` 会自动导入两份离线镜像包，加载 `offline-images.env`，切换到本地 `vulhunter-local/*` 镜像标签，然后等待 release stack 通过 readiness 检查
+- 默认模式不显示附着日志；只有 `--attach-logs` 才会在 backend 健康后切到前台 `docker compose up`
 - 离线模式不会改变 compose 结构，只改变镜像来源；代码执行统一走本地 `sandbox-runner` 标签，主 frontend 仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，不会切回 `FRONTEND_IMAGE`
 
 ## 数据、端口与访问地址

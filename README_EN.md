@@ -36,7 +36,13 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 bash ./scripts/offline-up.sh
 ```
 
-Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution. The offline path is now Bash/WSL-only; native Windows PowerShell is no longer part of the release contract.
+If you want startup logs attached in the terminal:
+
+```bash
+bash ./scripts/offline-up.sh --attach-logs
+```
+
+Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution. The offline path is now Bash/WSL-only; native Windows PowerShell is no longer part of the release contract. The default mode stays detached; `--attach-logs` switches to foreground output after backend health turns green.
 
 ## Explicitly outside the release contract
 

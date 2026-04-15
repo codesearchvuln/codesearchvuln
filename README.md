@@ -42,8 +42,14 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 bash ./scripts/offline-up.sh
 ```
 
+如需在终端里持续查看启动日志：
+
+```bash
+bash ./scripts/offline-up.sh --attach-logs
+```
+
 用途：
-预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签启动同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层。
+预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签启动同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层。默认模式不附着日志，传 `--attach-logs` 才会在 backend 健康后切到前台输出。
 
 ## 明确不属于 release contract 的路径
 

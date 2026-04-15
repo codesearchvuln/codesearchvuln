@@ -12,6 +12,7 @@ BACKEND_ENV_EXAMPLE="${BACKEND_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/env.exa
 OFFLINE_ENV_FILE="${OFFLINE_ENV_FILE:-$ROOT_DIR/docker/env/backend/offline-images.env}"
 OFFLINE_ENV_EXAMPLE="${OFFLINE_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/offline-images.env.example}"
 COMPOSE_ENV_HELPER="${COMPOSE_ENV_HELPER:-$ROOT_DIR/scripts/lib/compose-env.sh}"
+ATTACH_LOGS="false"
 
 log_info() {
   echo "[offline-up] $*"
@@ -24,6 +25,17 @@ log_warn() {
 die() {
   echo "[offline-up] $*" >&2
   exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: bash ./scripts/offline-up.sh [--attach-logs]
+
+Options:
+  --attach-logs   After backend becomes healthy, run foreground
+                  `docker compose up` so startup logs stay attached.
+  -h, --help      Show this help text.
+EOF
 }
 
 trim() {
@@ -243,7 +255,34 @@ emit_failure_hints() {
   fi
 }
 
-wait_for_release_readiness() {
+wait_for_backend_readiness() {
+  local max_attempts="${OFFLINE_UP_MAX_ATTEMPTS:-60}"
+  local retry_delay="${OFFLINE_UP_RETRY_DELAY_SECONDS:-5}"
+  local attempt=0
+
+  while (( attempt < max_attempts )); do
+    attempt=$((attempt + 1))
+    local backend_cid backend_status_value backend_health_value
+    backend_cid="$(service_cid backend)"
+    backend_status_value="$(service_status "$backend_cid")"
+    backend_health_value="$(service_health "$backend_cid")"
+
+    if [[ "$backend_status_value" == "running" ]] && \
+       [[ "$backend_health_value" == "healthy" ]]; then
+      return 0
+    fi
+
+    if [[ "$backend_status_value" == "exited" || "$backend_status_value" == "dead" || "$backend_health_value" == "unhealthy" ]]; then
+      break
+    fi
+
+    sleep "$retry_delay"
+  done
+
+  return 1
+}
+
+wait_for_frontend_readiness() {
   local max_attempts="${OFFLINE_UP_MAX_ATTEMPTS:-60}"
   local retry_delay="${OFFLINE_UP_RETRY_DELAY_SECONDS:-5}"
   local attempt=0
@@ -313,7 +352,27 @@ ensure_compose_ready() {
   docker compose version >/dev/null 2>&1 || die "docker compose not found or unavailable"
 }
 
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --attach-logs)
+        ATTACH_LOGS="true"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+}
+
 main() {
+  parse_args "$@"
+
   require_command docker
   require_command python3
   [[ -f "$SERVICES_METADATA_FILE" ]] || die "images manifest not found: $SERVICES_METADATA_FILE"
@@ -353,10 +412,28 @@ main() {
   parse_and_export_offline_env
   validate_compose_images_local_only
 
-  log_info "starting docker compose up -d"
-  compose up -d
+  log_info "starting docker compose up -d db redis backend"
+  compose up -d db redis backend
 
-  if ! wait_for_release_readiness; then
+  if ! wait_for_backend_readiness; then
+    log_warn "release readiness probe failed"
+    compose ps || true
+    logs_output="$(compose logs backend frontend --tail=100 2>&1 || true)"
+    printf '%s\n' "$logs_output" >&2
+    emit_failure_hints "$logs_output"
+    die "release services failed readiness checks"
+  fi
+
+  if [[ "$ATTACH_LOGS" == "true" ]]; then
+    log_info "backend is healthy; attaching startup logs with docker compose up"
+    compose up
+    return 0
+  fi
+
+  log_info "starting docker compose up -d frontend"
+  compose up -d frontend
+
+  if ! wait_for_frontend_readiness; then
     log_warn "release readiness probe failed"
     compose ps || true
     logs_output="$(compose logs backend frontend --tail=100 2>&1 || true)"

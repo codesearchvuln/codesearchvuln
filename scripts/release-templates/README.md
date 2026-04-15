@@ -58,6 +58,12 @@ docker compose ps
 bash ./scripts/offline-up.sh
 ```
 
+如需直接附着启动日志：
+
+```bash
+bash ./scripts/offline-up.sh --attach-logs
+```
+
 当前离线路径只支持 `WSL` 或 Linux `Bash`。不再提供 `Windows PowerShell` 兼容层。
 
 离线脚本会自动：
@@ -67,6 +73,7 @@ bash ./scripts/offline-up.sh
 - 导入 `services` 与 `scanner` 两份离线镜像包
 - 启动 `docker compose up -d`
 - 等待 backend `/health`、frontend `/`、以及 proxied `http://127.0.0.1/api/v1/openapi.json` 全部成功后才报告 ready
+- 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`
 
 如果你需要手工检查离线镜像映射，查看：
 

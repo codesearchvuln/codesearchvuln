@@ -58,6 +58,12 @@ Run in `WSL` or Linux `Bash`:
 bash ./scripts/offline-up.sh
 ```
 
+If you want startup logs attached in the terminal:
+
+```bash
+bash ./scripts/offline-up.sh --attach-logs
+```
+
 The offline path now supports `WSL` or Linux `Bash` only. Native `Windows PowerShell` is no longer part of the release contract.
 
 The offline script will automatically:
@@ -67,6 +73,7 @@ The offline script will automatically:
 - load the `services` and `scanner` offline bundles
 - start `docker compose up -d`
 - wait for backend `/health`, frontend `/`, and proxied `http://127.0.0.1/api/v1/openapi.json` before reporting ready
+- the default mode stays detached; `--attach-logs` switches to foreground `docker compose up` after backend health turns green
 
 If you want to inspect the offline image mapping, check:
 

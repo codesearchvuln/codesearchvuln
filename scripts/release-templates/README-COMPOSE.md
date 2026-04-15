@@ -41,9 +41,16 @@ docker compose up -d
 bash ./scripts/offline-up.sh
 ```
 
+如需前台附着启动日志：
+
+```bash
+bash ./scripts/offline-up.sh --attach-logs
+```
+
 离线脚本会自动复制缺失的 `.env` / `offline-images.env`，导入离线镜像包，然后启动服务。
 脚本会继续等待 backend `/health`、frontend `/`、和 proxied `http://127.0.0.1/api/v1/openapi.json` 成功后才报告 ready。
 当前 release tree 不再提供 `Windows PowerShell` 兼容层。
+默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`。
 
 如果你使用 cloud 模型接口，运行时仍然需要访问对应 API。离线部署只表示运行镜像来自本地。
 
