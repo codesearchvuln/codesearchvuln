@@ -174,8 +174,8 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
         publish_frontend_section
     )
     assert "vulhunter-frontend:${{ needs.prepare.outputs.tag }}" in publish_frontend_section
-    assert "digest=${DIGEST}" in publish_frontend_section
-    assert "ref=${IMAGE}@${DIGEST}" in publish_frontend_section
+    assert 'print(f"digest={digest}", file=output)' in publish_frontend_section
+    assert 'print(f"ref={os.environ[\'IMAGE\']}@{digest}", file=output)' in publish_frontend_section
 
     assert "if: ${{ inputs.build_backend }}" in publish_backend_amd64_section
     assert "runs-on: ubuntu-latest" in publish_backend_amd64_section
@@ -187,7 +187,7 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
     assert "vulhunter-backend:buildcache-runtime-release-amd64" in publish_backend_amd64_section
     assert "actions/cache@v4" in publish_workflow_text
     assert "buildkit-cache-dance" in publish_workflow_text
-    assert "type=gha,mode=max,scope=backend-runtime-release-amd64" not in publish_backend_amd64_section
+    assert "type=gha,mode=max,scope=backend-runtime-release-amd64" in publish_backend_amd64_section
 
     assert "if: ${{ inputs.build_backend && inputs.multi_arch }}" in publish_backend_arm64_section
     assert "runs-on: ubuntu-24.04-arm" in publish_backend_arm64_section
@@ -198,7 +198,7 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
     assert "scope=backend-runtime-release-arm64" in publish_backend_arm64_section
     assert "vulhunter-backend:buildcache-runtime-release-arm64" in publish_backend_arm64_section
     assert "setup-qemu-action" not in publish_backend_arm64_section
-    assert "type=gha,mode=max,scope=backend-runtime-release-arm64" not in publish_backend_arm64_section
+    assert "type=gha,mode=max,scope=backend-runtime-release-arm64" in publish_backend_arm64_section
 
     assert "needs:" in publish_backend_section
     assert "publish-backend-amd64" in publish_backend_section
@@ -208,8 +208,9 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
     assert "linux/amd64" in publish_backend_section
     assert "linux/arm64" in publish_backend_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}" in publish_backend_section
-    assert "ref=${IMAGE}@${DIGEST}" in publish_backend_section
-    assert "Release manifest requires a freshly built backend image ref" in publish_backend_section
+    assert 'print(f"digest={digest}", file=output)' in publish_backend_section
+    assert 'print(f"ref={os.environ[\'IMAGE\']}@{digest}", file=output)' in publish_backend_section
+    assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
 
     assert "if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}" in hardened_section
     assert "platforms: linux/amd64" in hardened_section

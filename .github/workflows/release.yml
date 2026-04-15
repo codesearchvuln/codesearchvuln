@@ -298,6 +298,8 @@ jobs:
 
       - name: Smoke test offline release runtime
         working-directory: ${{ runner.temp }}/release-tree
+        env:
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
         run: |
           set -euo pipefail
 

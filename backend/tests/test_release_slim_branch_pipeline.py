@@ -320,6 +320,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
     assert 'cp "${SNAPSHOT_ASSET_DIR}/"*' in workflow_text
     assert "bash ./scripts/offline-up.sh" in workflow_text
+    assert "SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets" in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text
     assert "service_cid()" not in workflow_text
