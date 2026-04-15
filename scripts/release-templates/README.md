@@ -2,6 +2,8 @@
 
 本目录是 VulHunter 的 generated release tree 运行包，不是源码仓库运行目录。请只在当前 release 根目录执行下面的命令；不要把源码仓库里的 local-build、hybrid overlay、`use-offline-env` 一类命令直接套到这里。
 
+当前 release branch 只表示“最新一份 generated release tree 下载通道”，不是历史 snapshot 列表。若你要离线部署某个 snapshot，请确保当前 release tree 与两份离线 tar 包来自同一个 snapshot。
+
 ## 1. 部署前准备
 
 - 宿主机支持：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -45,7 +47,7 @@ docker compose ps
 
 ## 4. 离线部署
 
-先准备两份与你当前 Docker server 架构匹配的离线镜像包，并放到 release 根目录或 `images/`：
+先准备两份与你当前 Docker server 架构匹配、且与当前 release tree 来自同一个 snapshot 的离线镜像包，并放到 release 根目录或 `images/`。用户侧仍然只需要这两份 tar 包：
 
 - `vulhunter-services-images-<arch>.tar.zst`
 - `vulhunter-scanner-images-<arch>.tar.zst`
@@ -70,6 +72,8 @@ bash ./scripts/offline-up.sh --attach-logs
 
 - 自动复制缺失的 `docker/env/backend/.env`
 - 自动复制缺失的 `docker/env/backend/offline-images.env`
+- 读取 release tree 内置的 `release-snapshot-lock.json`
+- 在 `docker load` 前校验 `services` / `scanner` 两份 tar 包的文件名与 SHA256，确认它们和当前 release tree 属于同一个 snapshot
 - 导入 `services` 与 `scanner` 两份离线镜像包
 - 启动 `docker compose up -d`
 - 等待 backend `/health`、frontend `/`、以及 proxied `http://127.0.0.1/api/v1/openapi.json` 全部成功后才报告 ready

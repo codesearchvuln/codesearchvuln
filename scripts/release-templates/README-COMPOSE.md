@@ -2,6 +2,8 @@
 
 本文档只说明 generated release tree 里的 Compose 命令，不覆盖源码仓库根目录的 `docker compose up` / `docker-compose.hybrid.yml` 合同。
 
+release branch 只提供最新一份 generated release tree 的下载通道，不是历史 snapshot 列表。离线部署时，请保证 release tree 与两份离线 tar 包来自同一个 snapshot。
+
 支持宿主机：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`。
 
 ## 1. 启动前
@@ -30,7 +32,7 @@ docker compose up -d
 
 ## 3. 离线启动
 
-先把下面两份离线镜像包放到 release 根目录或 `images/`：
+先把下面两份与你当前 release tree 属于同一个 snapshot、且匹配当前 Docker server 架构的离线镜像包放到 release 根目录或 `images/`。用户侧仍然只需要这两份 tar 包：
 
 - `vulhunter-services-images-<arch>.tar.zst`
 - `vulhunter-scanner-images-<arch>.tar.zst`
@@ -47,7 +49,7 @@ bash ./scripts/offline-up.sh
 bash ./scripts/offline-up.sh --attach-logs
 ```
 
-离线脚本会自动复制缺失的 `.env` / `offline-images.env`，导入离线镜像包，然后启动服务。
+离线脚本会自动复制缺失的 `.env` / `offline-images.env`，并先依据 release tree 自带的 `release-snapshot-lock.json` 校验两份 tar 包的文件名与 SHA256；只有确认 bundle 与当前 snapshot 匹配后，才会导入离线镜像包并启动服务。
 脚本会继续等待 backend `/health`、frontend `/`、和 proxied `http://127.0.0.1/api/v1/openapi.json` 成功后才报告 ready。
 当前 release tree 不再提供 `Windows PowerShell` 兼容层。
 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`。

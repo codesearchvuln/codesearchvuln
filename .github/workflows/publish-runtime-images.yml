@@ -213,8 +213,8 @@ jobs:
       id-token: write
       attestations: write
     outputs:
-      digest: ${{ steps.capture.outputs.digest }}
-      ref: ${{ steps.capture.outputs.ref }}
+      digest: ${{ steps.assemble.outputs.digest }}
+      ref: ${{ steps.assemble.outputs.ref }}
 
     steps:
       - name: 登录到 GitHub Container Registry
@@ -228,6 +228,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: 组装多架构前端 manifest
+        id: assemble
         env:
           IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend
           IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -245,16 +246,16 @@ jobs:
             docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
           fi
 
-          docker buildx imagetools inspect "${FINAL_TAG}" >/dev/null
           raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
-          python3 - <<'PY' <<<"${raw_json}"
+          RAW_JSON="${raw_json}" python3 - <<'PY'
           from __future__ import annotations
 
+          import hashlib
           import json
           import os
-          import sys
 
-          data = json.load(sys.stdin)
+          raw = os.environ["RAW_JSON"]
+          data = json.loads(raw)
           manifests = data.get("manifests", [])
           platforms = {
               f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
@@ -264,32 +265,12 @@ jobs:
           missing = sorted(expected - platforms)
           if missing:
               raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
+          digest = f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"digest={digest}", file=output)
+              print(f"ref={os.environ['IMAGE']}@{digest}", file=output)
           print(f"validated platforms: {', '.join(sorted(platforms))}")
           PY
-
-      - name: 设置前端 GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-frontend
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
-
-      - name: 记录前端镜像引用
-        id: capture
-        env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend
-          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          set -euo pipefail
-          DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${IMAGE_TAG}" --format '{{.Manifest.Digest}}')"
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
 
   publish-backend-amd64:
     name: Publish backend image (amd64)
@@ -352,7 +333,9 @@ jobs:
           cache-from: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64
             type=gha,scope=backend-runtime-release-amd64
-          cache-to: type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max
+            type=gha,mode=max,scope=backend-runtime-release-amd64
 
       - name: 记录 amd64 后端镜像标签
         id: capture
@@ -423,7 +406,9 @@ jobs:
           cache-from: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64
             type=gha,scope=backend-runtime-release-arm64
-          cache-to: type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max
+            type=gha,mode=max,scope=backend-runtime-release-arm64
 
       - name: 记录 arm64 后端镜像标签
         id: capture
@@ -447,8 +432,8 @@ jobs:
       id-token: write
       attestations: write
     outputs:
-      digest: ${{ steps.capture.outputs.digest }}
-      ref: ${{ steps.capture.outputs.ref }}
+      digest: ${{ steps.assemble.outputs.digest }}
+      ref: ${{ steps.assemble.outputs.ref }}
 
     steps:
       - name: 登录到 GitHub Container Registry
@@ -462,6 +447,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: 组装多架构后端 manifest
+        id: assemble
         env:
           IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend
           IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -479,16 +465,16 @@ jobs:
             docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
           fi
 
-          docker buildx imagetools inspect "${FINAL_TAG}" >/dev/null
           raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
-          python3 - <<'PY' <<<"${raw_json}"
+          RAW_JSON="${raw_json}" python3 - <<'PY'
           from __future__ import annotations
 
+          import hashlib
           import json
           import os
-          import sys
 
-          data = json.load(sys.stdin)
+          raw = os.environ["RAW_JSON"]
+          data = json.loads(raw)
           manifests = data.get("manifests", [])
           platforms = {
               f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
@@ -498,32 +484,12 @@ jobs:
           missing = sorted(expected - platforms)
           if missing:
               raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
+          digest = f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"digest={digest}", file=output)
+              print(f"ref={os.environ['IMAGE']}@{digest}", file=output)
           print(f"validated platforms: {', '.join(sorted(platforms))}")
           PY
-
-      - name: 设置后端 GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-backend
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
-
-      - name: 记录后端镜像引用
-        id: capture
-        env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend
-          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
-        run: |
-          set -euo pipefail
-          DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${IMAGE_TAG}" --format '{{.Manifest.Digest}}')"
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
 
   publish-backend-hardened:
     name: Publish hardened backend image
@@ -571,19 +537,6 @@ jobs:
           cache-to: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-cython,mode=max
             type=gha,mode=max,scope=backend-runtime-cython
-
-      - name: 设置后端 GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-backend
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
 
       - name: 验证 hardened 后端镜像可解析
         run: |
@@ -645,19 +598,6 @@ jobs:
           cache-from: type=gha,scope=yasa-runner
           cache-to: type=gha,mode=max,scope=yasa-runner
 
-      - name: 设置 YASA runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-yasa-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
-
       - name: 验证 YASA runner 镜像可解析
         run: |
           set -euo pipefail
@@ -717,19 +657,6 @@ jobs:
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}
           cache-from: type=gha,scope=opengrep-runner
           cache-to: type=gha,mode=max,scope=opengrep-runner
-
-      - name: 设置 OpenGrep runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-opengrep-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
 
       - name: 验证 OpenGrep runner 镜像可解析
         run: |
@@ -791,19 +718,6 @@ jobs:
           cache-from: type=gha,scope=bandit-runner
           cache-to: type=gha,mode=max,scope=bandit-runner
 
-      - name: 设置 Bandit runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-bandit-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
-
       - name: 验证 Bandit runner 镜像可解析
         run: |
           set -euo pipefail
@@ -863,19 +777,6 @@ jobs:
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}
           cache-from: type=gha,scope=gitleaks-runner
           cache-to: type=gha,mode=max,scope=gitleaks-runner
-
-      - name: 设置 Gitleaks runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-gitleaks-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
 
       - name: 验证 Gitleaks runner 镜像可解析
         run: |
@@ -937,19 +838,6 @@ jobs:
           cache-from: type=gha,scope=phpstan-runner
           cache-to: type=gha,mode=max,scope=phpstan-runner
 
-      - name: 设置 PHPStan runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-phpstan-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
-
       - name: 验证 PHPStan runner 镜像可解析
         run: |
           set -euo pipefail
@@ -1009,19 +897,6 @@ jobs:
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}
           cache-from: type=gha,scope=flow-parser-runner
           cache-to: type=gha,mode=max,scope=flow-parser-runner
-
-      - name: 设置 flow/parser runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-flow-parser-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
 
       - name: 验证 flow/parser runner 镜像可解析
         run: |
@@ -1083,19 +958,6 @@ jobs:
           cache-from: type=gha,scope=pmd-runner
           cache-to: type=gha,mode=max,scope=pmd-runner
 
-      - name: 设置 PMD runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-pmd-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
-
       - name: 验证 PMD runner 镜像可解析
         run: |
           set -euo pipefail
@@ -1156,19 +1018,6 @@ jobs:
           cache-from: type=gha,scope=sandbox-runner
           cache-to: type=gha,mode=max,scope=sandbox-runner
 
-      - name: 设置 sandbox-runner GHCR 包为公开可见性
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_NAME: vulhunter-sandbox-runner
-        run: |
-          set -euo pipefail
-
-          if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
-            echo "${PACKAGE_NAME} set to public successfully"
-          else
-            echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
-          fi
-
       - name: 验证 sandbox-runner 镜像可解析
         run: |
           set -euo pipefail
@@ -1184,6 +1033,95 @@ jobs:
         run: |
           set -euo pipefail
           echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+  publish-package-visibility:
+    name: Update published GHCR package visibility
+    needs:
+      - publish-frontend
+      - publish-backend
+      - publish-backend-hardened
+      - publish-yasa-runner
+      - publish-opengrep-runner
+      - publish-bandit-runner
+      - publish-gitleaks-runner
+      - publish-phpstan-runner
+      - publish-flow-parser-runner
+      - publish-pmd-runner
+      - publish-sandbox-runner
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - name: 汇总本次发布的 GHCR 包
+        id: packages
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+
+          mapping = {
+              "publish-frontend": "vulhunter-frontend",
+              "publish-backend": "vulhunter-backend",
+              "publish-backend-hardened": "vulhunter-backend",
+              "publish-yasa-runner": "vulhunter-yasa-runner",
+              "publish-opengrep-runner": "vulhunter-opengrep-runner",
+              "publish-bandit-runner": "vulhunter-bandit-runner",
+              "publish-gitleaks-runner": "vulhunter-gitleaks-runner",
+              "publish-phpstan-runner": "vulhunter-phpstan-runner",
+              "publish-flow-parser-runner": "vulhunter-flow-parser-runner",
+              "publish-pmd-runner": "vulhunter-pmd-runner",
+              "publish-sandbox-runner": "vulhunter-sandbox-runner",
+          }
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          packages = sorted(
+              {
+                  package
+                  for job_name, package in mapping.items()
+                  if needs.get(job_name, {}).get("result") == "success"
+              }
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print("names<<EOF", file=output)
+              for package in packages:
+                  print(package, file=output)
+              print("EOF", file=output)
+
+          if packages:
+              print(f"Will update visibility for: {', '.join(packages)}")
+          else:
+              print("No GHCR packages were published in this run.")
+          PY
+
+      - name: 更新 GHCR 包可见性
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGES: ${{ steps.packages.outputs.names }}
+        run: |
+          set -u
+
+          if [[ -z "${PACKAGES:-}" ]]; then
+            echo "No GHCR packages were published in this run."
+            exit 0
+          fi
+
+          while IFS= read -r PACKAGE_NAME; do
+            [[ -n "${PACKAGE_NAME}" ]] || continue
+
+            if gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null; then
+              echo "${PACKAGE_NAME} set to public successfully"
+            else
+              echo "::warning::Could not set ${PACKAGE_NAME} to public via API."
+            fi
+          done <<< "${PACKAGES}"
 
   assemble-release-manifest:
     name: Assemble release manifest

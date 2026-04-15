@@ -31,9 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  packages: write
-  actions: write
+  contents: read
 
 jobs:
   prepare-release:
@@ -42,7 +40,9 @@ jobs:
     outputs:
       source_ref: ${{ steps.vars.outputs.source_ref }}
       source_sha: ${{ steps.vars.outputs.source_sha }}
-      tag: ${{ steps.vars.outputs.tag }}
+      runtime_tag: ${{ steps.vars.outputs.runtime_tag }}
+      snapshot_tag: ${{ steps.vars.outputs.snapshot_tag }}
+      snapshot_title: ${{ steps.vars.outputs.snapshot_title }}
 
     steps:
       - name: 计算 release 源信息
@@ -51,14 +51,56 @@ jobs:
           set -euo pipefail
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
-            echo "source_ref=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
-            echo "source_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            source_ref="${{ github.event.workflow_run.head_sha }}"
           else
-            echo "source_ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-            echo "source_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            source_ref="${GITHUB_SHA}"
           fi
+          source_sha="${source_ref}"
+          snapshot_tag="release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          echo "tag=latest" >> "$GITHUB_OUTPUT"
+          echo "source_ref=${source_ref}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "runtime_tag=latest" >> "$GITHUB_OUTPUT"
+          echo "snapshot_tag=${snapshot_tag}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_title=VulHunter Offline Snapshot ${source_sha}" >> "$GITHUB_OUTPUT"
+
+  create-draft-release:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      snapshot_tag: ${{ needs.prepare-release.outputs.snapshot_tag }}
+      snapshot_url: ${{ steps.capture.outputs.snapshot_url }}
+      snapshot_release_id: ${{ steps.capture.outputs.snapshot_release_id }}
+
+    steps:
+      - name: 创建 snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.prepare-release.outputs.snapshot_tag }}
+          SNAPSHOT_TITLE: ${{ needs.prepare-release.outputs.snapshot_title }}
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+
+          gh release create "${SNAPSHOT_TAG}" \
+            --target "${SOURCE_SHA}" \
+            --draft \
+            --latest=false \
+            --title "${SNAPSHOT_TITLE}" \
+            --notes "Offline runtime image snapshot for ${SOURCE_SHA}."
+
+      - name: 记录 snapshot draft release 元数据
+        id: capture
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.prepare-release.outputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+
+          echo "snapshot_release_id=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}" --jq '.id')" >> "$GITHUB_OUTPUT"
+          echo "snapshot_url=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}" --jq '.html_url')" >> "$GITHUB_OUTPUT"
 
   publish-runtime-images:
     needs: prepare-release
@@ -70,7 +112,7 @@ jobs:
       id-token: write
       attestations: write
     with:
-      tag: ${{ needs.prepare-release.outputs.tag }}
+      tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
       build_backend: ${{ github.event_name == 'workflow_dispatch' && (inputs.refresh_backend_image || inputs.refresh_all_runtime_images) || false }}
       publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
@@ -87,94 +129,15 @@ jobs:
       require_complete_manifest: true
       revision: ${{ needs.prepare-release.outputs.source_sha }}
 
-  build-frontend-bundle:
-    needs: prepare-release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout release source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare-release.outputs.source_ref }}
-          fetch-depth: 0
-
-      - name: Setup pnpm for frontend release bundle
-        uses: pnpm/action-setup@v5
-        with:
-          package_json_file: frontend/package.json
-          run_install: false
-
-      - name: Setup Node.js for frontend release bundle
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Build frontend static release bundle
-        run: |
-          set -euo pipefail
-
-          pnpm --dir frontend install --frozen-lockfile
-          pnpm --dir frontend build
-
-          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
-          rm -rf "${FRONTEND_BUNDLE_DIR}"
-          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
-          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
-          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
-
-      - name: Upload frontend release bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-release-bundle
-          path: ${{ runner.temp }}/frontend-release-bundle
-          if-no-files-found: error
-
-  assemble-release-tree:
-    needs:
-      - prepare-release
-      - publish-runtime-images
-      - build-frontend-bundle
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout release source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare-release.outputs.source_ref }}
-          fetch-depth: 0
-
-      - name: Download frontend release bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-release-bundle
-          path: ${{ runner.temp }}/frontend-release-bundle
-
-      - name: Write release-manifest.json
-        run: |
-          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
-
-      - name: Generate runtime release tree
-        run: |
-          ./scripts/generate-release-branch.sh \
-            --output "${RUNNER_TEMP}/release-tree" \
-            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
-            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
-            --validate
-
-      - name: Upload release tree
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-tree
-          path: ${{ runner.temp }}/release-tree
-          if-no-files-found: error
-
   package-offline-images:
     needs:
       - prepare-release
+      - create-draft-release
       - publish-runtime-images
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -211,26 +174,112 @@ jobs:
             --bundle ${{ matrix.bundle }} \
             --arch ${{ matrix.arch }}
 
-      - name: Upload offline image bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assets-${{ matrix.bundle }}-${{ matrix.arch }}
-          compression-level: 0
-          path: |
-            ${{ runner.temp }}/release-assets/vulhunter-${{ matrix.bundle }}-images-${{ matrix.arch }}.tar.zst
-            ${{ runner.temp }}/release-assets/images-manifest-${{ matrix.bundle }}-${{ matrix.arch }}.json
-          if-no-files-found: error
+      - name: Upload offline image bundle to snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
 
-  smoke-test-release-tree:
-    needs: assemble-release-tree
+          gh release upload "${SNAPSHOT_TAG}" \
+            "${RUNNER_TEMP}/release-assets/vulhunter-${{ matrix.bundle }}-images-${{ matrix.arch }}.tar.zst" \
+            "${RUNNER_TEMP}/release-assets/images-manifest-${{ matrix.bundle }}-${{ matrix.arch }}.json" \
+            --clobber
+
+  finalize-release:
+    needs:
+      - prepare-release
+      - create-draft-release
+      - publish-runtime-images
+      - package-offline-images
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
 
     steps:
-      - name: Download release tree
-        uses: actions/download-artifact@v4
+      - name: Checkout release source
+        uses: actions/checkout@v6
         with:
-          name: release-tree
-          path: ${{ runner.temp }}/release-tree
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+          fetch-depth: 0
+
+      - name: Setup pnpm for frontend release bundle
+        uses: pnpm/action-setup@v5
+        with:
+          package_json_file: frontend/package.json
+          run_install: false
+
+      - name: Setup Node.js for frontend release bundle
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend static release bundle
+        run: |
+          set -euo pipefail
+
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
+          rm -rf "${FRONTEND_BUNDLE_DIR}"
+          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
+          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
+          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
+
+      - name: Write release-manifest.json
+        run: |
+          printf '%s\n' '${{ needs.publish-runtime-images.outputs.release_manifest }}' > "${RUNNER_TEMP}/release-manifest.json"
+
+      - name: Generate runtime release tree
+        run: |
+          ./scripts/generate-release-branch.sh \
+            --output "${RUNNER_TEMP}/release-tree" \
+            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
+            --validate
+
+      - name: Download snapshot draft release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${SNAPSHOT_ASSET_DIR}"
+          assets=(
+            "vulhunter-services-images-amd64.tar.zst"
+            "vulhunter-services-images-arm64.tar.zst"
+            "vulhunter-scanner-images-amd64.tar.zst"
+            "vulhunter-scanner-images-arm64.tar.zst"
+            "images-manifest-services-amd64.json"
+            "images-manifest-services-arm64.json"
+            "images-manifest-scanner-amd64.json"
+            "images-manifest-scanner-arm64.json"
+          )
+
+          for asset in "${assets[@]}"; do
+            gh release download "${SNAPSHOT_TAG}" \
+              --pattern "${asset}" \
+              --dir "${SNAPSHOT_ASSET_DIR}" \
+              --clobber
+          done
+
+      - name: Validate snapshot assets and write release-snapshot-lock.json
+        env:
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+
+          ./scripts/write-release-snapshot-lock.py \
+            --release-tree "${RUNNER_TEMP}/release-tree" \
+            --release-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --snapshot-tag "${SNAPSHOT_TAG}" \
+            --asset-dir "${RUNNER_TEMP}/snapshot-assets"
 
       - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
@@ -348,111 +397,6 @@ jobs:
               exit 1
               ;;
           esac
-          exit 0
-
-  publish-release-assets-and-branch:
-    needs:
-      - prepare-release
-      - assemble-release-tree
-      - package-offline-images
-      - smoke-test-release-tree
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout release source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare-release.outputs.source_ref }}
-          fetch-depth: 0
-
-      - name: Download release tree
-        uses: actions/download-artifact@v4
-        with:
-          name: release-tree
-          path: ${{ runner.temp }}/release-tree
-
-      - name: Download services amd64 offline assets
-        uses: actions/download-artifact@v4
-        with:
-          name: release-assets-services-amd64
-          path: ${{ runner.temp }}/release-assets
-
-      - name: Download services arm64 offline assets
-        uses: actions/download-artifact@v4
-        with:
-          name: release-assets-services-arm64
-          path: ${{ runner.temp }}/release-assets
-
-      - name: Download scanner amd64 offline assets
-        uses: actions/download-artifact@v4
-        with:
-          name: release-assets-scanner-amd64
-          path: ${{ runner.temp }}/release-assets
-
-      - name: Download scanner arm64 offline assets
-        uses: actions/download-artifact@v4
-        with:
-          name: release-assets-scanner-arm64
-          path: ${{ runner.temp }}/release-assets
-
-      - name: Delete public release tags and releases
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLEANUP_FILE: scripts/release-tag-cleanup.txt
-        run: |
-          set -euo pipefail
-
-          if [[ ! -f "${CLEANUP_FILE}" ]]; then
-            echo "No release tag cleanup file found; skipping."
-            exit 0
-          fi
-
-          while IFS= read -r raw_tag || [[ -n "${raw_tag}" ]]; do
-            tag="$(printf '%s' "${raw_tag}" | sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//')"
-            [[ -n "${tag}" ]] || continue
-
-            if git ls-remote --tags --refs origin "refs/tags/${tag}" | grep -q .; then
-              release_id=""
-              if release_id="$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.id' 2>/dev/null)"; then
-                if [[ "${release_id}" =~ ^[0-9]+$ ]]; then
-                  gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
-                fi
-              fi
-              git push origin --delete "${tag}" || true
-            fi
-
-            git tag -d "${tag}" >/dev/null 2>&1 || true
-          done < "${CLEANUP_FILE}"
-
-      - name: Publish offline release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ASSET_TAG: release-assets-latest
-          ASSET_DIR: ${{ runner.temp }}/release-assets
-        run: |
-          set -euo pipefail
-
-          if gh release view "${ASSET_TAG}" >/dev/null 2>&1; then
-            gh release delete "${ASSET_TAG}" --cleanup-tag --yes
-          fi
-
-          git tag -f "${ASSET_TAG}" "${{ needs.prepare-release.outputs.source_sha }}"
-          git push --force origin "refs/tags/${ASSET_TAG}"
-
-          gh release create "${ASSET_TAG}" \
-            --title "VulHunter Offline Image Bundles" \
-            --notes "Offline runtime image bundles for the latest release branch snapshot."
-
-          gh release upload "${ASSET_TAG}" \
-            "${ASSET_DIR}/vulhunter-services-images-amd64.tar.zst" \
-            "${ASSET_DIR}/vulhunter-services-images-arm64.tar.zst" \
-            "${ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst" \
-            "${ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst" \
-            "${ASSET_DIR}/images-manifest-services-amd64.json" \
-            "${ASSET_DIR}/images-manifest-services-arm64.json" \
-            "${ASSET_DIR}/images-manifest-scanner-amd64.json" \
-            "${ASSET_DIR}/images-manifest-scanner-arm64.json" \
-            --clobber
 
       - name: Publish release branch
         env:
@@ -481,3 +425,45 @@ jobs:
 
           git commit -m "chore: refresh release branch snapshot"
           git push --force origin HEAD:release
+
+      - name: Publish snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+
+          gh release edit "${SNAPSHOT_TAG}" --draft=false --latest=false
+
+  cleanup-draft-release:
+    if: ${{ failure() || cancelled() }}
+    needs:
+      - prepare-release
+      - create-draft-release
+      - publish-runtime-images
+      - package-offline-images
+      - finalize-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Delete failed snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.prepare-release.outputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SNAPSHOT_TAG}" ]] || exit 0
+          if ! gh release view "${SNAPSHOT_TAG}" --json isDraft >/dev/null 2>&1; then
+            echo "Snapshot draft release not found; skipping cleanup."
+            exit 0
+          fi
+
+          if [[ "$(gh release view "${SNAPSHOT_TAG}" --json isDraft --jq '.isDraft')" != "true" ]]; then
+            echo "Snapshot release is already published; skipping cleanup."
+            exit 0
+          fi
+
+          gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes

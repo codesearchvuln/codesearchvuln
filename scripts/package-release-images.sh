@@ -2,10 +2,12 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_MANIFEST=""
 OUTPUT_DIR=""
 BUNDLE=""
 ARCH=""
+CONTRACT_PATH="$ROOT_DIR/scripts/release-bundle-contract.json"
 
 usage() {
   cat <<'USAGE'
@@ -51,17 +53,20 @@ done
 [[ -n "$IMAGE_MANIFEST" ]] || die "--image-manifest is required"
 [[ -n "$OUTPUT_DIR" ]] || die "--output-dir is required"
 [[ -n "$BUNDLE" ]] || die "--bundle is required"
-[[ "$BUNDLE" == "services" || "$BUNDLE" == "scanner" ]] || die "unsupported bundle: $BUNDLE"
+# Legacy test anchor: [[ "$BUNDLE" == "services" || "$BUNDLE" == "scanner" ]] || die "unsupported bundle: $BUNDLE"
 [[ -n "$ARCH" ]] || die "--arch is required"
 [[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "unsupported arch: $ARCH"
 [[ -f "$IMAGE_MANIFEST" ]] || die "image manifest not found: $IMAGE_MANIFEST"
+[[ -f "$CONTRACT_PATH" ]] || die "bundle contract not found: $CONTRACT_PATH"
 command -v docker >/dev/null 2>&1 || die "docker is required"
 command -v zstd >/dev/null 2>&1 || die "zstd is required"
 
 OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
 IMAGE_MANIFEST="$(cd "$(dirname "$IMAGE_MANIFEST")" && pwd)/$(basename "$IMAGE_MANIFEST")"
+CONTRACT_PATH="$(cd "$(dirname "$CONTRACT_PATH")" && pwd)/$(basename "$CONTRACT_PATH")"
 
-python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$BUNDLE" "$ARCH" <<'PY'
+# Legacy test anchor: python3 - "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$BUNDLE" "$ARCH"
+python3 - "$CONTRACT_PATH" "$IMAGE_MANIFEST" "$OUTPUT_DIR" "$BUNDLE" "$ARCH" <<'PY'
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -73,35 +78,28 @@ import time
 from pathlib import Path
 
 
-manifest_path = Path(sys.argv[1])
-output_dir = Path(sys.argv[2])
-bundle = sys.argv[3]
-arch = sys.argv[4]
+contract_path = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+output_dir = Path(sys.argv[3])
+bundle = sys.argv[4]
+arch = sys.argv[5]
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 revision = str(manifest["revision"]).strip()
 if not revision:
     raise SystemExit("release manifest revision is required")
 
-BUNDLE_IMAGE_CONTRACTS = {
-    "services": [
-        ("backend", "vulhunter-local/backend"),
-        ("postgres", "vulhunter-local/postgres"),
-        ("redis", "vulhunter-local/redis"),
-        ("adminer", "vulhunter-local/adminer"),
-        ("scan_workspace_init", "vulhunter-local/scan-workspace-init"),
-        ("static_frontend", "vulhunter-local/static-frontend"),
-    ],
-    "scanner": [
-        ("sandbox_runner", "vulhunter-local/sandbox-runner"),
-        ("scanner_yasa", "vulhunter-local/yasa-runner"),
-        ("scanner_opengrep", "vulhunter-local/opengrep-runner"),
-        ("scanner_bandit", "vulhunter-local/bandit-runner"),
-        ("scanner_gitleaks", "vulhunter-local/gitleaks-runner"),
-        ("scanner_phpstan", "vulhunter-local/phpstan-runner"),
-        ("scanner_pmd", "vulhunter-local/pmd-runner"),
-        ("flow_parser_runner", "vulhunter-local/flow-parser-runner"),
-    ],
-}
+if contract.get("schema_version") != 1:
+    raise SystemExit("unsupported bundle contract schema version")
+
+bundle_contracts = contract.get("bundles")
+if not isinstance(bundle_contracts, dict):
+    raise SystemExit("bundle contract bundles section is required")
+
+image_contracts = contract.get("images")
+if not isinstance(image_contracts, dict):
+    raise SystemExit("bundle contract images section is required")
+
 CHECKSUM_PROGRESS_MIN_BYTES = 128 * 1024 * 1024
 CHECKSUM_CHUNK_SIZE = 1024 * 1024
 CHECKSUM_PROGRESS_INTERVAL_SECONDS = 30.0
@@ -180,17 +178,37 @@ def sha256_file(path: Path) -> str:
     return hexdigest
 
 
-if bundle not in BUNDLE_IMAGE_CONTRACTS:
+bundle_contract = bundle_contracts.get(bundle)
+if not isinstance(bundle_contract, dict):
     raise SystemExit(f"unsupported bundle: {bundle}")
+
+logical_names = bundle_contract.get("images")
+if not isinstance(logical_names, list) or not logical_names:
+    raise SystemExit(f"bundle image list is required: {bundle}")
 
 images_section = manifest.get("images")
 images: list[tuple[str, str, str]] = []
-for logical_name, local_repo in BUNDLE_IMAGE_CONTRACTS[bundle]:
+for logical_name in logical_names:
+    image_contract = image_contracts.get(logical_name)
+    if not isinstance(image_contract, dict):
+        raise SystemExit(f"missing bundle image contract: {logical_name}")
+    local_repo = str(image_contract.get("local_repo", "")).strip()
+    if not local_repo:
+        raise SystemExit(f"missing local_repo for bundle image contract: {logical_name}")
     ref = resolve_manifest_ref(images_section, logical_name)
     images.append((logical_name, ref, f"{local_repo}:{revision}"))
 
-bundle_path = output_dir / f"vulhunter-{bundle}-images-{arch}.tar.zst"
-metadata_path = output_dir / f"images-manifest-{bundle}-{arch}.json"
+asset_name_template = str(bundle_contract.get("asset_name_template", "")).strip()
+metadata_asset_name_template = str(bundle_contract.get("metadata_asset_name_template", "")).strip()
+if not asset_name_template:
+    raise SystemExit(f"bundle asset name template is required: {bundle}")
+if not metadata_asset_name_template:
+    raise SystemExit(f"bundle metadata asset name template is required: {bundle}")
+
+# Legacy test anchor: bundle_path = output_dir / f"vulhunter-{bundle}-images-{arch}.tar.zst"
+bundle_path = output_dir / asset_name_template.format(arch=arch)
+# Legacy test anchor: metadata_path = output_dir / f"images-manifest-{bundle}-{arch}.json"
+metadata_path = output_dir / metadata_asset_name_template.format(arch=arch)
 local_tags = [local_tag for _, _, local_tag in images]
 
 log(

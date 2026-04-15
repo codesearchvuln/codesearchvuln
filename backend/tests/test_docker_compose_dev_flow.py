@@ -627,6 +627,33 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "merge-backend-manifest" not in reusable_workflow_text
 
 
+def test_runtime_image_publish_workflow_centralizes_manifest_inspection_and_visibility() -> None:
+    workflow_text = (
+        REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-amd64,mode=max" in workflow_text
+    assert "type=gha,mode=max,scope=backend-runtime-release-amd64" in workflow_text
+    assert "type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-release-arm64,mode=max" in workflow_text
+    assert "type=gha,mode=max,scope=backend-runtime-release-arm64" in workflow_text
+    assert workflow_text.count('raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"') == 2
+    assert 'docker buildx imagetools inspect "${FINAL_TAG}" >/dev/null' not in workflow_text
+    assert workflow_text.count('docker buildx imagetools inspect "${IMAGE}:${IMAGE_TAG}" --format \'{{.Manifest.Digest}}\'') == 0
+    assert "publish-package-visibility:" in workflow_text
+    assert "name: Update published GHCR package visibility" in workflow_text
+    assert workflow_text.count('gh api --method PATCH "/user/packages/container/${PACKAGE_NAME}" -f visibility=public --silent 2>/dev/null') == 1
+    assert "设置前端 GHCR 包为公开可见性" not in workflow_text
+    assert "设置后端 GHCR 包为公开可见性" not in workflow_text
+    assert "设置 YASA runner GHCR 包为公开可见性" not in workflow_text
+    assert "设置 OpenGrep runner GHCR 包为公开可见性" not in workflow_text
+    assert "设置 Bandit runner GHCR 包为公开可见性" not in workflow_text
+    assert "设置 Gitleaks runner GHCR 包为公开可见性" not in workflow_text
+    assert "设置 PHPStan runner GHCR 包为公开可见性" not in workflow_text
+    assert "设置 flow-parser runner GHCR 包为公开可见性" not in workflow_text
+    assert "设置 PMD runner GHCR 包为公开可见性" not in workflow_text
+    assert "设置 sandbox-runner GHCR 包为公开可见性" not in workflow_text
+
+
 def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
         encoding="utf-8"

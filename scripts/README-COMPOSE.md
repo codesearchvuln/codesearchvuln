@@ -2,6 +2,8 @@
 
 这里说明的是 generated release tree 的运行时 compose 合同。若你是在源码仓库根目录直接执行 `docker compose up`，那是另一份 compose 合同：主 frontend 仍使用 `FRONTEND_IMAGE`，默认指向 `vulhunter-frontend`，并可继续叠加 `docker-compose.hybrid.yml`。当前文档不覆盖那条路径。
 
+release branch 只代表最新一份 generated release tree 的交付通道，不是历史 snapshot 索引。离线部署时，请保证你手里的 release tree 与两份离线 tar 包来自同一个 snapshot。
+
 generated release tree 只暴露一份运行时 compose 合同：`docker-compose.yml`。它不会附带本地 build overlay、Dockerfile，也不支持在 release tree 内本地重建 `backend` / `frontend`。
 
 ## 运行前提与支持边界
@@ -51,8 +53,8 @@ bash ./scripts/offline-up.sh --attach-logs
 
 - `vulhunter-services-images-<arch>.tar.zst`
 - `vulhunter-scanner-images-<arch>.tar.zst`
-- 两份文件都需要放在 release 根目录或 `images/` 目录，且必须与当前机器架构匹配（`amd64` / `arm64`）
-- `offline-up.sh` 会自动导入两份离线镜像包，加载 `offline-images.env`，切换到本地 `vulhunter-local/*` 镜像标签，然后等待 release stack 通过 readiness 检查
+- 用户侧仍然只需要这两份 tar 包；两份文件都需要放在 release 根目录或 `images/` 目录，且必须与当前机器架构匹配（`amd64` / `arm64`），并与当前 release tree 来自同一个 snapshot
+- `offline-up.sh` 会先读取 release tree 自带的 `release-snapshot-lock.json`，在 `docker load` 之前校验两份 bundle 的文件名与 SHA256；通过后才会导入离线镜像包，加载 `offline-images.env`，切换到本地 `vulhunter-local/*` 镜像标签，然后等待 release stack 通过 readiness 检查
 - 默认模式不显示附着日志；只有 `--attach-logs` 才会在 backend 健康后切到前台 `docker compose up`
 - 离线模式不会改变 compose 结构，只改变镜像来源；代码执行统一走本地 `sandbox-runner` 标签，主 frontend 仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，不会切回 `FRONTEND_IMAGE`
 

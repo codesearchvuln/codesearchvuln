@@ -7,6 +7,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SERVICES_METADATA_FILE="${SERVICES_IMAGES_MANIFEST_PATH:-$ROOT_DIR/images-manifest-services.json}"
 SCANNER_METADATA_FILE="${SCANNER_IMAGES_MANIFEST_PATH:-$ROOT_DIR/images-manifest-scanner.json}"
+RELEASE_SNAPSHOT_LOCK_PATH="${RELEASE_SNAPSHOT_LOCK_PATH:-$ROOT_DIR/release-snapshot-lock.json}"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$ROOT_DIR/docker/env/backend/.env}"
 BACKEND_ENV_EXAMPLE="${BACKEND_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/env.example}"
 OFFLINE_ENV_FILE="${OFFLINE_ENV_FILE:-$ROOT_DIR/docker/env/backend/offline-images.env}"
@@ -89,7 +90,7 @@ detect_server_arch() {
   normalize_arch "$arch"
 }
 
-select_bundle_path() {
+find_bundle_path() {
   local bundle="$1"
   local arch="$2"
   local locations=("$ROOT_DIR" "$ROOT_DIR/images")
@@ -106,7 +107,95 @@ select_bundle_path() {
     done
   done
 
-  die "offline image bundle not found for ${bundle}/${arch}. Expected vulhunter-${bundle}-images-${arch}.tar.zst or .tar in the release root or images/."
+  return 1
+}
+
+read_lock_bundle_contract() {
+  local bundle="$1"
+  local arch="$2"
+
+  python3 - "$RELEASE_SNAPSHOT_LOCK_PATH" "$bundle" "$arch" <<'PY'
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+
+lock_path = Path(sys.argv[1])
+bundle = sys.argv[2]
+arch = sys.argv[3]
+
+try:
+    lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
+except FileNotFoundError as exc:
+    raise SystemExit(f"missing lock file: {lock_path}") from exc
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"invalid lock file JSON: {lock_path}: {exc}") from exc
+
+snapshot_tag = str(lock_payload.get("snapshot_tag", "")).strip() or "unknown"
+entry = lock_payload.get("bundles", {}).get(bundle, {}).get(arch)
+if not isinstance(entry, dict):
+    raise SystemExit(f"missing bundles/{bundle}/{arch} entry in lock file: {lock_path}")
+
+bundle_file = str(entry.get("asset_name", "")).strip()
+bundle_sha256 = str(entry.get("bundle_sha256", "")).strip().lower()
+if not bundle_file:
+    raise SystemExit(f"missing asset_name for {bundle}/{arch} in lock file: {lock_path}")
+if not re.fullmatch(r"[0-9a-f]{64}", bundle_sha256):
+    raise SystemExit(f"invalid bundle_sha256 for {bundle}/{arch} in lock file: {lock_path}")
+
+print(f"{snapshot_tag}\t{bundle_file}\t{bundle_sha256}")
+PY
+}
+
+sha256_file() {
+  local path="$1"
+
+  python3 - "$path" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import sys
+
+
+digest = hashlib.sha256()
+with open(sys.argv[1], "rb") as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
+print(digest.hexdigest())
+PY
+}
+
+prevalidate_bundle() {
+  local bundle="$1"
+  local arch="$2"
+  local contract snapshot_tag expected_file expected_sha bundle_path actual_file actual_sha
+  local lock_label="${RELEASE_SNAPSHOT_LOCK_PATH#$ROOT_DIR/}"
+
+  if ! contract="$(read_lock_bundle_contract "$bundle" "$arch" 2>&1)"; then
+    die "offline bundle prevalidation failed for ${bundle}/${arch} (snapshot unknown): ${contract}"
+  fi
+
+  IFS=$'\t' read -r snapshot_tag expected_file expected_sha <<<"$contract"
+
+  if ! bundle_path="$(find_bundle_path "$bundle" "$arch")"; then
+    die "offline bundle prevalidation failed for ${bundle}/${arch} (snapshot ${snapshot_tag}): expected ${expected_file} in the release root or images/ according to ${lock_label}."
+  fi
+
+  actual_file="$(basename "$bundle_path")"
+  if [[ "$actual_file" != "$expected_file" ]]; then
+    die "offline bundle prevalidation failed for ${bundle}/${arch} (snapshot ${snapshot_tag}): expected filename ${expected_file}, found ${actual_file}."
+  fi
+
+  actual_sha="$(sha256_file "$bundle_path")"
+  if [[ "$actual_sha" != "$expected_sha" ]]; then
+    die "offline bundle prevalidation failed for ${bundle}/${arch} (snapshot ${snapshot_tag}): checksum mismatch for ${actual_file}."
+  fi
+
+  log_info "prevalidated ${bundle}/${arch}: ${actual_file} (snapshot ${snapshot_tag})" >&2
+  printf '%s' "$bundle_path"
 }
 
 load_bundle() {
@@ -400,8 +489,8 @@ main() {
   local arch services_bundle scanner_bundle
   arch="$(detect_server_arch)"
   log_info "detected architecture: $arch"
-  services_bundle="$(select_bundle_path "services" "$arch")"
-  scanner_bundle="$(select_bundle_path "scanner" "$arch")"
+  services_bundle="$(prevalidate_bundle "services" "$arch")"
+  scanner_bundle="$(prevalidate_bundle "scanner" "$arch")"
 
   [[ -n "${DOCKER_SOCKET_PATH:-}" ]] && log_info "detected Docker socket path: ${DOCKER_SOCKET_PATH}"
   [[ -n "${DOCKER_SOCKET_GID:-}" ]] && log_info "detected Docker socket gid: ${DOCKER_SOCKET_GID}"

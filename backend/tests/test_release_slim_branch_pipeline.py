@@ -240,6 +240,12 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "workflow_dispatch:" in workflow_text
     assert "refresh_backend_image:" in workflow_text
     assert "publish_backend_hardened:" in workflow_text
+    assert "prepare-release:" in workflow_text
+    assert "create-draft-release:" in workflow_text
+    assert "publish-runtime-images:" in workflow_text
+    assert "package-offline-images:" in workflow_text
+    assert "finalize-release:" in workflow_text
+    assert "cleanup-draft-release:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "build_frontend: false" in workflow_text
     assert (
@@ -250,11 +256,14 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
         "inputs.publish_backend_hardened || false }}"
     ) in workflow_text
     assert "build_sandbox:" not in workflow_text
-    assert "build-frontend-bundle:" in workflow_text
-    assert "assemble-release-tree:" in workflow_text
-    assert "package-offline-images:" in workflow_text
-    assert "smoke-test-release-tree:" in workflow_text
-    assert "publish-release-assets-and-branch:" in workflow_text
+    assert "runtime_tag" in workflow_text
+    assert "snapshot_tag" in workflow_text
+    assert "snapshot_title" in workflow_text
+    assert "release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" in workflow_text
+    assert "build-frontend-bundle:" not in workflow_text
+    assert "assemble-release-tree:" not in workflow_text
+    assert "smoke-test-release-tree:" not in workflow_text
+    assert "publish-release-assets-and-branch:" not in workflow_text
     assert "Setup Node.js for frontend release bundle" in workflow_text
     assert "Setup pnpm for frontend release bundle" in workflow_text
     assert "uses: pnpm/action-setup@v5" in workflow_text
@@ -265,10 +274,17 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "cp -R frontend/dist/. " in workflow_text
     assert "cp frontend/nginx.conf " in workflow_text
     assert "deploy/frontend/default.conf" not in workflow_text
-    assert "upload-artifact@v4" in workflow_text
-    assert "download-artifact@v4" in workflow_text
+    assert "upload-artifact@v4" not in workflow_text
+    assert "download-artifact@v4" not in workflow_text
+    assert "name: frontend-release-bundle" not in workflow_text
+    assert "name: release-tree" not in workflow_text
+    assert "name: release-assets-services-amd64" not in workflow_text
+    assert "name: release-assets-services-arm64" not in workflow_text
+    assert "name: release-assets-scanner-amd64" not in workflow_text
+    assert "name: release-assets-scanner-arm64" not in workflow_text
     assert "--frontend-bundle" in workflow_text
     assert "release-manifest.json" in workflow_text
+    assert "release-snapshot-lock.json" in workflow_text
     assert "images-manifest-services-amd64.json" in workflow_text
     assert "images-manifest-services-arm64.json" in workflow_text
     assert "images-manifest-scanner-amd64.json" in workflow_text
@@ -281,9 +297,16 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "--bundle ${{ matrix.bundle }}" in workflow_text
     assert "--arch ${{ matrix.arch }}" in workflow_text
     assert "matrix:" in workflow_text
-    assert "compression-level: 0" in workflow_text
+    assert "compression-level: 0" not in workflow_text
     assert "gh release create" in workflow_text
     assert "gh release upload" in workflow_text
+    assert "gh release edit" in workflow_text
+    assert "--draft" in workflow_text
+    assert "--draft=false" in workflow_text
+    assert "--latest=false" in workflow_text
+    assert 'gh release upload "${SNAPSHOT_TAG}"' in workflow_text
+    assert 'gh release download "${SNAPSHOT_TAG}"' in workflow_text
+    assert "write-release-snapshot-lock.py" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "docker compose config" in workflow_text
     assert "DOCKER_SOCKET_GID" in workflow_text
@@ -305,16 +328,26 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "/health" in workflow_text
     assert "http://127.0.0.1:3000/" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
+    assert workflow_text.index("write-release-snapshot-lock.py") < workflow_text.index(
+        'git push --force origin HEAD:release'
+    )
+    assert workflow_text.index('git push --force origin HEAD:release') < workflow_text.index(
+        'gh release edit "${SNAPSHOT_TAG}"'
+    )
     assert "fetch-depth: 0" in workflow_text
     assert "git checkout --orphan" in workflow_text
     assert "origin/release" not in workflow_text
     assert "git fetch origin release" not in workflow_text
     assert "git checkout -B release origin/release" not in workflow_text
-    assert "git ls-remote --tags" in workflow_text
-    assert "git push origin --delete" in workflow_text
-    assert "release-tag-cleanup.txt" in workflow_text
-    assert 'release_id=""' in workflow_text
+    assert "git ls-remote --tags" not in workflow_text
+    assert "git push origin --delete" not in workflow_text
+    assert "release-tag-cleanup.txt" not in workflow_text
+    assert "release-assets-latest" not in workflow_text
     assert "docker-publish.yml" not in workflow_text
+    assert "actions: write" not in workflow_text
+    assert "if: ${{ failure() || cancelled() }}" in workflow_text
+    assert "isDraft" in workflow_text
+    assert 'gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes' in workflow_text
     assert "publish_backend_hardened:" in publish_workflow_text
     assert "build_sandbox:" not in publish_workflow_text
     assert "publish-sandbox:" not in publish_workflow_text

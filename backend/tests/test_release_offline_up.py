@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -46,6 +47,10 @@ def _write_frontend_bundle(path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _run_release_generator(
@@ -205,6 +210,46 @@ cat
     zstd_path.chmod(zstd_path.stat().st_mode | stat.S_IXUSR)
 
 
+def _write_release_snapshot_lock(
+    output_dir: Path,
+    *,
+    services_file: str = "vulhunter-services-images-amd64.tar",
+    scanner_file: str = "vulhunter-scanner-images-amd64.tar",
+    services_sha256: str | None = None,
+    scanner_sha256: str | None = None,
+    snapshot_tag: str = "snapshot-2026-04-13",
+) -> Path:
+    services_path = output_dir / services_file
+    scanner_path = output_dir / scanner_file
+    lock_payload = {
+        "schema_version": 1,
+        "source_sha": "deadbeefcafebabe0123456789abcdef01234567",
+        "snapshot_tag": snapshot_tag,
+        "release_manifest_sha256": "f" * 64,
+        "bundles": {
+            "services": {
+                "amd64": {
+                    "asset_name": services_file,
+                    "bundle_sha256": services_sha256 or _sha256(services_path),
+                    "revision": "deadbeefcafebabe0123456789abcdef01234567",
+                    "metadata_asset_name": "images-manifest-services-amd64.json",
+                }
+            },
+            "scanner": {
+                "amd64": {
+                    "asset_name": scanner_file,
+                    "bundle_sha256": scanner_sha256 or _sha256(scanner_path),
+                    "revision": "deadbeefcafebabe0123456789abcdef01234567",
+                    "metadata_asset_name": "images-manifest-scanner-amd64.json",
+                }
+            }
+        },
+    }
+    lock_path = output_dir / "release-snapshot-lock.json"
+    lock_path.write_text(json.dumps(lock_payload, indent=2) + "\n", encoding="utf-8")
+    return lock_path
+
+
 def _generate_release_tree(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     output_dir = tmp_path / "release-tree"
     manifest_path = tmp_path / "release-manifest.json"
@@ -215,6 +260,7 @@ def _generate_release_tree(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     assert result.returncode == 0, combined_output
     (output_dir / "vulhunter-services-images-amd64.tar").write_text("services-bundle\n", encoding="utf-8")
     (output_dir / "vulhunter-scanner-images-amd64.tar").write_text("scanner-bundle\n", encoding="utf-8")
+    _write_release_snapshot_lock(output_dir)
     return output_dir, manifest
 
 
@@ -393,6 +439,148 @@ def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode != 0
     assert "STATIC_FRONTEND_IMAGE" in combined_output or "two bundles" in combined_output or "not covered" in combined_output
+
+
+def test_offline_up_bash_fails_prevalidation_before_load_when_lock_bundle_name_is_wrong(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+    _write_release_snapshot_lock(
+        output_dir,
+        services_file="vulhunter-services-images-amd64.tar.zst",
+        services_sha256=_sha256(output_dir / "vulhunter-services-images-amd64.tar"),
+    )
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "snapshot-2026-04-13" in combined_output
+    assert "services" in combined_output
+    assert "vulhunter-services-images-amd64.tar.zst" in combined_output
+    assert not docker_log.exists() or "load" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_offline_up_bash_fails_prevalidation_before_load_when_lock_checksum_mismatches(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+    _write_release_snapshot_lock(
+        output_dir,
+        scanner_sha256="0" * 64,
+    )
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "snapshot-2026-04-13" in combined_output
+    assert "scanner" in combined_output
+    assert "checksum" in combined_output
+    assert not docker_log.exists() or "load" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_offline_up_bash_fails_prevalidation_before_load_when_current_arch_entry_is_missing(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    lock_path = output_dir / "release-snapshot-lock.json"
+    lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    lock_payload["bundles"]["scanner"].pop("amd64")
+    lock_path.write_text(json.dumps(lock_payload, indent=2) + "\n", encoding="utf-8")
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "scanner/amd64" in combined_output
+    assert "snapshot unknown" in combined_output or "missing bundles/scanner/amd64" in combined_output
+    assert not docker_log.exists() or "load" not in docker_log.read_text(encoding="utf-8")
 
 
 def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(tmp_path: Path) -> None:

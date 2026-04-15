@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "bundles": {
+    "services": {
+      "tree_metadata_filename": "images-manifest-services.json",
+      "asset_name_template": "vulhunter-services-images-{arch}.tar.zst",
+      "metadata_asset_name_template": "images-manifest-services-{arch}.json",
+      "images": [
+        "backend",
+        "postgres",
+        "redis",
+        "adminer",
+        "scan_workspace_init",
+        "static_frontend"
+      ]
+    },
+    "scanner": {
+      "tree_metadata_filename": "images-manifest-scanner.json",
+      "asset_name_template": "vulhunter-scanner-images-{arch}.tar.zst",
+      "metadata_asset_name_template": "images-manifest-scanner-{arch}.json",
+      "images": [
+        "sandbox_runner",
+        "scanner_yasa",
+        "scanner_opengrep",
+        "scanner_bandit",
+        "scanner_gitleaks",
+        "scanner_phpstan",
+        "scanner_pmd",
+        "flow_parser_runner"
+      ]
+    }
+  },
+  "images": {
+    "backend": {
+      "env_var": "BACKEND_IMAGE",
+      "local_repo": "vulhunter-local/backend"
+    },
+    "postgres": {
+      "env_var": "POSTGRES_IMAGE",
+      "local_repo": "vulhunter-local/postgres"
+    },
+    "redis": {
+      "env_var": "REDIS_IMAGE",
+      "local_repo": "vulhunter-local/redis"
+    },
+    "adminer": {
+      "env_var": "ADMINER_IMAGE",
+      "local_repo": "vulhunter-local/adminer"
+    },
+    "scan_workspace_init": {
+      "env_var": "SCAN_WORKSPACE_INIT_IMAGE",
+      "local_repo": "vulhunter-local/scan-workspace-init"
+    },
+    "static_frontend": {
+      "env_var": "STATIC_FRONTEND_IMAGE",
+      "local_repo": "vulhunter-local/static-frontend"
+    },
+    "sandbox_runner": {
+      "env_var": "SANDBOX_RUNNER_IMAGE",
+      "local_repo": "vulhunter-local/sandbox-runner"
+    },
+    "scanner_yasa": {
+      "env_var": "SCANNER_YASA_IMAGE",
+      "local_repo": "vulhunter-local/yasa-runner"
+    },
+    "scanner_opengrep": {
+      "env_var": "SCANNER_OPENGREP_IMAGE",
+      "local_repo": "vulhunter-local/opengrep-runner"
+    },
+    "scanner_bandit": {
+      "env_var": "SCANNER_BANDIT_IMAGE",
+      "local_repo": "vulhunter-local/bandit-runner"
+    },
+    "scanner_gitleaks": {
+      "env_var": "SCANNER_GITLEAKS_IMAGE",
+      "local_repo": "vulhunter-local/gitleaks-runner"
+    },
+    "scanner_phpstan": {
+      "env_var": "SCANNER_PHPSTAN_IMAGE",
+      "local_repo": "vulhunter-local/phpstan-runner"
+    },
+    "scanner_pmd": {
+      "env_var": "SCANNER_PMD_IMAGE",
+      "local_repo": "vulhunter-local/pmd-runner"
+    },
+    "flow_parser_runner": {
+      "env_var": "FLOW_PARSER_RUNNER_IMAGE",
+      "local_repo": "vulhunter-local/flow-parser-runner"
+    }
+  }
+}

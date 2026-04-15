@@ -2,6 +2,8 @@
 
 This directory is the generated release tree runtime package, not the source-repo runtime directory. Run the commands below only from this release root; do not reuse source-repo local-build, hybrid overlay, or `use-offline-env` style commands here.
 
+The release branch is only the channel for the latest generated release tree. It is not a catalog of historical snapshots. If you are deploying offline, keep this release tree and the two offline tarballs from the same snapshot.
+
 ## 1. Before You Start
 
 - Supported hosts: `Ubuntu 22.04 LTS`, `Ubuntu 24.04 LTS`, `Windows 10 WSL2 + Ubuntu 22.04 LTS`, `Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -45,7 +47,7 @@ docker compose ps
 
 ## 4. Offline Deployment
 
-Download both offline bundles for your current Docker server architecture and place them in the release root or `images/`:
+Download both offline bundles for your current Docker server architecture, make sure they come from the same snapshot as this release tree, and place them in the release root or `images/`. End users still only need these two tarballs:
 
 - `vulhunter-services-images-<arch>.tar.zst`
 - `vulhunter-scanner-images-<arch>.tar.zst`
@@ -70,6 +72,8 @@ The offline script will automatically:
 
 - auto-copy missing `docker/env/backend/.env`
 - auto-copy missing `docker/env/backend/offline-images.env`
+- read the bundled `release-snapshot-lock.json`
+- validate the `services` and `scanner` tarball filename and SHA256 before `docker load`, so the offline bundles match this release snapshot
 - load the `services` and `scanner` offline bundles
 - start `docker compose up -d`
 - wait for backend `/health`, frontend `/`, and proxied `http://127.0.0.1/api/v1/openapi.json` before reporting ready

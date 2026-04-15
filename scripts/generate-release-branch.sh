@@ -10,6 +10,7 @@ FRONTEND_BUNDLE_DIR=""
 VALIDATE="false"
 ALLOWLIST_PATH="$ROOT_DIR/scripts/release-allowlist.txt"
 TEMPLATE_DIR="$ROOT_DIR/scripts/release-templates"
+CONTRACT_PATH="$ROOT_DIR/scripts/release-bundle-contract.json"
 
 usage() {
   cat <<'USAGE'
@@ -176,6 +177,7 @@ overlay_release_templates() {
   chmod +x "$OUTPUT_DIR/scripts/offline-up.sh"
   render_release_compose
   python3 - \
+    "$CONTRACT_PATH" \
     "$IMAGE_MANIFEST" \
     "$OUTPUT_DIR/images-manifest-services.json" \
     "$OUTPUT_DIR/images-manifest-scanner.json" \
@@ -187,38 +189,29 @@ import sys
 from pathlib import Path
 
 
-manifest_path = Path(sys.argv[1])
-services_metadata_path = Path(sys.argv[2])
-scanner_metadata_path = Path(sys.argv[3])
-offline_env_path = Path(sys.argv[4])
+contract_path = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+services_metadata_path = Path(sys.argv[3])
+scanner_metadata_path = Path(sys.argv[4])
+offline_env_path = Path(sys.argv[5])
 
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 revision = str(manifest["revision"]).strip()
 if not revision:
     raise SystemExit("release manifest revision is required")
 
-service_image_contracts = {
-    "backend": ("BACKEND_IMAGE", "vulhunter-local/backend"),
-    "postgres": ("POSTGRES_IMAGE", "vulhunter-local/postgres"),
-    "redis": ("REDIS_IMAGE", "vulhunter-local/redis"),
-    "adminer": ("ADMINER_IMAGE", "vulhunter-local/adminer"),
-    "scan_workspace_init": ("SCAN_WORKSPACE_INIT_IMAGE", "vulhunter-local/scan-workspace-init"),
-    "static_frontend": ("STATIC_FRONTEND_IMAGE", "vulhunter-local/static-frontend"),
-}
+if contract.get("schema_version") != 1:
+    raise SystemExit("unsupported bundle contract schema version")
 
-scanner_image_contracts = {
-    "sandbox_runner": ("SANDBOX_RUNNER_IMAGE", "vulhunter-local/sandbox-runner"),
-    "scanner_yasa": ("SCANNER_YASA_IMAGE", "vulhunter-local/yasa-runner"),
-    "scanner_opengrep": ("SCANNER_OPENGREP_IMAGE", "vulhunter-local/opengrep-runner"),
-    "scanner_bandit": ("SCANNER_BANDIT_IMAGE", "vulhunter-local/bandit-runner"),
-    "scanner_gitleaks": ("SCANNER_GITLEAKS_IMAGE", "vulhunter-local/gitleaks-runner"),
-    "scanner_phpstan": ("SCANNER_PHPSTAN_IMAGE", "vulhunter-local/phpstan-runner"),
-    "scanner_pmd": ("SCANNER_PMD_IMAGE", "vulhunter-local/pmd-runner"),
-    "flow_parser_runner": ("FLOW_PARSER_RUNNER_IMAGE", "vulhunter-local/flow-parser-runner"),
-}
+bundle_contracts = contract.get("bundles")
+if not isinstance(bundle_contracts, dict):
+    raise SystemExit("bundle contract bundles section is required")
 
-services_images_payload: dict[str, dict[str, str]] = {}
-scanner_images_payload: dict[str, dict[str, str]] = {}
+image_contracts = contract.get("images")
+if not isinstance(image_contracts, dict):
+    raise SystemExit("bundle contract images section is required")
+
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
     "# Then run bash ./scripts/offline-up.sh.",
@@ -226,9 +219,27 @@ offline_env_lines = [
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
 ]
 
-def build_payload(contracts: dict[str, tuple[str, str]]) -> dict[str, dict[str, str]]:
+
+def build_payload(bundle_name: str) -> dict[str, dict[str, str]]:
+    bundle_contract = bundle_contracts.get(bundle_name)
+    if not isinstance(bundle_contract, dict):
+        raise SystemExit(f"missing bundle contract: {bundle_name}")
+
+    logical_names = bundle_contract.get("images")
+    if not isinstance(logical_names, list) or not logical_names:
+        raise SystemExit(f"bundle image list is required: {bundle_name}")
+
     payload: dict[str, dict[str, str]] = {}
-    for logical_name, (env_var, local_repo) in contracts.items():
+    for logical_name in logical_names:
+        image_contract = image_contracts.get(logical_name)
+        if not isinstance(image_contract, dict):
+            raise SystemExit(f"missing bundle image contract: {logical_name}")
+        env_var = str(image_contract.get("env_var", "")).strip()
+        local_repo = str(image_contract.get("local_repo", "")).strip()
+        if not env_var:
+            raise SystemExit(f"missing env_var for bundle image contract: {logical_name}")
+        if not local_repo:
+            raise SystemExit(f"missing local_repo for bundle image contract: {logical_name}")
         try:
             source_ref = str(manifest["images"][logical_name]["ref"]).strip()
         except Exception as exc:  # pragma: no cover - defensive path
@@ -246,17 +257,20 @@ def build_payload(contracts: dict[str, tuple[str, str]]) -> dict[str, dict[str, 
     return payload
 
 
-services_images_payload = build_payload(service_image_contracts)
-scanner_images_payload = build_payload(scanner_image_contracts)
+services_images_payload = build_payload("services")
+scanner_images_payload = build_payload("scanner")
+
+services_bundle_contract = bundle_contracts["services"]
+scanner_bundle_contract = bundle_contracts["scanner"]
 
 services_metadata = {
     "revision": revision,
-    "bundle_template": "images/vulhunter-services-images-{arch}.tar.zst",
+    "bundle_template": f"images/{services_bundle_contract['asset_name_template']}",
     "images": services_images_payload,
 }
 scanner_metadata = {
     "revision": revision,
-    "bundle_template": "images/vulhunter-scanner-images-{arch}.tar.zst",
+    "bundle_template": f"images/{scanner_bundle_contract['asset_name_template']}",
     "images": scanner_images_payload,
 }
 
