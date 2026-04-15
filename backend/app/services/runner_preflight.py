@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 
 import docker
@@ -12,6 +13,19 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 DOCKER_EXCEPTION = getattr(getattr(docker, "errors", None), "DockerException", Exception)
 DOCKER_NOT_FOUND = getattr(getattr(docker, "errors", None), "ImageNotFound", Exception)
+DOCKER_API_ERROR = getattr(getattr(docker, "errors", None), "APIError", None)
+
+_PREFLIGHT_MAX_RETRIES = 3
+_PREFLIGHT_RETRY_DELAY_S = 2.0
+
+
+def _is_transient_docker_error(exc: Exception) -> bool:
+    """Return True if the exception is a transient Docker error worth retrying."""
+    if DOCKER_API_ERROR is not None and isinstance(exc, DOCKER_API_ERROR):
+        return getattr(exc, "is_server_error", lambda: False)()
+    if isinstance(exc, (ConnectionError, OSError)):
+        return True
+    return False
 
 
 def _format_docker_error(exc: Exception) -> str:
@@ -138,8 +152,28 @@ def run_runner_preflight_sync(spec: RunnerPreflightSpec) -> RunnerPreflightResul
     container_id: str | None = None
     client = None
     try:
-        client = docker.from_env()
-        _ensure_runner_image(client, spec)
+        for attempt in range(_PREFLIGHT_MAX_RETRIES):
+            try:
+                client = docker.from_env()
+                _ensure_runner_image(client, spec)
+                break
+            except Exception as exc:
+                if not _is_transient_docker_error(exc) or attempt >= _PREFLIGHT_MAX_RETRIES - 1:
+                    raise
+                logger.warning(
+                    "runner preflight %s: transient docker error (attempt %d/%d): %s",
+                    spec.name,
+                    attempt + 1,
+                    _PREFLIGHT_MAX_RETRIES,
+                    exc,
+                )
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                    client = None
+                time.sleep(_PREFLIGHT_RETRY_DELAY_S)
         container = client.containers.run(
             spec.image,
             spec.command,

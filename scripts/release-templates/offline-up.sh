@@ -540,8 +540,8 @@ main() {
   parse_and_export_offline_env
   validate_compose_images_local_only
 
-  log_info "starting docker compose up -d db redis backend"
-  compose up -d db redis backend
+  log_info "starting docker compose up db redis backend"
+  compose up db redis backend
 
   if ! wait_for_backend_readiness; then
     log_warn "release readiness probe failed"

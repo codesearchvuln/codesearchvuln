@@ -457,7 +457,7 @@ EXPOSE 8000
 
 RUN /opt/backend-venv/bin/python - <<'PYEOF'
 import importlib.util
-cython_mods = ['app.core.config', 'app.services.agent.config', 'app.db.session']
+cython_mods = ['app.db.session']
 for mod_name in cython_mods:
     spec = importlib.util.find_spec(mod_name)
     assert spec is not None, 'Module ' + mod_name + ' not found'
@@ -466,6 +466,8 @@ for mod_name in cython_mods:
 pyc_mods = [
     'app.main',
     'app.runtime.container_startup',
+    'app.core.config',
+    'app.services.agent.config',
     'app.services.agent.core.state',
     'app.services.agent.tools.finish_tool',
     'app.api.v1.endpoints.agent_tasks_execution',
@@ -685,7 +687,7 @@ EXPOSE 8000
 # 验证核心模块可从 .so / .pyc 正确导入（确保运行时入口与 Cython 产物完整）
 RUN /opt/backend-venv/bin/python - <<'PYEOF'
 import importlib.util
-cython_mods = ['app.core.config', 'app.services.agent.config', 'app.db.session']
+cython_mods = ['app.db.session']
 for mod_name in cython_mods:
     spec = importlib.util.find_spec(mod_name)
     assert spec is not None, 'Module ' + mod_name + ' not found'
@@ -694,6 +696,8 @@ for mod_name in cython_mods:
 pyc_mods = [
     'app.main',
     'app.runtime.container_startup',
+    'app.core.config',
+    'app.services.agent.config',
     'app.api.v1.endpoints.agent_tasks_reporting',
 ]
 for mod_name in pyc_mods:
