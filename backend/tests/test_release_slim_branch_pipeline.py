@@ -10,6 +10,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_workflows_pin_setup_node_to_24_and_force_js_actions_to_node24() -> None:
+    workflow_dir = REPO_ROOT / ".github" / "workflows"
+    workflow_paths = sorted(workflow_dir.glob("*.yml"))
+
+    assert workflow_paths
+
+    for workflow_path in workflow_paths:
+        text = workflow_path.read_text(encoding="utf-8")
+        assert 'FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"' in text
+        assert "node-version: 20" not in text
+        if "actions/setup-node@v4" in text:
+            assert "node-version: 24" in text
+
+
 def _write_release_manifest(path: Path) -> dict[str, object]:
     manifest = {
         "revision": "deadbeefcafebabe0123456789abcdef01234567",
