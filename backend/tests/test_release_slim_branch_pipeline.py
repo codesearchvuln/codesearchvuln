@@ -258,6 +258,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "snapshot_tag" in workflow_text
     assert "snapshot_title" in workflow_text
     assert "snapshot_release_id" in workflow_text
+    assert 'repos/${GITHUB_REPOSITORY}/releases?per_page=30' in workflow_text
+    assert 'repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}' not in workflow_text
     assert "release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" in workflow_text
     assert "build-frontend-bundle:" not in workflow_text
     assert "assemble-release-tree:" not in workflow_text
@@ -316,6 +318,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "write-release-snapshot-lock.py" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "docker compose config" in workflow_text
+    assert workflow_text.count("set -euo pipefail") >= 10
     assert "DOCKER_SOCKET_GID" in workflow_text
     assert "stat -c '%g'" in workflow_text
     assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text

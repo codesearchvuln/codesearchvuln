@@ -96,8 +96,48 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "snapshot_release_id=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}" --jq '.id')" >> "$GITHUB_OUTPUT"
-          echo "snapshot_url=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}" --jq '.html_url')" >> "$GITHUB_OUTPUT"
+          releases_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30")"
+          RELEASES_JSON="${releases_json}" \
+          SNAPSHOT_TAG="${SNAPSHOT_TAG}" \
+          GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import sys
+
+
+          releases = json.loads(os.environ["RELEASES_JSON"])
+          tag = os.environ["SNAPSHOT_TAG"]
+          if not isinstance(releases, list):
+              raise SystemExit("release list response must be an array")
+
+          matches = [
+              release
+              for release in releases
+              if isinstance(release, dict) and str(release.get("tag_name") or "").strip() == tag
+          ]
+          if not matches:
+              raise SystemExit(f"failed to locate snapshot release metadata for tag {tag}")
+          if len(matches) > 1:
+              raise SystemExit(f"multiple releases matched snapshot tag {tag}")
+
+          release = matches[0]
+          if release.get("draft") is not True:
+              raise SystemExit(f"snapshot release must be draft when captured, got draft={release.get('draft')!r}")
+
+          release_id = release.get("id")
+          if not isinstance(release_id, int):
+              raise SystemExit(f"snapshot release id must be integer, got {release_id!r}")
+          html_url = str(release.get("html_url") or "").strip()
+          if not html_url:
+              raise SystemExit("snapshot release html_url must not be empty")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"snapshot_release_id={release_id}\n")
+              handle.write(f"snapshot_url={html_url}\n")
+          PY
 
   publish-runtime-images:
     needs: prepare-release
@@ -337,6 +377,8 @@ jobs:
       - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
         run: |
+          set -euo pipefail
+
           export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
           if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
             export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
