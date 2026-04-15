@@ -249,9 +249,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "cleanup-draft-release:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "build_frontend: false" in workflow_text
-    assert (
-        "build_backend: ${{ github.event_name == 'workflow_dispatch' && (inputs.refresh_backend_image || inputs.refresh_all_runtime_images) || false }}"
-    ) in workflow_text
+    assert "build_backend: true" in workflow_text
     assert (
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
         "inputs.publish_backend_hardened || false }}"
@@ -303,44 +301,53 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "gh release upload" in workflow_text
     assert "gh release edit" in workflow_text
     assert "--draft" in workflow_text
-    assert "--draft=false" in workflow_text
+    assert "--draft=false" not in workflow_text
     assert "--latest=false" in workflow_text
     assert 'gh release upload "${SNAPSHOT_TAG}"' in workflow_text
     assert 'gh release download "${SNAPSHOT_TAG}"' in workflow_text
+    assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text
+    assert 'gh release edit "${SEMANTIC_TAG}"' in workflow_text
+    assert 'gh release upload "${SEMANTIC_TAG}"' in workflow_text
+    assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
+    assert "generated_by=release.yml" in workflow_text
+    assert "./scripts/release_version.py" in workflow_text
+    assert "--github-output \"$GITHUB_OUTPUT\"" in workflow_text
     assert "write-release-snapshot-lock.py" in workflow_text
     assert "--image-manifest" in workflow_text
     assert "docker compose config" in workflow_text
     assert "DOCKER_SOCKET_GID" in workflow_text
     assert "stat -c '%g'" in workflow_text
-    assert "docker compose up -d db redis backend" in workflow_text
-    assert "docker compose up -d frontend" in workflow_text
-    assert "service_cid()" in workflow_text
-    assert "docker compose ps -q \"$1\"" in workflow_text
-    assert "service_health()" in workflow_text
-    assert "docker inspect --format" in workflow_text
-    assert "curl -fsS http://127.0.0.1:8000/health" in workflow_text
-    assert "curl -fsS http://127.0.0.1:3000/" in workflow_text
-    assert "curl -fsS http://127.0.0.1:3000/api/v1/openapi.json" in workflow_text
+    assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
+    assert 'cp "${SNAPSHOT_ASSET_DIR}/"*' in workflow_text
+    assert "bash ./scripts/offline-up.sh" in workflow_text
+    assert "docker compose up -d db redis backend" not in workflow_text
+    assert "docker compose up -d frontend" not in workflow_text
+    assert "service_cid()" not in workflow_text
+    assert "docker compose ps -q \"$1\"" not in workflow_text
+    assert "service_health()" not in workflow_text
+    assert "curl -fsS http://127.0.0.1:8000/health" not in workflow_text
+    assert "curl -fsS http://127.0.0.1:3000/" not in workflow_text
+    assert "curl -fsS http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
     assert "dashboard_status_code=" in workflow_text
     assert "http://127.0.0.1:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14" in workflow_text
     assert 'case "${dashboard_status_code}" in' in workflow_text
     assert "200|401|403)" in workflow_text
     assert "502|503|504|000)" in workflow_text
-    assert "/health" in workflow_text
+    assert "/api/v1/projects/dashboard-snapshot" in workflow_text
     assert "http://127.0.0.1:3000/" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
     assert workflow_text.index("write-release-snapshot-lock.py") < workflow_text.index(
         'git push --force origin HEAD:release'
     )
     assert workflow_text.index('git push --force origin HEAD:release') < workflow_text.index(
-        'gh release edit "${SNAPSHOT_TAG}"'
+        '- name: Resolve semantic release version'
     )
     assert "fetch-depth: 0" in workflow_text
     assert "git checkout --orphan" in workflow_text
     assert "origin/release" not in workflow_text
     assert "git fetch origin release" not in workflow_text
     assert "git checkout -B release origin/release" not in workflow_text
-    assert "git ls-remote --tags" not in workflow_text
+    assert "git fetch --force --tags origin" in workflow_text
     assert "git push origin --delete" not in workflow_text
     assert "release-tag-cleanup.txt" not in workflow_text
     assert "release-assets-latest" not in workflow_text
@@ -350,11 +357,13 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert workflow_text.count("GH_REPO: ${{ github.repository }}") == 4
     assert "isDraft" in workflow_text
     assert 'gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes' in workflow_text
+    assert 'gh release edit "${SNAPSHOT_TAG}"' not in workflow_text
     assert "publish_backend_hardened:" in publish_workflow_text
     assert "build_sandbox:" not in publish_workflow_text
     assert "publish-sandbox:" not in publish_workflow_text
     assert "target: runtime-release" in publish_workflow_text
     assert "target: runtime-cython" in publish_workflow_text
+    assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
     assert "buildcache-runtime-release-amd64" in publish_workflow_text
     assert "buildcache-runtime-release-arm64" in publish_workflow_text
     assert "buildcache-runtime-cython" in publish_workflow_text
@@ -382,6 +391,8 @@ def test_release_helper_script_no_longer_creates_or_pushes_git_tags() -> None:
     assert 'git tag -a "v$NEW_VERSION"' not in script_text
     assert 'git push origin "v$NEW_VERSION"' not in script_text
     assert "已创建本地 tag" not in script_text
+    assert "只读预览模式" in script_text
+    assert "release_version.py" in script_text
 
 
 def test_release_generator_requires_image_manifest(tmp_path: Path) -> None:

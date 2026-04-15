@@ -125,6 +125,24 @@ if [ "${1:-}" = "compose" ] && [ "${2:-}" = "ps" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format" ]; then
+  format="${4:-}"
+  target="${5:-}"
+  if [[ "$format" == *"org.opencontainers.image.revision"* ]]; then
+    echo "${FAKE_BACKEND_IMAGE_REVISION:-deadbeefcafebabe0123456789abcdef01234567}"
+    exit 0
+  fi
+  case "$target" in
+    ghcr.io/*|vulhunter-local/*)
+      echo "unknown"
+      exit 0
+      ;;
+    *)
+      exit 1
+      ;;
+  esac
+fi
+
 if [ "${1:-}" = "inspect" ] && [ "${2:-}" = "--format" ]; then
   format="${3:-}"
   target="${4:-}"
@@ -314,6 +332,51 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert "http://backend:8000/health" in docker_commands
     assert "http://127.0.0.1/" in docker_commands
     assert "http://127.0.0.1/api/v1/openapi.json" in docker_commands
+    assert "image inspect --format {{ index .Config.Labels \"org.opencontainers.image.revision\" }} vulhunter-local/backend:deadbeefcafebabe0123456789abcdef01234567" in docker_commands
+    assert "backend image provenance" in combined_output
+
+
+def test_offline_up_bash_fails_when_backend_image_revision_label_does_not_match_release_revision(
+    tmp_path: Path,
+) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["FAKE_BACKEND_IMAGE_REVISION"] = "stale-revision"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "backend image provenance mismatch" in combined_output
 
 
 def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(tmp_path: Path) -> None:

@@ -116,7 +116,7 @@ jobs:
     with:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
-      build_backend: ${{ github.event_name == 'workflow_dispatch' && (inputs.refresh_backend_image || inputs.refresh_all_runtime_images) || false }}
+      build_backend: true
       publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
@@ -296,7 +296,7 @@ jobs:
           fi
           docker compose config >/dev/null
 
-      - name: Smoke test release runtime
+      - name: Smoke test offline release runtime
         working-directory: ${{ runner.temp }}/release-tree
         run: |
           set -euo pipefail
@@ -305,30 +305,6 @@ jobs:
           if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
             export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
           fi
-
-          service_cid() {
-            docker compose ps -q "$1"
-          }
-
-          service_status() {
-            local cid
-            cid="$(service_cid "$1")"
-            if [[ -z "${cid}" ]]; then
-              echo "missing"
-              return 0
-            fi
-            docker inspect --format '{{.State.Status}}' "${cid}" 2>/dev/null || echo "unknown"
-          }
-
-          service_health() {
-            local cid
-            cid="$(service_cid "$1")"
-            if [[ -z "${cid}" ]]; then
-              echo "missing"
-              return 0
-            fi
-            docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${cid}" 2>/dev/null || echo "unknown"
-          }
 
           dump_debug() {
             docker compose ps || true
@@ -340,48 +316,12 @@ jobs:
           }
           trap cleanup EXIT
 
-          docker compose up -d db redis backend
-          backend_ready=false
-          for attempt in $(seq 1 60); do
-            backend_status="$(service_status backend)"
-            backend_health="$(service_health backend)"
-            if [[ "${backend_status}" == "running" && "${backend_health}" == "healthy" ]] && \
-               curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
-              backend_ready=true
-              break
-            fi
-            if [[ "${backend_status}" == "exited" || "${backend_status}" == "dead" || "${backend_health}" == "unhealthy" ]]; then
-              break
-            fi
-            sleep 5
-          done
-          if [[ "${backend_ready}" != "true" ]]; then
-            dump_debug
-            echo "::error::Release backend failed to become ready for generated release tree."
-            exit 1
-          fi
+          mkdir -p "${RUNNER_TEMP}/release-tree/images"
+          cp "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"
 
-          docker compose up -d frontend
-          frontend_ready=false
-          for attempt in $(seq 1 12); do
-            backend_status="$(service_status backend)"
-            backend_health="$(service_health backend)"
-            frontend_status="$(service_status frontend)"
-            if [[ "${backend_status}" == "running" && "${backend_health}" == "healthy" ]] && \
-               curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1 && \
-               curl -fsS http://127.0.0.1:3000/ >/dev/null 2>&1 && \
-               curl -fsS http://127.0.0.1:3000/api/v1/openapi.json >/dev/null 2>&1; then
-              frontend_ready=true
-              break
-            fi
-            if [[ "${backend_status}" != "running" || "${backend_health}" != "healthy" || "${frontend_status}" == "exited" || "${frontend_status}" == "dead" ]]; then
-              break
-            fi
-            sleep 5
-          done
-          if [[ "${frontend_ready}" != "true" ]]; then
+          if ! bash ./scripts/offline-up.sh; then
             dump_debug
-            echo "::error::Release frontend/backend failed readiness verification for generated release tree."
+            echo "::error::Release offline-up.sh failed for generated release tree."
             exit 1
           fi
 
@@ -405,6 +345,7 @@ jobs:
           esac
 
       - name: Publish release branch
+        id: publish_release_branch
         env:
           RELEASE_DIR: ${{ runner.temp }}/release-tree
         run: |
@@ -430,16 +371,101 @@ jobs:
           git add -A
 
           git commit -m "chore: refresh release branch snapshot"
+          echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git push --force origin HEAD:release
 
-      - name: Publish snapshot draft release
+      - name: Resolve semantic release version
+        id: resolve_semantic_version
+        env:
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch --force --tags origin
+          python3 ./scripts/release_version.py \
+            --repo "$PWD" \
+            --source-sha "${SOURCE_SHA}" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Create semantic release tag
+        if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' && steps.resolve_semantic_version.outputs.existing_tag != 'true' }}
+        env:
+          SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
+          BUMP_TYPE: ${{ steps.resolve_semantic_version.outputs.bump_type }}
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+          RELEASE_COMMIT_SHA: ${{ steps.publish_release_branch.outputs.release_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}" \
+            -m "${SEMANTIC_TAG}" \
+            -m "source_sha=${SOURCE_SHA}" \
+            -m "bump_type=${BUMP_TYPE}" \
+            -m "generated_by=release.yml"
+          git push origin "refs/tags/${SEMANTIC_TAG}"
+
+      - name: Create or update semantic GitHub release
+        if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
+          BUMP_TYPE: ${{ steps.resolve_semantic_version.outputs.bump_type }}
+          EXISTING_TAG: ${{ steps.resolve_semantic_version.outputs.existing_tag }}
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+          RELEASE_COMMIT_SHA: ${{ steps.publish_release_branch.outputs.release_commit_sha }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+          RELEASE_TREE: ${{ runner.temp }}/release-tree
+        run: |
+          set -euo pipefail
+
+          notes_file="${RUNNER_TEMP}/semantic-release-notes.md"
+          cat > "${notes_file}" <<EOF
+          Generated release snapshot for source commit \`${SOURCE_SHA}\`.
+
+          - bump_type: \`${BUMP_TYPE}\`
+          - release_commit: \`${RELEASE_COMMIT_SHA}\`
+          - generated_by: \`release.yml\`
+          EOF
+
+          target_args=()
+          if [[ "${EXISTING_TAG}" != "true" ]]; then
+            target_args+=(--target "${RELEASE_COMMIT_SHA}")
+          fi
+
+          if gh release view "${SEMANTIC_TAG}" >/dev/null 2>&1; then
+            gh release edit "${SEMANTIC_TAG}" \
+              "${target_args[@]}" \
+              --title "VulHunter ${SEMANTIC_TAG}" \
+              --notes-file "${notes_file}"
+          else
+            gh release create "${SEMANTIC_TAG}" \
+              "${target_args[@]}" \
+              --title "VulHunter ${SEMANTIC_TAG}" \
+              --notes-file "${notes_file}"
+          fi
+
+          gh release upload "${SEMANTIC_TAG}" \
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst" \
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst" \
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst" \
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst" \
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-amd64.json" \
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-arm64.json" \
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json" \
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json" \
+            "${RELEASE_TREE}/release-snapshot-lock.json" \
+            --clobber
+
+      - name: Delete snapshot draft release after promotion
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
         run: |
           set -euo pipefail
 
-          gh release edit "${SNAPSHOT_TAG}" --draft=false --latest=false
+          gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes
 
   cleanup-draft-release:
     if: ${{ failure() || cancelled() }}

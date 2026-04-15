@@ -297,6 +297,9 @@ RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/ap
 # ============================================
 FROM runtime-base AS dev-runtime
 
+ARG VCS_REF=""
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 
 RUN set -eux; \
@@ -409,6 +412,9 @@ RUN set -eux; \
 # 选择性 Cython + 全量 .pyc 收口，兼顾公开镜像源码收敛与构建时长
 # ============================================================
 FROM runtime-base AS runtime-release
+
+ARG VCS_REF=""
+LABEL org.opencontainers.image.revision="${VCS_REF}"
 
 COPY --from=builder /opt/backend-venv /opt/backend-venv
 
@@ -623,6 +629,9 @@ RUN set -eux; \
 # ============================================================
 FROM runtime-base AS runtime-cython
 
+ARG VCS_REF=""
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+
 # 提前复制 builder 产物，避免 runtime 与 builder 并行下载导致网络争抢
 COPY --from=builder /opt/backend-venv /opt/backend-venv
 
@@ -703,6 +712,9 @@ CMD ["python3", "-m", "app.runtime.container_startup", "prod"]
 # 默认推荐此 target，避免全量 Cython 在构建阶段占满 CPU / 内存
 # ============================================================
 FROM runtime-base AS runtime
+
+ARG VCS_REF=""
+LABEL org.opencontainers.image.revision="${VCS_REF}"
 
 COPY --from=builder /opt/backend-venv /opt/backend-venv
 
@@ -801,6 +813,9 @@ CMD ["python3", "-m", "app.runtime.container_startup", "prod"]
 # 用于本地开发构建（hybrid / full compose），节省 ~20 分钟构建时间
 # ============================================================
 FROM runtime-base AS runtime-plain
+
+ARG VCS_REF=""
+LABEL org.opencontainers.image.revision="${VCS_REF}"
 
 COPY --from=builder /opt/backend-venv /opt/backend-venv
 

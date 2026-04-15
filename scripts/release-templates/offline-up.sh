@@ -230,6 +230,21 @@ for metadata_path in sys.argv[1:]:
 PY
 }
 
+read_backend_image_contract() {
+  python3 - "$SERVICES_METADATA_FILE" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    metadata = json.load(handle)
+
+backend_image = metadata["images"]["backend"]
+print(f"{metadata['revision']}\t{backend_image['source_ref']}\t{backend_image['local_tag']}")
+PY
+}
+
 ensure_images_ready() {
   while IFS=$'\t' read -r logical_name _env_var source_ref local_tag; do
     [[ -n "$logical_name" ]] || continue
@@ -247,6 +262,29 @@ ensure_images_ready() {
 
     die "image missing after load: ${logical_name} (${local_tag}). Re-download the bundle and retry."
   done < <(emit_manifest_images)
+}
+
+validate_backend_image_provenance() {
+  local contract expected_revision source_ref local_tag actual_revision
+
+  contract="$(read_backend_image_contract)"
+  IFS=$'\t' read -r expected_revision source_ref local_tag <<<"$contract"
+
+  actual_revision="$(
+    docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$local_tag" \
+      2>/dev/null || true
+  )"
+  actual_revision="$(printf '%s' "$actual_revision" | tr -d '\r')"
+
+  if [[ -z "$actual_revision" || "$actual_revision" == "<no value>" ]]; then
+    die "backend image provenance missing: ${local_tag} does not expose org.opencontainers.image.revision"
+  fi
+
+  log_info "backend image provenance: local=${local_tag} source=${source_ref} revision=${actual_revision}"
+
+  if [[ "$actual_revision" != "$expected_revision" ]]; then
+    die "backend image provenance mismatch: expected ${expected_revision}, got ${actual_revision} for ${local_tag}"
+  fi
 }
 
 validate_compose_images_local_only() {
@@ -498,6 +536,7 @@ main() {
   load_bundle "$services_bundle"
   load_bundle "$scanner_bundle"
   ensure_images_ready
+  validate_backend_image_provenance
   parse_and_export_offline_env
   validate_compose_images_local_only
 

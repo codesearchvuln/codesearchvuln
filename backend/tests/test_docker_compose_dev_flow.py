@@ -703,20 +703,27 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "--arch ${{ matrix.arch }}" in workflow_text
     assert "build_sandbox:" not in workflow_text
     assert "docker compose config" in workflow_text
-    assert "docker compose up -d db redis backend" in workflow_text
-    assert "docker compose up -d frontend" in workflow_text
-    assert "service_cid()" in workflow_text
-    assert "docker compose ps -q \"$1\"" in workflow_text
-    assert "service_health()" in workflow_text
-    assert "docker inspect --format" in workflow_text
-    assert "http://127.0.0.1:3000/api/v1/openapi.json" in workflow_text
+    assert "bash ./scripts/offline-up.sh" in workflow_text
+    assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
+    assert "docker compose up -d db redis backend" not in workflow_text
+    assert "docker compose up -d frontend" not in workflow_text
+    assert "service_cid()" not in workflow_text
+    assert "docker compose ps -q \"$1\"" not in workflow_text
+    assert "service_health()" not in workflow_text
+    assert "http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
     assert "dashboard_status_code=" in workflow_text
     assert "git push --force origin HEAD:release" in workflow_text
+    assert "./scripts/release_version.py" in workflow_text
+    assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
+    assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text
+    assert 'gh release upload "${SEMANTIC_TAG}"' in workflow_text
+    assert 'gh release delete "${SNAPSHOT_TAG}" --cleanup-tag --yes' in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text
     assert "STATIC_FRONTEND_IMAGE" in reusable_workflow_text
     assert "STATIC_FRONTEND_FINAL_REF" in reusable_workflow_text
     assert '"static_frontend": {"ref": required("STATIC_FRONTEND_FINAL_REF")}' in reusable_workflow_text
+    assert "Release manifest requires a freshly built backend image ref" in reusable_workflow_text
 
 
 def test_sandbox_runner_dockerfile_now_carries_the_heavy_runtime_contract() -> None:

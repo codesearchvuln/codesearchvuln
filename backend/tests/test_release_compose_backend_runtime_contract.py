@@ -174,7 +174,6 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
         publish_frontend_section
     )
     assert "vulhunter-frontend:${{ needs.prepare.outputs.tag }}" in publish_frontend_section
-    assert "PACKAGE_NAME: vulhunter-frontend" in publish_frontend_section
     assert "digest=${DIGEST}" in publish_frontend_section
     assert "ref=${IMAGE}@${DIGEST}" in publish_frontend_section
 
@@ -210,6 +209,7 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
     assert "linux/arm64" in publish_backend_section
     assert "vulhunter-backend:${{ needs.prepare.outputs.tag }}" in publish_backend_section
     assert "ref=${IMAGE}@${DIGEST}" in publish_backend_section
+    assert "Release manifest requires a freshly built backend image ref" in publish_backend_section
 
     assert "if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}" in hardened_section
     assert "platforms: linux/amd64" in hardened_section
@@ -221,6 +221,7 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
 
     assert "publish_backend_hardened:" in release_workflow_text
     assert "refresh_backend_image:" in release_workflow_text
+    assert "build_backend: true" in release_workflow_text
     assert (
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
         "inputs.publish_backend_hardened || false }}"
@@ -237,6 +238,8 @@ def test_backend_release_selective_cython_inputs_and_dockerignore_contract() -> 
     dockerignore_text = (REPO_ROOT / "docker" / "backend.Dockerfile.dockerignore").read_text(encoding="utf-8")
 
     assert "FROM builder AS selective-cython-compiler" in backend_text
+    assert 'ARG VCS_REF=""' in backend_text
+    assert 'LABEL org.opencontainers.image.revision="${VCS_REF}"' in backend_text
     assert "CYTHON_INCLUDE_PATTERNS_FILE=/build/cython_build/release_allowlist.txt" in backend_text
     assert "FROM selective-cython-compiler AS runtime-release-app-assembler" in backend_text
     assert "removed cythonized source" in backend_text
