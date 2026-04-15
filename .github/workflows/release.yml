@@ -402,9 +402,7 @@ jobs:
           trap cleanup EXIT
 
           mkdir -p "${RUNNER_TEMP}/release-tree/images"
-          for f in "${SNAPSHOT_ASSET_DIR}/"*; do
-            ln -sf "$f" "${RUNNER_TEMP}/release-tree/images/$(basename "$f")"
-          done
+          cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"
 
           if ! bash ./scripts/offline-up.sh; then
             dump_debug
