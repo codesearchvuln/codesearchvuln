@@ -15,11 +15,6 @@ on:
         required: false
         type: boolean
         default: false
-      refresh_backend_image:
-        description: 'Rebuild the default backend image before generating release'
-        required: false
-        type: boolean
-        default: false
       publish_backend_hardened:
         description: 'Publish the hardened backend image variant alongside the default backend image'
         required: false
@@ -439,11 +434,13 @@ jobs:
           if gh release view "${SEMANTIC_TAG}" >/dev/null 2>&1; then
             gh release edit "${SEMANTIC_TAG}" \
               "${target_args[@]}" \
+              --latest=false \
               --title "VulHunter ${SEMANTIC_TAG}" \
               --notes-file "${notes_file}"
           else
             gh release create "${SEMANTIC_TAG}" \
               "${target_args[@]}" \
+              --latest=false \
               --title "VulHunter ${SEMANTIC_TAG}" \
               --notes-file "${notes_file}"
           fi

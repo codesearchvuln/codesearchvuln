@@ -79,5 +79,5 @@ def test_docker_publish_workflow_builds_pmd_runner() -> None:
 
     assert "build_pmd_runner" in workflow_text
     assert "./docker/pmd-runner.Dockerfile" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ steps.image-tag.outputs.tag }}" in workflow_text
+    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}" in workflow_text
     assert "build_nexus_web" not in workflow_text

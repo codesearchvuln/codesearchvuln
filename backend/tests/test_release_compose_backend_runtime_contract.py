@@ -221,7 +221,6 @@ def test_backend_release_publish_workflow_uses_split_runtime_release_and_optiona
     assert 'IMAGE_TAG: ${{ format(\'{0}-hardened\', needs.prepare.outputs.tag) }}' in hardened_section
 
     assert "publish_backend_hardened:" in release_workflow_text
-    assert "refresh_backend_image:" in release_workflow_text
     assert "build_backend: true" in release_workflow_text
     assert (
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "

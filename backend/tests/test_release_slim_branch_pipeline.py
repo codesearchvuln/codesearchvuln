@@ -238,7 +238,6 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "- completed" in workflow_text
     assert "\n  push:\n" not in workflow_text
     assert "workflow_dispatch:" in workflow_text
-    assert "refresh_backend_image:" in workflow_text
     assert "publish_backend_hardened:" in workflow_text
     assert "prepare-release:" in workflow_text
     assert "create-draft-release:" in workflow_text
@@ -302,7 +301,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "gh release edit" in workflow_text
     assert "--draft" in workflow_text
     assert "--draft=false" not in workflow_text
-    assert "--latest=false" in workflow_text
+    assert workflow_text.count("--latest=false") >= 3
     assert 'gh release upload "${SNAPSHOT_TAG}"' in workflow_text
     assert 'gh release download "${SNAPSHOT_TAG}"' in workflow_text
     assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text
