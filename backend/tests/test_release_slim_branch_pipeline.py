@@ -346,6 +346,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "Inspect snapshot draft release" in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text
+    assert "docker compose logs db-bootstrap backend frontend" in workflow_text
     assert "service_cid()" not in workflow_text
     assert "docker compose ps -q \"$1\"" not in workflow_text
     assert "service_health()" not in workflow_text

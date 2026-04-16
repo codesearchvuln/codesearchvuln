@@ -393,7 +393,7 @@ jobs:
 
           dump_debug() {
             docker compose ps || true
-            docker compose logs backend frontend || true
+            docker compose logs db-bootstrap backend frontend || true
           }
 
           cleanup() {
