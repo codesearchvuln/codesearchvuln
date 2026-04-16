@@ -76,6 +76,28 @@ services:
     networks:
       - vulhunter-network
 
+  db-bootstrap:
+    image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}
+    restart: "no"
+    working_dir: /app
+    volumes:
+      - ./docker/env/backend:/docker/env/backend
+    env_file:
+      - path: ./docker/env/backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
+    command:
+      - /opt/backend-venv/bin/python
+      - -m
+      - app.runtime.db_contract
+      - bootstrap
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - vulhunter-network
+
   backend:
     image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}
     restart: unless-stopped
@@ -163,6 +185,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       scan-workspace-init:

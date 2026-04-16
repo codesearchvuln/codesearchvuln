@@ -216,6 +216,7 @@ export default function ProjectsPage({
 				projectDetailFrom,
 				searchTerm: browser.searchTerm,
 				searchPlaceholder: t("projects.searchPlaceholder", "按项目名称/描述搜索"),
+				loadErrorMessage: data.loadErrorMessage,
 			}),
 		[
 			browser.projectPage,
@@ -395,6 +396,8 @@ export default function ProjectsPage({
 				) : (
 					<ProjectsEmptyState
 						hasSearchTerm={viewModel.emptyState.hasSearchTerm}
+						loadFailed={viewModel.emptyState.loadFailed}
+						message={viewModel.emptyState.message}
 						onCreateProjectClick={() => {
 							pinToProjectBrowserHash();
 							browser.setShowCreateDialog(true);

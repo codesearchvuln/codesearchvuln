@@ -35,6 +35,8 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "/usr/share/nginx/html/nexus:ro" not in compose_text
     assert "/usr/share/nginx/html/nexus-item-detail:ro" not in compose_text
     assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
+    assert "\n  db-bootstrap:\n" in compose_text
+    assert "db-bootstrap:\n        condition: service_completed_successfully" in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in compose_text
 
@@ -45,6 +47,8 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "frontend:\n    image: vulhunter/frontend-local:latest" in hybrid_text
     assert "backend:\n    image: vulhunter/backend-local:latest" in hybrid_text
     assert "target: runtime-plain" in hybrid_text
+    assert "\n  db-bootstrap:\n" in hybrid_text
+    assert "db-bootstrap:\n    image: vulhunter/backend-local:latest" in hybrid_text
     assert "context: ./frontend" in hybrid_text
     assert "context: ." in hybrid_text
     assert (

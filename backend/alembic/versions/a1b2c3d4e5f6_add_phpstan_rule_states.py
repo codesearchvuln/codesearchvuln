@@ -21,7 +21,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS phpstan_rule_states (
+        CREATE TABLE phpstan_rule_states (
             id VARCHAR PRIMARY KEY,
             rule_id VARCHAR NOT NULL UNIQUE,
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -32,19 +32,17 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_phpstan_rule_states_rule_id
+        CREATE INDEX ix_phpstan_rule_states_rule_id
         ON phpstan_rule_states (rule_id)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_phpstan_rule_states_is_active
+        CREATE INDEX ix_phpstan_rule_states_is_active
         ON phpstan_rule_states (is_active)
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_phpstan_rule_states_is_active")
-    op.execute("DROP INDEX IF EXISTS ix_phpstan_rule_states_rule_id")
-    op.execute("DROP TABLE IF EXISTS phpstan_rule_states")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

@@ -361,3 +361,26 @@ test("projects view model falls back missing AI verified severities to zero", as
 	assert.equal(row.aiVerifiedStats.medium, 0);
 	assert.equal(row.aiVerifiedStats.low, 0);
 });
+
+test("projects view model exposes load failure state instead of empty-project copy", async () => {
+	const builder = await importOrFail<any>(
+		"../src/pages/projects/lib/buildProjectsPageViewModel.ts",
+	);
+
+	const viewModel = builder.buildProjectsPageViewModel({
+		loading: false,
+		filteredProjects: [],
+		pagedProjects: [],
+		projectPage: 1,
+		totalProjectPages: 1,
+		projectDetailFrom: "/",
+		searchTerm: "",
+		searchPlaceholder: "Search",
+		loadErrorMessage:
+			"DB_SCHEMA_MISMATCH 当前数据库不受此版本支持；请使用空库初始化或恢复匹配版本快照。",
+	});
+
+	assert.equal(viewModel.emptyState.hasSearchTerm, false);
+	assert.equal(viewModel.emptyState.loadFailed, true);
+	assert.match(viewModel.emptyState.message, /DB_SCHEMA_MISMATCH/);
+});

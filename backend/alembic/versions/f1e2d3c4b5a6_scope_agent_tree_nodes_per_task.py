@@ -17,7 +17,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_agent_tree_nodes_agent_id")
+    op.execute("DROP INDEX ix_agent_tree_nodes_agent_id")
     op.create_index(
         "ix_agent_tree_nodes_agent_id",
         "agent_tree_nodes",
@@ -32,11 +32,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_agent_tree_nodes_task_agent", "agent_tree_nodes", type_="unique")
-    op.drop_index("ix_agent_tree_nodes_agent_id", table_name="agent_tree_nodes")
-    op.create_index(
-        "ix_agent_tree_nodes_agent_id",
-        "agent_tree_nodes",
-        ["agent_id"],
-        unique=True,
-    )
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

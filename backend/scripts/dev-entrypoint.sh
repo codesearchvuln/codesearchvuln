@@ -168,8 +168,8 @@ run_optional_resets() {
 sync_python_env_if_needed
 wait_for_db
 
-echo "Running database migrations..."
-"${VENV_DIR}/bin/alembic" upgrade head
+echo "Checking database contract..."
+"${VENV_DIR}/bin/python" -m app.runtime.db_contract check
 
 run_optional_resets
 

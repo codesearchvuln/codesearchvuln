@@ -151,14 +151,14 @@ EOF
   log_success "已生成 frontend/.env.local"
 }
 
-# ─── Alembic 数据库迁移 ───────────────────────────────────────────────────────
+# ─── 数据库 bootstrap ───────────────────────────────────────────────────────
 local_run_migrations() {
-  log_step "执行数据库迁移..."
+  log_step "执行数据库 bootstrap..."
   cd "${REPO_ROOT}/backend"
   uv sync --group dev -q
-  DOTENV_PATH=".env.local" uv run alembic upgrade head || \
-    uv run alembic upgrade head  # 部分版本不支持 DOTENV_PATH，直接尝试
-  log_success "数据库迁移完成"
+  DOTENV_PATH=".env.local" uv run python -m app.runtime.db_contract bootstrap || \
+    uv run python -m app.runtime.db_contract bootstrap
+  log_success "数据库 bootstrap 完成"
   cd "${REPO_ROOT}"
 }
 

@@ -6,6 +6,8 @@ The release branch is only the channel for the latest generated release tree. It
 
 The default release backend image now always comes from the Docker `runtime-plain` target. Offline deployment no longer depends on `runtime-release` or any other selective source-hardening target; `runtime-cython` remains only as an extra optional hardened variant.
 
+This is a breaking database-compatibility change: old `postgres_data` volumes are no longer expected to start successfully or auto-upgrade under a newer release. Back up the old database volume and `backend_uploads` before upgrading. The new release only supports empty-database bootstrap or restoring a snapshot that already matches the current version.
+
 ## 1. Before You Start
 
 - Supported hosts: `Ubuntu 22.04 LTS`, `Ubuntu 24.04 LTS`, `Windows 10 WSL2 + Ubuntu 22.04 LTS`, `Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -48,6 +50,7 @@ docker compose ps
 ```
 
 `http://localhost:3000/` only proves the static frontend is reachable. It does not prove the dashboard API proxy is healthy. Release acceptance still requires checking same-origin `/api/v1/...`.
+If the homepage does not come up at all, backend may be refusing to start because the database contract is incompatible, which also blocks frontend startup through `depends_on backend: service_healthy`.
 
 ## 4. Offline Deployment
 
@@ -82,6 +85,8 @@ The offline script will automatically:
 - start `docker compose up -d`
 - wait for backend `/health`, frontend `/`, and proxied `http://127.0.0.1/api/v1/openapi.json` before reporting ready
 - the default mode stays detached; `--attach-logs` switches to foreground `docker compose up` after backend health turns green
+
+If startup logs include `DB_SCHEMA_EMPTY`, `DB_SCHEMA_MISMATCH`, or `DB_SCHEMA_UNSUPPORTED_STATE`, do not keep trying to repair the old database in place. Recreate the `postgres_data` volume and bootstrap a fresh database, or restore a database snapshot that matches the current release.
 
 If you want to inspect the offline image mapping, check:
 
@@ -138,5 +143,6 @@ docker compose down -v
 ```
 
 `docker compose down -v` removes persistent data. Use it only when you intentionally want to clear runtime data.
+For cross-version upgrades, back up `postgres_data` and `backend_uploads` first; do not treat `down -v` as a routine upgrade step.
 
 See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for more Docker Compose commands.

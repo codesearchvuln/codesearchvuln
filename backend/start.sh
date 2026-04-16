@@ -18,9 +18,9 @@ if [ ! -d ".venv" ]; then
     uv sync
 fi
 
-# 运行数据库迁移
-echo "🔄 运行数据库迁移..."
-uv run alembic upgrade head
+# 校验数据库契约
+echo "🔄 校验数据库契约..."
+uv run python -m app.runtime.db_contract check
 
 # 启动服务
 echo "启动后端服务..."

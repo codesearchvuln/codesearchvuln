@@ -77,14 +77,14 @@ def upgrade() -> None:
 
     op.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_findings_task_finding_identity
+        CREATE UNIQUE INDEX ux_agent_findings_task_finding_identity
         ON agent_findings (task_id, finding_identity)
         WHERE finding_identity IS NOT NULL AND btrim(finding_identity) <> ''
         """
     )
     op.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_findings_task_fingerprint
+        CREATE UNIQUE INDEX ux_agent_findings_task_fingerprint
         ON agent_findings (task_id, fingerprint)
         WHERE fingerprint IS NOT NULL AND btrim(fingerprint) <> ''
         """
@@ -92,5 +92,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ux_agent_findings_task_fingerprint")
-    op.execute("DROP INDEX IF EXISTS ux_agent_findings_task_finding_identity")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

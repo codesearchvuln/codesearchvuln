@@ -63,4 +63,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("project_management_metrics")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

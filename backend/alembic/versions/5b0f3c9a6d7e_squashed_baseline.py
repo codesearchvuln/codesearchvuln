@@ -20,10 +20,9 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-    baseline_metadata.create_all(bind=bind, checkfirst=True)
+    op.execute("CREATE EXTENSION pg_trgm")
+    baseline_metadata.create_all(bind=bind, checkfirst=False)
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    baseline_metadata.drop_all(bind=bind, checkfirst=True)
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

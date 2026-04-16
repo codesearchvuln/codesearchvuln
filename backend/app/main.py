@@ -2,17 +2,13 @@ import asyncio
 import logging
 import os
 import signal
-import subprocess
 import warnings
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from alembic.config import Config as AlembicConfig
-from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 from sqlalchemy.future import select
 
 from app.api.v1.api import api_router
@@ -28,6 +24,7 @@ from app.models.opengrep import OpengrepScanTask
 from app.models.phpstan import PhpstanScanTask
 from app.models.pmd_scan import PmdScanTask
 from app.models.yasa import YasaScanTask
+from app.runtime.db_contract import check_database_contract
 from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
 from app.services.runner_preflight import run_configured_runner_preflights
 from app.services.zip_cache_manager import get_zip_cache_manager
@@ -109,68 +106,9 @@ async def check_agent_services():
     return issues
 
 
-async def run_pending_database_migrations() -> None:
-    """Run Alembic migrations for startup paths that skipped the entrypoint."""
-    backend_root = Path(__file__).resolve().parents[1]
-
-    def _run_upgrade() -> None:
-        subprocess.run(
-            ["alembic", "upgrade", "head"],
-            cwd=str(backend_root),
-            check=True,
-        )
-
-    try:
-        await asyncio.to_thread(_run_upgrade)
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError("自动执行 alembic upgrade head 失败") from exc
-
-
-async def _read_current_database_versions() -> set[str]:
-    async with AsyncSessionLocal() as db:
-        try:
-            result = await db.execute(text("SELECT version_num FROM alembic_version"))
-        except Exception as exc:
-            raise RuntimeError(
-                "数据库缺少迁移版本元数据（alembic_version），请先运行 alembic upgrade head"
-            ) from exc
-
-        return {str(item).strip() for item in result.scalars().all() if str(item).strip()}
-
-
-def _get_expected_database_head(script: ScriptDirectory) -> str | None:
-    head = str(script.get_current_head() or "").strip()
-    return head or None
-
-
-
 async def assert_database_schema_is_latest() -> None:
-    """Fail fast when DB migration version does not match Alembic head."""
-    backend_root = Path(__file__).resolve().parents[1]
-    alembic_cfg = AlembicConfig(str(backend_root / "alembic.ini"))
-    script = ScriptDirectory.from_config(alembic_cfg)
-    expected_head = _get_expected_database_head(script)
-    expected_versions = {expected_head} if expected_head else set()
-    current_versions = await _read_current_database_versions()
-
-    if not current_versions:
-        raise RuntimeError("数据库未记录迁移版本，请先运行 alembic upgrade head")
-
-    if expected_versions and current_versions != expected_versions:
-        logger.warning(
-            "检测到数据库迁移版本落后，尝试自动升级：current=%s expected=%s",
-            sorted(current_versions),
-            sorted(expected_versions),
-        )
-        await run_pending_database_migrations()
-        current_versions = await _read_current_database_versions()
-
-    if expected_versions and current_versions != expected_versions:
-        raise RuntimeError(
-            "数据库迁移版本与代码不一致："
-            f"current={sorted(current_versions)} expected={sorted(expected_versions)}。"
-            "请运行 alembic upgrade head"
-        )
+    """Fail fast when the runtime database contract is not satisfied."""
+    await check_database_contract()
 
 
 async def _run_cache_cleanup_once() -> dict[str, int]:

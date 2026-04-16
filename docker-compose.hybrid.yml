@@ -12,6 +12,9 @@
 # 适用场景: 仅修改了 frontend / backend 代码，无需重新构建所有 runner 镜像。
 
 services:
+  db-bootstrap:
+    image: vulhunter/backend-local:latest
+
   backend:
     image: vulhunter/backend-local:latest
     build: !override

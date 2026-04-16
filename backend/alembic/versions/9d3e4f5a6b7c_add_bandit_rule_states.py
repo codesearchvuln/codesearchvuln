@@ -21,7 +21,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS bandit_rule_states (
+        CREATE TABLE bandit_rule_states (
             id VARCHAR PRIMARY KEY,
             test_id VARCHAR NOT NULL UNIQUE,
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -32,19 +32,17 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_bandit_rule_states_test_id
+        CREATE INDEX ix_bandit_rule_states_test_id
         ON bandit_rule_states (test_id)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_bandit_rule_states_is_active
+        CREATE INDEX ix_bandit_rule_states_is_active
         ON bandit_rule_states (is_active)
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_bandit_rule_states_is_active")
-    op.execute("DROP INDEX IF EXISTS ix_bandit_rule_states_test_id")
-    op.execute("DROP TABLE IF EXISTS bandit_rule_states")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

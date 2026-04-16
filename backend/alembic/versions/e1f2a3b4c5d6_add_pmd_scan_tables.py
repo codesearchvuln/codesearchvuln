@@ -17,7 +17,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS pmd_scan_tasks (
+        CREATE TABLE pmd_scan_tasks (
             id VARCHAR PRIMARY KEY,
             project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             name VARCHAR NOT NULL,
@@ -38,19 +38,19 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_tasks_project_created_at
+        CREATE INDEX ix_pmd_tasks_project_created_at
         ON pmd_scan_tasks (project_id, created_at DESC)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_tasks_project_lower_status_created_at
+        CREATE INDEX ix_pmd_tasks_project_lower_status_created_at
         ON pmd_scan_tasks (project_id, lower(status), created_at DESC)
         """
     )
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS pmd_findings (
+        CREATE TABLE pmd_findings (
             id VARCHAR PRIMARY KEY,
             scan_task_id VARCHAR NOT NULL REFERENCES pmd_scan_tasks(id) ON DELETE CASCADE,
             file_path VARCHAR NOT NULL,
@@ -67,29 +67,23 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_findings_scan_task_status_created
+        CREATE INDEX ix_pmd_findings_scan_task_status_created
         ON pmd_findings (scan_task_id, status, created_at DESC)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_findings_scan_task_file_line
+        CREATE INDEX ix_pmd_findings_scan_task_file_line
         ON pmd_findings (scan_task_id, file_path, begin_line)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_findings_scan_task_priority
+        CREATE INDEX ix_pmd_findings_scan_task_priority
         ON pmd_findings (scan_task_id, priority)
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_pmd_findings_scan_task_priority")
-    op.execute("DROP INDEX IF EXISTS ix_pmd_findings_scan_task_file_line")
-    op.execute("DROP INDEX IF EXISTS ix_pmd_findings_scan_task_status_created")
-    op.execute("DROP TABLE IF EXISTS pmd_findings")
-    op.execute("DROP INDEX IF EXISTS ix_pmd_tasks_project_lower_status_created_at")
-    op.execute("DROP INDEX IF EXISTS ix_pmd_tasks_project_created_at")
-    op.execute("DROP TABLE IF EXISTS pmd_scan_tasks")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

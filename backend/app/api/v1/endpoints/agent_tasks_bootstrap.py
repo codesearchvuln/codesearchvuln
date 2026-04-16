@@ -34,6 +34,7 @@ from app.models.agent_task import AgentTask
 from app.models.bandit import BanditRuleState
 from app.models.opengrep import OpengrepRule
 from app.models.yasa import YasaRuleConfig
+from app.runtime.db_contract import unsupported_database_contract_message
 from app.services.bandit_rules_snapshot import load_bandit_builtin_snapshot
 from app.services.agent.bootstrap import (
     BanditBootstrapScanner,
@@ -128,7 +129,9 @@ async def _resolve_bandit_bootstrap_rule_ids(db: AsyncSession) -> List[str]:
         result = await db.execute(select(BanditRuleState))
     except ProgrammingError as exc:
         if "bandit_rule_states" in str(exc):
-            raise RuntimeError("Bandit 预处理失败：数据库缺少 bandit_rule_states 表，请先运行 alembic upgrade head") from exc
+            raise RuntimeError(
+                f"Bandit 预处理失败：{unsupported_database_contract_message()}"
+            ) from exc
         raise RuntimeError(f"Bandit 预处理失败：读取规则状态失败: {exc}") from exc
 
     rows = result.scalars().all()

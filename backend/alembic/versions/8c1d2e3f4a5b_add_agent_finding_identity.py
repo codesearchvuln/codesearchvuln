@@ -20,7 +20,7 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE agent_findings
-        ADD COLUMN IF NOT EXISTS finding_identity VARCHAR(128)
+        ADD COLUMN finding_identity VARCHAR(128)
         """
     )
     op.execute(
@@ -35,11 +35,11 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_agent_findings_finding_identity
+        CREATE INDEX ix_agent_findings_finding_identity
         ON agent_findings (finding_identity)
         """
     )
 
 
 def downgrade() -> None:
-    pass
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

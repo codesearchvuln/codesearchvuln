@@ -98,6 +98,7 @@ interface BuildProjectsPageViewModelParams {
 	projectDetailFrom: string;
 	searchTerm: string;
 	searchPlaceholder: string;
+	loadErrorMessage?: string | null;
 }
 
 export function buildProjectsPageViewModel(
@@ -112,6 +113,7 @@ export function buildProjectsPageViewModel(
 		projectDetailFrom,
 		searchTerm,
 		searchPlaceholder,
+		loadErrorMessage,
 	} = params;
 
 	return {
@@ -159,6 +161,8 @@ export function buildProjectsPageViewModel(
 		},
 		emptyState: {
 			hasSearchTerm: Boolean(searchTerm.trim()),
+			loadFailed: Boolean(loadErrorMessage),
+			message: loadErrorMessage?.trim() || null,
 		},
 	};
 }

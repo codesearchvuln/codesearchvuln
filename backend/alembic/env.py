@@ -22,7 +22,7 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 from app.db.base import Base
 from app.models import *  # noqa
-from app.core.config import settings
+from app.runtime.db_env import build_async_database_url_from_env
 
 target_metadata = Base.metadata
 
@@ -30,7 +30,7 @@ target_metadata = Base.metadata
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", build_async_database_url_from_env())
 
 
 def run_migrations_offline() -> None:
@@ -87,7 +87,6 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     asyncio.run(run_migrations_online())
-
 
 
 

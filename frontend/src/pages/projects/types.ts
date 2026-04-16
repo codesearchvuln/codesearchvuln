@@ -88,6 +88,8 @@ export interface ProjectsPageViewModel {
 	pagination: ProjectsPaginationViewModel;
 	emptyState: {
 		hasSearchTerm: boolean;
+		loadFailed: boolean;
+		message: string | null;
 	};
 }
 

@@ -6,6 +6,8 @@
 
 当前默认 release backend 镜像固定来自 Docker `runtime-plain` target。离线部署不依赖 `runtime-release` 或其他选择性源码加固 target；`runtime-cython` 仅作为额外可选的 hardened 变体存在。
 
+这是一次数据库兼容策略收紧的 breaking change：旧 `postgres_data` 不再保证可被新版本直接启动或自动前滚。升级前请备份旧数据库卷与 `backend_uploads`，新版本默认只接受空库初始化或与当前版本匹配的数据库快照。
+
 ## 1. 部署前准备
 
 - 宿主机支持：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -48,6 +50,7 @@ docker compose ps
 ```
 
 `http://localhost:3000/` 只代表前端静态首页可访问，不代表 dashboard API 代理已经可用。上线验收仍然必须检查同源 `/api/v1/...`。
+若首页无法打开，也可能是 backend 因数据库契约不兼容而拒绝启动，进而阻塞 frontend 的 `depends_on backend: service_healthy`。
 
 ## 4. 离线部署
 
@@ -82,6 +85,8 @@ bash ./scripts/offline-up.sh --attach-logs
 - 启动 `docker compose up -d`
 - 等待 backend `/health`、frontend `/`、以及 proxied `http://127.0.0.1/api/v1/openapi.json` 全部成功后才报告 ready
 - 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`
+
+如果启动日志出现 `DB_SCHEMA_EMPTY`、`DB_SCHEMA_MISMATCH` 或 `DB_SCHEMA_UNSUPPORTED_STATE`，不要继续尝试原地修旧库。请新建 `postgres_data` 卷重新初始化，或恢复与当前版本匹配的数据库快照。
 
 如果你需要手工检查离线镜像映射，查看：
 
@@ -138,5 +143,6 @@ docker compose down -v
 ```
 
 `docker compose down -v` 会删除持久化数据，请仅在明确需要清理数据时使用。
+如需跨版本升级，请优先备份 `postgres_data` 与 `backend_uploads`，不要把 `down -v` 当成普通升级步骤。
 
 更多 Docker Compose 命令见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。

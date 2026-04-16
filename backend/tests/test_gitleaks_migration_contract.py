@@ -30,7 +30,7 @@ class _FailingDb:
 
 @pytest.mark.asyncio
 async def test_gitleaks_config_builder_requires_migrated_rules_table():
-    with pytest.raises(RuntimeError, match="alembic upgrade head"):
+    with pytest.raises(RuntimeError, match="DB_SCHEMA_UNSUPPORTED_STATE"):
         await static_tasks._build_effective_gitleaks_config_toml(
             _FailingDb(),
             {"customConfigToml": ""},
@@ -46,7 +46,7 @@ async def test_list_gitleaks_rules_returns_explicit_migration_error_when_table_m
         )
 
     assert exc_info.value.status_code == 500
-    assert "alembic upgrade head" in str(exc_info.value.detail)
+    assert "DB_SCHEMA_UNSUPPORTED_STATE" in str(exc_info.value.detail)
 
 
 def test_init_db_no_longer_exports_runtime_schema_fixer():

@@ -20,16 +20,16 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE projects
-        ADD COLUMN IF NOT EXISTS zip_file_hash VARCHAR(64)
+        ADD COLUMN zip_file_hash VARCHAR(64)
         """
     )
     op.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS ix_projects_zip_file_hash
+        CREATE UNIQUE INDEX ix_projects_zip_file_hash
         ON projects (zip_file_hash)
         """
     )
 
 
 def downgrade() -> None:
-    pass
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

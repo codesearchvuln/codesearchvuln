@@ -96,4 +96,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    pass
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

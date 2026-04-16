@@ -59,7 +59,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("project_management_metrics", "verified_low")
-    op.drop_column("project_management_metrics", "verified_medium")
-    op.drop_column("project_management_metrics", "verified_high")
-    op.drop_column("project_management_metrics", "verified_critical")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

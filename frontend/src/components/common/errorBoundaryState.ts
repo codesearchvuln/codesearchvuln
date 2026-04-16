@@ -1,4 +1,4 @@
-export type ErrorBoundaryVariant = "generic" | "backend-offline";
+export type ErrorBoundaryVariant = "generic" | "backend-offline" | "database-contract";
 
 export type ErrorBoundaryActionKey = "reset" | "home" | "reload";
 
@@ -32,6 +32,12 @@ const BACKEND_OFFLINE_ACTIONS: readonly ErrorBoundaryAction[] = [
   { key: "reload", label: "刷新页面", variant: "outline" },
 ];
 
+const DATABASE_CONTRACT_ACTIONS: readonly ErrorBoundaryAction[] = [
+  { key: "reset", label: "重新检查", variant: "default" },
+  { key: "home", label: "返回首页", variant: "outline" },
+  { key: "reload", label: "刷新页面", variant: "outline" },
+];
+
 const VIEW_MODEL_MAP: Record<ErrorBoundaryVariant, ErrorBoundaryViewModel> = {
   generic: {
     variant: "generic",
@@ -55,13 +61,28 @@ const VIEW_MODEL_MAP: Record<ErrorBoundaryVariant, ErrorBoundaryViewModel> = {
     footer: "后端服务恢复后，页面即可继续正常使用",
     actions: BACKEND_OFFLINE_ACTIONS,
   },
+  "database-contract": {
+    variant: "database-contract",
+    statusCode: "DB_SCHEMA_MISMATCH",
+    badgeLabel: "Database Contract",
+    title: "数据库版本不兼容",
+    description: "请使用空库初始化当前版本，或恢复与当前版本匹配的数据库快照。",
+    summary: "后端检测到数据库 schema 与当前代码契约不匹配，已拒绝继续提供服务。",
+    guidance: "请使用空库初始化当前版本，或恢复与当前版本匹配的数据库快照后再重试。",
+    footer: "数据库契约恢复匹配后，页面即可继续正常使用",
+    actions: DATABASE_CONTRACT_ACTIONS,
+  },
 };
 
 const BACKEND_OFFLINE_STATUS_CODES = new Set([502, 503, 504]);
 
 type ErrorLike = {
   message?: unknown;
-  response?: { status?: unknown; config?: { url?: unknown; baseURL?: unknown } };
+  response?: {
+    status?: unknown;
+    config?: { url?: unknown; baseURL?: unknown };
+    data?: { detail?: unknown } | string;
+  };
   request?: { responseURL?: unknown };
   config?: { url?: unknown; baseURL?: unknown };
   status?: unknown;
@@ -72,8 +93,22 @@ type ErrorLike = {
 export function resolveErrorBoundaryViewModel(
   error: unknown,
 ): ErrorBoundaryViewModel {
-  const variant = isBackendOfflineError(error) ? "backend-offline" : "generic";
+  const variant = isDatabaseContractError(error)
+    ? "database-contract"
+    : isBackendOfflineError(error)
+      ? "backend-offline"
+      : "generic";
   return VIEW_MODEL_MAP[variant];
+}
+
+function isDatabaseContractError(error: unknown): boolean {
+  const message = getErrorMessage(error);
+  if (message.includes("DB_SCHEMA_")) {
+    return true;
+  }
+  const errorLike = asErrorLike(error);
+  const detail = getResponseDetail(errorLike);
+  return detail.includes("DB_SCHEMA_");
 }
 
 function isBackendOfflineError(error: unknown): boolean {
@@ -112,6 +147,18 @@ function isProjectsDynamicImportFailure(message: string): boolean {
     message.includes("Failed to fetch dynamically imported module") &&
     /Projects\.tsx(?:\?|$)/.test(message)
   );
+}
+
+function getResponseDetail(error: ErrorLike | null): string {
+  const data = error?.response?.data;
+  if (typeof data === "string") {
+    return data;
+  }
+  if (data && typeof data === "object" && "detail" in data) {
+    const { detail } = data as { detail?: unknown };
+    return typeof detail === "string" ? detail : "";
+  }
+  return "";
 }
 
 function getErrorMessage(error: unknown): string {

@@ -17,92 +17,35 @@ sys.modules.setdefault("fastmcp.client.transports", fastmcp_transports_module)
 sys.modules.setdefault("git", git_module)
 
 from app.main import assert_database_schema_is_latest
-
-CURRENT_REVISION = "prev_linear_revision"
-LATEST_REVISION = "linear_head_revision"
-
-
-class _FakeScalarResult:
-    def __init__(self, items):
-        self._items = list(items)
-
-    def scalars(self):
-        return self
-
-    def all(self):
-        return list(self._items)
-
-
-class _FakeSession:
-    def __init__(self, version_sequences):
-        self._version_sequences = [list(items) for items in version_sequences]
-        self._execute_calls = 0
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def execute(self, _statement):
-        index = min(self._execute_calls, len(self._version_sequences) - 1)
-        self._execute_calls += 1
-        return _FakeScalarResult(self._version_sequences[index])
-
-
-class _FakeScriptDirectory:
-    def __init__(self, head):
-        self._head = head
-
-    def get_current_head(self):
-        return self._head
-
+from app.runtime.db_contract import DatabaseContractError
 
 @pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_runs_alembic_upgrade_on_revision_mismatch(
-    monkeypatch,
-):
-    fake_session = _FakeSession([[CURRENT_REVISION], [LATEST_REVISION]])
-    upgrade_calls = []
+async def test_assert_database_schema_is_latest_delegates_to_strict_db_contract_check(monkeypatch):
+    called = []
 
-    monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
-    monkeypatch.setattr(
-        "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory(LATEST_REVISION),
-    )
+    async def _fake_check():
+        called.append("called")
 
-    async def _fake_run_upgrade():
-        upgrade_calls.append("called")
-
-    monkeypatch.setattr("app.main.run_pending_database_migrations", _fake_run_upgrade)
+    monkeypatch.setattr("app.main.check_database_contract", _fake_check)
 
     await assert_database_schema_is_latest()
 
-    assert upgrade_calls == ["called"]
-    assert fake_session._execute_calls == 2
+    assert called == ["called"]
 
 
 @pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_raises_when_schema_still_mismatched_after_upgrade(
+async def test_assert_database_schema_is_latest_rejects_revision_mismatch_without_auto_upgrade(
     monkeypatch,
 ):
-    fake_session = _FakeSession([[CURRENT_REVISION], [CURRENT_REVISION]])
+    async def _fake_check():
+        raise DatabaseContractError(
+            "DB_SCHEMA_MISMATCH",
+            "DB_SCHEMA_MISMATCH 当前数据库不受此版本支持；请使用空库初始化或恢复匹配版本快照。",
+        )
 
-    monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
-    monkeypatch.setattr(
-        "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory(LATEST_REVISION),
-    )
+    monkeypatch.setattr("app.main.check_database_contract", _fake_check)
 
-    async def _fake_run_upgrade():
-        return None
-
-    monkeypatch.setattr("app.main.run_pending_database_migrations", _fake_run_upgrade)
-
-    with pytest.raises(
-        RuntimeError,
-        match="current=\\['prev_linear_revision'\\] expected=\\['linear_head_revision'\\]",
-    ):
+    with pytest.raises(DatabaseContractError, match="DB_SCHEMA_MISMATCH"):
         await assert_database_schema_is_latest()
 
 
@@ -110,23 +53,13 @@ async def test_assert_database_schema_is_latest_raises_when_schema_still_mismatc
 async def test_assert_database_schema_is_latest_rejects_database_with_multiple_recorded_versions(
     monkeypatch,
 ):
-    fake_session = _FakeSession([["old_head_a", "old_head_b"], ["old_head_a", "old_head_b"]])
-    upgrade_calls = []
+    async def _fake_check():
+        raise DatabaseContractError(
+            "DB_SCHEMA_UNSUPPORTED_STATE",
+            "DB_SCHEMA_UNSUPPORTED_STATE 当前数据库不受此版本支持；请使用空库初始化或恢复匹配版本快照。",
+        )
 
-    monkeypatch.setattr("app.main.AsyncSessionLocal", lambda: fake_session)
-    monkeypatch.setattr(
-        "app.main.ScriptDirectory.from_config",
-        lambda _cfg: _FakeScriptDirectory(LATEST_REVISION),
-    )
+    monkeypatch.setattr("app.main.check_database_contract", _fake_check)
 
-    async def _fake_run_upgrade():
-        upgrade_calls.append("called")
-
-    monkeypatch.setattr("app.main.run_pending_database_migrations", _fake_run_upgrade)
-
-    with pytest.raises(
-        RuntimeError,
-        match="current=\\['old_head_a', 'old_head_b'\\] expected=\\['linear_head_revision'\\]",
-    ):
+    with pytest.raises(DatabaseContractError, match="DB_SCHEMA_UNSUPPORTED_STATE"):
         await assert_database_schema_is_latest()
-    assert upgrade_calls == ["called"]

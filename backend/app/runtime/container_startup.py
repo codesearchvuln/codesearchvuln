@@ -215,9 +215,13 @@ def _wait_for_db(max_retries: int = 30, sleep_seconds: int = 2) -> None:
     raise RuntimeError("Failed to connect to database")
 
 
-def _run_database_migrations(app_root: Path) -> None:
-    print("Running database migrations...")
-    subprocess.run([_venv_bin("alembic"), "upgrade", "head"], cwd=str(app_root), check=True)
+def _check_database_contract(app_root: Path) -> None:
+    print("Checking database contract...")
+    subprocess.run(
+        [_venv_bin("python"), "-m", "app.runtime.db_contract", "check"],
+        cwd=str(app_root),
+        check=True,
+    )
 
 
 def _run_optional_resets(app_root: Path) -> None:
@@ -245,7 +249,7 @@ def run(mode: str) -> None:
         print("VulHunter 后端启动中...")
 
     _wait_for_db()
-    _run_database_migrations(app_root)
+    _check_database_contract(app_root)
     _run_optional_resets(app_root)
     print("Starting uvicorn...")
     _exec_uvicorn(reload_enabled=(mode == "dev"))

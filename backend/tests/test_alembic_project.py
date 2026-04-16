@@ -76,7 +76,7 @@ def test_alembic_revisions_form_a_single_head_graph():
     heads = sorted(all_revisions - referenced_revisions)
 
     assert len(heads) == 1, f"Expected a single Alembic head, got {heads}"
-    assert heads == ["c9d0e1f2a3b4"], heads
+    assert heads == ["f1e2d3c4b5a6"], heads
     assert len(revisions) == len(down_revisions)
 
 
@@ -102,15 +102,20 @@ def test_alembic_versions_directory_keeps_expected_linearized_revisions():
     assert file_names["a8f1c2d3e4b5"] == "a8f1c2d3e4b5_add_agent_tasks_report_column.py"
     assert file_names["b9d8e7f6a5b4"] == "b9d8e7f6a5b4_drop_legacy_audit_tables.py"
     assert file_names["c9d0e1f2a3b4"] == "c9d0e1f2a3b4_add_yasa_rule_configs_and_task_binding.py"
+    assert file_names["d4e5f6a7b8c9"] == "d4e5f6a7b8c9_add_prompt_skills_table.py"
+    assert file_names["f1e2d3c4b5a6"] == "f1e2d3c4b5a6_scope_agent_tree_nodes_per_task.py"
     assert "048836873140" not in file_names
     assert "c4b1a7e8d9f0" not in file_names
-    assert "d4e5f6a7b8c9" not in file_names
     assert "5f6a7b8c9d0e" not in file_names
     assert "90a71996ac03" not in file_names
     assert down_revisions["a8f1c2d3e4b5"] == ("b7e8f9a0b1c2",)
     assert down_revisions["b9d8e7f6a5b4"] == ("a8f1c2d3e4b5",)
     assert down_revisions["1f2e3d4c5b6a"] == ("f6a7b8c9d0e1",)
     assert down_revisions["c9d0e1f2a3b4"] == ("1f2e3d4c5b6a",)
+    assert down_revisions["d4e5f6a7b8c9"] == ("c9d0e1f2a3b4",)
+    assert down_revisions["da4e5f6a7b8c"] == ("d4e5f6a7b8c9",)
+    assert down_revisions["e1f2a3b4c5d6"] == ("da4e5f6a7b8c",)
+    assert down_revisions["f1e2d3c4b5a6"] == ("e1f2a3b4c5d6",)
 
 
 def test_removed_bridge_revisions_stay_deleted_after_linearization():
@@ -125,33 +130,22 @@ def test_removed_bridge_revisions_stay_deleted_after_linearization():
         assert not (VERSIONS_DIR / file_name).exists()
 
 
-def test_bridge_downgrade_keeps_zip_file_hash_baseline_contract():
-    bridge_file = (
-        BACKEND_ROOT
-        / "alembic"
-        / "versions"
-        / "6c8d9e0f1a2b_finalize_projects_zip_file_hash.py"
-    )
-    bridge_source = bridge_file.read_text(encoding="utf-8")
-
-    assert "DROP COLUMN IF EXISTS zip_file_hash" not in bridge_source
-    assert "DROP INDEX IF EXISTS ix_projects_zip_file_hash" not in bridge_source
+def test_all_alembic_revisions_use_strict_ddl_without_exists_guards() -> None:
+    for path in sorted(VERSIONS_DIR.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        assert "IF EXISTS" not in source, path.name
+        assert "IF NOT EXISTS" not in source, path.name
+        assert "checkfirst=True" not in source, path.name
 
 
-def test_static_finding_path_migration_downgrade_keeps_data_normalization_contract():
-    migration_file = (
-        BACKEND_ROOT
-        / "alembic"
-        / "versions"
-        / "7f8e9d0c1b2a_normalize_static_finding_paths.py"
-    )
-    migration_source = migration_file.read_text(encoding="utf-8")
+def test_all_alembic_downgrades_are_explicitly_unsupported() -> None:
+    expected = 'raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")'
 
-    assert "bandit_findings" in migration_source
-    assert "opengrep_findings" in migration_source
-    assert "downgrade" in migration_source
-    assert "UPDATE bandit_findings" not in migration_source.split("def downgrade", 1)[1]
-    assert "UPDATE opengrep_findings" not in migration_source.split("def downgrade", 1)[1]
+    for path in sorted(VERSIONS_DIR.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        assert "def downgrade() -> None:" in source, path.name
+        downgrade_body = source.split("def downgrade() -> None:", 1)[1]
+        assert expected in downgrade_body, path.name
 
 
 def test_squashed_baseline_migration_uses_frozen_schema_snapshot():

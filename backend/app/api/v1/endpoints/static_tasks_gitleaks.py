@@ -26,6 +26,7 @@ from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
 from app.models.phpstan import PhpstanFinding, PhpstanScanTask
 from app.models.project import Project
 from app.models.user import User
+from app.runtime.db_contract import unsupported_database_contract_message
 from app.schemas.gitleaks_rules import (
     GitleaksRuleBatchUpdateRequest,
     GitleaksRuleCreateRequest,
@@ -301,7 +302,7 @@ def _normalize_gitleaks_runtime_config(runtime_config: Optional[Dict[str, Any]])
 
 
 def _missing_gitleaks_rules_migration_message() -> str:
-    return "数据库缺少 gitleaks_rules 表，请先运行 alembic upgrade head"
+    return unsupported_database_contract_message()
 
 
 def _raise_gitleaks_rules_migration_runtime_error(exc: ProgrammingError) -> None:

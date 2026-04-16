@@ -375,10 +375,10 @@ emit_failure_hints() {
   else
     log_warn "Hint: if logs mention 'Docker socket access was denied', set DOCKER_SOCKET_GID to the host docker.sock group."
   fi
-  if grep -Eiq '数据库迁移版本与代码不一致|alembic' <<<"$logs"; then
-    log_warn "Hint: database migration state is behind the code. Repair the DB migration state before retrying."
+  if grep -Eiq 'DB_SCHEMA_|数据库不受此版本支持|数据库版本不兼容|数据库迁移版本与代码不一致|alembic' <<<"$logs"; then
+    log_warn "Hint: this release does not upgrade old database volumes in place. Use a fresh postgres_data volume or restore a matching database snapshot before retrying."
   else
-    log_warn "Hint: if logs mention '数据库迁移版本与代码不一致' or Alembic failures, repair the database migration state."
+    log_warn "Hint: if logs mention DB_SCHEMA_*, database mismatch, or Alembic failures, old database volumes are not supported. Recreate postgres_data or restore a matching snapshot."
   fi
 }
 
@@ -540,13 +540,13 @@ main() {
   parse_and_export_offline_env
   validate_compose_images_local_only
 
-  log_info "starting docker compose up -d db redis backend"
-  compose up -d db redis backend
+  log_info "starting docker compose up -d db redis db-bootstrap backend"
+  compose up -d db redis db-bootstrap backend
 
   if ! wait_for_backend_readiness; then
     log_warn "release readiness probe failed"
     compose ps || true
-    logs_output="$(compose logs backend frontend --tail=100 2>&1 || true)"
+    logs_output="$(compose logs db-bootstrap backend frontend --tail=100 2>&1 || true)"
     printf '%s\n' "$logs_output" >&2
     emit_failure_hints "$logs_output"
     die "release services failed readiness checks"
@@ -564,7 +564,7 @@ main() {
   if ! wait_for_frontend_readiness; then
     log_warn "release readiness probe failed"
     compose ps || true
-    logs_output="$(compose logs backend frontend --tail=100 2>&1 || true)"
+    logs_output="$(compose logs db-bootstrap backend frontend --tail=100 2>&1 || true)"
     printf '%s\n' "$logs_output" >&2
     emit_failure_hints "$logs_output"
     die "release services failed readiness checks"

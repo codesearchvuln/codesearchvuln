@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS pmd_rule_configs (
+        CREATE TABLE pmd_rule_configs (
             id VARCHAR PRIMARY KEY,
             name VARCHAR NOT NULL,
             description TEXT,
@@ -35,26 +35,23 @@ def upgrade() -> None:
 
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_rule_configs_created_at
+        CREATE INDEX ix_pmd_rule_configs_created_at
         ON pmd_rule_configs (created_at)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_rule_configs_is_active
+        CREATE INDEX ix_pmd_rule_configs_is_active
         ON pmd_rule_configs (is_active)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_pmd_rule_configs_is_active_created_at
+        CREATE INDEX ix_pmd_rule_configs_is_active_created_at
         ON pmd_rule_configs (is_active, created_at)
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_pmd_rule_configs_is_active_created_at")
-    op.execute("DROP INDEX IF EXISTS ix_pmd_rule_configs_is_active")
-    op.execute("DROP INDEX IF EXISTS ix_pmd_rule_configs_created_at")
-    op.execute("DROP TABLE IF EXISTS pmd_rule_configs")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

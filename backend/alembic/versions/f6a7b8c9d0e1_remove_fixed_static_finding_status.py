@@ -34,5 +34,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Irreversible data migration: historical "fixed" rows are folded into "verified".
-    pass
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

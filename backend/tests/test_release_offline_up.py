@@ -93,6 +93,8 @@ fi
 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "config" ]; then
   cat <<EOF
 services:
+  db-bootstrap:
+    image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:$(printf '1%.0s' {1..64})}
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:$(printf '1%.0s' {1..64})}
   db:
@@ -323,7 +325,7 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert offline_env_file.exists()
     docker_commands = docker_log.read_text(encoding="utf-8")
     assert "load" in docker_commands
-    assert "compose up -d db redis backend" in docker_commands
+    assert "compose up -d db redis db-bootstrap backend" in docker_commands
     assert "compose up -d frontend" in docker_commands
     assert "compose ps -q backend" in docker_commands
     assert "compose ps -q frontend" in docker_commands
@@ -457,7 +459,7 @@ def test_offline_up_bash_attach_logs_mode_runs_foreground_compose_up(tmp_path: P
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
     docker_commands = docker_log.read_text(encoding="utf-8").splitlines()
-    assert "compose up -d db redis backend" in docker_commands
+    assert "compose up -d db redis db-bootstrap backend" in docker_commands
     assert "compose up" in docker_commands
     assert "compose up -d frontend" not in docker_commands
     assert not any("http://127.0.0.1/api/v1/openapi.json" in line for line in docker_commands)
@@ -693,4 +695,4 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
     assert "Docker socket access was denied" in combined_output
     docker_commands = docker_log.read_text(encoding="utf-8")
     assert "compose ps" in docker_commands
-    assert "compose logs backend frontend --tail=100" in docker_commands
+    assert "compose logs db-bootstrap backend frontend --tail=100" in docker_commands

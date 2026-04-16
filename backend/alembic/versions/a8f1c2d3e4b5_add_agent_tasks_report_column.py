@@ -20,10 +20,10 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE agent_tasks
-        ADD COLUMN IF NOT EXISTS report TEXT
+        ADD COLUMN report TEXT
         """
     )
 
 
 def downgrade() -> None:
-    pass
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

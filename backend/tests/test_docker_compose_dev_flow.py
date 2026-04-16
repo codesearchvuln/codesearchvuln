@@ -43,7 +43,8 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "runner preflight / warmup" not in compose_text
     assert "一次性预热/自检容器" not in compose_text
     assert "执行完检查后按预期退出" not in compose_text
-    assert 'condition: service_completed_successfully' not in compose_text
+    assert 'condition: service_completed_successfully' in compose_text
+    assert "\n  db-bootstrap:\n" in compose_text
     for runner_service in RUNNER_SERVICE_NAMES:
         assert f"\n  {runner_service}:" not in compose_text
     assert f"image: {DEFAULT_BACKEND_IMAGE}" in compose_text
@@ -53,6 +54,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "target: dev-runtime" not in compose_text
     assert "target: dev" not in compose_text
     assert "\n  backend:\n" in compose_text
+    assert "db-bootstrap:\n        condition: service_completed_successfully" in compose_text
     assert "\n  scan-workspace-init:\n" in compose_text
     assert "\n  frontend:\n" in compose_text
     assert "\n  nexus-web:\n" not in compose_text
@@ -61,7 +63,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert ".:/workspace:ro" not in compose_text
     assert "./frontend:/app" not in compose_text
     assert "./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" not in compose_text
-    assert "- /opt/backend-venv" not in compose_text
+    assert "\n      - /opt/backend-venv\n" not in compose_text
     assert "/app/.venv" not in compose_text
     assert "/root/.cache/uv" not in compose_text
     assert "/app/node_modules" not in compose_text
@@ -193,9 +195,11 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
     assert "一次性预热/自检容器" not in full_overlay_text
     assert "执行完检查后按预期退出" not in full_overlay_text
     assert 'condition: service_completed_successfully' not in full_overlay_text
+    assert "\n  db-bootstrap:\n" in full_overlay_text
     for runner_service in RUNNER_SERVICE_NAMES:
         assert f"\n  {runner_service}:" not in full_overlay_text
     assert "vulhunter/backend-local:latest" in full_overlay_text
+    assert "db-bootstrap:\n    image: vulhunter/backend-local:latest" in full_overlay_text
     assert "vulhunter/backend-dev-local:latest" not in full_overlay_text
     assert "vulhunter/frontend-local:latest" in full_overlay_text
     assert "./nexus-web/dist:/app/public/nexus:ro" in full_overlay_text
@@ -240,6 +244,8 @@ def test_hybrid_overlay_uses_frontend_dev_without_default_polling_and_with_resou
     hybrid_overlay_text = (REPO_ROOT / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
 
     assert "target: dev" in hybrid_overlay_text
+    assert "\n  db-bootstrap:\n" in hybrid_overlay_text
+    assert "db-bootstrap:\n    image: vulhunter/backend-local:latest" in hybrid_overlay_text
     assert "${VULHUNTER_FRONTEND_PORT:-3000}:5173" in hybrid_overlay_text
     assert "CHOKIDAR_USEPOLLING: ${FRONTEND_CHOKIDAR_USEPOLLING:-false}" in hybrid_overlay_text
     assert "mem_limit: 1536m" in hybrid_overlay_text

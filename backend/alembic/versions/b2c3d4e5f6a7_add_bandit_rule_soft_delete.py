@@ -22,22 +22,16 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE bandit_rule_states
-        ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+        ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_bandit_rule_states_is_deleted
+        CREATE INDEX ix_bandit_rule_states_is_deleted
         ON bandit_rule_states (is_deleted)
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_bandit_rule_states_is_deleted")
-    op.execute(
-        """
-        ALTER TABLE bandit_rule_states
-        DROP COLUMN IF EXISTS is_deleted
-        """
-    )
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

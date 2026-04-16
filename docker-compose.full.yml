@@ -10,6 +10,9 @@
 # 动态拉起临时 runner 容器。
 
 services:
+  db-bootstrap:
+    image: vulhunter/backend-local:latest
+
   backend:
     image: vulhunter/backend-local:latest
     build: !override

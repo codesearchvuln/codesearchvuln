@@ -49,6 +49,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_prompt_skills_user_created_at", table_name="prompt_skills")
-    op.drop_index("ix_prompt_skills_user_scope_active", table_name="prompt_skills")
-    op.drop_table("prompt_skills")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")

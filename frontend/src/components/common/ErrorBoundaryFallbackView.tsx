@@ -62,6 +62,18 @@ const VARIANT_VISUALS: Record<ErrorBoundaryVariant, VariantVisuals> = {
     actionClassName:
       'border-sky-400/25 bg-sky-500/10 text-sky-50 hover:border-sky-300/40 hover:bg-sky-500/16',
   },
+  'database-contract': {
+    icon: WifiOff,
+    badgeClassName:
+      'border-amber-400/30 bg-amber-500/10 text-amber-100',
+    iconClassName: 'text-amber-200',
+    iconWrapClassName:
+      'border-amber-400/30 bg-gradient-to-br from-amber-500/22 via-orange-500/14 to-yellow-500/12',
+    panelBorderClassName: 'border-amber-400/24',
+    panelGlow: 'radial-gradient(circle, rgba(245,158,11,0.18) 0%, rgba(15,23,42,0) 72%)',
+    actionClassName:
+      'border-amber-400/25 bg-amber-500/10 text-amber-50 hover:border-amber-300/40 hover:bg-amber-500/16',
+  },
 };
 
 export function ErrorBoundaryFallbackView({

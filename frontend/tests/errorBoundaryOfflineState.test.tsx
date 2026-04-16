@@ -57,6 +57,25 @@ test("API proxy and network failures resolve to backend-offline copy", () => {
   }
 });
 
+test("database contract API failures resolve to dedicated database-contract copy", () => {
+  const state = resolveErrorBoundaryViewModel({
+    isAxiosError: true,
+    message: "Request failed with status code 500",
+    config: { url: "/api/v1/projects/" },
+    response: {
+      status: 500,
+      data: {
+        detail:
+          "DB_SCHEMA_MISMATCH 当前数据库不受此版本支持；请使用空库初始化或恢复匹配版本快照。",
+      },
+    },
+  });
+
+  assert.equal(state.variant, "database-contract");
+  assert.equal(state.title, "数据库版本不兼容");
+  assert.match(state.description, /请使用空库初始化/);
+});
+
 test("unrelated render errors stay on the generic error page", () => {
   const state = resolveErrorBoundaryViewModel(
     new Error("Cannot read properties of undefined"),

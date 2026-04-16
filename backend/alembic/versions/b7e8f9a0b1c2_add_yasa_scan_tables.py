@@ -18,7 +18,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS yasa_scan_tasks (
+        CREATE TABLE yasa_scan_tasks (
             id VARCHAR PRIMARY KEY,
             project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             name VARCHAR NOT NULL,
@@ -40,20 +40,20 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_yasa_tasks_project_created_at
+        CREATE INDEX ix_yasa_tasks_project_created_at
         ON yasa_scan_tasks (project_id, created_at DESC)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_yasa_tasks_project_lower_status_created_at
+        CREATE INDEX ix_yasa_tasks_project_lower_status_created_at
         ON yasa_scan_tasks (project_id, lower(status), created_at DESC)
         """
     )
 
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS yasa_findings (
+        CREATE TABLE yasa_findings (
             id VARCHAR PRIMARY KEY,
             scan_task_id VARCHAR NOT NULL REFERENCES yasa_scan_tasks(id) ON DELETE CASCADE,
             rule_id VARCHAR,
@@ -71,30 +71,23 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_yasa_findings_scan_task_status_created
+        CREATE INDEX ix_yasa_findings_scan_task_status_created
         ON yasa_findings (scan_task_id, status, created_at DESC)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_yasa_findings_scan_task_file_line
+        CREATE INDEX ix_yasa_findings_scan_task_file_line
         ON yasa_findings (scan_task_id, file_path, start_line)
         """
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS ix_yasa_findings_scan_task_level
+        CREATE INDEX ix_yasa_findings_scan_task_level
         ON yasa_findings (scan_task_id, level)
         """
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_yasa_findings_scan_task_level")
-    op.execute("DROP INDEX IF EXISTS ix_yasa_findings_scan_task_file_line")
-    op.execute("DROP INDEX IF EXISTS ix_yasa_findings_scan_task_status_created")
-    op.execute("DROP TABLE IF EXISTS yasa_findings")
-
-    op.execute("DROP INDEX IF EXISTS ix_yasa_tasks_project_lower_status_created_at")
-    op.execute("DROP INDEX IF EXISTS ix_yasa_tasks_project_created_at")
-    op.execute("DROP TABLE IF EXISTS yasa_scan_tasks")
+    raise RuntimeError("Downgrade unsupported; restore matching snapshot/backup")
