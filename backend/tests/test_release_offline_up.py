@@ -1,14 +1,46 @@
 from __future__ import annotations
 
 import hashlib
+import http.server
 import json
 import os
 import stat
 import subprocess
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@contextmanager
+def _serve_release_probe_endpoints(status_by_path: dict[str, int]):
+    request_log: list[str] = []
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib hook
+            request_log.append(self.path)
+            status = status_by_path.get(self.path, 404)
+            body = f"status={status}\n".encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1], request_log
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 def _write_release_manifest(path: Path) -> dict[str, object]:
@@ -164,33 +196,6 @@ if [ "${1:-}" = "inspect" ] && [ "${2:-}" = "--format" ]; then
   exit 0
 fi
 
-if [ "${1:-}" = "compose" ] && [ "${2:-}" = "exec" ]; then
-  command="$*"
-  if [[ "$command" == *"http://backend:8000/health"* ]]; then
-    printf '  HTTP/1.1 %s\n' "${FAKE_BACKEND_PROBE_STATUS:-200}"
-    [ "${FAKE_BACKEND_PROBE_STATUS:-200}" = "200" ] && exit 0
-    exit 1
-  fi
-  if [[ "$command" == *"http://127.0.0.1/api/v1/openapi.json"* ]]; then
-    printf '  HTTP/1.1 %s\n' "${FAKE_FRONTEND_PROXY_STATUS:-200}"
-    [ "${FAKE_FRONTEND_PROXY_STATUS:-200}" = "200" ] && exit 0
-    exit 1
-  fi
-  if [[ "$command" == *"http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true"* ]]; then
-    printf '  HTTP/1.1 %s\n' "${FAKE_FRONTEND_PROJECTS_STATUS:-200}"
-    case "${FAKE_FRONTEND_PROJECTS_STATUS:-200}" in
-      200|401|403) exit 0 ;;
-    esac
-    exit 1
-  fi
-  if [[ "$command" == *"http://127.0.0.1/"* ]]; then
-    printf '  HTTP/1.1 %s\n' "${FAKE_FRONTEND_ROOT_STATUS:-200}"
-    [ "${FAKE_FRONTEND_ROOT_STATUS:-200}" = "200" ] && exit 0
-    exit 1
-  fi
-  exit 0
-fi
-
 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "logs" ]; then
   [ -n "${FAKE_BACKEND_LOG_HINT:-}" ] && echo "${FAKE_BACKEND_LOG_HINT}"
   [ -n "${FAKE_FRONTEND_LOG_HINT:-}" ] && echo "${FAKE_FRONTEND_LOG_HINT}"
@@ -321,13 +326,21 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    result = subprocess.run(
-        ["bash", str(script_path)],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    status_by_path = {
+        "/": 200,
+        "/api/v1/openapi.json": 200,
+        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
+        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 200,
+    }
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
@@ -340,13 +353,15 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert "compose ps -q backend" in docker_commands
     assert "compose ps -q frontend" in docker_commands
     assert "inspect --format" in docker_commands
-    assert "compose exec -T frontend sh -lc" in docker_commands
-    assert "http://backend:8000/health" in docker_commands
-    assert "http://127.0.0.1/" in docker_commands
-    assert "http://127.0.0.1/api/v1/openapi.json" in docker_commands
-    assert "http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true" in docker_commands
+    assert "compose exec -T frontend sh -lc" not in docker_commands
     assert "image inspect --format {{ index .Config.Labels \"org.opencontainers.image.revision\" }} vulhunter-local/backend:deadbeefcafebabe0123456789abcdef01234567" in docker_commands
     assert "backend image provenance" in combined_output
+    assert request_log == [
+        "/",
+        "/api/v1/openapi.json",
+        "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
+        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
+    ]
 
 
 def test_offline_up_bash_fails_when_backend_image_revision_label_does_not_match_release_revision(
@@ -419,13 +434,21 @@ def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(t
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "4321"
 
-    result = subprocess.run(
-        ["bash", str(script_path)],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    status_by_path = {
+        "/": 200,
+        "/api/v1/openapi.json": 200,
+        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
+        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 200,
+    }
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
@@ -685,9 +708,74 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
     env["FAKE_ZSTD_LOG"] = str(zstd_log)
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
-    env["FAKE_FRONTEND_PROXY_STATUS"] = "502"
     env["FAKE_BACKEND_LOG_HINT"] = "offline runner image unavailable"
     env["FAKE_FRONTEND_LOG_HINT"] = "Docker socket access was denied"
+    env["OFFLINE_UP_MAX_ATTEMPTS"] = "1"
+    env["OFFLINE_UP_RETRY_DELAY_SECONDS"] = "0"
+
+    status_by_path = {
+        "/": 200,
+        "/api/v1/openapi.json": 502,
+        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
+        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 403,
+    }
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "release readiness probe failed" in combined_output
+    assert "openapi.json" in combined_output
+    assert "502" in combined_output
+    assert "dashboard-snapshot" in combined_output
+    assert "offline runner image unavailable" in combined_output
+    assert "Docker socket access was denied" in combined_output
+    docker_commands = docker_log.read_text(encoding="utf-8")
+    assert "compose exec -T frontend sh -lc" not in docker_commands
+    assert "compose ps" in docker_commands
+    assert "compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100" in docker_commands
+    assert request_log == [
+        "/",
+        "/api/v1/openapi.json",
+        "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
+        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
+    ]
+
+
+def test_offline_up_bash_backend_readiness_failure_collects_dependency_logs(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["FAKE_BACKEND_HEALTH"] = "unhealthy"
     env["OFFLINE_UP_MAX_ATTEMPTS"] = "1"
     env["OFFLINE_UP_RETRY_DELAY_SECONDS"] = "0"
 
@@ -702,8 +790,5 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode != 0
     assert "release readiness probe failed" in combined_output
-    assert "offline runner image unavailable" in combined_output
-    assert "Docker socket access was denied" in combined_output
     docker_commands = docker_log.read_text(encoding="utf-8")
-    assert "compose ps" in docker_commands
-    assert "compose logs db-bootstrap backend frontend --tail=100" in docker_commands
+    assert "compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100" in docker_commands

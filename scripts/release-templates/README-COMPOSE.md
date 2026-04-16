@@ -57,7 +57,8 @@ bash ./scripts/offline-up.sh --attach-logs
 ```
 
 离线脚本会自动复制缺失的 `.env` / `offline-images.env`，并先依据 release tree 自带的 `release-snapshot-lock.json` 校验两份 tar 包的文件名与 SHA256；只有确认 bundle 与当前 snapshot 匹配后，才会导入离线镜像包并启动服务。
-脚本会继续等待 backend `/health`、frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、以及 proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true` 成功后才报告 ready。
+脚本会继续等待 backend 容器 healthcheck 通过，再从宿主机检查 frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`、以及 proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` 成功后才报告 ready。
+前端探针不再依赖 frontend 镜像内置 `sh` / `wget`。
 当前 release tree 不再提供 `Windows PowerShell` 兼容层。
 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`。
 
@@ -87,7 +88,7 @@ docker compose logs -f
 
 ```bash
 docker compose ps
-docker compose logs backend frontend --tail=100
+docker compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"

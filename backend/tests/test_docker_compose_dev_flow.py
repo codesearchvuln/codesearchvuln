@@ -714,12 +714,12 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text
-    assert "docker compose logs db-bootstrap backend frontend" in workflow_text
+    assert "docker compose logs db redis scan-workspace-init db-bootstrap backend frontend" in workflow_text
     assert "service_cid()" not in workflow_text
     assert "docker compose ps -q \"$1\"" not in workflow_text
     assert "service_health()" not in workflow_text
     assert "http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
-    assert "dashboard_status_code=" in workflow_text
+    assert "dashboard_status_code=" not in workflow_text
     assert "git push origin HEAD:release" in workflow_text
     assert "git ls-remote --exit-code --heads origin release" in workflow_text
     assert "git checkout -B release origin/release" in workflow_text

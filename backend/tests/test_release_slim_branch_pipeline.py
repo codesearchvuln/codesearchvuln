@@ -346,24 +346,18 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "Inspect snapshot draft release" in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text
-    assert "docker compose logs db-bootstrap backend frontend" in workflow_text
+    assert "docker compose logs db redis scan-workspace-init db-bootstrap backend frontend" in workflow_text
     assert "service_cid()" not in workflow_text
     assert "docker compose ps -q \"$1\"" not in workflow_text
     assert "service_health()" not in workflow_text
     assert "curl -fsS http://127.0.0.1:8000/health" not in workflow_text
     assert "curl -fsS http://127.0.0.1:3000/" not in workflow_text
     assert "curl -fsS http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
-    assert "dashboard_status_code=" in workflow_text
-    assert "projects_status_code=" in workflow_text
-    assert "http://127.0.0.1:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14" in workflow_text
-    assert "http://127.0.0.1:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true" in workflow_text
-    assert 'case "${dashboard_status_code}" in' in workflow_text
-    assert 'case "${projects_status_code}" in' in workflow_text
-    assert "200|401|403)" in workflow_text
-    assert "502|503|504|000)" in workflow_text
-    assert "/api/v1/projects/dashboard-snapshot" in workflow_text
-    assert "/api/v1/projects/?skip=0&limit=1&include_metrics=true" in workflow_text
-    assert "http://127.0.0.1:3000/" in workflow_text
+    assert "dashboard_status_code=" not in workflow_text
+    assert "projects_status_code=" not in workflow_text
+    assert 'case "${dashboard_status_code}" in' not in workflow_text
+    assert 'case "${projects_status_code}" in' not in workflow_text
+    assert "http://127.0.0.1:3000/" not in workflow_text
     assert "git push origin HEAD:release" in workflow_text
     assert workflow_text.index("- name: Download snapshot draft release assets") < workflow_text.index(
         "uses: pnpm/action-setup@v5"
@@ -718,6 +712,10 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "docker/env/backend/offline-images.env" in offline_up_script
     assert "docker compose up -d" in offline_up_script
     assert "load_container_socket_env" in offline_up_script
+    assert "dashboard-snapshot?top_n=10&range_days=14" in offline_up_script
+    assert "compose exec -T frontend sh -lc" not in offline_up_script
+    assert "urllib.request" in offline_up_script
+    assert "VULHUNTER_FRONTEND_PORT" in offline_up_script
     assert "load_container_socket_gid_env" in offline_up_script
     assert "load_container_socket_env" in compose_env_helper
     assert "load_container_socket_gid_env" in compose_env_helper

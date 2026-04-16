@@ -83,7 +83,8 @@ The offline script will automatically:
 - validate the `services` and `scanner` tarball filename and SHA256 before `docker load`, so the offline bundles match this release snapshot
 - load the `services` and `scanner` offline bundles
 - start `docker compose up -d`
-- wait for backend `/health`, frontend `/`, proxied `http://127.0.0.1/api/v1/openapi.json`, and proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true` before reporting ready
+- wait for backend container health, then run host-side probes for frontend `/`, proxied `http://127.0.0.1/api/v1/openapi.json`, proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`, and proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` before reporting ready
+- frontend readiness no longer depends on `sh` / `wget` being present inside the static frontend image
 - the default mode stays detached; `--attach-logs` switches to foreground `docker compose up` after backend health turns green
 
 If startup logs include `DB_SCHEMA_EMPTY`, `DB_SCHEMA_MISMATCH`, or `DB_SCHEMA_UNSUPPORTED_STATE`, do not keep trying to repair the old database in place. Recreate the `postgres_data` volume and bootstrap a fresh database, or restore a database snapshot that matches the current release.
@@ -106,18 +107,13 @@ The main static assets and bundled `nexus-*` static pages are already included i
 
 ## 6. Post-Deploy Verification
 
-Run at least these checks; do not stop at “the homepage opens”:
+Run at least these four checks; do not stop at “the homepage opens”:
 
 ```bash
 docker compose ps
-docker compose logs backend frontend --tail=100
+docker compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
-```
-
-Optional dashboard proxy probe:
-
-```bash
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 

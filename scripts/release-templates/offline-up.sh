@@ -14,6 +14,7 @@ OFFLINE_ENV_FILE="${OFFLINE_ENV_FILE:-$ROOT_DIR/docker/env/backend/offline-image
 OFFLINE_ENV_EXAMPLE="${OFFLINE_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/offline-images.env.example}"
 COMPOSE_ENV_HELPER="${COMPOSE_ENV_HELPER:-$ROOT_DIR/scripts/lib/compose-env.sh}"
 ATTACH_LOGS="false"
+LAST_RELEASE_PROBE_RESULTS=""
 
 log_info() {
   echo "[offline-up] $*"
@@ -352,25 +353,118 @@ service_health() {
   docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || printf 'unknown'
 }
 
-probe_frontend_status() {
-  local url="$1"
-  local allowed_statuses="${2:-200}"
-  local output
-
-  output="$(
-    compose exec -T frontend sh -lc "wget -S -O- '$url' >/dev/null 2>&1 || true"
-  )"
-  grep -Eq "HTTP/[0-9.]+ (${allowed_statuses})([^0-9]|$)" <<<"$output"
+release_frontend_base_url() {
+  local frontend_port="${VULHUNTER_FRONTEND_PORT:-3000}"
+  printf 'http://127.0.0.1:%s' "$frontend_port"
 }
 
-probe_frontend_url() {
+status_matches_allowed() {
+  local status="$1"
+  local allowed_statuses="$2"
+  [[ "$status" =~ ^(${allowed_statuses})$ ]]
+}
+
+probe_host_status() {
   local url="$1"
-  probe_frontend_status "$url" "200"
+  local timeout_seconds="${OFFLINE_UP_HTTP_TIMEOUT_SECONDS:-5}"
+
+  python3 - "$url" "$timeout_seconds" <<'PY'
+from __future__ import annotations
+
+import socket
+import sys
+import urllib.error
+import urllib.request
+
+
+url = sys.argv[1]
+timeout = float(sys.argv[2])
+status = "000"
+detail = "unknown error"
+
+request = urllib.request.Request(url, method="GET")
+try:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        status = str(response.getcode())
+        detail = getattr(response, "reason", "") or "OK"
+except urllib.error.HTTPError as exc:
+    status = str(exc.code)
+    detail = getattr(exc, "reason", "") or exc.__class__.__name__
+except urllib.error.URLError as exc:
+    reason = exc.reason
+    if isinstance(reason, socket.timeout):
+        detail = "timeout"
+    else:
+        detail = str(reason)
+except TimeoutError:
+    detail = "timeout"
+except Exception as exc:  # pragma: no cover - defensive fallback for shell runtime
+    detail = f"{exc.__class__.__name__}: {exc}"
+
+detail = detail.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip() or "n/a"
+print(f"{status}\t{detail}")
+PY
+}
+
+append_release_probe_result() {
+  local label="$1"
+  local url="$2"
+  local allowed_statuses="$3"
+  local probe_output status detail
+
+  probe_output="$(probe_host_status "$url")"
+  IFS=$'\t' read -r status detail <<<"$probe_output"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$url" "$allowed_statuses" "$status" "$detail"
+}
+
+run_release_readiness_probes() {
+  local base_url="$1"
+
+  {
+    append_release_probe_result "frontend-root" "${base_url}/" "200"
+    append_release_probe_result "frontend-openapi" "${base_url}/api/v1/openapi.json" "200"
+    append_release_probe_result \
+      "frontend-projects" \
+      "${base_url}/api/v1/projects/?skip=0&limit=1&include_metrics=true" \
+      "200|401|403"
+    append_release_probe_result \
+      "frontend-dashboard" \
+      "${base_url}/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14" \
+      "200|401|403"
+  }
+}
+
+release_probe_results_green() {
+  local probe_results="$1"
+  local label url allowed_statuses status detail
+
+  while IFS=$'\t' read -r label url allowed_statuses status detail; do
+    [[ -n "$label" ]] || continue
+    if ! status_matches_allowed "$status" "$allowed_statuses"; then
+      return 1
+    fi
+  done <<<"$probe_results"
+
+  return 0
+}
+
+emit_probe_results() {
+  local probe_results="$1"
+  local label url allowed_statuses status detail
+
+  while IFS=$'\t' read -r label url allowed_statuses status detail; do
+    [[ -n "$label" ]] || continue
+    log_warn "Probe ${label}: status=${status} allowed=${allowed_statuses} url=${url} detail=${detail}"
+  done <<<"$probe_results"
+}
+
+collect_compose_logs() {
+  compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100 2>&1 || true
 }
 
 emit_failure_hints() {
   local logs="$1"
-  log_warn "Hint: a release tree is only ready after backend health, frontend /, proxied /api/v1/openapi.json, and the proxied project list probe all succeed."
+  log_warn "Hint: a release tree is only ready after backend health, frontend /, proxied /api/v1/openapi.json, proxied project list, and proxied dashboard snapshot all succeed."
   if grep -Eiq 'offline runner image unavailable|pull failed for|image missing after load' <<<"$logs"; then
     log_warn "Hint: runner images are missing from the offline bundles. Rebuild and reload both services/scanner image bundles."
   else
@@ -424,6 +518,9 @@ wait_for_frontend_readiness() {
   local max_attempts="${OFFLINE_UP_MAX_ATTEMPTS:-60}"
   local retry_delay="${OFFLINE_UP_RETRY_DELAY_SECONDS:-5}"
   local attempt=0
+  local frontend_base_url last_probe_results=""
+
+  frontend_base_url="$(release_frontend_base_url)"
 
   while (( attempt < max_attempts )); do
     attempt=$((attempt + 1))
@@ -436,12 +533,12 @@ wait_for_frontend_readiness() {
 
     if [[ "$backend_status_value" == "running" ]] && \
        [[ "$backend_health_value" == "healthy" ]] && \
-       [[ "$frontend_status_value" == "running" ]] && \
-       probe_frontend_url "http://backend:8000/health" && \
-       probe_frontend_url "http://127.0.0.1/" && \
-       probe_frontend_url "http://127.0.0.1/api/v1/openapi.json" && \
-       probe_frontend_status "http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true" "200|401|403"; then
-      return 0
+       [[ "$frontend_status_value" == "running" ]]; then
+      last_probe_results="$(run_release_readiness_probes "$frontend_base_url")"
+      if release_probe_results_green "$last_probe_results"; then
+        LAST_RELEASE_PROBE_RESULTS="$last_probe_results"
+        return 0
+      fi
     fi
 
     if [[ "$backend_status_value" == "exited" || "$backend_status_value" == "dead" || "$backend_health_value" == "unhealthy" || "$frontend_status_value" == "exited" || "$frontend_status_value" == "dead" ]]; then
@@ -451,6 +548,7 @@ wait_for_frontend_readiness() {
     sleep "$retry_delay"
   done
 
+  LAST_RELEASE_PROBE_RESULTS="$last_probe_results"
   return 1
 }
 
@@ -558,7 +656,7 @@ main() {
   if ! wait_for_backend_readiness; then
     log_warn "release readiness probe failed"
     compose ps || true
-    logs_output="$(compose logs db-bootstrap backend frontend --tail=100 2>&1 || true)"
+    logs_output="$(collect_compose_logs)"
     printf '%s\n' "$logs_output" >&2
     emit_failure_hints "$logs_output"
     die "release services failed readiness checks"
@@ -575,8 +673,11 @@ main() {
 
   if ! wait_for_frontend_readiness; then
     log_warn "release readiness probe failed"
+    if [[ -n "$LAST_RELEASE_PROBE_RESULTS" ]]; then
+      emit_probe_results "$LAST_RELEASE_PROBE_RESULTS"
+    fi
     compose ps || true
-    logs_output="$(compose logs db-bootstrap backend frontend --tail=100 2>&1 || true)"
+    logs_output="$(collect_compose_logs)"
     printf '%s\n' "$logs_output" >&2
     emit_failure_hints "$logs_output"
     die "release services failed readiness checks"

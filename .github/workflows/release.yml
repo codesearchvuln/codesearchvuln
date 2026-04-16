@@ -393,7 +393,7 @@ jobs:
 
           dump_debug() {
             docker compose ps || true
-            docker compose logs db-bootstrap backend frontend || true
+            docker compose logs db redis scan-workspace-init db-bootstrap backend frontend || true
           }
 
           cleanup() {
@@ -409,44 +409,6 @@ jobs:
             echo "::error::Release offline-up.sh failed for generated release tree."
             exit 1
           fi
-
-          dashboard_status_code="$(
-            curl -sS -o /tmp/vulhunter-dashboard-snapshot.json -w '%{http_code}' \
-              'http://127.0.0.1:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14' || true
-          )"
-          case "${dashboard_status_code}" in
-            200|401|403)
-              ;;
-            502|503|504|000)
-              dump_debug
-              echo "::error::Release proxied dashboard API returned gateway failure (${dashboard_status_code})."
-              exit 1
-              ;;
-            *)
-              dump_debug
-              echo "::error::Release proxied dashboard API returned unexpected status (${dashboard_status_code})."
-              exit 1
-              ;;
-          esac
-
-          projects_status_code="$(
-            curl -sS -o /tmp/vulhunter-projects.json -w '%{http_code}' \
-              'http://127.0.0.1:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true' || true
-          )"
-          case "${projects_status_code}" in
-            200|401|403)
-              ;;
-            502|503|504|000)
-              dump_debug
-              echo "::error::Release proxied project list API returned gateway failure (${projects_status_code})."
-              exit 1
-              ;;
-            *)
-              dump_debug
-              echo "::error::Release proxied project list API returned unexpected status (${projects_status_code})."
-              exit 1
-              ;;
-          esac
 
       - name: Publish release branch
         id: publish_release_branch

@@ -83,7 +83,8 @@ bash ./scripts/offline-up.sh --attach-logs
 - 在 `docker load` 前校验 `services` / `scanner` 两份 tar 包的文件名与 SHA256，确认它们和当前 release tree 属于同一个 snapshot
 - 导入 `services` 与 `scanner` 两份离线镜像包
 - 启动 `docker compose up -d`
-- 等待 backend `/health`、frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、以及 proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true` 全部通过后才报告 ready
+- 等待 backend 容器 healthcheck 通过，再从宿主机检查 frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`、以及 proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` 全部通过后才报告 ready
+- 前端探针不再依赖 frontend 镜像内置 `sh` / `wget`
 - 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`
 
 如果启动日志出现 `DB_SCHEMA_EMPTY`、`DB_SCHEMA_MISMATCH` 或 `DB_SCHEMA_UNSUPPORTED_STATE`，不要继续尝试原地修旧库。请新建 `postgres_data` 卷重新初始化，或恢复与当前版本匹配的数据库快照。
@@ -106,18 +107,13 @@ bash ./scripts/offline-up.sh --attach-logs
 
 ## 6. 部署后验收
 
-至少执行下面三步，不要只看首页是否打开：
+至少执行下面四步，不要只看首页是否打开：
 
 ```bash
 docker compose ps
-docker compose logs backend frontend --tail=100
+docker compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
-```
-
-可选再补一条 dashboard 代理链路检查：
-
-```bash
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
