@@ -257,10 +257,12 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "create-draft-release:" in workflow_text
     assert "GH_REPO: ${{ github.repository }}" in workflow_text
     assert "publish-runtime-images:" in workflow_text
+    assert "resolve-release-manifest:" in workflow_text
     assert "package-offline-images:" in workflow_text
     assert "finalize-release:" in workflow_text
     assert "cleanup-draft-release:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
+    assert "if: ${{ github.event_name == 'workflow_dispatch' }}" in workflow_text
     assert "build_frontend: false" in workflow_text
     assert "build_backend: true" in workflow_text
     assert (
@@ -291,6 +293,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "deploy/frontend/default.conf" not in workflow_text
     assert "upload-artifact@v4" not in workflow_text
     assert "download-artifact@v4" not in workflow_text
+    assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' in workflow_text
+    assert 'actions/artifacts/${artifact_id}/zip' in workflow_text
     assert "name: frontend-release-bundle" not in workflow_text
     assert "name: release-tree" not in workflow_text
     assert "name: release-assets-services-amd64" not in workflow_text

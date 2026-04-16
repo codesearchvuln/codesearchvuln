@@ -29,6 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -124,6 +125,7 @@ jobs:
           echo "snapshot_url=${html_url}" >> "$GITHUB_OUTPUT"
 
   publish-runtime-images:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: prepare-release
     uses: ./.github/workflows/publish-runtime-images.yml
     secrets: inherit
@@ -150,11 +152,82 @@ jobs:
       require_complete_manifest: true
       revision: ${{ needs.prepare-release.outputs.source_sha }}
 
+  resolve-release-manifest:
+    needs:
+      - prepare-release
+      - publish-runtime-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      release_manifest: ${{ steps.from_workflow_run.outputs.release_manifest || steps.from_dispatch.outputs.release_manifest }}
+
+    steps:
+      - name: Load release manifest from Docker Publish workflow_run artifact
+        id: from_workflow_run
+        if: ${{ github.event_name == 'workflow_run' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+
+          artifacts_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts")"
+          artifact_id="$(
+            printf '%s' "${artifacts_json}" | jq -r '.artifacts[] | select(.name == "release-manifest-json") | .id' | head -n 1
+          )"
+
+          if [[ -z "${artifact_id}" || "${artifact_id}" == "null" ]]; then
+            echo "::error::release-manifest-json artifact not found for workflow run ${WORKFLOW_RUN_ID}"
+            exit 1
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${RUNNER_TEMP}/release-manifest.zip"
+
+          release_manifest="$(
+            python3 - "${RUNNER_TEMP}/release-manifest.zip" <<'PY'
+from __future__ import annotations
+
+import sys
+import zipfile
+
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    print(archive.read("release-manifest.json").decode("utf-8"))
+PY
+          )"
+
+          [[ -n "${release_manifest}" ]] || { echo "::error::release manifest artifact is empty"; exit 1; }
+
+          {
+            echo "release_manifest<<EOF"
+            printf '%s\n' "${release_manifest}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Load release manifest from workflow_dispatch build outputs
+        id: from_dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          RELEASE_MANIFEST: ${{ needs.publish-runtime-images.outputs.release_manifest }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::workflow_dispatch release manifest is empty"; exit 1; }
+
+          {
+            echo "release_manifest<<EOF"
+            printf '%s\n' "${RELEASE_MANIFEST}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
   package-offline-images:
     needs:
       - prepare-release
       - create-draft-release
-      - publish-runtime-images
+      - resolve-release-manifest
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -187,7 +260,7 @@ jobs:
 
       - name: Write release-manifest.json
         env:
-          RELEASE_MANIFEST: ${{ needs.publish-runtime-images.outputs.release_manifest }}
+          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
         run: |
           printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
 
@@ -220,7 +293,7 @@ jobs:
     needs:
       - prepare-release
       - create-draft-release
-      - publish-runtime-images
+      - resolve-release-manifest
       - package-offline-images
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -317,7 +390,7 @@ jobs:
 
       - name: Write release-manifest.json
         env:
-          RELEASE_MANIFEST: ${{ needs.publish-runtime-images.outputs.release_manifest }}
+          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
         run: |
           printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
 

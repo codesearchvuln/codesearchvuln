@@ -601,6 +601,8 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "detect-changes:" in workflow_text
     assert "dorny/paths-filter@v3" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
+    assert "actions/upload-artifact@v4" in workflow_text
+    assert "release-manifest-json" in workflow_text
     assert "tag:" in workflow_text
     assert "publish-runtime-images:" in workflow_text
     assert "build_yasa_runner" in workflow_text
@@ -671,18 +673,18 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
     assert "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}" in workflow_text
     assert "multi_arch: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
+    assert "emit_release_manifest: true" in workflow_text
     assert "- 'frontend/**'" in workflow_text
     assert "- 'backend/**'" in workflow_text
     assert "- 'docker/frontend.Dockerfile'" in workflow_text
     assert "- 'docker/backend.Dockerfile'" in workflow_text
+    assert "- 'scripts/**'" in workflow_text
+    assert "- 'scripts/release-templates/**'" in workflow_text
     assert "- 'docker/sandbox-runner.Dockerfile'" not in workflow_text
     assert "- 'docker/sandbox.Dockerfile'" not in workflow_text
     assert "- '.github/workflows/docker-publish.yml'" in workflow_text
     assert "- 'frontend/yasa-engine-overrides/**'" in workflow_text
     assert "- '.github/workflows/release.yml'" not in workflow_text
-    assert "- 'scripts/generate-release-branch.sh'" not in workflow_text
-    assert "- 'scripts/package-release-images.sh'" not in workflow_text
-    assert "- 'scripts/release-templates/**'" not in workflow_text
     assert "- 'nexus-web/dist/**'" not in workflow_text
     assert "- 'nexus-itemDetail/dist/**'" not in workflow_text
 
@@ -696,6 +698,7 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     ).read_text(encoding="utf-8")
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
+    assert "if: ${{ github.event_name == 'workflow_dispatch' }}" in workflow_text
     assert "build_frontend: false" in workflow_text
     assert "workflow_run:" in workflow_text
     assert "Docker Publish" in workflow_text
@@ -721,6 +724,9 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "service_health()" not in workflow_text
     assert "http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
     assert "dashboard_status_code=" not in workflow_text
+    assert "WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}" in workflow_text
+    assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' in workflow_text
+    assert 'actions/artifacts/${artifact_id}/zip' in workflow_text
     assert "git push origin HEAD:release" in workflow_text
     assert "git ls-remote --exit-code --heads origin release" in workflow_text
     assert "git checkout -B release origin/release" in workflow_text
