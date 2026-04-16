@@ -354,11 +354,15 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "curl -fsS http://127.0.0.1:3000/" not in workflow_text
     assert "curl -fsS http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
     assert "dashboard_status_code=" in workflow_text
+    assert "projects_status_code=" in workflow_text
     assert "http://127.0.0.1:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14" in workflow_text
+    assert "http://127.0.0.1:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true" in workflow_text
     assert 'case "${dashboard_status_code}" in' in workflow_text
+    assert 'case "${projects_status_code}" in' in workflow_text
     assert "200|401|403)" in workflow_text
     assert "502|503|504|000)" in workflow_text
     assert "/api/v1/projects/dashboard-snapshot" in workflow_text
+    assert "/api/v1/projects/?skip=0&limit=1&include_metrics=true" in workflow_text
     assert "http://127.0.0.1:3000/" in workflow_text
     assert "git push origin HEAD:release" in workflow_text
     assert workflow_text.index("- name: Download snapshot draft release assets") < workflow_text.index(
@@ -463,6 +467,12 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
     ]
     for rel_path in required_paths:
         assert (output_dir / rel_path).exists(), rel_path
+
+    release_index = (output_dir / "deploy" / "runtime" / "frontend" / "site" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "fonts.googleapis.com" not in release_index
+    assert "fonts.gstatic.com" not in release_index
 
     forbidden_paths = [
         "backend",

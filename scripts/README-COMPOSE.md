@@ -84,6 +84,7 @@ bash ./scripts/offline-up.sh --attach-logs
 
 ```bash
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 

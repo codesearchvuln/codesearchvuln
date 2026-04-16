@@ -1,5 +1,22 @@
+const DEFAULT_OBFUSCATION_SEED = 1337;
+
+function resolveObfuscationSeed() {
+  const rawValue = String(process.env.VITE_BUILD_OBFUSCATION_SEED || "").trim();
+  if (!rawValue) {
+    return DEFAULT_OBFUSCATION_SEED;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (Number.isSafeInteger(parsed)) {
+    return parsed;
+  }
+
+  return DEFAULT_OBFUSCATION_SEED;
+}
+
 export function createProductionObfuscatorOptions() {
   return {
+    seed: resolveObfuscationSeed(),
     // 标识符混淆（低成本高收益）
     identifierNamesGenerator: "hexadecimal" as const,
     renameGlobals: false, // 不重命名全局：避免破坏 React 运行时

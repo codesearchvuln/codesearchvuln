@@ -83,7 +83,7 @@ bash ./scripts/offline-up.sh --attach-logs
 - 在 `docker load` 前校验 `services` / `scanner` 两份 tar 包的文件名与 SHA256，确认它们和当前 release tree 属于同一个 snapshot
 - 导入 `services` 与 `scanner` 两份离线镜像包
 - 启动 `docker compose up -d`
-- 等待 backend `/health`、frontend `/`、以及 proxied `http://127.0.0.1/api/v1/openapi.json` 全部成功后才报告 ready
+- 等待 backend `/health`、frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、以及 proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true` 全部通过后才报告 ready
 - 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`
 
 如果启动日志出现 `DB_SCHEMA_EMPTY`、`DB_SCHEMA_MISMATCH` 或 `DB_SCHEMA_UNSUPPORTED_STATE`，不要继续尝试原地修旧库。请新建 `postgres_data` 卷重新初始化，或恢复与当前版本匹配的数据库快照。
@@ -112,6 +112,7 @@ bash ./scripts/offline-up.sh --attach-logs
 docker compose ps
 docker compose logs backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 ```
 
 可选再补一条 dashboard 代理链路检查：
@@ -120,7 +121,7 @@ curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
-这条 dashboard 探针返回 `200` / `401` / `403` 都说明代理链路仍在工作；如果是 `502` / `503` / `504`，说明前端到 backend 的 release 代理链路仍然异常。
+项目列表探针或 dashboard 探针返回 `200` / `401` / `403` 都说明代理链路仍在工作；如果是 `502` / `503` / `504`，说明前端到 backend 的 release 代理链路仍然异常。
 
 ## 7. 常用维护命令
 

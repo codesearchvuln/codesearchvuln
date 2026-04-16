@@ -367,6 +367,18 @@ def test_init_db_module_no_longer_exports_legacy_demo_helpers():
     assert not hasattr(init_db_module, "create_demo_data")
 
 
+def test_collect_unique_yaml_rule_files_sorts_and_deduplicates_by_content_hash(tmp_path: Path):
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "b.yaml").write_text("rules:\n  - id: shared\n", encoding="utf-8")
+    (rules_dir / "a.yaml").write_text("rules:\n  - id: unique\n", encoding="utf-8")
+    (rules_dir / "dup.yaml").write_text("rules:\n  - id: shared\n", encoding="utf-8")
+
+    unique_files = init_db_module._collect_unique_yaml_rule_files(rules_dir)
+
+    assert [path.name for path in unique_files] == ["a.yaml", "b.yaml"]
+
+
 @pytest.mark.asyncio
 async def test_init_db_uses_seed_project_initializer(monkeypatch):
     db = AsyncMock()
@@ -438,3 +450,46 @@ async def test_init_db_can_skip_heavy_bootstrap_steps_via_env_flags(monkeypatch)
     create_patch_rules_mock.assert_awaited_once_with(db)
     ensure_builtin_gitleaks_rules_mock.assert_awaited_once_with(db)
     init_templates_mock.assert_awaited_once_with(db)
+
+
+@pytest.mark.asyncio
+async def test_init_db_warns_and_continues_when_rule_bootstrap_fails(monkeypatch, caplog):
+    db = _make_db(existing_project=[])
+    user = SimpleNamespace(id="user-1")
+
+    create_demo_user_mock = AsyncMock(return_value=user)
+    ensure_default_seed_projects_mock = AsyncMock()
+    create_internal_rules_mock = AsyncMock(side_effect=RuntimeError("mro"))
+    create_patch_rules_mock = AsyncMock(side_effect=RuntimeError("patch bootstrap failed"))
+    ensure_builtin_gitleaks_rules_mock = AsyncMock()
+    init_templates_mock = AsyncMock()
+
+    monkeypatch.setattr(init_db_module, "create_demo_user", create_demo_user_mock)
+    monkeypatch.setattr(init_db_module, "ensure_default_seed_projects", ensure_default_seed_projects_mock)
+    monkeypatch.setattr(init_db_module, "create_internal_opengrep_rules", create_internal_rules_mock)
+    monkeypatch.setattr(init_db_module, "create_patch_opengrep_rules", create_patch_rules_mock)
+    monkeypatch.setattr(init_db_module, "ensure_builtin_gitleaks_rules", ensure_builtin_gitleaks_rules_mock)
+
+    module = sys.modules.get("app.services.init_templates")
+    if module is None:
+        import app.services.init_templates as module
+    original = getattr(module, "init_templates_and_rules", None)
+    monkeypatch.setattr(module, "init_templates_and_rules", init_templates_mock)
+
+    with caplog.at_level(logging.WARNING):
+        try:
+            await init_db_module.init_db(db)
+        finally:
+            if original is None:
+                delattr(module, "init_templates_and_rules")
+            else:
+                setattr(module, "init_templates_and_rules", original)
+
+    create_demo_user_mock.assert_awaited_once_with(db)
+    ensure_default_seed_projects_mock.assert_awaited_once_with(db, user)
+    create_internal_rules_mock.assert_awaited_once_with(db)
+    create_patch_rules_mock.assert_awaited_once_with(db)
+    ensure_builtin_gitleaks_rules_mock.assert_awaited_once_with(db)
+    init_templates_mock.assert_awaited_once_with(db)
+    assert "初始化内置 opengrep 规则跳过" in caplog.text
+    assert "初始化 Patch 来源 opengrep 规则跳过" in caplog.text

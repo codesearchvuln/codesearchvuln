@@ -83,7 +83,7 @@ The offline script will automatically:
 - validate the `services` and `scanner` tarball filename and SHA256 before `docker load`, so the offline bundles match this release snapshot
 - load the `services` and `scanner` offline bundles
 - start `docker compose up -d`
-- wait for backend `/health`, frontend `/`, and proxied `http://127.0.0.1/api/v1/openapi.json` before reporting ready
+- wait for backend `/health`, frontend `/`, proxied `http://127.0.0.1/api/v1/openapi.json`, and proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true` before reporting ready
 - the default mode stays detached; `--attach-logs` switches to foreground `docker compose up` after backend health turns green
 
 If startup logs include `DB_SCHEMA_EMPTY`, `DB_SCHEMA_MISMATCH`, or `DB_SCHEMA_UNSUPPORTED_STATE`, do not keep trying to repair the old database in place. Recreate the `postgres_data` volume and bootstrap a fresh database, or restore a database snapshot that matches the current release.
@@ -112,6 +112,7 @@ Run at least these checks; do not stop at “the homepage opens”:
 docker compose ps
 docker compose logs backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 ```
 
 Optional dashboard proxy probe:
@@ -120,7 +121,7 @@ Optional dashboard proxy probe:
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
-For this dashboard probe, `200`, `401`, or `403` all mean the proxy path is still alive. `502`, `503`, or `504` mean the release frontend can no longer reach the backend through the bundled proxy contract.
+For the project-list probe or dashboard probe, `200`, `401`, or `403` all mean the proxy path is still alive. `502`, `503`, or `504` mean the release frontend can no longer reach the backend through the bundled proxy contract.
 
 ## 7. Common Maintenance Commands
 

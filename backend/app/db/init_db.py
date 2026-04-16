@@ -49,6 +49,24 @@ def _load_yaml_fast(content: str):
     return yaml.load(content, Loader=YAML_LOADER)
 
 
+def _collect_unique_yaml_rule_files(rules_dir: Path, *, recursive: bool = False) -> list[Path]:
+    """按文件内容去重，避免同一批规则语料被重复导入或重复触发异常。"""
+    patterns = ("**/*.yml", "**/*.yaml") if recursive else ("*.yaml", "*.yml")
+    discovered: list[Path] = []
+    for pattern in patterns:
+        discovered.extend(rules_dir.glob(pattern))
+
+    unique_files: list[Path] = []
+    seen_hashes: set[str] = set()
+    for yaml_file in sorted(discovered):
+        digest = _sha256_file(str(yaml_file))
+        if digest in seen_hashes:
+            continue
+        seen_hashes.add(digest)
+        unique_files.append(yaml_file)
+    return unique_files
+
+
 def _normalize_confidence(value: str | None) -> str:
     normalized = str(value or "").strip().upper()
     if normalized in {"HIGH", "MEDIUM", "LOW"}:
@@ -424,10 +442,17 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
         return
 
     # 读取所有 .yaml 文件
-    yaml_files = list(rules_dir.glob("*.yaml")) + list(rules_dir.glob("*.yml"))
+    raw_yaml_files = sorted(list(rules_dir.glob("*.yaml")) + list(rules_dir.glob("*.yml")))
+    yaml_files = _collect_unique_yaml_rule_files(rules_dir)
     if not yaml_files:
         logger.warning(f"规则目录中没有找到 .yaml 文件: {rules_dir}")
         return
+    duplicate_count = len(raw_yaml_files) - len(yaml_files)
+    if duplicate_count > 0:
+        logger.warning(
+            "检测到 %s 个重复内置规则文件，已按内容去重后继续导入",
+            duplicate_count,
+        )
 
     logger.info(f"开始加载内置规则，找到 {len(yaml_files)} 个文件...")
     logger.info(f"数据库中已存在 {len(existing_rule_ids)} 条规则")
@@ -533,7 +558,12 @@ async def create_internal_opengrep_rules(db: AsyncSession) -> None:
                 logger.debug(f"  ✓ 规则已准备入库: {rule_id} (CWE: {len(cwe) if cwe else 0})")
 
         except Exception as e:
-            logger.error(f"加载规则文件失败 {yaml_file.name}: {e}")
+            logger.error(
+                "加载规则文件失败 %s [%s]: %s",
+                yaml_file.name,
+                type(e).__name__,
+                e,
+            )
             invalid_count += 1
             continue
 
@@ -577,10 +607,17 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
         return
 
     # 递归读取所有 .yml 文件
-    yaml_files = list(rules_dir.glob("**/*.yml")) + list(rules_dir.glob("**/*.yaml"))
+    raw_yaml_files = sorted(list(rules_dir.glob("**/*.yml")) + list(rules_dir.glob("**/*.yaml")))
+    yaml_files = _collect_unique_yaml_rule_files(rules_dir, recursive=True)
     if not yaml_files:
         logger.warning(f"Patch 规则目录中没有找到 .yml 文件: {rules_dir}")
         return
+    duplicate_count = len(raw_yaml_files) - len(yaml_files)
+    if duplicate_count > 0:
+        logger.warning(
+            "检测到 %s 个重复 Patch 规则文件，已按内容去重后继续导入",
+            duplicate_count,
+        )
 
     logger.info(f"开始加载 Patch 来源规则，找到 {len(yaml_files)} 个文件...")
     logger.info(f"数据库中已存在 {len(existing_rule_ids)} 条规则")
@@ -705,7 +742,12 @@ async def create_patch_opengrep_rules(db: AsyncSession) -> None:
                 logger.debug(f"  ✓ 规则已准备入库: {rule_id} (CWE: {len(cwe) if cwe else 0})")
 
         except Exception as e:
-            logger.error(f"加载规则文件失败 {yaml_file.relative_to(rules_dir)}: {e}")
+            logger.error(
+                "加载规则文件失败 %s [%s]: %s",
+                yaml_file.relative_to(rules_dir),
+                type(e).__name__,
+                e,
+            )
             error_count += 1
             continue
 
@@ -744,10 +786,18 @@ async def init_db(db: AsyncSession) -> None:
     await db.commit()
 
     # 初始化内置 opengrep 规则
-    await create_internal_opengrep_rules(db)
+    try:
+        await create_internal_opengrep_rules(db)
+    except Exception as e:
+        await db.rollback()
+        logger.warning(f"初始化内置 opengrep 规则跳过: {e}")
 
     # 初始化 Patch 来源的 opengrep 规则
-    await create_patch_opengrep_rules(db)
+    try:
+        await create_patch_opengrep_rules(db)
+    except Exception as e:
+        await db.rollback()
+        logger.warning(f"初始化 Patch 来源 opengrep 规则跳过: {e}")
 
     # 初始化 gitleaks 内置规则（失败不阻断启动）
     try:

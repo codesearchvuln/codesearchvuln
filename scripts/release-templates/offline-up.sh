@@ -352,14 +352,25 @@ service_health() {
   docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || printf 'unknown'
 }
 
+probe_frontend_status() {
+  local url="$1"
+  local allowed_statuses="${2:-200}"
+  local output
+
+  output="$(
+    compose exec -T frontend sh -lc "wget -S -O- '$url' >/dev/null 2>&1 || true"
+  )"
+  grep -Eq "HTTP/[0-9.]+ (${allowed_statuses})([^0-9]|$)" <<<"$output"
+}
+
 probe_frontend_url() {
   local url="$1"
-  compose exec -T frontend sh -lc "wget -q -O- '$url' >/dev/null"
+  probe_frontend_status "$url" "200"
 }
 
 emit_failure_hints() {
   local logs="$1"
-  log_warn "Hint: a release tree is only ready after backend health, frontend /, and proxied /api/v1/openapi.json all succeed."
+  log_warn "Hint: a release tree is only ready after backend health, frontend /, proxied /api/v1/openapi.json, and the proxied project list probe all succeed."
   if grep -Eiq 'offline runner image unavailable|pull failed for|image missing after load' <<<"$logs"; then
     log_warn "Hint: runner images are missing from the offline bundles. Rebuild and reload both services/scanner image bundles."
   else
@@ -428,7 +439,8 @@ wait_for_frontend_readiness() {
        [[ "$frontend_status_value" == "running" ]] && \
        probe_frontend_url "http://backend:8000/health" && \
        probe_frontend_url "http://127.0.0.1/" && \
-       probe_frontend_url "http://127.0.0.1/api/v1/openapi.json"; then
+       probe_frontend_url "http://127.0.0.1/api/v1/openapi.json" && \
+       probe_frontend_status "http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true" "200|401|403"; then
       return 0
     fi
 

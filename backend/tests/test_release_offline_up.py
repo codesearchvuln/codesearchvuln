@@ -167,14 +167,24 @@ fi
 if [ "${1:-}" = "compose" ] && [ "${2:-}" = "exec" ]; then
   command="$*"
   if [[ "$command" == *"http://backend:8000/health"* ]]; then
+    printf '  HTTP/1.1 %s\n' "${FAKE_BACKEND_PROBE_STATUS:-200}"
     [ "${FAKE_BACKEND_PROBE_STATUS:-200}" = "200" ] && exit 0
     exit 1
   fi
   if [[ "$command" == *"http://127.0.0.1/api/v1/openapi.json"* ]]; then
+    printf '  HTTP/1.1 %s\n' "${FAKE_FRONTEND_PROXY_STATUS:-200}"
     [ "${FAKE_FRONTEND_PROXY_STATUS:-200}" = "200" ] && exit 0
     exit 1
   fi
+  if [[ "$command" == *"http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true"* ]]; then
+    printf '  HTTP/1.1 %s\n' "${FAKE_FRONTEND_PROJECTS_STATUS:-200}"
+    case "${FAKE_FRONTEND_PROJECTS_STATUS:-200}" in
+      200|401|403) exit 0 ;;
+    esac
+    exit 1
+  fi
   if [[ "$command" == *"http://127.0.0.1/"* ]]; then
+    printf '  HTTP/1.1 %s\n' "${FAKE_FRONTEND_ROOT_STATUS:-200}"
     [ "${FAKE_FRONTEND_ROOT_STATUS:-200}" = "200" ] && exit 0
     exit 1
   fi
@@ -334,6 +344,7 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert "http://backend:8000/health" in docker_commands
     assert "http://127.0.0.1/" in docker_commands
     assert "http://127.0.0.1/api/v1/openapi.json" in docker_commands
+    assert "http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true" in docker_commands
     assert "image inspect --format {{ index .Config.Labels \"org.opencontainers.image.revision\" }} vulhunter-local/backend:deadbeefcafebabe0123456789abcdef01234567" in docker_commands
     assert "backend image provenance" in combined_output
 
