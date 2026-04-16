@@ -356,6 +356,9 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert "compose exec -T frontend sh -lc" not in docker_commands
     assert "image inspect --format {{ index .Config.Labels \"org.opencontainers.image.revision\" }} vulhunter-local/backend:deadbeefcafebabe0123456789abcdef01234567" in docker_commands
     assert "backend image provenance" in combined_output
+    assert "所有服务已启动" in combined_output
+    assert "All services are up." in combined_output
+    assert f"http://localhost:{frontend_port}" in combined_output
     assert request_log == [
         "/",
         "/api/v1/openapi.json",
@@ -482,13 +485,21 @@ def test_offline_up_bash_attach_logs_mode_runs_foreground_compose_up(tmp_path: P
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    result = subprocess.run(
-        ["bash", str(script_path), "--attach-logs"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    status_by_path = {
+        "/": 200,
+        "/api/v1/openapi.json": 200,
+        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
+        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 200,
+    }
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path), "--attach-logs"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
@@ -497,6 +508,54 @@ def test_offline_up_bash_attach_logs_mode_runs_foreground_compose_up(tmp_path: P
     assert "compose up" in docker_commands
     assert "compose up -d frontend" not in docker_commands
     assert not any("http://127.0.0.1/api/v1/openapi.json" in line for line in docker_commands)
+    assert combined_output.count("所有服务已启动") == 1
+    assert combined_output.count("All services are up.") == 1
+
+
+def test_online_up_bash_waits_for_frontend_and_prints_bilingual_banner(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "online-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+
+    status_by_path = {
+        "/": 200,
+    }
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode == 0, combined_output
+    docker_commands = docker_log.read_text(encoding="utf-8")
+    assert "compose up -d" in docker_commands
+    assert "所有服务已启动" in combined_output
+    assert "All services are up." in combined_output
+    assert f"http://localhost:{frontend_port}" in combined_output
+    assert request_log == ["/"]
 
 
 def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(tmp_path: Path) -> None:

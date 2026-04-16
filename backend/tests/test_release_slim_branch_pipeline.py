@@ -449,7 +449,9 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "images-manifest-scanner.json",
         "scripts/README-COMPOSE.md",
         "scripts/offline-up.sh",
+        "scripts/online-up.sh",
         "scripts/lib/compose-env.sh",
+        "scripts/lib/startup-banner.sh",
         "docker/env/backend/env.example",
         "docker/env/backend/offline-images.env.example",
         "deploy/runtime/frontend/site/index.html",
@@ -599,6 +601,7 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
     for doc in docs:
         assert "docker compose up" in doc
         assert "offline-up.sh" in doc
+        assert "online-up.sh" in doc
         assert "load-images.sh" not in doc
         assert "use-offline-env.sh" not in doc
         assert "offline-images.env" in doc
@@ -621,6 +624,7 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "WSL" in doc or "Bash" in doc
         assert "cp " in doc
         assert "./scripts/offline-up.sh" in doc
+        assert "./scripts/online-up.sh" in doc
         assert "LLM_API_KEY" in doc
         assert "cloud" in doc.lower() or "云端" in doc
         assert "chmod +x" not in doc
@@ -663,7 +667,9 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
         encoding="utf-8"
     )
     offline_up_script = (output_dir / "scripts" / "offline-up.sh").read_text(encoding="utf-8")
+    online_up_script = (output_dir / "scripts" / "online-up.sh").read_text(encoding="utf-8")
     compose_env_helper = (output_dir / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8")
+    startup_banner_helper = (output_dir / "scripts" / "lib" / "startup-banner.sh").read_text(encoding="utf-8")
 
     assert services_metadata["revision"] == manifest["revision"]
     assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
@@ -716,6 +722,12 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "compose exec -T frontend sh -lc" not in offline_up_script
     assert "urllib.request" in offline_up_script
     assert "VULHUNTER_FRONTEND_PORT" in offline_up_script
+    assert "startup-banner.sh" in offline_up_script
+    assert "docker compose up -d" in online_up_script
+    assert "startup-banner.sh" in online_up_script
+    assert "所有服务已启动" in startup_banner_helper
+    assert "All services are up." in startup_banner_helper
+    assert "urllib.request" in startup_banner_helper
     assert "load_container_socket_gid_env" in offline_up_script
     assert "load_container_socket_env" in compose_env_helper
     assert "load_container_socket_gid_env" in compose_env_helper

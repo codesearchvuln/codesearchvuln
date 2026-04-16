@@ -38,10 +38,18 @@ cp docker/env/backend/env.example docker/env/backend/.env
 启动：
 
 ```bash
+bash ./scripts/online-up.sh
+```
+
+这里启动的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。脚本会在本地 `3000` 端口真正可访问后输出中英双语提示。
+
+如需走低阶命令，也可以直接执行：
+
+```bash
 docker compose up -d
 ```
 
-这里启动的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。
+但这种方式不保证出现统一的终端 ready 提示。
 
 查看状态：
 

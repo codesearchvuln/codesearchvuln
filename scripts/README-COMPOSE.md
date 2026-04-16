@@ -32,7 +32,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ## 命令说明
 
-### `docker compose up -d`
+### `bash ./scripts/online-up.sh`
 
 - 默认使用已发布且 digest 固定的运行镜像，包括 `backend`、`postgres`、`redis`、`scan-workspace-init`、scanner runners 与 `sandbox-runner`
 - 默认 backend 运行镜像对应 `runtime-plain` target，不再依赖 release 专用选择性 Cython / `.so` 产物
@@ -41,6 +41,15 @@ cp docker/env/backend/env.example docker/env/backend/.env
 - `db` 与 `redis` 仍由当前 compose 文件拉起
 - `nexus-web` 与 `nexus-itemDetail` 不再启动独立容器，而是作为本地静态页面挂载到主前端容器中
 - release 合同下的 runner preflight 只会校验并拉取声明的运行镜像，不会回退到本地构建
+- 脚本会在本地 `3000` 端口真正可访问后打印中英双语提示
+
+如果你只想走低阶命令，也可以直接执行：
+
+```bash
+docker compose up -d
+```
+
+但这种方式不保证出现统一的终端 ready 提示。
 
 ### 离线模式
 

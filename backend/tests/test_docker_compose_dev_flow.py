@@ -408,6 +408,7 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
 
     for doc in (root_readme, root_readme_en, compose_readme):
         assert "docker compose up -d" in doc
+        assert "online-up.sh" in doc
         assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in doc
         assert "docker-compose.full.yml" not in doc
         assert "docker-compose.self-contained.yml" not in doc

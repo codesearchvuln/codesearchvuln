@@ -24,10 +24,18 @@ cp docker/env/backend/env.example docker/env/backend/.env
 ### 1. Online deployment (default)
 
 ```bash
+bash ./scripts/online-up.sh
+```
+
+Use this when you want the core stack to start from published, digest-pinned `backend`, scanner runner, and `sandbox-runner` images. The main frontend is still served via `STATIC_FRONTEND_IMAGE` plus the packaged static assets. The script prints a bilingual ready banner after local port `3000` is actually reachable.
+
+If you want the lower-level path, you can still run:
+
+```bash
 docker compose up -d
 ```
 
-Use this when you want the core stack to start from published, digest-pinned `backend`, scanner runner, and `sandbox-runner` images. The main frontend is still served via `STATIC_FRONTEND_IMAGE` plus the packaged static assets.
+That path remains supported, but it does not guarantee the unified ready prompt.
 
 ### 2. Offline deployment (optional)
 

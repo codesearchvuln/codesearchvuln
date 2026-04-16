@@ -29,10 +29,18 @@ Choose exactly one shell path。
 ## 2. 在线启动
 
 ```bash
+bash ./scripts/online-up.sh
+```
+
+这里启动的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。脚本会在本地 `3000` 端口真正可访问后打印中英双语提示。
+
+如果你只想走低阶命令，也可以直接执行：
+
+```bash
 docker compose up -d
 ```
 
-这里启动的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。
+但这种方式不保证出现统一的终端 ready 提示。
 
 注意：`http://localhost:3000/` 可访问并不等价于 dashboard 已恢复，仍然需要验证同源 `/api/v1/...`。
 若首页根本起不来，也可能是 backend 因数据库契约不兼容而拒绝启动，并连带阻塞 frontend。

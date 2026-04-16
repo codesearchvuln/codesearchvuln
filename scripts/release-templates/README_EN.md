@@ -38,10 +38,18 @@ If your deployment uses a cloud model provider, runtime network access to that A
 Start the stack:
 
 ```bash
+bash ./scripts/online-up.sh
+```
+
+The default backend started here is also the `runtime-plain` artifact, not a release-only selective `.so` / Cython assembly path. The script prints a bilingual ready banner after local port `3000` is actually reachable.
+
+If you want the lower-level path, you can still run:
+
+```bash
 docker compose up -d
 ```
 
-The default backend started here is also the `runtime-plain` artifact, not a release-only selective `.so` / Cython assembly path.
+That path remains supported, but it does not guarantee the unified ready prompt.
 
 Check status:
 

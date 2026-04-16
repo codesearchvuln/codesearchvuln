@@ -175,8 +175,10 @@ overlay_release_templates() {
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
   cp "$TEMPLATE_DIR/offline-up.sh" "$OUTPUT_DIR/scripts/offline-up.sh"
+  cp "$TEMPLATE_DIR/online-up.sh" "$OUTPUT_DIR/scripts/online-up.sh"
   cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/lib/compose-env.sh"
-  chmod +x "$OUTPUT_DIR/scripts/offline-up.sh"
+  cp "$TEMPLATE_DIR/lib/startup-banner.sh" "$OUTPUT_DIR/scripts/lib/startup-banner.sh"
+  chmod +x "$OUTPUT_DIR/scripts/offline-up.sh" "$OUTPUT_DIR/scripts/online-up.sh"
   render_release_compose
   python3 - \
     "$CONTRACT_PATH" \
@@ -294,7 +296,9 @@ validate_release_tree() {
     "images-manifest-scanner.json"
     "scripts/README-COMPOSE.md"
     "scripts/offline-up.sh"
+    "scripts/online-up.sh"
     "scripts/lib/compose-env.sh"
+    "scripts/lib/startup-banner.sh"
     "docker/env/backend/env.example"
     "docker/env/backend/offline-images.env.example"
     "deploy/runtime/frontend/site/index.html"

@@ -13,6 +13,7 @@ BACKEND_ENV_EXAMPLE="${BACKEND_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/env.exa
 OFFLINE_ENV_FILE="${OFFLINE_ENV_FILE:-$ROOT_DIR/docker/env/backend/offline-images.env}"
 OFFLINE_ENV_EXAMPLE="${OFFLINE_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/offline-images.env.example}"
 COMPOSE_ENV_HELPER="${COMPOSE_ENV_HELPER:-$ROOT_DIR/scripts/lib/compose-env.sh}"
+STARTUP_BANNER_HELPER="${STARTUP_BANNER_HELPER:-$ROOT_DIR/scripts/lib/startup-banner.sh}"
 ATTACH_LOGS="false"
 LAST_RELEASE_PROBE_RESULTS=""
 
@@ -615,6 +616,7 @@ main() {
   [[ -f "$SERVICES_METADATA_FILE" ]] || die "images manifest not found: $SERVICES_METADATA_FILE"
   [[ -f "$SCANNER_METADATA_FILE" ]] || die "images manifest not found: $SCANNER_METADATA_FILE"
   [[ -f "$COMPOSE_ENV_HELPER" ]] || die "missing compose env helper: $COMPOSE_ENV_HELPER"
+  [[ -f "$STARTUP_BANNER_HELPER" ]] || die "missing startup banner helper: $STARTUP_BANNER_HELPER"
 
   ensure_file_from_example \
     "$BACKEND_ENV_FILE" \
@@ -631,6 +633,8 @@ main() {
 
   # shellcheck disable=SC1090
   source "$COMPOSE_ENV_HELPER"
+  # shellcheck disable=SC1090
+  source "$STARTUP_BANNER_HELPER"
   load_container_socket_env
   load_container_socket_gid_env
 
@@ -664,8 +668,21 @@ main() {
 
   if [[ "$ATTACH_LOGS" == "true" ]]; then
     log_info "backend is healthy; attaching startup logs with docker compose up"
+    (
+      if wait_for_frontend_readiness; then
+        print_release_ready_banner
+      fi
+    ) &
+    readiness_pid="$!"
+    set +e
     compose up
-    return 0
+    compose_status="$?"
+    set -e
+    if [[ "$compose_status" -ne 0 ]] && kill -0 "$readiness_pid" >/dev/null 2>&1; then
+      kill "$readiness_pid" >/dev/null 2>&1 || true
+    fi
+    wait "$readiness_pid" 2>/dev/null || true
+    return "$compose_status"
   fi
 
   log_info "starting docker compose up -d frontend"
@@ -683,7 +700,7 @@ main() {
     die "release services failed readiness checks"
   fi
 
-  log_info "offline startup ready"
+  print_release_ready_banner
 }
 
 main "$@"
