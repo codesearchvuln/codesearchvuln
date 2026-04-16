@@ -178,6 +178,7 @@ overlay_release_templates() {
   cp "$TEMPLATE_DIR/online-up.sh" "$OUTPUT_DIR/scripts/online-up.sh"
   cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/lib/compose-env.sh"
   cp "$TEMPLATE_DIR/lib/startup-banner.sh" "$OUTPUT_DIR/scripts/lib/startup-banner.sh"
+  cp "$TEMPLATE_DIR/lib/release-refresh.sh" "$OUTPUT_DIR/scripts/lib/release-refresh.sh"
   chmod +x "$OUTPUT_DIR/scripts/offline-up.sh" "$OUTPUT_DIR/scripts/online-up.sh"
   render_release_compose
   python3 - \
@@ -299,6 +300,7 @@ validate_release_tree() {
     "scripts/online-up.sh"
     "scripts/lib/compose-env.sh"
     "scripts/lib/startup-banner.sh"
+    "scripts/lib/release-refresh.sh"
     "docker/env/backend/env.example"
     "docker/env/backend/offline-images.env.example"
     "deploy/runtime/frontend/site/index.html"

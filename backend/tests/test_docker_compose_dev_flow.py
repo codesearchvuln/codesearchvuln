@@ -425,6 +425,11 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
     assert "package-release-artifacts.sh" not in root_readme_en
     assert "package-release-artifacts.sh" not in compose_readme
     assert "deploy-release-artifacts.sh" not in compose_readme
+    assert "VULHUNTER_RELEASE_PROJECT_NAME" in compose_readme
+    assert "vulhunter-release" in compose_readme
+    assert "不会删除任何 Docker volume" in compose_readme or "不会删除这些 volumes" in compose_readme
+    assert "does not perform the release refresh" in root_readme_en
+    assert "不会执行 release refresh 合同里的预拉取与清理" in root_readme or "不会执行 release refresh 合同里的拉取与清理" in root_readme
 
 
 def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:

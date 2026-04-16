@@ -14,6 +14,7 @@ OFFLINE_ENV_FILE="${OFFLINE_ENV_FILE:-$ROOT_DIR/docker/env/backend/offline-image
 OFFLINE_ENV_EXAMPLE="${OFFLINE_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/offline-images.env.example}"
 COMPOSE_ENV_HELPER="${COMPOSE_ENV_HELPER:-$ROOT_DIR/scripts/lib/compose-env.sh}"
 STARTUP_BANNER_HELPER="${STARTUP_BANNER_HELPER:-$ROOT_DIR/scripts/lib/startup-banner.sh}"
+RELEASE_REFRESH_HELPER="${RELEASE_REFRESH_HELPER:-$ROOT_DIR/scripts/lib/release-refresh.sh}"
 ATTACH_LOGS="false"
 LAST_RELEASE_PROBE_RESULTS=""
 
@@ -291,10 +292,7 @@ validate_backend_image_provenance() {
 
 validate_compose_images_local_only() {
   local compose_output
-  compose_output="$(
-    cd "$ROOT_DIR"
-    docker compose config
-  )"
+  compose_output="$(compose_release config)"
 
   COMPOSE_CONFIG="$compose_output" python3 - "$SERVICES_METADATA_FILE" "$SCANNER_METADATA_FILE" <<'PY'
 from __future__ import annotations
@@ -325,15 +323,8 @@ if violations:
 PY
 }
 
-compose() {
-  (
-    cd "$ROOT_DIR"
-    docker compose "$@"
-  )
-}
-
 service_cid() {
-  compose ps -q "$1"
+  compose_release ps -q "$1"
 }
 
 service_status() {
@@ -460,7 +451,7 @@ emit_probe_results() {
 }
 
 collect_compose_logs() {
-  compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100 2>&1 || true
+  compose_release logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100 2>&1 || true
 }
 
 emit_failure_hints() {
@@ -617,6 +608,7 @@ main() {
   [[ -f "$SCANNER_METADATA_FILE" ]] || die "images manifest not found: $SCANNER_METADATA_FILE"
   [[ -f "$COMPOSE_ENV_HELPER" ]] || die "missing compose env helper: $COMPOSE_ENV_HELPER"
   [[ -f "$STARTUP_BANNER_HELPER" ]] || die "missing startup banner helper: $STARTUP_BANNER_HELPER"
+  [[ -f "$RELEASE_REFRESH_HELPER" ]] || die "missing release refresh helper: $RELEASE_REFRESH_HELPER"
 
   ensure_file_from_example \
     "$BACKEND_ENV_FILE" \
@@ -635,31 +627,37 @@ main() {
   source "$COMPOSE_ENV_HELPER"
   # shellcheck disable=SC1090
   source "$STARTUP_BANNER_HELPER"
+  # shellcheck disable=SC1090
+  source "$RELEASE_REFRESH_HELPER"
   load_container_socket_env
   load_container_socket_gid_env
 
   local arch services_bundle scanner_bundle
   arch="$(detect_server_arch)"
+  log_info "detected release compose project: $(release_compose_project_name)"
   log_info "detected architecture: $arch"
   services_bundle="$(prevalidate_bundle "services" "$arch")"
   scanner_bundle="$(prevalidate_bundle "scanner" "$arch")"
 
+  parse_and_export_offline_env
+  validate_compose_images_local_only
+
   [[ -n "${DOCKER_SOCKET_PATH:-}" ]] && log_info "detected Docker socket path: ${DOCKER_SOCKET_PATH}"
   [[ -n "${DOCKER_SOCKET_GID:-}" ]] && log_info "detected Docker socket gid: ${DOCKER_SOCKET_GID}"
+
+  cleanup_release_stack
 
   load_bundle "$services_bundle"
   load_bundle "$scanner_bundle"
   ensure_images_ready
   validate_backend_image_provenance
-  parse_and_export_offline_env
-  validate_compose_images_local_only
 
   log_info "starting docker compose up -d db redis db-bootstrap backend"
-  compose up -d db redis db-bootstrap backend
+  compose_release up -d db redis db-bootstrap backend
 
   if ! wait_for_backend_readiness; then
     log_warn "release readiness probe failed"
-    compose ps || true
+    compose_release ps || true
     logs_output="$(collect_compose_logs)"
     printf '%s\n' "$logs_output" >&2
     emit_failure_hints "$logs_output"
@@ -675,7 +673,7 @@ main() {
     ) &
     readiness_pid="$!"
     set +e
-    compose up
+    compose_release up
     compose_status="$?"
     set -e
     if [[ "$compose_status" -ne 0 ]] && kill -0 "$readiness_pid" >/dev/null 2>&1; then
@@ -686,14 +684,14 @@ main() {
   fi
 
   log_info "starting docker compose up -d frontend"
-  compose up -d frontend
+  compose_release up -d frontend
 
   if ! wait_for_frontend_readiness; then
     log_warn "release readiness probe failed"
     if [[ -n "$LAST_RELEASE_PROBE_RESULTS" ]]; then
       emit_probe_results "$LAST_RELEASE_PROBE_RESULTS"
     fi
-    compose ps || true
+    compose_release ps || true
     logs_output="$(collect_compose_logs)"
     printf '%s\n' "$logs_output" >&2
     emit_failure_hints "$logs_output"

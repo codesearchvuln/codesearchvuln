@@ -27,7 +27,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 bash ./scripts/online-up.sh
 ```
 
-Use this when you want the core stack to start from published, digest-pinned `backend`, scanner runner, and `sandbox-runner` images. The main frontend is still served via `STATIC_FRONTEND_IMAGE` plus the packaged static assets. The script prints a bilingual ready banner after local port `3000` is actually reachable.
+Use this when you want the core stack to refresh from published, digest-pinned `backend`, scanner runner, and `sandbox-runner` images. The main frontend is still served via `STATIC_FRONTEND_IMAGE` plus the packaged static assets. The script defaults to the fixed Compose project name `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release`, pulls current release images first, then cleans up the current release-stack containers and images without removing volumes. It prints a bilingual ready banner only after local port `3000` is actually reachable.
 
 If you want the lower-level path, you can still run:
 
@@ -35,7 +35,7 @@ If you want the lower-level path, you can still run:
 docker compose up -d
 ```
 
-That path remains supported, but it does not guarantee the unified ready prompt.
+That path remains supported, but it is only the low-level `docker compose up -d`: it does not perform the release refresh pre-pull and cleanup contract and does not guarantee the unified ready prompt.
 
 ### 2. Offline deployment (optional)
 
@@ -50,7 +50,7 @@ If you want startup logs attached in the terminal:
 bash ./scripts/offline-up.sh --attach-logs
 ```
 
-Use this when you have preloaded the offline image bundle and want the same runtime stack to switch to local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution. The offline path is now Bash/WSL-only; native Windows PowerShell is no longer part of the release contract. The default mode stays detached; `--attach-logs` switches to foreground output after backend health turns green.
+Use this when you have preloaded the offline image bundle and want the same runtime stack to refresh onto local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution. The script validates the tar bundles first, then cleans up the current `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release-stack containers and images without removing volumes. The offline path is now Bash/WSL-only; native Windows PowerShell is no longer part of the release contract. Offline reruns still require both tar bundles to remain available. The default mode stays detached; `--attach-logs` switches to foreground output after backend health turns green.
 
 ## Explicitly outside the release contract
 

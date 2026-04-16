@@ -456,6 +456,7 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "scripts/online-up.sh",
         "scripts/lib/compose-env.sh",
         "scripts/lib/startup-banner.sh",
+        "scripts/lib/release-refresh.sh",
         "docker/env/backend/env.example",
         "docker/env/backend/offline-images.env.example",
         "deploy/runtime/frontend/site/index.html",
@@ -606,6 +607,9 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "docker compose up" in doc
         assert "offline-up.sh" in doc
         assert "online-up.sh" in doc
+        assert "VULHUNTER_RELEASE_PROJECT_NAME" in doc
+        assert "vulhunter-release" in doc
+        assert "volume" in doc.lower() or "卷" in doc
         assert "load-images.sh" not in doc
         assert "use-offline-env.sh" not in doc
         assert "offline-images.env" in doc
@@ -634,6 +638,10 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "chmod +x" not in doc
         assert "chmod 666" not in doc
         assert "docker compose down" not in doc or "down -v" in doc
+
+    compose_doc = docs[2]
+    assert "VULHUNTER_RELEASE_PROJECT_NAME" in compose_doc
+    assert "vulhunter-release" in compose_doc
 
 
 def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tmp_path: Path) -> None:
@@ -674,6 +682,7 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     online_up_script = (output_dir / "scripts" / "online-up.sh").read_text(encoding="utf-8")
     compose_env_helper = (output_dir / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8")
     startup_banner_helper = (output_dir / "scripts" / "lib" / "startup-banner.sh").read_text(encoding="utf-8")
+    release_refresh_helper = (output_dir / "scripts" / "lib" / "release-refresh.sh").read_text(encoding="utf-8")
 
     assert services_metadata["revision"] == manifest["revision"]
     assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
@@ -717,6 +726,9 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
     assert "offline-up" in offline_env
     assert "[offline-up]" in offline_up_script
+    assert "RELEASE_REFRESH_HELPER" in offline_up_script
+    assert "compose_release" in offline_up_script
+    assert "cleanup_release_stack" in offline_up_script
     assert "images-manifest-services.json" in offline_up_script
     assert "images-manifest-scanner.json" in offline_up_script
     assert "docker/env/backend/offline-images.env" in offline_up_script
@@ -727,8 +739,18 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "urllib.request" in offline_up_script
     assert "VULHUNTER_FRONTEND_PORT" in offline_up_script
     assert "startup-banner.sh" in offline_up_script
+    assert "RELEASE_REFRESH_HELPER" in online_up_script
+    assert "pull" in online_up_script
+    assert "compose_release pull" in online_up_script
+    assert "cleanup_release_stack" in online_up_script
     assert "docker compose up -d" in online_up_script
     assert "startup-banner.sh" in online_up_script
+    assert "VULHUNTER_RELEASE_PROJECT_NAME" in release_refresh_helper
+    assert "vulhunter-release" in release_refresh_helper
+    assert "release_compose_project_name" in release_refresh_helper
+    assert 'docker ps -aq --filter "label=com.docker.compose.project=' in release_refresh_helper
+    assert "compose_release down --remove-orphans" in release_refresh_helper
+    assert "docker image rm" in release_refresh_helper
     assert "所有服务已启动" in startup_banner_helper
     assert "All services are up." in startup_banner_helper
     assert "urllib.request" in startup_banner_helper

@@ -33,7 +33,7 @@ bash ./scripts/online-up.sh
 ```
 
 用途：
-直接使用已发布且 digest 固定的 `backend`、scanner runner 与 `sandbox-runner` 镜像启动核心栈；主 frontend 由 `STATIC_FRONTEND_IMAGE` 承载随包静态文件与 nginx 配置。脚本会在本地 `3000` 端口真正可访问后输出中英双语提示。
+直接使用已发布且 digest 固定的 `backend`、scanner runner 与 `sandbox-runner` 镜像刷新当前 release stack；主 frontend 由 `STATIC_FRONTEND_IMAGE` 承载随包静态文件与 nginx 配置。脚本默认固定 Compose project name 为 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release`，会先拉取当前 release 镜像，再清理当前 release stack 的容器与镜像，但不会删除 volumes；本地 `3000` 端口真正可访问后才会输出中英双语提示。
 
 如需走低阶命令，也可以直接执行：
 
@@ -41,7 +41,7 @@ bash ./scripts/online-up.sh
 docker compose up -d
 ```
 
-但这种方式不保证出现统一的终端 ready 提示。
+但这种方式只是低阶 `docker compose up -d`，不会执行 release refresh 合同里的预拉取与清理，也不保证出现统一的终端 ready 提示。
 
 ### 2. 离线部署（可选）
 
@@ -57,7 +57,7 @@ bash ./scripts/offline-up.sh --attach-logs
 ```
 
 用途：
-预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签启动同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层。默认模式不附着日志，传 `--attach-logs` 才会在 backend 健康后切到前台输出。
+预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签刷新同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。脚本会先校验 tar bundle，再清理当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与镜像，但不会删除 volumes。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层；离线重跑前，两份 tar bundle 也必须仍然存在。默认模式不附着日志，传 `--attach-logs` 才会在 backend 健康后切到前台输出。
 
 ## 明确不属于 release contract 的路径
 

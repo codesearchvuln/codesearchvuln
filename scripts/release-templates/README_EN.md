@@ -8,6 +8,8 @@ The default release backend image now always comes from the Docker `runtime-plai
 
 This is a breaking database-compatibility change: old `postgres_data` volumes are no longer expected to start successfully or auto-upgrade under a newer release. Back up the old database volume and `backend_uploads` before upgrading. The new release only supports empty-database bootstrap or restoring a snapshot that already matches the current version.
 
+`online-up.sh` and `offline-up.sh` now refresh the current release stack instead of only starting it once. The default fixed Compose project name is `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release`; the scripts only touch that release stack, and after online pulls or offline bundle prevalidation complete they stop and remove the current release-stack containers and their images, but never any Docker volumes.
+
 ## 1. Before You Start
 
 - Supported hosts: `Ubuntu 22.04 LTS`, `Ubuntu 24.04 LTS`, `Windows 10 WSL2 + Ubuntu 22.04 LTS`, `Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -35,13 +37,13 @@ If your deployment uses a cloud model provider, runtime network access to that A
 
 ## 3. Online Deployment
 
-Start the stack:
+Refresh the current release stack:
 
 ```bash
 bash ./scripts/online-up.sh
 ```
 
-The default backend started here is also the `runtime-plain` artifact, not a release-only selective `.so` / Cython assembly path. The script prints a bilingual ready banner after local port `3000` is actually reachable.
+The default backend refreshed here is also the `runtime-plain` artifact, not a release-only selective `.so` / Cython assembly path. The script pulls the current release images first, then cleans up the current `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release-stack containers and images before starting again. It prints a bilingual ready banner only after local port `3000` is actually reachable. Online reruns pull again, but never remove volumes.
 
 If you want the lower-level path, you can still run:
 
@@ -49,7 +51,7 @@ If you want the lower-level path, you can still run:
 docker compose up -d
 ```
 
-That path remains supported, but it does not guarantee the unified ready prompt.
+That path remains supported, but it is only the low-level `docker compose up -d`: it does not do the refresh pull-and-cleanup sequence and does not guarantee the unified ready prompt.
 
 Check status:
 
@@ -88,9 +90,10 @@ The offline script will automatically:
 - auto-copy missing `docker/env/backend/.env`
 - auto-copy missing `docker/env/backend/offline-images.env`
 - read the bundled `release-snapshot-lock.json`
-- validate the `services` and `scanner` tarball filename and SHA256 before `docker load`, so the offline bundles match this release snapshot
+- validate the `services` and `scanner` tarball filename and SHA256 before cleaning up the current release stack, so the offline bundles match this release snapshot
 - load the `services` and `scanner` offline bundles
-- start `docker compose up -d`
+- stop and remove only the current `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release-stack containers and their images, never volumes and never other Compose projects
+- run staged `docker compose up -d` again to restore the release stack
 - wait for backend container health, then run host-side probes for frontend `/`, proxied `http://127.0.0.1/api/v1/openapi.json`, proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`, and proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` before reporting ready
 - frontend readiness no longer depends on `sh` / `wget` being present inside the static frontend image
 - the default mode stays detached; `--attach-logs` switches to foreground `docker compose up` after backend health turns green
@@ -101,7 +104,7 @@ If you want to inspect the offline image mapping, check:
 
 - `docker/env/backend/offline-images.env`
 
-After editing `.env` or `offline-images.env`, rerun the same offline command.
+After editing `.env` or `offline-images.env`, rerun the same offline command. Offline reruns still require both tar bundles to remain available in the release root or `images/`.
 
 ## 5. Access After Deployment
 
@@ -149,5 +152,6 @@ docker compose down -v
 
 `docker compose down -v` removes persistent data. Use it only when you intentionally want to clear runtime data.
 For cross-version upgrades, back up `postgres_data` and `backend_uploads` first; do not treat `down -v` as a routine upgrade step.
+For routine refresh / upgrade flows, rerun `bash ./scripts/online-up.sh` or `bash ./scripts/offline-up.sh`; plain `docker compose up -d` / `down` remain low-level Compose operations and do not perform the release refresh pre-pull or prevalidation-and-cleanup contract.
 
 See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for more Docker Compose commands.

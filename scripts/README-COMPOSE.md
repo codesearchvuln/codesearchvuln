@@ -10,6 +10,8 @@ generated release tree 只暴露一份运行时 compose 合同：`docker-compose
 
 这是一次数据库兼容策略收紧的 breaking change：旧 `postgres_data` 不再保证能被新版本直接启动或自动前滚。升级前请备份旧数据库卷与 `backend_uploads`；新版本默认只接受空库 bootstrap 或与当前版本匹配的数据库快照。
 
+release refresh 脚本默认固定 Compose project name 为 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release`。它们只清理当前 release stack 的容器与对应镜像，不会删除任何 Docker volume，也不会影响其他 Compose project。
+
 ## 运行前提与支持边界
 
 - 当前 release 合同仅面向宿主机部署，支持的宿主机环境为：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -34,13 +36,15 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ### `bash ./scripts/online-up.sh`
 
+- 这个入口的合同是“刷新当前 release stack”，不是“仅执行一次启动”
 - 默认使用已发布且 digest 固定的运行镜像，包括 `backend`、`postgres`、`redis`、`scan-workspace-init`、scanner runners 与 `sandbox-runner`
 - 默认 backend 运行镜像对应 `runtime-plain` target，不再依赖 release 专用选择性 Cython / `.so` 产物
 - `db-bootstrap` 会在 backend 启动前显式执行数据库 bootstrap；backend 自身不再承担旧库自动升级职责
 - 主 frontend 不是 `vulhunter-frontend` 运行镜像，而是 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，加上 `./deploy/runtime/frontend/site` 与 `./deploy/runtime/frontend/nginx/default.conf` 挂载内容
 - `db` 与 `redis` 仍由当前 compose 文件拉起
 - `nexus-web` 与 `nexus-itemDetail` 不再启动独立容器，而是作为本地静态页面挂载到主前端容器中
-- release 合同下的 runner preflight 只会校验并拉取声明的运行镜像，不会回退到本地构建
+- release 合同下的 runner preflight 只会校验并拉取声明的运行镜像，不会回退到本地构建；在线重跑会再次拉取这些镜像
+- 脚本会在重新启动前，停止并删除当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与对应镜像，但绝不删除 volumes
 - 脚本会在本地 `3000` 端口真正可访问后打印中英双语提示
 
 如果你只想走低阶命令，也可以直接执行：
@@ -50,6 +54,7 @@ docker compose up -d
 ```
 
 但这种方式不保证出现统一的终端 ready 提示。
+它也不会执行 release refresh 合同里的预拉取、容器与镜像清理步骤。
 
 ### 离线模式
 
@@ -69,8 +74,10 @@ bash ./scripts/offline-up.sh --attach-logs
 - `vulhunter-services-images-<arch>.tar.zst`
 - `vulhunter-scanner-images-<arch>.tar.zst`
 - 用户侧仍然只需要这两份 tar 包；两份文件都需要放在 release 根目录或 `images/` 目录，且必须与当前机器架构匹配（`amd64` / `arm64`），并与当前 release tree 来自同一个 snapshot
-- `offline-up.sh` 会先读取 release tree 自带的 `release-snapshot-lock.json`，在 `docker load` 之前校验两份 bundle 的文件名与 SHA256；通过后才会导入离线镜像包，加载 `offline-images.env`，切换到本地 `vulhunter-local/*` 镜像标签，然后等待 release stack 通过 readiness 检查
+- `offline-up.sh` 的合同也是“刷新当前 release stack”；它会先读取 release tree 自带的 `release-snapshot-lock.json`，在清理前校验两份 bundle 的文件名与 SHA256；通过后才会导入离线镜像包，加载 `offline-images.env`，切换到本地 `vulhunter-local/*` 镜像标签
+- 之后脚本只会停止并删除当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与对应镜像，绝不删除 volumes，也不会清理其他 Compose project
 - 默认模式不显示附着日志；只有 `--attach-logs` 才会在 backend 健康后切到前台 `docker compose up`
+- 离线重跑前，两份 tar 包仍然必须保留在 release 根目录或 `images/`
 - 离线模式不会改变 compose 结构，只改变镜像来源；代码执行统一走本地 `sandbox-runner` 标签，主 frontend 仍按 `STATIC_FRONTEND_IMAGE + deploy/runtime/frontend/*` 运行，不会切回 `FRONTEND_IMAGE`
 - 如果日志出现 `DB_SCHEMA_EMPTY`、`DB_SCHEMA_MISMATCH` 或 `DB_SCHEMA_UNSUPPORTED_STATE`，说明旧数据库卷已不受此版本支持；请新建 `postgres_data` 卷或恢复与当前版本匹配的数据库快照
 
@@ -78,6 +85,7 @@ bash ./scripts/offline-up.sh --attach-logs
 
 - 默认暴露端口：`3000`、`8000`、`5432`、`6379`；`adminer` 仅在 `tools` profile 下通过 `8081` 暴露
 - 运行数据保存在 Docker volumes：`postgres_data`、`backend_uploads`、`backend_runtime_data`、`scan_workspace`、`redis_data`
+- `online-up.sh` / `offline-up.sh` 不会删除这些 volumes；只有你手工执行 `docker compose down -v` 时才会删除它们
 - 如执行 `docker compose down -v`，上述持久化数据会被一并删除
 - 跨版本升级前必须先备份 `postgres_data` 与 `backend_uploads`；不要把 `down -v` 当成普通升级流程
 

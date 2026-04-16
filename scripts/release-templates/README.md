@@ -8,6 +8,8 @@
 
 这是一次数据库兼容策略收紧的 breaking change：旧 `postgres_data` 不再保证可被新版本直接启动或自动前滚。升级前请备份旧数据库卷与 `backend_uploads`，新版本默认只接受空库初始化或与当前版本匹配的数据库快照。
 
+`online-up.sh` 与 `offline-up.sh` 现在执行的是“刷新当前 release stack”，不是“仅启动一次”。默认固定 Compose project name 为 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release`；脚本只处理这个 release stack 的资源，并且会在在线拉取或离线 bundle 预校验完成后，停止并删除当前 release stack 的容器与对应镜像，但绝不会删除任何 Docker volume。
+
 ## 1. 部署前准备
 
 - 宿主机支持：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
@@ -35,13 +37,13 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ## 3. 在线部署
 
-启动：
+刷新当前 release stack：
 
 ```bash
 bash ./scripts/online-up.sh
 ```
 
-这里启动的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。脚本会在本地 `3000` 端口真正可访问后输出中英双语提示。
+这里刷新的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。脚本会先拉取当前 release 所需镜像，再清理当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与镜像，然后重新启动；本地 `3000` 端口真正可访问后才会输出中英双语提示。在线重跑会重新拉取镜像，但不会删除 volumes。
 
 如需走低阶命令，也可以直接执行：
 
@@ -49,7 +51,7 @@ bash ./scripts/online-up.sh
 docker compose up -d
 ```
 
-但这种方式不保证出现统一的终端 ready 提示。
+但这种方式只是低阶 `docker compose up -d`：不会执行 refresh 前的拉取与清理，也不保证出现统一的终端 ready 提示。
 
 查看状态：
 
@@ -88,9 +90,10 @@ bash ./scripts/offline-up.sh --attach-logs
 - 自动复制缺失的 `docker/env/backend/.env`
 - 自动复制缺失的 `docker/env/backend/offline-images.env`
 - 读取 release tree 内置的 `release-snapshot-lock.json`
-- 在 `docker load` 前校验 `services` / `scanner` 两份 tar 包的文件名与 SHA256，确认它们和当前 release tree 属于同一个 snapshot
+- 在清理当前 release stack 之前，先校验 `services` / `scanner` 两份 tar 包的文件名与 SHA256，确认它们和当前 release tree 属于同一个 snapshot
 - 导入 `services` 与 `scanner` 两份离线镜像包
-- 启动 `docker compose up -d`
+- 只停止并删除当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与对应镜像，不会删除 volumes，也不会清理其他 Compose project
+- 分阶段重新执行 `docker compose up -d` 恢复 release stack
 - 等待 backend 容器 healthcheck 通过，再从宿主机检查 frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`、以及 proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` 全部通过后才报告 ready
 - 前端探针不再依赖 frontend 镜像内置 `sh` / `wget`
 - 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`
@@ -101,7 +104,7 @@ bash ./scripts/offline-up.sh --attach-logs
 
 - `docker/env/backend/offline-images.env`
 
-修改 `.env` 或 `offline-images.env` 后，继续重跑同一个离线命令。
+修改 `.env` 或 `offline-images.env` 后，继续重跑同一个离线命令。离线重跑前，两份 tar bundle 也必须仍然保留在 release 根目录或 `images/`。
 
 ## 5. 部署后访问
 
@@ -149,5 +152,6 @@ docker compose down -v
 
 `docker compose down -v` 会删除持久化数据，请仅在明确需要清理数据时使用。
 如需跨版本升级，请优先备份 `postgres_data` 与 `backend_uploads`，不要把 `down -v` 当成普通升级步骤。
+日常 refresh / upgrade 请重跑 `bash ./scripts/online-up.sh` 或 `bash ./scripts/offline-up.sh`；单独执行 `docker compose up -d` / `down` 只是低阶 Compose 操作，不会执行 release refresh 合同里的预拉取或预校验、容器与镜像清理步骤。
 
 更多 Docker Compose 命令见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。
