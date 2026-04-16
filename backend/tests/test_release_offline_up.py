@@ -615,12 +615,7 @@ def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(t
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "4321"
 
-    status_by_path = {
-        "/": 200,
-        "/api/v1/openapi.json": 200,
-        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
-        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 200,
-    }
+    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -663,12 +658,7 @@ def test_offline_up_bash_attach_logs_mode_runs_foreground_compose_up(tmp_path: P
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    status_by_path = {
-        "/": 200,
-        "/api/v1/openapi.json": 200,
-        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
-        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 200,
-    }
+    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -889,9 +879,7 @@ def test_online_up_bash_skips_cleanup_when_release_stack_is_empty(tmp_path: Path
     env["DOCKER_SOCKET_GID"] = "1234"
     env["FAKE_RELEASE_STACK_EMPTY"] = "1"
 
-    status_by_path = {
-        "/": 200,
-    }
+    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -936,9 +924,7 @@ def test_online_up_bash_continues_when_old_image_removal_fails(tmp_path: Path) -
     env["DOCKER_SOCKET_GID"] = "1234"
     env["FAKE_DOCKER_IMAGE_RM_FAIL"] = "1"
 
-    status_by_path = {
-        "/": 200,
-    }
+    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(

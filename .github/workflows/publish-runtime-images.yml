@@ -1879,59 +1879,80 @@ jobs:
             exit 1
           fi
 
+          set_manifest_entry() {
+            local prefix="$1"
+            local final_ref="$2"
+            local provenance_mode="$3"
+            local provenance_source_tag="$4"
+
+            printf -v "${prefix}_FINAL_REF" '%s' "${final_ref}"
+            printf -v "${prefix}_PROVENANCE_MODE" '%s' "${provenance_mode}"
+            printf -v "${prefix}_PROVENANCE_SOURCE_TAG" '%s' "${provenance_source_tag}"
+            export "${prefix}_FINAL_REF" "${prefix}_PROVENANCE_MODE" "${prefix}_PROVENANCE_SOURCE_TAG"
+          }
+
           resolve_ref() {
             local image="$1"
             local ref="$2"
-            local resolved_digest
+            local prefix="$3"
+            local resolved_digest=""
+            local final_ref=""
+            local provenance_mode=""
+            local provenance_source_tag=""
 
             if [[ -n "$ref" ]]; then
-              printf '%s' "$ref"
-              return 0
-            fi
-
-            resolved_digest="$(docker buildx imagetools inspect "${image}:${IMAGE_TAG}" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
-            if [[ -z "$resolved_digest" ]]; then
-              if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
-                echo "::error::Failed to resolve digest for ${image}:${IMAGE_TAG}" >&2
+              final_ref="$ref"
+              provenance_mode="built_this_run"
+            else
+              provenance_source_tag="${image}:${IMAGE_TAG}"
+              resolved_digest="$(docker buildx imagetools inspect "${provenance_source_tag}" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+              if [[ -n "$resolved_digest" ]]; then
+                final_ref="${image}@${resolved_digest}"
+                provenance_mode="resolved_fallback"
+              elif [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
+                echo "::error::Failed to resolve digest for ${provenance_source_tag}" >&2
                 return 1
               fi
-              return 0
             fi
 
-            printf '%s@%s' "$image" "$resolved_digest"
+            set_manifest_entry "${prefix}" "${final_ref}" "${provenance_mode}" "${provenance_source_tag}"
           }
 
           resolve_external_ref() {
             local ref="$1"
+            local prefix="$2"
             local image="${ref%%@*}"
-            local resolved_digest
+            local resolved_digest=""
+            local final_ref=""
+            local provenance_mode=""
+            local provenance_source_tag="${ref}"
 
             resolved_digest="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
-            if [[ -z "$resolved_digest" ]]; then
-              if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
-                echo "::error::Failed to resolve digest for ${ref}" >&2
-                return 1
-              fi
-              return 0
+            if [[ -n "$resolved_digest" ]]; then
+              final_ref="${image}@${resolved_digest}"
+              provenance_mode="resolved_fallback"
+            elif [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
+              echo "::error::Failed to resolve digest for ${ref}" >&2
+              return 1
             fi
 
-            printf '%s@%s' "$image" "$resolved_digest"
+            set_manifest_entry "${prefix}" "${final_ref}" "${provenance_mode}" "${provenance_source_tag}"
           }
 
-          export BACKEND_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend" "${BACKEND_REF}")"
-          export POSTGRES_FINAL_REF="$(resolve_external_ref "${POSTGRES_IMAGE}")"
-          export REDIS_FINAL_REF="$(resolve_external_ref "${REDIS_IMAGE}")"
-          export ADMINER_FINAL_REF="$(resolve_external_ref "${ADMINER_IMAGE}")"
-          export SCAN_WORKSPACE_INIT_FINAL_REF="$(resolve_external_ref "${SCAN_WORKSPACE_INIT_IMAGE}")"
-          export STATIC_FRONTEND_FINAL_REF="$(resolve_external_ref "${STATIC_FRONTEND_IMAGE}")"
-          export SANDBOX_RUNNER_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}")"
-          export SCANNER_YASA_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}")"
-          export SCANNER_OPENGREP_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner" "${SCANNER_OPENGREP_REF}")"
-          export SCANNER_BANDIT_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-bandit-runner" "${SCANNER_BANDIT_REF}")"
-          export SCANNER_GITLEAKS_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-gitleaks-runner" "${SCANNER_GITLEAKS_REF}")"
-          export SCANNER_PHPSTAN_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-phpstan-runner" "${SCANNER_PHPSTAN_REF}")"
-          export SCANNER_PMD_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-pmd-runner" "${SCANNER_PMD_REF}")"
-          export FLOW_PARSER_RUNNER_FINAL_REF="$(resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-flow-parser-runner" "${FLOW_PARSER_RUNNER_REF}")"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend" "${BACKEND_REF}" "BACKEND"
+          resolve_external_ref "${POSTGRES_IMAGE}" "POSTGRES"
+          resolve_external_ref "${REDIS_IMAGE}" "REDIS"
+          resolve_external_ref "${ADMINER_IMAGE}" "ADMINER"
+          resolve_external_ref "${SCAN_WORKSPACE_INIT_IMAGE}" "SCAN_WORKSPACE_INIT"
+          resolve_external_ref "${STATIC_FRONTEND_IMAGE}" "STATIC_FRONTEND"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}" "SANDBOX_RUNNER"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}" "SCANNER_YASA"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner" "${SCANNER_OPENGREP_REF}" "SCANNER_OPENGREP"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-bandit-runner" "${SCANNER_BANDIT_REF}" "SCANNER_BANDIT"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-gitleaks-runner" "${SCANNER_GITLEAKS_REF}" "SCANNER_GITLEAKS"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-phpstan-runner" "${SCANNER_PHPSTAN_REF}" "SCANNER_PHPSTAN"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-pmd-runner" "${SCANNER_PMD_REF}" "SCANNER_PMD"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-flow-parser-runner" "${FLOW_PARSER_RUNNER_REF}" "FLOW_PARSER_RUNNER"
 
           manifest_json="$(python3 - <<'PY'
           from __future__ import annotations
@@ -1941,42 +1962,113 @@ jobs:
           from datetime import datetime, timezone
 
 
-          def required(name: str) -> str:
-              value = os.environ.get(name, "").strip()
-              if not value and os.environ.get("REQUIRE_COMPLETE_MANIFEST", "false") == "true":
-                  raise SystemExit(f"missing manifest ref: {name}")
+          IMAGE_ENV_PREFIXES = {
+              "backend": "BACKEND",
+              "postgres": "POSTGRES",
+              "redis": "REDIS",
+              "adminer": "ADMINER",
+              "scan_workspace_init": "SCAN_WORKSPACE_INIT",
+              "static_frontend": "STATIC_FRONTEND",
+              "sandbox_runner": "SANDBOX_RUNNER",
+              "scanner_yasa": "SCANNER_YASA",
+              "scanner_opengrep": "SCANNER_OPENGREP",
+              "scanner_bandit": "SCANNER_BANDIT",
+              "scanner_gitleaks": "SCANNER_GITLEAKS",
+              "scanner_phpstan": "SCANNER_PHPSTAN",
+              "scanner_pmd": "SCANNER_PMD",
+              "flow_parser_runner": "FLOW_PARSER_RUNNER",
+          }
+
+
+          def required_ref(prefix: str) -> str:
+              value = os.environ.get(f"{prefix}_FINAL_REF", "").strip()
+              if not value:
+                  raise SystemExit(f"missing manifest ref: {prefix}_FINAL_REF")
+              if "@sha256:" not in value:
+                  raise SystemExit(f"manifest ref must be digest-pinned: {prefix}_FINAL_REF")
               return value
+
+
+          def provenance(prefix: str) -> dict[str, str]:
+              mode = os.environ.get(f"{prefix}_PROVENANCE_MODE", "").strip()
+              source_tag = os.environ.get(f"{prefix}_PROVENANCE_SOURCE_TAG", "").strip()
+              if mode not in {"built_this_run", "resolved_fallback"}:
+                  raise SystemExit(f"missing manifest provenance mode: {prefix}")
+
+              payload = {"mode": mode}
+              if mode == "resolved_fallback":
+                  if not source_tag:
+                      raise SystemExit(f"missing manifest provenance source_tag: {prefix}")
+                  payload["source_tag"] = source_tag
+              return payload
 
 
           payload = {
               "revision": os.environ["REVISION"],
               "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-              "images": {
-                  "backend": {"ref": required("BACKEND_FINAL_REF")},
-                  "postgres": {"ref": required("POSTGRES_FINAL_REF")},
-                  "redis": {"ref": required("REDIS_FINAL_REF")},
-                  "adminer": {"ref": required("ADMINER_FINAL_REF")},
-                  "scan_workspace_init": {"ref": required("SCAN_WORKSPACE_INIT_FINAL_REF")},
-                  "static_frontend": {"ref": required("STATIC_FRONTEND_FINAL_REF")},
-                  "sandbox_runner": {"ref": required("SANDBOX_RUNNER_FINAL_REF")},
-                  "scanner_yasa": {"ref": required("SCANNER_YASA_FINAL_REF")},
-                  "scanner_opengrep": {"ref": required("SCANNER_OPENGREP_FINAL_REF")},
-                  "scanner_bandit": {"ref": required("SCANNER_BANDIT_FINAL_REF")},
-                  "scanner_gitleaks": {"ref": required("SCANNER_GITLEAKS_FINAL_REF")},
-                  "scanner_phpstan": {"ref": required("SCANNER_PHPSTAN_FINAL_REF")},
-                  "scanner_pmd": {"ref": required("SCANNER_PMD_FINAL_REF")},
-                  "flow_parser_runner": {"ref": required("FLOW_PARSER_RUNNER_FINAL_REF")},
-              },
+              "images": {},
           }
+          for logical_name, prefix in IMAGE_ENV_PREFIXES.items():
+              payload["images"][logical_name] = {
+                  "ref": required_ref(prefix),
+                  "provenance": provenance(prefix),
+              }
           print(json.dumps(payload, separators=(",", ":")))
           PY
           )"
 
+          collect_images_by_mode() {
+            local expected_mode="$1"
+            shift
+            local entry logical_name prefix current_mode
+            local matches=()
+
+            for entry in "$@"; do
+              logical_name="${entry%%:*}"
+              prefix="${entry#*:}"
+              current_mode="$(printenv "${prefix}_PROVENANCE_MODE" || true)"
+              if [[ "${current_mode}" == "${expected_mode}" ]]; then
+                matches+=("${logical_name}")
+              fi
+            done
+
+            if ((${#matches[@]} == 0)); then
+              printf 'none'
+              return 0
+            fi
+
+            local IFS=', '
+            printf '%s' "${matches[*]}"
+          }
+
+          manifest_entries=(
+            "backend:BACKEND"
+            "postgres:POSTGRES"
+            "redis:REDIS"
+            "adminer:ADMINER"
+            "scan_workspace_init:SCAN_WORKSPACE_INIT"
+            "static_frontend:STATIC_FRONTEND"
+            "sandbox_runner:SANDBOX_RUNNER"
+            "scanner_yasa:SCANNER_YASA"
+            "scanner_opengrep:SCANNER_OPENGREP"
+            "scanner_bandit:SCANNER_BANDIT"
+            "scanner_gitleaks:SCANNER_GITLEAKS"
+            "scanner_phpstan:SCANNER_PHPSTAN"
+            "scanner_pmd:SCANNER_PMD"
+            "flow_parser_runner:FLOW_PARSER_RUNNER"
+          )
+          built_images="$(collect_images_by_mode "built_this_run" "${manifest_entries[@]}")"
+          fallback_images="$(collect_images_by_mode "resolved_fallback" "${manifest_entries[@]}")"
+
           printf '%s\n' "${manifest_json}" > release-manifest.json
           {
             echo "json=${manifest_json}"
+            echo "built_images=${built_images}"
+            echo "fallback_images=${fallback_images}"
           } >> "$GITHUB_OUTPUT"
 
       - name: 更新摘要
         run: |
           echo "- release-manifest.json generated" >> "$GITHUB_STEP_SUMMARY"
+          echo "- release-manifest built images: ${{ steps.release-manifest.outputs.built_images }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- release-manifest fallback images: ${{ steps.release-manifest.outputs.fallback_images }}" >> "$GITHUB_STEP_SUMMARY"

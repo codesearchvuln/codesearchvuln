@@ -1,13 +1,14 @@
 name: Release Branch
 
 on:
-  workflow_run:
-    workflows:
-      - Docker Publish
-    branches:
-      - main
-    types:
-      - completed
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      release_manifest:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       refresh_all_runtime_images:
@@ -25,16 +26,14 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
-  group: release-branch-${{ github.event.workflow_run.head_branch || github.ref_name || github.run_id }}
+  group: release-branch-${{ inputs.source_sha || github.ref_name || github.run_id }}
   cancel-in-progress: true
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
   prepare-release:
-    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -48,12 +47,12 @@ jobs:
       - name: 计算 release 源信息
         id: vars
         env:
-          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
-            source_ref="${WORKFLOW_RUN_HEAD_SHA}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
+            source_ref="${SOURCE_SHA_INPUT}"
           else
             source_ref="${GITHUB_SHA}"
           fi
@@ -159,51 +158,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: read
       contents: read
     outputs:
-      release_manifest: ${{ steps.from_workflow_run.outputs.release_manifest || steps.from_dispatch.outputs.release_manifest }}
+      release_manifest: ${{ steps.from_call.outputs.release_manifest || steps.from_dispatch.outputs.release_manifest }}
 
     steps:
-      - name: Load release manifest from Docker Publish workflow_run artifact
-        id: from_workflow_run
-        if: ${{ github.event_name == 'workflow_run' }}
+      - name: Load release manifest from workflow_call inputs
+        id: from_call
+        if: ${{ github.event_name == 'workflow_call' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
         run: |
           set -euo pipefail
 
-          artifacts_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts")"
-          artifact_id="$(
-            printf '%s' "${artifacts_json}" | jq -r '.artifacts[] | select(.name == "release-manifest-json") | .id' | head -n 1
-          )"
-
-          if [[ -z "${artifact_id}" || "${artifact_id}" == "null" ]]; then
-            echo "::error::release-manifest-json artifact not found for workflow run ${WORKFLOW_RUN_ID}"
-            exit 1
-          fi
-
-          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${RUNNER_TEMP}/release-manifest.zip"
-
-          release_manifest="$(
-            python3 - "${RUNNER_TEMP}/release-manifest.zip" <<'PY'
-            from __future__ import annotations
-
-            import sys
-            import zipfile
-
-
-            with zipfile.ZipFile(sys.argv[1]) as archive:
-                print(archive.read("release-manifest.json").decode("utf-8"))
-            PY
-          )"
-
-          [[ -n "${release_manifest}" ]] || { echo "::error::release manifest artifact is empty"; exit 1; }
+          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::workflow_call release manifest is empty"; exit 1; }
 
           {
             echo "release_manifest<<EOF"
-            printf '%s\n' "${release_manifest}"
+            printf '%s\n' "${RELEASE_MANIFEST}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
