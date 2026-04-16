@@ -115,18 +115,61 @@ base_url = sys.argv[2].rstrip("/")
 
 probe_specs: list[tuple[str, str, str]] = [
     ("frontend-root", f"{base_url}/", "200"),
-    ("frontend-openapi", f"{base_url}/api/v1/openapi.json", "200"),
-    (
-        "frontend-projects",
-        f"{base_url}/api/v1/projects/?skip=0&limit=1&include_metrics=true",
-        "200|401|403",
-    ),
-    (
-        "frontend-dashboard",
-        f"{base_url}/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
-        "200|401|403",
-    ),
 ]
+
+def append_asset_probes(
+    label_prefix: str,
+    index_path: Path,
+    url_prefix: str,
+) -> None:
+    try:
+        index_html = index_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise SystemExit(f"missing bundle index: {index_path}") from exc
+
+    asset_suffixes = re.findall(r'(?:src|href)="[^"]*?/(assets/[^"]+)"', index_html)
+    if not asset_suffixes:
+        raise SystemExit(f"no asset refs found in {index_path}")
+
+    seen_urls: set[str] = set()
+    for index, asset_suffix in enumerate(asset_suffixes, start=1):
+        if url_prefix:
+            asset_url = f"{base_url}/{url_prefix}/{asset_suffix}"
+        else:
+            asset_url = f"{base_url}/{asset_suffix}"
+        if asset_url in seen_urls:
+            continue
+        seen_urls.add(asset_url)
+        if asset_suffix.endswith(".js"):
+            asset_kind = "script"
+        elif asset_suffix.endswith(".css"):
+            asset_kind = "style"
+        else:
+            asset_kind = "asset"
+        probe_specs.append((f"{label_prefix}-{asset_kind}-{index}", asset_url, "200"))
+
+
+append_asset_probes(
+    "frontend-root",
+    release_root / "deploy" / "runtime" / "frontend" / "site" / "index.html",
+    "",
+)
+
+probe_specs.extend(
+    [
+        ("frontend-openapi", f"{base_url}/api/v1/openapi.json", "200"),
+        (
+            "frontend-projects",
+            f"{base_url}/api/v1/projects/?skip=0&limit=1&include_metrics=true",
+            "200|401|403",
+        ),
+        (
+            "frontend-dashboard",
+            f"{base_url}/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
+            "200|401|403",
+        ),
+    ]
+)
 
 bundle_specs = (
     ("frontend-nexus", release_root / "nexus-web" / "dist" / "index.html", "nexus"),
@@ -138,29 +181,8 @@ bundle_specs = (
 )
 
 for label, index_path, public_prefix in bundle_specs:
-    try:
-        index_html = index_path.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        raise SystemExit(f"missing bundle index: {index_path}") from exc
-
     probe_specs.append((label, f"{base_url}/{public_prefix}/", "200"))
-    asset_suffixes = re.findall(r'(?:src|href)="[^"]*?/(assets/[^"]+)"', index_html)
-    if not asset_suffixes:
-        raise SystemExit(f"no asset refs found in {index_path}")
-
-    seen_urls: set[str] = set()
-    for index, asset_suffix in enumerate(asset_suffixes, start=1):
-        asset_url = f"{base_url}/{public_prefix}/{asset_suffix}"
-        if asset_url in seen_urls:
-            continue
-        seen_urls.add(asset_url)
-        if asset_suffix.endswith(".js"):
-            asset_kind = "script"
-        elif asset_suffix.endswith(".css"):
-            asset_kind = "style"
-        else:
-            asset_kind = "asset"
-        probe_specs.append((f"{label}-{asset_kind}-{index}", asset_url, "200"))
+    append_asset_probes(label, index_path, public_prefix)
 
 for label, url, allowed_statuses in probe_specs:
     print(f"{label}\t{url}\t{allowed_statuses}")

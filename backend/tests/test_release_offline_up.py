@@ -87,6 +87,12 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _expected_asset_probe_paths(index_path: Path, public_prefix: str = "/") -> list[str]:
+    index_html = index_path.read_text(encoding="utf-8")
+    asset_suffixes = re.findall(r'(?:src|href)="[^"]*?/(assets/[^"]+)"', index_html)
+    return [f"{public_prefix}{asset_suffix}" for asset_suffix in asset_suffixes]
+
+
 def _expected_nexus_bundle_probe_paths() -> list[str]:
     bundle_contracts = (
         ("nexus-web", "/nexus/"),
@@ -95,10 +101,8 @@ def _expected_nexus_bundle_probe_paths() -> list[str]:
     probe_paths: list[str] = []
 
     for bundle_dir, public_prefix in bundle_contracts:
-        index_html = (REPO_ROOT / bundle_dir / "dist" / "index.html").read_text(encoding="utf-8")
         probe_paths.append(public_prefix)
-        asset_suffixes = re.findall(r'(?:src|href)="[^"]*?/(assets/[^"]+)"', index_html)
-        probe_paths.extend(f"{public_prefix}{asset_suffix}" for asset_suffix in asset_suffixes)
+        probe_paths.extend(_expected_asset_probe_paths(REPO_ROOT / bundle_dir / "dist" / "index.html", public_prefix))
 
     return probe_paths
 
@@ -106,6 +110,7 @@ def _expected_nexus_bundle_probe_paths() -> list[str]:
 def _expected_release_probe_paths() -> list[str]:
     return [
         "/",
+        *_expected_asset_probe_paths(REPO_ROOT / "frontend" / "dist" / "index.html"),
         "/api/v1/openapi.json",
         "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
         "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",

@@ -333,10 +333,10 @@ def test_nexus_static_bundles_are_subpath_safe() -> None:
 def test_frontend_nginx_routes_nexus_static_mounts() -> None:
     frontend_nginx = (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
     assert not (REPO_ROOT / "deploy" / "frontend" / "default.conf").exists()
-    assert "location /nexus/" in frontend_nginx
+    assert "location ^~ /nexus/" in frontend_nginx
     assert "alias /srv/nexus-web/;" in frontend_nginx
     assert "try_files $uri $uri/ /nexus/index.html;" in frontend_nginx
-    assert "location /nexus-item-detail/" in frontend_nginx
+    assert "location ^~ /nexus-item-detail/" in frontend_nginx
     assert "alias /srv/nexus-item-detail/;" in frontend_nginx
     assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in frontend_nginx
 

@@ -571,10 +571,10 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert generated_nginx == source_nginx
     assert "location /api/" in generated_nginx
     assert "proxy_pass http://backend:8000/api/;" in generated_nginx
-    assert "location /nexus/" in generated_nginx
+    assert "location ^~ /nexus/" in generated_nginx
     assert "alias /srv/nexus-web/;" in generated_nginx
     assert "try_files $uri $uri/ /nexus/index.html;" in generated_nginx
-    assert "location /nexus-item-detail/" in generated_nginx
+    assert "location ^~ /nexus-item-detail/" in generated_nginx
     assert "alias /srv/nexus-item-detail/;" in generated_nginx
     assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in generated_nginx
 
@@ -776,6 +776,7 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "所有服务已启动" in startup_banner_helper
     assert "All services are up." in startup_banner_helper
     assert "urllib.request" in startup_banner_helper
+    assert "deploy/runtime/frontend/site/index.html" in startup_banner_helper
     assert "frontend-nexus" in startup_banner_helper
     assert "frontend-item-detail" in startup_banner_helper
     assert "load_container_socket_gid_env" in offline_up_script
