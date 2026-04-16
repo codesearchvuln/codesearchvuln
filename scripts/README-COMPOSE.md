@@ -101,8 +101,10 @@ bash ./scripts/offline-up.sh --attach-logs
 
 ```bash
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -fsS http://localhost:3000/nexus/ >/dev/null
+curl -fsS http://localhost:3000/nexus-item-detail/ >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
-不要只看 `/` 或 `:8000/health`。
+`/nexus/` 与 `/nexus-item-detail/` 返回 `200` 只说明入口 HTML 可访问，还要继续确认它们引用的 JS/CSS 静态资源也能正常返回。不要只看 `/` 或 `:8000/health`。

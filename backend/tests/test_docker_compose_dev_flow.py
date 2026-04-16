@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -297,9 +298,19 @@ def test_nexus_static_bundles_are_subpath_safe() -> None:
 
     for bundle_name, dist_dir, assets_prefix, wasm_prefix in bundle_contracts:
         index_html = (dist_dir / "index.html").read_text(encoding="utf-8")
+        prefix_segment = assets_prefix.strip("/").split("/")[0]
+        double_prefix = f"/{prefix_segment}/{prefix_segment}/"
         assert assets_prefix in index_html, bundle_name
+        assert double_prefix not in index_html, bundle_name
         assert 'src="/assets/' not in index_html, bundle_name
         assert 'href="/assets/' not in index_html, bundle_name
+
+        asset_refs = re.findall(r'(?:src|href)="([^"]*?/assets/[^"]+)"', index_html)
+        assert asset_refs, bundle_name
+        for asset_ref in asset_refs:
+            assert asset_ref.startswith(assets_prefix), bundle_name
+            asset_file = asset_ref.removeprefix(f"/{prefix_segment}/")
+            assert (dist_dir / asset_file).is_file(), f"{bundle_name}: missing asset {asset_file}"
 
         bad_tokens = ('"/assets/', '"/wasm/', "`/assets/", "`/wasm/")
         offenders: list[str] = []

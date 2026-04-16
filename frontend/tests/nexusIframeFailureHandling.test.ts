@@ -64,10 +64,14 @@ test("AgentAudit 首页在 GitNexus 背景加载失败后停止继续挂载 ifra
 	);
 
 	assert.match(source, /reduceNexusEmbedLoadState/);
-	assert.match(source, /GitNexus 背景加载失败，已停止继续加载。/);
 	assert.match(source, /nexusIframeState !== "failed" \?/);
 	assert.match(source, /dispatchNexusIframeState\("load-timeout"\)/);
 	assert.match(source, /dispatchNexusIframeState\("iframe-error"\)/);
+	assert.doesNotMatch(source, /GitNexus 背景加载失败，已停止继续加载。/);
+	assert.doesNotMatch(
+		source,
+		/bg-\[radial-gradient\(circle_at_top,_rgba\(59,130,246,0\.16\),_transparent_58%\),linear-gradient\(180deg,rgba\(15,23,42,0\.86\),rgba\(2,6,23,0\.98\)\)\]/,
+	);
 });
 
 test("ProjectDetail 在 nexus-item-detail 加载失败后停止继续挂载 iframe", () => {
@@ -77,8 +81,21 @@ test("ProjectDetail 在 nexus-item-detail 加载失败后停止继续挂载 ifra
 	);
 
 	assert.match(source, /reduceNexusEmbedLoadState/);
-	assert.match(source, /项目详情背景加载失败，已停止继续加载。/);
-	assert.match(source, /itemDetailIframeState !== "failed" \?/);
 	assert.match(source, /dispatchItemDetailIframeState\("load-timeout"\)/);
 	assert.match(source, /dispatchItemDetailIframeState\("iframe-error"\)/);
+	assert.match(source, /itemDetailIframeState === "failed" \? null :/);
+	assert.doesNotMatch(source, /项目详情背景加载失败，已停止继续加载。/);
+	assert.doesNotMatch(source, /可返回列表后重新进入/);
+	assert.doesNotMatch(source, /min-h-\[600px\]/);
+});
+
+test("ProjectDetail 在项目切换时会重置 iframe 状态与归档发送标记", () => {
+	const source = fs.readFileSync(
+		path.resolve(process.cwd(), "src/pages/ProjectDetail.tsx"),
+		"utf8",
+	);
+
+	assert.match(source, /dispatchItemDetailIframeState\("reset"\)/);
+	assert.match(source, /iframeReadyRef\.current = false/);
+	assert.match(source, /archiveSentRef\.current = false/);
 });

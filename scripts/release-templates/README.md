@@ -59,7 +59,7 @@ docker compose up -d
 docker compose ps
 ```
 
-`http://localhost:3000/` 只代表前端静态首页可访问，不代表 dashboard API 代理已经可用。上线验收仍然必须检查同源 `/api/v1/...`。
+`http://localhost:3000/` 只代表前端静态首页可访问，不代表 dashboard API 代理和 `nexus-*` 静态 bundle 已经可用。上线验收仍然必须检查同源 `/api/v1/...`、`/nexus/`、`/nexus-item-detail/` 以及它们引用的静态资源。
 若首页无法打开，也可能是 backend 因数据库契约不兼容而拒绝启动，进而阻塞 frontend 的 `depends_on backend: service_healthy`。
 
 ## 4. 离线部署
@@ -94,7 +94,7 @@ bash ./scripts/offline-up.sh --attach-logs
 - 导入 `services` 与 `scanner` 两份离线镜像包
 - 只停止并删除当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与对应镜像，不会删除 volumes，也不会清理其他 Compose project
 - 分阶段重新执行 `docker compose up -d` 恢复 release stack
-- 等待 backend 容器 healthcheck 通过，再从宿主机检查 frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`、以及 proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` 全部通过后才报告 ready
+- 等待 backend 容器 healthcheck 通过，再从宿主机检查 frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`、proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14`、`http://127.0.0.1/nexus/`、`http://127.0.0.1/nexus-item-detail/`，以及这两个入口实际引用的首个 JS/CSS 静态资源全部通过后才报告 ready
 - 前端探针不再依赖 frontend 镜像内置 `sh` / `wget`
 - 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`
 
@@ -124,11 +124,13 @@ bash ./scripts/offline-up.sh --attach-logs
 docker compose ps
 docker compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -fsS http://localhost:3000/nexus/ >/dev/null
+curl -fsS http://localhost:3000/nexus-item-detail/ >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
-项目列表探针或 dashboard 探针返回 `200` / `401` / `403` 都说明代理链路仍在工作；如果是 `502` / `503` / `504`，说明前端到 backend 的 release 代理链路仍然异常。
+项目列表探针或 dashboard 探针返回 `200` / `401` / `403` 都说明代理链路仍在工作；`/nexus/` 与 `/nexus-item-detail/` 返回 `200` 只说明入口 HTML 可访问，还要继续检查它们实际引用的 JS/CSS 是否能正常返回。如果是 `502` / `503` / `504`，说明前端到 backend 的 release 代理链路仍然异常。
 
 ## 7. 常用维护命令
 

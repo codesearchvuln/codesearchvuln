@@ -59,7 +59,7 @@ Check status:
 docker compose ps
 ```
 
-`http://localhost:3000/` only proves the static frontend is reachable. It does not prove the dashboard API proxy is healthy. Release acceptance still requires checking same-origin `/api/v1/...`.
+`http://localhost:3000/` only proves the static frontend entry is reachable. It does not prove the dashboard API proxy or the `nexus-*` static bundles are healthy. Release acceptance still requires checking same-origin `/api/v1/...`, `/nexus/`, `/nexus-item-detail/`, and the static assets they reference.
 If the homepage does not come up at all, backend may be refusing to start because the database contract is incompatible, which also blocks frontend startup through `depends_on backend: service_healthy`.
 
 ## 4. Offline Deployment
@@ -94,7 +94,7 @@ The offline script will automatically:
 - load the `services` and `scanner` offline bundles
 - stop and remove only the current `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release-stack containers and their images, never volumes and never other Compose projects
 - run staged `docker compose up -d` again to restore the release stack
-- wait for backend container health, then run host-side probes for frontend `/`, proxied `http://127.0.0.1/api/v1/openapi.json`, proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`, and proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` before reporting ready
+- wait for backend container health, then run host-side probes for frontend `/`, proxied `http://127.0.0.1/api/v1/openapi.json`, proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`, proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14`, `http://127.0.0.1/nexus/`, `http://127.0.0.1/nexus-item-detail/`, and the first JS/CSS assets referenced by those two bundle entry pages before reporting ready
 - frontend readiness no longer depends on `sh` / `wget` being present inside the static frontend image
 - the default mode stays detached; `--attach-logs` switches to foreground `docker compose up` after backend health turns green
 
@@ -118,17 +118,19 @@ The main static assets and bundled `nexus-*` static pages are already included i
 
 ## 6. Post-Deploy Verification
 
-Run at least these four checks; do not stop at “the homepage opens”:
+Run at least these checks; do not stop at “the homepage opens”:
 
 ```bash
 docker compose ps
 docker compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -fsS http://localhost:3000/nexus/ >/dev/null
+curl -fsS http://localhost:3000/nexus-item-detail/ >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
-For the project-list probe or dashboard probe, `200`, `401`, or `403` all mean the proxy path is still alive. `502`, `503`, or `504` mean the release frontend can no longer reach the backend through the bundled proxy contract.
+For the project-list probe or dashboard probe, `200`, `401`, or `403` all mean the proxy path is still alive. `/nexus/` and `/nexus-item-detail/` returning `200` only prove the entry HTML is reachable; you still need the referenced JS/CSS assets to load successfully. `502`, `503`, or `504` mean the release frontend can no longer reach the backend through the bundled proxy contract.
 
 ## 7. Common Maintenance Commands
 

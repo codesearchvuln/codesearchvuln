@@ -543,6 +543,9 @@ export default function ProjectDetail() {
 	}, [id, loadProjectData]);
 
 	useEffect(() => {
+		iframeReadyRef.current = false;
+		archiveSentRef.current = false;
+		dispatchItemDetailIframeState("reset");
 		setProjectDescriptionStatus("idle");
 		setProjectDescriptionSource(null);
 		setProjectDescriptionUnsupported(false);
@@ -911,8 +914,8 @@ export default function ProjectDetail() {
 					</Button> */}
 				</div>
 			</div>
-				<div className="relative z-10 min-h-[600px] overflow-hidden rounded-lg border border-border/50 bg-black/20">
-					{itemDetailIframeState !== "failed" ? (
+				{itemDetailIframeState === "failed" ? null : (
+					<div className="relative z-10 overflow-hidden rounded-lg border border-border/50 bg-black/20">
 						<iframe
 							ref={nexusIframeRef}
 							src="/nexus-item-detail/"
@@ -922,26 +925,15 @@ export default function ProjectDetail() {
 							onLoad={handleIframeLoad}
 							onError={() => dispatchItemDetailIframeState("iframe-error")}
 						/>
-					) : (
-						<div className="flex h-[600px] w-full items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.18),_transparent_55%),linear-gradient(180deg,rgba(2,6,23,0.88),rgba(15,23,42,0.96))] px-6 text-center">
-							<div className="max-w-md rounded-2xl border border-sky-500/20 bg-slate-950/40 px-6 py-5 backdrop-blur-sm">
-								<p className="text-base font-medium text-sky-100">
-									项目详情背景加载失败，已停止继续加载。
-								</p>
-								<p className="mt-2 text-sm leading-6 text-slate-300/80">
-									可返回列表后重新进入，避免当前页面持续占用加载资源。
-								</p>
-							</div>
-						</div>
-					)}
-					{!isItemDetailReady && itemDetailIframeState !== "failed" ? (
+						{!isItemDetailReady ? (
 						<div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/35 backdrop-blur-sm">
 							<div className="rounded-2xl border border-sky-500/25 bg-slate-950/65 px-5 py-3 text-sm font-medium text-sky-100 shadow-[0_0_24px_rgba(14,165,233,0.16)]">
 								Nexus-itemDetail 正在加载…
 							</div>
 						</div>
-					) : null}
-				</div>
+						) : null}
+					</div>
+				)}
 			<div className="relative z-10 space-y-4 mt-6">
 				<ProjectDescriptionSection
 					description={project.description || ""}

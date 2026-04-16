@@ -411,43 +411,17 @@ append_release_probe_result() {
 
 run_release_readiness_probes() {
   local base_url="$1"
-
-  {
-    append_release_probe_result "frontend-root" "${base_url}/" "200"
-    append_release_probe_result "frontend-openapi" "${base_url}/api/v1/openapi.json" "200"
-    append_release_probe_result \
-      "frontend-projects" \
-      "${base_url}/api/v1/projects/?skip=0&limit=1&include_metrics=true" \
-      "200|401|403"
-    append_release_probe_result \
-      "frontend-dashboard" \
-      "${base_url}/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14" \
-      "200|401|403"
-  }
+  startup_banner_run_release_readiness_probes "$base_url"
 }
 
 release_probe_results_green() {
   local probe_results="$1"
-  local label url allowed_statuses status detail
-
-  while IFS=$'\t' read -r label url allowed_statuses status detail; do
-    [[ -n "$label" ]] || continue
-    if ! status_matches_allowed "$status" "$allowed_statuses"; then
-      return 1
-    fi
-  done <<<"$probe_results"
-
-  return 0
+  startup_banner_release_probe_results_green "$probe_results"
 }
 
 emit_probe_results() {
   local probe_results="$1"
-  local label url allowed_statuses status detail
-
-  while IFS=$'\t' read -r label url allowed_statuses status detail; do
-    [[ -n "$label" ]] || continue
-    log_warn "Probe ${label}: status=${status} allowed=${allowed_statuses} url=${url} detail=${detail}"
-  done <<<"$probe_results"
+  startup_banner_emit_release_probe_results "$probe_results"
 }
 
 collect_compose_logs() {
@@ -456,7 +430,7 @@ collect_compose_logs() {
 
 emit_failure_hints() {
   local logs="$1"
-  log_warn "Hint: a release tree is only ready after backend health, frontend /, proxied /api/v1/openapi.json, proxied project list, and proxied dashboard snapshot all succeed."
+  log_warn "Hint: a release tree is only ready after backend health, frontend /, proxied /api/v1/*, /nexus/, /nexus-item-detail/, and their referenced static assets all succeed."
   if grep -Eiq 'offline runner image unavailable|pull failed for|image missing after load' <<<"$logs"; then
     log_warn "Hint: runner images are missing from the offline bundles. Rebuild and reload both services/scanner image bundles."
   else

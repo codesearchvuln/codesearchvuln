@@ -67,7 +67,7 @@ bash ./scripts/offline-up.sh --attach-logs
 ```
 
 离线脚本会自动复制缺失的 `.env` / `offline-images.env`，并先依据 release tree 自带的 `release-snapshot-lock.json` 校验两份 tar 包的文件名与 SHA256；只有确认 bundle 与当前 snapshot 匹配后，才会导入离线镜像包，再停止并删除当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与对应镜像，然后分阶段恢复服务。
-脚本会继续等待 backend 容器 healthcheck 通过，再从宿主机检查 frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`、以及 proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14` 成功后才报告 ready。
+脚本会继续等待 backend 容器 healthcheck 通过，再从宿主机检查 frontend `/`、proxied `http://127.0.0.1/api/v1/openapi.json`、proxied `http://127.0.0.1/api/v1/projects/?skip=0&limit=1&include_metrics=true`、proxied `http://127.0.0.1/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14`、`http://127.0.0.1/nexus/`、`http://127.0.0.1/nexus-item-detail/`，以及这两个入口实际引用的首个 JS/CSS 静态资源成功后才报告 ready。
 前端探针不再依赖 frontend 镜像内置 `sh` / `wget`。
 当前 release tree 不再提供 `Windows PowerShell` 兼容层。
 默认模式不附着日志；传 `--attach-logs` 后，会在 backend 健康后切到前台 `docker compose up`。
@@ -101,11 +101,13 @@ docker compose logs -f
 docker compose ps
 docker compose logs db redis scan-workspace-init db-bootstrap backend frontend --tail=100
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
+curl -fsS http://localhost:3000/nexus/ >/dev/null
+curl -fsS http://localhost:3000/nexus-item-detail/ >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
-项目列表或 `dashboard-snapshot` 返回 `200` / `401` / `403` 都说明代理链路正常；`502` / `503` / `504` 说明 release frontend 到 backend 的代理链路仍异常。
+项目列表或 `dashboard-snapshot` 返回 `200` / `401` / `403` 都说明代理链路正常；`/nexus/` 与 `/nexus-item-detail/` 返回 `200` 只说明入口 HTML 可访问，还要继续确认它们引用的 JS/CSS 可以正常返回；`502` / `503` / `504` 说明 release frontend 到 backend 的代理链路仍异常。
 
 ## 6. 停止与清理
 

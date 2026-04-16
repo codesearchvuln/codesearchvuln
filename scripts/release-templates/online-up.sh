@@ -114,8 +114,11 @@ main() {
   log_info "starting docker compose up -d"
   compose_release up -d
 
-  if ! wait_for_local_frontend_root_ready "${ONLINE_UP_MAX_ATTEMPTS:-60}" "${ONLINE_UP_RETRY_DELAY_SECONDS:-5}"; then
+  if ! wait_for_local_frontend_release_ready "${ONLINE_UP_MAX_ATTEMPTS:-60}" "${ONLINE_UP_RETRY_DELAY_SECONDS:-5}"; then
     log_warn "online startup readiness probe failed"
+    if [[ -n "${STARTUP_BANNER_LAST_RELEASE_PROBE_RESULTS:-}" ]]; then
+      startup_banner_emit_release_probe_results "$STARTUP_BANNER_LAST_RELEASE_PROBE_RESULTS"
+    fi
     compose_release ps || true
     logs_output="$(collect_compose_logs)"
     printf '%s\n' "$logs_output" >&2

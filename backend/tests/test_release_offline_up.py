@@ -4,6 +4,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 import stat
 import subprocess
 import threading
@@ -84,6 +85,32 @@ def _write_frontend_bundle(path: Path) -> Path:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _expected_nexus_bundle_probe_paths() -> list[str]:
+    bundle_contracts = (
+        ("nexus-web", "/nexus/"),
+        ("nexus-itemDetail", "/nexus-item-detail/"),
+    )
+    probe_paths: list[str] = []
+
+    for bundle_dir, public_prefix in bundle_contracts:
+        index_html = (REPO_ROOT / bundle_dir / "dist" / "index.html").read_text(encoding="utf-8")
+        probe_paths.append(public_prefix)
+        asset_suffixes = re.findall(r'(?:src|href)="[^"]*?/(assets/[^"]+)"', index_html)
+        probe_paths.extend(f"{public_prefix}{asset_suffix}" for asset_suffix in asset_suffixes)
+
+    return probe_paths
+
+
+def _expected_release_probe_paths() -> list[str]:
+    return [
+        "/",
+        "/api/v1/openapi.json",
+        "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
+        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
+        *_expected_nexus_bundle_probe_paths(),
+    ]
 
 
 def _run_release_generator(
@@ -454,12 +481,7 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    status_by_path = {
-        "/": 200,
-        "/api/v1/openapi.json": 200,
-        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
-        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 200,
-    }
+    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -520,12 +542,7 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert "所有服务已启动" in combined_output
     assert "All services are up." in combined_output
     assert f"http://localhost:{frontend_port}" in combined_output
-    assert request_log == [
-        "/",
-        "/api/v1/openapi.json",
-        "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
-        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
-    ]
+    assert request_log == _expected_release_probe_paths()
 
 
 def test_offline_up_bash_fails_when_backend_image_revision_label_does_not_match_release_revision(
@@ -718,9 +735,7 @@ def test_online_up_bash_waits_for_frontend_and_prints_bilingual_banner(tmp_path:
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    status_by_path = {
-        "/": 200,
-    }
+    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -754,7 +769,7 @@ def test_online_up_bash_waits_for_frontend_and_prints_bilingual_banner(tmp_path:
     assert "所有服务已启动" in combined_output
     assert "All services are up." in combined_output
     assert f"http://localhost:{frontend_port}" in combined_output
-    assert request_log == ["/"]
+    assert request_log == _expected_release_probe_paths()
 
 
 def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(tmp_path: Path) -> None:
@@ -1123,12 +1138,9 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
     env["OFFLINE_UP_MAX_ATTEMPTS"] = "1"
     env["OFFLINE_UP_RETRY_DELAY_SECONDS"] = "0"
 
-    status_by_path = {
-        "/": 200,
-        "/api/v1/openapi.json": 502,
-        "/api/v1/projects/?skip=0&limit=1&include_metrics=true": 200,
-        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14": 403,
-    }
+    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
+    status_by_path["/api/v1/openapi.json"] = 502
+    status_by_path["/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"] = 403
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -1164,12 +1176,7 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
         )
         in docker_commands
     )
-    assert request_log == [
-        "/",
-        "/api/v1/openapi.json",
-        "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
-        "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
-    ]
+    assert request_log == _expected_release_probe_paths()
 
 
 def test_offline_up_bash_backend_readiness_failure_collects_dependency_logs(tmp_path: Path) -> None:

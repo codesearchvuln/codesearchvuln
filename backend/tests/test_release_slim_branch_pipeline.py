@@ -629,6 +629,8 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "generated release tree" in doc or "release 包" in doc or "release tree" in doc
         assert "/nexus/" in doc
         assert "/nexus-item-detail/" in doc
+        assert "curl -fsS http://localhost:3000/nexus/ >/dev/null" in doc
+        assert "curl -fsS http://localhost:3000/nexus-item-detail/ >/dev/null" in doc
         assert "WSL" in doc or "Bash" in doc
         assert "cp " in doc
         assert "./scripts/offline-up.sh" in doc
@@ -734,7 +736,6 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "docker/env/backend/offline-images.env" in offline_up_script
     assert "docker compose up -d" in offline_up_script
     assert "load_container_socket_env" in offline_up_script
-    assert "dashboard-snapshot?top_n=10&range_days=14" in offline_up_script
     assert "compose exec -T frontend sh -lc" not in offline_up_script
     assert "urllib.request" in offline_up_script
     assert "VULHUNTER_FRONTEND_PORT" in offline_up_script
@@ -754,6 +755,8 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "所有服务已启动" in startup_banner_helper
     assert "All services are up." in startup_banner_helper
     assert "urllib.request" in startup_banner_helper
+    assert "frontend-nexus" in startup_banner_helper
+    assert "frontend-item-detail" in startup_banner_helper
     assert "load_container_socket_gid_env" in offline_up_script
     assert "load_container_socket_env" in compose_env_helper
     assert "load_container_socket_gid_env" in compose_env_helper
