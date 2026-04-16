@@ -171,8 +171,12 @@ jobs:
     uses: ./.github/workflows/release.yml
     secrets: inherit
     permissions:
+      # GitHub statically validates nested reusable-workflow permissions even when
+      # release.yml's publish-runtime-images job is skipped under workflow_call.
       contents: write
-      packages: read
+      packages: write
+      id-token: write
+      attestations: write
     with:
       source_sha: ${{ github.sha }}
       release_manifest: ${{ needs.publish-runtime-images.outputs.release_manifest }}
