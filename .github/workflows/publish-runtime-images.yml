@@ -1950,9 +1950,6 @@ jobs:
               if [[ -n "$resolved_digest" ]]; then
                 final_ref="${image}@${resolved_digest}"
                 provenance_mode="resolved_fallback"
-              elif [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
-                echo "::error::Failed to resolve digest for ${provenance_source_tag}" >&2
-                return 1
               fi
             fi
 
@@ -1972,9 +1969,6 @@ jobs:
             if [[ -n "$resolved_digest" ]]; then
               final_ref="${image}@${resolved_digest}"
               provenance_mode="resolved_fallback"
-            elif [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
-              echo "::error::Failed to resolve digest for ${ref}" >&2
-              return 1
             fi
 
             set_manifest_entry "${prefix}" "${final_ref}" "${provenance_mode}" "${provenance_source_tag}"
@@ -1994,6 +1988,94 @@ jobs:
           resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-phpstan-runner" "${SCANNER_PHPSTAN_REF}" "SCANNER_PHPSTAN"
           resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-pmd-runner" "${SCANNER_PMD_REF}" "SCANNER_PMD"
           resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-flow-parser-runner" "${FLOW_PARSER_RUNNER_REF}" "FLOW_PARSER_RUNNER"
+
+          collect_images_by_mode() {
+            local expected_mode="$1"
+            shift
+            local entry logical_name prefix current_mode
+            local matches=()
+
+            for entry in "$@"; do
+              logical_name="${entry%%:*}"
+              prefix="${entry#*:}"
+              current_mode="$(printenv "${prefix}_PROVENANCE_MODE" || true)"
+              if [[ "${current_mode}" == "${expected_mode}" ]]; then
+                matches+=("${logical_name}")
+              fi
+            done
+
+            if ((${#matches[@]} == 0)); then
+              printf 'none'
+              return 0
+            fi
+
+            local IFS=', '
+            printf '%s' "${matches[*]}"
+          }
+
+          collect_missing_images() {
+            local entry logical_name prefix current_ref current_source_tag
+            local matches=()
+
+            for entry in "$@"; do
+              logical_name="${entry%%:*}"
+              prefix="${entry#*:}"
+              current_ref="$(printenv "${prefix}_FINAL_REF" || true)"
+              current_source_tag="$(printenv "${prefix}_PROVENANCE_SOURCE_TAG" || true)"
+              if [[ -n "${current_ref}" ]]; then
+                continue
+              fi
+              if [[ -n "${current_source_tag}" ]]; then
+                matches+=("${logical_name} (${current_source_tag})")
+              else
+                matches+=("${logical_name}")
+              fi
+            done
+
+            if ((${#matches[@]} == 0)); then
+              printf 'none'
+              return 0
+            fi
+
+            local IFS=', '
+            printf '%s' "${matches[*]}"
+          }
+
+          manifest_entries=(
+            "backend:BACKEND"
+            "postgres:POSTGRES"
+            "redis:REDIS"
+            "adminer:ADMINER"
+            "scan_workspace_init:SCAN_WORKSPACE_INIT"
+            "static_frontend:STATIC_FRONTEND"
+            "sandbox_runner:SANDBOX_RUNNER"
+            "scanner_yasa:SCANNER_YASA"
+            "scanner_opengrep:SCANNER_OPENGREP"
+            "scanner_bandit:SCANNER_BANDIT"
+            "scanner_gitleaks:SCANNER_GITLEAKS"
+            "scanner_phpstan:SCANNER_PHPSTAN"
+            "scanner_pmd:SCANNER_PMD"
+            "flow_parser_runner:FLOW_PARSER_RUNNER"
+          )
+          built_images="$(collect_images_by_mode "built_this_run" "${manifest_entries[@]}")"
+          fallback_images="$(collect_images_by_mode "resolved_fallback" "${manifest_entries[@]}")"
+          missing_images="$(collect_missing_images "${manifest_entries[@]}")"
+
+          if [[ "${missing_images}" != "none" ]]; then
+            if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" ]]; then
+              echo "::error::Release manifest is missing digest-pinned refs for: ${missing_images}" >&2
+              exit 1
+            fi
+
+            echo "::warning::Skipping release-manifest output because required fallback images are unavailable: ${missing_images}" >&2
+            {
+              echo "json="
+              echo "built_images=${built_images}"
+              echo "fallback_images=${fallback_images}"
+              echo "missing_images=${missing_images}"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           manifest_json="$(python3 - <<'PY'
           from __future__ import annotations
@@ -2058,58 +2140,21 @@ jobs:
           PY
           )"
 
-          collect_images_by_mode() {
-            local expected_mode="$1"
-            shift
-            local entry logical_name prefix current_mode
-            local matches=()
-
-            for entry in "$@"; do
-              logical_name="${entry%%:*}"
-              prefix="${entry#*:}"
-              current_mode="$(printenv "${prefix}_PROVENANCE_MODE" || true)"
-              if [[ "${current_mode}" == "${expected_mode}" ]]; then
-                matches+=("${logical_name}")
-              fi
-            done
-
-            if ((${#matches[@]} == 0)); then
-              printf 'none'
-              return 0
-            fi
-
-            local IFS=', '
-            printf '%s' "${matches[*]}"
-          }
-
-          manifest_entries=(
-            "backend:BACKEND"
-            "postgres:POSTGRES"
-            "redis:REDIS"
-            "adminer:ADMINER"
-            "scan_workspace_init:SCAN_WORKSPACE_INIT"
-            "static_frontend:STATIC_FRONTEND"
-            "sandbox_runner:SANDBOX_RUNNER"
-            "scanner_yasa:SCANNER_YASA"
-            "scanner_opengrep:SCANNER_OPENGREP"
-            "scanner_bandit:SCANNER_BANDIT"
-            "scanner_gitleaks:SCANNER_GITLEAKS"
-            "scanner_phpstan:SCANNER_PHPSTAN"
-            "scanner_pmd:SCANNER_PMD"
-            "flow_parser_runner:FLOW_PARSER_RUNNER"
-          )
-          built_images="$(collect_images_by_mode "built_this_run" "${manifest_entries[@]}")"
-          fallback_images="$(collect_images_by_mode "resolved_fallback" "${manifest_entries[@]}")"
-
           printf '%s\n' "${manifest_json}" > release-manifest.json
           {
             echo "json=${manifest_json}"
             echo "built_images=${built_images}"
             echo "fallback_images=${fallback_images}"
+            echo "missing_images=${missing_images}"
           } >> "$GITHUB_OUTPUT"
 
       - name: 更新摘要
         run: |
-          echo "- release-manifest.json generated" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "${{ steps.release-manifest.outputs.json }}" ]]; then
+            echo "- release-manifest.json generated" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- release-manifest.json skipped" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "- release-manifest built images: ${{ steps.release-manifest.outputs.built_images }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- release-manifest fallback images: ${{ steps.release-manifest.outputs.fallback_images }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- release-manifest missing images: ${{ steps.release-manifest.outputs.missing_images != '' && steps.release-manifest.outputs.missing_images || 'none' }}" >> "$GITHUB_STEP_SUMMARY"
