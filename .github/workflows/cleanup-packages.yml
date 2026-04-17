@@ -1,0 +1,112 @@
+name: Cleanup Packages
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+      timezone: Asia/Shanghai
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: "限制只清理某一个 GHCR 包；选择 all 表示扫描所有运行时镜像。"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - vulhunter-frontend
+          - vulhunter-backend
+          - vulhunter-yasa-runner
+          - vulhunter-opengrep-runner
+          - vulhunter-bandit-runner
+          - vulhunter-gitleaks-runner
+          - vulhunter-phpstan-runner
+          - vulhunter-flow-parser-runner
+          - vulhunter-pmd-runner
+          - vulhunter-sandbox-runner
+      min_versions_to_keep:
+        description: "保留最近多少个可删除的历史版本。"
+        required: true
+        default: "20"
+        type: string
+      delete_only_untagged_versions:
+        description: "默认只删未打 tag 的容器版本；关闭后按保留数删除旧版本。"
+        required: true
+        default: true
+        type: boolean
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DEFAULT_MIN_VERSIONS_TO_KEEP: "20"
+  PACKAGE_CLEANUP_OWNER: ${{ vars.PACKAGE_CLEANUP_OWNER || github.repository_owner }}
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cleanup-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup-ghcr:
+    name: Cleanup ${{ matrix.package_name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package_name:
+          - vulhunter-frontend
+          - vulhunter-backend
+          - vulhunter-yasa-runner
+          - vulhunter-opengrep-runner
+          - vulhunter-bandit-runner
+          - vulhunter-gitleaks-runner
+          - vulhunter-phpstan-runner
+          - vulhunter-flow-parser-runner
+          - vulhunter-pmd-runner
+          - vulhunter-sandbox-runner
+
+    steps:
+      - name: Skip unselected package
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.package_name != 'all' && inputs.package_name != matrix.package_name }}
+        run: |
+          set -euo pipefail
+
+          echo "Skipping package ${PACKAGE_NAME} because workflow_dispatch targeted ${TARGET_PACKAGE}." >> "$GITHUB_STEP_SUMMARY"
+        env:
+          PACKAGE_NAME: ${{ matrix.package_name }}
+          TARGET_PACKAGE: ${{ inputs.package_name }}
+
+      - name: 输出清理摘要
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.package_name == 'all' || inputs.package_name == matrix.package_name }}
+        run: |
+          set -euo pipefail
+
+          echo "## Package cleanup" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- owner: \`${{ env.PACKAGE_CLEANUP_OWNER }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- package: \`${{ matrix.package_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- min_versions_to_keep: \`${{ github.event_name == 'workflow_dispatch' && inputs.min_versions_to_keep || env.DEFAULT_MIN_VERSIONS_TO_KEEP }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- delete_only_untagged_versions: \`${{ github.event_name != 'workflow_dispatch' || inputs.delete_only_untagged_versions }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- token_source: \`${{ secrets.PACKAGES_DELETE_TOKEN != '' && 'PACKAGES_DELETE_TOKEN' || 'github.token' }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete old untagged container versions
+        if: ${{ (github.event_name != 'workflow_dispatch' || inputs.package_name == 'all' || inputs.package_name == matrix.package_name) && (github.event_name != 'workflow_dispatch' || inputs.delete_only_untagged_versions) }}
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ env.PACKAGE_CLEANUP_OWNER }}
+          package-name: ${{ matrix.package_name }}
+          package-type: container
+          min-versions-to-keep: ${{ github.event_name == 'workflow_dispatch' && inputs.min_versions_to_keep || env.DEFAULT_MIN_VERSIONS_TO_KEEP }}
+          delete-only-untagged-versions: "true"
+          token: ${{ secrets.PACKAGES_DELETE_TOKEN || github.token }}
+
+      - name: Delete old container versions
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.package_name == 'all' || inputs.package_name == matrix.package_name) && !inputs.delete_only_untagged_versions }}
+        uses: actions/delete-package-versions@v5
+        with:
+          owner: ${{ env.PACKAGE_CLEANUP_OWNER }}
+          package-name: ${{ matrix.package_name }}
+          package-type: container
+          min-versions-to-keep: ${{ inputs.min_versions_to_keep }}
+          token: ${{ secrets.PACKAGES_DELETE_TOKEN || github.token }}
