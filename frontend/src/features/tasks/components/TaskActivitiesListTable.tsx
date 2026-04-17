@@ -13,7 +13,7 @@ import {
 	formatCreatedAt,
 	getActivityDurationLabel,
 	getRelativeTime,
-	getTaskProgressPercent,
+	getTaskActivityStageBadgeMeta,
 	getTaskStatusBadgeClassName,
 	getTaskStatusText,
 	type TaskActivityItem,
@@ -131,27 +131,34 @@ function getColumns(
 					{ label: "运行中", value: "running" },
 					{ label: "已完成", value: "completed" },
 					{ label: "失败", value: "failed" },
+					{ label: "已中断", value: "interrupted" },
+					{ label: "已取消", value: "cancelled" },
 				],
 			},
 			cell: ({ row }) => {
-				const status = String(row.original.status || "")
-					.trim()
-					.toLowerCase();
-				const progress = getTaskProgressPercent(row.original, nowMs);
+				const stageBadge = getTaskActivityStageBadgeMeta(row.original);
+
+				if (stageBadge) {
+					return (
+						<div className="flex items-center">
+							<span
+								className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] leading-none tracking-normal ${stageBadge.badgeClassName}`}
+							>
+								<span
+									className={`h-2 w-2 rounded-full ${stageBadge.dotClassName}`}
+								/>
+								<span>{stageBadge.label}</span>
+							</span>
+						</div>
+					);
+				}
 
 				return (
 					<div className="flex items-center">
 						<Badge
-							className={`${getTaskStatusBadgeClassName(
-								row.original.status,
-							)} max-w-full gap-2 px-2.5`}
+							className={`${getTaskStatusBadgeClassName(row.original.status)} max-w-full gap-2 px-2.5`}
 						>
 							<span>{getTaskStatusText(row.original.status)}</span>
-							{status === "running" ? (
-								<span className="rounded-[2px] border border-current/20 bg-black/10 px-1.5 py-0.5 text-[13px] leading-none tracking-normal">
-									{progress}%
-								</span>
-							) : null}
 						</Badge>
 					</div>
 				);

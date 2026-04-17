@@ -1,3 +1,5 @@
+import { getTaskDisplayStatusSummary } from "@/features/tasks/services/taskDisplay";
+
 export type AuditSeverityKey =
   | "critical"
   | "high"
@@ -15,18 +17,6 @@ const LOG_TYPE_LABELS: Record<string, string> = {
   error: "错误",
   user: "用户",
   progress: "进度",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  running: "运行中",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  interrupted: "中止",
-  canceled: "已取消",
-  pending: "待处理",
-  waiting: "等待中",
-  created: "已创建",
 };
 
 export function toZhAgentName(raw: string): string {
@@ -122,7 +112,21 @@ export function toZhLogType(raw: string): string {
 export function toZhStatus(raw: string): string {
   const key = String(raw || "").trim().toLowerCase();
   if (!key) return "";
-  return STATUS_LABELS[key] || raw;
+  if (
+    key === "running" ||
+    key === "completed" ||
+    key === "failed" ||
+    key === "cancelled" ||
+    key === "canceled" ||
+    key === "interrupted" ||
+    key === "aborted" ||
+    key === "pending"
+  ) {
+    return getTaskDisplayStatusSummary(key).statusLabel;
+  }
+  if (key === "waiting") return "等待中";
+  if (key === "created") return "已创建";
+  return raw;
 }
 
 type EventLogPhaseLabel =

@@ -56,7 +56,6 @@ import {
   EVENT_LOG_GRID_TEMPLATE,
   EVENT_LOG_TABLE_MIN_WIDTH_PX,
   POLLING_INTERVALS,
-  TASK_PHASE_LABELS,
 } from "./constants";
 import {
   cleanThinkingContent,
@@ -124,6 +123,7 @@ import {
   buildAgentAuditStreamDisconnectTitle,
   toAgentAuditStatusLabel,
 } from "./taskStatus";
+import { buildAgentDisplayStageSummary } from "./stageProgress";
 
 const EVENT_PAGE_SIZE = 500;
 const EVENT_BATCH_SAFETY_LIMIT = 200;
@@ -926,6 +926,14 @@ function AgentAuditPageContent() {
         : null,
     [statsNow, task, tokenUsage, visibleManagedFindings],
   );
+  const stageSummary = useMemo(
+    () =>
+      buildAgentDisplayStageSummary({
+        task,
+        logs,
+      }),
+    [logs, task],
+  );
   const selectedLogItem = useMemo(
     () =>
       detailDialog?.type === "log"
@@ -1067,25 +1075,26 @@ function AgentAuditPageContent() {
     [],
   );
   const currentPhaseLabel = useMemo(() => {
-    const phaseKey = String(task?.current_phase || "")
-      .trim()
-      .toLowerCase();
-    if (phaseKey && TASK_PHASE_LABELS[phaseKey]) {
-      return TASK_PHASE_LABELS[phaseKey];
+    if (stageSummary?.currentStageLabel) {
+      return stageSummary.currentStageLabel;
     }
-    if (task?.status === "completed") return "完成";
-    if (task?.status === "failed") return "失败";
-    if (task?.status === "cancelled") return "已取消";
-    if (task?.status === "interrupted") return toAgentAuditStatusLabel("interrupted");
+    if (stageSummary?.headline) {
+      return stageSummary.headline;
+    }
+    const fallbackStatusLabel = toAgentAuditStatusLabel(task?.status);
+    if (fallbackStatusLabel) {
+      return fallbackStatusLabel;
+    }
     return null;
-  }, [task?.current_phase, task?.status]);
+  }, [stageSummary, task?.status]);
   const phaseHint = useMemo(() => {
+    if (stageSummary?.hint) return stageSummary.hint;
     const currentStep = String(task?.current_step || "").trim();
     if (currentStep) return currentStep;
     if (!isRunning) return null;
     if (currentPhaseLabel) return `当前阶段：${currentPhaseLabel}`;
     return null;
-  }, [task?.current_step, isRunning, currentPhaseLabel]);
+  }, [stageSummary?.hint, task?.current_step, isRunning, currentPhaseLabel]);
   const setDetailQuery = useCallback(
     (nextDetail: { type: "log" | "finding" | "agent"; id: string } | null) => {
       const params = new URLSearchParams(location.search);
@@ -3706,7 +3715,11 @@ function AgentAuditPageContent() {
               ref={agentContainerRef}
               className="overflow-x-auto custom-scrollbar"
             >
-              <StatsPanel summary={statsSummary} projectName={projectName} />
+              <StatsPanel
+                summary={statsSummary}
+                stageSummary={stageSummary}
+                projectName={projectName}
+              />
             </div>
           </div>
 

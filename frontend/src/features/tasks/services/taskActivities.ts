@@ -83,7 +83,12 @@ export interface TaskActivityItem {
 	projectName: string;
 	kind: TaskActivityKind;
 	sourceMode: TaskActivitySourceMode;
+	name?: string | null;
+	description?: string | null;
 	status: string;
+	currentPhase?: string | null;
+	currentStep?: string | null;
+	targetFiles?: string[] | null;
 	gitleaksEnabled?: boolean;
 	staticFindingStats?: SeverityCounts;
 	agentFindingStats?: {
@@ -106,6 +111,62 @@ export interface TaskActivityItem {
 	yasaTaskId?: string;
 	agentTaskId?: string;
 }
+
+export type TaskActivityStageKey =
+	| "static_scan"
+	| "recon"
+	| "analysis"
+	| "verification"
+	| "complete";
+
+export interface TaskActivityStageBadgeMeta {
+	key: TaskActivityStageKey;
+	label: string;
+	variant: "pending" | "running" | "completed" | "failed";
+	dotClassName: string;
+	badgeClassName: string;
+}
+
+const TASK_ACTIVITY_STAGE_LABELS: Record<TaskActivityStageKey, string> = {
+	static_scan: "静态扫描",
+	recon: "侦查",
+	analysis: "分析",
+	verification: "验证",
+	complete: "完成",
+};
+
+const TASK_ACTIVITY_STAGE_BADGE_STYLES: Record<
+	TaskActivityStageKey,
+	{ dotClassName: string; badgeClassName: string }
+> = {
+	static_scan: {
+		dotClassName: "bg-sky-500 shadow-[0_0_10px_rgba(14,165,233,0.45)]",
+		badgeClassName:
+			"border-sky-500/30 bg-sky-500/10 text-sky-100",
+	},
+	recon: {
+		dotClassName: "bg-teal-500 shadow-[0_0_10px_rgba(20,184,166,0.45)]",
+		badgeClassName:
+			"border-teal-500/30 bg-teal-500/10 text-teal-100",
+	},
+	analysis: {
+		dotClassName: "bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.45)]",
+		badgeClassName:
+			"border-amber-500/30 bg-amber-500/10 text-amber-100",
+	},
+	verification: {
+		dotClassName:
+			"bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.45)]",
+		badgeClassName:
+			"border-emerald-500/30 bg-emerald-500/10 text-emerald-100",
+	},
+	complete: {
+		dotClassName:
+			"bg-violet-500 shadow-[0_0_10px_rgba(139,92,246,0.45)]",
+		badgeClassName:
+			"border-violet-500/30 bg-violet-500/10 text-violet-100",
+	},
+};
 
 function normalizeTaskName(name: string | null | undefined): string {
 	return String(name || "").trim().toLowerCase();
@@ -171,6 +232,100 @@ function mapProjectNames(projects: Project[]) {
 
 function normalizeStatus(status: string | null | undefined): string {
 	return String(status || "").trim().toLowerCase();
+}
+
+function resolveTaskActivityStageKey(
+	activity: Pick<
+		TaskActivityItem,
+		"kind" | "sourceMode" | "status" | "currentPhase" | "currentStep"
+	>,
+): TaskActivityStageKey | null {
+	const status = normalizeStatus(activity.status);
+	if (activity.kind === "rule_scan") {
+		return status === "running" || status === "pending" || status === "initializing"
+			? "static_scan"
+			: null;
+	}
+	if (activity.kind !== "intelligent_audit") {
+		return null;
+	}
+
+	const phase = normalizeStatus(activity.currentPhase);
+	const step = String(activity.currentStep || "").trim();
+
+	if (/验证/.test(step) || phase === "verification") {
+		return "verification";
+	}
+	if (/报告|归档|收尾|入库/.test(step) || phase === "reporting") {
+		return "complete";
+	}
+	if (/分析/.test(step) || phase === "analysis") {
+		return "analysis";
+	}
+	if (
+		activity.sourceMode === "hybrid" &&
+		(/静态预扫|预扫|bootstrap/i.test(step) ||
+			phase === "planning" ||
+			phase === "indexing")
+	) {
+		return "static_scan";
+	}
+	if (
+		phase === "planning" ||
+		phase === "indexing" ||
+		phase === "reconnaissance"
+	) {
+		return "recon";
+	}
+	if (status === "completed") {
+		return "complete";
+	}
+	if (
+		status === "running" ||
+		status === "pending" ||
+		status === "initializing"
+	) {
+		return activity.sourceMode === "hybrid" ? "static_scan" : "recon";
+	}
+	return null;
+}
+
+export function getTaskActivityStageBadgeMeta(
+	activity: Pick<
+		TaskActivityItem,
+		"kind" | "sourceMode" | "status" | "currentPhase" | "currentStep"
+	>,
+): TaskActivityStageBadgeMeta | null {
+	const status = normalizeStatus(activity.status);
+	if (
+		status !== "running" &&
+		status !== "pending" &&
+		status !== "initializing"
+	) {
+		return null;
+	}
+	const key = resolveTaskActivityStageKey(activity);
+	if (!key) {
+		return null;
+	}
+	const style = TASK_ACTIVITY_STAGE_BADGE_STYLES[key];
+	const variant =
+		status === "pending" ? "pending" : "running";
+	const badgeClassName =
+		variant === "pending"
+			? "border-border/70 bg-muted/30 text-muted-foreground"
+			: style.badgeClassName;
+	const dotClassName =
+		variant === "pending"
+			? `${style.dotClassName} opacity-35`
+			: style.dotClassName;
+	return {
+		key,
+		label: TASK_ACTIVITY_STAGE_LABELS[key],
+		variant,
+		dotClassName,
+		badgeClassName,
+	};
 }
 
 function toNonNegativeInt(value: unknown): number {
@@ -491,7 +646,12 @@ function toAgentActivities(
 			task.name,
 			task.description,
 		),
+		name: task.name,
+		description: task.description,
 		status: task.status,
+		currentPhase: task.current_phase,
+		currentStep: task.current_step,
+		targetFiles: task.target_files,
 		agentFindingStats: getAgentTaskDefectSummaryStats(task),
 		createdAt: task.created_at,
 		startedAt: task.started_at,
@@ -718,16 +878,20 @@ export function getTaskStatusText(status: string): string {
 }
 
 export function getTaskStatusClassName(status: string): string {
-	if (status === "completed") {
+	const normalized = normalizeStatus(status);
+	if (normalized === "completed") {
 		return "bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40";
 	}
-	if (status === "running" || status === "pending") {
+	if (normalized === "running" || normalized === "pending") {
 		return "bg-sky-500/5 border-sky-500/20 hover:border-sky-500/40";
 	}
-	if (status === "failed") {
+	if (normalized === "failed") {
 		return "bg-rose-500/5 border-rose-500/20 hover:border-rose-500/40";
 	}
-	if (INTERRUPTED_STATUSES.has(status)) {
+	if (normalized === "cancelled" || normalized === "canceled") {
+		return "bg-slate-500/5 border-slate-500/20 hover:border-slate-500/40";
+	}
+	if (INTERRUPTED_STATUSES.has(normalized)) {
 		return "bg-orange-500/5 border-orange-500/20 hover:border-orange-500/40";
 	}
 	return "bg-muted/30 border-border hover:border-border";
@@ -858,6 +1022,7 @@ export function summarizeTaskActivities(
 ): TaskActivitySummary {
 	return activities.reduce<TaskActivitySummary>(
 		(acc, activity) => {
+			const normalizedStatus = normalizeStatus(activity.status);
 			if (activity.kind === "rule_scan") {
 				acc.staticTotal += 1;
 			} else if (isIntelligentAgentActivity(activity)) {
@@ -866,10 +1031,19 @@ export function summarizeTaskActivities(
 				acc.hybridTotal += 1;
 			}
 
-			if (activity.status === "running" || activity.status === "pending") acc.running += 1;
-			else if (activity.status === "completed") acc.completed += 1;
-			else if (activity.status === "failed") acc.failed += 1;
-			else if (INTERRUPTED_STATUSES.has(activity.status)) acc.interrupted += 1;
+			if (normalizedStatus === "running" || normalizedStatus === "pending") {
+				acc.running += 1;
+			} else if (normalizedStatus === "completed") {
+				acc.completed += 1;
+			} else if (normalizedStatus === "failed") {
+				acc.failed += 1;
+			} else if (
+				normalizedStatus === "cancelled" ||
+				normalizedStatus === "canceled" ||
+				INTERRUPTED_STATUSES.has(normalizedStatus)
+			) {
+				acc.interrupted += 1;
+			}
 
 			return acc;
 		},
@@ -890,10 +1064,11 @@ export function summarizeTaskStatus(
 ): TaskStatusSummary {
 	return activities.reduce<TaskStatusSummary>(
 		(acc, activity) => {
+			const normalizedStatus = normalizeStatus(activity.status);
 			acc.total += 1;
-			if (activity.status === "completed") {
+			if (normalizedStatus === "completed") {
 				acc.completed += 1;
-			} else if (activity.status === "running" || activity.status === "pending") {
+			} else if (normalizedStatus === "running" || normalizedStatus === "pending") {
 				acc.running += 1;
 			}
 			return acc;

@@ -13,6 +13,7 @@ import {
 	Square,
 	AlertCircle,
 } from "lucide-react";
+import { getTaskDisplayStatusSummary } from "@/features/tasks/services/taskDisplay";
 
 interface StatusBadgeProps {
 	status: string;
@@ -34,17 +35,17 @@ const STATUS_CONFIG: Record<
 	pending: {
 		icon: <Clock className="w-3.5 h-3.5" />,
 		iconSm: <Clock className="w-3 h-3" />,
-		bg: "bg-muted border-border",
-		text: "text-foreground",
+		bg: "bg-sky-100 dark:bg-sky-950/60 border-sky-500/40",
+		text: "text-sky-700 dark:text-sky-300",
 		label: "待处理",
 	},
 	running: {
 		icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
 		iconSm: <Loader2 className="w-3 h-3 animate-spin" />,
-		bg: "bg-green-100 dark:bg-green-950/80 border-green-500/50",
-		text: "text-green-700 dark:text-green-400",
+		bg: "bg-sky-100 dark:bg-sky-950/80 border-sky-500/50",
+		text: "text-sky-700 dark:text-sky-300",
 		label: "运行中",
-		glow: "dark:shadow-[0_0_8px_rgba(74,222,128,0.3)]",
+		glow: "dark:shadow-[0_0_8px_rgba(56,189,248,0.3)]",
 		animate: true,
 	},
 	completed: {
@@ -65,9 +66,16 @@ const STATUS_CONFIG: Record<
 	cancelled: {
 		icon: <Square className="w-3.5 h-3.5" />,
 		iconSm: <Square className="w-3 h-3" />,
+		bg: "bg-muted border-border",
+		text: "text-foreground",
+		label: "已取消",
+	},
+	interrupted: {
+		icon: <AlertCircle className="w-3.5 h-3.5" />,
+		iconSm: <AlertCircle className="w-3 h-3" />,
 		bg: "bg-yellow-100 dark:bg-yellow-950/60 border-yellow-600/50",
 		text: "text-yellow-700 dark:text-yellow-400",
-		label: "已取消",
+		label: "已中断",
 	},
 	error: {
 		icon: <AlertCircle className="w-3.5 h-3.5" />,
@@ -83,7 +91,19 @@ export const StatusBadge = memo(function StatusBadge({
 	status,
 	size = "default",
 }: StatusBadgeProps) {
-	const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+	const normalizedStatus = String(status || "").trim().toLowerCase();
+	const summary = getTaskDisplayStatusSummary(normalizedStatus);
+	const statusKey =
+		summary.normalizedStatus === "canceled"
+			? "cancelled"
+			: summary.normalizedStatus === "aborted"
+				? "interrupted"
+				: summary.normalizedStatus;
+	const fallbackConfig = STATUS_CONFIG[statusKey] || STATUS_CONFIG.pending;
+	const config = {
+		...fallbackConfig,
+		label: summary.statusLabel || fallbackConfig.label,
+	};
 	const isSmall = size === "sm";
 
 	return (

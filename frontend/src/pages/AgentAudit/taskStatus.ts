@@ -1,3 +1,5 @@
+import { getTaskDisplayStatusSummary } from "@/features/tasks/services/taskDisplay";
+
 export function isAgentAuditTerminalStatus(status: string | undefined): boolean {
 	const normalized = String(status || "").trim().toLowerCase();
 	return (
@@ -10,12 +12,18 @@ export function isAgentAuditTerminalStatus(status: string | undefined): boolean 
 
 export function toAgentAuditStatusLabel(status: string | undefined): string {
 	const normalized = String(status || "").trim().toLowerCase();
-	if (normalized === "interrupted") return "中止";
-	if (normalized === "cancelled" || normalized === "canceled") return "已取消";
-	if (normalized === "completed") return "已完成";
-	if (normalized === "failed") return "失败";
-	if (normalized === "running") return "运行中";
-	if (normalized === "pending") return "待处理";
+	if (
+		normalized === "interrupted" ||
+		normalized === "cancelled" ||
+		normalized === "canceled" ||
+		normalized === "completed" ||
+		normalized === "failed" ||
+		normalized === "running" ||
+		normalized === "pending" ||
+		normalized === "aborted"
+	) {
+		return getTaskDisplayStatusSummary(normalized).statusLabel;
+	}
 	if (normalized === "waiting") return "等待中";
 	if (normalized === "created") return "已创建";
 	return String(status || "");

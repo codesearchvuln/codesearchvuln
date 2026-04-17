@@ -20,6 +20,7 @@ import {
 	Clock,
 	Loader2,
 	Square,
+	AlertCircle,
 	Cpu,
 	Scan,
 	FileSearch,
@@ -237,7 +238,7 @@ export const TASK_STATUS_CONFIG: Record<
 		text: "待处理",
 	},
 	running: {
-		bg: "bg-emerald-600",
+		bg: "bg-sky-600",
 		icon: React.createElement(Loader2, { className: "w-3 h-3 animate-spin" }),
 		text: "运行中",
 	},
@@ -252,9 +253,14 @@ export const TASK_STATUS_CONFIG: Record<
 		text: "失败",
 	},
 	cancelled: {
-		bg: "bg-amber-600",
+		bg: "bg-slate-500",
 		icon: React.createElement(Square, { className: "w-3 h-3" }),
 		text: "已取消",
+	},
+	interrupted: {
+		bg: "bg-amber-600",
+		icon: React.createElement(AlertCircle, { className: "w-3 h-3" }),
+		text: "已中断",
 	},
 };
 

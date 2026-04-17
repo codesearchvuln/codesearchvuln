@@ -41,6 +41,10 @@ import {
 } from "@/features/projects/services/projectCardPreview";
 import { resolveSourceModeFromTaskMeta } from "@/features/tasks/services/taskActivities";
 import {
+	getTaskStatusBadgeClassName,
+	getTaskStatusText,
+} from "@/features/tasks/services/taskActivities";
+import {
 	type AgentFinding,
 	type AgentTask,
 	getAgentFindings,
@@ -671,24 +675,13 @@ export default function ProjectDetail() {
 	};
 
 	const getStatusBadge = (status: string) => {
-		switch (status) {
-			case "completed":
-				return <Badge className="cyber-badge-success font-normal">完成</Badge>;
-			case "running":
-				return <Badge className="cyber-badge-info font-normal">运行中</Badge>;
-			case "failed":
-				return <Badge className="cyber-badge-danger font-normal">失败</Badge>;
-			case "interrupted":
-				return (
-					<Badge className="bg-orange-500/20 text-orange-300 border-orange-500/30 font-normal">
-						中断
-					</Badge>
-				);
-			case "cancelled":
-				return <Badge className="cyber-badge-muted font-normal">已取消</Badge>;
-			default:
-				return <Badge className="cyber-badge-muted font-normal">等待中</Badge>;
-		}
+		return (
+			<Badge
+				className={`${getTaskStatusBadgeClassName(status)} font-normal`}
+			>
+				{getTaskStatusText(status)}
+			</Badge>
+		);
 	};
 
 	const openTaskFindingsDialog = useCallback(

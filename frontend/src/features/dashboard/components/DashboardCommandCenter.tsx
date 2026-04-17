@@ -28,6 +28,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { getTaskDisplayStatusSummary } from "@/features/tasks/services/taskDisplay";
 import { getEstimatedTaskProgressPercent } from "@/features/tasks/services/taskProgress";
 import type {
 	DashboardDailyActivityItem,
@@ -591,35 +592,35 @@ function buildTaskStatusRows(snapshot: DashboardSnapshotResponse) {
 	return [
 		{
 			key: "completed" as const,
-			label: "已完成",
+			label: getTaskDisplayStatusSummary("completed").statusLabel,
 			value: snapshot.task_status_breakdown.completed,
 			tone: "low" as Tone,
 			scanTypeBreakdown: snapshot.task_status_by_scan_type.completed,
 		},
 		{
 			key: "running" as const,
-			label: "运行中",
+			label: getTaskDisplayStatusSummary("running").statusLabel,
 			value: snapshot.task_status_breakdown.running,
 			tone: "neutral" as Tone,
 			scanTypeBreakdown: snapshot.task_status_by_scan_type.running,
 		},
 		{
 			key: "failed" as const,
-			label: "失败",
+			label: getTaskDisplayStatusSummary("failed").statusLabel,
 			value: snapshot.task_status_breakdown.failed,
 			tone: "critical" as Tone,
 			scanTypeBreakdown: snapshot.task_status_by_scan_type.failed,
 		},
 		{
 			key: "interrupted" as const,
-			label: "已中断",
+			label: getTaskDisplayStatusSummary("interrupted").statusLabel,
 			value: snapshot.task_status_breakdown.interrupted,
 			tone: "high" as Tone,
 			scanTypeBreakdown: snapshot.task_status_by_scan_type.interrupted,
 		},
 		{
 			key: "cancelled" as const,
-			label: "已取消",
+			label: getTaskDisplayStatusSummary("cancelled").statusLabel,
 			value: snapshot.task_status_breakdown.cancelled,
 			tone: "medium" as Tone,
 			scanTypeBreakdown: snapshot.task_status_by_scan_type.cancelled,

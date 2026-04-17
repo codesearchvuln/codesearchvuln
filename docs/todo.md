@@ -1,6 +1,9 @@
 ## Feat
 - [ ] 添加文件审计功能
-- [ ] 前端文件/智能/混合扫描日志详情展示进度 (Recon → Analysis → Verication → End)
+- [x] 前端文件/智能/混合扫描详情与任务管理页展示阶段进度
+  - 详情页：文件/智能扫描 `侦查 → 分析 → 验证 → 完成`，混合扫描 `静态扫描 → 侦查 → 分析 → 验证 → 完成`
+  - 任务管理页：运行中任务由百分比改为同口径阶段标签
+  - 规划与实现见 `docs/progress/agent-detail-stage-progress-plan.md`
 ## Refactor
 - [x] 重构Recon
 - [x] 优化文件上传功能，调整为异步

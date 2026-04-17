@@ -109,6 +109,36 @@ export interface AgentTreeResponse {
   nodes: AgentTreeNode[];
 }
 
+export type AgentDisplayStageMode = "file" | "intelligent" | "hybrid";
+
+export type AgentDisplayStageKey =
+  | "static_scan"
+  | "recon"
+  | "analysis"
+  | "verification"
+  | "complete";
+
+export type AgentDisplayStageStatus =
+  | "pending"
+  | "active"
+  | "completed"
+  | "failed";
+
+export interface AgentDisplayStageItem {
+  key: AgentDisplayStageKey;
+  label: string;
+  status: AgentDisplayStageStatus;
+}
+
+export interface AgentDisplayStageSummary {
+  mode: AgentDisplayStageMode;
+  currentStageKey: AgentDisplayStageKey | null;
+  currentStageLabel: string | null;
+  headline: string;
+  hint?: string | null;
+  stages: AgentDisplayStageItem[];
+}
+
 // ============ Action Types ============
 
 export type AgentAuditAction =
@@ -174,6 +204,7 @@ export interface AgentDetailPanelProps {
 
 export interface StatsPanelProps {
   summary: AgentAuditStatsSummary | null;
+  stageSummary?: AgentDisplayStageSummary | null;
   projectName?: string | null;
 }
 

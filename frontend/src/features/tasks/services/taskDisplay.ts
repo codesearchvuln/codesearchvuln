@@ -27,7 +27,7 @@ export function getTaskDisplayStatusSummary(
   if (normalized === "completed") {
     return {
       normalizedStatus: normalized,
-      statusLabel: "任务完成",
+      statusLabel: "已完成",
       badgeClassName: "cyber-badge-success",
       progressBarClassName: "bg-emerald-400",
       progressHint: "扫描已结束，全部引擎已完成",
@@ -37,7 +37,7 @@ export function getTaskDisplayStatusSummary(
   if (normalized === "running") {
     return {
       normalizedStatus: normalized,
-      statusLabel: "任务运行中",
+      statusLabel: "运行中",
       badgeClassName: "cyber-badge-info",
       progressBarClassName: "bg-sky-200",
       progressHint: "扫描进行中，仍有引擎正在执行",
@@ -47,7 +47,7 @@ export function getTaskDisplayStatusSummary(
   if (normalized === "pending") {
     return {
       normalizedStatus: normalized,
-      statusLabel: "任务待处理",
+      statusLabel: "待处理",
       badgeClassName: "cyber-badge-info",
       progressBarClassName: "bg-sky-400",
       progressHint: "扫描排队中，等待引擎启动",
@@ -57,17 +57,27 @@ export function getTaskDisplayStatusSummary(
   if (normalized === "failed") {
     return {
       normalizedStatus: normalized,
-      statusLabel: "任务失败",
+      statusLabel: "失败",
       badgeClassName: "cyber-badge-danger",
       progressBarClassName: "bg-rose-400",
       progressHint: "扫描已结束，至少一个引擎失败",
     };
   }
 
+  if (normalized === "cancelled" || normalized === "canceled") {
+    return {
+      normalizedStatus: normalized,
+      statusLabel: "已取消",
+      badgeClassName: "cyber-badge-muted",
+      progressBarClassName: "bg-slate-400",
+      progressHint: "扫描已结束，任务已取消",
+    };
+  }
+
   if (INTERRUPTED_STATUSES.has(normalized)) {
     return {
       normalizedStatus: normalized,
-      statusLabel: "任务中止",
+      statusLabel: "已中断",
       badgeClassName: "cyber-badge-warning",
       progressBarClassName: "bg-orange-400",
       progressHint: "扫描已结束，任务已中断",
