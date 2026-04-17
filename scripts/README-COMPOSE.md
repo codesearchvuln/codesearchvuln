@@ -5,6 +5,7 @@
 release branch 只提供最新一份 generated release tree 的下载通道，不是历史 snapshot 列表。离线部署时，请保证 release tree 与两份离线 tar 包来自同一个 snapshot。
 
 当前默认 release backend 镜像固定来自 Docker `runtime-plain` target。离线部署与 release tree 验收都不依赖 `runtime-release` 或其他选择性源码加固 target；如需额外发布 `runtime-cython`，它仅作为可选 hardened 变体存在。
+generated release tree 现在只支持离线部署，不支持在线部署，也不再提供 `online-up.sh`。
 
 这是一次数据库兼容策略收紧的 breaking change：旧 `postgres_data` 不再保证能被新版本直接启动或自动前滚。升级前请备份旧数据库卷与 `backend_uploads`；新版本默认只接受空库 bootstrap 或与当前版本匹配的数据库快照。
 
@@ -28,26 +29,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 Choose exactly one shell path。
 
-## 2. 在线启动
-
-```bash
-bash ./scripts/online-up.sh
-```
-
-这个入口的合同是“刷新当前 release stack”，不是“仅执行一次启动”。这里刷新的默认 backend 也是 `runtime-plain` 产物，不会再依赖 release 专用 `.so`/选择性 Cython 组装链。脚本会先拉取当前 release 所需镜像，再停止并删除当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与对应镜像，然后重新启动；本地 `3000` 端口真正可访问后才会打印中英双语提示。在线重跑会重新拉取镜像，但不会删除 volumes。
-
-如果你只想走低阶命令，也可以直接执行：
-
-```bash
-docker compose up -d
-```
-
-但这种方式只是低阶 `docker compose up -d`，不会执行 release refresh 合同里的预拉取、容器与镜像清理，也不保证出现统一的终端 ready 提示。
-
-注意：`http://localhost:3000/` 可访问并不等价于 dashboard 已恢复，仍然需要验证同源 `/api/v1/...`。
-若首页根本起不来，也可能是 backend 因数据库契约不兼容而拒绝启动，并连带阻塞 frontend。
-
-## 3. 离线启动
+## 2. 离线启动
 
 先把下面两份与你当前 release tree 属于同一个 snapshot、且匹配当前 Docker server 架构的离线镜像包放到 release 根目录或 `images/`。用户侧仍然只需要这两份 tar 包：
 
@@ -77,7 +59,7 @@ bash ./scripts/offline-up.sh --attach-logs
 
 如果你使用 cloud 模型接口，运行时仍然需要访问对应 API。离线部署只表示运行镜像来自本地。
 
-## 4. 查看状态
+## 3. 查看状态
 
 ```bash
 docker compose ps
@@ -95,7 +77,7 @@ docker compose logs -f
 
 主站静态文件与 `nexus-*` 页面已经随 release tree 附带。
 
-## 5. 验收代理链路
+## 4. 验收代理链路
 
 ```bash
 docker compose ps
@@ -109,7 +91,7 @@ curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range
 
 项目列表或 `dashboard-snapshot` 返回 `200` / `401` / `403` 都说明代理链路正常；`/nexus/` 与 `/nexus-item-detail/` 返回 `200` 只说明入口 HTML 可访问，还要继续确认它们引用的 JS/CSS 可以正常返回；`502` / `503` / `504` 说明 release frontend 到 backend 的代理链路仍异常。
 
-## 6. 停止与清理
+## 5. 停止与清理
 
 停止服务：
 
@@ -126,7 +108,6 @@ docker compose down -v
 `docker compose down -v` 会删除持久化数据，请谨慎使用。
 如需跨版本升级，请先整体备份 `postgres_data` 与 `backend_uploads`，不要把 `down -v` 当成常规升级步骤。
 
-## 7. 修改配置后重启
+## 6. 修改配置后重启
 
-- 在线路径：修改 `.env` 后重新执行 `bash ./scripts/online-up.sh`
 - 离线路径：修改 `.env` 或 `offline-images.env` 后，重新执行同一个 `offline-up` 命令；离线重跑前确认两份 tar bundle 仍在
