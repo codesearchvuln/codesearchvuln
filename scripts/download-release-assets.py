@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import subprocess
 import sys
@@ -203,6 +204,7 @@ def download_release_assets(
     tag: str,
     output_dir: Path,
     contract_path: Path,
+    max_workers: int = 4,
 ) -> list[Path]:
     _release, expected_names, assets = inspect_release(
         repo=repo,
@@ -212,12 +214,38 @@ def download_release_assets(
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if max_workers < 1:
+        raise DownloadReleaseAssetsError("--max-workers must be >= 1")
+    effective_workers = min(max_workers, len(expected_names)) or 1
+
     downloaded_paths: list[Path] = []
-    for name in expected_names:
+    if effective_workers == 1:
+        for name in expected_names:
+            asset_id = _coerce_asset_id(assets[name]["id"], f"{name} asset id")
+            output_path = output_dir / name
+            _download_asset(repo, asset_id, output_path)
+            downloaded_paths.append(output_path)
+        return downloaded_paths
+
+    def _worker(name: str) -> Path:
         asset_id = _coerce_asset_id(assets[name]["id"], f"{name} asset id")
         output_path = output_dir / name
         _download_asset(repo, asset_id, output_path)
-        downloaded_paths.append(output_path)
+        return output_path
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
+        future_to_name = {executor.submit(_worker, name): name for name in expected_names}
+        results: dict[str, Path] = {}
+        try:
+            for future in concurrent.futures.as_completed(future_to_name):
+                name = future_to_name[future]
+                results[name] = future.result()
+        except BaseException:
+            for pending in future_to_name:
+                pending.cancel()
+            raise
+
+    downloaded_paths = [results[name] for name in expected_names]
     return downloaded_paths
 
 
@@ -232,7 +260,17 @@ def main() -> int:
         type=Path,
         default=Path(__file__).resolve().parents[1] / "scripts" / "release-bundle-contract.json",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=4,
+        help="Parallel download workers (1-16, default 4).",
+    )
     args = parser.parse_args()
+
+    if not 1 <= args.max_workers <= 16:
+        print("--max-workers must be between 1 and 16", file=sys.stderr)
+        return 2
 
     try:
         downloaded = download_release_assets(
@@ -241,6 +279,7 @@ def main() -> int:
             tag=args.tag.strip(),
             output_dir=args.output_dir,
             contract_path=args.contract,
+            max_workers=args.max_workers,
         )
     except DownloadReleaseAssetsError as exc:
         print(str(exc), file=sys.stderr)

@@ -195,6 +195,120 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+  build-frontend-bundle:
+    name: Build frontend release bundle
+    needs:
+      - prepare-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout frontend source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          package_json_file: frontend/package.json
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend static bundle
+        run: |
+          set -euo pipefail
+
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
+          rm -rf "${FRONTEND_BUNDLE_DIR}"
+          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
+          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
+          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
+
+      - name: Upload frontend release bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/frontend-release-bundle
+          retention-days: 1
+          if-no-files-found: error
+
+  prepare-release-tree:
+    name: Prepare release tree
+    needs:
+      - prepare-release
+      - resolve-release-manifest
+      - build-frontend-bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+          fetch-depth: 1
+          filter: 'blob:none'
+
+      - name: Write release-manifest.json
+        env:
+          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
+        run: |
+          printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
+
+      - name: Download frontend release bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/frontend-release-bundle
+
+      - name: Generate runtime release tree
+        run: |
+          ./scripts/generate-release-branch.sh \
+            --output "${RUNNER_TEMP}/release-tree" \
+            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
+            --validate
+
+      - name: Validate compose entrypoint
+        working-directory: ${{ runner.temp }}/release-tree
+        run: |
+          set -euo pipefail
+
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
+          docker compose config >/dev/null
+
+      - name: Package release tree for artifact transfer
+        run: |
+          set -euo pipefail
+
+          tar -C "${RUNNER_TEMP}" -cf "${RUNNER_TEMP}/release-tree.tar" release-tree
+
+      - name: Upload release tree artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tree-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-tree.tar
+          retention-days: 1
+          if-no-files-found: error
+
   package-offline-images:
     needs:
       - prepare-release
@@ -261,14 +375,15 @@ jobs:
             "${RUNNER_TEMP}/release-assets/images-manifest-${BUNDLE}-${ARCH}.json" \
             --clobber
 
-  finalize-release:
+  finalize-publish:
     needs:
       - prepare-release
       - create-draft-release
       - resolve-release-manifest
+      - prepare-release-tree
       - package-offline-images
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: write
       packages: read
@@ -281,6 +396,7 @@ jobs:
         with:
           ref: ${{ needs.prepare-release.outputs.source_ref }}
           fetch-depth: 0
+          filter: 'blob:none'
 
       - name: Finalize preflight
         env:
@@ -344,6 +460,21 @@ jobs:
                   handle.write(f"- available_assets: `{', '.join(asset_names)}`\n")
           PY
 
+      - name: Download release tree artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tree-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-tree-artifact
+
+      - name: Extract release tree
+        run: |
+          set -euo pipefail
+
+          rm -rf "${RUNNER_TEMP}/release-tree"
+          tar -C "${RUNNER_TEMP}" -xf "${RUNNER_TEMP}/release-tree-artifact/release-tree.tar"
+          # Artifact round-trip may drop exec bits; restore for .sh helpers.
+          find "${RUNNER_TEMP}/release-tree" -type f -name '*.sh' -exec chmod +x {} +
+
       - name: Download snapshot draft release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -358,47 +489,14 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --release-id "${SNAPSHOT_RELEASE_ID}" \
             --tag "${SNAPSHOT_TAG}" \
-            --output-dir "${SNAPSHOT_ASSET_DIR}"
+            --output-dir "${SNAPSHOT_ASSET_DIR}" \
+            --max-workers 4
 
       - name: Write release-manifest.json
         env:
           RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
         run: |
           printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
-
-      - name: Setup pnpm for frontend release bundle
-        uses: pnpm/action-setup@v5
-        with:
-          package_json_file: frontend/package.json
-          run_install: false
-
-      - name: Setup Node.js for frontend release bundle
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Build frontend static release bundle
-        run: |
-          set -euo pipefail
-
-          pnpm --dir frontend install --frozen-lockfile
-          pnpm --dir frontend build
-
-          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
-          rm -rf "${FRONTEND_BUNDLE_DIR}"
-          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
-          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
-          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
-
-      - name: Generate runtime release tree
-        run: |
-          ./scripts/generate-release-branch.sh \
-            --output "${RUNNER_TEMP}/release-tree" \
-            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
-            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
-            --validate
 
       - name: Validate snapshot assets and write release-snapshot-lock.json
         env:
@@ -412,17 +510,6 @@ jobs:
             --release-manifest "${RUNNER_TEMP}/release-manifest.json" \
             --snapshot-tag "${SNAPSHOT_TAG}" \
             --asset-dir "${SNAPSHOT_ASSET_DIR}"
-
-      - name: Validate compose entrypoint
-        working-directory: ${{ runner.temp }}/release-tree
-        run: |
-          set -euo pipefail
-
-          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
-          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
-            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
-          fi
-          docker compose config >/dev/null
 
       - name: Smoke test offline release runtime
         working-directory: ${{ runner.temp }}/release-tree
@@ -528,7 +615,7 @@ jobs:
             -m "generated_by=release.yml"
           git push origin "refs/tags/${SEMANTIC_TAG}"
 
-      - name: Create or update semantic GitHub release
+      - name: Create or update semantic GitHub release metadata
         if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -537,8 +624,6 @@ jobs:
           EXISTING_TAG: ${{ steps.resolve_semantic_version.outputs.existing_tag }}
           SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
           RELEASE_COMMIT_SHA: ${{ steps.publish_release_branch.outputs.release_commit_sha }}
-          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
-          RELEASE_TREE: ${{ runner.temp }}/release-tree
         run: |
           set -euo pipefail
 
@@ -569,18 +654,84 @@ jobs:
               --notes-file "${notes_file}"
           fi
 
-          gh release upload "${SEMANTIC_TAG}" \
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst" \
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst" \
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst" \
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst" \
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-amd64.json" \
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-arm64.json" \
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json" \
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json" \
-            "${RELEASE_TREE}/release-snapshot-lock.json" \
-            "./scripts/release-assets/offline-bootstrap.sh#AuditTool-offline-bootstrap.sh" \
-            --clobber
+      - name: Upload semantic GitHub release assets in parallel
+        if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+          RELEASE_TREE: ${{ runner.temp }}/release-tree
+          UPLOAD_PARALLELISM: "4"
+        run: |
+          set -uo pipefail
+
+          assets=(
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-amd64.json"
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-arm64.json"
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json"
+            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
+            "${RELEASE_TREE}/release-snapshot-lock.json"
+            "./scripts/release-assets/offline-bootstrap.sh#AuditTool-offline-bootstrap.sh"
+          )
+
+          max_parallel="${UPLOAD_PARALLELISM}"
+          [[ "${max_parallel}" =~ ^[0-9]+$ ]] || max_parallel=4
+          (( max_parallel >= 1 )) || max_parallel=1
+
+          pids=()
+          fails=0
+          log_dir="${RUNNER_TEMP}/semantic-release-upload-logs"
+          rm -rf "${log_dir}"
+          mkdir -p "${log_dir}"
+
+          wait_for_slot() {
+            while (( ${#pids[@]} >= max_parallel )); do
+              new_pids=()
+              progressed=0
+              for pid in "${pids[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                  new_pids+=("$pid")
+                else
+                  if ! wait "$pid"; then
+                    fails=$((fails + 1))
+                  fi
+                  progressed=1
+                fi
+              done
+              pids=("${new_pids[@]}")
+              (( progressed )) || sleep 1
+            done
+          }
+
+          for asset in "${assets[@]}"; do
+            wait_for_slot
+            log_file="${log_dir}/$(printf '%s' "${asset##*/}" | tr -c 'A-Za-z0-9._-' '_').log"
+            (
+              gh release upload "${SEMANTIC_TAG}" "${asset}" --clobber >"${log_file}" 2>&1
+            ) &
+            pids+=("$!")
+          done
+
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+              fails=$((fails + 1))
+            fi
+          done
+
+          if (( fails > 0 )); then
+            echo "::error::${fails} semantic release asset upload(s) failed; see logs below:"
+            for log_file in "${log_dir}"/*.log; do
+              [[ -f "${log_file}" ]] || continue
+              echo "::group::${log_file##*/}"
+              cat "${log_file}"
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
 
       - name: Delete snapshot draft release after promotion
         env:
@@ -597,8 +748,10 @@ jobs:
       - prepare-release
       - create-draft-release
       - publish-runtime-images
+      - build-frontend-bundle
+      - prepare-release-tree
       - package-offline-images
-      - finalize-release
+      - finalize-publish
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
