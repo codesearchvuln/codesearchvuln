@@ -10,7 +10,7 @@ import {
 	FileText,
 	Loader2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -36,10 +36,6 @@ import {
 	type ProjectCardTaskFindingCategory,
 } from "@/features/projects/services/projectCardPreview";
 import { resolveSourceModeFromTaskMeta } from "@/features/tasks/services/taskActivities";
-import {
-	NEXUS_EMBED_LOAD_TIMEOUT_MS,
-	reduceNexusEmbedLoadState,
-} from "@/shared/nexusEmbedLoadState";
 import {
 	type AgentFinding,
 	type AgentTask,
@@ -486,66 +482,12 @@ export default function ProjectDetail() {
 		}
 	}, [fetchProjectPotentialVulnerabilities, id]);
 
-	const nexusIframeRef = useRef<HTMLIFrameElement>(null);
-	const iframeReadyRef = useRef(false);
-	const archiveSentRef = useRef(false);
-	const [itemDetailIframeState, dispatchItemDetailIframeState] = useReducer(
-		reduceNexusEmbedLoadState,
-		"loading",
-	);
-	const isItemDetailReady = itemDetailIframeState === "ready";
-
-	const sendArchiveToIframe = useCallback(async (projectId: string) => {
-		if (archiveSentRef.current) return;
-		archiveSentRef.current = true;
-		try {
-			const archive = await api.downloadProjectArchive(projectId);
-			const arrayBuffer = await archive.blob.arrayBuffer();
-			nexusIframeRef.current?.contentWindow?.postMessage(
-				{ type: 'LOAD_PROJECT_ZIP', filename: archive.filename, buffer: arrayBuffer },
-				window.location.origin,
-				[arrayBuffer],
-			);
-		} catch (error) {
-			archiveSentRef.current = false;
-			console.error('Failed to fetch project archive:', error);
-			toast.error('获取项目压缩包失败');
-		}
-	}, []);
-
-	const handleIframeLoad = useCallback(() => {
-		dispatchItemDetailIframeState("iframe-loaded");
-		iframeReadyRef.current = true;
-		if (project?.id) {
-			void sendArchiveToIframe(project.id);
-		}
-	}, [project, sendArchiveToIframe]);
-
-	useEffect(() => {
-		if (itemDetailIframeState !== "loading") return;
-
-		const timeoutId = window.setTimeout(() => {
-			dispatchItemDetailIframeState("load-timeout");
-		}, NEXUS_EMBED_LOAD_TIMEOUT_MS);
-
-		return () => window.clearTimeout(timeoutId);
-	}, [itemDetailIframeState]);
-
-	useEffect(() => {
-		if (project?.id && iframeReadyRef.current) {
-			void sendArchiveToIframe(project.id);
-		}
-	}, [project?.id, sendArchiveToIframe]);
-
 	useEffect(() => {
 		if (!id) return;
 		void loadProjectData();
 	}, [id, loadProjectData]);
 
 	useEffect(() => {
-		iframeReadyRef.current = false;
-		archiveSentRef.current = false;
-		dispatchItemDetailIframeState("reset");
 		setProjectDescriptionStatus("idle");
 		setProjectDescriptionSource(null);
 		setProjectDescriptionUnsupported(false);
@@ -600,6 +542,43 @@ export default function ProjectDetail() {
 			setProjectDescriptionStatus("failed");
 		}
 	}, [project]);
+
+	const nexusIframeRef = useRef<HTMLIFrameElement>(null);
+	const iframeReadyRef = useRef(false);
+	const archiveSentRef = useRef(false);  // 新增
+
+	const sendArchiveToIframe = useCallback(async (projectId: string) => {
+		if (archiveSentRef.current) return;  // 已发过，跳过
+		archiveSentRef.current = true;       // 标记已发
+		try {
+			const archive = await api.downloadProjectArchive(projectId);
+			const arrayBuffer = await archive.blob.arrayBuffer();
+			nexusIframeRef.current?.contentWindow?.postMessage(
+				{ type: 'LOAD_PROJECT_ZIP', filename: archive.filename, buffer: arrayBuffer },
+				'*',
+				[arrayBuffer],
+			);
+		} catch (error) {
+			archiveSentRef.current = false;    // 失败时重置，允许重试
+			console.error('Failed to fetch project archive:', error);
+			toast.error('获取项目压缩包失败');
+		}
+	}, []);
+
+	// iframe onLoad 时标记 ready，如果 project 已经有了就直接发
+	const handleIframeLoad = useCallback(() => {
+		iframeReadyRef.current = true;
+		if (project?.id) {
+			void sendArchiveToIframe(project.id);
+		}
+	}, [project, sendArchiveToIframe]);
+
+	// project 加载完成后，如果 iframe 已经 ready 就补发
+	useEffect(() => {
+		if (project?.id && iframeReadyRef.current) {
+			void sendArchiveToIframe(project.id);
+		}
+	}, [project?.id, sendArchiveToIframe]);
 
 	useEffect(() => {
 		if (
@@ -914,26 +893,16 @@ export default function ProjectDetail() {
 					</Button> */}
 				</div>
 			</div>
-				{itemDetailIframeState === "failed" ? null : (
-					<div className="relative z-10 overflow-hidden rounded-lg border border-border/50 bg-black/20">
-						<iframe
-							ref={nexusIframeRef}
-							src="/nexus-item-detail/"
-							title="Nexus-itemDetail"
-							className="w-full border-0 rounded-lg"
-							style={{ height: '600px' }}
-							onLoad={handleIframeLoad}
-							onError={() => dispatchItemDetailIframeState("iframe-error")}
-						/>
-						{!isItemDetailReady ? (
-						<div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/35 backdrop-blur-sm">
-							<div className="rounded-2xl border border-sky-500/25 bg-slate-950/65 px-5 py-3 text-sm font-medium text-sky-100 shadow-[0_0_24px_rgba(14,165,233,0.16)]">
-								Nexus-itemDetail 正在加载…
-							</div>
-						</div>
-						) : null}
-					</div>
-				)}
+			<div className="relative z-10">
+				<iframe
+					ref={nexusIframeRef}
+          src={`http://${window.location.hostname}:5175`}
+					title="Nexus-itemDetail"
+					className="w-full border-0 rounded-lg"
+					style={{ height: '600px' }}
+					onLoad={handleIframeLoad}
+				/>
+			</div>
 			<div className="relative z-10 space-y-4 mt-6">
 				<ProjectDescriptionSection
 					description={project.description || ""}

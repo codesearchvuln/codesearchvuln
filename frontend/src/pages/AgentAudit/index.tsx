@@ -2,11 +2,7 @@ import { Zap, Bot, Layers, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLogoVariant } from "@/shared/branding/useLogoVariant";
 import { useTheme } from "next-themes";
-import { useEffect, useReducer, useRef } from "react";
-import {
-  NEXUS_EMBED_LOAD_TIMEOUT_MS,
-  reduceNexusEmbedLoadState,
-} from "@/shared/nexusEmbedLoadState";
+import { useEffect, useRef } from "react";
 
 type HomeScanCard = {
   key: "static" | "agent" | "hybrid";
@@ -45,63 +41,36 @@ export function HomeScanCards() {
   const { logoSrc, cycleLogoVariant } = useLogoVariant();
   const { resolvedTheme } = useTheme();
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [nexusIframeState, dispatchNexusIframeState] = useReducer(
-    reduceNexusEmbedLoadState,
-    "loading",
-  );
-  const iframeOrigin = window.location.origin;
-  const iframePath = "/nexus/";
 
+  // 主题变化时通知 iframe
   useEffect(() => {
-    if (nexusIframeState !== "loading") return;
-
-    const timeoutId = window.setTimeout(() => {
-      dispatchNexusIframeState("load-timeout");
-    }, NEXUS_EMBED_LOAD_TIMEOUT_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [nexusIframeState]);
-
-  // GitNexus 不再通过独立容器暴露端口，改为由主前端承载本地 dist 页面。
-  useEffect(() => {
-    if (nexusIframeState === "failed") return;
-
     const iframe = iframeRef.current;
     if (!iframe) return;
 
     const sendTheme = () => {
       iframe.contentWindow?.postMessage(
         { type: "THEME_CHANGE", theme: resolvedTheme },
-        iframeOrigin
+        "http://localhost:5174"
       );
     };
 
+    // iframe 加载完成后立即同步当前主题
     iframe.addEventListener("load", sendTheme);
+    // 主题变化时也发送
     sendTheme();
 
     return () => iframe.removeEventListener("load", sendTheme);
-  }, [iframeOrigin, nexusIframeState, resolvedTheme]);
+  }, [resolvedTheme]);
 
   return (
     <div className="min-h-[100dvh] relative overflow-hidden">
       <div className="absolute inset-0 z-10">
-        {nexusIframeState !== "failed" ? (
-          <iframe
-            ref={iframeRef}
-            src={iframePath}
-            title="GitNexus"
-            className="w-full h-full border-0 pointer-events-auto"
-            onLoad={() => dispatchNexusIframeState("iframe-loaded")}
-            onError={() => dispatchNexusIframeState("iframe-error")}
-          />
-        ) : null}
-        {nexusIframeState === "loading" ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.14),_transparent_55%),linear-gradient(180deg,rgba(15,23,42,0.58),rgba(2,6,23,0.78))] backdrop-blur-sm">
-            <div className="rounded-2xl border border-primary/30 bg-background/70 px-5 py-3 text-sm font-medium text-primary/90 shadow-[0_0_24px_rgba(59,130,246,0.18)]">
-              GitNexus 正在加载…
-            </div>
-          </div>
-        ) : null}
+        <iframe
+          ref={iframeRef}
+          src={`http://${window.location.hostname}:5174`}
+          title="GitNexus"
+          className="w-full h-full border-0 pointer-events-auto"
+        />
       </div>
 
       <div className="relative z-20 w-full max-w-[1200px] mx-auto px-6 text-center pointer-events-none min-h-[100dvh] flex flex-col">
