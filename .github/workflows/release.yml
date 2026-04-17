@@ -195,120 +195,6 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-  build-frontend-bundle:
-    name: Build frontend release bundle
-    needs:
-      - prepare-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout frontend source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare-release.outputs.source_ref }}
-          fetch-depth: 1
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          package_json_file: frontend/package.json
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Build frontend static bundle
-        run: |
-          set -euo pipefail
-
-          pnpm --dir frontend install --frozen-lockfile
-          pnpm --dir frontend build
-
-          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
-          rm -rf "${FRONTEND_BUNDLE_DIR}"
-          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
-          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
-          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
-
-      - name: Upload frontend release bundle artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/frontend-release-bundle
-          retention-days: 1
-          if-no-files-found: error
-
-  prepare-release-tree:
-    name: Prepare release tree
-    needs:
-      - prepare-release
-      - resolve-release-manifest
-      - build-frontend-bundle
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout release source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.prepare-release.outputs.source_ref }}
-          fetch-depth: 1
-          filter: 'blob:none'
-
-      - name: Write release-manifest.json
-        env:
-          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
-        run: |
-          printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
-
-      - name: Download frontend release bundle artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-release-bundle-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/frontend-release-bundle
-
-      - name: Generate runtime release tree
-        run: |
-          ./scripts/generate-release-branch.sh \
-            --output "${RUNNER_TEMP}/release-tree" \
-            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
-            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
-            --validate
-
-      - name: Validate compose entrypoint
-        working-directory: ${{ runner.temp }}/release-tree
-        run: |
-          set -euo pipefail
-
-          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
-          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
-            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
-          fi
-          docker compose config >/dev/null
-
-      - name: Package release tree for artifact transfer
-        run: |
-          set -euo pipefail
-
-          tar -C "${RUNNER_TEMP}" -cf "${RUNNER_TEMP}/release-tree.tar" release-tree
-
-      - name: Upload release tree artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-tree-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/release-tree.tar
-          retention-days: 1
-          if-no-files-found: error
-
   package-offline-images:
     needs:
       - prepare-release
@@ -380,7 +266,6 @@ jobs:
       - prepare-release
       - create-draft-release
       - resolve-release-manifest
-      - prepare-release-tree
       - package-offline-images
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -460,20 +345,56 @@ jobs:
                   handle.write(f"- available_assets: `{', '.join(asset_names)}`\n")
           PY
 
-      - name: Download release tree artifact
-        uses: actions/download-artifact@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
         with:
-          name: release-tree-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/release-tree-artifact
+          package_json_file: frontend/package.json
+          run_install: false
 
-      - name: Extract release tree
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend static bundle
         run: |
           set -euo pipefail
 
-          rm -rf "${RUNNER_TEMP}/release-tree"
-          tar -C "${RUNNER_TEMP}" -xf "${RUNNER_TEMP}/release-tree-artifact/release-tree.tar"
-          # Artifact round-trip may drop exec bits; restore for .sh helpers.
-          find "${RUNNER_TEMP}/release-tree" -type f -name '*.sh' -exec chmod +x {} +
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
+          rm -rf "${FRONTEND_BUNDLE_DIR}"
+          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
+          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
+          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
+
+      - name: Write release-manifest.json
+        env:
+          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
+        run: |
+          printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
+
+      - name: Generate runtime release tree
+        run: |
+          ./scripts/generate-release-branch.sh \
+            --output "${RUNNER_TEMP}/release-tree" \
+            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
+            --validate
+
+      - name: Validate compose entrypoint
+        working-directory: ${{ runner.temp }}/release-tree
+        run: |
+          set -euo pipefail
+
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
+          docker compose config >/dev/null
 
       - name: Download snapshot draft release assets
         env:
@@ -491,12 +412,6 @@ jobs:
             --tag "${SNAPSHOT_TAG}" \
             --output-dir "${SNAPSHOT_ASSET_DIR}" \
             --max-workers 4
-
-      - name: Write release-manifest.json
-        env:
-          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
-        run: |
-          printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
 
       - name: Validate snapshot assets and write release-snapshot-lock.json
         env:
@@ -748,8 +663,6 @@ jobs:
       - prepare-release
       - create-draft-release
       - publish-runtime-images
-      - build-frontend-bundle
-      - prepare-release-tree
       - package-offline-images
       - finalize-publish
     runs-on: ubuntu-latest
