@@ -1,50 +1,69 @@
-# AuditTool Public Source Branch
+# AuditTool 源码部署指南
 
-这个 `sourcecode` 分支由 `main` 自动生成，用于公开源码与本地 full 构建，不承载内部 CI、规划文档或发布打包流程。
+本目录只描述源码交付形态下的部署方式。唯一支持的启动合同是 `docker-compose.yml` + `docker-compose.full.yml` 的全量本地构建，不要把 release 运行包里的在线 / 离线刷新脚本套用到这里。
 
-## 快速开始
+## 部署准备
 
-1. 准备后端环境文件：
+1. 复制后端环境文件：
 
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 ```
 
-2. 自动探测 Docker / Podman socket：
+2. 至少确认以下变量：
+   `LLM_API_KEY`、`LLM_PROVIDER`、`LLM_MODEL`
+
+3. 生成根目录 `.env` 里的容器 socket 配置：
 
 ```bash
 bash scripts/setup-env.sh
 ```
 
-3. 使用唯一保留的 full 本地构建入口启动：
+也可以直接使用快捷命令：
+
+```bash
+make setup
+```
+
+## 支持环境
+
+- `docker compose`
+- `podman compose`
+- `make` 会自动在 `docker compose`、`podman compose`、`docker-compose` 之间选择当前机器可用的实现
+- 所有直接 compose 命令都必须同时带上 `-f docker-compose.yml -f docker-compose.full.yml`
+
+## 部署命令
+
+推荐直接使用全量本地构建入口：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 ```
 
-也可以使用 `Makefile` 快捷命令：
+如果当前宿主机使用 Podman：
 
 ```bash
-make setup
+podman compose -f docker-compose.yml -f docker-compose.full.yml up --build
+```
+
+如果你更习惯统一入口：
+
+```bash
 make up-full
 ```
 
-## 保留内容
+## 常用维护指令
 
-- `backend/`、`frontend/`、`docker/`、`data/`
-- `nexus-web/`、`nexus-itemDetail/`
-- `docker-compose.yml` 基座与 `docker-compose.full.yml` 全量本地构建覆盖层
-- `scripts/setup-env.sh`
+```bash
+make ps
+make logs
+make down
+```
 
-## 已移除内容
+不使用 `Makefile` 时，请继续保留同一组 compose 文件：
 
-- `.github/`
-- `docs/`
-- `deploy/`
-- hybrid 覆盖层与默认入口脚本
-- release / offline / fallback / security 等内部脚本
-
-## 约定
-
-- `sourcecode` 分支是生成产物，不接受直接维护。
-- 如需调整公开源码内容，请修改 `main` 上的生成逻辑。
+```bash
+docker compose -f docker-compose.yml -f docker-compose.full.yml ps
+docker compose -f docker-compose.yml -f docker-compose.full.yml logs -f
+docker compose -f docker-compose.yml -f docker-compose.full.yml down
+```

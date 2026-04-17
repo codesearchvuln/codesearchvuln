@@ -26,24 +26,9 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ## 受支持的启动方式
 
-### 1. 在线部署（默认）
+generated release tree 现在只支持离线部署，不支持在线部署，也不再提供 `online-up.sh` 入口。
 
-```bash
-bash ./scripts/online-up.sh
-```
-
-用途：
-直接使用已发布且 digest 固定的 `backend`、scanner runner 与 `sandbox-runner` 镜像刷新当前 release stack；主 frontend 由 `STATIC_FRONTEND_IMAGE` 承载随包静态文件与 nginx 配置。脚本默认固定 Compose project name 为 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release`，会先拉取当前 release 镜像，再清理当前 release stack 的容器与镜像，但不会删除 volumes；本地 `3000` 端口真正可访问后才会输出中英双语提示。
-
-如需走低阶命令，也可以直接执行：
-
-```bash
-docker compose up -d
-```
-
-但这种方式只是低阶 `docker compose up -d`，不会执行 release refresh 合同里的预拉取与清理，也不保证出现统一的终端 ready 提示。
-
-### 2. 离线部署（可选）
+### 1. 离线部署
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
@@ -69,6 +54,7 @@ bash ./AuditTool-offline-bootstrap.sh
 
 ## 明确不属于 release contract 的路径
 
+- 在线部署，或任何依赖 `online-up.sh` 的启动方式
 - 在 release tree 内重新构建 `backend` / `frontend` 镜像
 - 依赖源码分发包或本地 build overlay 的发布方式
 - 把源码仓库里的 `FRONTEND_IMAGE` / `vulhunter-frontend` 主 frontend 合同直接套用到 generated release tree

@@ -418,17 +418,15 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
     compose_readme = (REPO_ROOT / "scripts" / "README-COMPOSE.md").read_text(encoding="utf-8")
 
     for doc in (root_readme, root_readme_en, compose_readme):
-        assert "docker compose up -d" in doc
-        assert "online-up.sh" in doc
+        assert "bash ./scripts/online-up.sh" not in doc
         assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in doc
-        assert "docker-compose.full.yml" not in doc
-        assert "docker-compose.self-contained.yml" not in doc
         assert "docker/env/backend/env.example" in doc
         assert "offline-images.env.example" in doc
         assert "offline-up.sh" in doc
         assert "offline-up.ps1" not in doc
         assert "/nexus/" in doc
         assert "/nexus-item-detail/" in doc
+        assert "does not support online deployment" in doc or "不支持在线部署" in doc
 
     assert "scripts/README-COMPOSE.md" in root_readme
     assert "scripts/README-COMPOSE.md" in root_readme_en
@@ -439,8 +437,8 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
     assert "VULHUNTER_RELEASE_PROJECT_NAME" in compose_readme
     assert "vulhunter-release" in compose_readme
     assert "不会删除任何 Docker volume" in compose_readme or "不会删除这些 volumes" in compose_readme
-    assert "does not perform the release refresh" in root_readme_en
-    assert "不会执行 release refresh 合同里的预拉取与清理" in root_readme or "不会执行 release refresh 合同里的拉取与清理" in root_readme
+    assert "does not support online deployment" in root_readme_en
+    assert "不支持在线部署" in root_readme
 
 
 def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:

@@ -5,6 +5,7 @@
 release branch 只代表最新一份 generated release tree 的交付通道，不是历史 snapshot 索引。离线部署时，请保证你手里的 release tree 与两份离线 tar 包来自同一个 snapshot。
 
 generated release tree 只暴露一份运行时 compose 合同：`docker-compose.yml`。它不会附带本地 build overlay、Dockerfile，也不支持在 release tree 内本地重建 `backend` / `frontend`。
+generated release tree 现在只支持离线部署，不支持在线部署，也不再提供 `online-up.sh`。
 
 当前默认 release backend 镜像固定来自 Docker `runtime-plain` target。离线部署与 release tree 验收都不依赖 `runtime-release` 或其他选择性源码加固 target；如需额外发布 `runtime-cython`，它仅作为可选 hardened 变体存在。
 
@@ -33,28 +34,6 @@ cp docker/env/backend/env.example docker/env/backend/.env
 `LLM_API_KEY`、`LLM_PROVIDER`、`LLM_MODEL`
 
 ## 命令说明
-
-### `bash ./scripts/online-up.sh`
-
-- 这个入口的合同是“刷新当前 release stack”，不是“仅执行一次启动”
-- 默认使用已发布且 digest 固定的运行镜像，包括 `backend`、`postgres`、`redis`、`scan-workspace-init`、scanner runners 与 `sandbox-runner`
-- 默认 backend 运行镜像对应 `runtime-plain` target，不再依赖 release 专用选择性 Cython / `.so` 产物
-- `db-bootstrap` 会在 backend 启动前显式执行数据库 bootstrap；backend 自身不再承担旧库自动升级职责
-- 主 frontend 不是 `vulhunter-frontend` 运行镜像，而是 `STATIC_FRONTEND_IMAGE` 提供的 nginx 基底镜像，加上 `./deploy/runtime/frontend/site` 与 `./deploy/runtime/frontend/nginx/default.conf` 挂载内容
-- `db` 与 `redis` 仍由当前 compose 文件拉起
-- `nexus-web` 与 `nexus-itemDetail` 不再启动独立容器，而是作为本地静态页面挂载到主前端容器中
-- release 合同下的 runner preflight 只会校验并拉取声明的运行镜像，不会回退到本地构建；在线重跑会再次拉取这些镜像
-- 脚本会在重新启动前，停止并删除当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与对应镜像，但绝不删除 volumes
-- 脚本会在本地 `3000` 端口真正可访问后打印中英双语提示
-
-如果你只想走低阶命令，也可以直接执行：
-
-```bash
-docker compose up -d
-```
-
-但这种方式不保证出现统一的终端 ready 提示。
-它也不会执行 release refresh 合同里的预拉取、容器与镜像清理步骤。
 
 ### 离线模式
 
@@ -85,7 +64,7 @@ bash ./scripts/offline-up.sh --attach-logs
 
 - 默认暴露端口：`3000`、`8000`、`5432`、`6379`；`adminer` 仅在 `tools` profile 下通过 `8081` 暴露
 - 运行数据保存在 Docker volumes：`postgres_data`、`backend_uploads`、`backend_runtime_data`、`scan_workspace`、`redis_data`
-- `online-up.sh` / `offline-up.sh` 不会删除这些 volumes；只有你手工执行 `docker compose down -v` 时才会删除它们
+- `offline-up.sh` 不会删除这些 volumes；只有你手工执行 `docker compose down -v` 时才会删除它们
 - 如执行 `docker compose down -v`，上述持久化数据会被一并删除
 - 跨版本升级前必须先备份 `postgres_data` 与 `backend_uploads`；不要把 `down -v` 当成普通升级流程
 

@@ -175,11 +175,10 @@ overlay_release_templates() {
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
   cp "$TEMPLATE_DIR/offline-up.sh" "$OUTPUT_DIR/scripts/offline-up.sh"
-  cp "$TEMPLATE_DIR/online-up.sh" "$OUTPUT_DIR/scripts/online-up.sh"
   cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/lib/compose-env.sh"
   cp "$TEMPLATE_DIR/lib/startup-banner.sh" "$OUTPUT_DIR/scripts/lib/startup-banner.sh"
   cp "$TEMPLATE_DIR/lib/release-refresh.sh" "$OUTPUT_DIR/scripts/lib/release-refresh.sh"
-  chmod +x "$OUTPUT_DIR/scripts/offline-up.sh" "$OUTPUT_DIR/scripts/online-up.sh"
+  chmod +x "$OUTPUT_DIR/scripts/offline-up.sh"
   render_release_compose
   python3 - \
     "$CONTRACT_PATH" \
@@ -297,7 +296,6 @@ validate_release_tree() {
     "images-manifest-scanner.json"
     "scripts/README-COMPOSE.md"
     "scripts/offline-up.sh"
-    "scripts/online-up.sh"
     "scripts/lib/compose-env.sh"
     "scripts/lib/startup-banner.sh"
     "scripts/lib/release-refresh.sh"
@@ -373,11 +371,11 @@ validate_release_tree() {
     if grep -Fq "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" "$OUTPUT_DIR/$doc_path"; then
       die "release docs still reference hybrid local-build compose entrypoint: $doc_path"
     fi
-    if grep -Fq "docker-compose.full.yml" "$OUTPUT_DIR/$doc_path"; then
-      die "release docs still reference full local-build compose overlay: $doc_path"
-    fi
     if grep -Fq "vulhunter-source-" "$OUTPUT_DIR/$doc_path"; then
       die "release docs still reference source artifact packaging: $doc_path"
+    fi
+    if grep -Fq "./scripts/online-up.sh" "$OUTPUT_DIR/$doc_path"; then
+      die "release docs still reference removed online deployment entrypoint: $doc_path"
     fi
     if grep -Eq '(^|[^A-Z_])FRONTEND_IMAGE([^A-Z_]|$)' "$OUTPUT_DIR/$doc_path"; then
       die "release docs still reference frontend runtime image override: $doc_path"

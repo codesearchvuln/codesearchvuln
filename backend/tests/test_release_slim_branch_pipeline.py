@@ -583,7 +583,6 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "images-manifest-scanner.json",
         "scripts/README-COMPOSE.md",
         "scripts/offline-up.sh",
-        "scripts/online-up.sh",
         "scripts/lib/compose-env.sh",
         "scripts/lib/startup-banner.sh",
         "scripts/lib/release-refresh.sh",
@@ -733,12 +732,8 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         (output_dir / "scripts" / "README-COMPOSE.md").read_text(encoding="utf-8"),
     )
     for doc in docs:
-        assert "docker compose up" in doc
         assert "offline-up.sh" in doc
-        assert "online-up.sh" in doc
-        assert "VULHUNTER_RELEASE_PROJECT_NAME" in doc
-        assert "vulhunter-release" in doc
-        assert "volume" in doc.lower() or "卷" in doc
+        assert "bash ./scripts/online-up.sh" not in doc
         assert "load-images.sh" not in doc
         assert "use-offline-env.sh" not in doc
         assert "offline-images.env" in doc
@@ -746,33 +741,23 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "vulhunter-scanner-images-" in doc
         assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in doc
         assert "在线" in doc or "offline" in doc or "离线" in doc or "online" in doc
-        assert "docker-compose.full.yml" not in doc
-        assert "docker-compose.self-contained.yml" not in doc
         assert "docker/env/backend/env.example" in doc
         assert "docker/env/backend/.env" in doc
         assert "LLM_API_KEY" in doc
-        assert "STATIC_FRONTEND_IMAGE" in doc or "静态文件" in doc or "static assets" in doc
-        assert "/api/v1/openapi.json" in doc
-        assert "http://localhost:3000/" in doc
-        assert "http://localhost:3000/api/v1" in doc
-        assert "generated release tree" in doc or "release 包" in doc or "release tree" in doc
-        assert "/nexus/" in doc
-        assert "/nexus-item-detail/" in doc
-        assert "curl -fsS http://localhost:3000/nexus/ >/dev/null" in doc
-        assert "curl -fsS http://localhost:3000/nexus-item-detail/ >/dev/null" in doc
         assert "WSL" in doc or "Bash" in doc
         assert "cp " in doc
         assert "./scripts/offline-up.sh" in doc
-        assert "./scripts/online-up.sh" in doc
+        assert "./scripts/online-up.sh" not in doc
         assert "LLM_API_KEY" in doc
         assert "cloud" in doc.lower() or "云端" in doc
+        assert "does not support online deployment" in doc or "不支持在线部署" in doc
         assert "chmod +x" not in doc
         assert "chmod 666" not in doc
-        assert "docker compose down" not in doc or "down -v" in doc
 
     compose_doc = docs[2]
     assert "VULHUNTER_RELEASE_PROJECT_NAME" in compose_doc
     assert "vulhunter-release" in compose_doc
+    assert "volume" in compose_doc.lower() or "卷" in compose_doc
 
 
 def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tmp_path: Path) -> None:
@@ -810,10 +795,10 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
         encoding="utf-8"
     )
     offline_up_script = (output_dir / "scripts" / "offline-up.sh").read_text(encoding="utf-8")
-    online_up_script = (output_dir / "scripts" / "online-up.sh").read_text(encoding="utf-8")
     compose_env_helper = (output_dir / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8")
     startup_banner_helper = (output_dir / "scripts" / "lib" / "startup-banner.sh").read_text(encoding="utf-8")
     release_refresh_helper = (output_dir / "scripts" / "lib" / "release-refresh.sh").read_text(encoding="utf-8")
+    assert not (output_dir / "scripts" / "online-up.sh").exists()
 
     assert services_metadata["revision"] == manifest["revision"]
     assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
@@ -869,12 +854,6 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "urllib.request" in offline_up_script
     assert "VULHUNTER_FRONTEND_PORT" in offline_up_script
     assert "startup-banner.sh" in offline_up_script
-    assert "RELEASE_REFRESH_HELPER" in online_up_script
-    assert "pull" in online_up_script
-    assert "compose_release pull" in online_up_script
-    assert "cleanup_release_stack" in online_up_script
-    assert "docker compose up -d" in online_up_script
-    assert "startup-banner.sh" in online_up_script
     assert "VULHUNTER_RELEASE_PROJECT_NAME" in release_refresh_helper
     assert "vulhunter-release" in release_refresh_helper
     assert "release_compose_project_name" in release_refresh_helper

@@ -1,50 +1,69 @@
-# AuditTool Public Source Branch
+# AuditTool Source Deployment Guide
 
-This `sourcecode` branch is generated automatically from `main`. It is meant for publishing source code plus the full local-build path, without internal CI, planning artifacts, or release-packaging helpers.
+This directory only documents the source-delivery deployment path. The only supported startup contract is the full local build with `docker-compose.yml` + `docker-compose.full.yml`. Do not reuse the release-package online/offline refresh scripts here.
 
-## Quick Start
+## Deployment Preparation
 
-1. Prepare the backend environment file:
+1. Copy the backend environment file:
 
 ```bash
 cp docker/env/backend/env.example docker/env/backend/.env
 ```
 
-2. Detect the Docker / Podman socket automatically:
+2. Review at least these variables:
+   `LLM_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`
+
+3. Generate the container socket settings in the root `.env`:
 
 ```bash
 bash scripts/setup-env.sh
 ```
 
-3. Start the stack with the only supported full local-build entrypoint:
+You can also use the shortcut:
+
+```bash
+make setup
+```
+
+## Supported Environments
+
+- `docker compose`
+- `podman compose`
+- `make` auto-detects `docker compose`, `podman compose`, or `docker-compose`
+- Every direct compose command must keep `-f docker-compose.yml -f docker-compose.full.yml`
+
+## Deployment Command
+
+Preferred full local build entrypoint:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 ```
 
-You can also use the shortened `Makefile` commands:
+If the host uses Podman:
 
 ```bash
-make setup
+podman compose -f docker-compose.yml -f docker-compose.full.yml up --build
+```
+
+If you prefer one wrapper command:
+
+```bash
 make up-full
 ```
 
-## Included
+## Common Maintenance Commands
 
-- `backend/`, `frontend/`, `docker/`, `data/`
-- `nexus-web/`, `nexus-itemDetail/`
-- the base `docker-compose.yml` plus the full local-build overlay `docker-compose.full.yml`
-- `scripts/setup-env.sh`
+```bash
+make ps
+make logs
+make down
+```
 
-## Removed
+If you are not using `Makefile`, keep the same compose file set on every command:
 
-- `.github/`
-- `docs/`
-- `deploy/`
-- the hybrid overlay and default-entrypoint helpers
-- release, offline, fallback, and security helper scripts
-
-## Contract
-
-- The `sourcecode` branch is generated output and should not be maintained by hand.
-- Change the generation logic on `main` whenever the public source tree needs to change.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.full.yml ps
+docker compose -f docker-compose.yml -f docker-compose.full.yml logs -f
+docker compose -f docker-compose.yml -f docker-compose.full.yml down
+```

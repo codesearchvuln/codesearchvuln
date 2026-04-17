@@ -21,23 +21,9 @@ cp docker/env/backend/env.example docker/env/backend/.env
 
 ## Supported Startup Modes
 
-### 1. Online deployment (default)
+The generated release tree now supports offline deployment only. It does not support online deployment and no longer ships `online-up.sh`.
 
-```bash
-bash ./scripts/online-up.sh
-```
-
-Use this when you want the core stack to refresh from published, digest-pinned `backend`, scanner runner, and `sandbox-runner` images. The main frontend is still served via `STATIC_FRONTEND_IMAGE` plus the packaged static assets. The script defaults to the fixed Compose project name `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release`, pulls current release images first, then cleans up the current release-stack containers and images without removing volumes. It prints a bilingual ready banner only after local port `3000` is actually reachable.
-
-If you want the lower-level path, you can still run:
-
-```bash
-docker compose up -d
-```
-
-That path remains supported, but it is only the low-level `docker compose up -d`: it does not perform the release refresh pre-pull and cleanup contract and does not guarantee the unified ready prompt.
-
-### 2. Offline deployment (optional)
+### 1. Offline deployment
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
@@ -62,6 +48,7 @@ That helper only auto-discovers the files, extracts the release archive, moves t
 
 ## Explicitly outside the release contract
 
+- online deployment, or any startup flow that depends on `online-up.sh`
 - rebuilding `backend` / `frontend` images inside the release tree
 - release delivery that depends on source bundles or local-build overlays
 - any distribution model that expects backend or frontend source code in the release tree
