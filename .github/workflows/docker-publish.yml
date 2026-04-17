@@ -202,19 +202,26 @@ jobs:
       require_complete_manifest: false
       revision: ${{ github.sha }}
 
-  release-branch:
-    name: Release Branch
+  upload-release-manifest-artifact:
+    name: Upload release manifest artifact
     needs: publish-runtime-images
     if: ${{ always() && needs.publish-runtime-images.result == 'success' && needs.publish-runtime-images.outputs.release_manifest != '' }}
-    uses: ./.github/workflows/release.yml
-    secrets: inherit
+    runs-on: ubuntu-latest
     permissions:
-      # GitHub statically validates nested reusable-workflow permissions even when
-      # release.yml's publish-runtime-images job is skipped under workflow_call.
-      contents: write
-      packages: write
-      id-token: write
-      attestations: write
-    with:
-      source_sha: ${{ github.sha }}
-      release_manifest: ${{ needs.publish-runtime-images.outputs.release_manifest }}
+      contents: read
+
+    steps:
+      - name: Write release-manifest.json
+        env:
+          RELEASE_MANIFEST: ${{ needs.publish-runtime-images.outputs.release_manifest }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${RELEASE_MANIFEST}" > release-manifest.json
+
+      - name: Upload release-manifest-json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-json
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 1

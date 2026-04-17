@@ -13,15 +13,15 @@ RUNNER_SERVICE_NAMES = (
     "flow-parser-runner",
 )
 DEFAULT_BACKEND_IMAGE = (
-    "${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
+    "${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}"
     "/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}"
 )
 DEFAULT_FRONTEND_IMAGE = (
-    "${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
+    "${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}"
     "/vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}}"
 )
 DEFAULT_SCANNER_PMD_IMAGE = (
-    "${SCANNER_PMD_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}"
+    "${SCANNER_PMD_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}"
     "/vulhunter-pmd-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
 )
 
@@ -83,32 +83,32 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}" in compose_text
     assert "SCAN_WORKSPACE_VOLUME: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}" in compose_text
     assert "GHCR_REGISTRY: ${GHCR_REGISTRY:-ghcr.io}" in compose_text
-    assert "VULHUNTER_IMAGE_NAMESPACE: ${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}" in compose_text
+    assert "VULHUNTER_IMAGE_NAMESPACE: ${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}" in compose_text
     assert "VULHUNTER_IMAGE_TAG: ${VULHUNTER_IMAGE_TAG:-latest}" in compose_text
     assert "SANDBOX_IMAGE:" not in compose_text
     assert (
-        "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert (
-        "SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-opengrep-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert (
-        "SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-bandit-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert (
-        "SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-gitleaks-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert (
-        "SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-phpstan-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert f"SCANNER_PMD_IMAGE: {DEFAULT_SCANNER_PMD_IMAGE}" in compose_text
     assert (
-        "FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-flow-parser-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert 'FLOW_PARSER_RUNNER_ENABLED: "${FLOW_PARSER_RUNNER_ENABLED:-true}"' in compose_text
@@ -130,7 +130,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "MCP_REQUIRE_ALL_READY_ON_STARTUP" not in compose_text
     assert '/bin/sh", "-lc"' not in compose_text
     assert (
-        "SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-sandbox-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert "SANDBOX_RUNNER_ENABLED:" not in compose_text
@@ -609,7 +609,7 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
 
     assert "\n  push:\n" in workflow_text
     assert "\n    branches:\n      - main\n" in workflow_text
-    assert "\n    paths:\n" in workflow_text
+    assert "\n    paths-ignore:\n" in workflow_text
     assert "\non:\n  push:\n" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "concurrency:" in workflow_text
@@ -646,7 +646,7 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "./docker/sandbox-runner.Dockerfile" in reusable_workflow_text
     assert "./docker/sandbox.Dockerfile" not in reusable_workflow_text
     assert "release-manifest.json" in reusable_workflow_text
-    assert "docker manifest inspect" in reusable_workflow_text
+    assert 'raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"' in reusable_workflow_text
     assert "publish-backend-amd64:" in reusable_workflow_text
     assert "publish-backend-arm64:" in reusable_workflow_text
     assert "merge-backend-manifest" not in reusable_workflow_text
@@ -687,16 +687,16 @@ def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
     assert "publish-runtime-images:" in workflow_text
     assert "build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}" in workflow_text
     assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
-    assert "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}" in workflow_text
-    assert "multi_arch: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
+    assert "multi_arch: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}" in workflow_text
     assert "emit_release_manifest: true" in workflow_text
+    assert "upload-release-manifest-artifact:" in workflow_text
+    assert "actions/upload-artifact@v4" in workflow_text
+    assert "release-manifest-json" in workflow_text
     assert "- 'frontend/**'" in workflow_text
     assert "- 'backend/**'" in workflow_text
     assert "- 'docker/frontend.Dockerfile'" in workflow_text
     assert "- 'docker/backend.Dockerfile'" in workflow_text
-    assert "- 'scripts/**'" in workflow_text
-    assert "- 'scripts/release-templates/**'" in workflow_text
-    assert "- 'docker/sandbox-runner.Dockerfile'" not in workflow_text
+    assert "- 'docker/sandbox-runner.Dockerfile'" in workflow_text
     assert "- 'docker/sandbox.Dockerfile'" not in workflow_text
     assert "- '.github/workflows/docker-publish.yml'" in workflow_text
     assert "- 'frontend/yasa-engine-overrides/**'" in workflow_text
@@ -718,6 +718,7 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "build_frontend: false" in workflow_text
     assert "workflow_run:" in workflow_text
     assert "Docker Publish" in workflow_text
+    assert "github.event.workflow_run.conclusion == 'success'" in workflow_text
     assert "Setup Node.js for frontend release bundle" in workflow_text
     assert "pnpm --dir frontend install --frozen-lockfile" in workflow_text
     assert "pnpm --dir frontend build" in workflow_text
@@ -743,6 +744,7 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}" in workflow_text
     assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' in workflow_text
     assert 'actions/artifacts/${artifact_id}/zip' in workflow_text
+    assert "release-manifest-json" in workflow_text
     assert "git push origin HEAD:release" in workflow_text
     assert "git ls-remote --exit-code --heads origin release" in workflow_text
     assert "git checkout -B release origin/release" in workflow_text
@@ -756,8 +758,7 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "workflow_dispatch:" in workflow_text
     assert "tags:" not in workflow_text
     assert "STATIC_FRONTEND_IMAGE" in reusable_workflow_text
-    assert "STATIC_FRONTEND_FINAL_REF" in reusable_workflow_text
-    assert '"static_frontend": {"ref": required("STATIC_FRONTEND_FINAL_REF")}' in reusable_workflow_text
+    assert '"static_frontend": "STATIC_FRONTEND"' in reusable_workflow_text
     assert "Release manifest requires a freshly built backend image ref" in reusable_workflow_text
 
 

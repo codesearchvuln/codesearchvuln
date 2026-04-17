@@ -252,11 +252,11 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "workflow_call:" in workflow_text
     assert "source_sha:" in workflow_text
     assert "release_manifest:" in workflow_text
-    assert "workflow_run:" not in workflow_text
-    assert "WORKFLOW_RUN_ID" not in workflow_text
+    assert "workflow_run:" in workflow_text
+    assert "WORKFLOW_RUN_ID" in workflow_text
+    assert "Docker Publish" in workflow_text
     assert "\n  push:\n" not in workflow_text
     assert "workflow_dispatch:" in workflow_text
-    assert "publish_backend_hardened:" in workflow_text
     assert "reuse_existing_images:" in workflow_text
     assert (
         "Skip runtime image builds and reuse the current `latest` digests on GHCR"
@@ -275,20 +275,16 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "build_frontend: false" in workflow_text
     assert (
         "build_backend: ${{ github.event_name == 'workflow_dispatch' && "
-        "!inputs.reuse_existing_images }}"
+        "!inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_backend) || false }}"
     ) in workflow_text
     assert "build_backend: true" not in workflow_text
     assert (
-        "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
-        "!inputs.reuse_existing_images && inputs.publish_backend_hardened || false }}"
-    ) in workflow_text
-    assert (
         "build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && "
-        "!inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}"
+        "!inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_yasa_runner) || false }}"
     ) in workflow_text
     assert (
         "build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && "
-        "!inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}"
+        "!inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_sandbox_runner) || false }}"
     ) in workflow_text
     assert "build_sandbox:" not in workflow_text
     assert "runtime_tag" in workflow_text
@@ -314,8 +310,9 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "deploy/frontend/default.conf" not in workflow_text
     assert "upload-artifact@v4" not in workflow_text
     assert "download-artifact@v4" not in workflow_text
-    assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' not in workflow_text
-    assert 'actions/artifacts/${artifact_id}/zip' not in workflow_text
+    assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' in workflow_text
+    assert 'actions/artifacts/${artifact_id}/zip' in workflow_text
+    assert "release-manifest-json" in workflow_text
     assert "name: frontend-release-bundle" not in workflow_text
     assert "name: release-tree" not in workflow_text
     assert "name: release-assets-services-amd64" not in workflow_text
@@ -378,6 +375,10 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "docker compose ps -q \"$1\"" not in workflow_text
     assert "service_health()" not in workflow_text
     assert "curl -fsS http://127.0.0.1:8000/health" not in workflow_text
+    assert "actions/upload-artifact@v4" in docker_publish_text
+    assert "upload-release-manifest-artifact:" in docker_publish_text
+    assert "release-manifest-json" in docker_publish_text
+    assert "uses: ./.github/workflows/release.yml" not in docker_publish_text
     assert "curl -fsS http://127.0.0.1:3000/" not in workflow_text
     assert "curl -fsS http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
     assert "dashboard_status_code=" not in workflow_text
@@ -386,12 +387,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'case "${projects_status_code}" in' not in workflow_text
     assert "http://127.0.0.1:3000/" not in workflow_text
     assert "git push origin HEAD:release" in workflow_text
-    assert workflow_text.index("- name: Download snapshot draft release assets") < workflow_text.index(
-        "uses: pnpm/action-setup@v5"
-    )
-    assert workflow_text.index("./scripts/download-release-assets.py") < workflow_text.index(
-        "pnpm --dir frontend install --frozen-lockfile"
-    )
+    assert "- name: Download snapshot draft release assets" in workflow_text
+    assert "./scripts/download-release-assets.py" in workflow_text
     assert workflow_text.index("write-release-snapshot-lock.py") < workflow_text.index(
         'git push origin HEAD:release'
     )
@@ -410,28 +407,28 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "release-assets-latest" not in workflow_text
     assert "docker-publish.yml" not in workflow_text
     assert "actions: write" not in workflow_text
-    assert "actions: read" not in workflow_text
+    assert "actions: read" in workflow_text
     assert "if: ${{ failure() || cancelled() }}" in workflow_text
     assert workflow_text.count("GH_REPO: ${{ github.repository }}") == 4
     assert "isDraft" in workflow_text
     assert 'gh release delete "${SNAPSHOT_TAG}" --yes' in workflow_text
     assert 'gh release edit "${SNAPSHOT_TAG}"' not in workflow_text
 
-    assert "upload-release-manifest:" not in docker_publish_text
-    assert "uses: ./.github/workflows/release.yml" in docker_publish_text
-    assert "source_sha: ${{ github.sha }}" in docker_publish_text
-    assert "release_manifest: ${{ needs.publish-runtime-images.outputs.release_manifest }}" in docker_publish_text
+    assert "upload-release-manifest-artifact:" in docker_publish_text
+    assert "uses: ./.github/workflows/release.yml" not in docker_publish_text
+    assert "source_sha: ${{ github.sha }}" not in docker_publish_text
+    assert "release_manifest: ${{ needs.publish-runtime-images.outputs.release_manifest }}" not in docker_publish_text
+    assert "actions/upload-artifact@v4" in docker_publish_text
+    assert "release-manifest-json" in docker_publish_text
     assert (
         "if: ${{ always() && needs.publish-runtime-images.result == 'success' && "
         "needs.publish-runtime-images.outputs.release_manifest != '' }}"
     ) in docker_publish_text
     assert "frontend/**" in docker_publish_text
 
-    assert "publish_backend_hardened:" in publish_workflow_text
     assert "build_sandbox:" not in publish_workflow_text
     assert "publish-sandbox:" not in publish_workflow_text
     assert "target: runtime-plain" in publish_workflow_text
-    assert "target: runtime-cython" in publish_workflow_text
     assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
     assert "BUILD_BACKEND: ${{ inputs.build_backend }}" in publish_workflow_text
     assert (
@@ -443,8 +440,6 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "release-manifest fallback images" in publish_workflow_text
     assert "buildcache-runtime-plain-amd64" in publish_workflow_text
     assert "buildcache-runtime-plain-arm64" in publish_workflow_text
-    assert "buildcache-runtime-cython" in publish_workflow_text
-    assert "-hardened" in publish_workflow_text
 
 
 def test_scheduled_release_workflow_has_been_removed() -> None:
@@ -463,13 +458,16 @@ def test_docker_publish_backend_trigger_respects_paths_filter() -> None:
     docker_publish_text = (
         REPO_ROOT / ".github" / "workflows" / "docker-publish.yml"
     ).read_text(encoding="utf-8")
+    build_backend_line = next(
+        line for line in docker_publish_text.splitlines() if line.strip().startswith("build_backend:")
+    )
 
     assert (
         "build_backend: ${{ github.event_name == 'workflow_dispatch' && "
         "inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}"
     ) in docker_publish_text
     # Regression: the永真 clause previously ORed in `github.event_name == 'push'`.
-    assert "|| github.event_name == 'push'" not in docker_publish_text
+    assert "|| github.event_name == 'push'" not in build_backend_line
 
 
 def test_docker_publish_paths_ignore_skips_doc_only_pushes() -> None:

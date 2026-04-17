@@ -9,6 +9,11 @@ on:
       release_manifest:
         required: true
         type: string
+  workflow_run:
+    workflows:
+      - Docker Publish
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       reuse_existing_images:
@@ -75,10 +80,171 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
+  resolve-entry:
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      effective_source_sha: ${{ steps.from_call.outputs.source_sha || steps.from_dispatch.outputs.source_sha || steps.from_workflow_run.outputs.source_sha }}
+      effective_release_manifest: ${{ steps.from_call.outputs.release_manifest || steps.from_workflow_run.outputs.release_manifest }}
+
+    steps:
+      - name: Load release source from workflow_call inputs
+        id: from_call
+        if: ${{ github.event_name == 'workflow_call' }}
+        env:
+          SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
+          RELEASE_MANIFEST_INPUT: ${{ inputs.release_manifest }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SOURCE_SHA_INPUT}" ]] || { echo "::error::workflow_call source_sha is empty"; exit 1; }
+          [[ -n "${RELEASE_MANIFEST_INPUT}" ]] || { echo "::error::workflow_call release manifest is empty"; exit 1; }
+
+          echo "source_sha=${SOURCE_SHA_INPUT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_manifest<<EOF"
+            printf '%s\n' "${RELEASE_MANIFEST_INPUT}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Load release source from workflow_dispatch context
+        id: from_dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          echo "source_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Load release source and manifest from workflow_run artifact
+        id: from_workflow_run
+        if: ${{ github.event_name == 'workflow_run' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+
+          artifact_listing_path="${RUNNER_TEMP}/workflow-run-artifacts.json"
+          artifact_zip_path="${RUNNER_TEMP}/release-manifest-json.zip"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts" > "${artifact_listing_path}"
+
+          artifact_id="$(python3 - "$artifact_listing_path" "$GITHUB_STEP_SUMMARY" <<'PY'
+          from __future__ import annotations
+
+          import json
+          import sys
+          from pathlib import Path
+
+
+          listing_path = Path(sys.argv[1])
+          summary_path = Path(sys.argv[2])
+          payload = json.loads(listing_path.read_text(encoding="utf-8"))
+          artifacts = payload.get("artifacts")
+          if not isinstance(artifacts, list):
+              raise SystemExit("workflow_run artifacts payload must include an artifacts list")
+
+          artifact = next(
+              (
+                  candidate
+                  for candidate in artifacts
+                  if isinstance(candidate, dict)
+                  and str(candidate.get("name", "")).strip() == "release-manifest-json"
+                  and not bool(candidate.get("expired"))
+              ),
+              None,
+          )
+          if artifact is None:
+              with summary_path.open("a", encoding="utf-8") as handle:
+                  handle.write("## Workflow Run Handoff\n")
+                  handle.write("- status: `missing release-manifest-json artifact`\n")
+              raise SystemExit("workflow_run missing required artifact: release-manifest-json")
+
+          artifact_id = str(artifact.get("id", "")).strip()
+          if not artifact_id.isdigit():
+              with summary_path.open("a", encoding="utf-8") as handle:
+                  handle.write("## Workflow Run Handoff\n")
+                  handle.write("- status: `invalid release-manifest-json artifact id`\n")
+              raise SystemExit("workflow_run artifact id is invalid for release-manifest-json")
+
+          print(artifact_id)
+          PY
+          )"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${artifact_zip_path}"
+
+          python3 - "$artifact_zip_path" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$WORKFLOW_RUN_ID" "$WORKFLOW_RUN_EVENT" "$WORKFLOW_RUN_HEAD_BRANCH" <<'PY'
+          from __future__ import annotations
+
+          import json
+          import sys
+          import zipfile
+          from pathlib import Path
+
+
+          artifact_zip_path = Path(sys.argv[1])
+          github_output = Path(sys.argv[2])
+          summary_path = Path(sys.argv[3])
+          workflow_run_id = sys.argv[4]
+          workflow_run_event = sys.argv[5]
+          workflow_run_head_branch = sys.argv[6]
+
+          try:
+              with zipfile.ZipFile(artifact_zip_path) as archive:
+                  try:
+                      manifest_text = archive.read("release-manifest.json").decode("utf-8")
+                  except KeyError as exc:
+                      with summary_path.open("a", encoding="utf-8") as handle:
+                          handle.write("## Workflow Run Handoff\n")
+                          handle.write("- status: `artifact missing release-manifest.json`\n")
+                      raise SystemExit("release-manifest-json artifact does not contain release-manifest.json") from exc
+          except zipfile.BadZipFile as exc:
+              with summary_path.open("a", encoding="utf-8") as handle:
+                  handle.write("## Workflow Run Handoff\n")
+                  handle.write("- status: `artifact zip is invalid`\n")
+              raise SystemExit("release-manifest-json artifact zip is invalid") from exc
+
+          try:
+              manifest = json.loads(manifest_text)
+          except json.JSONDecodeError as exc:
+              with summary_path.open("a", encoding="utf-8") as handle:
+                  handle.write("## Workflow Run Handoff\n")
+                  handle.write("- status: `release-manifest.json is invalid JSON`\n")
+              raise SystemExit(f"release-manifest.json is invalid JSON: {exc}") from exc
+
+          revision = str(manifest.get("revision", "")).strip()
+          if not revision:
+              with summary_path.open("a", encoding="utf-8") as handle:
+                  handle.write("## Workflow Run Handoff\n")
+                  handle.write("- status: `release-manifest revision missing`\n")
+              raise SystemExit("release-manifest.json revision is empty")
+
+          with summary_path.open("a", encoding="utf-8") as handle:
+              handle.write("## Workflow Run Handoff\n")
+              handle.write(f"- workflow_run_id: `{workflow_run_id}`\n")
+              handle.write(f"- workflow_run_event: `{workflow_run_event}`\n")
+              handle.write(f"- workflow_run_head_branch: `{workflow_run_head_branch}`\n")
+              handle.write("- artifact_name: `release-manifest-json`\n")
+              handle.write(f"- source_sha: `{revision}`\n")
+
+          with github_output.open("a", encoding="utf-8") as handle:
+              handle.write(f"source_sha={revision}\n")
+              handle.write("release_manifest<<EOF\n")
+              handle.write(manifest_text.rstrip("\n"))
+              handle.write("\nEOF\n")
+          PY
+
   prepare-release:
+    needs: resolve-entry
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -92,15 +258,12 @@ jobs:
       - name: 计算 release 源信息
         id: vars
         env:
-          SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
+          SOURCE_SHA_INPUT: ${{ needs.resolve-entry.outputs.effective_source_sha }}
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_call" ]]; then
-            source_ref="${SOURCE_SHA_INPUT}"
-          else
-            source_ref="${GITHUB_SHA}"
-          fi
+          [[ -n "${SOURCE_SHA_INPUT}" ]] || { echo "::error::effective source_sha is empty"; exit 1; }
+          source_ref="${SOURCE_SHA_INPUT}"
           source_sha="${source_ref}"
           snapshot_tag="release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
@@ -174,7 +337,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   create-draft-release:
-    needs: prepare-release
+    needs:
+      - prepare-release
+      - resolve-release-manifest
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -260,6 +425,7 @@ jobs:
 
   resolve-release-manifest:
     needs:
+      - resolve-entry
       - prepare-release
       - publish-runtime-images
     runs-on: ubuntu-latest
@@ -270,15 +436,15 @@ jobs:
       release_manifest: ${{ steps.from_call.outputs.release_manifest || steps.from_dispatch.outputs.release_manifest }}
 
     steps:
-      - name: Load release manifest from workflow_call inputs
+      - name: Load release manifest from resolved entry context
         id: from_call
-        if: ${{ github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name == 'workflow_call' || github.event_name == 'workflow_run' }}
         env:
-          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
+          RELEASE_MANIFEST: ${{ needs.resolve-entry.outputs.effective_release_manifest }}
         run: |
           set -euo pipefail
 
-          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::workflow_call release manifest is empty"; exit 1; }
+          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::resolved release manifest is empty"; exit 1; }
 
           {
             echo "release_manifest<<EOF"
@@ -452,13 +618,13 @@ jobs:
                   handle.write(f"- available_assets: `{', '.join(asset_names)}`\n")
           PY
 
-      - name: Setup pnpm
+      - name: Setup pnpm for frontend release bundle
         uses: pnpm/action-setup@v5
         with:
           package_json_file: frontend/package.json
           run_install: false
 
-      - name: Setup Node.js
+      - name: Setup Node.js for frontend release bundle
         uses: actions/setup-node@v4
         with:
           node-version: 24
