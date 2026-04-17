@@ -6,7 +6,6 @@ import stat
 import subprocess
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -624,7 +623,6 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "image: ${BACKEND_IMAGE:-ghcr.io/acme-sec/vulhunter-backend@sha256:" in compose_text
     assert "image: ${STATIC_FRONTEND_IMAGE:-ghcr.io/acme-sec/static-frontend@sha256:" in compose_text
     assert "SANDBOX_IMAGE" not in compose_text
-    assert 'INIT_DB_SEED_PROJECTS: "${INIT_DB_SEED_PROJECTS:-false}"' in compose_text
     assert "start_period: 180s" in compose_text
     assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
     assert "./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" in compose_text

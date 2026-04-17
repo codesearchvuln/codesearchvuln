@@ -4,12 +4,8 @@ Default demo projects are no longer stored as repo-tracked ZIP files.
 
 ## Runtime behavior
 
-- On backend startup, `app/db/init_db.py` ensures the default GitHub-backed seed projects exist for the demo user.
-- If a project ZIP is not stored yet, backend builds the pinned GitHub archive URL, probes configured mirror candidates plus the official GitHub source, then downloads the fastest reachable archive.
-- With Docker Compose defaults:
-  - Postgres data is persisted in `postgres_data`.
-  - ZIP files are persisted in `backend_uploads` (`/app/uploads/zip_files`).
-- Result: after the first successful install, the projects are reused across restarts/rebuilds without re-downloading.
+- Backend startup no longer auto-downloads or auto-imports these seed projects.
+- The pinned seed descriptors remain in `app/db/init_db.py` so historical demo-project metadata can still be recognized by compatibility paths such as project transfer/export logic.
 
 ## Managed seed projects
 

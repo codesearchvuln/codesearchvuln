@@ -380,7 +380,7 @@ def test_collect_unique_yaml_rule_files_sorts_and_deduplicates_by_content_hash(t
 
 
 @pytest.mark.asyncio
-async def test_init_db_uses_seed_project_initializer(monkeypatch):
+async def test_init_db_no_longer_imports_seed_projects_during_startup(monkeypatch):
     db = AsyncMock()
     user = SimpleNamespace(id="user-1")
     create_demo_user_mock = AsyncMock(return_value=user)
@@ -404,14 +404,14 @@ async def test_init_db_uses_seed_project_initializer(monkeypatch):
     await init_db_module.init_db(db)
 
     create_demo_user_mock.assert_awaited_once_with(db)
-    ensure_default_seed_projects_mock.assert_awaited_once_with(db, user)
+    ensure_default_seed_projects_mock.assert_not_called()
     create_internal_rules_mock.assert_awaited_once_with(db)
     create_patch_rules_mock.assert_awaited_once_with(db)
     ensure_builtin_gitleaks_rules_mock.assert_awaited_once_with(db)
 
 
 @pytest.mark.asyncio
-async def test_init_db_can_skip_heavy_bootstrap_steps_via_env_flags(monkeypatch):
+async def test_init_db_keeps_other_bootstrap_steps_without_project_imports(monkeypatch):
     db = _make_db(existing_project=[])
     user = SimpleNamespace(id="user-1")
 
@@ -434,15 +434,13 @@ async def test_init_db_can_skip_heavy_bootstrap_steps_via_env_flags(monkeypatch)
     original = getattr(module, "init_templates_and_rules", None)
     monkeypatch.setattr(module, "init_templates_and_rules", init_templates_mock)
 
-    monkeypatch.setenv("INIT_DB_SEED_PROJECTS", "false")
-
     try:
         await init_db_module.init_db(db)
     finally:
         if original is None:
             delattr(module, "init_templates_and_rules")
         else:
-            setattr(module, "init_templates_and_rules", original)
+            module.init_templates_and_rules = original
 
     create_demo_user_mock.assert_awaited_once_with(db)
     ensure_default_seed_projects_mock.assert_not_called()
@@ -483,10 +481,10 @@ async def test_init_db_warns_and_continues_when_rule_bootstrap_fails(monkeypatch
             if original is None:
                 delattr(module, "init_templates_and_rules")
             else:
-                setattr(module, "init_templates_and_rules", original)
+                module.init_templates_and_rules = original
 
     create_demo_user_mock.assert_awaited_once_with(db)
-    ensure_default_seed_projects_mock.assert_awaited_once_with(db, user)
+    ensure_default_seed_projects_mock.assert_not_called()
     create_internal_rules_mock.assert_awaited_once_with(db)
     create_patch_rules_mock.assert_awaited_once_with(db)
     ensure_builtin_gitleaks_rules_mock.assert_awaited_once_with(db)

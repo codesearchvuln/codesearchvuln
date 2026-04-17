@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from sqlalchemy import insert, text
+from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -775,13 +775,7 @@ async def init_db(db: AsyncSession) -> None:
     logger.info("开始初始化数据库...")
 
     # 创建演示用户
-    demo_user = await create_demo_user(db)
-
-    # 不再创建历史演示项目，统一切换为 GitHub 预置样本项目
-    if demo_user and _env_flag("INIT_DB_SEED_PROJECTS", default=True):
-        await ensure_default_seed_projects(db, demo_user)
-    elif demo_user:
-        logger.info("跳过默认种子项目初始化（INIT_DB_SEED_PROJECTS=false）")
+    await create_demo_user(db)
 
     await db.commit()
 

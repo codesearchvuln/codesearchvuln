@@ -32,23 +32,10 @@ The default compose startup now only brings up the long-lived services.
 Instead, backend runs the configured runner preflight during startup to verify the images and commands behind `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE`.
 Those compose services are not the runtime scan workers. During actual scans, backend uses the Docker SDK and `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE` to start temporary runner containers on demand.
 
-### Default seed projects (persistent)
+### Startup project import
 
-On first startup (`docker compose up` or the compatibility self-contained overlay path), backend downloads the pinned GitHub archive snapshots for the demo user and stores them as persistent ZIP projects:
-
-- `libplist`
-- `DVWA`
-- `DSVW`
-- `WebGoat`
-- `JavaSecLab`
-- `govwa`
-- `fastjson`
-
-The installer probes configured GitHub mirror candidates plus the official GitHub source, sorts them by latency, and downloads from the fastest reachable source first.
-
-Project ZIPs are installed once and persisted in Docker volumes (`postgres_data` + `backend_uploads`), so subsequent restarts/rebuilds reuse them directly.
-
-If all candidates fail during first startup, backend still starts successfully and retries the missing project archives on the next startup.
+Backend startup no longer auto-imports any demo or seed projects.
+`docker compose up` only bootstraps the service, database schema, built-in rules, and templates.
 
 ## Local Development
 
