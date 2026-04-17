@@ -38,6 +38,21 @@ def test_release_workflow_dispatch_path_still_owns_manual_runtime_builds() -> No
     assert "if: ${{ github.event_name == 'workflow_dispatch' }}" in workflow_text
 
 
+def test_release_workflow_run_path_allows_manifest_resolution_when_manual_build_job_is_skipped() -> None:
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "if: ${{ always() && needs.resolve-entry.result == 'success' && "
+        "needs.prepare-release.result == 'success' && ((github.event_name == "
+        "'workflow_dispatch' && needs.publish-runtime-images.result == 'success') || "
+        "(github.event_name != 'workflow_dispatch' && "
+        "(needs.publish-runtime-images.result == 'skipped' || "
+        "needs.publish-runtime-images.result == 'success'))) }}"
+    ) in workflow_text
+
+
 def test_docker_publish_uploads_release_manifest_artifact_without_nested_release_call() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
         encoding="utf-8"

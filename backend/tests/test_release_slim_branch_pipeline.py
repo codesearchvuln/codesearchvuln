@@ -266,6 +266,14 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "GH_REPO: ${{ github.repository }}" in workflow_text
     assert "publish-runtime-images:" in workflow_text
     assert "resolve-release-manifest:" in workflow_text
+    assert (
+        "if: ${{ always() && needs.resolve-entry.result == 'success' && "
+        "needs.prepare-release.result == 'success' && ((github.event_name == "
+        "'workflow_dispatch' && needs.publish-runtime-images.result == 'success') || "
+        "(github.event_name != 'workflow_dispatch' && "
+        "(needs.publish-runtime-images.result == 'skipped' || "
+        "needs.publish-runtime-images.result == 'success'))) }}"
+    ) in workflow_text
     assert "package-offline-images:" in workflow_text
     assert "finalize-publish:" in workflow_text
     assert "cleanup-draft-release:" in workflow_text

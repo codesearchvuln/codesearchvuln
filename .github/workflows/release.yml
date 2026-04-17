@@ -428,6 +428,7 @@ jobs:
       - resolve-entry
       - prepare-release
       - publish-runtime-images
+    if: ${{ always() && needs.resolve-entry.result == 'success' && needs.prepare-release.result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.publish-runtime-images.result == 'success') || (github.event_name != 'workflow_dispatch' && (needs.publish-runtime-images.result == 'skipped' || needs.publish-runtime-images.result == 'success'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
