@@ -16,9 +16,13 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import CreateScanTaskDialog from "@/components/scan/CreateScanTaskDialog";
 import {
+	areDataTableQueryStatesEqual,
+	createDefaultDataTableState,
 	DataTable,
 	type AppColumnDef,
 	type DataTableQueryState,
+	mergeDataTableUrlState,
+	useDataTableUrlState,
 } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -257,6 +261,24 @@ export default function ProjectDetail() {
 			rowSelection: {},
 			density: "comfortable",
 		});
+	const { initialState: potentialInitialUrlState, syncStateToUrl: syncPotentialStateToUrl } =
+		useDataTableUrlState(true, { prefix: "pv_" });
+	const resolvedPotentialUrlState = useMemo(
+		() =>
+			createDefaultDataTableState({
+				...potentialInitialUrlState,
+				pagination: {
+					pageIndex: potentialInitialUrlState.pagination.pageIndex,
+					pageSize:
+						potentialInitialUrlState.pagination.pageSize ||
+						DETAIL_POTENTIAL_FINDINGS_PAGE_SIZE,
+				},
+			}),
+		[potentialInitialUrlState],
+	);
+	const [potentialTableState, setPotentialTableState] = useState<DataTableQueryState>(
+		() => resolvedPotentialUrlState,
+	);
 
 	const fallbackBackPath = "/projects#project-browser";
 	const sourceFromState =
@@ -271,6 +293,15 @@ export default function ProjectDetail() {
 			? normalizedSourceFrom
 			: fallbackBackPath;
 	const currentRoute = `${location.pathname}${location.search}`;
+	const potentialCurrentRoute = useMemo(() => {
+		const merged = mergeDataTableUrlState(
+			new URLSearchParams(location.search),
+			potentialTableState,
+			{ prefix: "pv_" },
+		);
+		const query = merged.toString();
+		return query ? `${location.pathname}?${query}` : location.pathname;
+	}, [location.pathname, location.search, potentialTableState]);
 	const withStaticReturnTo = useCallback(
 		(route: string, taskKind: string) => {
 			if (taskKind !== "static") return route;
@@ -282,6 +313,18 @@ export default function ProjectDetail() {
 	const handleBack = () => {
 		navigate(backTarget);
 	};
+
+	useEffect(() => {
+		syncPotentialStateToUrl(potentialTableState);
+	}, [potentialTableState, syncPotentialStateToUrl]);
+
+	useEffect(() => {
+		setPotentialTableState((current) =>
+			areDataTableQueryStatesEqual(current, resolvedPotentialUrlState)
+				? current
+				: resolvedPotentialUrlState,
+		);
+	}, [resolvedPotentialUrlState]);
 
 	const fetchProjectPotentialVulnerabilities = useCallback(
 		async (
@@ -952,8 +995,9 @@ export default function ProjectDetail() {
 					status={potentialStatus}
 					findings={potentialFindings}
 					totalFindings={potentialTotalFindings}
-					currentRoute={currentRoute}
-					pageSize={DETAIL_POTENTIAL_FINDINGS_PAGE_SIZE}
+					currentRoute={potentialCurrentRoute}
+					tableState={potentialTableState}
+					onTableStateChange={setPotentialTableState}
 				/>
 			</div>
 

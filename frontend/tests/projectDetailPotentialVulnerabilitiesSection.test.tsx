@@ -26,6 +26,19 @@ const sampleFindings = Array.from({ length: 12 }, (_, index) => ({
 	source: index % 2 === 0 ? "agent" : "static",
 })) as any;
 
+const defaultTableState = {
+	globalFilter: "",
+	columnFilters: [],
+	sorting: [],
+	pagination: {
+		pageIndex: 0,
+		pageSize: 10,
+	},
+	columnVisibility: {},
+	rowSelection: {},
+	density: "comfortable" as const,
+};
+
 test("ProjectPotentialVulnerabilitiesSection 渲染表格并默认分页显示首批漏洞", () => {
 	const markup = renderToStaticMarkup(
 		createElement(
@@ -35,8 +48,9 @@ test("ProjectPotentialVulnerabilitiesSection 渲染表格并默认分页显示�
 				status: "ready",
 				findings: sampleFindings,
 				totalFindings: sampleFindings.length,
-				currentRoute: "/projects/project-1",
-				pageSize: 10,
+				currentRoute: "/projects/project-1?pv_page=2&pv_pageSize=20",
+				tableState: defaultTableState,
+				onTableStateChange: () => {},
 			}),
 		),
 	);
@@ -48,7 +62,7 @@ test("ProjectPotentialVulnerabilitiesSection 渲染表格并默认分页显示�
 	assert.match(markup, /#finding-1/);
 	assert.match(markup, /CWE-1/);
 	assert.match(markup, /智能扫描/);
-	assert.match(markup, /returnTo=%2Fprojects%2Fproject-1/);
+	assert.match(markup, /returnTo=%2Fprojects%2Fproject-1%3Fpv_page%3D2%26pv_pageSize%3D20/);
 	assert.match(markup, /第 1 \/ 2 页/);
 	assert.match(markup, /placeholder="搜索漏洞 ID、类型或任务"/);
 	assert.match(markup, /cyber-input h-10 pl-11 pr-4/);
@@ -69,7 +83,8 @@ test("ProjectPotentialVulnerabilitiesSection 调整列宽并让漏洞列内容�
 				findings: sampleFindings.slice(0, 1),
 				totalFindings: 1,
 				currentRoute: "/projects/project-1",
-				pageSize: 10,
+				tableState: defaultTableState,
+				onTableStateChange: () => {},
 			}),
 		),
 	);
@@ -92,7 +107,8 @@ test("ProjectPotentialVulnerabilitiesSection 显示分页按钮并在第一页�
 				findings: sampleFindings.slice(0, 5),
 				totalFindings: 5,
 				currentRoute: "/projects/project-1",
-				pageSize: 10,
+				tableState: defaultTableState,
+				onTableStateChange: () => {},
 			}),
 		),
 	);
@@ -113,6 +129,8 @@ test("ProjectPotentialVulnerabilitiesSection 在非 ready 状态显示反馈文�
 				findings: [],
 				totalFindings: 0,
 				currentRoute: "/projects/project-1",
+				tableState: defaultTableState,
+				onTableStateChange: () => {},
 			}),
 		),
 	);
@@ -127,6 +145,8 @@ test("ProjectPotentialVulnerabilitiesSection 在非 ready 状态显示反馈文�
 				findings: [],
 				totalFindings: 0,
 				currentRoute: "/projects/project-1",
+				tableState: defaultTableState,
+				onTableStateChange: () => {},
 			}),
 		),
 	);

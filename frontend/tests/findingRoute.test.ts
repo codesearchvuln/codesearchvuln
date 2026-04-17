@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  appendReturnTo,
   buildAgentFindingDetailRoute,
   buildProjectCodeBrowserRoute,
   resolveFindingDetailBackTarget,
@@ -62,4 +63,17 @@ test("buildProjectCodeBrowserRoute omits invalid line while keeping file query",
   const url = new URL(`http://localhost${route}`);
   assert.equal(url.searchParams.get("file"), "src/main.ts");
   assert.equal(url.searchParams.has("line"), false);
+});
+
+test("appendReturnTo preserves namespaced table state query in returnTo", () => {
+  const route = appendReturnTo(
+    "/finding-detail/static/task-1/finding-1?engine=opengrep",
+    "/projects/project-1?pv_page=3&pv_pageSize=20&pv_sort=severity&pv_order=desc",
+  );
+
+  const url = new URL(`http://localhost${route}`);
+  assert.equal(
+    url.searchParams.get("returnTo"),
+    "/projects/project-1?pv_page=3&pv_pageSize=20&pv_sort=severity&pv_order=desc",
+  );
 });

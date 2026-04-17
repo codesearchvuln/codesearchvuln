@@ -256,6 +256,7 @@ AuditTool 是一个面向代码仓库安全扫描的平台。仓库名叫 `Audit
 - 统一分页接口：`GET /api/v1/static-tasks/findings/unified`
 - 前端数据入口：`frontend/src/shared/api/staticUnifiedFindings.ts`
 - 页面数据管理：`frontend/src/pages/static-analysis/useStaticAnalysisData.ts`
+- 详情回跳状态：`returnTo` 使用“即时表格状态”构造，避免切页后瞬间点详情丢页码
 
 #### 智能/混合扫描结果
 
@@ -327,6 +328,9 @@ AuditTool 是一个面向代码仓库安全扫描的平台。仓库名叫 `Audit
 #### 3. `frontend/src/pages/ProjectDetail.tsx`
 
 如果你想理解“为什么项目页能把不同结果汇总在一起”，看这里。
+
+补充：项目页里的“潜在漏洞”表格状态使用 URL 命名空间参数（`pv_*`）持久化，
+对应工具在 `frontend/src/components/data-table/urlState.ts`，用于保障详情返回时恢复页码/筛选。
 
 #### 4. `frontend/src/shared/api/agentTasks.ts`
 

@@ -19,10 +19,9 @@ interface ProjectPotentialVulnerabilitiesSectionProps {
 	findings: ProjectDetailPotentialListItem[];
 	totalFindings: number;
 	currentRoute: string;
-	pageSize?: number;
+	tableState: DataTableQueryState;
+	onTableStateChange: (state: DataTableQueryState) => void;
 }
-
-const DEFAULT_PAGE_SIZE = 10;
 
 function getStatusMessage(status: PotentialStatus): string | null {
 	if (status === "loading") return "加载中...";
@@ -91,7 +90,8 @@ export function ProjectPotentialVulnerabilitiesSection({
 	findings,
 	totalFindings,
 	currentRoute,
-	pageSize = DEFAULT_PAGE_SIZE,
+	tableState,
+	onTableStateChange,
 }: ProjectPotentialVulnerabilitiesSectionProps) {
 	const statusMessage = useMemo(() => getStatusMessage(status), [status]);
 	const columns = useMemo<ColumnDef<ProjectDetailPotentialListItem>[]>(
@@ -236,16 +236,6 @@ export function ProjectPotentialVulnerabilitiesSection({
 			] satisfies AppColumnDef<ProjectDetailPotentialListItem, unknown>[],
 		[currentRoute],
 	);
-	const defaultState = useMemo<Partial<DataTableQueryState>>(
-		() => ({
-			pagination: {
-				pageIndex: 0,
-				pageSize: Math.max(1, pageSize),
-			},
-		}),
-		[pageSize],
-	);
-
 	return (
 		<section className="space-y-3">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -272,10 +262,10 @@ export function ProjectPotentialVulnerabilitiesSection({
 			) : (
 				<div className="space-y-3">
 					<DataTable
-						key={`${status}:${findings.length}:${pageSize}`}
 						data={findings}
 						columns={columns}
-						defaultState={defaultState}
+						state={tableState}
+						onStateChange={onTableStateChange}
 						emptyState={{
 							title: "暂无潜在漏洞",
 						}}

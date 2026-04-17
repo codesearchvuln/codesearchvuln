@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   areDataTableQueryStatesEqual,
+  mergeDataTableUrlState,
   type DataTableQueryState,
   useDataTableUrlState,
 } from "@/components/data-table";
@@ -56,7 +57,6 @@ export default function StaticAnalysis() {
     returnToParam.startsWith("/") && !returnToParam.startsWith("//")
       ? returnToParam
       : "";
-  const currentRoute = `${location.pathname}${location.search}`;
   const { initialState, syncStateToUrl } = useDataTableUrlState(true);
 
   const opengrepTaskId = useMemo(() => {
@@ -134,6 +134,14 @@ export default function StaticAnalysis() {
     () => resolveStaticAnalysisTableState(initialState),
     [initialState],
   );
+  const findingsCurrentRoute = useMemo(() => {
+    const merged = mergeDataTableUrlState(
+      new URLSearchParams(location.search),
+      tableState,
+    );
+    const query = merged.toString();
+    return query ? `${location.pathname}?${query}` : location.pathname;
+  }, [location.pathname, location.search, tableState]);
   const unifiedQuery = useMemo(
     () =>
       buildStaticAnalysisUnifiedFindingsQuery({
@@ -345,7 +353,7 @@ export default function StaticAnalysis() {
       />
 
         <StaticAnalysisFindingsTable
-          currentRoute={currentRoute}
+          currentRoute={findingsCurrentRoute}
           loading={loadingInitial || loadingFindings}
           rows={unifiedRows}
           total={unifiedTotal}
