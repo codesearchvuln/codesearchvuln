@@ -255,7 +255,6 @@ SubAgent 建议保留只读侦查工具：
 - `get_function_summary`
 - `get_symbol_body`
 - `locate_enclosing_function`
-- 可选：`update_recon_file_tree`
 
 不建议给 Recon SubAgent 直接开放 legacy `create_sub_agent`，避免递归派生失控。
 

@@ -141,6 +141,62 @@ class TestSandboxManagerImageResolution:
         assert result["success"] is False
         assert "runner" in (result["error"] or "").lower()
 
+    @pytest.mark.asyncio
+    async def test_initialize_permission_denied_includes_socket_gid_hint(self, monkeypatch):
+        def _raise_permission_denied():
+            raise RuntimeError(
+                "Error while fetching server API version: "
+                "('Connection aborted.', PermissionError(13, 'Permission denied'))"
+            )
+
+        monkeypatch.setattr("docker.from_env", _raise_permission_denied)
+
+        manager = SandboxManager(SandboxConfig())
+        await manager.initialize()
+
+        diagnosis = manager.get_diagnosis()
+        assert manager.is_available is False
+        assert manager._initialized is False
+        assert "Permission denied" in diagnosis
+        assert "DOCKER_SOCKET_GID" in diagnosis
+
+    @pytest.mark.asyncio
+    async def test_initialize_retries_after_failure_and_can_recover(self, monkeypatch):
+        class FakeDockerClient:
+            def ping(self):
+                return None
+
+        call_count = {"value": 0}
+
+        def _from_env():
+            call_count["value"] += 1
+            if call_count["value"] == 1:
+                raise RuntimeError(
+                    "Error while fetching server API version: "
+                    "('Connection aborted.', PermissionError(13, 'Permission denied'))"
+                )
+            return FakeDockerClient()
+
+        class FakeRunnerClient:
+            pass
+
+        monkeypatch.setattr("docker.from_env", _from_env)
+        monkeypatch.setattr(
+            sandbox_runner_client_module,
+            "SandboxRunnerClient",
+            FakeRunnerClient,
+        )
+
+        manager = SandboxManager(SandboxConfig())
+
+        await manager.initialize()
+        assert manager.is_available is False
+
+        await manager.initialize()
+        assert manager.is_available is True
+        assert manager._initialized is True
+        assert call_count["value"] == 2
+
     def test_format_image_resolution_error_uses_sandbox_runner_build_hint(self):
         manager = SandboxManager(SandboxConfig(image="custom/sandbox-runner:latest"))
 

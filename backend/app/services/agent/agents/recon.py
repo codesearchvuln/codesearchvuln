@@ -241,7 +241,6 @@ class ReconAgent(BaseAgent):
         self._coverage_directories: List[str] = []
         self._coverage_files_discovered: List[str] = []
         self._coverage_files_read: List[str] = []
-        self._coverage_tracker_file_count: int = 0
         self._latest_tool_module_results: List[Dict[str, Any]] = []
         self._latest_tool_project_model: Dict[str, Any] = {}
     
@@ -534,8 +533,8 @@ class ReconAgent(BaseAgent):
             "directories_scanned_count": len(self._coverage_directories),
             "files_discovered_count": len(self._coverage_files_discovered),
             "files_read_count": len(self._coverage_files_read),
-            "tracker_enabled": "update_recon_file_tree" in self.tools,
-            "tracker_built": self._coverage_tracker_file_count > 0,
+            "tracker_enabled": False,
+            "tracker_built": False,
         }
 
     def _apply_runtime_recon_state(self, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -587,15 +586,6 @@ class ReconAgent(BaseAgent):
         result["coverage_summary"] = self._build_coverage_summary()
         return result
 
-    async def _refresh_recon_file_tree(self, action: str, **payload: Any) -> None:
-        if "update_recon_file_tree" not in self.tools:
-            return
-        tool_input = {"action": action, **payload}
-        try:
-            await self.execute_tool("update_recon_file_tree", tool_input)
-        except Exception as exc:
-            logger.debug("[Recon] update_recon_file_tree failed: %s", exc)
-
     async def _update_coverage_from_last_tool(self, action_name: str, action_input: Dict[str, Any]) -> None:
         context = getattr(self, "_last_successful_tool_context", None) or {}
         if str(context.get("tool_name") or "") != str(action_name or ""):
@@ -636,12 +626,6 @@ class ReconAgent(BaseAgent):
             self._remember_coverage_directory(directory)
             for file_path in metadata.get("files", []) or []:
                 self._remember_discovered_file(file_path)
-            if self._coverage_files_discovered and len(self._coverage_files_discovered) != self._coverage_tracker_file_count:
-                await self._refresh_recon_file_tree(
-                    "build",
-                    files=sorted(self._coverage_files_discovered),
-                )
-                self._coverage_tracker_file_count = len(self._coverage_files_discovered)
             return
 
         if action_name == "search_code":
@@ -665,12 +649,6 @@ class ReconAgent(BaseAgent):
             if file_path:
                 if file_path not in self._coverage_files_discovered:
                     self._remember_discovered_file(file_path)
-                    await self._refresh_recon_file_tree(
-                        "build",
-                        files=sorted(self._coverage_files_discovered),
-                    )
-                    self._coverage_tracker_file_count = len(self._coverage_files_discovered)
-                await self._refresh_recon_file_tree("mark_done", file_path=file_path)
 
     def _track_live_push_action(self, action_name: str, action_input: Dict[str, Any], observation: Any) -> None:
         payload = self._parse_tool_output(observation)
@@ -858,7 +836,6 @@ class ReconAgent(BaseAgent):
         self._coverage_directories = []
         self._coverage_files_discovered = []
         self._coverage_files_read = []
-        self._coverage_tracker_file_count = 0
         self._latest_tool_module_results = []
         self._latest_tool_project_model = {}
         for target_file in target_files if isinstance(target_files, list) else []:
@@ -1023,12 +1000,6 @@ class ReconAgent(BaseAgent):
         ]
         
         self._steps = []
-        if self._coverage_files_discovered:
-            await self._refresh_recon_file_tree(
-                "build",
-                files=sorted(self._coverage_files_discovered),
-            )
-            self._coverage_tracker_file_count = len(self._coverage_files_discovered)
         final_result = None
         error_message = None  #  跟踪错误信息
         last_action_signature: Optional[str] = None

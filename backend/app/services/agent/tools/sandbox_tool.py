@@ -57,6 +57,27 @@ class SandboxManager:
         self._last_image_candidates: List[str] = []
 
         self._runner_client = None
+
+    @staticmethod
+    def _is_docker_socket_permission_error(error: Exception) -> bool:
+        error_text = f"{type(error).__name__}: {error}".lower()
+        return "permission denied" in error_text and (
+            "server api version" in error_text
+            or "docker.sock" in error_text
+            or "connection aborted" in error_text
+            or "unix_socket" in error_text
+        )
+
+    def _format_init_error(self, stage: str, error: Exception) -> str:
+        base = f"{type(error).__name__}: {error}"
+        if self._is_docker_socket_permission_error(error):
+            return (
+                f"{stage}: {base}. Docker socket access was denied. "
+                "Ensure the backend container joins the Docker socket group by exporting "
+                "DOCKER_SOCKET_GID=$(stat -c '%g' ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}) "
+                "before running docker compose."
+            )
+        return f"{stage}: {base}"
     
     async def initialize(self):
         """初始化 Docker 客户端和 Runner Client"""
@@ -85,16 +106,19 @@ class SandboxManager:
         except ImportError as e:
             logger.error(f"Docker library not installed: {e}")
             self._docker_client = None
+            self._runner_client = None
+            self._initialized = False
             self._init_error = f"ImportError: {e}"
         except Exception as e:
             self._docker_client = docker_client
             self._runner_client = None
-            self._initialized = True
+            self._initialized = False
             stage = "Sandbox runner unavailable" if docker_client is not None else "Docker unavailable"
-            logger.warning(f"{stage}: {e}")
-            import traceback
-            logger.warning(f"Docker connection traceback: {traceback.format_exc()}")
-            self._init_error = f"{stage}: {type(e).__name__}: {str(e)}"
+            self._init_error = self._format_init_error(stage, e)
+            logger.warning(self._init_error)
+            if logger.isEnabledFor(logging.DEBUG):
+                import traceback
+                logger.debug("Docker connection traceback: %s", traceback.format_exc())
     
     @property
     def is_available(self) -> bool:
@@ -654,6 +678,8 @@ class SandboxTool(AgentTool):
         await self.sandbox_manager.initialize()
         
         if not self.sandbox_manager.is_available:
+            diagnosis = self.sandbox_manager.get_diagnosis()
+            unavailable_message = f"沙箱环境不可用：{diagnosis}"
             return self._build_execution_tool_result(
                 success=False,
                 command=command,
@@ -662,10 +688,10 @@ class SandboxTool(AgentTool):
                     "exit_code": -1,
                     "stdout": "",
                     "stderr": "",
-                    "error": "沙箱环境不可用（Docker 未安装或未运行）",
+                    "error": unavailable_message,
                 },
-                error_message="沙箱环境不可用（Docker 未安装或未运行）",
-                fallback_data="沙箱环境不可用（Docker 未安装或未运行）",
+                error_message=unavailable_message,
+                fallback_data=unavailable_message,
             )
         
         # 安全检查：验证命令是否允许
@@ -892,9 +918,10 @@ class SandboxHttpTool(AgentTool):
             logger.warning(f"Sandbox init failed during execution: {e}")
         
         if not self.sandbox_manager.is_available:
+            diagnosis = self.sandbox_manager.get_diagnosis()
             return ToolResult(
                 success=False,
-                error="沙箱环境不可用 (Docker Unavailable)",
+                error=f"沙箱环境不可用: {diagnosis}",
             )
         
         result = await self.sandbox_manager.execute_http_request(
@@ -997,9 +1024,10 @@ class VulnerabilityVerifyTool(AgentTool):
             logger.warning(f"Sandbox init failed during execution: {e}")
         
         if not self.sandbox_manager.is_available:
+            diagnosis = self.sandbox_manager.get_diagnosis()
             return ToolResult(
                 success=False,
-                error="沙箱环境不可用 (Docker Unavailable)",
+                error=f"沙箱环境不可用: {diagnosis}",
             )
         
         result = await self.sandbox_manager.verify_vulnerability(
@@ -1130,7 +1158,8 @@ class PhpTestTool(AgentTool):
             logger.warning(f"Sandbox init failed: {e}")
 
         if not self.sandbox_manager.is_available:
-            return ToolResult(success=False, error="沙箱环境不可用")
+            diagnosis = self.sandbox_manager.get_diagnosis()
+            return ToolResult(success=False, error=f"沙箱环境不可用: {diagnosis}")
 
         # 1. 代码读取逻辑
         if file_path:
@@ -1270,9 +1299,10 @@ class CommandInjectionTestTool(AgentTool):
             logger.warning(f"Sandbox init failed: {e}")
 
         if not self.sandbox_manager.is_available:
+            diagnosis = self.sandbox_manager.get_diagnosis()
             return ToolResult(
                 success=False,
-                error="沙箱环境不可用 (Docker Unavailable)",
+                error=f"沙箱环境不可用: {diagnosis}",
             )
 
         full_path = os.path.join(self.project_root, target_file)

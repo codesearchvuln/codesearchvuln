@@ -175,6 +175,8 @@ for payload in payloads:
             logger.warning(f"Sandbox init failed: {e}")
 
         if not self.sandbox_manager.is_available:
+            diagnosis = self.sandbox_manager.get_diagnosis()
+            unavailable_message = f"沙箱环境不可用: {diagnosis}"
             return self._build_execution_tool_result(
                 success=False,
                 language=language,
@@ -185,9 +187,9 @@ for payload in payloads:
                     "exit_code": -1,
                     "stdout": "",
                     "stderr": "",
-                    "error": "沙箱环境不可用 (Docker 未运行)",
+                    "error": unavailable_message,
                 },
-                fallback_data="请确保 Docker 已启动。如果无法使用沙箱，你可以通过静态分析代码来验证漏洞。",
+                fallback_data=unavailable_message,
                 code=code,
             )
 

@@ -371,7 +371,6 @@ async def _execute_agent_task(task_id: str):
                 "peek_recon_risk_queue",
                 "clear_recon_risk_queue",
                 "is_recon_risk_point_in_queue",
-                "update_recon_file_tree",
             }
             recon_subagent = ReconSubAgent(
                 llm_service=llm_service,
@@ -1753,7 +1752,6 @@ async def _initialize_tools(
         SmartScanTool,
         QuickAuditTool,
         SymbolBodyTool,
-        UpdateReconFileTreeTool,
         RunReconSubAgentTool,
     )
     from app.services.agent.tools.queue_tools import (
@@ -1832,7 +1830,6 @@ async def _initialize_tools(
             queue_service=recon_queue_service,
             task_id=task_id,
         )
-        recon_tools["update_recon_file_tree"] = UpdateReconFileTreeTool(task_id=task_id)
         logger.info(f"[Tools] Added Recon risk queue tools for task {task_id}")
 
     analysis_tools = {
