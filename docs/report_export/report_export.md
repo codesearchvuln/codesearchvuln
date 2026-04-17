@@ -1,4 +1,4 @@
-# DeepAudit 漏洞报告导出架构分析
+# Vulhunter 漏洞报告导出架构分析
 
 > 生成日期：2026-03-26
 
@@ -6,7 +6,7 @@
 
 ## 一、概述
 
-DeepAudit 后端提供三种格式的漏洞审计报告导出：**PDF**、**Markdown**、**JSON**。报告内容由两个阶段产生：
+Vulhunter 后端提供三种格式的漏洞审计报告导出：**PDF**、**Markdown**、**JSON**。报告内容由两个阶段产生：
 
 1. **ReportAgent 阶段**（扫描期间）：生成运行期可复用的漏洞详情 Markdown 素材与项目级风险评估素材，分别存储于数据库字段 `AgentFinding.report` 和 `AgentTask.report`。
 2. **导出阶段**（按需请求）：用户调用导出 API，系统从数据库拉取当前任务 findings，按导出三态做归一化后再组装并转换为目标格式返回。

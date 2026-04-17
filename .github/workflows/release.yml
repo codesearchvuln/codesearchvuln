@@ -9,11 +9,19 @@ on:
       release_manifest:
         required: true
         type: string
-  workflow_run:
-    workflows:
-      - Docker Publish
-    types:
-      - completed
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/tests/**'
+      - '**/docs/**'
+      - 'tests/**'
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - 'NOTICE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   workflow_dispatch:
     inputs:
       reuse_existing_images:
@@ -75,25 +83,188 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
-concurrency:
-  group: release-branch-${{ inputs.source_sha || github.ref_name || github.run_id }}
-  cancel-in-progress: true
-
 permissions:
   actions: read
   contents: read
 
 jobs:
+  detect-changes:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend || 'false' }}
+      yasa_runner: ${{ steps.filter.outputs.yasa_runner || 'false' }}
+      opengrep_runner: ${{ steps.filter.outputs.opengrep_runner || 'false' }}
+      bandit_runner: ${{ steps.filter.outputs.bandit_runner || 'false' }}
+      gitleaks_runner: ${{ steps.filter.outputs.gitleaks_runner || 'false' }}
+      phpstan_runner: ${{ steps.filter.outputs.phpstan_runner || 'false' }}
+      flow_parser_runner: ${{ steps.filter.outputs.flow_parser_runner || 'false' }}
+      pmd_runner: ${{ steps.filter.outputs.pmd_runner || 'false' }}
+      sandbox_runner: ${{ steps.filter.outputs.sandbox_runner || 'false' }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: 识别运行时镜像相关变更
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - '.github/workflows/publish-runtime-images.yml'
+              - '.dockerignore'
+              - 'docker/backend.Dockerfile'
+              - 'docker/backend.Dockerfile.dockerignore'
+              - 'backend/**'
+            yasa_runner:
+              - 'docker/yasa-runner.Dockerfile'
+              - 'docker/yasa-runner.Dockerfile.dockerignore'
+              - 'backend/scripts/package_source_selector.py'
+              - 'backend/app/runtime/launchers/yasa_engine_launcher.py'
+              - 'backend/app/runtime/launchers/yasa_launcher.py'
+              - 'backend/app/runtime/launchers/yasa_uast4py_launcher.py'
+              - 'frontend/yasa-engine-overrides/**'
+            opengrep_runner:
+              - 'docker/opengrep-runner.Dockerfile'
+              - 'docker/opengrep-runner.Dockerfile.dockerignore'
+              - 'backend/app/runtime/launchers/opengrep_launcher.py'
+            bandit_runner:
+              - 'docker/bandit-runner.Dockerfile'
+              - 'docker/bandit-runner.Dockerfile.dockerignore'
+            gitleaks_runner:
+              - 'docker/gitleaks-runner.Dockerfile'
+              - 'docker/gitleaks-runner.Dockerfile.dockerignore'
+            phpstan_runner:
+              - 'docker/phpstan-runner.Dockerfile'
+              - 'docker/phpstan-runner.Dockerfile.dockerignore'
+              - 'backend/app/runtime/launchers/phpstan_launcher.py'
+            flow_parser_runner:
+              - 'docker/flow-parser-runner.Dockerfile'
+              - 'docker/flow-parser-runner.Dockerfile.dockerignore'
+              - 'docker/flow-parser-runner.requirements.txt'
+              - 'backend/scripts/package_source_selector.py'
+              - 'backend/app/services/parser.py'
+              - 'backend/scripts/flow_parser_runner.py'
+            pmd_runner:
+              - 'docker/pmd-runner.Dockerfile'
+              - 'docker/pmd-runner.Dockerfile.dockerignore'
+            sandbox_runner:
+              - 'docker/sandbox-runner.Dockerfile'
+              - 'docker/sandbox-runner.Dockerfile.dockerignore'
+              - 'docker/sandbox-runner.requirements.txt'
+
+  await-turn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: read
+
+    steps:
+      - name: Wait for earlier release runs to finish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          POLL_SECONDS: "30"
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import subprocess
+          import time
+          from pathlib import Path
+
+
+          current_run_id = int(os.environ["CURRENT_RUN_ID"])
+          poll_seconds = int(os.environ.get("POLL_SECONDS", "30"))
+          repo = os.environ["GITHUB_REPOSITORY"]
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          active_statuses = {
+              "queued",
+              "in_progress",
+              "requested",
+              "waiting",
+              "pending",
+              "action_required",
+          }
+          waited = False
+
+          def list_blockers() -> list[dict[str, str]]:
+              result = subprocess.run(
+                  [
+                      "gh",
+                      "api",
+                      f"repos/{repo}/actions/workflows/release.yml/runs?per_page=100",
+                  ],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              )
+              payload = json.loads(result.stdout)
+              runs = payload.get("workflow_runs")
+              if not isinstance(runs, list):
+                  raise SystemExit("workflow runs payload must include a workflow_runs list")
+
+              blockers: list[dict[str, str]] = []
+              for run in runs:
+                  if not isinstance(run, dict):
+                      continue
+                  run_id = run.get("id")
+                  status = str(run.get("status") or "").strip()
+                  if not isinstance(run_id, int):
+                      continue
+                  if run_id >= current_run_id or status not in active_statuses:
+                      continue
+                  blockers.append(
+                      {
+                          "id": str(run_id),
+                          "status": status,
+                          "event": str(run.get("event") or "").strip(),
+                          "head_sha": str(run.get("head_sha") or "").strip(),
+                          "url": str(run.get("html_url") or "").strip(),
+                      }
+                  )
+              blockers.sort(key=lambda item: int(item["id"]))
+              return blockers
+
+          while True:
+              blockers = list_blockers()
+              if not blockers:
+                  with summary_path.open("a", encoding="utf-8") as handle:
+                      handle.write("## Release Queue\n")
+                      handle.write(f"- current_run_id: `{current_run_id}`\n")
+                      handle.write("- queue_status: `ready`\n")
+                      handle.write(f"- waited_for_prior_runs: `{'yes' if waited else 'no'}`\n")
+                  print("No earlier active release runs detected; continuing.")
+                  break
+
+              waited = True
+              oldest = blockers[0]
+              print(
+                  "Waiting for earlier release run "
+                  f"{oldest['id']} ({oldest['status']}, event={oldest['event']}, "
+                  f"head_sha={oldest['head_sha'] or 'unknown'}) to finish before continuing."
+              )
+              time.sleep(poll_seconds)
+          PY
+
   resolve-entry:
-    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main') }}
+    needs: await-turn
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       actions: read
       contents: read
     outputs:
-      effective_source_sha: ${{ steps.from_call.outputs.source_sha || steps.from_dispatch.outputs.source_sha || steps.from_workflow_run.outputs.source_sha }}
-      effective_release_manifest: ${{ steps.from_call.outputs.release_manifest || steps.from_workflow_run.outputs.release_manifest }}
+      effective_source_sha: ${{ steps.from_call.outputs.source_sha || steps.from_branch_context.outputs.source_sha }}
+      effective_release_manifest: ${{ steps.from_call.outputs.release_manifest }}
 
     steps:
       - name: Load release source from workflow_call inputs
@@ -115,133 +286,12 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Load release source from workflow_dispatch context
-        id: from_dispatch
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Load release source from push/workflow_dispatch context
+        id: from_branch_context
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
           echo "source_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-
-      - name: Load release source and manifest from workflow_run artifact
-        id: from_workflow_run
-        if: ${{ github.event_name == 'workflow_run' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
-          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
-          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-        run: |
-          set -euo pipefail
-
-          artifact_listing_path="${RUNNER_TEMP}/workflow-run-artifacts.json"
-          artifact_zip_path="${RUNNER_TEMP}/release-manifest-json.zip"
-
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts" > "${artifact_listing_path}"
-
-          artifact_id="$(python3 - "$artifact_listing_path" "$GITHUB_STEP_SUMMARY" <<'PY'
-          from __future__ import annotations
-
-          import json
-          import sys
-          from pathlib import Path
-
-
-          listing_path = Path(sys.argv[1])
-          summary_path = Path(sys.argv[2])
-          payload = json.loads(listing_path.read_text(encoding="utf-8"))
-          artifacts = payload.get("artifacts")
-          if not isinstance(artifacts, list):
-              raise SystemExit("workflow_run artifacts payload must include an artifacts list")
-
-          artifact = next(
-              (
-                  candidate
-                  for candidate in artifacts
-                  if isinstance(candidate, dict)
-                  and str(candidate.get("name", "")).strip() == "release-manifest-json"
-                  and not bool(candidate.get("expired"))
-              ),
-              None,
-          )
-          if artifact is None:
-              with summary_path.open("a", encoding="utf-8") as handle:
-                  handle.write("## Workflow Run Handoff\n")
-                  handle.write("- status: `missing release-manifest-json artifact`\n")
-              raise SystemExit("workflow_run missing required artifact: release-manifest-json")
-
-          artifact_id = str(artifact.get("id", "")).strip()
-          if not artifact_id.isdigit():
-              with summary_path.open("a", encoding="utf-8") as handle:
-                  handle.write("## Workflow Run Handoff\n")
-                  handle.write("- status: `invalid release-manifest-json artifact id`\n")
-              raise SystemExit("workflow_run artifact id is invalid for release-manifest-json")
-
-          print(artifact_id)
-          PY
-          )"
-
-          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${artifact_zip_path}"
-
-          python3 - "$artifact_zip_path" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$WORKFLOW_RUN_ID" "$WORKFLOW_RUN_EVENT" "$WORKFLOW_RUN_HEAD_BRANCH" <<'PY'
-          from __future__ import annotations
-
-          import json
-          import sys
-          import zipfile
-          from pathlib import Path
-
-
-          artifact_zip_path = Path(sys.argv[1])
-          github_output = Path(sys.argv[2])
-          summary_path = Path(sys.argv[3])
-          workflow_run_id = sys.argv[4]
-          workflow_run_event = sys.argv[5]
-          workflow_run_head_branch = sys.argv[6]
-
-          try:
-              with zipfile.ZipFile(artifact_zip_path) as archive:
-                  try:
-                      manifest_text = archive.read("release-manifest.json").decode("utf-8")
-                  except KeyError as exc:
-                      with summary_path.open("a", encoding="utf-8") as handle:
-                          handle.write("## Workflow Run Handoff\n")
-                          handle.write("- status: `artifact missing release-manifest.json`\n")
-                      raise SystemExit("release-manifest-json artifact does not contain release-manifest.json") from exc
-          except zipfile.BadZipFile as exc:
-              with summary_path.open("a", encoding="utf-8") as handle:
-                  handle.write("## Workflow Run Handoff\n")
-                  handle.write("- status: `artifact zip is invalid`\n")
-              raise SystemExit("release-manifest-json artifact zip is invalid") from exc
-
-          try:
-              manifest = json.loads(manifest_text)
-          except json.JSONDecodeError as exc:
-              with summary_path.open("a", encoding="utf-8") as handle:
-                  handle.write("## Workflow Run Handoff\n")
-                  handle.write("- status: `release-manifest.json is invalid JSON`\n")
-              raise SystemExit(f"release-manifest.json is invalid JSON: {exc}") from exc
-
-          revision = str(manifest.get("revision", "")).strip()
-          if not revision:
-              with summary_path.open("a", encoding="utf-8") as handle:
-                  handle.write("## Workflow Run Handoff\n")
-                  handle.write("- status: `release-manifest revision missing`\n")
-              raise SystemExit("release-manifest.json revision is empty")
-
-          with summary_path.open("a", encoding="utf-8") as handle:
-              handle.write("## Workflow Run Handoff\n")
-              handle.write(f"- workflow_run_id: `{workflow_run_id}`\n")
-              handle.write(f"- workflow_run_event: `{workflow_run_event}`\n")
-              handle.write(f"- workflow_run_head_branch: `{workflow_run_head_branch}`\n")
-              handle.write("- artifact_name: `release-manifest-json`\n")
-              handle.write(f"- source_sha: `{revision}`\n")
-
-          with github_output.open("a", encoding="utf-8") as handle:
-              handle.write(f"source_sha={revision}\n")
-              handle.write("release_manifest<<EOF\n")
-              handle.write(manifest_text.rstrip("\n"))
-              handle.write("\nEOF\n")
-          PY
 
   prepare-release:
     needs: resolve-entry
@@ -397,8 +447,10 @@ jobs:
           echo "snapshot_url=${html_url}" >> "$GITHUB_OUTPUT"
 
   publish-runtime-images:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: prepare-release
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    needs:
+      - detect-changes
+      - prepare-release
     uses: ./.github/workflows/publish-runtime-images.yml
     secrets: inherit
     permissions:
@@ -409,15 +461,15 @@ jobs:
     with:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
-      build_backend: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_backend) || false }}
-      build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_yasa_runner) || false }}
-      build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_opengrep_runner) || false }}
-      build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_bandit_runner) || false }}
-      build_gitleaks_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_gitleaks_runner) || false }}
-      build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_phpstan_runner) || false }}
-      build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_flow_parser_runner) || false }}
-      build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_pmd_runner) || false }}
-      build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_sandbox_runner) || false }}
+      build_backend: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_backend)) || false }}
+      build_yasa_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.yasa_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_yasa_runner)) || false }}
+      build_opengrep_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.opengrep_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_opengrep_runner)) || false }}
+      build_bandit_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.bandit_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_bandit_runner)) || false }}
+      build_gitleaks_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.gitleaks_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_gitleaks_runner)) || false }}
+      build_phpstan_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.phpstan_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_phpstan_runner)) || false }}
+      build_flow_parser_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.flow_parser_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_flow_parser_runner)) || false }}
+      build_pmd_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.pmd_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_pmd_runner)) || false }}
+      build_sandbox_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.sandbox_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_sandbox_runner)) || false }}
       multi_arch: true
       emit_release_manifest: true
       require_complete_manifest: true
@@ -428,18 +480,18 @@ jobs:
       - resolve-entry
       - prepare-release
       - publish-runtime-images
-    if: ${{ always() && needs.resolve-entry.result == 'success' && needs.prepare-release.result == 'success' && ((github.event_name == 'workflow_dispatch' && needs.publish-runtime-images.result == 'success') || (github.event_name != 'workflow_dispatch' && (needs.publish-runtime-images.result == 'skipped' || needs.publish-runtime-images.result == 'success'))) }}
+    if: ${{ always() && needs.resolve-entry.result == 'success' && needs.prepare-release.result == 'success' && ((github.event_name == 'workflow_call' && (needs.publish-runtime-images.result == 'skipped' || needs.publish-runtime-images.result == 'success')) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.publish-runtime-images.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     outputs:
-      release_manifest: ${{ steps.from_call.outputs.release_manifest || steps.from_dispatch.outputs.release_manifest }}
+      release_manifest: ${{ steps.from_call.outputs.release_manifest || steps.from_build.outputs.release_manifest }}
 
     steps:
       - name: Load release manifest from resolved entry context
         id: from_call
-        if: ${{ github.event_name == 'workflow_call' || github.event_name == 'workflow_run' }}
+        if: ${{ github.event_name == 'workflow_call' }}
         env:
           RELEASE_MANIFEST: ${{ needs.resolve-entry.outputs.effective_release_manifest }}
         run: |
@@ -453,15 +505,15 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Load release manifest from workflow_dispatch build outputs
-        id: from_dispatch
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Load release manifest from release build outputs
+        id: from_build
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
         env:
           RELEASE_MANIFEST: ${{ needs.publish-runtime-images.outputs.release_manifest }}
         run: |
           set -euo pipefail
 
-          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::workflow_dispatch release manifest is empty"; exit 1; }
+          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::release manifest from publish-runtime-images is empty"; exit 1; }
 
           {
             echo "release_manifest<<EOF"

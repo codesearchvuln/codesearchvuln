@@ -1,19 +1,6 @@
 name: Docker Publish
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - '**/tests/**'
-      - '**/docs/**'
-      - 'tests/**'
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - 'NOTICE'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/PULL_REQUEST_TEMPLATE.md'
   workflow_dispatch:
     inputs:
       tag:
@@ -80,104 +67,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  detect-changes:
-    name: 检测镜像相关变更
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    outputs:
-      frontend: ${{ steps.filter.outputs.frontend || steps.manual.outputs.frontend }}
-      backend: ${{ steps.filter.outputs.backend || steps.manual.outputs.backend }}
-      yasa_runner: ${{ steps.filter.outputs.yasa_runner || steps.manual.outputs.yasa_runner }}
-      opengrep_runner: ${{ steps.filter.outputs.opengrep_runner || steps.manual.outputs.opengrep_runner }}
-      bandit_runner: ${{ steps.filter.outputs.bandit_runner || steps.manual.outputs.bandit_runner }}
-      gitleaks_runner: ${{ steps.filter.outputs.gitleaks_runner || steps.manual.outputs.gitleaks_runner }}
-      phpstan_runner: ${{ steps.filter.outputs.phpstan_runner || steps.manual.outputs.phpstan_runner }}
-      flow_parser_runner: ${{ steps.filter.outputs.flow_parser_runner || steps.manual.outputs.flow_parser_runner }}
-      pmd_runner: ${{ steps.filter.outputs.pmd_runner || steps.manual.outputs.pmd_runner }}
-      sandbox_runner: ${{ steps.filter.outputs.sandbox_runner || steps.manual.outputs.sandbox_runner }}
-
-    steps:
-      - name: 检出代码
-        if: github.event_name == 'push'
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 2
-
-      - name: 识别镜像相关变更
-        id: filter
-        if: github.event_name == 'push'
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            frontend:
-              - '.github/workflows/docker-publish.yml'
-              - '.github/workflows/publish-runtime-images.yml'
-              - 'docker/frontend.Dockerfile'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'frontend/**'
-            backend:
-              - '.github/workflows/docker-publish.yml'
-              - '.github/workflows/publish-runtime-images.yml'
-              - '.dockerignore'
-              - 'docker/backend.Dockerfile'
-              - 'docker/backend.Dockerfile.dockerignore'
-              - 'backend/**'
-            yasa_runner:
-              - 'docker/yasa-runner.Dockerfile'
-              - 'docker/yasa-runner.Dockerfile.dockerignore'
-              - 'backend/scripts/package_source_selector.py'
-              - 'backend/app/runtime/launchers/yasa_engine_launcher.py'
-              - 'backend/app/runtime/launchers/yasa_launcher.py'
-              - 'backend/app/runtime/launchers/yasa_uast4py_launcher.py'
-              - 'frontend/yasa-engine-overrides/**'
-            opengrep_runner:
-              - 'docker/opengrep-runner.Dockerfile'
-              - 'docker/opengrep-runner.Dockerfile.dockerignore'
-              - 'backend/app/runtime/launchers/opengrep_launcher.py'
-            bandit_runner:
-              - 'docker/bandit-runner.Dockerfile'
-              - 'docker/bandit-runner.Dockerfile.dockerignore'
-            gitleaks_runner:
-              - 'docker/gitleaks-runner.Dockerfile'
-              - 'docker/gitleaks-runner.Dockerfile.dockerignore'
-            phpstan_runner:
-              - 'docker/phpstan-runner.Dockerfile'
-              - 'docker/phpstan-runner.Dockerfile.dockerignore'
-              - 'backend/app/runtime/launchers/phpstan_launcher.py'
-            flow_parser_runner:
-              - 'docker/flow-parser-runner.Dockerfile'
-              - 'docker/flow-parser-runner.Dockerfile.dockerignore'
-              - 'docker/flow-parser-runner.requirements.txt'
-              - 'backend/scripts/package_source_selector.py'
-              - 'backend/app/services/parser.py'
-              - 'backend/scripts/flow_parser_runner.py'
-            pmd_runner:
-              - 'docker/pmd-runner.Dockerfile'
-              - 'docker/pmd-runner.Dockerfile.dockerignore'
-            sandbox_runner:
-              - 'docker/sandbox-runner.Dockerfile'
-              - 'docker/sandbox-runner.Dockerfile.dockerignore'
-              - 'docker/sandbox-runner.requirements.txt'
-
-      - name: workflow_dispatch 默认输出
-        id: manual
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo "frontend=false" >> "$GITHUB_OUTPUT"
-          echo "backend=false" >> "$GITHUB_OUTPUT"
-          echo "yasa_runner=false" >> "$GITHUB_OUTPUT"
-          echo "opengrep_runner=false" >> "$GITHUB_OUTPUT"
-          echo "bandit_runner=false" >> "$GITHUB_OUTPUT"
-          echo "gitleaks_runner=false" >> "$GITHUB_OUTPUT"
-          echo "phpstan_runner=false" >> "$GITHUB_OUTPUT"
-          echo "flow_parser_runner=false" >> "$GITHUB_OUTPUT"
-          echo "pmd_runner=false" >> "$GITHUB_OUTPUT"
-          echo "sandbox_runner=false" >> "$GITHUB_OUTPUT"
-
   publish-runtime-images:
-    needs: detect-changes
     uses: ./.github/workflows/publish-runtime-images.yml
     secrets: inherit
     permissions:
@@ -186,18 +76,18 @@ jobs:
       id-token: write
       attestations: write
     with:
-      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'latest' }}
-      build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}
-      build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}
-      build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_yasa_runner || needs.detect-changes.outputs.yasa_runner == 'true' }}
-      build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_opengrep_runner || needs.detect-changes.outputs.opengrep_runner == 'true' }}
-      build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_bandit_runner || needs.detect-changes.outputs.bandit_runner == 'true' }}
-      build_gitleaks_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_gitleaks_runner || needs.detect-changes.outputs.gitleaks_runner == 'true' }}
-      build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_phpstan_runner || needs.detect-changes.outputs.phpstan_runner == 'true' }}
-      build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_flow_parser_runner || needs.detect-changes.outputs.flow_parser_runner == 'true' }}
-      build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_pmd_runner || needs.detect-changes.outputs.pmd_runner == 'true' }}
-      build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox_runner || needs.detect-changes.outputs.sandbox_runner == 'true' }}
-      multi_arch: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+      tag: ${{ inputs.tag }}
+      build_frontend: ${{ inputs.build_frontend }}
+      build_backend: ${{ inputs.build_backend }}
+      build_yasa_runner: ${{ inputs.build_yasa_runner }}
+      build_opengrep_runner: ${{ inputs.build_opengrep_runner }}
+      build_bandit_runner: ${{ inputs.build_bandit_runner }}
+      build_gitleaks_runner: ${{ inputs.build_gitleaks_runner }}
+      build_phpstan_runner: ${{ inputs.build_phpstan_runner }}
+      build_flow_parser_runner: ${{ inputs.build_flow_parser_runner }}
+      build_pmd_runner: ${{ inputs.build_pmd_runner }}
+      build_sandbox_runner: ${{ inputs.build_sandbox_runner }}
+      multi_arch: true
       emit_release_manifest: true
       require_complete_manifest: false
       revision: ${{ github.sha }}

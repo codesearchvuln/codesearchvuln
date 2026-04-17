@@ -8,9 +8,12 @@ ARG BACKEND_PYPI_INDEX_FALLBACK=https://pypi.org/simple
 ARG BACKEND_PYPI_INDEX_CANDIDATES=https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple
 ARG YASA_VERSION=v0.2.33
 ARG YASA_UAST_VERSION=v0.2.8
+ARG NODEJS24_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/node:24-bookworm-slim
 # 0 = 自动选择（x86_64 使用预构建二进制，arm64 从源码编译）
 # 1 = 强制从源码编译
 ARG YASA_BUILD_FROM_SOURCE=0
+
+FROM ${NODEJS24_IMAGE} AS node24-base
 
 # ─── Stage 1: yasa-fetcher ────────────────────────────────────────────────────
 # 纯下载/编译阶段。launcher 文件不在此阶段 COPY，因此 launcher 变动不会破坏此层缓存。
@@ -39,6 +42,8 @@ ENV PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES}
 # 注意：launcher 文件不在此处 COPY，移至 yasa-builder 阶段
 COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_selector.py
 COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides
+COPY --from=node24-base /usr/local/bin/node /usr/local/bin/node
+COPY --from=node24-base /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,id=vulhunter-yasa-runner-apt-cache,target=/var/cache/apt,sharing=locked \
@@ -72,6 +77,7 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/li
         YASA_RELEASE_ASSET="yasa-linux-x64.zip"; \
         YASA_RELEASE_BIN="yasa-engine-linux-x64"; \
         UAST_PLATFORM="linux-amd64"; \
+        # pkg 的稳定 targets 仍以 node18 为界，构建环境升级到 Node 24，但打包 target 先保持兼容值。
         YASA_PKG_TARGET="node18-linux-x64"; \
         YASA_GO_ARCH="amd64"; \
         YASA_SOURCE_BUILD_REQUIRED="0" ;; \
@@ -79,6 +85,7 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/li
         YASA_RELEASE_ASSET=""; \
         YASA_RELEASE_BIN=""; \
         UAST_PLATFORM="linux-arm64"; \
+        # pkg 的稳定 targets 仍以 node18 为界，构建环境升级到 Node 24，但打包 target 先保持兼容值。
         YASA_PKG_TARGET="node18-linux-arm64"; \
         YASA_GO_ARCH="arm64"; \
         YASA_SOURCE_BUILD_REQUIRED="1" ;; \
@@ -98,8 +105,6 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/li
           curl \
           unzip \
           git \
-          nodejs \
-          npm \
           golang-go; \
       }; \
     else \
@@ -118,6 +123,9 @@ RUN --mount=type=cache,id=vulhunter-yasa-runner-apt-lists,target=/var/lib/apt/li
       install_builder_packages; \
     fi; \
     rm -rf /var/lib/apt/lists/*; \
+    ln -sf /usr/local/bin/node /usr/local/bin/nodejs; \
+    ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
     download_with_fallback() { \
       output="$1"; \
       shift; \

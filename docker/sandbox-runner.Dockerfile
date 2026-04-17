@@ -3,7 +3,8 @@
 
 ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
 ARG SANDBOX_RUNNER_BASE_IMAGE=docker.m.daocloud.io/python:3.11-slim
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS nodebase
+ARG NODEJS24_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/node:24-bookworm-slim
+FROM ${NODEJS24_IMAGE} AS node24-base
 FROM ${SANDBOX_RUNNER_BASE_IMAGE}
 
 ARG SANDBOX_RUNNER_APT_MIRROR_PRIMARY=mirrors.aliyun.com
@@ -72,8 +73,8 @@ RUN --mount=type=cache,id=vulhunter-sandbox-runner-apt-lists,target=/var/lib/apt
   fi; \
   rm -rf /var/lib/apt/lists/*
 
-COPY --from=nodebase /usr/local/bin/node /usr/local/bin/node
-COPY --from=nodebase /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node24-base /usr/local/bin/node /usr/local/bin/node
+COPY --from=node24-base /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN set -eux; \
   ln -sf /usr/local/bin/node /usr/local/bin/nodejs; \
   ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \

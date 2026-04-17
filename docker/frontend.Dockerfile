@@ -3,8 +3,9 @@
 # =============================================
 
 ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-ARG FRONTEND_APK_MIRROR=mirrors.aliyun.com
-FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS pnpm-base
+ARG NODEJS24_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/node:24-bookworm-slim
+FROM ${NODEJS24_IMAGE} AS node24-base
+FROM node24-base AS pnpm-base
 
 WORKDIR /app
 

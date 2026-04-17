@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 TRANSFER_SCOPE = "project-domain"
 TRANSFER_EXPORT_VERSION = "project-export-v1"
-TRANSFER_BUNDLE_PREFIX = "deepaudit-project-export-v1"
+TRANSFER_BUNDLE_PREFIX = "Vulhunter-project-export-v1"
 
 
 @dataclass
@@ -494,7 +494,7 @@ async def export_projects_bundle(
     )
     datasets, table_order = await _collect_project_domain_rows(db=db, projects=projects)
 
-    tmp_dir = tempfile.mkdtemp(prefix="deepaudit-project-export-")
+    tmp_dir = tempfile.mkdtemp(prefix="Vulhunter-project-export-")
     bundle_filename = f"{TRANSFER_BUNDLE_PREFIX}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.zip"
     bundle_path = os.path.join(tmp_dir, bundle_filename)
 
@@ -837,7 +837,7 @@ async def import_projects_bundle(
     current_table_order, current_specs = _project_domain_specs()
     tracked_columns = _referenced_columns(current_table_order, current_specs)
 
-    temp_dir = tempfile.mkdtemp(prefix="deepaudit-project-import-")
+    temp_dir = tempfile.mkdtemp(prefix="Vulhunter-project-import-")
     bundle_path = os.path.join(temp_dir, bundle_file.filename or "project-transfer.zip")
     try:
         with open(bundle_path, "wb") as handle:

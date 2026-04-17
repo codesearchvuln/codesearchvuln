@@ -497,7 +497,9 @@ def test_backend_runtime_python_tools_are_installed_via_backend_venv() -> None:
     assert "COPY frontend/yasa-engine-overrides /tmp/yasa-engine-overrides" in yasa_runner_text
     assert "COPY --from=yasa-builder /opt/yasa-runtime /opt/yasa" in yasa_runner_text
     assert "YASA runner placeholder" not in yasa_runner_text
-    assert "node_modules" not in yasa_runner_text
+    assert "COPY --from=node24-base /usr/local/lib/node_modules /usr/local/lib/node_modules" in yasa_runner_text
+    assert "\n          nodejs \\\n" not in yasa_runner_text
+    assert "\n          npm \\\n" not in yasa_runner_text
     assert "WORKDIR /scan" in yasa_runner_text
     assert "tree-sitter-language-pack" in flow_parser_runner_text
     assert "code2flow" in flow_parser_runner_text
@@ -607,15 +609,11 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
         REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml"
     ).read_text(encoding="utf-8")
 
-    assert "\n  push:\n" in workflow_text
-    assert "\n    branches:\n      - main\n" in workflow_text
-    assert "\n    paths-ignore:\n" in workflow_text
-    assert "\non:\n  push:\n" in workflow_text
     assert "workflow_dispatch:" in workflow_text
+    assert "\n  push:\n" not in workflow_text
     assert "concurrency:" in workflow_text
     assert "'v*.*.*'" not in workflow_text
-    assert "detect-changes:" in workflow_text
-    assert "dorny/paths-filter@v3" in workflow_text
+    assert "detect-changes:" not in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "actions/upload-artifact@v4" in workflow_text
     assert "release-manifest-json" in workflow_text
@@ -632,6 +630,12 @@ def test_docker_publish_uses_shared_runtime_image_publish_workflow() -> None:
     assert "release_manifest" in workflow_text
     assert "build_nexus_web" not in workflow_text
     assert "./nexus-web/src" not in workflow_text
+    assert "dorny/paths-filter@v3" not in workflow_text
+    assert "workflow_dispatch 默认输出" not in workflow_text
+    assert "tag: ${{ inputs.tag }}" in workflow_text
+    assert "build_frontend: ${{ inputs.build_frontend }}" in workflow_text
+    assert "build_backend: ${{ inputs.build_backend }}" in workflow_text
+    assert "multi_arch: true" in workflow_text
     assert "workflow_call:" in reusable_workflow_text
     assert "docker/build-push-action@v7" in reusable_workflow_text
     assert "./docker/backend.Dockerfile" in reusable_workflow_text
@@ -679,30 +683,24 @@ def test_runtime_image_publish_workflow_centralizes_manifest_inspection_and_visi
     assert "设置 sandbox-runner GHCR 包为公开可见性" not in workflow_text
 
 
-def test_main_push_auto_builds_frontend_and_backend_latest_only() -> None:
+def test_docker_publish_manual_dispatch_passes_selected_build_inputs_directly() -> None:
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
         encoding="utf-8"
     )
 
     assert "publish-runtime-images:" in workflow_text
-    assert "build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}" in workflow_text
-    assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}" in workflow_text
-    assert "multi_arch: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}" in workflow_text
+    assert "tag: ${{ inputs.tag }}" in workflow_text
+    assert "build_frontend: ${{ inputs.build_frontend }}" in workflow_text
+    assert "build_backend: ${{ inputs.build_backend }}" in workflow_text
+    assert "build_yasa_runner: ${{ inputs.build_yasa_runner }}" in workflow_text
+    assert "build_sandbox_runner: ${{ inputs.build_sandbox_runner }}" in workflow_text
+    assert "multi_arch: true" in workflow_text
     assert "emit_release_manifest: true" in workflow_text
     assert "upload-release-manifest-artifact:" in workflow_text
     assert "actions/upload-artifact@v4" in workflow_text
     assert "release-manifest-json" in workflow_text
-    assert "- 'frontend/**'" in workflow_text
-    assert "- 'backend/**'" in workflow_text
-    assert "- 'docker/frontend.Dockerfile'" in workflow_text
-    assert "- 'docker/backend.Dockerfile'" in workflow_text
-    assert "- 'docker/sandbox-runner.Dockerfile'" in workflow_text
-    assert "- 'docker/sandbox.Dockerfile'" not in workflow_text
-    assert "- '.github/workflows/docker-publish.yml'" in workflow_text
-    assert "- 'frontend/yasa-engine-overrides/**'" in workflow_text
-    assert "- '.github/workflows/release.yml'" not in workflow_text
-    assert "- 'nexus-web/dist/**'" not in workflow_text
-    assert "- 'nexus-itemDetail/dist/**'" not in workflow_text
+    assert "detect-changes:" not in workflow_text
+    assert "dorny/paths-filter@v3" not in workflow_text
 
 
 def test_release_workflow_builds_manifest_driven_release_tree() -> None:
@@ -714,11 +712,11 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     ).read_text(encoding="utf-8")
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
-    assert "if: ${{ github.event_name == 'workflow_dispatch' }}" in workflow_text
+    assert "if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}" in workflow_text
     assert "build_frontend: false" in workflow_text
-    assert "workflow_run:" in workflow_text
-    assert "Docker Publish" in workflow_text
-    assert "github.event.workflow_run.conclusion == 'success'" in workflow_text
+    assert "\n  push:\n" in workflow_text
+    assert "workflow_run:" not in workflow_text
+    assert "Wait for earlier release runs to finish" in workflow_text
     assert "Setup Node.js for frontend release bundle" in workflow_text
     assert "pnpm --dir frontend install --frozen-lockfile" in workflow_text
     assert "pnpm --dir frontend build" in workflow_text
@@ -741,10 +739,10 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "service_health()" not in workflow_text
     assert "http://127.0.0.1:3000/api/v1/openapi.json" not in workflow_text
     assert "dashboard_status_code=" not in workflow_text
-    assert "WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}" in workflow_text
-    assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' in workflow_text
-    assert 'actions/artifacts/${artifact_id}/zip' in workflow_text
-    assert "release-manifest-json" in workflow_text
+    assert "WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}" not in workflow_text
+    assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' not in workflow_text
+    assert 'actions/artifacts/${artifact_id}/zip' not in workflow_text
+    assert "release-manifest-json" not in workflow_text
     assert "git push origin HEAD:release" in workflow_text
     assert "git ls-remote --exit-code --heads origin release" in workflow_text
     assert "git checkout -B release origin/release" in workflow_text
