@@ -126,6 +126,7 @@ RECON_SYSTEM_PROMPT = """你是 VulHunter 的 Recon Host Agent。
 6. **无子任务执行通道时允许回退** —— 若当前运行时没有 SubAgent 可用，你必须回退为直接侦查，并确保风险点可入队。
 7. **只识别功能模块，不把噪音目录当模块** —— `docs/`、`examples/`、`demo/`、`samples/`、`fixtures/`、`mocks/`、`coverage/`、`dist/`、`build/`、`node_modules/`、纯测试数据目录默认不是功能模块，不要为它们单独规划 Recon SubAgent。
 8. **SubAgent 必须拿到具体目录** —— `module.paths` 应优先是可执行的功能目录，例如 `src/auth`、`app/api`、`services/order`、`worker/jobs`，不要把整个项目根目录、`docs/`、或一堆零散说明文件直接交给 SubAgent。
+9. **优先使用 `run_recon_subagent` 工具** —— Host 在完成项目建模后，应通过该工具进行模块执行（先 `action=plan` 再按需 `action=run`），不要仅停留在规划文本。
 
 ## Host 完成条件
 ## 侦查完成条件（关键）
@@ -241,6 +242,8 @@ class ReconAgent(BaseAgent):
         self._coverage_files_discovered: List[str] = []
         self._coverage_files_read: List[str] = []
         self._coverage_tracker_file_count: int = 0
+        self._latest_tool_module_results: List[Dict[str, Any]] = []
+        self._latest_tool_project_model: Dict[str, Any] = {}
     
     def _parse_llm_response(self, response: str) -> ReconStep:
         """解析 LLM 响应（共享 ReAct 解析器）"""
@@ -601,6 +604,33 @@ class ReconAgent(BaseAgent):
         if not isinstance(metadata, dict):
             metadata = {}
 
+        if action_name == "run_recon_subagent":
+            module_results = metadata.get("module_results")
+            if isinstance(module_results, list):
+                self._latest_tool_module_results = [
+                    item for item in module_results if isinstance(item, dict)
+                ]
+            project_model = metadata.get("project_model")
+            if isinstance(project_model, dict):
+                self._latest_tool_project_model = dict(project_model)
+
+            for file_path in metadata.get("target_files", []) or []:
+                self._remember_target_file(file_path)
+                self._remember_read_file(file_path)
+            for item in metadata.get("input_surfaces", []) or []:
+                self._remember_input_surface(item)
+            for item in metadata.get("trust_boundaries", []) or []:
+                self._remember_trust_boundary(item)
+            coverage = metadata.get("coverage_summary") or {}
+            if isinstance(coverage, dict):
+                for directory in coverage.get("directories_scanned", []) or []:
+                    self._remember_coverage_directory(directory)
+                for file_path in coverage.get("files_discovered", []) or []:
+                    self._remember_discovered_file(file_path)
+                for file_path in coverage.get("files_read", []) or []:
+                    self._remember_read_file(file_path)
+            return
+
         if action_name == "list_files":
             directory = metadata.get("directory") or action_input.get("directory") or "."
             self._remember_coverage_directory(directory)
@@ -753,6 +783,54 @@ class ReconAgent(BaseAgent):
             except Exception:
                 return {}
 
+    @staticmethod
+    def _normalize_module_results_payload(value: Any) -> List[Dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                normalized.append(dict(item))
+                continue
+            to_dict = getattr(item, "to_dict", None)
+            if callable(to_dict):
+                try:
+                    payload = to_dict()
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict):
+                    normalized.append(payload)
+        return normalized
+
+    def _merge_module_results_payload(self, *sources: Any) -> List[Dict[str, Any]]:
+        merged: List[Dict[str, Any]] = []
+        seen: Set[str] = set()
+        for source in sources:
+            for item in self._normalize_module_results_payload(source):
+                module_id = str(item.get("module_id") or item.get("module", "")).strip() or "__unknown__"
+                if module_id in seen:
+                    continue
+                seen.add(module_id)
+                merged.append(item)
+        return merged
+
+    def _apply_subagent_runtime_payload(self, final_result: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(final_result, dict):
+            return final_result
+        module_results = self._merge_module_results_payload(
+            final_result.get("module_results"),
+            self._latest_tool_module_results,
+        )
+        if module_results:
+            final_result["module_results"] = module_results
+            final_result["module_count"] = max(
+                int(final_result.get("module_count") or 0),
+                len(module_results),
+            )
+        if not isinstance(final_result.get("project_model"), dict) and self._latest_tool_project_model:
+            final_result["project_model"] = dict(self._latest_tool_project_model)
+        return final_result
+
 
     
     async def run(self, input_data: Dict[str, Any]) -> AgentResult:
@@ -781,6 +859,8 @@ class ReconAgent(BaseAgent):
         self._coverage_files_discovered = []
         self._coverage_files_read = []
         self._coverage_tracker_file_count = 0
+        self._latest_tool_module_results = []
+        self._latest_tool_project_model = {}
         for target_file in target_files if isinstance(target_files, list) else []:
             self._remember_target_file(target_file)
             self._remember_discovered_file(target_file)
@@ -898,6 +978,7 @@ class ReconAgent(BaseAgent):
 - 你的主职责是建模、拆分**功能模块**、定义优先级，而不是亲自扫完整个项目的每个模块
 - 先建立项目地图，再明确哪些模块应该由 Recon SubAgent 去做深度侦查
 - 你可以做少量关键确认，但不要陷入所有模块的逐文件深挖
+- 建模完成后，应调用 `run_recon_subagent`（先 `action=plan`，再 `action=run`）推进模块侦查
 - 若没有可用的模块化执行通道，再回退为亲自执行传统 Recon
 - 你要把模块规划成**可直接派发给 SubAgent 的具体目录**，而不是抽象主题或文档目录
 
@@ -1302,6 +1383,7 @@ Final Answer:""",
             if not final_result:
                 final_result = self._summarize_from_steps()
             if isinstance(final_result, dict):
+                final_result = self._apply_subagent_runtime_payload(final_result)
                 final_result = self._apply_runtime_recon_state(final_result)
                 final_result = self._ensure_project_profile(final_result)
                 await self._sync_recon_queue(final_result)

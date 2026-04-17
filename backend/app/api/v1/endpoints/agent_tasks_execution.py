@@ -280,6 +280,10 @@ async def _execute_agent_task(task_id: str):
                 _test_llm_connection_once,
             )
 
+            # Workflow 并发配置优先使用当前用户在“扫描配置-智能引擎”中保存的值；
+            # 若用户未覆盖，则回退到 workflow/config.yml 或 settings 默认值。
+            workflow_config = _build_workflow_config_from_user_config(user_config)
+
             # 初始化工具集 - 传递排除模式和目标文件以及预初始化的 sandbox_manager
             # 传递 event_emitter 以发送索引进度，传递 task_id 以支持取消
             task.current_phase = AgentTaskPhase.INDEXING
@@ -316,6 +320,17 @@ async def _execute_agent_task(task_id: str):
                     queue_service=queue_service,  # 新增：漏洞队列服务
                     recon_queue_service=recon_queue_service,  # 新增：Recon 风险队列服务
                     bl_queue_service=bl_queue_service,  # 新增：业务逻辑风险队列服务
+                    recon_subagent_max_workers=max(
+                        1,
+                        int(
+                            getattr(
+                                workflow_config,
+                                "effective_recon_workers",
+                                getattr(workflow_config, "recon_max_workers", 1),
+                            )
+                            or 1
+                        ),
+                    ),
                 )
 
             tools = await _run_with_retries(
@@ -348,6 +363,7 @@ async def _execute_agent_task(task_id: str):
             )
 
             recon_subagent_tool_blacklist = {
+                "run_recon_subagent",
                 "push_risk_point_to_queue",
                 "push_risk_points_to_queue",
                 "get_recon_risk_queue_status",
@@ -410,10 +426,6 @@ async def _execute_agent_task(task_id: str):
                 if hasattr(agent, "set_write_scope_guard"):
                     agent.set_write_scope_guard(write_scope_guard)
 
-            # Workflow 并发配置优先使用当前用户在“扫描配置-智能引擎”中保存的值；
-            # 若用户未覆盖，则回退到 workflow/config.yml 或 settings 默认值。
-            workflow_config = _build_workflow_config_from_user_config(user_config)
-
             # 创建 Orchestrator Agent（使用确定性 Workflow 版本，注入两个队列服务）
             orchestrator = WorkflowOrchestratorAgent(
                 llm_service=llm_service,
@@ -437,6 +449,10 @@ async def _execute_agent_task(task_id: str):
                 orchestrator.config.metadata.update(audit_runtime_metadata)
             if hasattr(orchestrator, "set_write_scope_guard"):
                 orchestrator.set_write_scope_guard(write_scope_guard)
+
+            recon_runtime_tool = tools.get("recon", {}).get("run_recon_subagent")
+            if recon_runtime_tool and hasattr(recon_runtime_tool, "set_orchestrator"):
+                recon_runtime_tool.set_orchestrator(orchestrator)
 
             # 设置外部取消检查回调
             # 这确保即使 runner.cancel() 失败，Agent 也能通过 checking 全局标志感知取消
@@ -1715,6 +1731,7 @@ async def _initialize_tools(
     queue_service: Optional[Any] = None,  # 新增：漏洞队列服务
     recon_queue_service: Optional[Any] = None,  # 新增：Recon 风险队列服务
     bl_queue_service: Optional[Any] = None,  # 新增：业务逻辑风险队列服务
+    recon_subagent_max_workers: int = 3,
     save_callback: Optional[Any] = None,  # 新增：验证结果持久化回调 async (findings) -> int
 ) -> Dict[str, Dict[str, Any]]:
     """初始化工具集。"""
@@ -1737,6 +1754,7 @@ async def _initialize_tools(
         QuickAuditTool,
         SymbolBodyTool,
         UpdateReconFileTreeTool,
+        RunReconSubAgentTool,
     )
     from app.services.agent.tools.queue_tools import (
         GetQueueStatusTool, DequeueFindingTool, PushFindingToQueueTool, IsFindingInQueueTool
@@ -1794,6 +1812,9 @@ async def _initialize_tools(
     }
 
     recon_tools = {**base_tools}
+    recon_tools["run_recon_subagent"] = RunReconSubAgentTool(
+        max_workers=max(1, int(recon_subagent_max_workers or 1)),
+    )
     if recon_queue_service and task_id:
         recon_tools["push_risk_point_to_queue"] = PushRiskPointToQueueTool(
             queue_service=recon_queue_service,

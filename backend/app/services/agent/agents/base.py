@@ -105,6 +105,7 @@ NON_CACHEABLE_TOOL_NAMES: Set[str] = {
     "peek_bl_risk_queue",
     "clear_bl_risk_queue",
     "is_bl_risk_point_in_queue",
+    "run_recon_subagent",
 }
 STRICT_MODE_LOCAL_ONLY_TOOL_NAMES: Set[str] = {
     "push_risk_point_to_queue",
@@ -127,6 +128,7 @@ STRICT_MODE_LOCAL_ONLY_TOOL_NAMES: Set[str] = {
     "peek_bl_risk_queue",
     "clear_bl_risk_queue",
     "is_bl_risk_point_in_queue",
+    "run_recon_subagent",
 }
 WRITE_TOOL_GUARD_NAMES: Set[str] = {"edit_file", "write_file", "move_file", "create_directory"}
 DETERMINISTIC_ERROR_HINTS: Tuple[str, ...] = (

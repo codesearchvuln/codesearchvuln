@@ -2,12 +2,12 @@
 
 ## 1. 背景
 
-当前常规 Recon 仍是单个 `ReconAgent` 对整个项目执行一次“大而全”的侦查：
+当前常规 Recon 已具备 `recon_count` 并发配置，但主调度仍未完全收口到 Host 工具调用模型：
 
 - `AuditWorkflowEngine._run_recon_phase()` 只调度一次 `recon` 子 Agent，直到 Recon 队列非空或达到兜底重试上限。
 - `ReconAgent` 同时承担了项目建模、重点目录识别、候选风险搜索、上下文确认、风险点入队、coverage 汇总等全部职责。
 - Analysis / Verification 已经具备独立 worker + 并发数可配置的执行模型，但 Recon 阶段还没有类似的 fan-out / fan-in 机制。
-- 当前用户工作流并发配置只包含 `analysis_count` 和 `verification_count`，没有 `recon_count`。
+- 用户工作流已支持 `recon_count`，但当前实现中 Recon fan-out 仍存在 Engine 直接驱动路径。
 
 这导致几个问题：
 
@@ -18,11 +18,11 @@
 
 ## 2. 重构目标
 
-本轮重构目标是把常规 Recon 拆成“Host 建模 + Module SubAgent 侦查”的两层模型：
+本轮重构目标是把常规 Recon 拆成“Host 建模 + Tool 驱动 SubAgent 侦查”的两层模型：
 
 - `ReconAgent` 只负责项目建模与模块规划，不再承担所有模块的具体侦查细节。
 - 新增 `ReconSubAgent`（命名可再定），每个 SubAgent 只负责一个模块/子域的侦查。
-- Recon SubAgent 异步执行，可并发，且并发数与 Analysis / Verification 一样由用户手动配置。
+- Recon SubAgent 由 `ReconAgent` 通过工具按需调用，可异步并发，且并发数与 Analysis / Verification 一样由用户手动配置。
 - `ReconAgent` 在单次 Workflow Run 内固定只启动 1 个 Host 实例；并发只作用于其派发的 `ReconSubAgent` 数量。
 - 保持 Workflow 主阶段顺序不变，仍然是 `Recon -> Analysis -> Verification -> Report`。
 - 保持 Recon 队列作为 Analysis 的唯一权威输入源，不改变下游队列驱动语义。
@@ -100,22 +100,23 @@
 建议采用下面的执行模型：
 
 1. `AuditWorkflowEngine` 进入 Recon 阶段。
-2. `ReconHostAgent` 先完成建模，产出 `ProjectReconModel`。
-3. `ReconModuleExecutor` 按 `recon_max_workers` 异步派发多个 `ReconSubAgent`。
-4. Host 收集 `ReconModuleResult`，统一归并结果并发布到 `recon_queue`。
-5. Recon 完成后，下游 Analysis 保持现有逻辑不变。
+2. `AuditWorkflowEngine` 只调度一次 `ReconAgent`（Host）。
+3. `ReconAgent` 在会话内先建模，再按需调用 `run_recon_subagent` 工具。
+4. `run_recon_subagent` 工具在受控并发下执行多个 `ReconSubAgent`，返回结构化模块结果给 Host。
+5. Host 归并 `ReconModuleResult` 并发布到 `recon_queue`。
+6. Recon 完成后，下游 Analysis 保持现有逻辑不变。
 
 这里不建议直接把 Recon 硬塞进现有 `ParallelPhaseExecutor.run_parallel_analysis()` 风格循环，原因是：
 
 - Analysis / Verification 是“队列消费型并行”。
-- Recon 是“有界任务列表 fan-out/fan-in 型并行”。
+- Recon 是“Host 决策 + 工具驱动 worker fan-out/fan-in 型并行”。
 - 两者的调度对象和结果归并模型不同，强行共用一个大类会让 `ParallelPhaseExecutor` 继续膨胀。
 
-建议新增一个专用执行器：
+建议将并发执行入口下沉到工具层：
 
-- `ReconModuleExecutor`
+- `run_recon_subagent`（工具）
 
-如果后面发现逻辑高度相似，再把 worker clone / dispatch / merge 通用部分下沉到公共基类。
+工具内部可复用 `ReconModuleExecutor`，但它不再是 Workflow Engine 的主调度入口。
 
 ## 6. 核心数据结构建议
 
@@ -360,16 +361,16 @@ Recon SubAgent 并发语义与 Analysis/Verification 对齐，但增加 Host 单
 
 ### 11.1 `AuditWorkflowEngine`
 
-建议把当前 `_run_recon_phase()` 拆成三段：
+建议把 `_run_recon_phase()` 收敛为“单次调度 ReconHost”：
 
-1. `_build_recon_project_model(...)`
-2. `_run_recon_modules(...)`
-3. `_finalize_recon_results(...)`
+1. Engine 只调度一次 `recon` 子 Agent（Host）。
+2. Host 在会话内按需调用 `run_recon_subagent` 工具。
+3. Host 统一归并并入队，Engine 只负责阶段成功/失败与重试兜底。
 
-然后 `_run_recon_until_queue_ready()` 保持原有的兜底框架，只是内部改成：
+`_run_recon_until_queue_ready()` 保持原有兜底框架，但重试语义改成：
 
-- 第一次：Host 建模 + 模块并发侦查
-- 若队列仍空：进入补充建模/扩大模块范围的 retry
+- 第一次：Host 建模 + 工具化 SubAgent 侦查
+- 若队列仍空：Host 扩大覆盖并再次按需调用工具
 
 ### 11.2 状态与步骤记录
 
@@ -378,41 +379,40 @@ Recon SubAgent 并发语义与 Analysis/Verification 对齐，但增加 Host 单
 - 继续保留 `phase=RECON`
 - `agent` 字段细分为：
   - `recon_host`
-  - `recon_worker_<n>`
+  - `recon_subagent_tool`（可选，按工具调用记录）
 - `injected_context` 记录 `module_id / module_paths / priority`
 
 这样不需要改 phase 枚举，也能在日志与前端事件层面展示模块级进度。
 
-## 12. 执行器设计建议
+## 12. 执行器与工具设计建议
 
-### 12.1 新增 `ReconModuleExecutor`
+### 12.1 新增 `run_recon_subagent` 工具
 
 建议落点：
 
-- `backend/app/services/agent/workflow/recon_executor.py`
+- `backend/app/services/agent/tools/recon_subagent_tool.py`
 
 核心职责：
 
-- clone/创建 `ReconSubAgent`
-- 按 semaphore 控制并发
-- 派发模块任务
-- 收集结果
-- 处理取消
-- 汇总错误
-- 把结果回传给 Host/Engine
+- 接收 Host 传入的建模上下文或模块选择条件
+- 在工具内受控并发执行 `ReconSubAgent`
+- 收集 `ReconModuleResult`
+- 归并为 Host 可消费的结构化结果（含 `risk_points` / `coverage_summary`）
+- 处理取消和部分失败
+- 把结果回传给 `ReconAgent`
 
 接口示意：
 
 ```python
-class ReconModuleExecutor:
-    async def run_parallel_recon(
+class RunReconSubAgentTool(AgentTool):
+    async def _execute(
         self,
-        *,
-        state: WorkflowState,
-        task_id: str,
-        modules: list[ReconModuleDescriptor],
-        project_model: ProjectReconModel,
-    ) -> list[ReconModuleResult]:
+        action: Literal["plan", "run"] = "run",
+        module_ids: list[str] | None = None,
+        max_workers: int | None = None,
+        max_modules: int | None = None,
+        force_rerun: bool = False,
+    ) -> ToolResult:
         ...
 ```
 
@@ -421,12 +421,7 @@ class ReconModuleExecutor:
 建议：
 
 - 不直接把 Recon 模块 fan-out 混进 `ParallelPhaseExecutor` 主类。
-- 但可以复用或抽取以下公共能力：
-  - worker agent clone
-  - cancel callback 透传
-  - tool runtime / write scope 透传
-  - `_dispatch_to_worker_agent()` 这种统一执行包装
-  - worker usage 统计累加
+- 可在工具内部复用 `ReconModuleExecutor` 的并发执行能力（worker clone / cancel callback / usage 汇总）。
 
 ## 13. 结果模型与观测性
 
@@ -465,6 +460,7 @@ _agent_results["recon"] = {
 
 - `backend/app/services/agent/agents/recon.py`
 - `backend/app/services/agent/workflow/engine.py`
+- `backend/app/services/agent/tools/recon_subagent_tool.py`
 - `backend/app/services/agent/workflow/models.py`
 - `backend/app/services/agent/workflow/user_runtime_config.py`
 - `backend/app/services/agent/workflow/config.yml`
@@ -476,7 +472,7 @@ _agent_results["recon"] = {
 ### 14.2 建议新增文件
 
 - `backend/app/services/agent/agents/recon_subagent.py`
-- `backend/app/services/agent/workflow/recon_executor.py`
+- `backend/app/services/agent/tools/recon_subagent_tool.py`
 - `backend/app/services/agent/workflow/recon_models.py`
 - `backend/tests/test_recon_executor.py`
 - `backend/tests/test_recon_module_modeling.py`
@@ -510,13 +506,13 @@ _agent_results["recon"] = {
 - 不执行 SubAgent 时，也能输出稳定的模块列表。
 - 小项目与 target_files 模式都能给出正确模块规划。
 
-### Phase C：Recon SubAgent 与执行器落地
+### Phase C：Recon SubAgent 与工具化执行落地
 
-目标：让模块级侦查真正并发运行。
+目标：让模块级侦查由 Host 按需触发并发运行。
 
 1. 新增 `ReconSubAgent`。
-2. 新增 `ReconModuleExecutor`。
-3. Host 将模块任务扇出并收集结果。
+2. 新增 `run_recon_subagent` 工具（内部可复用执行器）。
+3. Host 通过工具按需触发模块任务并收集结果。
 4. Host 统一发布到 Recon 队列。
 
 验收标准：
@@ -552,14 +548,14 @@ _agent_results["recon"] = {
 
 ### 16.2 执行器测试
 
-1. `test_recon_executor_respects_max_workers`
-2. `test_recon_executor_collects_partial_failures`
-3. `test_recon_executor_handles_cancellation`
-4. `test_recon_executor_serial_fallback_when_worker_count_is_one`
+1. `test_run_recon_subagent_tool_respects_max_workers`
+2. `test_run_recon_subagent_tool_collects_partial_failures`
+3. `test_run_recon_subagent_tool_handles_cancellation`
+4. `test_run_recon_subagent_tool_serial_fallback_when_worker_count_is_one`
 
 ### 16.3 Workflow 集成测试
 
-1. `test_workflow_engine_parallel_recon_populates_recon_queue`
+1. `test_workflow_engine_recon_agent_calls_run_recon_subagent_tool_and_populates_recon_queue`
 2. `test_workflow_engine_parallel_recon_keeps_analysis_verification_unchanged`
 3. `test_workflow_engine_recon_retry_when_all_modules_return_empty`
 
@@ -612,7 +608,7 @@ _agent_results["recon"] = {
 
 1. 保留 `ReconAgent` 作为 Host，不改名字。
 2. 新增 `ReconSubAgent`，不要让 `ReconAgent` 递归调用自己。
-3. 新增 `ReconModuleExecutor`，不要把 Recon fan-out 直接塞进 `ParallelPhaseExecutor`。
+3. 新增 `run_recon_subagent` 工具，Recon fan-out 由 Host 在会话内按需触发。
 4. 新增 `recon_count`（仅表示 SubAgent 并发上限），并与用户现有的 Analysis / Verification 并发设置并列。
 5. 采用“SubAgent 返回结果，Host 统一入队”的结果归并模式。
 6. 本轮先不动 BusinessLogicRecon。
@@ -634,7 +630,7 @@ _agent_results["recon"] = {
 1. 先补 `recon_count` 配置链路。
 2. 再抽 `ProjectReconModel` / `ReconModuleDescriptor`。
 3. 再新增 `ReconSubAgent`。
-4. 再实现 `ReconModuleExecutor`。
-5. 最后把 `AuditWorkflowEngine` Recon 阶段切过去。
+4. 再实现 `run_recon_subagent` 工具（可复用执行器）。
+5. 最后把 `AuditWorkflowEngine` Recon 阶段切到“单次调度 ReconHost + 工具化 SubAgent”。
 
 这样做的原因很简单：先把契约和配置打稳，再替换执行路径，回归成本最低。

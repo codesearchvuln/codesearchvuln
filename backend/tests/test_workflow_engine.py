@@ -365,21 +365,68 @@ class TestAuditWorkflowEnginePhases:
         assert engine._build_recon_phase_context("") == ""
 
     @pytest.mark.asyncio
-    async def test_structured_recon_fans_out_to_module_subagents_and_populates_queue(
+    async def test_recon_host_tool_runtime_result_is_reflected_in_state_and_downstream(
         self, orchestrator_with_queues
     ):
         orch, recon_q, vuln_q = orchestrator_with_queues
-        _StructuredReconSubAgent.active_runs = 0
-        _StructuredReconSubAgent.max_seen = 0
-        orch.sub_agents["recon"] = _StructuredReconHost()
-        orch.sub_agents["recon_subagent"] = _StructuredReconSubAgent(
-            llm_service=orch.llm_service,
-            tools={},
-            event_emitter=None,
-        )
-        orch.sub_agents["analysis"] = MagicMock()
-        orch.sub_agents["verification"] = MagicMock()
-        calls = _install_dispatch_mock(orch, vuln_q)
+        calls: List[Dict[str, Any]] = []
+        module_results = [
+            {
+                "module_id": "auth",
+                "success": True,
+                "risk_points": [_make_risk_point("src/auth/routes.py", 7)],
+            },
+            {
+                "module_id": "payment",
+                "success": True,
+                "risk_points": [_make_risk_point("src/payment/callback.py", 7)],
+            },
+        ]
+
+        async def mock_dispatch(params: Dict[str, Any]) -> str:
+            calls.append(dict(params))
+            agent_name = str(params.get("agent", "")).lower()
+
+            if agent_name == "recon":
+                recon_q.enqueue(TASK_ID, _make_risk_point("src/auth/routes.py", 7))
+                recon_q.enqueue(TASK_ID, _make_risk_point("src/payment/callback.py", 7))
+                orch._agent_results["recon"] = {
+                    "_run_success": True,
+                    "module_count": 2,
+                    "module_results": module_results,
+                    "risk_points_pushed": 2,
+                }
+                return "Recon 完成"
+
+            if agent_name == "analysis":
+                risk_point = params.get("risk_point") or {}
+                finding = _make_finding(
+                    "Structured finding",
+                    file_path=risk_point.get("file_path", "module.py"),
+                    line_start=int(risk_point.get("line_start") or 1),
+                )
+                vuln_q.enqueue_finding(TASK_ID, finding)
+                orch._agent_results["analysis"] = {
+                    "_run_success": True,
+                    "findings": [finding],
+                }
+                return "Analysis 完成"
+
+            if agent_name == "verification":
+                finding_from_params = params.get("finding") or {}
+                orch._agent_results["verification"] = {
+                    "_run_success": True,
+                    "findings": [finding_from_params],
+                }
+                if isinstance(finding_from_params, dict) and finding_from_params:
+                    normalized = orch._normalize_finding(finding_from_params)
+                    if normalized:
+                        orch._all_findings.append(normalized)
+                return "Verification 完成"
+
+            return "未知 Agent"
+
+        orch._dispatch_agent = mock_dispatch
 
         engine = AuditWorkflowEngine(
             recon_q,
@@ -409,7 +456,6 @@ class TestAuditWorkflowEnginePhases:
             if isinstance(c.get("risk_point"), dict)
         }
         assert analyzed_paths == {"src/auth/routes.py", "src/payment/callback.py"}
-        assert _StructuredReconSubAgent.max_seen <= 2
 
     @pytest.mark.asyncio
     async def test_full_workflow_phases(self, orchestrator_with_queues):
