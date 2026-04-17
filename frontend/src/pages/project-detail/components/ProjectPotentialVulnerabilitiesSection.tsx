@@ -226,7 +226,7 @@ export function ProjectPotentialVulnerabilitiesSection({
 								variant="outline"
 								className="cyber-btn-ghost h-7 px-3"
 								disabled
-								title="误报不提供统一漏洞详情入口"
+								title={row.original.detailDisabledReason || "详情暂不可用"}
 							>
 								详情
 							</Button>

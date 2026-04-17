@@ -4,6 +4,7 @@ import {
 	type ProjectCardVulnerabilitySeverity,
 } from "@/features/projects/services/projectCardPreview";
 import { resolveSourceModeFromTaskMeta } from "@/features/tasks/services/taskActivities";
+import { isTerminalTaskStatus } from "@/features/tasks/services/taskProgress";
 import type { AgentFinding, AgentTask } from "@/shared/api/agentTasks";
 import type { OpengrepFinding, OpengrepScanTask } from "@/shared/api/opengrep";
 import { resolveCweDisplay } from "@/shared/security/cweCatalog";
@@ -20,6 +21,7 @@ export interface ProjectDetailPotentialFindingNode {
 	confidence: ProjectCardVulnerabilityConfidence;
 	location: string;
 	route: string | null;
+	detailDisabledReason: string | null;
 	taskCategory: ProjectCardTaskFindingCategory;
 	source: "static" | "agent";
 	line: number | null;
@@ -77,6 +79,7 @@ export interface ProjectDetailPotentialListItem {
 	taskName: string;
 	taskCreatedAt: string;
 	route: string | null;
+	detailDisabledReason: string | null;
 	source: "static" | "agent";
 }
 
@@ -104,6 +107,9 @@ type CandidateFinding = ProjectDetailPotentialFindingNode & {
 	taskName: string;
 	relativePath: string;
 };
+
+const AGENT_FINDING_DETAIL_PENDING_REASON = "扫描完成后可查看漏洞详情";
+const FALSE_POSITIVE_DETAIL_DISABLED_REASON = "误报不提供统一漏洞详情入口";
 
 const SOURCE_ROOT_SEGMENTS = new Set([
 	"src",
@@ -469,6 +475,7 @@ export function flattenProjectDetailPotentialFindings(
 				taskName: task.taskName,
 				taskCreatedAt: task.createdAt,
 				route: leaf.route,
+				detailDisabledReason: leaf.detailDisabledReason,
 				source: leaf.source,
 			});
 		}
@@ -492,6 +499,7 @@ export function buildProjectDetailPotentialTree(params: {
 			taskCategory: ProjectCardTaskFindingCategory;
 			taskName: string;
 			createdAt: string;
+			status: string | null;
 		}
 	>();
 
@@ -508,6 +516,7 @@ export function buildProjectDetailPotentialTree(params: {
 			taskCategory,
 			taskName: String(task.name || "").trim(),
 			createdAt: task.created_at,
+			status: task.status ?? null,
 		});
 	}
 
@@ -517,6 +526,7 @@ export function buildProjectDetailPotentialTree(params: {
 			taskCategory: "static",
 			taskName: String(task.name || "").trim(),
 			createdAt: task.created_at,
+			status: task.status ?? null,
 		});
 	}
 
@@ -549,6 +559,11 @@ export function buildProjectDetailPotentialTree(params: {
 			fallbackLabel:
 				String(finding.vulnerability_type || "").trim() || title || "潜在漏洞",
 		});
+		const detailDisabledReason = isFalsePositiveAgentFinding(finding)
+			? FALSE_POSITIVE_DETAIL_DISABLED_REASON
+			: !isTerminalTaskStatus(task.status)
+				? AGENT_FINDING_DETAIL_PENDING_REASON
+				: null;
 
 		candidateFindings.push({
 			type: "finding",
@@ -565,13 +580,14 @@ export function buildProjectDetailPotentialTree(params: {
 				projectName,
 				source: "agent",
 			}),
-			route: isFalsePositiveAgentFinding(finding)
+			route: detailDisabledReason
 				? null
 				: buildFindingDetailPath({
 						source: "agent",
 						taskId: task.taskId,
 						findingId: finding.id,
 					}),
+			detailDisabledReason,
 			taskCategory: task.taskCategory,
 			source: "agent",
 			line,
@@ -626,6 +642,7 @@ export function buildProjectDetailPotentialTree(params: {
 				findingId: finding.id,
 				engine: "opengrep",
 			}),
+			detailDisabledReason: null,
 			taskCategory: "static",
 			source: "static",
 			line,

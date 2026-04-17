@@ -19,6 +19,7 @@ export interface TaskFindingRow {
 	severity: TaskFindingSeverity;
 	confidence: TaskFindingConfidence;
 	route: string | null;
+	detailDisabledReason: string | null;
 	createdAt: string | null;
 }
 

@@ -15,6 +15,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { isTerminalTaskStatus } from "@/features/tasks/services/taskProgress";
 import { type AgentFinding, getAgentFindings } from "@/shared/api/agentTasks";
 import {
 	getOpengrepScanFindings,
@@ -46,10 +47,14 @@ export interface ProjectTaskFindingsDialogProps {
 	onOpenChange: (open: boolean) => void;
 	taskId: string;
 	taskCategory: TaskFindingCategory;
+	taskStatus?: string | null;
 	projectName: string;
 	returnTo: string;
 	taskLabel: string;
 }
+
+const AGENT_FINDING_DETAIL_PENDING_REASON = "扫描完成后可查看漏洞详情";
+const FALSE_POSITIVE_DETAIL_DISABLED_REASON = "误报不提供统一漏洞详情入口";
 
 function getSeverityText(severity: TaskFindingSeverity): string {
 	if (severity === "CRITICAL") return "严重";
@@ -256,6 +261,9 @@ function normalizeAgentFindings(
 						taskId,
 						findingId: finding.id,
 					}),
+			detailDisabledReason: isFalsePositiveAgentFinding(finding)
+				? FALSE_POSITIVE_DETAIL_DISABLED_REASON
+				: null,
 			createdAt: finding.created_at ?? null,
 		};
 	});
@@ -290,6 +298,7 @@ function normalizeStaticFindings(
 				findingId: finding.id,
 				engine: "opengrep",
 			}),
+			detailDisabledReason: null,
 			createdAt: null,
 		};
 	});
@@ -300,6 +309,7 @@ export default function ProjectTaskFindingsDialog({
 	onOpenChange,
 	taskId,
 	taskCategory,
+	taskStatus,
 	projectName,
 	returnTo,
 	taskLabel,
@@ -321,6 +331,8 @@ export default function ProjectTaskFindingsDialog({
 	});
 	const cacheRef = useRef(new Map<string, TaskFindingRow[]>());
 	const cacheKey = `${taskCategory}:${taskId}`;
+	const canOpenAgentFindingDetail =
+		taskCategory === "static" ? true : isTerminalTaskStatus(taskStatus);
 
 	const formatLocation = useCallback(
 		(filePath: string, line: number | null) => {
@@ -525,7 +537,7 @@ export default function ProjectTaskFindingsDialog({
 						width: 120,
 					},
 					cell: ({ row }) =>
-						row.original.route ? (
+						row.original.route && canOpenAgentFindingDetail ? (
 							<Button
 								asChild
 								size="sm"
@@ -542,14 +554,19 @@ export default function ProjectTaskFindingsDialog({
 								variant="outline"
 								className="cyber-btn-ghost h-8 px-3"
 								disabled
-								title="误报不提供统一漏洞详情入口"
+								title={
+									canOpenAgentFindingDetail
+										? row.original.detailDisabledReason ||
+											"详情暂不可用"
+										: AGENT_FINDING_DETAIL_PENDING_REASON
+								}
 							>
 								详情
 							</Button>
 						),
 				},
 			] satisfies AppColumnDef<TaskFindingRow, unknown>[],
-		[formatLocation, returnTo],
+		[canOpenAgentFindingDetail, formatLocation, returnTo],
 	);
 
 	return (

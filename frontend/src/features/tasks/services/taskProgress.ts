@@ -10,6 +10,17 @@ export const INTERRUPTED_STATUSES = new Set([
 	"cancelled",
 ]);
 
+export function isTerminalTaskStatus(
+	status: string | null | undefined,
+): boolean {
+	const normalized = normalizeTaskStatus(status);
+	return (
+		normalized === "completed" ||
+		normalized === "failed" ||
+		INTERRUPTED_STATUSES.has(normalized)
+	);
+}
+
 function normalizeTaskStatus(status: string | null | undefined): string {
 	return String(status || "").trim().toLowerCase();
 }
@@ -21,9 +32,7 @@ export function getEstimatedTaskProgressPercent(
 	const status = normalizeTaskStatus(input.status);
 
 	if (
-		status === "completed" ||
-		status === "failed" ||
-		INTERRUPTED_STATUSES.has(status)
+		isTerminalTaskStatus(status)
 	) {
 		return 100;
 	}

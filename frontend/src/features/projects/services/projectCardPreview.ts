@@ -22,6 +22,7 @@ import {
   buildStaticScanGroups,
   resolveStaticScanGroupStatus,
 } from "@/features/tasks/services/staticScanGrouping";
+import { isTerminalTaskStatus } from "@/features/tasks/services/taskProgress";
 import { resolveCweDisplay } from "@/shared/security/cweCatalog";
 import { buildFindingDetailPath } from "@/shared/utils/findingRoute";
 
@@ -114,6 +115,8 @@ type ProjectInfoPayload = {
   status?: string;
   language_info?: unknown;
 } | null;
+
+const AGENT_FINDINGS_DETAIL_PENDING_REASON = "扫描完成后可查看漏洞详情";
 
 function toFiniteNumber(value: unknown): number {
   const num = Number(value);
@@ -641,6 +644,7 @@ export function getProjectCardRecentTasks(params: {
         task.description,
       );
       const scanLabel = sourceMode === "hybrid" ? "混合扫描" : "智能扫描";
+      const canOpenFindingsDetail = isTerminalTaskStatus(task.status);
 
       return {
         id: task.id,
@@ -666,8 +670,10 @@ export function getProjectCardRecentTasks(params: {
         ),
         vulnerabilities: toNullableNonNegativeNumber(task.verified_count),
         taskCategory: sourceMode === "hybrid" ? "hybrid" : "intelligent",
-        supportsFindingsDetail: true,
-        findingsButtonDisabledReason: null,
+        supportsFindingsDetail: canOpenFindingsDetail,
+        findingsButtonDisabledReason: canOpenFindingsDetail
+          ? null
+          : AGENT_FINDINGS_DETAIL_PENDING_REASON,
       };
     });
 

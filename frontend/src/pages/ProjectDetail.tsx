@@ -251,6 +251,7 @@ export default function ProjectDetail() {
 		taskId: string;
 		taskCategory: ProjectCardTaskFindingCategory;
 		taskLabel: string;
+		taskStatus: string | null;
 	} | null>(null);
 	const [recentTasksTableState, setRecentTasksTableState] =
 		useState<DataTableQueryState>({
@@ -689,11 +690,13 @@ export default function ProjectDetail() {
 			taskId: string,
 			taskCategory: ProjectCardTaskFindingCategory,
 			taskLabel: string,
+			taskStatus: string | null,
 		) => {
 			setSelectedTaskFindings({
 				taskId,
 				taskCategory,
 				taskLabel,
+				taskStatus,
 			});
 		},
 		[],
@@ -838,6 +841,7 @@ export default function ProjectDetail() {
 											row.original.id,
 											taskCategory,
 											getProjectDetailPotentialTaskCategoryText(taskCategory),
+											row.original.status ?? null,
 										);
 									}}
 								>
@@ -1009,6 +1013,7 @@ export default function ProjectDetail() {
 				}}
 				taskId={selectedTaskFindings?.taskId || ""}
 				taskCategory={selectedTaskFindings?.taskCategory || "static"}
+				taskStatus={selectedTaskFindings?.taskStatus || null}
 				projectName={project.name}
 				returnTo={currentRoute}
 				taskLabel={selectedTaskFindings?.taskLabel || "任务"}
