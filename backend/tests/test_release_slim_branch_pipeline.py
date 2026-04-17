@@ -257,21 +257,38 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "\n  push:\n" not in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "publish_backend_hardened:" in workflow_text
+    assert "reuse_existing_images:" in workflow_text
+    assert (
+        "Skip runtime image builds and reuse the current `latest` digests on GHCR"
+        in workflow_text
+    )
     assert "prepare-release:" in workflow_text
     assert "create-draft-release:" in workflow_text
     assert "GH_REPO: ${{ github.repository }}" in workflow_text
     assert "publish-runtime-images:" in workflow_text
     assert "resolve-release-manifest:" in workflow_text
     assert "package-offline-images:" in workflow_text
-    assert "finalize-release:" in workflow_text
+    assert "finalize-publish:" in workflow_text
     assert "cleanup-draft-release:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert "if: ${{ github.event_name == 'workflow_dispatch' }}" in workflow_text
     assert "build_frontend: false" in workflow_text
-    assert "build_backend: true" in workflow_text
+    assert (
+        "build_backend: ${{ github.event_name == 'workflow_dispatch' && "
+        "!inputs.reuse_existing_images }}"
+    ) in workflow_text
+    assert "build_backend: true" not in workflow_text
     assert (
         "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
-        "inputs.publish_backend_hardened || false }}"
+        "!inputs.reuse_existing_images && inputs.publish_backend_hardened || false }}"
+    ) in workflow_text
+    assert (
+        "build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && "
+        "!inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}"
+    ) in workflow_text
+    assert (
+        "build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && "
+        "!inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}"
     ) in workflow_text
     assert "build_sandbox:" not in workflow_text
     assert "runtime_tag" in workflow_text
@@ -416,6 +433,11 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "target: runtime-plain" in publish_workflow_text
     assert "target: runtime-cython" in publish_workflow_text
     assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
+    assert "BUILD_BACKEND: ${{ inputs.build_backend }}" in publish_workflow_text
+    assert (
+        'if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" && '
+        '"${BUILD_BACKEND}" == "true" && -z "${BACKEND_REF}" ]]; then'
+    ) in publish_workflow_text
     assert "built_this_run" in publish_workflow_text
     assert "resolved_fallback" in publish_workflow_text
     assert "release-manifest fallback images" in publish_workflow_text
@@ -429,6 +451,58 @@ def test_scheduled_release_workflow_has_been_removed() -> None:
     workflow_path = REPO_ROOT / ".github" / "workflows" / "scheduled-release.yml"
 
     assert not workflow_path.exists()
+
+
+def test_docker_publish_backend_trigger_respects_paths_filter() -> None:
+    """
+    Guard against the永真 regression where every push to main rebuilt backend
+    regardless of whether backend paths changed, burning quota on no-op runs.
+    The trigger must only fire when either (a) workflow_dispatch with
+    inputs.build_backend, or (b) the paths-filter detected backend changes.
+    """
+    docker_publish_text = (
+        REPO_ROOT / ".github" / "workflows" / "docker-publish.yml"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "build_backend: ${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}"
+    ) in docker_publish_text
+    # Regression: the永真 clause previously ORed in `github.event_name == 'push'`.
+    assert "|| github.event_name == 'push'" not in docker_publish_text
+
+
+def test_docker_publish_paths_ignore_skips_doc_only_pushes() -> None:
+    """
+    Extended paths-ignore prevents the whole publish-runtime-images + release
+    pipeline from firing on doc-only pushes. `*.md` (root) must be ignored but
+    `**/*.md` must NOT be used because docker/backend.Dockerfile copies
+    backend/README.md as a real image input.
+    """
+    docker_publish_text = (
+        REPO_ROOT / ".github" / "workflows" / "docker-publish.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "paths-ignore:" in docker_publish_text
+    for pattern in (
+        "'**/tests/**'",
+        "'**/docs/**'",
+        "'tests/**'",
+        "'docs/**'",
+        "'*.md'",
+        "'LICENSE'",
+        "'NOTICE'",
+        "'.github/ISSUE_TEMPLATE/**'",
+        "'.github/PULL_REQUEST_TEMPLATE.md'",
+    ):
+        assert pattern in docker_publish_text, pattern
+    # `**/*.md` would mask backend/README.md which backend.Dockerfile COPYs.
+    assert "'**/*.md'" not in docker_publish_text
+
+    backend_dockerfile = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    assert "backend/README.md" in backend_dockerfile
 
 
 def test_release_helper_script_no_longer_creates_or_pushes_git_tags() -> None:

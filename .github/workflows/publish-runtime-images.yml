@@ -1970,6 +1970,7 @@ jobs:
         env:
           IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
           REQUIRE_COMPLETE_MANIFEST: ${{ inputs.require_complete_manifest }}
+          BUILD_BACKEND: ${{ inputs.build_backend }}
           REVISION: ${{ inputs.revision != '' && inputs.revision || github.sha }}
           POSTGRES_IMAGE: docker.io/library/postgres:15-alpine
           REDIS_IMAGE: docker.io/library/redis:7-alpine
@@ -1988,7 +1989,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" && -z "${BACKEND_REF}" ]]; then
+          if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" && "${BUILD_BACKEND}" == "true" && -z "${BACKEND_REF}" ]]; then
             echo "::error::Release manifest requires a freshly built backend image ref; refusing to fall back to ${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${IMAGE_TAG}" >&2
             exit 1
           fi

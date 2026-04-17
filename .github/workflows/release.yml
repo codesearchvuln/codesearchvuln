@@ -11,13 +11,18 @@ on:
         type: string
   workflow_dispatch:
     inputs:
+      reuse_existing_images:
+        description: 'Skip runtime image builds and reuse the current `latest` digests on GHCR for the release manifest (fails fast if any required image is missing)'
+        required: false
+        type: boolean
+        default: true
       refresh_all_runtime_images:
-        description: 'Rebuild runtime runner images before generating release'
+        description: 'Rebuild runtime runner images before generating release (ignored when reuse_existing_images is true)'
         required: false
         type: boolean
         default: false
       publish_backend_hardened:
-        description: 'Publish the optional hardened backend image variant in addition to the default runtime-plain backend image'
+        description: 'Publish the optional hardened backend image variant in addition to the default runtime-plain backend image (ignored when reuse_existing_images is true)'
         required: false
         type: boolean
         default: false
@@ -136,16 +141,16 @@ jobs:
     with:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
-      build_backend: true
-      publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
-      build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_gitleaks_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
-      build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.refresh_all_runtime_images || false }}
+      build_backend: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images }}
+      publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.publish_backend_hardened || false }}
+      build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_gitleaks_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
       multi_arch: true
       emit_release_manifest: true
       require_complete_manifest: true

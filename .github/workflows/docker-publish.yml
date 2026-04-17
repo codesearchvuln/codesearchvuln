@@ -9,6 +9,11 @@ on:
       - '**/docs/**'
       - 'tests/**'
       - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - 'NOTICE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   workflow_dispatch:
     inputs:
       tag:
@@ -140,7 +145,7 @@ jobs:
     with:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'latest' }}
       build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}
-      build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || github.event_name == 'push' || needs.detect-changes.outputs.backend == 'true' }}
+      build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}
       publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_yasa_runner || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_opengrep_runner || false }}
