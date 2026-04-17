@@ -25,6 +25,8 @@ import yaml
 from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord, WorkflowConfig
 from .memory_monitor import MemoryMonitor
 from .parallel_executor import ParallelPhaseExecutor
+from .recon_executor import ReconModuleExecutor
+from .recon_models import merge_recon_module_results
 from ..tools.verification_result_tools import deduplicate_verification_findings
 
 if TYPE_CHECKING:
@@ -103,6 +105,12 @@ class AuditWorkflowEngine:
             shared_semaphore=self.analysis_shared_semaphore,
         )
 
+        self.recon_executor = ReconModuleExecutor(
+            orchestrator=orchestrator,
+            max_workers=self.workflow_config.recon_max_workers,
+            enable_parallel=self.workflow_config.should_parallelize_recon,
+        )
+
         self.verification_executor = ParallelPhaseExecutor(
             orchestrator=orchestrator,
             agent_type="verification",
@@ -128,6 +136,8 @@ class AuditWorkflowEngine:
 
         logger.info(
             f"[WorkflowEngine] Initialized with parallel config: "
+            f"recon_workers={self.workflow_config.recon_max_workers} "
+            f"(enabled={self.workflow_config.should_parallelize_recon}), "
             f"analysis_workers={self.workflow_config.analysis_max_workers} "
             f"(shared_pool={self.analysis_shared_pool_size}, "
             f"enabled={self.workflow_config.should_parallelize_analysis}), "
@@ -202,6 +212,7 @@ class AuditWorkflowEngine:
 
         overrides_applied: Dict[str, int] = {}
         for agent_name, field_name in (
+            ("recon", "recon_max_workers"),
             ("analysis", "analysis_max_workers"),
             ("verification", "verification_max_workers"),
         ):
@@ -963,13 +974,23 @@ class AuditWorkflowEngine:
             "如果发现可疑点，请立即推送到 Recon 队列。"
         )
 
-    async def _run_recon_phase(
+    def _should_use_recon_subagent_runtime(self) -> bool:
+        recon_agent = self.orchestrator.sub_agents.get("recon")
+        recon_subagent = self.orchestrator.sub_agents.get("recon_subagent")
+        return (
+            recon_subagent is not None
+            and recon_agent is not None
+            and hasattr(type(recon_agent), "build_project_recon_model")
+            and hasattr(type(recon_agent), "merge_module_results")
+        )
+
+    async def _run_legacy_recon_phase(
         self,
         state: WorkflowState,
         attempt: int = 1,
         task_context: str = "",
     ) -> None:
-        """调度 Recon Agent 一次（Recon Agent 内部会将风险点推送到 recon_risk_queue）。"""
+        """保留旧的单 Agent Recon 路径，作为兼容/回退执行方式。"""
         orc = self.orchestrator
         step_start = time.time()
 
@@ -981,12 +1002,11 @@ class AuditWorkflowEngine:
         if effective_context:
             params["context"] = effective_context
         try:
-            observation = await orc._dispatch_agent(params)
+            await orc._dispatch_agent(params)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.error("[WorkflowEngine] Recon phase failed: %s", exc)
-            observation = f"Recon 执行异常: {exc}"
 
         duration_ms = int((time.time() - step_start) * 1000)
         recon_success = bool(
@@ -1009,12 +1029,139 @@ class AuditWorkflowEngine:
             recon_success,
             len(orc._all_findings),
         )
-        
-        #  清理 Recon Agent 的会话内存
+
         recon_agent = orc.sub_agents.get("recon")
         if recon_agent:
             recon_agent.reset_session_memory()
             logger.debug("[WorkflowEngine] Recon Agent session memory reset after phase completed")
+
+    async def _run_recon_phase(
+        self,
+        state: WorkflowState,
+        attempt: int = 1,
+        task_context: str = "",
+    ) -> None:
+        """执行 Recon Host 建模 + Module SubAgent 侦查；必要时回退到 legacy 单 Agent 路径。"""
+        orc = self.orchestrator
+        if not self._should_use_recon_subagent_runtime():
+            await self._run_legacy_recon_phase(
+                state=state,
+                attempt=attempt,
+                task_context=task_context,
+            )
+            return
+
+        step_start = time.time()
+        recon_agent = orc.sub_agents.get("recon")
+        if recon_agent is None:
+            await self._run_legacy_recon_phase(
+                state=state,
+                attempt=attempt,
+                task_context=task_context,
+            )
+            return
+
+        runtime_context = getattr(orc, "_runtime_context", {}) or {}
+        host_input = {
+            "task": "对项目进行建模、识别模块，并调度 Recon SubAgent 进行模块侦查",
+            "task_context": self._build_recon_phase_context(task_context),
+            "project_info": (
+                dict(runtime_context.get("project_info", {}))
+                if isinstance(runtime_context.get("project_info"), dict)
+                else {}
+            ),
+            "config": (
+                dict(runtime_context.get("config", {}))
+                if isinstance(runtime_context.get("config"), dict)
+                else {}
+            ),
+            "project_root": runtime_context.get("project_root", "."),
+            "task_id": runtime_context.get("task_id"),
+        }
+
+        try:
+            await orc.emit_event("info", "[Workflow] Recon Host 开始项目建模")
+            project_model = recon_agent.build_project_recon_model(host_input)
+            module_results = await self.recon_executor.run_parallel_recon(
+                state=state,
+                task_id=self.task_id,
+                project_model=project_model,
+            )
+            if hasattr(recon_agent, "merge_module_results"):
+                final_result = recon_agent.merge_module_results(
+                    project_model=project_model,
+                    module_results=module_results,
+                    project_info=host_input["project_info"],
+                )
+            else:
+                final_result = merge_recon_module_results(
+                    project_model=project_model,
+                    module_results=module_results,
+                    project_info=host_input["project_info"],
+                )
+
+            risk_points = final_result.get("risk_points", [])
+            enqueued_count = (
+                self.recon_queue.enqueue_batch(self.task_id, risk_points)
+                if isinstance(risk_points, list)
+                else 0
+            )
+            final_result["risk_points_pushed"] = int(enqueued_count)
+            final_result["recon_queue_status"] = self.recon_queue.stats(self.task_id)
+            final_result["project_model"] = project_model.to_dict()
+            final_result["module_count"] = len(project_model.module_descriptors)
+            final_result["module_results"] = [result.to_dict() for result in module_results]
+            final_result["_run_success"] = True
+
+            orc._agent_results["recon"] = final_result
+            if hasattr(recon_agent, "_create_recon_handoff"):
+                try:
+                    orc._agent_handoffs["recon"] = recon_agent._create_recon_handoff(final_result)
+                except Exception as exc:
+                    logger.warning("[WorkflowEngine] Failed to create recon handoff: %s", exc)
+
+            state.recon_done = True
+            duration_ms = int((time.time() - step_start) * 1000)
+            state.step_records.append(
+                WorkflowStepRecord(
+                    phase=WorkflowPhase.RECON,
+                    agent="recon_host",
+                    injected_context={
+                        "module_count": len(project_model.module_descriptors),
+                        "attempt": attempt,
+                    },
+                    success=True,
+                    error=None,
+                    findings_count=len(risk_points) if isinstance(risk_points, list) else 0,
+                    duration_ms=duration_ms,
+                )
+            )
+            logger.info(
+                "[WorkflowEngine] Recon host/sub-agent phase done: attempt=%s modules=%s queued=%s",
+                attempt,
+                len(project_model.module_descriptors),
+                enqueued_count,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("[WorkflowEngine] Structured Recon failed, fallback to legacy path: %s", exc, exc_info=True)
+            await orc.emit_event(
+                "warning",
+                "[Workflow] Recon SubAgent 运行失败，回退到单 Agent Recon 模式",
+            )
+            await self._run_legacy_recon_phase(
+                state=state,
+                attempt=attempt,
+                task_context=task_context,
+            )
+            return
+
+        if hasattr(recon_agent, "reset_session_memory"):
+            recon_agent.reset_session_memory()
+        recon_subagent = orc.sub_agents.get("recon_subagent")
+        if recon_subagent and hasattr(recon_subagent, "reset_session_memory"):
+            recon_subagent.reset_session_memory()
 
     async def _run_business_logic_recon_phase(self, state: WorkflowState, task_id: str) -> None:
         """

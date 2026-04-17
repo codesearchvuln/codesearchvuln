@@ -2,6 +2,8 @@
 # `analysis.count` is the shared total pool for both analysis and business_logic_analysis.
 # Set count to 1 to force serial execution for that phase/pool.
 agents:
+  recon:
+    count: 3
   analysis:
     count: 5
   verification:

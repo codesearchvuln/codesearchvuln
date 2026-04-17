@@ -14,6 +14,7 @@ Test suite for AuditWorkflowEngine and WorkflowOrchestratorAgent.
 
 import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -75,6 +76,139 @@ def _make_risk_point(file_path: str = "app.py", line_start: int = 10) -> Dict[st
         "line_start": line_start,
         "description": f"Risk at {file_path}:{line_start}",
     }
+
+
+class _StructuredReconHost:
+    def __init__(self) -> None:
+        self._reset_calls = 0
+
+    def build_project_recon_model(self, input_data: Dict[str, Any]):
+        from app.services.agent.workflow.recon_models import (
+            ProjectReconModel,
+            ReconModuleDescriptor,
+        )
+
+        return ProjectReconModel(
+            project_root=str(input_data.get("project_root") or "."),
+            languages=["Python"],
+            frameworks=["FastAPI"],
+            entry_points=["src/auth/routes.py", "src/payment/callback.py"],
+            key_directories=["src/auth", "src/payment"],
+            module_descriptors=[
+                ReconModuleDescriptor(
+                    module_id="auth",
+                    name="src/auth",
+                    module_type="auth",
+                    paths=["src/auth"],
+                    entrypoints=["src/auth/routes.py"],
+                    language_hints=["Python"],
+                    framework_hints=["FastAPI"],
+                    risk_focus=["authentication"],
+                    priority=100,
+                    estimated_size=1,
+                    target_files=["src/auth/routes.py"],
+                ),
+                ReconModuleDescriptor(
+                    module_id="payment",
+                    name="src/payment",
+                    module_type="payment",
+                    paths=["src/payment"],
+                    entrypoints=["src/payment/callback.py"],
+                    language_hints=["Python"],
+                    framework_hints=["FastAPI"],
+                    risk_focus=["callback_validation"],
+                    priority=90,
+                    estimated_size=1,
+                    target_files=["src/payment/callback.py"],
+                ),
+            ],
+        )
+
+    def merge_module_results(self, *, project_model, module_results, project_info=None):
+        from app.services.agent.workflow.recon_models import merge_recon_module_results
+
+        return merge_recon_module_results(
+            project_model=project_model,
+            module_results=module_results,
+            project_info=project_info,
+        )
+
+    def _create_recon_handoff(self, final_result: Dict[str, Any]):
+        from app.services.agent.agents.base import TaskHandoff
+
+        return TaskHandoff(
+            from_agent="Recon",
+            to_agent="analysis",
+            summary="structured recon",
+            context_data={"risk_points": final_result.get("risk_points", [])},
+        )
+
+    def reset_session_memory(self) -> None:
+        self._reset_calls += 1
+
+
+class _StructuredReconSubAgent:
+    active_runs = 0
+    max_seen = 0
+
+    def __init__(self, llm_service=None, tools=None, event_emitter=None):
+        self.llm_service = llm_service
+        self.tools = tools or {}
+        self.event_emitter = event_emitter
+        self.config = SimpleNamespace(name="ReconSubAgent")
+        self.name = "ReconSubAgent"
+        self._tool_runtime = None
+        self._write_scope_guard = None
+        self._cancel_callback = None
+
+    def set_tool_runtime(self, runtime):
+        self._tool_runtime = runtime
+
+    def set_write_scope_guard(self, guard):
+        self._write_scope_guard = guard
+
+    def set_cancel_callback(self, callback):
+        self._cancel_callback = callback
+
+    def reset_session_memory(self):
+        return None
+
+    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+        type(self).active_runs += 1
+        type(self).max_seen = max(type(self).max_seen, type(self).active_runs)
+        try:
+            await asyncio.sleep(0.01)
+            module = input_data.get("config", {}).get("recon_module", {})
+            target_files = module.get("target_files", [])
+            primary = target_files[0]
+            return AgentResult(
+                success=True,
+                data={
+                    "risk_points": [
+                        {
+                            "file_path": primary,
+                            "line_start": 7,
+                            "description": f"Risk in {primary}",
+                            "vulnerability_type": "potential_issue",
+                            "severity": "medium",
+                        }
+                    ],
+                    "input_surfaces": [f"input:{primary}"],
+                    "trust_boundaries": [f"boundary:{primary}"],
+                    "target_files": list(target_files),
+                    "coverage_summary": {
+                        "files_read": list(target_files),
+                        "files_discovered": list(target_files),
+                        "directories_scanned": [primary.rsplit("/", 1)[0]],
+                    },
+                    "summary": f"Scoped recon for {primary}",
+                },
+                iterations=1,
+                tool_calls=1,
+                tokens_used=5,
+            )
+        finally:
+            type(self).active_runs -= 1
 
 
 def _build_orchestrator(
@@ -229,6 +363,53 @@ class TestAuditWorkflowEnginePhases:
 
         assert engine._build_recon_phase_context("已有上下文") == "已有上下文"
         assert engine._build_recon_phase_context("") == ""
+
+    @pytest.mark.asyncio
+    async def test_structured_recon_fans_out_to_module_subagents_and_populates_queue(
+        self, orchestrator_with_queues
+    ):
+        orch, recon_q, vuln_q = orchestrator_with_queues
+        _StructuredReconSubAgent.active_runs = 0
+        _StructuredReconSubAgent.max_seen = 0
+        orch.sub_agents["recon"] = _StructuredReconHost()
+        orch.sub_agents["recon_subagent"] = _StructuredReconSubAgent(
+            llm_service=orch.llm_service,
+            tools={},
+            event_emitter=None,
+        )
+        orch.sub_agents["analysis"] = MagicMock()
+        orch.sub_agents["verification"] = MagicMock()
+        calls = _install_dispatch_mock(orch, vuln_q)
+
+        engine = AuditWorkflowEngine(
+            recon_q,
+            vuln_q,
+            TASK_ID,
+            orch,
+            workflow_config=WorkflowConfig(
+                enable_parallel_recon=True,
+                enable_parallel_analysis=False,
+                enable_parallel_verification=False,
+                enable_parallel_report=False,
+                recon_max_workers=2,
+                use_agent_count_config_file=False,
+            ),
+        )
+        state = await engine.run({}, {}, "/tmp", TASK_ID)
+
+        assert state.phase == WorkflowPhase.COMPLETE
+        assert state.recon_modules_total == 2
+        assert state.recon_modules_processed == 2
+        assert recon_q.size(TASK_ID) == 0
+        analysis_calls = [c for c in calls if c["agent"] == "analysis"]
+        assert len(analysis_calls) == 2
+        analyzed_paths = {
+            c.get("risk_point", {}).get("file_path")
+            for c in analysis_calls
+            if isinstance(c.get("risk_point"), dict)
+        }
+        assert analyzed_paths == {"src/auth/routes.py", "src/payment/callback.py"}
+        assert _StructuredReconSubAgent.max_seen <= 2
 
     @pytest.mark.asyncio
     async def test_full_workflow_phases(self, orchestrator_with_queues):

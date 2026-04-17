@@ -13,6 +13,7 @@ USER_AGENT_WORKFLOW_CONFIG_KEY = "agent_workflow_config"
 AgentWorkflowConfigSource = Literal["user_override", "local_file", "settings_default"]
 
 _AGENT_COUNT_LIMITS: Dict[str, tuple[int, int]] = {
+    "recon_count": (1, 32),
     "analysis_count": (1, 32),
     "verification_count": (1, 32),
 }
@@ -21,6 +22,7 @@ _AGENT_COUNT_CONFIG_PATH = Path(__file__).with_name("config.yml")
 
 def _build_settings_default_config() -> Dict[str, int]:
     return {
+        "recon_count": int(getattr(settings, "RECON_MAX_WORKERS", 3) or 3),
         "analysis_count": int(getattr(settings, "ANALYSIS_MAX_WORKERS", 5) or 5),
         "verification_count": int(getattr(settings, "VERIFICATION_MAX_WORKERS", 3) or 3),
     }
@@ -46,6 +48,7 @@ def _load_local_file_default_config() -> tuple[Dict[str, int], AgentWorkflowConf
 
     resolved = dict(defaults)
     for agent_name, field_name in (
+        ("recon", "recon_count"),
         ("analysis", "analysis_count"),
         ("verification", "verification_count"),
     ):
@@ -105,6 +108,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
     if saved_runtime is None:
         return {
             **default_config,
+            "default_recon_count": default_config["recon_count"],
             "default_analysis_count": default_config["analysis_count"],
             "default_verification_count": default_config["verification_count"],
             "default_source": default_source,
@@ -120,6 +124,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
     except ValueError:
         return {
             **default_config,
+            "default_recon_count": default_config["recon_count"],
             "default_analysis_count": default_config["analysis_count"],
             "default_verification_count": default_config["verification_count"],
             "default_source": default_source,
@@ -129,6 +134,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
 
     return {
         **effective_config,
+        "default_recon_count": default_config["recon_count"],
         "default_analysis_count": default_config["analysis_count"],
         "default_verification_count": default_config["verification_count"],
         "default_source": default_source,
@@ -140,6 +146,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
 def resolve_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str, int]:
     described = describe_effective_agent_workflow_config(raw_other_config)
     return {
+        "recon_count": int(described["recon_count"]),
         "analysis_count": int(described["analysis_count"]),
         "verification_count": int(described["verification_count"]),
     }

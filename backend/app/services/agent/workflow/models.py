@@ -16,18 +16,25 @@ class WorkflowConfig:
 
     控制并行化行为和 worker 数量。
 
-    analysis / verification 的 worker 数量可由同目录下的 config.yml 覆盖。
+    recon / analysis / verification 的 worker 数量可由同目录下的 config.yml 覆盖。
     其中 analysis worker 数同时作为 analysis + business_logic_analysis 的共享总池大小。
     """
+    enable_parallel_recon: bool = True
     enable_parallel_analysis: bool = True
     enable_parallel_verification: bool = True
     enable_parallel_report: bool = True
+    recon_max_workers: int = 3
     analysis_max_workers: int = 3
     verification_max_workers: int = 3
     report_max_workers: int = 3
     bl_analysis_max_workers: int = 3
     use_agent_count_config_file: bool = True
     agent_count_config_path: Optional[str] = None
+
+    @property
+    def should_parallelize_recon(self) -> bool:
+        """是否应该并行化 Recon（workers > 1 且启用）"""
+        return self.enable_parallel_recon and self.recon_max_workers > 1
 
     @property
     def should_parallelize_analysis(self) -> bool:
@@ -98,6 +105,9 @@ class WorkflowState:
 
     # Recon
     recon_done: bool = False
+    recon_modules_total: int = 0
+    recon_modules_processed: int = 0
+    recon_modules_failed: int = 0
 
     # BusinessLogicRecon
     bl_recon_done: bool = False
@@ -151,6 +161,9 @@ class WorkflowState:
         return {
             "phase": self.phase.value,
             "recon_done": self.recon_done,
+            "recon_modules_total": self.recon_modules_total,
+            "recon_modules_processed": self.recon_modules_processed,
+            "recon_modules_failed": self.recon_modules_failed,
             "bl_recon_done": self.bl_recon_done,
             "bl_risk_points_generated": self.bl_risk_points_generated,
             "bl_risk_points_deduped": self.bl_risk_points_deduped,

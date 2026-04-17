@@ -38,7 +38,7 @@ async def test_load_user_agent_workflow_config_uses_local_file_defaults(
 ):
     config_path = tmp_path / "config.yml"
     config_path.write_text(
-        "agents:\n  analysis:\n    count: 6\n  verification:\n    count: 2\n",
+        "agents:\n  recon:\n    count: 4\n  analysis:\n    count: 6\n  verification:\n    count: 2\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(user_runtime_config, "_AGENT_COUNT_CONFIG_PATH", config_path)
@@ -48,8 +48,10 @@ async def test_load_user_agent_workflow_config_uses_local_file_defaults(
         user_id="u1",
     )
 
+    assert loaded["recon_count"] == 4
     assert loaded["analysis_count"] == 6
     assert loaded["verification_count"] == 2
+    assert loaded["default_recon_count"] == 4
     assert loaded["default_analysis_count"] == 6
     assert loaded["default_verification_count"] == 2
     assert loaded["default_source"] == "local_file"
@@ -64,7 +66,7 @@ async def test_save_user_agent_workflow_config_preserves_other_config(
 ):
     config_path = tmp_path / "config.yml"
     config_path.write_text(
-        "agents:\n  analysis:\n    count: 5\n  verification:\n    count: 3\n",
+        "agents:\n  recon:\n    count: 3\n  analysis:\n    count: 5\n  verification:\n    count: 3\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(user_runtime_config, "_AGENT_COUNT_CONFIG_PATH", config_path)
@@ -80,6 +82,7 @@ async def test_save_user_agent_workflow_config_preserves_other_config(
         db,
         user_id="u1",
         runtime_config={
+            "recon_count": 6,
             "analysis_count": 9,
             "verification_count": 4,
         },
@@ -88,9 +91,11 @@ async def test_save_user_agent_workflow_config_preserves_other_config(
     payload = json.loads(row.other_config)
     assert payload["maxAnalyzeFiles"] == 88
     assert payload[user_runtime_config.USER_AGENT_WORKFLOW_CONFIG_KEY] == {
+        "recon_count": 6,
         "analysis_count": 9,
         "verification_count": 4,
     }
+    assert saved["recon_count"] == 6
     assert saved["analysis_count"] == 9
     assert saved["verification_count"] == 4
     assert saved["source"] == "user_override"

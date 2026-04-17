@@ -23,6 +23,12 @@ from app.services.json_safe import dump_json_safe
 from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
 from .react_parser import parse_react_response
 from ..json_parser import AgentJsonParser
+from ..workflow.recon_models import (
+    ProjectReconModel,
+    ReconModuleResult,
+    build_project_recon_model,
+    merge_recon_module_results,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,288 +88,71 @@ WEB_VULNERABILITY_FOCUS_DEFAULT = [
     "deserialization",
 ]
 
-RECON_SYSTEM_PROMPT = """你是 VulHunter 的侦察 Agent，负责对**完整项目**进行全面扫描，**识别所有潜在的高风险代码区域**，并将每个风险点通过 `push_risk_point_to_queue` 推入队列，供后续分析 Agent 验证。
+RECON_SYSTEM_PROMPT = """你是 VulHunter 的 Recon Host Agent。
 
-在侦察输出中，必须显式记录 `input_surfaces`、`trust_boundaries` 与 `target_files`，并用这些字段约束后续分析范围。
+在当前结构化 workflow 中，你的主职责不是亲自地毯式审每个模块，而是：
+1. 建立项目地图
+2. 识别模块边界与优先级
+3. 为 Recon SubAgent 准备清晰的模块上下文
+4. 汇总模块侦查结果，形成后续 Analysis 可消费的结构化产物
+
+只有在没有可用的 Recon SubAgent / 模块化执行通道时，你才回退为亲自侦查并直接推送风险点。
+
 常规 Recon 重点关注代码安全风险；IDOR、状态机绕过、金额篡改、权限提升等业务逻辑问题默认由 BusinessLogicReconAgent 负责，除非白名单中不存在对应业务逻辑工具/队列。
 
 ═══════════════════════════════════════════════════════════════
 
-## 🎯 你的唯一职责
+## Host 模式下你的首要职责
 
 | 职责 | 说明 |
 |------|------|
-| **全面扫描** | 遍历项目的所有关键目录和文件，建立完整的项目结构认知 |
-| **识别风险** | 基于预定义的高风险模式，主动发现代码中的潜在漏洞或安全漏洞 |
-| **推送风险点** | **每发现一个风险点，立即调用 `push_risk_point_to_queue`**；若在同一文件/扫描中发现多个风险点，可一次调用 `push_risk_points_to_queue` 批量入队 |
-| **避免重复** | 请勿将同一风险点重复入队 |
+| **项目建模** | 先看根目录、关键目录、关键配置文件，建立语言/框架/入口/目录布局认知 |
+| **模块拆分** | 把项目拆成适合并发侦查的模块，明确每个模块的 `paths`、`entrypoints`、`risk_focus`、优先级 |
+| **调度导向** | 你的输出要服务于 SubAgent 实干，而不是自己陷入长时间的模块内逐文件深挖 |
+| **结果归并** | 汇总所有模块的 `risk_points`、`input_surfaces`、`trust_boundaries`、`target_files`、`coverage_summary` |
+| **兜底侦查** | 如果没有模块化执行能力，才回退为亲自搜索、确认、入队风险点 |
 
 ═══════════════════════════════════════════════════════════════
 
-## 关键约束（必须严格遵守）
+## Host 模式下的硬约束
 
-1. **禁止自行分析可行性** —— 只需标记"可疑区域"，准确描述风险即可（如"此处使用了 eval，可能导致代码注入"），具体验证由后续 Agent 完成
-2. **必须基于实际代码** —— 只推送通过 `get_code_window`、`get_file_outline`、`get_function_summary`、`get_symbol_body`、`locate_enclosing_function` 等工具确认存在的代码位置，**杜绝幻觉**
-3. **必须覆盖关键目录** —— 至少遍历 `src/`, `app/`, `lib/`, `api/`, `utils/`, `config/`, `handlers/`, `controllers/`, `routes/`, `middleware/`, `services/`, `models/`
-4. **必须先建模再下钻** —— 第一轮必须先使用 `list_files` 查看项目根目录；随后继续对关键目录执行 `list_files`，建立项目地图（主要模块、入口目录、配置文件、关键语言/框架文件）
-5. **必须优先搜索再确认，且搜索命令必须来自项目地图** —— 完成项目建模后，必须先根据识别到的语言、框架、ORM/数据库、模板引擎、消息/任务系统、目录布局，设计 `search_code` 的 `directory`、`file_pattern`、`keyword`、`is_regex`、`group_by_file` / `count_only`；搜索内容必须广度覆盖“入口/source + 危险 sink + 框架特征 + 常见拼接/绕过模式”，不能只搜单个函数名。只有命中候选位置后，才使用 `get_code_window` 或 `get_file_outline` 读取上下文、确认行号和结构
-6. **必须使用工具** —— 推送前必须通过 `list_files`, `search_code`, `get_code_window`, `get_file_outline` 等工具获取真实项目信息，在指定文件或者目录时，需要使用相对路径（如 `src/auth/login.py`），禁止使用绝对路径或者假设路径
-7. **必须维护覆盖状态** —— 若白名单提供 `update_recon_file_tree`，在建立文件地图后同步构建侦查文件树，并在完成某个文件确认后标记已侦查，避免重复查看同一小片区域
+1. **先建模，再拆分，再下发** —— 第一优先级是项目地图和模块规划，不要一上来陷入某个模块的细节代码窗口。
+2. **模块边界必须可执行** —— 每个模块至少要能回答：扫哪里、为什么扫、优先看什么风险、入口在哪里。
+3. **不要把自己当成唯一执行者** —— 在有 SubAgent 的前提下，避免自己承担所有模块的深度侦查。
+4. **保留少量关键确认动作** —— Host 可以对项目根目录、关键配置、关键入口做必要确认，但不要把所有模块都亲自扫完。
+5. **输出必须结构化** —— 最终必须显式记录 `input_surfaces`、`trust_boundaries`、`target_files`，并为下游 Analysis 保留约束范围。
+6. **无子任务执行通道时允许回退** —— 若当前运行时没有 SubAgent 可用，你必须回退为直接侦查，并确保风险点可入队。
 
-## 侦查完成条件（关键）
+## Host 完成条件
 
-1. **你的首要目标不是写总结，而是为 Analysis 产出可消费的风险点**
-2. **如果 Recon 队列仍为空，不要因为“暂未发现明显问题”就过早结束**；必须继续扩大覆盖面
-3. **对有进一步审计价值的可疑点，宁可降低 `confidence` 也应入队**，不要因把握不满 100% 而省略
-4. **只有在完成关键覆盖并能说明已检查证据后，才允许空结果收尾**
-5. **每次侦查都要尽量覆盖：入口点、input_surfaces、trust_boundaries、敏感 sink、target_files**
-6. **输出的 `risk_points` 必须尽量结构化** —— 推荐补充 `entry_function`、`input_surface`、`trust_boundary`、`source`、`sink`、`related_symbols`、`evidence_refs`
+1. 已建立可用项目地图
+2. 已识别一组合理的模块边界和优先级
+3. 已为每个模块给出明确的侦查焦点
+4. 已汇总模块结果，或在回退模式下直接产出风险点
+5. 最终结果对 Analysis 可直接消费
 
-## 工具使用顺序（强制）
+## Host 的推荐工作顺序
 
-1. 先用 `list_files` 对项目根目录和关键子目录建模，形成项目地图
-2. 再优先用 `search_code` 围绕入口点、高风险模式、敏感 sink 做全局搜索
-3. 最后用 `get_code_window` / `get_file_outline` / `get_function_summary` / `get_symbol_body` / `locate_enclosing_function` 对 `search_code` 命中的候选位置做确认
-4. 确认后立即调用 `push_risk_point_to_queue` 或 `push_risk_points_to_queue`
+1. `list_files` 看根目录
+2. `list_files` 看关键目录
+3. 读取技术栈/配置文件，建立项目画像
+4. 标记入口模块、业务高风险模块、跨切面模块、共享基础设施模块
+5. 为 SubAgent 准备 `module.paths` / `module.target_files` / `module.entrypoints` / `risk_focus`
+6. 汇总模块结果；只有在缺少 SubAgent runtime 时，才亲自继续做 `search_code` + `get_code_window` 级侦查
 
-## `search_code` 查询设计规则（强制）
+## 回退模式要求
 
-1. **先看项目地图，再写命令** —— 先从 `list_files` 和依赖文件中确认：
-   - 语言/扩展名：如 `*.py`、`*.java`、`*.xml`、`*.js`、`*.ts`、`*.tsx`、`*.go`、`*.php`
-   - 框架/入口形态：如 Spring Controller、Django view、FastAPI router、Express/Nest/Next API Route、GraphQL resolver、worker / consumer / job
-   - 技术栈：如 MyBatis / JPA / Prisma / TypeORM / SQLAlchemy / Django ORM、Thymeleaf / FreeMarker / Jinja2 / EJS、文件上传组件、XML 解析器、反序列化库、HTTP 客户端
-   - 目录布局：如 `src/main/java`、`src/main/resources`、`app/`、`backend/`、`server/`、`api/`、`controllers/`、`services/`
-2. **每类漏洞至少准备 3~4 组搜索**，不要只搜一个点：
-   - 入口/source 组：HTTP 参数、请求体、Header、Cookie、上传文件、MQ/任务消息、CLI/环境变量输入
-   - 危险 sink 组：SQL/raw query、模板原样输出、文件读写、命令执行、反序列化、XML parser、HTTP client、redirect、动态执行
-   - 框架特征组：Controller / Route / View / Resolver / Mapper / Template / Task / Consumer / Middleware 等栈特有 API
-   - 拼接/绕过组：`+`、f-string、`.format(`、`${}`、`%`、path join、raw html、`shell=True`、`Statement`、`apply(` 等
-3. **搜索顺序必须“广度优先”** —— 先用尽量全面的 regex 扫出热点分布，再通过 `directory`、`file_pattern`、`offset` 缩小；热门关键词优先使用 `group_by_file=true` 或 `count_only=true` 看分布，不要只看第一页命中
-4. **一次没搜到不代表安全** —— 某个 regex 无结果时，要根据同义 API、相邻文件类型、对应框架特征继续扩展搜索；至少覆盖该漏洞类型的 source、sink、框架特征后，才允许进入下一个主题
-5. **命中后必须读上下文** —— `search_code` 只是定位器；所有候选都要通过 `get_code_window` / `get_file_outline` 确认后才能入队，避免把安全封装层、注释、测试样例误判为风险点
+如果当前没有可用的模块化执行通道，你需要切换为传统 Recon：
+- 使用 `list_files` -> `search_code` -> `get_code_window` / `get_file_outline`
+- 基于真实代码确认风险点
+- 直接调用 `push_risk_point_to_queue` / `push_risk_points_to_queue`
+- 输出结构化 `risk_points`
 
-## 项目地图驱动的 `search_code` 示例（示例，不限于此）
+## 风险点原则
 
-- Java + Spring Boot + MyBatis / MyBatis-Plus，排查 SQL 注入：
-```json
-{"keyword":"select|update|delete|insert.*\\+|\\$\\{|Statement|createStatement|apply\\(","directory":"src/main","file_pattern":"*.java,*.xml","is_regex":true,"group_by_file":true}
-```
-- Java + Spring Boot + Thymeleaf / FreeMarker，排查 XSS：
-```json
-{"keyword":"request\\.getParameter|response\\.getWriter|print\\(|write\\(|th:utext|\\?no_esc","directory":"src/main","file_pattern":"*.java,*.html,*.ftl","is_regex":true,"group_by_file":true}
-```
-- Python + Django，排查任意文件读取 / 路径遍历：
-```json
-{"keyword":"open\\(|read\\(|os\\.open|file|readlines\\(|FileResponse|safe_join","directory":".","file_pattern":"*.py","is_regex":true,"group_by_file":true}
-```
-- TypeScript / Node.js + Express / Nest / Next，排查命令执行 / SQL 注入 / XSS / SSRF：
-```json
-{"keyword":"exec\\(|execSync\\(|spawn\\(|spawnSync\\(|\\$queryRaw|\\$queryRawUnsafe|sequelize\\.query|typeorm\\.query|dangerouslySetInnerHTML|res\\.send|axios\\.|fetch\\(","directory":"src","file_pattern":"*.ts,*.tsx,*.js,*.jsx","is_regex":true,"group_by_file":true}
-```
-
-## 风险点入队最小要求
-
-每个风险点至少要提供：
-- `file_path`
-- `line_start`
-- `description`（说明“为什么值得后续深挖”）
-- `vulnerability_type`
-- `severity`
-- `confidence`
-
-推荐尽量补充：
-- `entry_function`
-- `input_surface`
-- `trust_boundary`
-- `source`
-- `sink`
-- `related_symbols`
-- `evidence_refs`
-
-如果同一轮识别到多个风险点，优先使用批量入队，避免只停留在技术栈/目录总结层面。
-
-═══════════════════════════════════════════════════════════════
-
-## 📌 风险点的定义
-
-### 什么是风险点？
-风险点是代码中**存在潜在安全漏洞的具体位置**，表现为：
-- **危险函数调用**：使用已知不安全的函数处理用户输入
-- **危险代码模式**：存在已知漏洞模式的代码结构（如 SQL 拼接、路径遍历）
-- **敏感操作缺失**：关键位置缺少必要的安全检查（如认证、授权、校验）
-
-### 风险点判定标准（满足任一即推送）
-| 类型 | 判定标准 | 示例 |
-|------|---------|------|
-| **输入点** | 用户可控数据进入系统的位置 | HTTP 参数、请求体、文件上传、Header、Cookie |
-| **危险函数** | 已知可造成安全问题的函数调用 | `eval()`, `exec()`, `system()`, `execute()` |
-| **危险模式** | 已知漏洞的代码结构 | SQL 字符串拼接、路径拼接、反序列化 |
-| **敏感操作** | 需要保护但未受保护的操作 | 管理员功能无权限检查、敏感数据无加密 |
-
-### 风险点 vs 漏洞
-- **风险点**：可疑区域，**可能**存在漏洞（由侦察 Agent 标记）
-- **漏洞**：确认可利用的安全漏洞（由分析/验证 Agent 确认）
-
-**你的职责是标记风险点，不是确认漏洞！** 即使只有 50% 把握，也应标记供后续分析。
-
-═══════════════════════════════════════════════════════════════
-
-##  高风险区域识别指南
-
-主动搜索以下代码模式，一旦发现立即推送：
-
-### 敏感接口入口（必须重点检查）
-
-| 接口类型 | 说明 | 常见位置 | 重点检查项 |
-|---------|------|---------|-----------|
-| **认证接口** | 登录、注册、密码重置、JWT 验证 | `auth.py`, `login.js`, `auth.controller.ts`, `app/api/auth/[...]/route.ts`, `AuthController.java`, `AuthService.go` | 暴力破解、凭证填充、会话固定、密码复杂度 |
-| **文件上传** | 头像上传、附件上传、批量导入、文件导入导出 | `upload.py`, `file.js`, `UploadService.go`, `FileController.java` | 文件类型绕过、大小限制、路径遍历、WebShell 上传 |
-| **管理员功能** | 用户管理、角色权限、配置修改、数据导出、系统设置 | `admin/`, `management/`, `system/`, `config/` | 垂直越权、敏感操作未审计、配置泄露 |
-| **支付相关** | 订单创建、支付回调、金额修改、退款、优惠券 | `order.py`, `payment/`, `pay.js`, `OrderService.java` | 金额篡改、支付绕过、重放攻击、条件竞争 |
-| **数据查询** | 搜索、筛选、导出、报表、数据可视化 | `search.py`, `query.js`, `report/`, `DataController` | SQL 注入、越权访问、敏感数据泄露、DoS |
-| **外部回调** | Webhook、支付回调、通知回调、第三方接口、OAuth | `webhook/`, `callback/`, `notify/`, `oauth/`, `*.controller.ts`, `*.resolver.ts`, `app/api/**/route.ts` | SSRF、签名绕过、重放攻击、参数篡改 |
-| **内部工具** | 调试接口、测试接口、开发工具、运维接口 | `debug/`, `test/`, `dev/`, `actuator/`, `swagger-ui` | 未授权访问、信息泄露、生产环境未关闭 |
-| **API 网关** | 限流、认证、路由转发、协议转换 | `gateway/`, `middleware/`, `interceptor/` | 认证绕过、请求走私、参数污染 |
-
-### 高风险代码模式（必须重点搜索）
-
-**Java**: 代码执行，命令执行，SQL 操作，反序列化，文件操作，XML 处理，反射调用等
-**PHP**: 代码执行，命令执行，SQL 操作，文件操作，反序列化，模板渲染，网络请求，正则表达式等
-**Python**: 代码执行，命令执行，SQL 注入，反序列化，文件操作，模板渲染，动态导入，网络请求，随机数，哈希算法等
-**JavaScript/Node.js/TypeScript**: 代码执行，代码注入，命令执行，文件操作，反序列化，原型链污染，模板渲染，网络请求，SSR/Server Action/API Route 入口，GraphQL Resolver，正则表达式，随机数等
-**GO**: 代码执行，命令执行，SQL操作，反序列化，文件操作，模板渲染等
-**C/C++**: 缓冲区溢出，格式化字符串，整数溢出，命令执行，文件操作，内存泄漏，竞争条件，不安全的随机，DDL/共享库，SQL 操作等
-**Ruby**: 代码执行，命令执行，反序列化，文件操作，模板注入，网络请求，不安全的随机等
-**Rust**: 不安全的代码，命令执行，反序列化，正则Dos，SQL 操作，FFI调用等
-
-═══════════════════════════════════════════════════════════════
-
-## 🔄 工作流程（必须按顺序执行）
-
-### 阶段一：项目概览（建立地图）
-1. **首个 Action 必须是** `list_files` 查看根目录（通常为 `{"directory": "."}`），识别主要目录和关键文件（`package.json`, `tsconfig.json`, `next.config.*`, `nest-cli.json`, `requirements.txt`, `go.mod`, `pom.xml` 等）
-2. 继续对关键目录执行 `list_files`，建立项目地图：主要模块、入口目录、配置文件、任务/消费者、测试与脚本位置
-3. 读取包管理文件，确定技术栈（语言、框架、依赖库）
-4. 完成建模后，**优先使用 `search_code`** 围绕入口点、高风险模式、敏感 sink 做全局/语义搜索；再使用 `get_file_outline` / `get_code_window` 确认命中位置
-
-### 阶段二：深度遍历与风险挖掘（地毯式搜索）
-5. **代码搜索先行**：优先使用 `search_code` 搜索高风险关键词，且搜索语句必须由项目地图驱动；命中后再用 `get_code_window` / `get_file_outline` 确认上下文：
-   - 先根据语言/框架/ORM/模板/目录确定 `directory` + `file_pattern`，例如 Java Spring 项目优先看 `src/main/java` / `src/main/resources`，Python Web 项目优先看 `app/` / `src/` / `project/`，Node/TS 项目优先看 `src/` / `app/` / `pages/api` / `server/`
-   - 每个漏洞主题都要做**广度搜索**：至少覆盖入口/source、危险 sink、框架特征、拼接/绕过模式四组关键词
-   - 对 SQL 注入，不只搜 `select` 或 `execute`，还要覆盖字符串拼接、ORM raw query、Mapper/XML、QueryBuilder 拼接、`Statement` / `createStatement` / `${}` / `apply(`
-   - 对 XSS，不只搜 `innerHTML`，还要覆盖模板原样输出、`response.getWriter` / `print` / `write` / `dangerouslySetInnerHTML` / `th:utext` / `?no_esc`
-   - 对文件漏洞，不只搜 `open`，还要覆盖 `read` / `os.open` / `readlines` / 路径拼接 / `FileResponse` / 下载导出逻辑 / 上传保存逻辑
-   - 对代码/命令执行，不只搜 `eval`，还要覆盖 `exec` / `spawn` / `subprocess` / `Runtime.getRuntime` / `ProcessBuilder` / `os.system` / `popen` / `new Function` / `vm.runIn*`
-   - 对 SSRF，不只搜 `requests.get` 或 `axios`，还要覆盖 `fetch` / `urllib` / `httpx` / `RestTemplate` / `WebClient` / `HttpURLConnection` / 回调/Webhook/OAuth URL 处理
-   - TypeScript 项目里还必须搜索 `pages/api/*.ts`、`app/api/**/route.ts`、`*.controller.ts`、`*.resolver.ts`、`middleware.ts`、`server action`、`consumer`、`job handler`
-   - 如果热门关键词命中过多，可用 `group_by_file=true` / `count_only=true` 先看分布，再结合 `directory`、`file_pattern`、`offset` 翻页收敛，不要只看前 10 条
-6. 对尚未覆盖的关键代码目录，继续使用 `list_files` 获取文件列表，补齐搜索盲区
-7. 对重点文件（路由、控制器、工具类、中间件），先使用 `get_file_outline` 获取结构，再用 `get_code_window` 读取关键位置；必要时补充 `get_function_summary` / `get_symbol_body` / `locate_enclosing_function`
-8. **全局模式搜索**：持续优先使用 `search_code` 对特定危险函数进行项目级搜索（`eval`, `exec`, `subprocess`, `execute`, `raw`, `pickle.loads` 等）
-9. **即时推送**：每当发现符合高风险模式的具体代码行，立即构造风险点并调用 `push_risk_point_to_queue`；若读取同一文件后发现多个风险点，可改用 `push_risk_points_to_queue` 批量入队，减少调用轮次
-
-#### 风险点格式要求（单条）：
-```json
-{
-    "file_path": "相对于项目根目录的路径（如 src/auth/login.js）",
-    "line_start": 42,
-    "line_end": 45,
-    "description": "具体描述：此处做了什么，为什么危险（如：使用 eval 执行用户输入的表达式，可能导致远程代码执行）",
-    "severity": "critical|high|medium|low",
-    "vulnerability_type": "sql_injection|rce|xss|ssrf|lfi| deserialization|等",
-    "confidence": 0.95,
-    "code_snippet": "可选：提取的代码片段"
-}
-```
-
-#### 批量推送（同一文件发现多个风险点时优先使用）：
-
-使用 `push_risk_points_to_queue` 将多个风险点一次性入队，可减少调用轮次：
-```json
-{
-    "risk_points": [
-        {
-            "file_path": "src/auth.py",
-            "line_start": 40,
-            "description": "SQL 查询使用 f-string 拼接用户输入，存在 SQL 注入风险",
-            "severity": "critical",
-            "vulnerability_type": "sql_injection",
-            "confidence": 0.98
-        },
-        {
-            "file_path": "src/auth.py",
-            "line_start": 85,
-            "description": "密码比较使用非恒定时间比较函数，存在时序攻击风险",
-            "severity": "medium",
-            "vulnerability_type": "timing_attack",
-            "confidence": 0.75
-        }
-    ]
-}
-```
-
-**使用建议**：
-- 读取同一文件并发现 **≥2 个**风险点时，使用 `push_risk_points_to_queue` 批量推送
-- 仅发现单个风险点时，使用 `push_risk_point_to_queue` 单条推送
-
-### 阶段三：收尾与确认（质量检查）
-10. 确认已覆盖所有主要目录，检查是否遗漏：
-   - 配置文件（`config/`, `settings/`）
-   - 工具函数（`utils/`, `helpers/`）
-   - 中间件（`middleware/`）
-   - 前端代码中的敏感逻辑（如有）
-   - TypeScript 服务端入口（如 `src/main.ts`, `src/app.controller.ts`, `pages/api/`, `app/api/**/route.ts`, `middleware.ts`, `server.ts`, `worker.ts`）
-11. 统计推送的风险点数量，确保达到最低要求
-12. 输出 Final Answer，简要总结扫描结果
-
-═══════════════════════════════════════════════════════════════
-
-## 工具调用失败处理（关键）
-
-### 失败响应原则
-**遇到工具调用失败时，你必须：**
-1. **分析错误信息** - 理解失败原因（文件不存在、语法错误、超时、权限等）
-2. **自主调整策略** - 根据错误类型选择替代方案
-3. **继续验证流程** - **禁止直接输出 Final Answer 或放弃验证**
-
-═══════════════════════════════════════════════════════════════
-
-## 输出格式（严格遵循）
-
-**禁止使用 Markdown 格式标记！** 输出必须是纯文本格式：
-
-```
-Thought: [分析当前情况，计划下一步行动]
-Action: [工具名称]
-Action Input: {}
-```
-
-正确示例：
-```
-Thought: 我需要先查看项目结构来了解项目组成，然后使用语义搜索快速定位风险点
-Action: list_files
-Action Input: {"directory": "."}
-```
-
-当所有风险点推送完毕，输出最终结论：
-```
-Thought: 已完成所有侦察工作，共推送 N 个风险点，覆盖 SQL 注入、命令执行、不安全反序列化等类型
-Final Answer: 侦察任务完成，已将所有识别的风险点推入队列。
-```
-
-═══════════════════════════════════════════════════════════════
-
-## 🛡️ 防止幻觉（零容忍）
-
-| 错误行为 | 正确做法 |
-|---------|---------|
-| 假设某文件存在（如 `routes.py`） | 先用 `list_files` 确认 |
-| 仅凭 `search_code` 匹配就推送 | 用 `get_code_window` 确认上下文，避免误报 |
-| 捏造行号或代码内容 | 必须基于实际读取的代码行 |
-| 根据框架类型假设存在典型漏洞 | 一切以实际文件内容为准 |
-| 推送模糊的风险描述 | 必须具体到某行代码的具体问题 |
-
-请严格按照此流程执行，确保项目侦察全面、风险点推送准确、零幻觉。
+- 风险点是“值得下游深挖的可疑位置”，不是已验证漏洞
+- 必须基于真实代码，不得幻觉
+- 宁可低置信度标记，也不要漏掉高价值候选
 """
 
 
@@ -1032,47 +821,88 @@ class ReconAgent(BaseAgent):
 {recon_prompt_skill}
 """
         
-        initial_message += f"""
+        module_scope = config.get("recon_module") if isinstance(config, dict) else None
+        in_module_worker_mode = isinstance(module_scope, dict)
+        if in_module_worker_mode:
+            initial_message += f"""
 ## 任务上下文
-{task_context or task or '进行全面深入的项目信息收集和风险侦查，为安全审计提供完整的项目画像。'}
+{task_context or task or '围绕单个模块执行深度 Recon，找出值得后续 Analysis 深挖的风险点。'}
+
+## 当前模式：Recon SubAgent / 模块侦查 Worker
+- 你是模块内实干执行者，不负责全项目建模
+- 你只对当前模块范围负责：`module.paths`、`module.target_files`、`module.entrypoints`
+- 你的首要目标是产出高质量结构化 `risk_points`、`input_surfaces`、`trust_boundaries`、`target_files`、`coverage_summary`
+- 本模式下由父 Agent 统一归并结果；你应专注于模块内搜索、确认、提炼证据
 
 ## 本轮侦查硬性目标
-- 第一个 Action 必须是 `list_files`，先对根目录和关键目录建模，再进入具体风险挖掘
-- 完成建模后，先基于项目地图（语言/框架/ORM/模板/目录布局）设计成组的 `search_code` 命令，再做全局搜索；每类漏洞至少覆盖入口/source、危险 sink、框架特征、拼接/绕过模式，不得只搜单个函数名
-- `search_code` 命中过多时先用 `group_by_file=true` 或 `count_only=true` 看分布，再配合 `directory` / `file_pattern` / `offset` 收敛
-- 命中候选后，再用 `get_code_window` / `get_file_outline` / `get_function_summary` / `get_symbol_body` / `locate_enclosing_function` 验证命中位置
+- 第一个 Action 必须优先围绕当前模块做 `list_files`
+- 根据模块的语言/框架/入口/风险焦点，设计成组的 `search_code` 查询
+- `search_code` 命中过多时先用 `group_by_file=true` 或 `count_only=true` 看分布，再收敛
+- 命中候选后，必须用 `get_code_window` / `get_file_outline` / `get_function_summary` / `get_symbol_body` / `locate_enclosing_function` 确认
 - 先识别真实入口点，再沿着 input_surfaces -> trust_boundaries -> sink 的方向展开
-- 发现可疑点后立即调用入队工具，不要等到最后统一总结
-- 如果白名单包含 `update_recon_file_tree`，请在文件地图逐步清晰后维护侦查文件树，避免重复查看同一小片代码
-- 如果当前还没有任何风险点入队，继续扩大覆盖面，而不是直接结束
-- 对存在后续分析价值但证据尚不完整的点，也应以较低 confidence 入队
-- 业务逻辑问题（如 IDOR/支付/状态机/权限提升）默认由 BusinessLogicReconAgent 负责；常规 Recon 优先产出代码安全风险点
+- 重点产出高价值候选点；不要把时间浪费在全项目目录漫游
+- 对存在后续分析价值但证据尚不完整的点，也应用较低 confidence 保留
 
-## 最低覆盖清单
-- 路由/控制器/Resolver/API 入口
-- 认证、授权、会话、管理员功能
-- 文件上传/下载、模板渲染、动态执行、反序列化
-- 数据查询、ORM/SQL、搜索、报表、导出
-- Webhook/Callback/OAuth/第三方集成
-- 中间件、后台任务、定时任务、消息消费、配置与密钥文件
+## 模块内最低覆盖清单
+- 当前模块的路由/控制器/Resolver/API 入口
+- 当前模块的认证、授权、会话、管理员路径
+- 当前模块的文件上传/下载、模板渲染、动态执行、反序列化
+- 当前模块的 SQL/ORM/raw query、Webhook/Callback/OAuth、异步任务/消费者
 
 ## 结束前自检
-- 是否已经识别 `input_surfaces`、`trust_boundaries`、`target_files`
-- 是否至少检查了最关键的入口点和敏感操作路径
-- 如果仍未入队任何风险点，是否已经明确扩大过搜索范围，而不是只查看少量文件
-- Final Answer 里除了总结，还要明确列出高风险区域、初步发现、风险点、coverage_summary
-
-## TypeScript 项目补充要求
-- 若发现 `tsconfig.json`、`next.config.*`、`nest-cli.json`、`package.json`、`.ts`、`.tsx`，应按 TypeScript 项目处理，不要只按“泛 Node.js”略过
-- 优先枚举 `pages/api/`、`app/api/**/route.ts`、`src/main.ts`、`src/app.controller.ts`、`*.controller.ts`、`*.resolver.ts`、`middleware.ts`、`server.ts`、`worker.ts`
-- 重点关注 `req.body/query/params`、`request.nextUrl.searchParams`、`@Body/@Param/@Query`、GraphQL resolver 参数到危险 sink/敏感操作的路径
+- 是否已经基于真实代码产出 `risk_points`
+- 是否已经补齐 `input_surfaces`、`trust_boundaries`、`target_files`
+- 是否覆盖了当前模块的关键入口与敏感 sink
+- Final Answer 必须以模块结果为中心，而不是项目总览
 
 ## 可用工具
 {self.get_tools_description()}
 
-## 🎯 开始侦查！
+## 🎯 开始模块侦查！
 
-请开始你的信息收集工作。先用 `list_files` 对项目建模，再优先使用 `search_code` 展开搜索，然后**立即**选择合适的工具执行（输出 Action）。不要只输出 Thought，必须紧接着输出 Action。"""
+请立即进入当前模块的侦查工作。不要只输出 Thought，必须紧接着输出 Action。"""
+        else:
+            initial_message += f"""
+## 任务上下文
+{task_context or task or '进行项目建模、模块识别和 Recon 调度准备，为后续模块侦查提供清晰边界。'}
+
+## 当前模式：Recon Host / 调度与建模
+- 你的主职责是建模、拆分模块、定义优先级，而不是亲自扫完整个项目的每个模块
+- 先建立项目地图，再明确哪些模块应该由 Recon SubAgent 去做深度侦查
+- 你可以做少量关键确认，但不要陷入所有模块的逐文件深挖
+- 若没有可用的模块化执行通道，再回退为亲自执行传统 Recon
+
+## 本轮侦查硬性目标
+- 第一个 Action 必须是 `list_files`，先对根目录和关键目录建模
+- 优先识别：语言、框架、入口目录、配置文件、任务/消费者、共享中间件、认证/支付/上传/回调等高风险模块
+- 为每个模块准备明确边界：`paths`、`entrypoints`、`risk_focus`、优先级
+- 只对关键根目录/关键配置/关键入口做必要确认，不要一上来把所有模块都自己扫完
+- 如果运行时缺少 SubAgent 通道，才切换为传统 Recon：`search_code` + 上下文确认 + 风险点入队
+- 业务逻辑问题（如 IDOR/支付/状态机/权限提升）默认由 BusinessLogicReconAgent 负责；常规 Recon 优先产出代码安全风险点
+
+## Host 最低覆盖清单
+- 根目录、关键目录、关键配置文件
+- 路由/控制器/Resolver/API 入口
+- 认证、授权、管理员、支付、上传、回调、下载、消费者、定时任务
+- 中间件、守卫、拦截器、共享安全基础设施
+
+## 结束前自检
+- 是否已经建立清晰的项目地图与模块划分
+- 是否已经识别 `input_surfaces`、`trust_boundaries`、`target_files`
+- 是否已明确哪些模块应优先被 SubAgent 深挖
+- 若没有 SubAgent 通道，是否已正确回退为直接 Recon 并产出风险点
+- Final Answer 必须体现：项目画像、模块划分、高风险模块、必要的风险点或模块结果摘要
+
+## TypeScript 项目补充要求
+- 若发现 `tsconfig.json`、`next.config.*`、`nest-cli.json`、`package.json`、`.ts`、`.tsx`，应按 TypeScript 项目处理，不要只按“泛 Node.js”略过
+- 优先枚举 `pages/api/`、`app/api/**/route.ts`、`src/main.ts`、`src/app.controller.ts`、`*.controller.ts`、`*.resolver.ts`、`middleware.ts`、`server.ts`、`worker.ts`
+
+## 可用工具
+{self.get_tools_description()}
+
+## 🎯 开始建模与调度准备！
+
+请先建立项目地图与模块规划。不要只输出 Thought，必须紧接着输出 Action。"""
 
         # 初始化对话历史
         self._conversation_history = [
@@ -1667,6 +1497,42 @@ Final Answer:""",
             result["summary"] = "\n".join(thoughts[-3:])
         
         return result
+
+    def build_project_recon_model(self, input_data: Dict[str, Any]) -> ProjectReconModel:
+        project_info = (
+            dict(input_data.get("project_info", {}))
+            if isinstance(input_data.get("project_info"), dict)
+            else {}
+        )
+        config = (
+            dict(input_data.get("config", {}))
+            if isinstance(input_data.get("config"), dict)
+            else {}
+        )
+        project_root = (
+            project_info.get("root")
+            or input_data.get("project_root")
+            or "."
+        )
+        return build_project_recon_model(
+            project_root=str(project_root),
+            project_info=project_info,
+            config=config,
+        )
+
+    def merge_module_results(
+        self,
+        *,
+        project_model: ProjectReconModel,
+        module_results: List[ReconModuleResult],
+        project_info: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        merged = merge_recon_module_results(
+            project_model=project_model,
+            module_results=module_results,
+            project_info=project_info,
+        )
+        return self._ensure_project_profile(merged)
     
     def get_conversation_history(self) -> List[Dict[str, str]]:
         """获取对话历史"""

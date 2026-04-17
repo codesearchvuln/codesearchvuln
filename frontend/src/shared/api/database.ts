@@ -32,8 +32,10 @@ export type AgentWorkflowConfigSource =
   | "settings_default";
 
 export interface AgentWorkflowConfigPayload {
+  recon_count: number;
   analysis_count: number;
   verification_count: number;
+  default_recon_count: number;
   default_analysis_count: number;
   default_verification_count: number;
   default_source: AgentWorkflowConfigSource;
@@ -858,6 +860,7 @@ export const api = {
   },
 
   async updateAgentWorkflowConfig(payload: {
+    recon_count: number;
     analysis_count: number;
     verification_count: number;
   }): Promise<AgentWorkflowConfigPayload> {

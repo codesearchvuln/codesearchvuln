@@ -642,8 +642,10 @@ class UserConfigResponse(BaseModel):
 
 
 class AgentWorkflowConfigResponse(BaseModel):
+    recon_count: int = Field(..., ge=1, le=32)
     analysis_count: int = Field(..., ge=1, le=32)
     verification_count: int = Field(..., ge=1, le=32)
+    default_recon_count: int = Field(..., ge=1, le=32)
     default_analysis_count: int = Field(..., ge=1, le=32)
     default_verification_count: int = Field(..., ge=1, le=32)
     default_source: AgentWorkflowConfigSource
@@ -652,6 +654,7 @@ class AgentWorkflowConfigResponse(BaseModel):
 
 
 class AgentWorkflowConfigUpdateRequest(BaseModel):
+    recon_count: int = Field(..., ge=1, le=32)
     analysis_count: int = Field(..., ge=1, le=32)
     verification_count: int = Field(..., ge=1, le=32)
 

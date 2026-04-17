@@ -75,9 +75,11 @@ def _build_workflow_config_from_user_config(user_config: Optional[Dict[str, Any]
     runtime_config = resolve_effective_agent_workflow_config(other_config)
 
     return WorkflowConfig(
+        enable_parallel_recon=bool(getattr(settings, "ENABLE_PARALLEL_RECON", True)),
         enable_parallel_analysis=settings.ENABLE_PARALLEL_ANALYSIS,
         enable_parallel_verification=settings.ENABLE_PARALLEL_VERIFICATION,
         enable_parallel_report=settings.ENABLE_PARALLEL_REPORT,
+        recon_max_workers=runtime_config["recon_count"],
         analysis_max_workers=runtime_config["analysis_count"],
         verification_max_workers=runtime_config["verification_count"],
         report_max_workers=settings.REPORT_MAX_WORKERS,
@@ -90,7 +92,7 @@ async def _execute_agent_task(task_id: str):
     
     架构：OrchestratorAgent 作为大脑，动态调度子 Agent
     """
-    from app.services.agent.agents import OrchestratorAgent, ReconAgent, AnalysisAgent, VerificationAgent, ReportAgent, BusinessLogicReconAgent, BusinessLogicAnalysisAgent
+    from app.services.agent.agents import OrchestratorAgent, ReconAgent, AnalysisAgent, VerificationAgent, ReportAgent, BusinessLogicReconAgent, BusinessLogicAnalysisAgent, ReconSubAgent
     from app.services.agent.workflow import WorkflowOrchestratorAgent
     from app.services.agent.event_manager import EventManager, AgentEventEmitter
     from app.services.llm.service import LLMService, LLMConfigError
@@ -340,6 +342,26 @@ async def _execute_agent_task(task_id: str):
                 event_emitter=event_emitter,
             )
 
+            recon_subagent_tool_blacklist = {
+                "push_risk_point_to_queue",
+                "push_risk_points_to_queue",
+                "get_recon_risk_queue_status",
+                "dequeue_recon_risk_point",
+                "peek_recon_risk_queue",
+                "clear_recon_risk_queue",
+                "is_recon_risk_point_in_queue",
+                "update_recon_file_tree",
+            }
+            recon_subagent = ReconSubAgent(
+                llm_service=llm_service,
+                tools={
+                    key: value
+                    for key, value in tools.get("recon", {}).items()
+                    if key not in recon_subagent_tool_blacklist
+                },
+                event_emitter=event_emitter,
+            )
+
             analysis_agent = AnalysisAgent(
                 llm_service=llm_service,
                 tools=tools.get("analysis", {}),
@@ -377,7 +399,7 @@ async def _execute_agent_task(task_id: str):
                 "read_scope_policy": "project_scope",
             }
 
-            for agent in (recon_agent, analysis_agent, verification_agent, report_agent, bl_recon_agent, bl_analysis_agent):
+            for agent in (recon_agent, recon_subagent, analysis_agent, verification_agent, report_agent, bl_recon_agent, bl_analysis_agent):
                 if isinstance(getattr(agent.config, "metadata", None), dict):
                     agent.config.metadata.update(audit_runtime_metadata)
                 if hasattr(agent, "set_write_scope_guard"):
@@ -394,6 +416,7 @@ async def _execute_agent_task(task_id: str):
                 event_emitter=event_emitter,
                 sub_agents={
                     "recon": recon_agent,
+                    "recon_subagent": recon_subagent,
                     "analysis": analysis_agent,
                     "verification": verification_agent,
                     "report": report_agent,
@@ -418,6 +441,7 @@ async def _execute_agent_task(task_id: str):
             orchestrator.set_cancel_callback(check_global_cancel)
             # 同时也为子 Agent 设置（虽然 Orchestrator 会传播）
             recon_agent.set_cancel_callback(check_global_cancel)
+            recon_subagent.set_cancel_callback(check_global_cancel)
             analysis_agent.set_cancel_callback(check_global_cancel)
             verification_agent.set_cancel_callback(check_global_cancel)
             report_agent.set_cancel_callback(check_global_cancel)

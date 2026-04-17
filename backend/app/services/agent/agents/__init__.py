@@ -10,6 +10,7 @@
 from .base import BaseAgent, AgentConfig, AgentResult, TaskHandoff
 from .orchestrator import OrchestratorAgent
 from .recon import ReconAgent
+from .recon_subagent import ReconSubAgent
 from .analysis import AnalysisAgent
 from .verification import VerificationAgent
 from .business_logic_scan import BusinessLogicScanAgent
@@ -24,6 +25,7 @@ __all__ = [
     "TaskHandoff",
     "OrchestratorAgent",
     "ReconAgent",
+    "ReconSubAgent",
     "AnalysisAgent",
     "VerificationAgent",
     "BusinessLogicScanAgent",
@@ -31,4 +33,3 @@ __all__ = [
     "BusinessLogicAnalysisAgent",
     "ReportAgent",
 ]
-

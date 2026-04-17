@@ -31,6 +31,7 @@ type LlmSummaryState = {
 };
 
 type WorkflowDraftState = {
+	reconCount: string;
 	analysisCount: string;
 	verificationCount: string;
 };
@@ -50,6 +51,7 @@ export default function ScanConfigIntelligentEngine() {
 	const [workflowConfig, setWorkflowConfig] =
 		useState<AgentWorkflowConfigPayload | null>(null);
 	const [workflowDraft, setWorkflowDraft] = useState<WorkflowDraftState>({
+		reconCount: "",
 		analysisCount: "",
 		verificationCount: "",
 	});
@@ -85,6 +87,7 @@ export default function ScanConfigIntelligentEngine() {
 				if (!active) return;
 				setWorkflowConfig(response);
 				setWorkflowDraft({
+					reconCount: String(response.recon_count),
 					analysisCount: String(response.analysis_count),
 					verificationCount: String(response.verification_count),
 				});
@@ -116,18 +119,24 @@ export default function ScanConfigIntelligentEngine() {
 	const applyWorkflowDefaults = () => {
 		if (!workflowConfig) return;
 		setWorkflowDraft({
+			reconCount: String(workflowConfig.default_recon_count),
 			analysisCount: String(workflowConfig.default_analysis_count),
 			verificationCount: String(workflowConfig.default_verification_count),
 		});
 	};
 
 	const saveWorkflowConfig = async () => {
+		const reconCount = Number.parseInt(workflowDraft.reconCount, 10);
 		const analysisCount = Number.parseInt(workflowDraft.analysisCount, 10);
 		const verificationCount = Number.parseInt(
 			workflowDraft.verificationCount,
 			10,
 		);
 
+		if (!Number.isInteger(reconCount) || reconCount < 1 || reconCount > 32) {
+			toast.error("Recon 并发数必须是 1 到 32 的整数");
+			return;
+		}
 		if (!Number.isInteger(analysisCount) || analysisCount < 1 || analysisCount > 32) {
 			toast.error("Analysis 并发数必须是 1 到 32 的整数");
 			return;
@@ -144,11 +153,13 @@ export default function ScanConfigIntelligentEngine() {
 		try {
 			setWorkflowSaving(true);
 			const response = await api.updateAgentWorkflowConfig({
+				recon_count: reconCount,
 				analysis_count: analysisCount,
 				verification_count: verificationCount,
 			});
 			setWorkflowConfig(response);
 			setWorkflowDraft({
+				reconCount: String(response.recon_count),
 				analysisCount: String(response.analysis_count),
 				verificationCount: String(response.verification_count),
 			});
@@ -242,7 +253,7 @@ export default function ScanConfigIntelligentEngine() {
 						</div>
 					</div>
 					<div className="cyber-card p-4 space-y-4">
-						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+						<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
 							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
 								<div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
 									当前来源
@@ -252,6 +263,17 @@ export default function ScanConfigIntelligentEngine() {
 								</div>
 								<div className="mt-2 text-xs leading-5 text-muted-foreground">
 									未单独设置时，默认取自 {workflowDefaultSourceLabel}
+								</div>
+							</div>
+							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
+								<div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+									Recon 池
+								</div>
+								<div className="mt-2 text-2xl font-semibold text-foreground">
+									{workflowLoading ? "--" : workflowConfig?.recon_count ?? "--"}
+								</div>
+								<div className="mt-2 text-xs leading-5 text-muted-foreground">
+									控制模块级 Recon SubAgent 的并发 worker 数
 								</div>
 							</div>
 							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
@@ -280,7 +302,24 @@ export default function ScanConfigIntelligentEngine() {
 							</div>
 						</div>
 
-						<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+							<div className="space-y-2">
+								<Label htmlFor="workflow-recon-count">
+									Recon 并发数
+								</Label>
+								<Input
+									id="workflow-recon-count"
+									type="number"
+									min={1}
+									max={32}
+									step={1}
+									value={workflowDraft.reconCount}
+									onChange={(event) =>
+										updateWorkflowDraft("reconCount", event.target.value)
+									}
+									disabled={workflowLoading || workflowSaving}
+								/>
+							</div>
 							<div className="space-y-2">
 								<Label htmlFor="workflow-analysis-count">
 									Analysis 并发数
@@ -323,7 +362,8 @@ export default function ScanConfigIntelligentEngine() {
 
 						<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 							<div className="text-xs leading-5 text-muted-foreground">
-								本地默认值：Analysis{" "}
+								本地默认值：Recon {workflowConfig?.default_recon_count ?? "--"} /
+								Analysis{" "}
 								{workflowConfig?.default_analysis_count ?? "--"} / Verification{" "}
 								{workflowConfig?.default_verification_count ?? "--"}
 							</div>
