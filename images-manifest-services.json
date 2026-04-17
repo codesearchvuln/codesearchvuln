@@ -1,0 +1,36 @@
+{
+  "revision": "d27b3ed7130db24b4dfb8162afe24e13aca25fc6",
+  "bundle_template": "images/vulhunter-services-images-{arch}.tar.zst",
+  "images": {
+    "backend": {
+      "env_var": "BACKEND_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-backend@sha256:5f7f1e2b2f08f3f01c5721e73be55c45d59eb35cd28d79eb5b123ed3c230cb34",
+      "local_tag": "vulhunter-local/backend:d27b3ed7130db24b4dfb8162afe24e13aca25fc6"
+    },
+    "postgres": {
+      "env_var": "POSTGRES_IMAGE",
+      "source_ref": "docker.io/library/postgres:15-alpine@sha256:1c52f5ad23db5d7648a63634444af76de48e63b860fccbe3e3a5458b2812eaed",
+      "local_tag": "vulhunter-local/postgres:d27b3ed7130db24b4dfb8162afe24e13aca25fc6"
+    },
+    "redis": {
+      "env_var": "REDIS_IMAGE",
+      "source_ref": "docker.io/library/redis:7-alpine@sha256:efc27681bf81e6ed55cb581718b7818c6c04c39b1f9aa40854edd3ea2241b6ed",
+      "local_tag": "vulhunter-local/redis:d27b3ed7130db24b4dfb8162afe24e13aca25fc6"
+    },
+    "adminer": {
+      "env_var": "ADMINER_IMAGE",
+      "source_ref": "docker.io/library/adminer:latest@sha256:6de28d31ace560fc6b82a691a806452e8ab1cf85969049a493497deb9087b570",
+      "local_tag": "vulhunter-local/adminer:d27b3ed7130db24b4dfb8162afe24e13aca25fc6"
+    },
+    "scan_workspace_init": {
+      "env_var": "SCAN_WORKSPACE_INIT_IMAGE",
+      "source_ref": "docker.io/library/alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+      "local_tag": "vulhunter-local/scan-workspace-init:d27b3ed7130db24b4dfb8162afe24e13aca25fc6"
+    },
+    "static_frontend": {
+      "env_var": "STATIC_FRONTEND_IMAGE",
+      "source_ref": "docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+      "local_tag": "vulhunter-local/static-frontend:d27b3ed7130db24b4dfb8162afe24e13aca25fc6"
+    }
+  }
+}
