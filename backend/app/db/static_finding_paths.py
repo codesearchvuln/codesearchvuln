@@ -179,6 +179,18 @@ def build_zip_member_path_candidates(file_path: str) -> list[str]:
 
     _append(normalized)
 
+    # Opengrep findings may keep an absolute scan-workspace path such as
+    # /tmp/vulhunter/scans/opengrep/<task-id>/project/src/foo.c in rule.path.
+    # Strip the workspace prefix so we can map it back to the original project tree.
+    lowered = normalized.lower()
+    for marker in ("/project/", "/source/", "/workspace/"):
+        marker_normalized = marker.strip("/")
+        token = f"{marker_normalized}/"
+        token_index = lowered.find(token)
+        if token_index >= 0:
+            suffix = normalized[token_index + len(token) :]
+            _append(suffix)
+
     parts = [part for part in normalized.split("/") if part]
     if len(parts) >= 2:
         first_segment = parts[0].lower()

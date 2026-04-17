@@ -1,3 +1,4 @@
+import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -114,6 +115,10 @@ function getErrorStatus(error: unknown): number {
     response?: { status?: number };
   };
   return Number(apiError?.response?.status || 0);
+}
+
+function isOpengrepContextMissingError(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 404;
 }
 
 function FindingDetailShell({
@@ -280,6 +285,15 @@ export default function FindingDetail() {
                 findingId,
                 before: 5,
                 after: 5,
+              }).catch((error) => {
+                if (isOpengrepContextMissingError(error)) {
+                  console.warn(
+                    "[FindingDetail] Opengrep context unavailable, falling back to stored snippet.",
+                    error,
+                  );
+                  return null;
+                }
+                throw error;
               }),
             ]);
             if (cancelled) return;

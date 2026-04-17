@@ -1,36 +1,43 @@
+import axios from "axios";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  getBanditFindings,
   getBanditScanTask,
   interruptBanditScanTask,
   updateBanditFindingStatus,
   type BanditScanTask,
 } from "@/shared/api/bandit";
 import {
+  getPhpstanFindings,
   getPhpstanScanTask,
   interruptPhpstanScanTask,
   updatePhpstanFindingStatus,
   type PhpstanScanTask,
 } from "@/shared/api/phpstan";
 import {
+  getPmdFindings,
   getPmdScanTask,
   interruptPmdScanTask,
   updatePmdFindingStatus,
   type PmdScanTask,
 } from "@/shared/api/pmd";
 import {
+  getGitleaksFindings,
   getGitleaksScanTask,
   interruptGitleaksScanTask,
   updateGitleaksFindingStatus,
   type GitleaksScanTask,
 } from "@/shared/api/gitleaks";
 import {
+  getYasaFindings,
   getYasaScanTask,
   interruptYasaScanTask,
   updateYasaFindingStatus,
   type YasaScanTask,
 } from "@/shared/api/yasa";
 import {
+  getOpengrepScanFindings,
   getOpengrepScanTask,
   interruptOpengrepScanTask,
   updateOpengrepFindingStatus,
@@ -44,8 +51,136 @@ import type { Engine, FindingStatus, UnifiedFindingRow } from "./viewModel";
 import {
   isStaticAnalysisInterruptibleStatus,
   isStaticAnalysisPollableStatus,
+  buildUnifiedFindingRows,
   mapUnifiedFindingItemToRow,
 } from "./viewModel";
+
+function compareOptionalNumberAsc(left: number | null | undefined, right: number | null | undefined) {
+  const leftValue = left ?? Number.MAX_SAFE_INTEGER;
+  const rightValue = right ?? Number.MAX_SAFE_INTEGER;
+  return leftValue - rightValue;
+}
+
+function compareTextAsc(left: string | null | undefined, right: string | null | undefined) {
+  return String(left || "").toLowerCase().localeCompare(String(right || "").toLowerCase());
+}
+
+function applyLocalUnifiedFindingsQuery(
+  rows: UnifiedFindingRow[],
+  query: UnifiedStaticFindingsQuery,
+): { items: UnifiedFindingRow[]; total: number } {
+  const normalizedKeyword = String(query.keyword || "").trim().toLowerCase();
+  const filtered = rows
+    .filter((row) => !query.engine || row.engine === query.engine)
+    .filter((row) => !query.status || row.status === query.status)
+    .filter((row) => !query.severity || row.severity === query.severity)
+    .filter((row) => !query.confidence || row.confidence === query.confidence)
+    .filter((row) => {
+      if (!normalizedKeyword) return true;
+      return (
+        row.rule.toLowerCase().includes(normalizedKeyword) ||
+        row.filePath.toLowerCase().includes(normalizedKeyword)
+      );
+    });
+
+  const sortBy = query.sortBy || "severity";
+  const sortOrder = query.sortOrder || "desc";
+  const direction = sortOrder === "desc" ? -1 : 1;
+
+  filtered.sort((left, right) => {
+    if (sortBy === "severity" && left.severityScore !== right.severityScore) {
+      return direction * (left.severityScore - right.severityScore);
+    }
+    if (sortBy === "confidence" && left.confidenceScore !== right.confidenceScore) {
+      return direction * (left.confidenceScore - right.confidenceScore);
+    }
+    if (sortBy === "file_path") {
+      const pathCompare = compareTextAsc(left.filePath, right.filePath);
+      if (pathCompare !== 0) return direction * pathCompare;
+    }
+    if (sortBy === "line") {
+      const lineCompare = compareOptionalNumberAsc(left.line, right.line);
+      if (lineCompare !== 0) return direction * lineCompare;
+    }
+
+    if (sortBy !== "severity" && left.severityScore !== right.severityScore) {
+      return right.severityScore - left.severityScore;
+    }
+    if (sortBy !== "confidence" && left.confidenceScore !== right.confidenceScore) {
+      return right.confidenceScore - left.confidenceScore;
+    }
+    if (sortBy !== "file_path") {
+      const pathCompare = compareTextAsc(left.filePath, right.filePath);
+      if (pathCompare !== 0) return pathCompare;
+    }
+    if (sortBy !== "line") {
+      const lineCompare = compareOptionalNumberAsc(left.line, right.line);
+      if (lineCompare !== 0) return lineCompare;
+    }
+
+    return left.key.localeCompare(right.key);
+  });
+
+  const page = Math.max(1, Number(query.page || 1));
+  const pageSize = Math.max(1, Number(query.pageSize || 20));
+  const offset = (page - 1) * pageSize;
+
+  return {
+    items: filtered.slice(offset, offset + pageSize),
+    total: filtered.length,
+  };
+}
+
+async function getLegacyUnifiedFindingsFallback(query: UnifiedStaticFindingsQuery) {
+  const [
+    opengrepFindings,
+    gitleaksFindings,
+    banditFindings,
+    phpstanFindings,
+    yasaFindings,
+    pmdFindings,
+  ] = await Promise.all([
+    query.opengrepTaskId
+      ? getOpengrepScanFindings({ taskId: query.opengrepTaskId, status: query.status })
+      : Promise.resolve([]),
+    query.gitleaksTaskId
+      ? getGitleaksFindings({ taskId: query.gitleaksTaskId, status: query.status })
+      : Promise.resolve([]),
+    query.banditTaskId
+      ? getBanditFindings({ taskId: query.banditTaskId, status: query.status })
+      : Promise.resolve([]),
+    query.phpstanTaskId
+      ? getPhpstanFindings({ taskId: query.phpstanTaskId, status: query.status })
+      : Promise.resolve([]),
+    query.yasaTaskId
+      ? getYasaFindings({ taskId: query.yasaTaskId, status: query.status })
+      : Promise.resolve([]),
+    query.pmdTaskId
+      ? getPmdFindings({ taskId: query.pmdTaskId, status: query.status })
+      : Promise.resolve([]),
+  ]);
+
+  const rows = buildUnifiedFindingRows({
+    opengrepFindings,
+    gitleaksFindings,
+    banditFindings,
+    phpstanFindings,
+    yasaFindings,
+    pmdFindings,
+    opengrepTaskId: query.opengrepTaskId || "",
+    gitleaksTaskId: query.gitleaksTaskId || "",
+    banditTaskId: query.banditTaskId || "",
+    phpstanTaskId: query.phpstanTaskId || "",
+    yasaTaskId: query.yasaTaskId || "",
+    pmdTaskId: query.pmdTaskId || "",
+  });
+
+  return applyLocalUnifiedFindingsQuery(rows, query);
+}
+
+function shouldFallbackToLegacyUnifiedFindings(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 404;
+}
 
 export function useStaticAnalysisData({
   hasEnabledEngine,
@@ -219,7 +354,24 @@ export function useStaticAnalysisData({
       }
       setUnifiedRows(response.items.map((item) => mapUnifiedFindingItemToRow(item)));
       setUnifiedTotal(response.total);
-    } catch {
+    } catch (error) {
+      if (shouldFallbackToLegacyUnifiedFindings(error)) {
+        try {
+          const fallback = await getLegacyUnifiedFindingsFallback(query);
+          if (requestSeq !== unifiedRequestSeqRef.current) {
+            return;
+          }
+          console.warn(
+            "[StaticAnalysis] Unified findings endpoint unavailable, using legacy findings fallback.",
+            error,
+          );
+          setUnifiedRows(fallback.items);
+          setUnifiedTotal(fallback.total);
+          return;
+        } catch (fallbackError) {
+          error = fallbackError;
+        }
+      }
       if (requestSeq !== unifiedRequestSeqRef.current) {
         return;
       }

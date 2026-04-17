@@ -1316,11 +1316,25 @@ def _serialize_finding_response(
         rule_cwe_map=rule_cwe_map,
         rule_display_name_map=rule_display_name_map,
     )
-    resolved_file_path, resolved_line_start = resolve_static_finding_location(
-        finding.file_path,
-        line_start=finding.start_line,
-        project_root=project_root,
-    )
+    resolved_file_path = None
+    resolved_line_start = None
+    for path_hint in _extract_opengrep_finding_path_hints(finding):
+        next_file_path, next_line_start = resolve_static_finding_location(
+            path_hint,
+            line_start=finding.start_line,
+            project_root=project_root,
+        )
+        if next_file_path:
+            resolved_file_path = next_file_path
+            resolved_line_start = next_line_start
+            break
+
+    if resolved_file_path is None:
+        resolved_file_path, resolved_line_start = resolve_static_finding_location(
+            finding.file_path,
+            line_start=finding.start_line,
+            project_root=project_root,
+        )
     return {
         "id": finding.id,
         "scan_task_id": finding.scan_task_id,
@@ -1368,6 +1382,32 @@ def _build_finding_path_candidates(file_path: Optional[str]) -> List[str]:
         _append(item)
 
     return deduplicated
+
+
+def _extract_opengrep_finding_path_hints(finding: OpengrepFinding) -> List[str]:
+    hints: List[str] = []
+    seen = set()
+
+    def _append(value: Optional[str]) -> None:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            return
+        hints.append(normalized)
+        seen.add(normalized)
+
+    _append(finding.file_path)
+
+    rule_payload = finding.rule if isinstance(finding.rule, dict) else {}
+    if isinstance(rule_payload, dict):
+        _append(rule_payload.get("path"))
+        extra_payload = rule_payload.get("extra")
+        if isinstance(extra_payload, dict):
+            _append(extra_payload.get("path"))
+            metadata_payload = extra_payload.get("metadata")
+            if isinstance(metadata_payload, dict):
+                _append(metadata_payload.get("path"))
+
+    return hints
 
 
 LANGUAGE_EXTENSION_MAP: Dict[str, str] = {
@@ -1894,21 +1934,45 @@ async def get_static_task_finding_context(
         resolved_file_path: Optional[str] = None
         selected_relative_path: Optional[str] = None
 
-        for candidate in _build_finding_path_candidates(finding.file_path):
-            if os.path.isabs(candidate):
-                normalized_candidate = os.path.normpath(candidate)
-            else:
-                normalized_candidate = os.path.normpath(
-                    os.path.join(project_root, candidate)
-                )
-            if not normalized_candidate.startswith(os.path.normpath(project_root)):
-                continue
-            if os.path.isfile(normalized_candidate):
-                resolved_file_path = normalized_candidate
-                selected_relative_path = os.path.relpath(
-                    normalized_candidate, project_root
-                )
+        path_hints = _extract_opengrep_finding_path_hints(finding)
+        if not path_hints:
+            path_hints = [str(finding.file_path or "")]
+
+        for path_hint in path_hints:
+            for candidate in _build_finding_path_candidates(path_hint):
+                if os.path.isabs(candidate):
+                    normalized_candidate = os.path.normpath(candidate)
+                else:
+                    normalized_candidate = os.path.normpath(
+                        os.path.join(project_root, candidate)
+                    )
+                if not normalized_candidate.startswith(os.path.normpath(project_root)):
+                    continue
+                if os.path.isfile(normalized_candidate):
+                    resolved_file_path = normalized_candidate
+                    selected_relative_path = os.path.relpath(
+                        normalized_candidate, project_root
+                    )
+                    break
+
+            if resolved_file_path:
                 break
+
+        if not resolved_file_path:
+            relative_file_path, _ = resolve_static_finding_location(
+                path_hints[0],
+                line_start=finding.start_line,
+                project_root=project_root,
+            )
+            if relative_file_path:
+                normalized_candidate = os.path.normpath(
+                    os.path.join(project_root, relative_file_path)
+                )
+                if normalized_candidate.startswith(os.path.normpath(project_root)) and os.path.isfile(
+                    normalized_candidate
+                ):
+                    resolved_file_path = normalized_candidate
+                    selected_relative_path = relative_file_path
 
         if not resolved_file_path:
             raise HTTPException(status_code=404, detail="未找到命中源码文件")

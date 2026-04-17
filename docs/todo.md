@@ -17,5 +17,5 @@
 ![扫描详情显示有漏洞，但是任务栏看不到](./images/2.png)
 ![扫描详情显示有漏洞，但是任务栏看不到](./images/3.png)
   - 修复规划见 `docs/verification-taskbar-sync-plan.md`
-- [ ] 漏洞不存在或已被清理
+- [x] 漏洞不存在或已被清理
 ![漏洞不存在或已被清理](./images/4.png)
