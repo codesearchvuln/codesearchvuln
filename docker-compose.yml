@@ -1,13 +1,12 @@
 # =============================================
-# VulHunter v3.0.4 Docker Compose 日常开发默认配置
+# VulHunter v3.0.4 Docker Compose 公共源码基座
 # =============================================
-# 默认入口: docker compose up
+# 公共源码分支仅保留 full 本地构建合同:
+# docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 # 注意: backend 会在启动期通过 Docker SDK 执行 runner preflight。
 # 这些自检容器是一次性容器，成功或失败后都会立即删除，不作为 compose service 常驻。
 # 真正执行扫描时，backend 会继续按 `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE`
 # 动态拉起临时 runner 容器（镜像默认从 GHCR 拉取）。
-# 本地修改 frontend/backend 时，可叠加 hybrid:
-# docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build
 
 services:
   db:

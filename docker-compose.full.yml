@@ -1,7 +1,7 @@
 # =============================================
 # VulHunter v3.0.4 Docker Compose 全量本地构建覆盖层
 # =============================================
-# 用法:
+# 公共源码分支唯一推荐入口:
 # docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
 # backend target 固定为 runtime-plain，仅用于本地开发/全量联调；不要用于发布镜像。
 # 注意: backend 会在启动期通过 Docker SDK 执行 runner preflight。
