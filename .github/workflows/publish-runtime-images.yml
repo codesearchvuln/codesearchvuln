@@ -145,8 +145,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=frontend-runtime-amd64
-          cache-to: type=gha,mode=max,scope=frontend-runtime-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-amd64
+            type=gha,scope=frontend-runtime-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-amd64,mode=max
+            type=gha,mode=max,scope=frontend-runtime-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 前端镜像标签
         id: capture
@@ -192,8 +198,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=frontend-runtime-arm64
-          cache-to: type=gha,mode=max,scope=frontend-runtime-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-arm64
+            type=gha,scope=frontend-runtime-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-arm64,mode=max
+            type=gha,mode=max,scope=frontend-runtime-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 前端镜像标签
         id: capture
@@ -340,6 +352,8 @@ jobs:
           cache-to: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-amd64,mode=max
             type=gha,mode=max,scope=backend-runtime-plain-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 后端镜像标签
         id: capture
@@ -413,6 +427,8 @@ jobs:
           cache-to: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-arm64,mode=max
             type=gha,mode=max,scope=backend-runtime-plain-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 后端镜像标签
         id: capture
@@ -543,6 +559,8 @@ jobs:
           cache-to: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-cython,mode=max
             type=gha,mode=max,scope=backend-runtime-cython
+          provenance: false
+          sbom: false
 
       - name: 验证可选 hardened 后端镜像可解析
         run: |
@@ -596,8 +614,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=yasa-runner-amd64
-          cache-to: type=gha,mode=max,scope=yasa-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-amd64
+            type=gha,scope=yasa-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-amd64,mode=max
+            type=gha,mode=max,scope=yasa-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 YASA runner 镜像标签
         id: capture
@@ -643,8 +667,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=yasa-runner-arm64
-          cache-to: type=gha,mode=max,scope=yasa-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-arm64
+            type=gha,scope=yasa-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-arm64,mode=max
+            type=gha,mode=max,scope=yasa-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 YASA runner 镜像标签
         id: capture
@@ -739,8 +769,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=opengrep-runner-amd64
-          cache-to: type=gha,mode=max,scope=opengrep-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-amd64
+            type=gha,scope=opengrep-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-amd64,mode=max
+            type=gha,mode=max,scope=opengrep-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 OpenGrep runner 镜像标签
         id: capture
@@ -786,8 +822,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=opengrep-runner-arm64
-          cache-to: type=gha,mode=max,scope=opengrep-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-arm64
+            type=gha,scope=opengrep-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-arm64,mode=max
+            type=gha,mode=max,scope=opengrep-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 OpenGrep runner 镜像标签
         id: capture
@@ -882,8 +924,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=bandit-runner-amd64
-          cache-to: type=gha,mode=max,scope=bandit-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-amd64
+            type=gha,scope=bandit-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-amd64,mode=max
+            type=gha,mode=max,scope=bandit-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 Bandit runner 镜像标签
         id: capture
@@ -929,8 +977,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=bandit-runner-arm64
-          cache-to: type=gha,mode=max,scope=bandit-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-arm64
+            type=gha,scope=bandit-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-arm64,mode=max
+            type=gha,mode=max,scope=bandit-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 Bandit runner 镜像标签
         id: capture
@@ -1025,8 +1079,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=gitleaks-runner-amd64
-          cache-to: type=gha,mode=max,scope=gitleaks-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-amd64
+            type=gha,scope=gitleaks-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-amd64,mode=max
+            type=gha,mode=max,scope=gitleaks-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 Gitleaks runner 镜像标签
         id: capture
@@ -1072,8 +1132,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=gitleaks-runner-arm64
-          cache-to: type=gha,mode=max,scope=gitleaks-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-arm64
+            type=gha,scope=gitleaks-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-arm64,mode=max
+            type=gha,mode=max,scope=gitleaks-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 Gitleaks runner 镜像标签
         id: capture
@@ -1168,8 +1234,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=phpstan-runner-amd64
-          cache-to: type=gha,mode=max,scope=phpstan-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-amd64
+            type=gha,scope=phpstan-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-amd64,mode=max
+            type=gha,mode=max,scope=phpstan-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 PHPStan runner 镜像标签
         id: capture
@@ -1215,8 +1287,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=phpstan-runner-arm64
-          cache-to: type=gha,mode=max,scope=phpstan-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-arm64
+            type=gha,scope=phpstan-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-arm64,mode=max
+            type=gha,mode=max,scope=phpstan-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 PHPStan runner 镜像标签
         id: capture
@@ -1311,8 +1389,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=flow-parser-runner-amd64
-          cache-to: type=gha,mode=max,scope=flow-parser-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-amd64
+            type=gha,scope=flow-parser-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-amd64,mode=max
+            type=gha,mode=max,scope=flow-parser-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 flow/parser runner 镜像标签
         id: capture
@@ -1358,8 +1442,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=flow-parser-runner-arm64
-          cache-to: type=gha,mode=max,scope=flow-parser-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-arm64
+            type=gha,scope=flow-parser-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-arm64,mode=max
+            type=gha,mode=max,scope=flow-parser-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 flow/parser runner 镜像标签
         id: capture
@@ -1454,8 +1544,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=pmd-runner-amd64
-          cache-to: type=gha,mode=max,scope=pmd-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-amd64
+            type=gha,scope=pmd-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-amd64,mode=max
+            type=gha,mode=max,scope=pmd-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 PMD runner 镜像标签
         id: capture
@@ -1501,8 +1597,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=pmd-runner-arm64
-          cache-to: type=gha,mode=max,scope=pmd-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-arm64
+            type=gha,scope=pmd-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-arm64,mode=max
+            type=gha,mode=max,scope=pmd-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 PMD runner 镜像标签
         id: capture
@@ -1597,8 +1699,14 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
-          cache-from: type=gha,scope=sandbox-runner-amd64
-          cache-to: type=gha,mode=max,scope=sandbox-runner-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-amd64
+            type=gha,scope=sandbox-runner-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-amd64,mode=max
+            type=gha,mode=max,scope=sandbox-runner-amd64
+          provenance: false
+          sbom: false
 
       - name: 记录 amd64 sandbox-runner 镜像标签
         id: capture
@@ -1644,8 +1752,14 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
-          cache-from: type=gha,scope=sandbox-runner-arm64
-          cache-to: type=gha,mode=max,scope=sandbox-runner-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-arm64
+            type=gha,scope=sandbox-runner-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-arm64,mode=max
+            type=gha,mode=max,scope=sandbox-runner-arm64
+          provenance: false
+          sbom: false
 
       - name: 记录 arm64 sandbox-runner 镜像标签
         id: capture
