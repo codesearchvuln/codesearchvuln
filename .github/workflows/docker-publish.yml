@@ -4,20 +4,11 @@ on:
   push:
     branches:
       - main
-    paths:
-      - '.github/workflows/docker-publish.yml'
-      - '.github/workflows/publish-runtime-images.yml'
-      - '.dockerignore'
-      - 'scripts/**'
-      - 'scripts/release-templates/**'
-      - 'docker/backend.Dockerfile.dockerignore'
-      - 'docker/*.Dockerfile.dockerignore'
-      - 'docker/frontend.Dockerfile'
-      - 'docker/backend.Dockerfile'
-      - 'docker/flow-parser-runner.requirements.txt'
-      - 'docker/sandbox-runner.requirements.txt'
-      - 'frontend/**'
-      - 'backend/**'
+    paths-ignore:
+      - '**/tests/**'
+      - '**/docs/**'
+      - 'tests/**'
+      - 'docs/**'
   workflow_dispatch:
     inputs:
       tag:
@@ -149,7 +140,7 @@ jobs:
     with:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'latest' }}
       build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}
-      build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}
+      build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || github.event_name == 'push' || needs.detect-changes.outputs.backend == 'true' }}
       publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_yasa_runner || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_opengrep_runner || false }}
@@ -159,7 +150,7 @@ jobs:
       build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_flow_parser_runner || false }}
       build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_pmd_runner || false }}
       build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_sandbox_runner || false }}
-      multi_arch: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}
+      multi_arch: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
       emit_release_manifest: true
       require_complete_manifest: false
       revision: ${{ github.sha }}
