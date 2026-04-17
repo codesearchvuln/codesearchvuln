@@ -3,7 +3,7 @@
   "bundles": {
     "services": {
       "tree_metadata_filename": "images-manifest-services.json",
-      "asset_name_template": "codesearchvuln-services-images-{arch}.tar.zst",
+      "asset_name_template": "vulhunter-services-images-{arch}.tar.zst",
       "metadata_asset_name_template": "images-manifest-services-{arch}.json",
       "images": [
         "backend",
@@ -16,7 +16,7 @@
     },
     "scanner": {
       "tree_metadata_filename": "images-manifest-scanner.json",
-      "asset_name_template": "codesearchvuln-scanner-images-{arch}.tar.zst",
+      "asset_name_template": "vulhunter-scanner-images-{arch}.tar.zst",
       "metadata_asset_name_template": "images-manifest-scanner-{arch}.json",
       "images": [
         "sandbox_runner",

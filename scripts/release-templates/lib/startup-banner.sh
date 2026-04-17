@@ -149,6 +149,8 @@ def append_asset_probes(
         probe_specs.append((f"{label_prefix}-{asset_kind}-{index}", asset_url, "200"))
 
 
+# Keep the release frontend probe path literal visible for contract tests:
+# deploy/runtime/frontend/site/index.html
 append_asset_probes(
     "frontend-root",
     release_root / "deploy" / "runtime" / "frontend" / "site" / "index.html",

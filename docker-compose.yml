@@ -77,7 +77,7 @@ services:
       - vulhunter-network
 
   db-bootstrap:
-    image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-backend:${VULHUNTER_IMAGE_TAG:-latest}}
+    image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}
     restart: "no"
     working_dir: /app
     volumes:
@@ -99,7 +99,7 @@ services:
       - vulhunter-network
 
   backend:
-    image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-backend:${VULHUNTER_IMAGE_TAG:-latest}}
+    image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}
     restart: unless-stopped
     mem_limit: 4g
     pids_limit: 1024
@@ -142,14 +142,14 @@ services:
       BACKEND_PYPI_INDEX_PRIMARY: ${BACKEND_PYPI_INDEX_PRIMARY:-}
       BACKEND_PYPI_INDEX_FALLBACK: ${BACKEND_PYPI_INDEX_FALLBACK:-}
       BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.bfsu.edu.cn/pypi/web/simple/,https://pypi.org/simple}
-      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-opengrep-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-bandit-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-gitleaks-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-phpstan-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-pmd-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-flow-parser-runner:${VULHUNTER_IMAGE_TAG:-latest}}
-      SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-sandbox-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-opengrep-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-bandit-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-gitleaks-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-phpstan-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-pmd-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-flow-parser-runner:${VULHUNTER_IMAGE_TAG:-latest}}
+      SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-sandbox-runner:${VULHUNTER_IMAGE_TAG:-latest}}
       FLOW_PARSER_RUNNER_ENABLED: "${FLOW_PARSER_RUNNER_ENABLED:-true}"
       FLOW_PARSER_RUNNER_TIMEOUT_SECONDS: "${FLOW_PARSER_RUNNER_TIMEOUT_SECONDS:-120}"
       FLOW_PARSER_RUNNER_BATCH_MAX_FILES: "${FLOW_PARSER_RUNNER_BATCH_MAX_FILES:-100}"
@@ -197,7 +197,7 @@ services:
       - vulhunter-network
 
   frontend:
-    image: ${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/codesearchvuln-frontend:${VULHUNTER_IMAGE_TAG:-latest}}
+    image: ${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}}
     restart: unless-stopped
     mem_limit: 512m
     pids_limit: 256

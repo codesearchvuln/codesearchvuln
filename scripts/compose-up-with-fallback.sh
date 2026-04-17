@@ -679,8 +679,8 @@ run_with_retries() {
   local rc=1
   local ready_watcher_pid=""
   while [ "$attempt" -le "$retry_count" ]; do
-    backend_image_resolved="${BACKEND_IMAGE:-${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-backend:${VULHUNTER_IMAGE_TAG}}"
-    frontend_image_resolved="${FRONTEND_IMAGE:-${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-frontend:${VULHUNTER_IMAGE_TAG}}"
+    backend_image_resolved="${BACKEND_IMAGE:-${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${VULHUNTER_IMAGE_TAG}}"
+    frontend_image_resolved="${FRONTEND_IMAGE:-${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-frontend:${VULHUNTER_IMAGE_TAG}}"
     log_info "Phase=${phase} attempt ${attempt}/${retry_count}"
     log_info "DOCKERHUB_LIBRARY_MIRROR=${dockerhub_mirror}"
     log_info "GHCR_REGISTRY=${ghcr_registry}"
@@ -1109,7 +1109,7 @@ for ((phase_index = 0; phase_index < PHASE_COUNT; phase_index++)); do
   if [ -n "${SANDBOX_RUNNER_IMAGE:-}" ]; then
     sandbox_image="${SANDBOX_RUNNER_IMAGE}"
   else
-    sandbox_image="${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-sandbox-runner:${VULHUNTER_IMAGE_TAG}"
+    sandbox_image="${ghcr_registry}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner:${VULHUNTER_IMAGE_TAG}"
   fi
 
   phase_name="rank-$((phase_index + 1))"

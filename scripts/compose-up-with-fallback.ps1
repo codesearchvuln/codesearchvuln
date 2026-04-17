@@ -269,7 +269,7 @@ if (-not $env:SANDBOX_BASE_IMAGE) {
 }
 
 if (-not $env:SANDBOX_RUNNER_IMAGE) {
-    $env:SANDBOX_RUNNER_IMAGE = "$($env:GHCR_REGISTRY)/$($env:VULHUNTER_IMAGE_NAMESPACE)/codesearchvuln-sandbox-runner:$($env:VULHUNTER_IMAGE_TAG)"
+    $env:SANDBOX_RUNNER_IMAGE = "$($env:GHCR_REGISTRY)/$($env:VULHUNTER_IMAGE_NAMESPACE)/vulhunter-sandbox-runner:$($env:VULHUNTER_IMAGE_TAG)"
 }
 
 if (-not $env:BACKEND_APT_MIRROR_PRIMARY) {
@@ -302,8 +302,8 @@ Log-Info "  UV_IMAGE=$env:UV_IMAGE"
 Log-Info "  SANDBOX_BASE_IMAGE=$env:SANDBOX_BASE_IMAGE"
 Log-Info "  SANDBOX_RUNNER_IMAGE=$env:SANDBOX_RUNNER_IMAGE"
 Log-Info "  FRONTEND_NPM_REGISTRY=$env:FRONTEND_NPM_REGISTRY"
-Log-Info "  BACKEND_IMAGE_RESOLVED=$($env:BACKEND_IMAGE ? $env:BACKEND_IMAGE : "$($env:GHCR_REGISTRY)/$($env:VULHUNTER_IMAGE_NAMESPACE)/codesearchvuln-backend:$($env:VULHUNTER_IMAGE_TAG)")"
-Log-Info "  FRONTEND_IMAGE_RESOLVED=$($env:FRONTEND_IMAGE ? $env:FRONTEND_IMAGE : "$($env:GHCR_REGISTRY)/$($env:VULHUNTER_IMAGE_NAMESPACE)/codesearchvuln-frontend:$($env:VULHUNTER_IMAGE_TAG)")"
+Log-Info "  BACKEND_IMAGE_RESOLVED=$($env:BACKEND_IMAGE ? $env:BACKEND_IMAGE : "$($env:GHCR_REGISTRY)/$($env:VULHUNTER_IMAGE_NAMESPACE)/vulhunter-backend:$($env:VULHUNTER_IMAGE_TAG)")"
+Log-Info "  FRONTEND_IMAGE_RESOLVED=$($env:FRONTEND_IMAGE ? $env:FRONTEND_IMAGE : "$($env:GHCR_REGISTRY)/$($env:VULHUNTER_IMAGE_NAMESPACE)/vulhunter-frontend:$($env:VULHUNTER_IMAGE_TAG)")"
 Log-Warn "GHCR registry host rewrites do not bypass private-package permissions; default remote mode expects anonymous pull access or an explicit full image override."
 
 # Execute docker compose

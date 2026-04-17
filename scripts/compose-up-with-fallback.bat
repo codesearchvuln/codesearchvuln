@@ -63,7 +63,7 @@ if not defined VULHUNTER_IMAGE_NAMESPACE set "VULHUNTER_IMAGE_NAMESPACE=codesear
 if not defined VULHUNTER_IMAGE_TAG set "VULHUNTER_IMAGE_TAG=latest"
 if not defined UV_IMAGE set "UV_IMAGE=%GHCR_REGISTRY%/astral-sh/uv:latest"
 if not defined SANDBOX_BASE_IMAGE set "SANDBOX_BASE_IMAGE=%DOCKERHUB_LIBRARY_MIRROR%/python:3.11-slim"
-if not defined SANDBOX_RUNNER_IMAGE set "SANDBOX_RUNNER_IMAGE=%GHCR_REGISTRY%/%VULHUNTER_IMAGE_NAMESPACE%/codesearchvuln-sandbox-runner:%VULHUNTER_IMAGE_TAG%"
+if not defined SANDBOX_RUNNER_IMAGE set "SANDBOX_RUNNER_IMAGE=%GHCR_REGISTRY%/%VULHUNTER_IMAGE_NAMESPACE%/vulhunter-sandbox-runner:%VULHUNTER_IMAGE_TAG%"
 if not defined FRONTEND_NPM_REGISTRY set "FRONTEND_NPM_REGISTRY=https://registry.npmmirror.com"
 if not defined FRONTEND_NPM_REGISTRY_FALLBACK set "FRONTEND_NPM_REGISTRY_FALLBACK=https://registry.npmjs.org"
 if not defined BACKEND_PYPI_INDEX_PRIMARY set "BACKEND_PYPI_INDEX_PRIMARY=https://mirrors.aliyun.com/pypi/simple/"
@@ -87,12 +87,12 @@ echo [INFO] SANDBOX_RUNNER_IMAGE=%SANDBOX_RUNNER_IMAGE%
 if defined BACKEND_IMAGE (
     echo [INFO] BACKEND_IMAGE_RESOLVED=%BACKEND_IMAGE%
 ) else (
-    echo [INFO] BACKEND_IMAGE_RESOLVED=%GHCR_REGISTRY%/%VULHUNTER_IMAGE_NAMESPACE%/codesearchvuln-backend:%VULHUNTER_IMAGE_TAG%
+    echo [INFO] BACKEND_IMAGE_RESOLVED=%GHCR_REGISTRY%/%VULHUNTER_IMAGE_NAMESPACE%/vulhunter-backend:%VULHUNTER_IMAGE_TAG%
 )
 if defined FRONTEND_IMAGE (
     echo [INFO] FRONTEND_IMAGE_RESOLVED=%FRONTEND_IMAGE%
 ) else (
-    echo [INFO] FRONTEND_IMAGE_RESOLVED=%GHCR_REGISTRY%/%VULHUNTER_IMAGE_NAMESPACE%/codesearchvuln-frontend:%VULHUNTER_IMAGE_TAG%
+    echo [INFO] FRONTEND_IMAGE_RESOLVED=%GHCR_REGISTRY%/%VULHUNTER_IMAGE_NAMESPACE%/vulhunter-frontend:%VULHUNTER_IMAGE_TAG%
 )
 echo [WARN] GHCR host rewrite does not bypass private package permissions; default remote mode expects anonymous pull access or an explicit full image override.
 
