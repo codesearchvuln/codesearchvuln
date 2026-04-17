@@ -19,6 +19,7 @@ class _DummyAgent(BaseAgent):
 
 class _SearchSchema(BaseModel):
     keyword: str
+    file_path: Optional[str] = None
     file_pattern: Optional[str] = None
     is_regex: bool = False
 
@@ -31,6 +32,7 @@ class _SearchTool:
             success=True,
             data={
                 "keyword": kwargs.get("keyword"),
+                "file_path": kwargs.get("file_path"),
                 "file_pattern": kwargs.get("file_pattern"),
             },
             error=None,
@@ -127,6 +129,48 @@ class _ListTool:
                 "recursive": kwargs.get("recursive"),
                 "max_files": kwargs.get("max_files"),
             },
+            error=None,
+            metadata={},
+        )
+
+
+class _CodeWindowSchema(BaseModel):
+    file_path: str
+    anchor_line: int
+    before_lines: int = 2
+    after_lines: int = 2
+
+
+class _CodeWindowTool:
+    args_schema = _CodeWindowSchema
+    name = "get_code_window"
+
+    async def execute(self, **kwargs):
+        return SimpleNamespace(
+            success=True,
+            data={
+                "file_path": kwargs.get("file_path"),
+                "anchor_line": kwargs.get("anchor_line"),
+                "before_lines": kwargs.get("before_lines"),
+                "after_lines": kwargs.get("after_lines"),
+            },
+            error=None,
+            metadata={},
+        )
+
+
+class _FileOutlineSchema(BaseModel):
+    file_path: str
+
+
+class _FileOutlineTool:
+    args_schema = _FileOutlineSchema
+    name = "get_file_outline"
+
+    async def execute(self, **kwargs):
+        return SimpleNamespace(
+            success=True,
+            data={"file_path": kwargs.get("file_path")},
             error=None,
             metadata={},
         )
@@ -581,6 +625,71 @@ async def test_execute_tool_repairs_search_code_from_recent_thought_context():
     repaired = metadata.get("input_repaired") or {}
     assert repaired.get("__context.keyword") == "keyword"
     assert repaired.get("__context.regex_hint") == "is_regex"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_get_file_outline_from_recent_context_path():
+    agent, emitter = _make_agent(tools={"get_file_outline": _FileOutlineTool()})
+    agent._recent_thought_texts.append("请先查看 docs/common/api/security.rst 的结构和入口。")
+
+    output = await agent.execute_tool("get_file_outline", {})
+
+    assert "docs/common/api/security.rst" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__context.file_path") == "file_path"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_get_code_window_from_recent_context_path_and_line():
+    agent, emitter = _make_agent(tools={"get_code_window": _CodeWindowTool()})
+    agent._recent_thought_texts.append("重点看 backend/app/main.py:88 的鉴权逻辑。")
+
+    output = await agent.execute_tool("get_code_window", {})
+
+    assert "backend/app/main.py" in output
+    assert "88" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__context.file_path") == "file_path"
+    assert repaired.get("__context_or_raw.anchor_line") == "anchor_line"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_get_code_window_defaults_anchor_line_when_only_file_hint_exists():
+    agent, emitter = _make_agent(tools={"get_code_window": _CodeWindowTool()})
+    agent._recent_thought_texts.append("请读取 AI_POLICY.md 确认其中的策略说明。")
+
+    output = await agent.execute_tool("get_code_window", {})
+
+    assert "AI_POLICY.md" in output
+    assert "1" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__context.file_path") == "file_path"
+    assert repaired.get("__default.anchor_line") == "anchor_line"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_repairs_search_code_from_recent_file_hint_when_keyword_missing():
+    agent, emitter = _make_agent()
+    agent._recent_thought_texts.append("请在 docs/common/api/security.rst 中继续定位敏感配置。")
+
+    output = await agent.execute_tool("search_code", {})
+
+    assert "security.rst" in output
+    tool_call_events = _events_by_type(emitter, "tool_call")
+    assert len(tool_call_events) == 1
+    metadata = tool_call_events[0].metadata or {}
+    repaired = metadata.get("input_repaired") or {}
+    assert repaired.get("__context_or_raw.file_path") == "file_path"
+    assert repaired.get("__file_hint.keyword") == "keyword"
 
 
 @pytest.mark.asyncio

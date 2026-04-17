@@ -2489,7 +2489,12 @@ class BaseAgent(ABC):
             return {}
 
         pattern = re.compile(
-            r"(?P<path>[A-Za-z0-9_./-]+\.(?:c|h|cc|cpp|cxx|hpp|hh|py|js|ts|java|go|rs|php|rb|swift))"
+            r"(?P<path>("
+            r"[A-Za-z0-9_./-]+\.(?:tsx|jsx|cxx|cpp|hpp|swift|java|php|yaml|yml|json|toml|conf|cfg|ini|"
+            r"bash|zsh|ps1|rst|txt|env|md|cc|hh|py|go|rb|ts|js|rs|sh|c|h)"
+            r"|(?:[A-Za-z0-9_./-]*/)?(?:README|AUTHORS|LICENSE|CHANGELOG|COPYING|NOTICE|Dockerfile|Makefile)"
+            r"(?:\.[A-Za-z0-9_-]+)?"
+            r"))"
             r"(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?"
         )
         fallback: Dict[str, Any] = {}
@@ -2532,6 +2537,28 @@ class BaseAgent(ABC):
             return None
         return text
 
+    def _build_keyword_from_file_hint(self, file_path: Any) -> Optional[str]:
+        path_text = str(file_path or "").strip().strip("`'\"")
+        if not path_text:
+            return None
+
+        basename = os.path.basename(path_text)
+        candidates = [basename]
+
+        stem, _ext = os.path.splitext(basename)
+        if stem and stem != basename:
+            candidates.append(stem)
+
+        guard_hint = self._build_include_guard_hint(path_text)
+        if guard_hint:
+            candidates.append(guard_hint)
+
+        for candidate in candidates:
+            normalized = self._normalize_keyword_candidate(candidate)
+            if normalized:
+                return normalized
+        return None
+    
     def _extract_keyword_hint_from_context(self, texts: List[str]) -> Optional[str]:
         if not texts:
             return None
@@ -3760,6 +3787,81 @@ class BaseAgent(ABC):
                 repaired_changes[f"__items[{index}]"] = target_key
 
         context_texts = [text for text in self._recent_thought_texts if isinstance(text, str) and text.strip()]
+        if tool_name == "list_files":
+            directory = str(repaired.get("directory") or "").strip()
+            if not directory and "directory" in schema_fields:
+                for source_key in ("dir", "path", "file_path"):
+                    candidate = str(repaired.get(source_key) or "").strip()
+                    if not candidate:
+                        continue
+                    candidate = candidate.replace("\\", "/").strip("/")
+                    if "." in os.path.basename(candidate):
+                        candidate = os.path.dirname(candidate).strip("/")
+                    repaired["directory"] = candidate or "."
+                    repaired_changes[source_key] = "directory"
+                    break
+
+                if not str(repaired.get("directory") or "").strip():
+                    remembered_directory = next(iter(self._recent_reason_dirs), ".")
+                    repaired["directory"] = remembered_directory or "."
+                    repaired_changes["__context.directory"] = "directory"
+
+        if tool_name in {"get_file_outline", "get_code_window"} and "file_path" in schema_fields:
+            def _safe_positive_int(value: Any) -> Optional[int]:
+                try:
+                    parsed = int(value)
+                except Exception:
+                    return None
+                return parsed if parsed > 0 else None
+
+            file_hint: Dict[str, Any] = {}
+            file_path = str(repaired.get("file_path") or repaired.get("path") or "").strip()
+            if not file_path:
+                used_raw_input_hint = False
+                file_hint = self._extract_file_hint_from_context(context_texts)
+                hinted_path = str(file_hint.get("file_path") or "").strip()
+                if not hinted_path and raw_input_text:
+                    file_hint = self._extract_file_hint_from_raw_input(raw_input_text)
+                    hinted_path = str(file_hint.get("file_path") or "").strip()
+                    used_raw_input_hint = bool(hinted_path)
+                if hinted_path:
+                    repaired["file_path"] = hinted_path
+                    source_label = "__raw_input.file_path" if used_raw_input_hint else "__context.file_path"
+                    repaired_changes[source_label] = "file_path"
+            else:
+                file_hint = self._extract_file_hint_from_context([file_path])
+                normalized_path = str(file_hint.get("file_path") or "").strip()
+                if not normalized_path:
+                    normalized_path = self._sanitize_file_path_text(file_path)
+                if normalized_path and normalized_path != file_path:
+                    repaired["file_path"] = normalized_path
+                    repaired_changes["__sanitize.file_path"] = "file_path"
+                if not file_hint and normalized_path:
+                    file_hint = {"file_path": normalized_path}
+
+            if tool_name == "get_code_window" and "anchor_line" in schema_fields:
+                anchor_line = _safe_positive_int(repaired.get("anchor_line"))
+                if anchor_line is None:
+                    for candidate in (
+                        repaired.get("line"),
+                        repaired.get("line_start"),
+                        raw_input_payload.get("anchor_line") if isinstance(raw_input_payload, dict) else None,
+                        raw_input_payload.get("line") if isinstance(raw_input_payload, dict) else None,
+                        raw_input_payload.get("line_start") if isinstance(raw_input_payload, dict) else None,
+                        file_hint.get("start_line") if isinstance(file_hint, dict) else None,
+                    ):
+                        anchor_line = _safe_positive_int(candidate)
+                        if anchor_line is not None:
+                            repaired_changes["__context_or_raw.anchor_line"] = "anchor_line"
+                            break
+
+                if anchor_line is None and str(repaired.get("file_path") or "").strip():
+                    anchor_line = 1
+                    repaired_changes["__default.anchor_line"] = "anchor_line"
+
+                if anchor_line is not None:
+                    repaired["anchor_line"] = int(anchor_line)
+        
         if tool_name == "read_file" and "file_path" in schema_fields:
             def _safe_positive_int(value: Any) -> Optional[int]:
                 try:
@@ -3985,6 +4087,18 @@ class BaseAgent(ABC):
                 if not hinted_keyword and raw_input_text:
                     hinted_keyword = self._extract_keyword_from_raw_input(raw_input_text)
                     source_label = "__raw_input.keyword"
+                if not hinted_keyword:
+                    file_hint = self._extract_file_hint_from_context(context_texts)
+                    hinted_path = str(file_hint.get("file_path") or "").strip()
+                    if not hinted_path and raw_input_text:
+                        file_hint = self._extract_file_hint_from_raw_input(raw_input_text)
+                        hinted_path = str(file_hint.get("file_path") or "").strip()
+                    if hinted_path:
+                        if "file_path" in schema_fields and not str(repaired.get("file_path") or "").strip():
+                            repaired["file_path"] = hinted_path
+                            repaired_changes["__context_or_raw.file_path"] = "file_path"
+                        hinted_keyword = self._build_keyword_from_file_hint(hinted_path)
+                        source_label = "__file_hint.keyword"
                 if hinted_keyword:
                     repaired["keyword"] = hinted_keyword
                     repaired_changes[source_label] = "keyword"

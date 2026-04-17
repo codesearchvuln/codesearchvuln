@@ -112,6 +112,20 @@ class ReconSubAgent(ReconAgent):
                 line for line in ([task_context] + module_lines) if line
             )
 
+            seeded_context = str(input_data.get("task_context") or "").strip()
+            if seeded_context:
+                self._recent_thought_texts.append(seeded_context)
+
+            if isinstance(paths, list):
+                for item in paths[:20]:
+                    self._remember_search_directory(item)
+            if isinstance(target_files, list):
+                for item in target_files[:40]:
+                    self._remember_reason_path(item)
+            if isinstance(entrypoints, list):
+                for item in entrypoints[:20]:
+                    self._remember_reason_path(item)
+
         result = await super().run(input_data)
         if result.success and isinstance(result.data, dict) and isinstance(module, dict):
             result.data.setdefault("module_id", module.get("module_id"))
