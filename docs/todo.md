@@ -7,3 +7,5 @@
 ## Fix
 - [x] backend 报错。unclosed client session
 ![backend 报错](./images/1.png)
+- [ ] 新版本中静态扫描详情页打开时间比较长 → 改为分页查询
+- [ ] 返回时总是返回到第一页 → 记录跳转前状态
