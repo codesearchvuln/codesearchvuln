@@ -1,146 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  getBanditFindings,
   getBanditScanTask,
   interruptBanditScanTask,
   updateBanditFindingStatus,
-  type BanditFinding,
   type BanditScanTask,
 } from "@/shared/api/bandit";
 import {
-  getPhpstanFindings,
   getPhpstanScanTask,
   interruptPhpstanScanTask,
   updatePhpstanFindingStatus,
-  type PhpstanFinding,
   type PhpstanScanTask,
 } from "@/shared/api/phpstan";
 import {
-  getPmdFindings,
   getPmdScanTask,
   interruptPmdScanTask,
   updatePmdFindingStatus,
-  type PmdFinding,
   type PmdScanTask,
 } from "@/shared/api/pmd";
 import {
-  getGitleaksFindings,
   getGitleaksScanTask,
   interruptGitleaksScanTask,
   updateGitleaksFindingStatus,
-  type GitleaksFinding,
   type GitleaksScanTask,
 } from "@/shared/api/gitleaks";
 import {
-  getYasaFindings,
   getYasaScanTask,
   interruptYasaScanTask,
   updateYasaFindingStatus,
-  type YasaFinding,
   type YasaScanTask,
 } from "@/shared/api/yasa";
 import {
-  getOpengrepScanFindings,
   getOpengrepScanTask,
   interruptOpengrepScanTask,
   updateOpengrepFindingStatus,
-  type OpengrepFinding,
   type OpengrepScanTask,
 } from "@/shared/api/opengrep";
+import {
+  getUnifiedStaticFindings,
+  type UnifiedStaticFindingsQuery,
+} from "@/shared/api/staticUnifiedFindings";
 import type { Engine, FindingStatus, UnifiedFindingRow } from "./viewModel";
 import {
   isStaticAnalysisInterruptibleStatus,
   isStaticAnalysisPollableStatus,
+  mapUnifiedFindingItemToRow,
 } from "./viewModel";
 
-const FINDING_BATCH_SIZE = 200;
-const MAX_FINDING_BATCH_PAGES = 500;
-
-async function fetchAllOpengrepFindings(taskId: string): Promise<OpengrepFinding[]> {
-  const allFindings: OpengrepFinding[] = [];
-  for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
-    const batch = await getOpengrepScanFindings({
-      taskId,
-      skip: page * FINDING_BATCH_SIZE,
-      limit: FINDING_BATCH_SIZE,
-    });
-    allFindings.push(...batch);
-    if (batch.length < FINDING_BATCH_SIZE) break;
-  }
-  return allFindings;
-}
-
-async function fetchAllGitleaksFindings(taskId: string): Promise<GitleaksFinding[]> {
-  const allFindings: GitleaksFinding[] = [];
-  for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
-    const batch = await getGitleaksFindings({
-      taskId,
-      skip: page * FINDING_BATCH_SIZE,
-      limit: FINDING_BATCH_SIZE,
-    });
-    allFindings.push(...batch);
-    if (batch.length < FINDING_BATCH_SIZE) break;
-  }
-  return allFindings;
-}
-
-async function fetchAllBanditFindings(taskId: string): Promise<BanditFinding[]> {
-  const allFindings: BanditFinding[] = [];
-  for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
-    const batch = await getBanditFindings({
-      taskId,
-      skip: page * FINDING_BATCH_SIZE,
-      limit: FINDING_BATCH_SIZE,
-    });
-    allFindings.push(...batch);
-    if (batch.length < FINDING_BATCH_SIZE) break;
-  }
-  return allFindings;
-}
-
-async function fetchAllPhpstanFindings(taskId: string): Promise<PhpstanFinding[]> {
-  const allFindings: PhpstanFinding[] = [];
-  for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
-    const batch = await getPhpstanFindings({
-      taskId,
-      skip: page * FINDING_BATCH_SIZE,
-      limit: FINDING_BATCH_SIZE,
-    });
-    allFindings.push(...batch);
-    if (batch.length < FINDING_BATCH_SIZE) break;
-  }
-  return allFindings;
-}
-
-async function fetchAllPmdFindings(taskId: string): Promise<PmdFinding[]> {
-  const allFindings: PmdFinding[] = [];
-  for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
-    const batch = await getPmdFindings({
-      taskId,
-      skip: page * FINDING_BATCH_SIZE,
-      limit: FINDING_BATCH_SIZE,
-    });
-    allFindings.push(...batch);
-    if (batch.length < FINDING_BATCH_SIZE) break;
-  }
-  return allFindings;
-}
-
-
-async function fetchAllYasaFindings(taskId: string): Promise<YasaFinding[]> {
-  const allFindings: YasaFinding[] = [];
-  for (let page = 0; page < MAX_FINDING_BATCH_PAGES; page += 1) {
-    const batch = await getYasaFindings({
-      taskId,
-      skip: page * FINDING_BATCH_SIZE,
-      limit: FINDING_BATCH_SIZE,
-    });
-    allFindings.push(...batch);
-    if (batch.length < FINDING_BATCH_SIZE) break;
-  }
-  return allFindings;
-}
 export function useStaticAnalysisData({
   hasEnabledEngine,
   opengrepTaskId,
@@ -149,6 +55,7 @@ export function useStaticAnalysisData({
   phpstanTaskId,
   yasaTaskId,
   pmdTaskId,
+  unifiedQuery,
 }: {
   hasEnabledEngine: boolean;
   opengrepTaskId: string;
@@ -157,26 +64,27 @@ export function useStaticAnalysisData({
   phpstanTaskId: string;
   yasaTaskId: string;
   pmdTaskId: string;
+  unifiedQuery: UnifiedStaticFindingsQuery;
 }) {
-  // PHPStan integration: keep task/findings lifecycle aligned with existing engines.
+  // Keep task lifecycle handling aligned across static engines.
   const [opengrepTask, setOpengrepTask] = useState<OpengrepScanTask | null>(null);
   const [gitleaksTask, setGitleaksTask] = useState<GitleaksScanTask | null>(null);
   const [banditTask, setBanditTask] = useState<BanditScanTask | null>(null);
   const [phpstanTask, setPhpstanTask] = useState<PhpstanScanTask | null>(null);
   const [yasaTask, setYasaTask] = useState<YasaScanTask | null>(null);
   const [pmdTask, setPmdTask] = useState<PmdScanTask | null>(null);
-  const [opengrepFindings, setOpengrepFindings] = useState<OpengrepFinding[]>([]);
-  const [gitleaksFindings, setGitleaksFindings] = useState<GitleaksFinding[]>([]);
-  const [banditFindings, setBanditFindings] = useState<BanditFinding[]>([]);
-  const [phpstanFindings, setPhpstanFindings] = useState<PhpstanFinding[]>([]);
-  const [yasaFindings, setYasaFindings] = useState<YasaFinding[]>([]);
-  const [pmdFindings, setPmdFindings] = useState<PmdFinding[]>([]);
+  const [unifiedRows, setUnifiedRows] = useState<UnifiedFindingRow[]>([]);
+  const [unifiedTotal, setUnifiedTotal] = useState(0);
+
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [loadingTask, setLoadingTask] = useState(false);
   const [loadingFindings, setLoadingFindings] = useState(false);
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
   const [interruptTarget, setInterruptTarget] = useState<Engine | null>(null);
   const [interrupting, setInterrupting] = useState(false);
+
+  const unifiedQueryRef = useRef<UnifiedStaticFindingsQuery>(unifiedQuery);
+  const unifiedRequestSeqRef = useRef(0);
 
   const opengrepSilentRefreshRef = useRef(false);
   const gitleaksSilentRefreshRef = useRef(false);
@@ -196,9 +104,7 @@ export function useStaticAnalysisData({
       setOpengrepTask(task);
     } catch {
       setOpengrepTask(null);
-      if (!silent) {
-        toast.error("加载 Opengrep 任务失败");
-      }
+      if (!silent) toast.error("加载 Opengrep 任务失败");
     } finally {
       if (!silent) setLoadingTask(false);
     }
@@ -215,9 +121,7 @@ export function useStaticAnalysisData({
       setGitleaksTask(task);
     } catch {
       setGitleaksTask(null);
-      if (!silent) {
-        toast.error("加载 Gitleaks 任务失败");
-      }
+      if (!silent) toast.error("加载 Gitleaks 任务失败");
     } finally {
       if (!silent) setLoadingTask(false);
     }
@@ -234,9 +138,7 @@ export function useStaticAnalysisData({
       setBanditTask(task);
     } catch {
       setBanditTask(null);
-      if (!silent) {
-        toast.error("加载 Bandit 任务失败");
-      }
+      if (!silent) toast.error("加载 Bandit 任务失败");
     } finally {
       if (!silent) setLoadingTask(false);
     }
@@ -253,9 +155,7 @@ export function useStaticAnalysisData({
       setPhpstanTask(task);
     } catch {
       setPhpstanTask(null);
-      if (!silent) {
-        toast.error("加载 PHPStan 任务失败");
-      }
+      if (!silent) toast.error("加载 PHPStan 任务失败");
     } finally {
       if (!silent) setLoadingTask(false);
     }
@@ -272,9 +172,7 @@ export function useStaticAnalysisData({
       setPmdTask(task);
     } catch {
       setPmdTask(null);
-      if (!silent) {
-        toast.error("加载 PMD 任务失败");
-      }
+      if (!silent) toast.error("加载 PMD 任务失败");
     } finally {
       if (!silent) setLoadingTask(false);
     }
@@ -291,127 +189,56 @@ export function useStaticAnalysisData({
       setYasaTask(task);
     } catch {
       setYasaTask(null);
-      if (!silent) {
-        toast.error("加载 YASA 任务失败");
-      }
+      if (!silent) toast.error("加载 YASA 任务失败");
     } finally {
       if (!silent) setLoadingTask(false);
     }
   }, [yasaTaskId]);
 
-  const loadOpengrepFindings = useCallback(async (silent = false) => {
-    if (!opengrepTaskId) {
-      setOpengrepFindings([]);
+  const loadUnifiedFindings = useCallback(async (
+    query: UnifiedStaticFindingsQuery,
+    silent = false,
+  ) => {
+    unifiedQueryRef.current = query;
+
+    if (!hasEnabledEngine) {
+      setUnifiedRows([]);
+      setUnifiedTotal(0);
+      if (!silent) setLoadingFindings(false);
       return;
     }
+
+    const requestSeq = unifiedRequestSeqRef.current + 1;
+    unifiedRequestSeqRef.current = requestSeq;
+
     try {
       if (!silent) setLoadingFindings(true);
-      setOpengrepFindings(await fetchAllOpengrepFindings(opengrepTaskId));
-    } catch {
-      setOpengrepFindings([]);
-      if (!silent) {
-        toast.error("加载 Opengrep 漏洞失败");
+      const response = await getUnifiedStaticFindings(query);
+      if (requestSeq !== unifiedRequestSeqRef.current) {
+        return;
       }
-    } finally {
-      if (!silent) setLoadingFindings(false);
-    }
-  }, [opengrepTaskId]);
-
-  const loadGitleaksFindings = useCallback(async (silent = false) => {
-    if (!gitleaksTaskId) {
-      setGitleaksFindings([]);
-      return;
-    }
-    try {
-      if (!silent) setLoadingFindings(true);
-      setGitleaksFindings(await fetchAllGitleaksFindings(gitleaksTaskId));
+      setUnifiedRows(response.items.map((item) => mapUnifiedFindingItemToRow(item)));
+      setUnifiedTotal(response.total);
     } catch {
-      setGitleaksFindings([]);
-      if (!silent) {
-        toast.error("加载 Gitleaks 漏洞失败");
+      if (requestSeq !== unifiedRequestSeqRef.current) {
+        return;
       }
+      setUnifiedRows([]);
+      setUnifiedTotal(0);
+      if (!silent) toast.error("加载漏洞列表失败");
     } finally {
-      if (!silent) setLoadingFindings(false);
-    }
-  }, [gitleaksTaskId]);
-
-  const loadBanditFindings = useCallback(async (silent = false) => {
-    if (!banditTaskId) {
-      setBanditFindings([]);
-      return;
-    }
-    try {
-      if (!silent) setLoadingFindings(true);
-      setBanditFindings(await fetchAllBanditFindings(banditTaskId));
-    } catch {
-      setBanditFindings([]);
-      if (!silent) {
-        toast.error("加载 Bandit 漏洞失败");
+      if (!silent && requestSeq === unifiedRequestSeqRef.current) {
+        setLoadingFindings(false);
       }
-    } finally {
-      if (!silent) setLoadingFindings(false);
     }
-  }, [banditTaskId]);
+  }, [hasEnabledEngine]);
 
-  const loadPhpstanFindings = useCallback(async (silent = false) => {
-    if (!phpstanTaskId) {
-      setPhpstanFindings([]);
-      return;
-    }
-    try {
-      if (!silent) setLoadingFindings(true);
-      setPhpstanFindings(await fetchAllPhpstanFindings(phpstanTaskId));
-    } catch {
-      setPhpstanFindings([]);
-      if (!silent) {
-        toast.error("加载 PHPStan 漏洞失败");
-      }
-    } finally {
-      if (!silent) setLoadingFindings(false);
-    }
-  }, [phpstanTaskId]);
-
-  const loadPmdFindings = useCallback(async (silent = false) => {
-    if (!pmdTaskId) {
-      setPmdFindings([]);
-      return;
-    }
-    try {
-      if (!silent) setLoadingFindings(true);
-      setPmdFindings(await fetchAllPmdFindings(pmdTaskId));
-    } catch {
-      setPmdFindings([]);
-      if (!silent) {
-        toast.error("加载 PMD 漏洞失败");
-      }
-    } finally {
-      if (!silent) setLoadingFindings(false);
-    }
-  }, [pmdTaskId]);
-
-  const loadYasaFindings = useCallback(async (silent = false) => {
-    if (!yasaTaskId) {
-      setYasaFindings([]);
-      return;
-    }
-    try {
-      if (!silent) setLoadingFindings(true);
-      setYasaFindings(await fetchAllYasaFindings(yasaTaskId));
-    } catch {
-      setYasaFindings([]);
-      if (!silent) {
-        toast.error("加载 YASA 漏洞失败");
-      }
-    } finally {
-      if (!silent) setLoadingFindings(false);
-    }
-  }, [yasaTaskId]);
-
-  const refreshAll = useCallback(async (silent = false) => {
+  const refreshTasks = useCallback(async (silent = false) => {
     if (!hasEnabledEngine) {
       setLoadingInitial(false);
       return;
     }
+
     if (!silent) setLoadingInitial(true);
     try {
       await Promise.all([
@@ -421,31 +248,33 @@ export function useStaticAnalysisData({
         loadPhpstanTask(silent),
         loadPmdTask(silent),
         loadYasaTask(silent),
-        loadOpengrepFindings(silent),
-        loadGitleaksFindings(silent),
-        loadBanditFindings(silent),
-        loadPhpstanFindings(silent),
-        loadPmdFindings(silent),
-        loadYasaFindings(silent),
       ]);
     } finally {
       if (!silent) setLoadingInitial(false);
     }
   }, [
     hasEnabledEngine,
-    loadGitleaksFindings,
-    loadGitleaksTask,
-    loadBanditFindings,
     loadBanditTask,
-    loadPmdFindings,
-    loadPmdTask,
-    loadPhpstanFindings,
-    loadYasaFindings,
-    loadPhpstanTask,
-    loadYasaTask,
-    loadOpengrepFindings,
+    loadGitleaksTask,
     loadOpengrepTask,
+    loadPhpstanTask,
+    loadPmdTask,
+    loadYasaTask,
   ]);
+
+  const refreshAll = useCallback(async (silent = false) => {
+    if (!hasEnabledEngine) {
+      setUnifiedRows([]);
+      setUnifiedTotal(0);
+      setLoadingInitial(false);
+      return;
+    }
+
+    await Promise.all([
+      refreshTasks(silent),
+      loadUnifiedFindings(unifiedQueryRef.current, silent),
+    ]);
+  }, [hasEnabledEngine, loadUnifiedFindings, refreshTasks]);
 
   const refreshOpengrepSilently = useCallback(async () => {
     if (!opengrepTaskId || opengrepSilentRefreshRef.current) return;
@@ -549,8 +378,8 @@ export function useStaticAnalysisData({
     opengrepTaskId,
     phpstanTaskId,
     pmdTaskId,
-    yasaTaskId,
     refreshAll,
+    yasaTaskId,
   ]);
 
   const handleToggleStatus = useCallback(async (
@@ -567,69 +396,45 @@ export function useStaticAnalysisData({
           findingId: row.id,
           status: nextStatus,
         });
-        setOpengrepFindings((prev) =>
-          prev.map((finding) =>
-            finding.id === row.id ? { ...finding, status: nextStatus } : finding,
-          ),
-        );
       } else if (row.engine === "gitleaks") {
         await updateGitleaksFindingStatus({
           findingId: row.id,
           status: nextStatus,
         });
-        setGitleaksFindings((prev) =>
-          prev.map((finding) =>
-            finding.id === row.id ? { ...finding, status: nextStatus } : finding,
-          ),
-        );
       } else if (row.engine === "bandit") {
         await updateBanditFindingStatus({
           findingId: row.id,
           status: nextStatus,
         });
-        setBanditFindings((prev) =>
-          prev.map((finding) =>
-            finding.id === row.id ? { ...finding, status: nextStatus } : finding,
-          ),
-        );
       } else if (row.engine === "phpstan") {
         await updatePhpstanFindingStatus({
           findingId: row.id,
           status: nextStatus,
         });
-        setPhpstanFindings((prev) =>
-          prev.map((finding) =>
-            finding.id === row.id ? { ...finding, status: nextStatus } : finding,
-          ),
-        );
       } else if (row.engine === "pmd") {
         await updatePmdFindingStatus(row.id, nextStatus);
-        setPmdFindings((prev) =>
-          prev.map((finding) =>
-            finding.id === row.id ? { ...finding, status: nextStatus } : finding,
-          ),
-        );
       } else {
         await updateYasaFindingStatus({
           findingId: row.id,
           status: nextStatus,
         });
-        setYasaFindings((prev) =>
-          prev.map((finding) =>
-            finding.id === row.id ? { ...finding, status: nextStatus } : finding,
-          ),
-        );
       }
+      await loadUnifiedFindings(unifiedQueryRef.current, true);
     } catch {
       toast.error("更新状态失败");
     } finally {
       setUpdatingKey(null);
     }
-  }, []);
+  }, [loadUnifiedFindings]);
 
   useEffect(() => {
-    void refreshAll(false);
-  }, [refreshAll]);
+    void refreshTasks(false);
+  }, [refreshTasks]);
+
+  useEffect(() => {
+    unifiedQueryRef.current = unifiedQuery;
+    void loadUnifiedFindings(unifiedQuery, false);
+  }, [loadUnifiedFindings, unifiedQuery]);
 
   useEffect(() => {
     if (!opengrepTaskId || !isStaticAnalysisPollableStatus(opengrepTask?.status)) {
@@ -698,12 +503,8 @@ export function useStaticAnalysisData({
     phpstanTask,
     pmdTask,
     yasaTask,
-    opengrepFindings,
-    gitleaksFindings,
-    banditFindings,
-    phpstanFindings,
-    pmdFindings,
-    yasaFindings,
+    unifiedRows,
+    unifiedTotal,
     loadingInitial,
     loadingTask,
     loadingFindings,

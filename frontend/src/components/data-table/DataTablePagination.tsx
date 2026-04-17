@@ -24,8 +24,14 @@ export function DataTablePagination<TData>({
   if (config === false || config?.enabled === false) return null;
 
   const pageSizeOptions = config?.pageSizeOptions ?? [...DATA_TABLE_PAGE_SIZE_OPTIONS];
-  const filteredCount = table.getFilteredRowModel().rows.length;
-  const totalCount = table.getCoreRowModel().rows.length;
+  const filteredCount = Math.max(
+    0,
+    Number(config?.totalCount ?? table.getFilteredRowModel().rows.length),
+  );
+  const totalCount = Math.max(
+    0,
+    Number(config?.totalCount ?? table.getCoreRowModel().rows.length),
+  );
   const pageIndex = table.getState().pagination.pageIndex;
   const pageSize = table.getState().pagination.pageSize;
   const pageCount = Math.max(1, table.getPageCount());

@@ -312,16 +312,18 @@ export function getColumns(input: {
 
 export default function StaticAnalysisFindingsTable({
 	currentRoute,
-	loadingInitial,
+	loading,
 	rows,
+	total,
 	state,
 	onStateChange,
 	updatingKey,
 	onToggleStatus,
 }: {
 	currentRoute: string;
-	loadingInitial: boolean;
+	loading: boolean;
 	rows: UnifiedFindingRow[];
+	total: number;
 	state: DataTableQueryState;
 	onStateChange: (state: DataTableQueryState) => void;
 	updatingKey: string | null;
@@ -335,14 +337,15 @@ export default function StaticAnalysisFindingsTable({
 
 	return (
 		<DataTable
+			mode="server"
 			data={rows}
 			columns={columns}
 			state={state}
 			onStateChange={onStateChange}
-			loading={loadingInitial}
+			loading={loading}
 			emptyState={{
 				title: "暂无符合条件的漏洞",
-				description: loadingInitial
+				description: loading
 					? undefined
 					: "可尝试调整筛选条件或稍后刷新",
 			}}
@@ -357,6 +360,7 @@ export default function StaticAnalysisFindingsTable({
 			pagination={{
 				enabled: true,
 				pageSizeOptions: [10, 20, 50],
+				totalCount: total,
 				infoLabel: ({ table, filteredCount }) =>
 					`共 ${filteredCount.toLocaleString()} 条，第 ${
 						table.getState().pagination.pageIndex + 1

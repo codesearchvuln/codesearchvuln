@@ -9,6 +9,7 @@ from app.api.v1.endpoints import static_tasks_opengrep as _opengrep
 from app.api.v1.endpoints import static_tasks_opengrep_rules as _opengrep_rules
 from app.api.v1.endpoints import static_tasks_pmd as _pmd
 from app.api.v1.endpoints import static_tasks_phpstan as _phpstan
+from app.api.v1.endpoints import static_tasks_unified_findings as _unified
 from app.api.v1.endpoints import static_tasks_yasa as _yasa
 from app.api.v1.endpoints.static_tasks_shared import (
     _clear_scan_task_cancel,
@@ -35,6 +36,7 @@ router.include_router(_phpstan.router)
 router.include_router(_gitleaks.router)
 router.include_router(_yasa.router)
 router.include_router(_cache.router)
+router.include_router(_unified.router)
 
 
 def _bind_bandit_runtime() -> None:
@@ -263,3 +265,7 @@ delete_pmd_rule_config = _pmd.delete_pmd_rule_config
 get_repo_cache_stats = _cache.get_repo_cache_stats
 cleanup_unused_cache = _cache.cleanup_unused_cache
 clear_all_cache = _cache.clear_all_cache
+
+UnifiedFindingItemResponse = _unified.UnifiedFindingItemResponse
+UnifiedFindingsPageResponse = _unified.UnifiedFindingsPageResponse
+list_unified_findings = _unified.list_unified_findings

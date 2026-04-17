@@ -154,6 +154,13 @@ export function DataTable<TData extends RowData>({
     internalState,
     state ? createDefaultDataTableState(state) : undefined,
   );
+  const isServerMode = mode === "server";
+  const serverTotalCount = isServerMode && pagination !== false
+    ? Math.max(0, Number(pagination?.totalCount ?? data.length))
+    : undefined;
+  const serverPageCount = serverTotalCount === undefined
+    ? undefined
+    : Math.max(1, Math.ceil(serverTotalCount / Math.max(1, resolvedState.pagination.pageSize)));
 
   const updateState = React.useCallback(
     (updater: ((old: DataTableQueryState) => DataTableQueryState) | DataTableQueryState) => {
@@ -221,14 +228,19 @@ export function DataTable<TData extends RowData>({
         rowSelection: functionalUpdate(updater, old.rowSelection),
       })),
     globalFilterFn: tanstackTextIncludesFilter,
+    manualFiltering: isServerMode,
+    manualSorting: isServerMode,
+    manualPagination: isServerMode && pagination !== false && pagination?.enabled !== false,
+    pageCount: serverPageCount,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+    getFilteredRowModel: isServerMode ? undefined : getFilteredRowModel(),
+    getSortedRowModel: isServerMode ? undefined : getSortedRowModel(),
+    getPaginationRowModel: isServerMode ? undefined : getPaginationRowModel(),
   });
 
-  const filteredCount = table.getFilteredRowModel().rows.length;
-  const totalCount = table.getCoreRowModel().rows.length;
+  const filteredCount =
+    serverTotalCount ?? table.getFilteredRowModel().rows.length;
+  const totalCount = serverTotalCount ?? table.getCoreRowModel().rows.length;
   const visibleRows =
     pagination === false || pagination?.enabled === false
       ? table.getPrePaginationRowModel().rows

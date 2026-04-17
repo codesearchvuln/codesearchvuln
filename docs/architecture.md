@@ -253,7 +253,9 @@ AuditTool 是一个面向代码仓库安全扫描的平台。仓库名叫 `Audit
 #### 静态扫描结果
 
 - 页面：`/static-analysis/:taskId`
-- 聚合逻辑：`frontend/src/features/tasks/services/taskActivities.ts`
+- 统一分页接口：`GET /api/v1/static-tasks/findings/unified`
+- 前端数据入口：`frontend/src/shared/api/staticUnifiedFindings.ts`
+- 页面数据管理：`frontend/src/pages/static-analysis/useStaticAnalysisData.ts`
 
 #### 智能/混合扫描结果
 

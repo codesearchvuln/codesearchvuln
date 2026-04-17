@@ -164,6 +164,18 @@ const CONFIDENCE_SCORE: Record<NormalizedConfidence, number> = {
   LOW: 1,
 };
 
+export function getStaticAnalysisSeverityScore(
+  severity: NormalizedSeverity,
+): number {
+  return SEVERITY_SCORE[severity];
+}
+
+export function getStaticAnalysisConfidenceScore(
+  confidence: NormalizedConfidence,
+): number {
+  return CONFIDENCE_SCORE[confidence];
+}
+
 const STATIC_ANALYSIS_TERMINAL_STATUSES = new Set([
   "completed",
   "failed",
@@ -586,6 +598,35 @@ export function getStaticAnalysisOpengrepRuleName(
   const byCheckId = String(rule.check_id || rule.id || "").trim();
   if (byCheckId) return byCheckId;
   return "-";
+}
+
+export function mapUnifiedFindingItemToRow(input: {
+  engine: Engine;
+  id: string;
+  task_id: string;
+  rule: string;
+  file_path: string;
+  line?: number | null;
+  severity?: string | null;
+  confidence?: string | null;
+  status?: string | null;
+}): UnifiedFindingRow {
+  const severity = normalizeStaticAnalysisSeverity(input.severity);
+  const confidence = normalizeStaticAnalysisConfidence(input.confidence);
+  return {
+    key: `${input.engine}:${input.id}`,
+    id: input.id,
+    taskId: input.task_id,
+    engine: input.engine,
+    rule: String(input.rule || "").trim() || "-",
+    filePath: normalizeStaticAnalysisPath(input.file_path),
+    line: toStaticAnalysisPositiveLine(input.line),
+    severity,
+    severityScore: getStaticAnalysisSeverityScore(severity),
+    confidence,
+    confidenceScore: getStaticAnalysisConfidenceScore(confidence),
+    status: String(input.status || "open").trim().toLowerCase(),
+  };
 }
 
 export function buildUnifiedFindingRows(input: {

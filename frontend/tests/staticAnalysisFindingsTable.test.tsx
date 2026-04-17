@@ -17,7 +17,7 @@ test("StaticAnalysisFindingsTable renders tri-state status copy and truthiness a
       {},
       createElement(tableModule.default, {
         currentRoute: "/static-analysis/task-1",
-        loadingInitial: false,
+        loading: false,
         rows: [
           {
             key: "og-1",
@@ -34,6 +34,7 @@ test("StaticAnalysisFindingsTable renders tri-state status copy and truthiness a
             status: "open",
           },
         ],
+        total: 1,
         state: {
           globalFilter: "",
           columnFilters: [],
@@ -74,7 +75,7 @@ test("StaticAnalysisFindingsTable only disables status actions for the updating 
       {},
       createElement(tableModule.default, {
         currentRoute: "/static-analysis/task-1",
-        loadingInitial: false,
+        loading: false,
         rows: [
           {
             key: "og-1",
@@ -105,6 +106,7 @@ test("StaticAnalysisFindingsTable only disables status actions for the updating 
             status: "verified",
           },
         ],
+        total: 2,
         state: {
           globalFilter: "",
           columnFilters: [],

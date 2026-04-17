@@ -26,12 +26,12 @@ import {
 import StaticAnalysisFindingsTable from "./static-analysis/StaticAnalysisFindingsTable";
 import StaticAnalysisSummaryCards from "./static-analysis/StaticAnalysisSummaryCards";
 import {
+  buildStaticAnalysisUnifiedFindingsQuery,
   createStaticAnalysisInitialTableState,
   resolveStaticAnalysisTableState,
 } from "./static-analysis/tableState";
 import { useStaticAnalysisData } from "./static-analysis/useStaticAnalysisData";
 import {
-  buildUnifiedFindingRows,
   decodeStaticAnalysisPathParam,
   type Engine,
 } from "./static-analysis/viewModel";
@@ -134,6 +134,27 @@ export default function StaticAnalysis() {
     () => resolveStaticAnalysisTableState(initialState),
     [initialState],
   );
+  const unifiedQuery = useMemo(
+    () =>
+      buildStaticAnalysisUnifiedFindingsQuery({
+        state: tableState,
+        opengrepTaskId,
+        gitleaksTaskId,
+        banditTaskId,
+        phpstanTaskId,
+        yasaTaskId,
+        pmdTaskId,
+      }),
+    [
+      banditTaskId,
+      gitleaksTaskId,
+      opengrepTaskId,
+      phpstanTaskId,
+      pmdTaskId,
+      tableState,
+      yasaTaskId,
+    ],
+  );
 
   const {
     opengrepTask,
@@ -142,12 +163,8 @@ export default function StaticAnalysis() {
     phpstanTask,
     pmdTask,
     yasaTask,
-    opengrepFindings,
-    gitleaksFindings,
-    banditFindings,
-    phpstanFindings,
-    pmdFindings,
-    yasaFindings,
+    unifiedRows,
+    unifiedTotal,
     loadingInitial,
     loadingTask,
     loadingFindings,
@@ -172,38 +189,8 @@ export default function StaticAnalysis() {
     phpstanTaskId,
     yasaTaskId,
     pmdTaskId,
+    unifiedQuery,
   });
-
-  const unifiedRows = useMemo(
-    () =>
-      buildUnifiedFindingRows({
-        opengrepFindings,
-        gitleaksFindings,
-        banditFindings,
-        phpstanFindings,
-        pmdFindings,
-        yasaFindings,
-        opengrepTaskId,
-        gitleaksTaskId,
-        banditTaskId,
-        phpstanTaskId,
-        yasaTaskId,
-        pmdTaskId,
-      }),
-    [
-      banditFindings,
-      banditTaskId,
-      gitleaksFindings,
-      gitleaksTaskId,
-      opengrepFindings,
-      opengrepTaskId,
-      pmdFindings,
-      pmdTaskId,
-      phpstanFindings,
-      yasaFindings,
-      phpstanTaskId,
-    ],
-  );
 
   const enabledEngines = useMemo(() => {
     const engines: Engine[] = [];
@@ -359,8 +346,9 @@ export default function StaticAnalysis() {
 
         <StaticAnalysisFindingsTable
           currentRoute={currentRoute}
-          loadingInitial={loadingInitial}
+          loading={loadingInitial || loadingFindings}
           rows={unifiedRows}
+          total={unifiedTotal}
           state={tableState}
           onStateChange={setTableState}
           updatingKey={updatingKey}
