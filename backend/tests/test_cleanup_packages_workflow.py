@@ -19,13 +19,28 @@ def test_cleanup_packages_workflow_supports_schedule_and_manual_dispatch() -> No
     assert "timezone: Asia/Shanghai" in workflow_text
     assert "packages: write" in workflow_text
     assert "contents: read" in workflow_text
-    assert "actions/delete-package-versions@v5" in workflow_text
-    assert "package-type: container" in workflow_text
-    assert "delete_only_untagged_versions:" in workflow_text
+    assert "gh api --paginate" in workflow_text
+    assert "python scripts/plan_cleanup_packages.py" in workflow_text
+    assert "delete_only_untagged_versions:" not in workflow_text
     assert "inputs.package_name == 'all' || inputs.package_name == matrix.package_name" in workflow_text
     assert "secrets.PACKAGES_DELETE_TOKEN || github.token" in workflow_text
     assert "vars.PACKAGE_CLEANUP_OWNER || github.repository_owner" in workflow_text
-    assert 'DEFAULT_MIN_VERSIONS_TO_KEEP: "20"' in workflow_text
+    assert "vars.PACKAGE_CLEANUP_OWNER_TYPE || github.event.repository.owner.type" in workflow_text
+    assert 'DEFAULT_MIN_VERSIONS_TO_KEEP: "3"' in workflow_text
+
+
+def test_cleanup_packages_workflow_deletes_all_untagged_and_keeps_recent_publish_batches() -> None:
+    workflow_text = _cleanup_packages_workflow_text()
+
+    assert "actions/delete-package-versions@v5" not in workflow_text
+    assert "Checkout repository" in workflow_text
+    assert "Delete container versions by publish-batch policy" in workflow_text
+    assert "UNTAGGED_VERSION_IDS" in workflow_text
+    assert "TAGGED_VERSION_IDS_TO_DELETE" in workflow_text
+    assert "tagged_publish_batches_to_keep" in workflow_text
+    assert "publish_batches_total" in workflow_text
+    assert "Deleting untagged version" in workflow_text
+    assert "Deleting tagged version" in workflow_text
 
 
 def test_cleanup_packages_workflow_covers_all_runtime_container_packages() -> None:

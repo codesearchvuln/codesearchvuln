@@ -24,20 +24,16 @@ on:
           - vulhunter-pmd-runner
           - vulhunter-sandbox-runner
       min_versions_to_keep:
-        description: "保留最近多少个可删除的历史版本。"
+        description: "保留最近多少次带 tag 的发布批次；未打 tag 的版本始终全部删除。"
         required: true
-        default: "20"
+        default: "3"
         type: string
-      delete_only_untagged_versions:
-        description: "默认只删未打 tag 的容器版本；关闭后按保留数删除旧版本。"
-        required: true
-        default: true
-        type: boolean
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  DEFAULT_MIN_VERSIONS_TO_KEEP: "20"
+  DEFAULT_MIN_VERSIONS_TO_KEEP: "3"
   PACKAGE_CLEANUP_OWNER: ${{ vars.PACKAGE_CLEANUP_OWNER || github.repository_owner }}
+  PACKAGE_CLEANUP_OWNER_TYPE: ${{ vars.PACKAGE_CLEANUP_OWNER_TYPE || github.event.repository.owner.type }}
 
 permissions:
   contents: read
@@ -77,6 +73,10 @@ jobs:
           PACKAGE_NAME: ${{ matrix.package_name }}
           TARGET_PACKAGE: ${{ inputs.package_name }}
 
+      - name: Checkout repository
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.package_name == 'all' || inputs.package_name == matrix.package_name }}
+        uses: actions/checkout@v6
+
       - name: 输出清理摘要
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.package_name == 'all' || inputs.package_name == matrix.package_name }}
         run: |
@@ -85,28 +85,107 @@ jobs:
           echo "## Package cleanup" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- owner: \`${{ env.PACKAGE_CLEANUP_OWNER }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- owner_type: \`${{ env.PACKAGE_CLEANUP_OWNER_TYPE }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- package: \`${{ matrix.package_name }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- min_versions_to_keep: \`${{ github.event_name == 'workflow_dispatch' && inputs.min_versions_to_keep || env.DEFAULT_MIN_VERSIONS_TO_KEEP }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- delete_only_untagged_versions: \`${{ github.event_name != 'workflow_dispatch' || inputs.delete_only_untagged_versions }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tagged_publish_batches_to_keep: \`${{ github.event_name == 'workflow_dispatch' && inputs.min_versions_to_keep || env.DEFAULT_MIN_VERSIONS_TO_KEEP }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- untagged_versions: \`delete-all\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- token_source: \`${{ secrets.PACKAGES_DELETE_TOKEN != '' && 'PACKAGES_DELETE_TOKEN' || 'github.token' }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Delete old untagged container versions
-        if: ${{ (github.event_name != 'workflow_dispatch' || inputs.package_name == 'all' || inputs.package_name == matrix.package_name) && (github.event_name != 'workflow_dispatch' || inputs.delete_only_untagged_versions) }}
-        uses: actions/delete-package-versions@v5
-        with:
-          owner: ${{ env.PACKAGE_CLEANUP_OWNER }}
-          package-name: ${{ matrix.package_name }}
-          package-type: container
-          min-versions-to-keep: ${{ github.event_name == 'workflow_dispatch' && inputs.min_versions_to_keep || env.DEFAULT_MIN_VERSIONS_TO_KEEP }}
-          delete-only-untagged-versions: "true"
-          token: ${{ secrets.PACKAGES_DELETE_TOKEN || github.token }}
+      - name: Delete container versions by publish-batch policy
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.package_name == 'all' || inputs.package_name == matrix.package_name }}
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_DELETE_TOKEN || github.token }}
+          OWNER: ${{ env.PACKAGE_CLEANUP_OWNER }}
+          OWNER_TYPE: ${{ env.PACKAGE_CLEANUP_OWNER_TYPE }}
+          PACKAGE_NAME: ${{ matrix.package_name }}
+          TAGGED_PUBLISH_BATCHES_TO_KEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.min_versions_to_keep || env.DEFAULT_MIN_VERSIONS_TO_KEEP }}
+        run: |
+          set -euo pipefail
 
-      - name: Delete old container versions
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.package_name == 'all' || inputs.package_name == matrix.package_name) && !inputs.delete_only_untagged_versions }}
-        uses: actions/delete-package-versions@v5
-        with:
-          owner: ${{ env.PACKAGE_CLEANUP_OWNER }}
-          package-name: ${{ matrix.package_name }}
-          package-type: container
-          min-versions-to-keep: ${{ inputs.min_versions_to_keep }}
-          token: ${{ secrets.PACKAGES_DELETE_TOKEN || github.token }}
+          if [[ ! "${TAGGED_PUBLISH_BATCHES_TO_KEEP}" =~ ^[0-9]+$ ]]; then
+            echo "::error::min_versions_to_keep must be a non-negative integer, got '${TAGGED_PUBLISH_BATCHES_TO_KEEP}'"
+            exit 1
+          fi
+
+          api_headers=(
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+
+          case "${OWNER_TYPE}" in
+            Organization|organization|org)
+              owner_api_kind="orgs"
+              ;;
+            User|user|users)
+              owner_api_kind="users"
+              ;;
+            *)
+              echo "::error::PACKAGE_CLEANUP_OWNER_TYPE must be Organization/org or User/user, got '${OWNER_TYPE}'"
+              exit 1
+              ;;
+          esac
+
+          package_api_prefix="/${owner_api_kind}/${OWNER}"
+          raw_versions_file="$(mktemp)"
+          versions_file="$(mktemp)"
+          plan_file="$(mktemp)"
+          error_file="$(mktemp)"
+
+          if ! gh api --paginate --jq '.[]' "${api_headers[@]}" \
+            "${package_api_prefix}/packages/container/${PACKAGE_NAME}/versions?per_page=100" \
+            >"${raw_versions_file}" 2>"${error_file}"; then
+            if grep -q "HTTP 404" "${error_file}"; then
+              echo "- package_status: \`not-found, skipped\`" >> "$GITHUB_STEP_SUMMARY"
+              echo "Package ${OWNER}/${PACKAGE_NAME} does not exist yet, skipping cleanup."
+              exit 0
+            fi
+
+            echo "::error::Failed to query package versions for ${OWNER}/${PACKAGE_NAME}"
+            cat "${error_file}" >&2
+            exit 1
+          fi
+
+          jq -s '.' "${raw_versions_file}" > "${versions_file}"
+          python scripts/plan_cleanup_packages.py \
+            --versions-file "${versions_file}" \
+            --keep-publish-batches "${TAGGED_PUBLISH_BATCHES_TO_KEEP}" \
+            > "${plan_file}"
+
+          total_versions="$(jq 'length' "${versions_file}")"
+          tagged_total="$(jq '.tagged_versions_total' "${plan_file}")"
+          untagged_total="$(jq '.untagged_versions_total' "${plan_file}")"
+          tagged_publish_batches_total="$(jq '.publish_batches_total' "${plan_file}")"
+          tagged_publish_batches_retained="$(jq '.publish_batches_retained' "${plan_file}")"
+          tagged_publish_batches_deleted="$(jq '.publish_batches_deleted' "${plan_file}")"
+          untagged_versions_deleted="$(jq '.untagged_version_ids | length' "${plan_file}")"
+          tagged_versions_deleted="$(jq '.tagged_version_ids_to_delete | length' "${plan_file}")"
+          tagged_versions_retained="$(( tagged_total - tagged_versions_deleted ))"
+          UNTAGGED_VERSION_IDS="$(jq -r '.untagged_version_ids[]?' "${plan_file}")"
+          TAGGED_VERSION_IDS_TO_DELETE="$(jq -r '.tagged_version_ids_to_delete[]?' "${plan_file}")"
+
+          echo "- package_api_prefix: \`${package_api_prefix}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- total_versions_seen: \`${total_versions}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- untagged_versions_total: \`${untagged_total}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- untagged_versions_deleted: \`${untagged_versions_deleted}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tagged_versions_total: \`${tagged_total}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tagged_versions_retained: \`${tagged_versions_retained}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tagged_versions_deleted: \`${tagged_versions_deleted}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tagged_publish_batches_total: \`${tagged_publish_batches_total}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tagged_publish_batches_retained: \`${tagged_publish_batches_retained}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tagged_publish_batches_deleted: \`${tagged_publish_batches_deleted}\`" >> "$GITHUB_STEP_SUMMARY"
+
+          while IFS= read -r version_id; do
+            [[ -n "${version_id}" ]] || continue
+            echo "Deleting untagged version ${version_id} from ${OWNER}/${PACKAGE_NAME}"
+            gh api "${api_headers[@]}" --method DELETE \
+              "${package_api_prefix}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
+              --silent
+          done <<<"${UNTAGGED_VERSION_IDS}"
+
+          while IFS= read -r version_id; do
+            [[ -n "${version_id}" ]] || continue
+            echo "Deleting tagged version ${version_id} from ${OWNER}/${PACKAGE_NAME}"
+            gh api "${api_headers[@]}" --method DELETE \
+              "${package_api_prefix}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
+              --silent
+          done <<<"${TAGGED_VERSION_IDS_TO_DELETE}"
