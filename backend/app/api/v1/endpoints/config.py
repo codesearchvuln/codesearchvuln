@@ -953,6 +953,7 @@ async def _execute_llm_test_request(
     import traceback
 
     start_time = time.time()
+    adapter = None
     saved_llm_config = saved_llm_config or {}
     saved_other_config = saved_other_config or {}
 
@@ -1149,6 +1150,12 @@ async def _execute_llm_test_request(
             message=friendly_message,
             debug=debug_info,
         )
+    finally:
+        if adapter is not None:
+            try:
+                await adapter.close()
+            except Exception:
+                pass
 
 
 @router.post("/test-llm", response_model=LLMTestResponse)
