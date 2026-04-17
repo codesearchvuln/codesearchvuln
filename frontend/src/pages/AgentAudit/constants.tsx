@@ -58,6 +58,8 @@ export const ACTION_VERBS = [
 	"建模中",
 ];
 
+export const EVENT_LOG_ROW_HEIGHT_PX = 40;
+
 // ============ Log Type Configurations (Enhanced colors) ============
 
 export const LOG_TYPE_CONFIG: Record<

@@ -20,14 +20,21 @@ const logEntryPath = path.join(
 	frontendDir,
 	"src/pages/AgentAudit/components/LogEntry.tsx",
 );
+const eventLogVirtualListPath = path.join(
+	frontendDir,
+	"src/pages/AgentAudit/components/EventLogVirtualList.tsx",
+);
 
 test("TaskDetailPage 仅将事件日志滚动区切换为暗色滚动条类", () => {
-	const source = readFileSync(taskDetailPagePath, "utf8");
+	const taskDetailSource = readFileSync(taskDetailPagePath, "utf8");
 
-	assert.match(source, /className="overflow-y-auto custom-scrollbar-dark"/);
-	assert.match(source, /className="overflow-x-auto custom-scrollbar"/);
+	assert.match(
+		taskDetailSource,
+		/className="overflow-x-auto custom-scrollbar"/,
+	);
+	assert.match(taskDetailSource, /custom-scrollbar-dark/);
 	assert.doesNotMatch(
-		source,
+		taskDetailSource,
 		/className="overflow-x-auto custom-scrollbar-dark"/,
 	);
 });
@@ -52,4 +59,19 @@ test("TaskDetailPage 事件日志表头和内容共用固定列模板，避免�
 		logEntrySource,
 		/TOOL_STATUS_LABELS/,
 	);
+});
+
+test("TaskDetailPage 事件日志使用虚拟列表并传入稳定的详情回调", () => {
+	const taskDetailSource = readFileSync(taskDetailPagePath, "utf8");
+	const logEntrySource = readFileSync(logEntryPath, "utf8");
+	const eventLogVirtualListSource = readFileSync(eventLogVirtualListPath, "utf8");
+
+	assert.match(taskDetailSource, /<EventLogVirtualList/);
+	assert.match(taskDetailSource, /onOpenDetail=\{handleOpenLogDetail\}/);
+	assert.doesNotMatch(taskDetailSource, /onOpenDetail=\{\(\) =>/);
+	assert.match(logEntrySource, /const handleOpenDetail = useCallback/);
+	assert.match(logEntrySource, /onOpenDetail\(item\.id, anchorId\)/);
+	assert.match(eventLogVirtualListSource, /items\.slice\(visibleRange\.startIndex, visibleRange\.endIndex \+ 1\)/);
+	assert.match(eventLogVirtualListSource, /import \{ EVENT_LOG_ROW_HEIGHT_PX \} from "\.\.\/constants"/);
+	assert.match(logEntrySource, /style=\{\{ height: `\$\{EVENT_LOG_ROW_HEIGHT_PX\}px` \}\}/);
 });

@@ -191,7 +191,7 @@ export interface AgentTreeNodeItemProps {
 
 export interface LogEntryProps {
   item: LogItem;
-  onOpenDetail: () => void;
+  onOpenDetail: (id: string, anchorId: string) => void;
   anchorId: string;
   highlighted?: boolean;
 }

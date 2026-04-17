@@ -15,6 +15,7 @@ export { ConnectionStatus } from "./ConnectionStatus";
 export { ReportExportDialog } from "./ReportExportDialog";
 export { AuditDetailDialog } from "./AuditDetailDialog";
 export { BootstrapInputsPanel } from "./BootstrapInputsPanel";
+export { default as EventLogVirtualList } from "./EventLogVirtualList";
 export { default as RealtimeFindingsPanel } from "./RealtimeFindingsPanel";
 export { default as RealtimeVerifiedReportPanel } from "./RealtimeVerifiedReportPanel";
 export { default as FindingCodeWindow } from "./FindingCodeWindow";

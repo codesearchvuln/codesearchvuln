@@ -1,8 +1,9 @@
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import { CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
 	EVENT_LOG_GRID_TEMPLATE,
+	EVENT_LOG_ROW_HEIGHT_PX,
 	EVENT_LOG_TABLE_MIN_WIDTH_PX,
 	LOG_TYPE_CONFIG,
 } from "../constants";
@@ -135,6 +136,9 @@ export const LogEntry = memo(function LogEntry({
 	anchorId,
 	highlighted = false,
 }: LogEntryProps) {
+	const handleOpenDetail = useCallback(() => {
+		onOpenDetail(item.id, anchorId);
+	}, [anchorId, item.id, onOpenDetail]);
 	const config = LOG_TYPE_CONFIG[item.type] || LOG_TYPE_CONFIG.info;
 	const typeLabel = LOG_TYPE_LABELS[item.type] || "日志";
 	const isProgressCompleted =
@@ -190,13 +194,14 @@ export const LogEntry = memo(function LogEntry({
 			id={anchorId}
 			className={
 				highlighted
-					? "bg-primary/5 ring-1 ring-primary/50 transition-colors"
-					: "transition-colors"
+					? "h-full bg-primary/5 ring-1 ring-primary/50 transition-colors"
+					: "h-full transition-colors"
 			}
+			style={{ height: `${EVENT_LOG_ROW_HEIGHT_PX}px` }}
 		>
-			<div className="px-2 py-2.5 hover:bg-muted/35">
+			<div className="flex h-full items-center px-2 py-1.5 hover:bg-muted/35">
 				<div
-					className="grid items-center gap-3"
+					className="grid w-full items-center gap-3"
 					style={{
 						gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE,
 						minWidth: `${EVENT_LOG_TABLE_MIN_WIDTH_PX}px`,
@@ -236,7 +241,7 @@ export const LogEntry = memo(function LogEntry({
 					<div className="flex justify-start md:justify-start">
 						<button
 							type="button"
-							onClick={onOpenDetail}
+							onClick={handleOpenDetail}
 							className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
 						>
 							查看详情

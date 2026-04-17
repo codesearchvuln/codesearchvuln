@@ -44,10 +44,10 @@ import {
 // Local imports
 import {
   Header,
-  LogEntry,
   StatsPanel,
   AuditDetailDialog,
   AgentErrorBoundary,
+  EventLogVirtualList,
   RealtimeFindingsPanel,
 } from "./components";
 import ReportExportDialog from "./components/ReportExportDialog";
@@ -733,7 +733,6 @@ function AgentAuditPageContent() {
   const detailContentRef = useRef<HTMLDivElement | null>(null);
   const failedReasonRef = useRef<HTMLDivElement | null>(null);
   const statsSectionRef = useRef<HTMLDivElement | null>(null);
-  const logEndRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement | null>(null);
   const eventLogsSectionRef = useRef<HTMLDivElement | null>(null);
   const eventLogsChromeHeightRef = useRef(0);
@@ -1218,6 +1217,17 @@ function AgentAuditPageContent() {
       setDetailQuery({ type: detail.type, id: detail.id });
     },
     [activeMainTab, findingsFilters, setDetailQuery],
+  );
+
+  const handleOpenLogDetail = useCallback(
+    (id: string, anchorId: string) => {
+      openDetailDialog({
+        type: "log",
+        id,
+        anchorId,
+      });
+    },
+    [openDetailDialog],
   );
 
   const openFindingDetailPage = useCallback(
@@ -3840,17 +3850,17 @@ function AgentAuditPageContent() {
                       <span>事件概况</span>
                       <span>操作</span>
                     </div>
-                    <div
-                      ref={logsContainerRef}
-                      onScroll={handleLogsScroll}
-                      className={
-                        isSmallScreenSplit
-                          ? "overflow-y-auto custom-scrollbar-dark h-full min-h-0"
-                          : "overflow-y-auto custom-scrollbar-dark transition-[height] duration-150"
-                      }
-                      style={isSmallScreenSplit ? undefined : { height: logViewportHeight }}
-                    >
-                      {filteredLogs.length === 0 ? (
+                    {filteredLogs.length === 0 ? (
+                      <div
+                        ref={logsContainerRef}
+                        onScroll={handleLogsScroll}
+                        className={
+                          isSmallScreenSplit
+                            ? "overflow-y-auto custom-scrollbar-dark h-full min-h-0"
+                            : "overflow-y-auto custom-scrollbar-dark transition-[height] duration-150"
+                        }
+                        style={isSmallScreenSplit ? undefined : { height: logViewportHeight }}
+                      >
                         <div className="flex h-full items-center justify-center px-3">
                           <div className="text-center text-muted-foreground">
                             {isRunning ? (
@@ -3867,27 +3877,22 @@ function AgentAuditPageContent() {
                             )}
                           </div>
                         </div>
-                      ) : (
-                        <div className="divide-y divide-border/60 px-3">
-                          {filteredLogs.map((item) => (
-                            <LogEntry
-                              key={item.id}
-                              item={item}
-                              anchorId={`log-item-${item.id}`}
-                              highlighted={highlightedLogId === item.id}
-                              onOpenDetail={() =>
-                                openDetailDialog({
-                                  type: "log",
-                                  id: item.id,
-                                  anchorId: `log-item-${item.id}`,
-                                })
-                              }
-                            />
-                          ))}
-                        </div>
-                      )}
-                      <div ref={logEndRef} />
-                    </div>
+                      </div>
+                    ) : (
+                      <EventLogVirtualList
+                        items={filteredLogs}
+                        highlightedLogId={highlightedLogId}
+                        onOpenDetail={handleOpenLogDetail}
+                        scrollContainerRef={logsContainerRef}
+                        onScroll={handleLogsScroll}
+                        className={
+                          isSmallScreenSplit
+                            ? "overflow-y-auto custom-scrollbar-dark h-full min-h-0"
+                            : "overflow-y-auto custom-scrollbar-dark transition-[height] duration-150"
+                        }
+                        style={isSmallScreenSplit ? undefined : { height: logViewportHeight }}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
