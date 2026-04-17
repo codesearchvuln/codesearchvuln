@@ -1,34 +1,34 @@
 {
   "schema_version": 1,
-  "source_sha": "8338bfa44298b65b9971bc7b5d86d896bed96610",
-  "snapshot_tag": "release-assets-8338bfa44298b65b9971bc7b5d86d896bed96610-24567685834-1",
-  "release_manifest_sha256": "0f53bfc15a049f6abdbf8e46cfea7cb95e01554259bc2cde4f21b43694f4b1a3",
+  "source_sha": "59650f711a735ab1aafb6ab256d0aa48ba3ffc2c",
+  "snapshot_tag": "release-assets-59650f711a735ab1aafb6ab256d0aa48ba3ffc2c-24567981479-1",
+  "release_manifest_sha256": "cebd605f06a9bcadf976ba2bfc7ddae7e76a3aa33971a2df6a9b56c806f96a17",
   "bundles": {
     "services": {
       "amd64": {
         "asset_name": "vulhunter-services-images-amd64.tar.zst",
-        "bundle_sha256": "6a1883b29ef05b5e9f2750258fc1551fa9a5ac7965d9f860f343a46ad1b4036c",
-        "revision": "8338bfa44298b65b9971bc7b5d86d896bed96610",
+        "bundle_sha256": "60fa0f0a795f9d96af23259f5c720c1289bb2a7142706885f58dfadfefb1215a",
+        "revision": "59650f711a735ab1aafb6ab256d0aa48ba3ffc2c",
         "metadata_asset_name": "images-manifest-services-amd64.json"
       },
       "arm64": {
         "asset_name": "vulhunter-services-images-arm64.tar.zst",
-        "bundle_sha256": "c57c4a92b5d5032b0d8a268b363af2ae6f21b72864c53bb6362dac26e1ed51d5",
-        "revision": "8338bfa44298b65b9971bc7b5d86d896bed96610",
+        "bundle_sha256": "8a49489090638c58198159818ab6a0750a6d5e5be152a95c368d3688e78d73e3",
+        "revision": "59650f711a735ab1aafb6ab256d0aa48ba3ffc2c",
         "metadata_asset_name": "images-manifest-services-arm64.json"
       }
     },
     "scanner": {
       "amd64": {
         "asset_name": "vulhunter-scanner-images-amd64.tar.zst",
-        "bundle_sha256": "4929c7bca5c3a8ea687045e5c3e2593f6ad7e562f1965fb0fdd59c05b84ccb05",
-        "revision": "8338bfa44298b65b9971bc7b5d86d896bed96610",
+        "bundle_sha256": "a9594667251b83e59aab36f79055aeec39609c752484c13cae92fbcb67f73f35",
+        "revision": "59650f711a735ab1aafb6ab256d0aa48ba3ffc2c",
         "metadata_asset_name": "images-manifest-scanner-amd64.json"
       },
       "arm64": {
         "asset_name": "vulhunter-scanner-images-arm64.tar.zst",
-        "bundle_sha256": "eba9c419c6b803f94256934680a0516b8f0b1e817313701ae35a0c25183db2cf",
-        "revision": "8338bfa44298b65b9971bc7b5d86d896bed96610",
+        "bundle_sha256": "993ad522c6caa4782c695325c47488b740c62b3e48f33595f8aaccda227439a7",
+        "revision": "59650f711a735ab1aafb6ab256d0aa48ba3ffc2c",
         "metadata_asset_name": "images-manifest-scanner-arm64.json"
       }
     }
