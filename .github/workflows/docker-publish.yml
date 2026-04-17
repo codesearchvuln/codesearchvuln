@@ -31,11 +31,6 @@ on:
         required: false
         type: boolean
         default: true
-      publish_backend_hardened:
-        description: '额外发布可选 hardened 后端镜像（默认 backend 仍为 runtime-plain）'
-        required: false
-        type: boolean
-        default: false
       build_yasa_runner:
         description: '构建 YASA runner 镜像'
         required: false
@@ -146,7 +141,6 @@ jobs:
       tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'latest' }}
       build_frontend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_frontend || needs.detect-changes.outputs.frontend == 'true' }}
       build_backend: ${{ github.event_name == 'workflow_dispatch' && inputs.build_backend || needs.detect-changes.outputs.backend == 'true' }}
-      publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_yasa_runner || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_opengrep_runner || false }}
       build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && inputs.build_bandit_runner || false }}

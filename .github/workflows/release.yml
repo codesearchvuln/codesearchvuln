@@ -21,11 +21,6 @@ on:
         required: false
         type: boolean
         default: false
-      publish_backend_hardened:
-        description: 'Publish the optional hardened backend image variant in addition to the default runtime-plain backend image (ignored when reuse_existing_images is true)'
-        required: false
-        type: boolean
-        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -142,7 +137,6 @@ jobs:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
       build_backend: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images }}
-      publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.publish_backend_hardened || false }}
       build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
       build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
       build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}

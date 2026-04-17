@@ -16,11 +16,6 @@ on:
         required: false
         type: boolean
         default: false
-      publish_backend_hardened:
-        description: Publish the optional hardened backend image variant alongside the default runtime-plain backend image.
-        required: false
-        type: boolean
-        default: false
       build_yasa_runner:
         required: false
         type: boolean
@@ -510,73 +505,6 @@ jobs:
               raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
           print(f"validated platforms: {', '.join(sorted(platforms))}")
           PY
-
-  publish-backend-hardened:
-    name: Publish optional hardened backend image
-    needs: prepare
-    if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      ref: ${{ steps.capture.outputs.ref }}
-
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v6
-
-      - name: 登录到 GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: 构建并推送可选 hardened 后端 Docker 镜像
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/backend.Dockerfile
-          target: runtime-cython
-          push: true
-          platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:${{ needs.prepare.outputs.tag }}-hardened
-          build-args: |
-            DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-            VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
-          cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-cython
-            type=gha,scope=backend-runtime-cython
-          cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-cython,mode=max
-            type=gha,mode=max,scope=backend-runtime-cython
-          provenance: false
-          sbom: false
-
-      - name: 验证可选 hardened 后端镜像可解析
-        run: |
-          set -euo pipefail
-          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-backend:${IMAGE_TAG}" >/dev/null
-        env:
-          IMAGE_TAG: ${{ format('{0}-hardened', needs.prepare.outputs.tag) }}
-
-      - name: 记录可选 hardened 后端镜像引用
-        id: capture
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend
-        run: |
-          set -euo pipefail
-          echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
 
   publish-yasa-runner-amd64:
     name: Publish YASA runner image (amd64)
@@ -1823,7 +1751,6 @@ jobs:
     needs:
       - publish-frontend
       - publish-backend
-      - publish-backend-hardened
       - publish-yasa-runner
       - publish-opengrep-runner
       - publish-bandit-runner
@@ -1855,7 +1782,6 @@ jobs:
           mapping = {
               "publish-frontend": "codesearchvuln-frontend",
               "publish-backend": "codesearchvuln-backend",
-              "publish-backend-hardened": "codesearchvuln-backend",
               "publish-yasa-runner": "codesearchvuln-yasa-runner",
               "publish-opengrep-runner": "codesearchvuln-opengrep-runner",
               "publish-bandit-runner": "codesearchvuln-bandit-runner",
