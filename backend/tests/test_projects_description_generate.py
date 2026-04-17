@@ -64,8 +64,9 @@ async def test_project_description_analyzer_uses_single_llm_summary_call(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_upload_project_zip_generates_and_persists_project_description(monkeypatch):
+async def test_upload_project_zip_marks_project_info_pending_and_enqueues_refresh(monkeypatch):
     from app.api.v1.endpoints import projects_shared as shared_endpoint
+    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
 
     project = SimpleNamespace(
         id="project-1",
@@ -83,6 +84,7 @@ async def test_upload_project_zip_generates_and_persists_project_description(mon
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
     db.rollback = AsyncMock()
+    enqueue_project_info = Mock()
 
     monkeypatch.setattr(
         shared_endpoint.CompressionStrategyFactory,
@@ -154,6 +156,11 @@ async def test_upload_project_zip_generates_and_persists_project_description(mon
         "ensure_base_metrics",
         AsyncMock(return_value=None),
     )
+    monkeypatch.setattr(
+        uploads_endpoint.project_info_refresher,
+        "enqueue",
+        enqueue_project_info,
+    )
 
     response = await upload_project_zip(
         id="project-1",
@@ -163,14 +170,17 @@ async def test_upload_project_zip_generates_and_persists_project_description(mon
     )
 
     assert response["message"] == "文件上传成功（已转换为 ZIP 格式）"
-    assert project.description == "智能简介"
+    assert response["project_info_status"] == "pending"
+    assert project.description == ""
     project_info = next(
         obj for obj in added_objects if getattr(obj, "project_id", None) == "project-1"
     )
-    assert project_info.description == "智能简介"
-    assert project_info.status == "completed"
-    assert project_info.language_info == (
-        '{"total": 42, "total_files": 2, "languages": {"TypeScript": {"loc_number": 42, "files_count": 2, "proportion": 1.0}}}'
+    assert project_info.description == ""
+    assert project_info.status == "pending"
+    assert project_info.language_info == '{"total": 0, "total_files": 0, "languages": {}}'
+    enqueue_project_info.assert_called_once_with(
+        "project-1",
+        expected_zip_hash="hash-1",
     )
 
 
@@ -306,7 +316,12 @@ async def test_generate_project_description_preview_invalid_format(monkeypatch):
 async def test_get_project_info_does_not_generate_description(monkeypatch):
     from app.api.v1.endpoints import projects_crud as crud_endpoint
 
-    project = SimpleNamespace(id="project-1", name="demo", source_type="zip")
+    project = SimpleNamespace(
+        id="project-1",
+        name="demo",
+        source_type="zip",
+        zip_file_hash="hash-1",
+    )
 
     db = AsyncMock()
     db.execute = AsyncMock(
@@ -318,20 +333,12 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
     db.add = Mock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
+    enqueue_project_info = Mock()
 
     monkeypatch.setattr(
-        crud_endpoint,
-        "get_pygount_stats",
-        AsyncMock(return_value='{"total": 1, "total_files": 1, "languages": {}}'),
-    )
-
-    def _fail_if_called(*_args, **_kwargs):
-        raise AssertionError("build_static_project_description should not be called")
-
-    monkeypatch.setattr(
-        crud_endpoint,
-        "build_static_project_description",
-        _fail_if_called,
+        crud_endpoint.project_info_refresher,
+        "enqueue",
+        enqueue_project_info,
     )
 
     info = await get_project_info(
@@ -341,9 +348,13 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
     )
 
     assert info.project_id == "project-1"
-    assert info.language_info == '{"total": 1, "total_files": 1, "languages": {}}'
+    assert info.language_info == '{"total": 0, "total_files": 0, "languages": {}}'
     assert info.description == ""
-    assert info.status == "completed"
+    assert info.status == "pending"
+    enqueue_project_info.assert_called_once_with(
+        "project-1",
+        expected_zip_hash="hash-1",
+    )
 
 
 @pytest.mark.asyncio
@@ -354,6 +365,7 @@ async def test_get_project_info_repository_is_hidden(monkeypatch):
         id="project-1",
         name="demo",
         source_type="repository",
+        zip_file_hash=None,
     )
 
     db = AsyncMock()
@@ -366,11 +378,6 @@ async def test_get_project_info_repository_is_hidden(monkeypatch):
     db.add = Mock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
-
-    def _fail_if_called(*_args, **_kwargs):
-        raise AssertionError("get_pygount_stats should not be called for repository projects")
-
-    monkeypatch.setattr(crud_endpoint, "get_pygount_stats", _fail_if_called)
 
     with pytest.raises(HTTPException) as exc_info:
         await get_project_info(
@@ -384,11 +391,12 @@ async def test_get_project_info_repository_is_hidden(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_project_info_pending_returns_pending_payload():
+async def test_get_project_info_pending_returns_pending_payload(monkeypatch):
     project = SimpleNamespace(
         id="project-1",
         name="demo",
         source_type="zip",
+        zip_file_hash="hash-2",
     )
     existing_info = SimpleNamespace(
         id="info-1",
@@ -406,6 +414,17 @@ async def test_get_project_info_pending_returns_pending_payload():
             _ScalarFirstResult(existing_info),
         ]
     )
+    db.add = Mock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    from app.api.v1.endpoints import projects_crud as crud_endpoint
+    enqueue_project_info = Mock()
+    monkeypatch.setattr(
+        crud_endpoint.project_info_refresher,
+        "enqueue",
+        enqueue_project_info,
+    )
 
     info = await get_project_info(
         id="project-1",
@@ -416,6 +435,10 @@ async def test_get_project_info_pending_returns_pending_payload():
     assert info.status == "pending"
     assert info.language_info == '{"total": 0, "total_files": 0, "languages": {}}'
     assert info.description == ""
+    enqueue_project_info.assert_called_once_with(
+        "project-1",
+        expected_zip_hash="hash-2",
+    )
 
 
 @pytest.mark.asyncio

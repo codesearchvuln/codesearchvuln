@@ -22,11 +22,19 @@ async def test_create_project_with_zip_returns_created_project(monkeypatch):
     db.refresh = AsyncMock()
     db.rollback = AsyncMock()
     delete_zip = AsyncMock()
+    enqueue_project_info = Mock()
+    enqueue_project_metrics = Mock()
+    project_holder: dict[str, object] = {}
+
+    async def _fake_load_project_for_response(db_session, project_id, *, include_metrics):
+        _ = (db_session, project_id, include_metrics)
+        return project_holder["project"]
 
     async def _fake_store_uploaded_archive_for_project(**kwargs):
         assert kwargs["commit"] is False
         kwargs["project"].description = "generated summary"
-        return {"message": "ok"}
+        project_holder["project"] = kwargs["project"]
+        return {"message": "ok", "file_hash": "hash-1"}
 
     monkeypatch.setattr(
         uploads_endpoint,
@@ -34,8 +42,23 @@ async def test_create_project_with_zip_returns_created_project(monkeypatch):
         _fake_store_uploaded_archive_for_project,
     )
     monkeypatch.setattr(uploads_endpoint, "delete_project_zip", delete_zip)
+    monkeypatch.setattr(
+        uploads_endpoint.project_metrics_refresher,
+        "enqueue",
+        enqueue_project_metrics,
+    )
+    monkeypatch.setattr(
+        uploads_endpoint,
+        "load_project_for_response",
+        _fake_load_project_for_response,
+    )
+    monkeypatch.setattr(
+        uploads_endpoint.project_info_refresher,
+        "enqueue",
+        enqueue_project_info,
+    )
 
-    project = await create_project_with_zip(
+    created_project = await create_project_with_zip(
         name="Demo Project",
         description="demo",
         default_branch="main",
@@ -45,14 +68,20 @@ async def test_create_project_with_zip_returns_created_project(monkeypatch):
         current_user=SimpleNamespace(id="user-1"),
     )
 
-    assert project.name == "Demo Project"
-    assert project.source_type == "zip"
-    assert project.repository_url is None
-    assert project.repository_type == "other"
-    db.add.assert_called_once_with(project)
+    assert created_project.name == "Demo Project"
+    assert created_project.source_type == "zip"
+    assert created_project.repository_url is None
+    assert created_project.repository_type == "other"
+    assert created_project.project_info_status == "pending"
+    db.add.assert_called_once_with(created_project)
     db.commit.assert_awaited_once()
-    db.refresh.assert_awaited_once_with(project)
+    db.refresh.assert_not_awaited()
     delete_zip.assert_not_awaited()
+    enqueue_project_metrics.assert_called_once_with(created_project.id)
+    enqueue_project_info.assert_called_once_with(
+        created_project.id,
+        expected_zip_hash="hash-1",
+    )
 
 
 @pytest.mark.asyncio
@@ -65,6 +94,7 @@ async def test_create_project_with_zip_rolls_back_invalid_archive(monkeypatch):
     db.refresh = AsyncMock()
     db.rollback = AsyncMock()
     delete_zip = AsyncMock()
+    enqueue_project_info = Mock()
 
     monkeypatch.setattr(
         uploads_endpoint,
@@ -77,6 +107,11 @@ async def test_create_project_with_zip_rolls_back_invalid_archive(monkeypatch):
         ),
     )
     monkeypatch.setattr(uploads_endpoint, "delete_project_zip", delete_zip)
+    monkeypatch.setattr(
+        uploads_endpoint.project_info_refresher,
+        "enqueue",
+        enqueue_project_info,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await create_project_with_zip(
@@ -92,6 +127,7 @@ async def test_create_project_with_zip_rolls_back_invalid_archive(monkeypatch):
     assert exc_info.value.status_code == 400
     db.rollback.assert_awaited_once()
     delete_zip.assert_awaited_once()
+    enqueue_project_info.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -104,6 +140,7 @@ async def test_create_project_with_zip_propagates_duplicate_conflict(monkeypatch
     db.refresh = AsyncMock()
     db.rollback = AsyncMock()
     delete_zip = AsyncMock()
+    enqueue_project_info = Mock()
 
     monkeypatch.setattr(
         uploads_endpoint,
@@ -116,6 +153,11 @@ async def test_create_project_with_zip_propagates_duplicate_conflict(monkeypatch
         ),
     )
     monkeypatch.setattr(uploads_endpoint, "delete_project_zip", delete_zip)
+    monkeypatch.setattr(
+        uploads_endpoint.project_info_refresher,
+        "enqueue",
+        enqueue_project_info,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await create_project_with_zip(
@@ -131,6 +173,7 @@ async def test_create_project_with_zip_propagates_duplicate_conflict(monkeypatch
     assert exc_info.value.status_code == 409
     db.rollback.assert_awaited_once()
     delete_zip.assert_awaited_once()
+    enqueue_project_info.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -143,6 +186,7 @@ async def test_create_project_with_zip_cleans_up_when_upload_pipeline_crashes(mo
     db.refresh = AsyncMock()
     db.rollback = AsyncMock()
     delete_zip = AsyncMock()
+    enqueue_project_info = Mock()
 
     monkeypatch.setattr(
         uploads_endpoint,
@@ -150,6 +194,11 @@ async def test_create_project_with_zip_cleans_up_when_upload_pipeline_crashes(mo
         AsyncMock(side_effect=RuntimeError("zip pipeline exploded")),
     )
     monkeypatch.setattr(uploads_endpoint, "delete_project_zip", delete_zip)
+    monkeypatch.setattr(
+        uploads_endpoint.project_info_refresher,
+        "enqueue",
+        enqueue_project_info,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await create_project_with_zip(
@@ -166,3 +215,4 @@ async def test_create_project_with_zip_cleans_up_when_upload_pipeline_crashes(mo
     assert "zip pipeline exploded" in str(exc_info.value.detail)
     db.rollback.assert_awaited_once()
     delete_zip.assert_awaited_once()
+    enqueue_project_info.assert_not_called()

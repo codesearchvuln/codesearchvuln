@@ -69,6 +69,7 @@ export interface Project {
   updated_at: string;
   owner?: Profile;
   management_metrics?: ProjectManagementMetrics | null;
+  project_info_status?: "pending" | "completed" | "failed" | string | null;
 }
 
 export interface ProjectMember {

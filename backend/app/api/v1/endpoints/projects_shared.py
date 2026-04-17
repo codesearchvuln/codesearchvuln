@@ -609,6 +609,7 @@ async def ensure_project_info_has_language_info(
     *,
     raise_on_error: bool = True,
     language_info_loader: Optional[Callable[[ProjectInfo], Awaitable[str]]] = None,
+    sync_compute: bool = True,
 ) -> ProjectInfo:
     project_info_query_result = await db.execute(
         select(ProjectInfo).where(ProjectInfo.project_id == project_id)
@@ -641,6 +642,17 @@ async def ensure_project_info_has_language_info(
         db.add(project_info_record)
         await db.commit()
         await db.refresh(project_info_record)
+
+    if not sync_compute:
+        project_info_record.status = "pending"
+        project_info_record.language_info = (
+            project_info_record.language_info or default_language_info_json
+        )
+        project_info_record.description = project_info_record.description or ""
+        db.add(project_info_record)
+        await db.commit()
+        await db.refresh(project_info_record)
+        return project_info_record
 
     try:
         project_info_record.status = "pending"
@@ -804,19 +816,16 @@ async def _store_uploaded_archive_for_project(
             detected_languages = detect_languages_from_paths(filtered_paths)
             project.programming_languages = _serialize_programming_languages(detected_languages)
             project.zip_file_hash = zip_hash
-            description, language_info_json, _description_source = await _resolve_project_description_bundle(
-                extracted_dir=temp_extract_dir,
-                extracted_files=extracted_files,
-                project_name=project.name,
-                db=db,
-                user_id=user_id,
-            )
-            project.description = description
 
             project_info_record = await _get_or_prepare_project_info(db, project.id)
-            project_info_record.language_info = language_info_json
-            project_info_record.description = description
-            project_info_record.status = "completed"
+            project_info_record.language_info = (
+                project_info_record.language_info or _default_language_info_json()
+            )
+            project_info_record.description = (
+                project_info_record.description
+                or str(project.description or "").strip()
+            )
+            project_info_record.status = "pending"
             await ProjectMetricsService.ensure_base_metrics(db, project.id)
             db.add(project)
             db.add(project_info_record)
@@ -845,6 +854,7 @@ async def _store_uploaded_archive_for_project(
                 "file_count": len(file_list),
                 "sample_files": file_list[:10],
                 "detected_languages": detected_languages,
+                "project_info_status": "pending",
             }
     except HTTPException:
         if archive_saved:
@@ -957,6 +967,7 @@ class ProjectResponse(BaseModel):
     updated_at: Optional[datetime] = None
     owner: Optional[OwnerSchema] = None
     management_metrics: Optional[ProjectManagementMetricsResponse] = None
+    project_info_status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

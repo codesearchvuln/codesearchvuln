@@ -10,6 +10,7 @@ from app.api.v1.endpoints.projects_shared import (
     _raise_if_project_hidden,
 )
 from app.services.project_metrics import project_metrics_refresher
+from app.services.upload.project_info_refresher import project_info_refresher
 
 router = APIRouter()
 
@@ -147,12 +148,54 @@ async def get_project_info(
 
     # 2. 检查权限
 
-    return await ensure_project_info_has_language_info(
-        db,
-        id,
-        raise_on_error=True,
-        language_info_loader=get_pygount_stats,
+    default_language_info_json = _default_language_info_json()
+    project_info_query_result = await db.execute(
+        select(ProjectInfo).where(ProjectInfo.project_id == id)
     )
+    project_info_record = project_info_query_result.scalars().first()
+
+    should_enqueue = False
+    should_commit = False
+
+    if not project_info_record:
+        project_info_record = ProjectInfo(
+            project_id=id,
+            status="pending",
+            created_at=datetime.now(timezone.utc),
+            language_info=default_language_info_json,
+            description="",
+        )
+        db.add(project_info_record)
+        should_commit = True
+        should_enqueue = True
+    else:
+        current_status = str(project_info_record.status or "").strip().lower()
+        has_language_info = bool(project_info_record.language_info)
+        if not has_language_info:
+            project_info_record.language_info = default_language_info_json
+            should_commit = True
+        if not project_info_record.description:
+            project_info_record.description = ""
+            should_commit = True
+
+        if current_status != "completed" or not has_language_info:
+            if current_status != "pending":
+                project_info_record.status = "pending"
+                should_commit = True
+            should_enqueue = True
+
+    if should_commit:
+        db.add(project_info_record)
+        await db.commit()
+        await db.refresh(project_info_record)
+
+    if should_enqueue:
+        project_info_refresher.enqueue(
+            id,
+            expected_zip_hash=str(project.zip_file_hash or ""),
+        )
+
+    return project_info_record
 
 
 @router.put("/{id}", response_model=ProjectResponse)

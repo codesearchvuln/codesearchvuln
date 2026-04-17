@@ -8,6 +8,7 @@ from app.api.v1.endpoints.projects_shared import (
     _validate_archive_extension,
 )
 from app.services.project_metrics import ProjectMetricsService, project_metrics_refresher
+from app.services.upload.project_info_refresher import project_info_refresher
 
 router = APIRouter()
 
@@ -180,7 +181,7 @@ async def create_project_with_zip(
     db.add(project)
 
     try:
-        await _store_uploaded_archive_for_project(
+        upload_result = await _store_uploaded_archive_for_project(
             db=db,
             project=project,
             file=file,
@@ -190,6 +191,10 @@ async def create_project_with_zip(
         try:
             await db.commit()
             project_metrics_refresher.enqueue(project.id)
+            project_info_refresher.enqueue(
+                project.id,
+                expected_zip_hash=str(upload_result.get("file_hash") or ""),
+            )
         except IntegrityError:
             await db.rollback()
             await delete_project_zip(project.id)
@@ -197,11 +202,14 @@ async def create_project_with_zip(
                 status_code=409,
                 detail="检测到相同压缩包已存在，请勿重复上传",
             )
-        return await load_project_for_response(
+        response_project = await load_project_for_response(
             db,
             project.id,
             include_metrics=False,
         )
+        if response_project is not None:
+            setattr(response_project, "project_info_status", "pending")
+        return response_project
     except HTTPException:
         await db.rollback()
         await delete_project_zip(project.id)
@@ -274,6 +282,10 @@ async def upload_project_zip(
         commit=True,
     )
     project_metrics_refresher.enqueue(project.id)
+    project_info_refresher.enqueue(
+        project.id,
+        expected_zip_hash=str(result.get("file_hash") or ""),
+    )
     return result
 
 

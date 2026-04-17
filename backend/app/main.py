@@ -45,6 +45,7 @@ logging.getLogger("weasyprint").setLevel(logging.WARNING)
 logging.getLogger("fontTools").setLevel(logging.WARNING)
 logging.getLogger("fontTools.subset").setLevel(logging.WARNING)
 logging.getLogger("fontTools.ttLib").setLevel(logging.WARNING)
+logging.getLogger("pygount").setLevel(logging.WARNING)
 
 warnings.filterwarnings(
     "ignore",
@@ -426,6 +427,7 @@ async def lifespan(app: FastAPI):
     try:
         from app.api.v1.endpoints.agent_tasks_runtime import _running_asyncio_tasks
         from app.api.v1.endpoints.static_tasks_shared import _shutdown_static_background_jobs
+        from app.services.upload.project_info_refresher import project_info_refresher
 
         active_agent_tasks = [
             task for task in list(_running_asyncio_tasks.values()) if task and not task.done()
@@ -436,11 +438,13 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(*active_agent_tasks, return_exceptions=True)
 
         cancelled_static_jobs = await _shutdown_static_background_jobs()
-        if active_agent_tasks or cancelled_static_jobs:
+        cancelled_project_info_jobs = await project_info_refresher.shutdown()
+        if active_agent_tasks or cancelled_static_jobs or cancelled_project_info_jobs:
             logger.info(
-                "  - 已取消后台任务: agent=%s static=%s",
+                "  - 已取消后台任务: agent=%s static=%s project_info=%s",
                 len(active_agent_tasks),
                 cancelled_static_jobs,
+                cancelled_project_info_jobs,
             )
     except Exception as e:
         logger.warning(f"停止后台任务失败: {e}")

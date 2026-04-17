@@ -472,7 +472,15 @@ export const api = {
     };
   },
 
-  async uploadProjectZip(id: string, file: File): Promise<{ message: string; original_filename: string; file_size: number }> {
+  async uploadProjectZip(
+    id: string,
+    file: File,
+  ): Promise<{
+    message: string;
+    original_filename: string;
+    file_size: number;
+    project_info_status?: string;
+  }> {
     const formData = new FormData();
     formData.append('file', file);
     const res = await apiClient.post(`/projects/${id}/zip`, formData, {

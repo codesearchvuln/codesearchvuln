@@ -34,6 +34,7 @@ from app.api.v1.endpoints.static_tasks_bandit import _extract_bandit_snapshot_ru
 from app.api.v1.endpoints.static_tasks_phpstan import _extract_phpstan_snapshot_rules
 from app.models.yasa import YasaRuleConfig
 from app.services.yasa_rules_snapshot import extract_yasa_snapshot_rules
+from app.services.upload.project_info_refresher import project_info_refresher
 from app.models.project_management_metrics import ProjectManagementMetrics
 from urllib.parse import urlencode
 
@@ -494,16 +495,23 @@ async def get_dashboard_snapshot(
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(days=int(range_days))
 
-    projects_result = await db.execute(select(Project.id, Project.name, Project.source_type))
+    projects_result = await db.execute(
+        select(Project.id, Project.name, Project.source_type, Project.zip_file_hash)
+    )
     project_rows = projects_result.all()
     project_name_map: Dict[str, str] = {
         str(project_id): str(project_name or "未知项目")
-        for project_id, project_name, _source_type in project_rows
+        for project_id, project_name, _source_type, _zip_file_hash in project_rows
         if project_id
     }
     project_source_type_map: Dict[str, str] = {
         str(project_id): str(source_type or "")
-        for project_id, _project_name, source_type in project_rows
+        for project_id, _project_name, source_type, _zip_file_hash in project_rows
+        if project_id
+    }
+    project_zip_hash_map: Dict[str, str] = {
+        str(project_id): str(zip_file_hash or "")
+        for project_id, _project_name, _source_type, zip_file_hash in project_rows
         if project_id
     }
     management_metrics_result = await db.execute(
@@ -550,6 +558,11 @@ async def get_dashboard_snapshot(
             db,
             project_id,
             raise_on_error=False,
+            sync_compute=False,
+        )
+        project_info_refresher.enqueue(
+            project_id,
+            expected_zip_hash=project_zip_hash_map.get(project_id, ""),
         )
         project_language_info_rows.append(
             (
