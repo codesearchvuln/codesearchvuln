@@ -803,6 +803,21 @@ async def _execute_agent_task(task_id: str):
                 if isinstance(seen_payload_digests, set):
                     seen_payload_digests.add(payload_digest)
                 persist_state["saved_count"] = int(persist_state.get("saved_count") or 0) + int(saved)
+                if int(saved) > 0:
+                    try:
+                        await _refresh_task_finding_counters(
+                            task_id,
+                            force=False,
+                            sync_state=persist_state,
+                            min_interval_seconds=1.0,
+                            reason="verification_persist",
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[AgentTask] Failed to refresh task counters after persist: task_id=%s error=%s",
+                            task_id,
+                            exc,
+                        )
                 return int(saved)
 
             async def _update_finding_callback(
@@ -944,6 +959,20 @@ async def _execute_agent_task(task_id: str):
                     finding_row.finding_identity = finding_identity
                     await update_db.commit()
                     await update_db.refresh(finding_row)
+                    try:
+                        await _refresh_task_finding_counters(
+                            task_id,
+                            force=True,
+                            sync_state=persist_state,
+                            min_interval_seconds=1.0,
+                            reason="finding_update",
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[AgentTask] Failed to refresh task counters after finding update: task_id=%s error=%s",
+                            task_id,
+                            exc,
+                        )
 
                     updated_finding = merge_finding_patch(
                         {
@@ -979,6 +1008,19 @@ async def _execute_agent_task(task_id: str):
                     updated_finding["finding_identity"] = finding_identity
                     return updated_finding
 
+            async def _refresh_task_summary_callback(
+                *,
+                force: bool = False,
+                reason: str = "workflow_runtime",
+            ) -> Dict[str, Any]:
+                return await _refresh_task_finding_counters(
+                    task_id,
+                    force=force,
+                    sync_state=persist_state,
+                    min_interval_seconds=1.0,
+                    reason=reason,
+                )
+
             input_data["persist_findings"] = _persist_findings_callback
 
             # 将持久化回调注入到已初始化的 Verification 保存工具
@@ -999,6 +1041,8 @@ async def _execute_agent_task(task_id: str):
             if _update_tool_instance is not None and hasattr(_update_tool_instance, "_update_callback"):
                 _update_tool_instance._update_callback = _update_finding_callback
                 logger.info("[Task] Injected update_finding_callback into update_vulnerability_finding tool")
+            if orchestrator is not None:
+                setattr(orchestrator, "_refresh_task_summary_callback", _refresh_task_summary_callback)
 
             # 执行 Orchestrator
             await event_emitter.emit_phase_start("orchestration", "🎯 Orchestrator 开始编排审计流程")

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
@@ -11,7 +12,15 @@ from sqlalchemy import delete, func, inspect as sa_inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import NO_VALUE
 
-from app.models.agent_task import AgentTask, AgentTaskStatus, AgentTreeNode
+from app.db.session import async_session_factory
+from app.models.agent_task import (
+    AgentFinding,
+    AgentTask,
+    AgentTaskStatus,
+    AgentTreeNode,
+    FindingStatus,
+    VulnerabilitySeverity,
+)
 from app.services.agent.event_manager import EventManager
 from app.services.project_metrics import project_metrics_refresher
 
@@ -27,6 +36,109 @@ _running_event_managers: Dict[str, EventManager] = {}
 #  已取消的任务集合（用于前置操作的取消检查）
 _cancelled_tasks: Set[str] = set()
 TOOL_DRAIN_TIMEOUT_SECONDS = 180
+
+
+async def recompute_task_finding_counters(
+    db: AsyncSession,
+    task: AgentTask,
+) -> Dict[str, int]:
+    result = await db.execute(
+        select(AgentFinding).where(AgentFinding.task_id == task.id)
+    )
+    findings = result.scalars().all()
+
+    task.findings_count = 0
+    task.verified_count = 0
+    task.false_positive_count = 0
+    task.critical_count = 0
+    task.high_count = 0
+    task.medium_count = 0
+    task.low_count = 0
+
+    for finding in findings:
+        normalized_status = str(getattr(finding, "status", "") or "").strip().lower()
+        if normalized_status == FindingStatus.FALSE_POSITIVE:
+            task.false_positive_count += 1
+            continue
+
+        task.findings_count += 1
+        severity = str(getattr(finding, "severity", "") or "").strip().lower()
+        if severity == VulnerabilitySeverity.CRITICAL:
+            task.critical_count += 1
+        elif severity == VulnerabilitySeverity.HIGH:
+            task.high_count += 1
+        elif severity == VulnerabilitySeverity.MEDIUM:
+            task.medium_count += 1
+        elif severity == VulnerabilitySeverity.LOW:
+            task.low_count += 1
+
+        if bool(getattr(finding, "is_verified", False)) or normalized_status == FindingStatus.VERIFIED:
+            task.verified_count += 1
+
+    return {
+        "findings_count": int(task.findings_count or 0),
+        "verified_count": int(task.verified_count or 0),
+        "false_positive_count": int(task.false_positive_count or 0),
+        "critical_count": int(task.critical_count or 0),
+        "high_count": int(task.high_count or 0),
+        "medium_count": int(task.medium_count or 0),
+        "low_count": int(task.low_count or 0),
+    }
+
+
+async def _refresh_task_finding_counters(
+    task_id: str,
+    *,
+    force: bool = False,
+    sync_state: Optional[Dict[str, Any]] = None,
+    min_interval_seconds: float = 0.0,
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized_task_id = str(task_id or "").strip()
+    if not normalized_task_id:
+        return {"updated": False, "reason": "missing_task_id"}
+
+    now_monotonic = time.monotonic()
+    if isinstance(sync_state, dict) and not force and min_interval_seconds > 0:
+        last_sync = float(sync_state.get("last_task_summary_sync_monotonic") or 0.0)
+        if last_sync > 0:
+            elapsed = now_monotonic - last_sync
+            if elapsed < float(min_interval_seconds):
+                sync_state["task_summary_refresh_pending"] = True
+                return {
+                    "updated": False,
+                    "reason": "throttled",
+                    "elapsed_seconds": elapsed,
+                }
+
+    async with async_session_factory() as db:
+        task = await db.get(AgentTask, normalized_task_id)
+        if task is None:
+            return {"updated": False, "reason": "task_not_found"}
+
+        counters = await recompute_task_finding_counters(db, task)
+        await db.commit()
+        project_id = getattr(task, "project_id", None)
+
+    if isinstance(sync_state, dict):
+        sync_state["last_task_summary_sync_monotonic"] = now_monotonic
+        sync_state["task_summary_refresh_pending"] = False
+
+    if project_id:
+        project_metrics_refresher.enqueue(project_id)
+
+    logger.info(
+        "[AgentTask] Refreshed task finding counters: task_id=%s reason=%s counters=%s",
+        normalized_task_id,
+        reason or "runtime_sync",
+        counters,
+    )
+    return {
+        "updated": True,
+        "reason": reason or "runtime_sync",
+        "task_id": normalized_task_id,
+        "counters": counters,
+    }
 
 
 def is_task_cancelled(task_id: str) -> bool:

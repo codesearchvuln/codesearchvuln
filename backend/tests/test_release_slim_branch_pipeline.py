@@ -802,6 +802,7 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
 
     assert services_metadata["revision"] == manifest["revision"]
     assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
+    assert services_metadata["backend_provenance_mode"] == "built_this_run"
     assert services_metadata["images"]["backend"]["source_ref"] == manifest["images"]["backend"]["ref"]
     assert services_metadata["images"]["backend"]["local_tag"] == f"vulhunter-local/backend:{manifest['revision']}"
     assert services_metadata["images"]["postgres"]["local_tag"] == f"vulhunter-local/postgres:{manifest['revision']}"

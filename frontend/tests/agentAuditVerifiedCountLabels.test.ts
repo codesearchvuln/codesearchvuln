@@ -21,12 +21,12 @@ const treeNodePath = path.join(
 	"src/pages/AgentAudit/components/AgentTreeNode.tsx",
 );
 
-test("智能扫描详情页相关计数字样和 root agent 计数都使用已验证漏洞口径", () => {
+test("智能扫描详情页顶部卡片显示有效漏洞，root agent 计数仍使用已验证漏洞口径", () => {
 	const statsSource = readFileSync(statsPanelPath, "utf8");
 	const detailPanelSource = readFileSync(detailPanelPath, "utf8");
 	const treeNodeSource = readFileSync(treeNodePath, "utf8");
 
-	assert.match(statsSource, /label="已验证漏洞"/);
+	assert.match(statsSource, /label="有效漏洞"/);
 	assert.match(detailPanelSource, /agent\.verified_findings_count/);
 	assert.match(treeNodeSource, /node\.verified_findings_count/);
 });

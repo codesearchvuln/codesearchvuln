@@ -71,7 +71,7 @@ export const StatsPanel = memo(function StatsPanel({ summary, projectName }: Sta
         />
         <MetricCard
           icon={<Bug className="h-4 w-4" />}
-          label="已验证漏洞"
+          label="有效漏洞"
           value={summary.totalFindings.toLocaleString()}
           subtext=""
         />

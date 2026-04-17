@@ -453,7 +453,15 @@ class AuditWorkflowEngine:
                 f"🛡️ [Workflow] 开始 Verification 阶段，漏洞队列共 {vuln_queue_size} 条",
             )
             await self._run_verification_phase(state, task_id)
+            await self._refresh_task_summary_if_available(
+                force=True,
+                reason="verification_phase_completed",
+            )
             await self._sync_verification_tool_buffer_to_db(task_id)
+            await self._refresh_task_summary_if_available(
+                force=True,
+                reason="verification_buffer_synced",
+            )
             
             #  记录 Verification 完成后的内存
             if self.enable_memory_monitoring:
@@ -1216,6 +1224,32 @@ class AuditWorkflowEngine:
             state.vuln_queue_findings_processed,
             len(self.orchestrator._all_findings),
         )
+
+    async def _refresh_task_summary_if_available(
+        self,
+        *,
+        force: bool,
+        reason: str,
+    ) -> None:
+        callback = getattr(self.orchestrator, "_refresh_task_summary_callback", None)
+        if callback is None or not callable(callback):
+            return
+
+        try:
+            result = await callback(force=force, reason=reason)
+            if isinstance(result, dict) and result.get("updated"):
+                logger.info(
+                    "[WorkflowEngine] Task summary refresh completed: task_id=%s reason=%s",
+                    self.task_id,
+                    reason,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[WorkflowEngine] Task summary refresh failed: task_id=%s reason=%s error=%s",
+                self.task_id,
+                reason,
+                exc,
+            )
 
     def _collect_verification_findings_for_persistence(
         self,

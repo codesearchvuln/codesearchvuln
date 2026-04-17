@@ -65,40 +65,7 @@ async def _recompute_task_finding_counters(
     db: AsyncSession,
     task: AgentTask,
 ) -> None:
-    result = await db.execute(
-        select(AgentFinding).where(AgentFinding.task_id == task.id)
-    )
-    findings = result.scalars().all()
-
-    task.findings_count = 0
-    task.verified_count = 0
-    task.false_positive_count = 0
-    task.critical_count = 0
-    task.high_count = 0
-    task.medium_count = 0
-    task.low_count = 0
-
-    for finding in findings:
-        normalized_status = str(getattr(finding, "status", "") or "").strip().lower()
-        if normalized_status == FindingStatus.FALSE_POSITIVE:
-            task.false_positive_count += 1
-            continue
-
-        task.findings_count += 1
-        severity = str(getattr(finding, "severity", "") or "").strip().lower()
-        if severity == VulnerabilitySeverity.CRITICAL:
-            task.critical_count += 1
-        elif severity == VulnerabilitySeverity.HIGH:
-            task.high_count += 1
-        elif severity == VulnerabilitySeverity.MEDIUM:
-            task.medium_count += 1
-        elif severity == VulnerabilitySeverity.LOW:
-            task.low_count += 1
-
-        if bool(getattr(finding, "is_verified", False)) or _is_manually_verified_status(
-            normalized_status
-        ):
-            task.verified_count += 1
+    await recompute_task_finding_counters(db, task)
 
 @router.get("/{task_id}/findings", response_model=List[AgentFindingResponse])
 async def list_agent_findings(
