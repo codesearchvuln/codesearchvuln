@@ -66,8 +66,8 @@ docker compose ps
 
 先准备两份与你当前 Docker server 架构匹配、且与当前 release tree 来自同一个 snapshot 的离线镜像包，并放到 release 根目录或 `images/`。用户侧仍然只需要这两份 tar 包：
 
-- `vulhunter-services-images-<arch>.tar.zst`
-- `vulhunter-scanner-images-<arch>.tar.zst`
+- `codesearchvuln-services-images-<arch>.tar.zst`
+- `codesearchvuln-scanner-images-<arch>.tar.zst`
 
 ### Bash / WSL
 

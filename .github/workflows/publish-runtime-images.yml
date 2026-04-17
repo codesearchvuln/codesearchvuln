@@ -77,7 +77,7 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   GHCR_REGISTRY: ghcr.io
-  VULHUNTER_IMAGE_NAMESPACE: unbengable12
+  VULHUNTER_IMAGE_NAMESPACE: codesearchvuln
 
 jobs:
   prepare:
@@ -144,12 +144,12 @@ jobs:
           file: ./docker/frontend.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:buildcache-frontend-runtime-amd64
             type=gha,scope=frontend-runtime-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:buildcache-frontend-runtime-amd64,mode=max
             type=gha,mode=max,scope=frontend-runtime-amd64
           provenance: false
           sbom: false
@@ -157,7 +157,7 @@ jobs:
       - name: 记录 amd64 前端镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -197,12 +197,12 @@ jobs:
           file: ./docker/frontend.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:buildcache-frontend-runtime-arm64
             type=gha,scope=frontend-runtime-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:buildcache-frontend-runtime-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:buildcache-frontend-runtime-arm64,mode=max
             type=gha,mode=max,scope=frontend-runtime-arm64
           provenance: false
           sbom: false
@@ -210,7 +210,7 @@ jobs:
       - name: 记录 arm64 前端镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -247,9 +247,9 @@ jobs:
       - name: 组装多架构前端 manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend
           IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-frontend:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-frontend-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-frontend-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -342,15 +342,15 @@ jobs:
           target: runtime-plain
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           build-args: |
             DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
             VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-plain-amd64
             type=gha,scope=backend-runtime-plain-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-plain-amd64,mode=max
             type=gha,mode=max,scope=backend-runtime-plain-amd64
           provenance: false
           sbom: false
@@ -358,7 +358,7 @@ jobs:
       - name: 记录 amd64 后端镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -417,15 +417,15 @@ jobs:
           target: runtime-plain
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           build-args: |
             DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
             VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-plain-arm64
             type=gha,scope=backend-runtime-plain-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-plain-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-plain-arm64,mode=max
             type=gha,mode=max,scope=backend-runtime-plain-arm64
           provenance: false
           sbom: false
@@ -433,7 +433,7 @@ jobs:
       - name: 记录 arm64 后端镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -470,9 +470,9 @@ jobs:
       - name: 组装多架构后端 manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend
           IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-backend-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-backend-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -549,15 +549,15 @@ jobs:
           target: runtime-cython
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-hardened
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:${{ needs.prepare.outputs.tag }}-hardened
           build-args: |
             DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
             VCS_REF=${{ inputs.revision != '' && inputs.revision || github.sha }}
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-cython
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-cython
             type=gha,scope=backend-runtime-cython
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache-runtime-cython,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend:buildcache-runtime-cython,mode=max
             type=gha,mode=max,scope=backend-runtime-cython
           provenance: false
           sbom: false
@@ -565,7 +565,7 @@ jobs:
       - name: 验证可选 hardened 后端镜像可解析
         run: |
           set -euo pipefail
-          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${IMAGE_TAG}" >/dev/null
+          docker manifest inspect "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-backend:${IMAGE_TAG}" >/dev/null
         env:
           IMAGE_TAG: ${{ format('{0}-hardened', needs.prepare.outputs.tag) }}
 
@@ -573,7 +573,7 @@ jobs:
         id: capture
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-backend
         run: |
           set -euo pipefail
           echo "ref=${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
@@ -613,12 +613,12 @@ jobs:
           file: ./docker/yasa-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:buildcache-yasa-runner-amd64
             type=gha,scope=yasa-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:buildcache-yasa-runner-amd64,mode=max
             type=gha,mode=max,scope=yasa-runner-amd64
           provenance: false
           sbom: false
@@ -626,7 +626,7 @@ jobs:
       - name: 记录 amd64 YASA runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -666,12 +666,12 @@ jobs:
           file: ./docker/yasa-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:buildcache-yasa-runner-arm64
             type=gha,scope=yasa-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:buildcache-yasa-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:buildcache-yasa-runner-arm64,mode=max
             type=gha,mode=max,scope=yasa-runner-arm64
           provenance: false
           sbom: false
@@ -679,7 +679,7 @@ jobs:
       - name: 记录 arm64 YASA runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -716,8 +716,8 @@ jobs:
       - name: 组装多架构 YASA runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-yasa-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-yasa-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-yasa-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-yasa-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -768,12 +768,12 @@ jobs:
           file: ./docker/opengrep-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:buildcache-opengrep-runner-amd64
             type=gha,scope=opengrep-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:buildcache-opengrep-runner-amd64,mode=max
             type=gha,mode=max,scope=opengrep-runner-amd64
           provenance: false
           sbom: false
@@ -781,7 +781,7 @@ jobs:
       - name: 记录 amd64 OpenGrep runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -821,12 +821,12 @@ jobs:
           file: ./docker/opengrep-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:buildcache-opengrep-runner-arm64
             type=gha,scope=opengrep-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:buildcache-opengrep-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:buildcache-opengrep-runner-arm64,mode=max
             type=gha,mode=max,scope=opengrep-runner-arm64
           provenance: false
           sbom: false
@@ -834,7 +834,7 @@ jobs:
       - name: 记录 arm64 OpenGrep runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -871,8 +871,8 @@ jobs:
       - name: 组装多架构 OpenGrep runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-opengrep-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-opengrep-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-opengrep-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-opengrep-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -923,12 +923,12 @@ jobs:
           file: ./docker/bandit-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:buildcache-bandit-runner-amd64
             type=gha,scope=bandit-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:buildcache-bandit-runner-amd64,mode=max
             type=gha,mode=max,scope=bandit-runner-amd64
           provenance: false
           sbom: false
@@ -936,7 +936,7 @@ jobs:
       - name: 记录 amd64 Bandit runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -976,12 +976,12 @@ jobs:
           file: ./docker/bandit-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:buildcache-bandit-runner-arm64
             type=gha,scope=bandit-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:buildcache-bandit-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:buildcache-bandit-runner-arm64,mode=max
             type=gha,mode=max,scope=bandit-runner-arm64
           provenance: false
           sbom: false
@@ -989,7 +989,7 @@ jobs:
       - name: 记录 arm64 Bandit runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1026,8 +1026,8 @@ jobs:
       - name: 组装多架构 Bandit runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-bandit-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-bandit-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-bandit-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-bandit-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -1078,12 +1078,12 @@ jobs:
           file: ./docker/gitleaks-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:buildcache-gitleaks-runner-amd64
             type=gha,scope=gitleaks-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:buildcache-gitleaks-runner-amd64,mode=max
             type=gha,mode=max,scope=gitleaks-runner-amd64
           provenance: false
           sbom: false
@@ -1091,7 +1091,7 @@ jobs:
       - name: 记录 amd64 Gitleaks runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1131,12 +1131,12 @@ jobs:
           file: ./docker/gitleaks-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:buildcache-gitleaks-runner-arm64
             type=gha,scope=gitleaks-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:buildcache-gitleaks-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:buildcache-gitleaks-runner-arm64,mode=max
             type=gha,mode=max,scope=gitleaks-runner-arm64
           provenance: false
           sbom: false
@@ -1144,7 +1144,7 @@ jobs:
       - name: 记录 arm64 Gitleaks runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1181,8 +1181,8 @@ jobs:
       - name: 组装多架构 Gitleaks runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-gitleaks-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-gitleaks-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-gitleaks-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-gitleaks-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -1233,12 +1233,12 @@ jobs:
           file: ./docker/phpstan-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:buildcache-phpstan-runner-amd64
             type=gha,scope=phpstan-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:buildcache-phpstan-runner-amd64,mode=max
             type=gha,mode=max,scope=phpstan-runner-amd64
           provenance: false
           sbom: false
@@ -1246,7 +1246,7 @@ jobs:
       - name: 记录 amd64 PHPStan runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1286,12 +1286,12 @@ jobs:
           file: ./docker/phpstan-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:buildcache-phpstan-runner-arm64
             type=gha,scope=phpstan-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:buildcache-phpstan-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:buildcache-phpstan-runner-arm64,mode=max
             type=gha,mode=max,scope=phpstan-runner-arm64
           provenance: false
           sbom: false
@@ -1299,7 +1299,7 @@ jobs:
       - name: 记录 arm64 PHPStan runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1336,8 +1336,8 @@ jobs:
       - name: 组装多架构 PHPStan runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-phpstan-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-phpstan-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-phpstan-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-phpstan-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -1388,12 +1388,12 @@ jobs:
           file: ./docker/flow-parser-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:buildcache-flow-parser-runner-amd64
             type=gha,scope=flow-parser-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:buildcache-flow-parser-runner-amd64,mode=max
             type=gha,mode=max,scope=flow-parser-runner-amd64
           provenance: false
           sbom: false
@@ -1401,7 +1401,7 @@ jobs:
       - name: 记录 amd64 flow/parser runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1441,12 +1441,12 @@ jobs:
           file: ./docker/flow-parser-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:buildcache-flow-parser-runner-arm64
             type=gha,scope=flow-parser-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:buildcache-flow-parser-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:buildcache-flow-parser-runner-arm64,mode=max
             type=gha,mode=max,scope=flow-parser-runner-arm64
           provenance: false
           sbom: false
@@ -1454,7 +1454,7 @@ jobs:
       - name: 记录 arm64 flow/parser runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1491,8 +1491,8 @@ jobs:
       - name: 组装多架构 flow/parser runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-flow-parser-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-flow-parser-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-flow-parser-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-flow-parser-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -1543,12 +1543,12 @@ jobs:
           file: ./docker/pmd-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:buildcache-pmd-runner-amd64
             type=gha,scope=pmd-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:buildcache-pmd-runner-amd64,mode=max
             type=gha,mode=max,scope=pmd-runner-amd64
           provenance: false
           sbom: false
@@ -1556,7 +1556,7 @@ jobs:
       - name: 记录 amd64 PMD runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1596,12 +1596,12 @@ jobs:
           file: ./docker/pmd-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:buildcache-pmd-runner-arm64
             type=gha,scope=pmd-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:buildcache-pmd-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:buildcache-pmd-runner-arm64,mode=max
             type=gha,mode=max,scope=pmd-runner-arm64
           provenance: false
           sbom: false
@@ -1609,7 +1609,7 @@ jobs:
       - name: 记录 arm64 PMD runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1646,8 +1646,8 @@ jobs:
       - name: 组装多架构 PMD runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-pmd-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-pmd-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-pmd-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -1698,12 +1698,12 @@ jobs:
           file: ./docker/sandbox-runner.Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-amd64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:buildcache-sandbox-runner-amd64
             type=gha,scope=sandbox-runner-amd64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-amd64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:buildcache-sandbox-runner-amd64,mode=max
             type=gha,mode=max,scope=sandbox-runner-amd64
           provenance: false
           sbom: false
@@ -1711,7 +1711,7 @@ jobs:
       - name: 记录 amd64 sandbox-runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1751,12 +1751,12 @@ jobs:
           file: ./docker/sandbox-runner.Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           cache-from: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-arm64
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:buildcache-sandbox-runner-arm64
             type=gha,scope=sandbox-runner-arm64
           cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:buildcache-sandbox-runner-arm64,mode=max
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:buildcache-sandbox-runner-arm64,mode=max
             type=gha,mode=max,scope=sandbox-runner-arm64
           provenance: false
           sbom: false
@@ -1764,7 +1764,7 @@ jobs:
       - name: 记录 arm64 sandbox-runner 镜像标签
         id: capture
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
         run: |
           set -euo pipefail
           echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
@@ -1801,8 +1801,8 @@ jobs:
       - name: 组装多架构 sandbox-runner manifest
         id: assemble
         env:
-          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner
-          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-sandbox-runner:${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/codesearchvuln-sandbox-runner:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-sandbox-runner-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-sandbox-runner-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
@@ -1853,17 +1853,17 @@ jobs:
           import os
 
           mapping = {
-              "publish-frontend": "vulhunter-frontend",
-              "publish-backend": "vulhunter-backend",
-              "publish-backend-hardened": "vulhunter-backend",
-              "publish-yasa-runner": "vulhunter-yasa-runner",
-              "publish-opengrep-runner": "vulhunter-opengrep-runner",
-              "publish-bandit-runner": "vulhunter-bandit-runner",
-              "publish-gitleaks-runner": "vulhunter-gitleaks-runner",
-              "publish-phpstan-runner": "vulhunter-phpstan-runner",
-              "publish-flow-parser-runner": "vulhunter-flow-parser-runner",
-              "publish-pmd-runner": "vulhunter-pmd-runner",
-              "publish-sandbox-runner": "vulhunter-sandbox-runner",
+              "publish-frontend": "codesearchvuln-frontend",
+              "publish-backend": "codesearchvuln-backend",
+              "publish-backend-hardened": "codesearchvuln-backend",
+              "publish-yasa-runner": "codesearchvuln-yasa-runner",
+              "publish-opengrep-runner": "codesearchvuln-opengrep-runner",
+              "publish-bandit-runner": "codesearchvuln-bandit-runner",
+              "publish-gitleaks-runner": "codesearchvuln-gitleaks-runner",
+              "publish-phpstan-runner": "codesearchvuln-phpstan-runner",
+              "publish-flow-parser-runner": "codesearchvuln-flow-parser-runner",
+              "publish-pmd-runner": "codesearchvuln-pmd-runner",
+              "publish-sandbox-runner": "codesearchvuln-sandbox-runner",
           }
           needs = json.loads(os.environ["NEEDS_JSON"])
           packages = sorted(
@@ -1990,7 +1990,7 @@ jobs:
           set -euo pipefail
 
           if [[ "${REQUIRE_COMPLETE_MANIFEST}" == "true" && "${BUILD_BACKEND}" == "true" && -z "${BACKEND_REF}" ]]; then
-            echo "::error::Release manifest requires a freshly built backend image ref; refusing to fall back to ${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend:${IMAGE_TAG}" >&2
+            echo "::error::Release manifest requires a freshly built backend image ref; refusing to fall back to ${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-backend:${IMAGE_TAG}" >&2
             exit 1
           fi
 
@@ -2054,20 +2054,20 @@ jobs:
             set_manifest_entry "${prefix}" "${final_ref}" "${provenance_mode}" "${provenance_source_tag}"
           }
 
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-backend" "${BACKEND_REF}" "BACKEND"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-backend" "${BACKEND_REF}" "BACKEND"
           resolve_external_ref "${POSTGRES_IMAGE}" "POSTGRES"
           resolve_external_ref "${REDIS_IMAGE}" "REDIS"
           resolve_external_ref "${ADMINER_IMAGE}" "ADMINER"
           resolve_external_ref "${SCAN_WORKSPACE_INIT_IMAGE}" "SCAN_WORKSPACE_INIT"
           resolve_external_ref "${STATIC_FRONTEND_IMAGE}" "STATIC_FRONTEND"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}" "SANDBOX_RUNNER"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}" "SCANNER_YASA"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner" "${SCANNER_OPENGREP_REF}" "SCANNER_OPENGREP"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-bandit-runner" "${SCANNER_BANDIT_REF}" "SCANNER_BANDIT"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-gitleaks-runner" "${SCANNER_GITLEAKS_REF}" "SCANNER_GITLEAKS"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-phpstan-runner" "${SCANNER_PHPSTAN_REF}" "SCANNER_PHPSTAN"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-pmd-runner" "${SCANNER_PMD_REF}" "SCANNER_PMD"
-          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-flow-parser-runner" "${FLOW_PARSER_RUNNER_REF}" "FLOW_PARSER_RUNNER"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-sandbox-runner" "${SANDBOX_RUNNER_REF}" "SANDBOX_RUNNER"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-yasa-runner" "${SCANNER_YASA_REF}" "SCANNER_YASA"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-opengrep-runner" "${SCANNER_OPENGREP_REF}" "SCANNER_OPENGREP"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-bandit-runner" "${SCANNER_BANDIT_REF}" "SCANNER_BANDIT"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-gitleaks-runner" "${SCANNER_GITLEAKS_REF}" "SCANNER_GITLEAKS"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-phpstan-runner" "${SCANNER_PHPSTAN_REF}" "SCANNER_PHPSTAN"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-pmd-runner" "${SCANNER_PMD_REF}" "SCANNER_PMD"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/codesearchvuln-flow-parser-runner" "${FLOW_PARSER_RUNNER_REF}" "FLOW_PARSER_RUNNER"
 
           manifest_json="$(python3 - <<'PY'
           from __future__ import annotations

@@ -68,7 +68,7 @@ jobs:
           echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
           echo "runtime_tag=latest" >> "$GITHUB_OUTPUT"
           echo "snapshot_tag=${snapshot_tag}" >> "$GITHUB_OUTPUT"
-          echo "snapshot_title=VulHunter Offline Snapshot ${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_title=codesearchvuln Offline Snapshot ${source_sha}" >> "$GITHUB_OUTPUT"
 
   create-draft-release:
     needs: prepare-release
@@ -262,7 +262,7 @@ jobs:
           set -euo pipefail
 
           gh release upload "${SNAPSHOT_TAG}" \
-            "${RUNNER_TEMP}/release-assets/vulhunter-${BUNDLE}-images-${ARCH}.tar.zst" \
+            "${RUNNER_TEMP}/release-assets/codesearchvuln-${BUNDLE}-images-${ARCH}.tar.zst" \
             "${RUNNER_TEMP}/release-assets/images-manifest-${BUNDLE}-${ARCH}.json" \
             --clobber
 
@@ -564,13 +564,13 @@ jobs:
             gh release edit "${SEMANTIC_TAG}" \
               "${target_args[@]}" \
               --latest=false \
-              --title "VulHunter ${SEMANTIC_TAG}" \
+              --title "codesearchvuln ${SEMANTIC_TAG}" \
               --notes-file "${notes_file}"
           else
             gh release create "${SEMANTIC_TAG}" \
               "${target_args[@]}" \
               --latest=false \
-              --title "VulHunter ${SEMANTIC_TAG}" \
+              --title "codesearchvuln ${SEMANTIC_TAG}" \
               --notes-file "${notes_file}"
           fi
 
@@ -586,16 +586,16 @@ jobs:
           set -uo pipefail
 
           assets=(
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst"
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst"
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst"
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/codesearchvuln-services-images-amd64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/codesearchvuln-services-images-arm64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/codesearchvuln-scanner-images-amd64.tar.zst"
+            "${SNAPSHOT_ASSET_DIR}/codesearchvuln-scanner-images-arm64.tar.zst"
             "${SNAPSHOT_ASSET_DIR}/images-manifest-services-amd64.json"
             "${SNAPSHOT_ASSET_DIR}/images-manifest-services-arm64.json"
             "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json"
             "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
             "${RELEASE_TREE}/release-snapshot-lock.json"
-            "./scripts/release-assets/offline-bootstrap.sh#AuditTool-offline-bootstrap.sh"
+            "./scripts/release-assets/offline-bootstrap.sh#codesearchvuln-offline-bootstrap.sh"
           )
 
           max_parallel="${UPLOAD_PARALLELISM}"

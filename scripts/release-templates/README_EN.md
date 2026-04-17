@@ -66,8 +66,8 @@ If the homepage does not come up at all, backend may be refusing to start becaus
 
 Download both offline bundles for your current Docker server architecture, make sure they come from the same snapshot as this release tree, and place them in the release root or `images/`. End users still only need these two tarballs:
 
-- `vulhunter-services-images-<arch>.tar.zst`
-- `vulhunter-scanner-images-<arch>.tar.zst`
+- `codesearchvuln-services-images-<arch>.tar.zst`
+- `codesearchvuln-scanner-images-<arch>.tar.zst`
 
 ### Bash / WSL
 

@@ -18,12 +18,12 @@ die() {
 
 usage() {
   cat <<'EOF'
-Usage: bash ./AuditTool-offline-bootstrap.sh
+Usage: bash ./codesearchvuln-offline-bootstrap.sh
 
 Run from a directory that contains:
-  - exactly one AuditTool-*.*.*.zip or AuditTool-*.*.*.tar.gz
-  - exactly one vulhunter-services-images-(amd64|arm64).tar.zst
-  - exactly one vulhunter-scanner-images-(amd64|arm64).tar.zst
+  - exactly one codesearchvuln-*.*.*.zip or codesearchvuln-*.*.*.tar.gz
+  - exactly one codesearchvuln-services-images-(amd64|arm64).tar.zst
+  - exactly one codesearchvuln-scanner-images-(amd64|arm64).tar.zst
 
 The script extracts the release archive, moves both bundle files into the
 resolved release root, then delegates to bash ./scripts/offline-up.sh.
@@ -65,7 +65,7 @@ discover_single_release_archive() {
   local matches=()
   local candidate
 
-  for candidate in "$CURRENT_DIR"/AuditTool-*.zip "$CURRENT_DIR"/AuditTool-*.tar.gz; do
+  for candidate in "$CURRENT_DIR"/codesearchvuln-*.zip "$CURRENT_DIR"/codesearchvuln-*.tar.gz; do
     [[ -f "$candidate" ]] || continue
     matches+=("$candidate")
   done
@@ -79,7 +79,7 @@ discover_single_bundle() {
   local matches=()
   local candidate
 
-  for candidate in "$CURRENT_DIR"/"vulhunter-${label}-images-"*.tar.zst; do
+  for candidate in "$CURRENT_DIR"/"codesearchvuln-${label}-images-"*.tar.zst; do
     [[ -f "$candidate" ]] || continue
     matches+=("$candidate")
   done
@@ -91,7 +91,7 @@ discover_single_bundle() {
 bundle_arch() {
   local filename="$1"
 
-  if [[ "$filename" =~ ^vulhunter-(services|scanner)-images-(amd64|arm64)\.tar\.zst$ ]]; then
+  if [[ "$filename" =~ ^codesearchvuln-(services|scanner)-images-(amd64|arm64)\.tar\.zst$ ]]; then
     printf '%s' "${BASH_REMATCH[2]}"
     return 0
   fi
