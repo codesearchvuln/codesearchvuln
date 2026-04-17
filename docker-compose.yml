@@ -42,7 +42,7 @@ services:
       - vulhunter-network
 
   db-bootstrap:
-    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:5f7f1e2b2f08f3f01c5721e73be55c45d59eb35cd28d79eb5b123ed3c230cb34}
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:1389672d8333a5934ff5b1cb173b4896351bc98cb3dda97804cf22688b6d004e}
     restart: "no"
     working_dir: /app
     volumes:
@@ -64,7 +64,7 @@ services:
       - vulhunter-network
 
   backend:
-    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:5f7f1e2b2f08f3f01c5721e73be55c45d59eb35cd28d79eb5b123ed3c230cb34}
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:1389672d8333a5934ff5b1cb173b4896351bc98cb3dda97804cf22688b6d004e}
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -85,7 +85,6 @@ services:
       ASYNCPG_DSN: postgresql://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
       REDIS_URL: redis://redis:6379/0
       RESET_STATIC_SCAN_TABLES_ON_DEPLOY: "false"
-      INIT_DB_SEED_PROJECTS: "${INIT_DB_SEED_PROJECTS:-false}"
       AGENT_ENABLED: "true"
       SANDBOX_ENABLED: "true"
       YASA_ENABLED: ${YASA_ENABLED:-true}
@@ -104,14 +103,14 @@ services:
       BACKEND_PYPI_INDEX_PRIMARY: ${BACKEND_PYPI_INDEX_PRIMARY:-}
       BACKEND_PYPI_INDEX_FALLBACK: ${BACKEND_PYPI_INDEX_FALLBACK:-}
       BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.bfsu.edu.cn/pypi/web/simple/,https://pypi.org/simple}
-      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-ghcr.io/codesearchvuln/vulhunter-yasa-runner@sha256:ea14429613823ca136da145a56ecad5017e108b2ffaa1b9a5542404af07d9cda}
+      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-ghcr.io/codesearchvuln/vulhunter-yasa-runner@sha256:23e1522110129192d8c4aa36a73f01838ed4683cfdd405ba0375219b75e7cf72}
       SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-ghcr.io/codesearchvuln/vulhunter-opengrep-runner@sha256:a365f690bc6e1146a293c1c304d5ff7213e53fb8b41c123bb7c93134c16b7d71}
       SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-ghcr.io/codesearchvuln/vulhunter-bandit-runner@sha256:b9fce58358eff4eda81e3c88afed5b3444d07ec41f0678a9489907b99c70d324}
       SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-ghcr.io/codesearchvuln/vulhunter-gitleaks-runner@sha256:2b894057b692459a4203dea5e092ff1991204ce76f16743fc7f15dff6b505108}
       SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-ghcr.io/codesearchvuln/vulhunter-phpstan-runner@sha256:1f9d822f97fc29a8c1910e84986f2727a8c2d0cc2a7c2ddef24b13a42467aea5}
       SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-ghcr.io/codesearchvuln/vulhunter-pmd-runner@sha256:58bf2a94e73aa2309a9c193df685b688c4496a353959dec5fae897f16dcf0c65}
-      FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-ghcr.io/codesearchvuln/vulhunter-flow-parser-runner@sha256:8157f9de92d9d25417e951b801ee672172848cba07e4826cb5eb8c4c661c011c}
-      SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-ghcr.io/codesearchvuln/vulhunter-sandbox-runner@sha256:bb6362e067394ceb0142a6c5def9641a083fa80726d3503603900b516d03db7c}
+      FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-ghcr.io/codesearchvuln/vulhunter-flow-parser-runner@sha256:6a6c1d1cf77200e4a0a9e8ee1155730be2b16bb6cd5aede42d2ae1d5d2988ba8}
+      SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-ghcr.io/codesearchvuln/vulhunter-sandbox-runner@sha256:cd19822000cad34dadd607a5fa0a8e9acdc59a1c45e9b17604599e9509f395f3}
       FLOW_PARSER_RUNNER_ENABLED: "${FLOW_PARSER_RUNNER_ENABLED:-true}"
       FLOW_PARSER_RUNNER_TIMEOUT_SECONDS: "${FLOW_PARSER_RUNNER_TIMEOUT_SECONDS:-120}"
       FLOW_PARSER_RUNNER_BATCH_MAX_FILES: "${FLOW_PARSER_RUNNER_BATCH_MAX_FILES:-100}"
