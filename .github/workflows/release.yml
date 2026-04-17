@@ -21,6 +21,51 @@ on:
         required: false
         type: boolean
         default: false
+      build_backend:
+        description: '构建后端镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_yasa_runner:
+        description: '构建 YASA runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_opengrep_runner:
+        description: '构建 OpenGrep runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_bandit_runner:
+        description: '构建 Bandit runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_gitleaks_runner:
+        description: '构建 Gitleaks runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_phpstan_runner:
+        description: '构建 PHPStan runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_flow_parser_runner:
+        description: '构建 flow/parser runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_pmd_runner:
+        description: '构建 PMD runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
+      build_sandbox_runner:
+        description: '构建 sandbox-runner 镜像（手动发布时按需启用）'
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -64,6 +109,69 @@ jobs:
           echo "runtime_tag=latest" >> "$GITHUB_OUTPUT"
           echo "snapshot_tag=${snapshot_tag}" >> "$GITHUB_OUTPUT"
           echo "snapshot_title=codesearchvuln Offline Snapshot ${source_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: 输出手动运行时镜像构建计划
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          REUSE_EXISTING_IMAGES: ${{ inputs.reuse_existing_images }}
+          REFRESH_ALL_RUNTIME_IMAGES: ${{ inputs.refresh_all_runtime_images }}
+          BUILD_BACKEND: ${{ inputs.build_backend }}
+          BUILD_YASA_RUNNER: ${{ inputs.build_yasa_runner }}
+          BUILD_OPENGREP_RUNNER: ${{ inputs.build_opengrep_runner }}
+          BUILD_BANDIT_RUNNER: ${{ inputs.build_bandit_runner }}
+          BUILD_GITLEAKS_RUNNER: ${{ inputs.build_gitleaks_runner }}
+          BUILD_PHPSTAN_RUNNER: ${{ inputs.build_phpstan_runner }}
+          BUILD_FLOW_PARSER_RUNNER: ${{ inputs.build_flow_parser_runner }}
+          BUILD_PMD_RUNNER: ${{ inputs.build_pmd_runner }}
+          BUILD_SANDBOX_RUNNER: ${{ inputs.build_sandbox_runner }}
+        run: |
+          set -euo pipefail
+
+          selected_builds=()
+
+          if [[ "${REUSE_EXISTING_IMAGES}" == "true" ]]; then
+            mode="reuse-existing-latest"
+          elif [[ "${REFRESH_ALL_RUNTIME_IMAGES}" == "true" ]]; then
+            mode="refresh-all-runtime-images"
+            selected_builds=(
+              backend
+              yasa_runner
+              opengrep_runner
+              bandit_runner
+              gitleaks_runner
+              phpstan_runner
+              flow_parser_runner
+              pmd_runner
+              sandbox_runner
+            )
+          else
+            mode="selected-runtime-images"
+            [[ "${BUILD_BACKEND}" == "true" ]] && selected_builds+=("backend")
+            [[ "${BUILD_YASA_RUNNER}" == "true" ]] && selected_builds+=("yasa_runner")
+            [[ "${BUILD_OPENGREP_RUNNER}" == "true" ]] && selected_builds+=("opengrep_runner")
+            [[ "${BUILD_BANDIT_RUNNER}" == "true" ]] && selected_builds+=("bandit_runner")
+            [[ "${BUILD_GITLEAKS_RUNNER}" == "true" ]] && selected_builds+=("gitleaks_runner")
+            [[ "${BUILD_PHPSTAN_RUNNER}" == "true" ]] && selected_builds+=("phpstan_runner")
+            [[ "${BUILD_FLOW_PARSER_RUNNER}" == "true" ]] && selected_builds+=("flow_parser_runner")
+            [[ "${BUILD_PMD_RUNNER}" == "true" ]] && selected_builds+=("pmd_runner")
+            [[ "${BUILD_SANDBOX_RUNNER}" == "true" ]] && selected_builds+=("sandbox_runner")
+          fi
+
+          if ((${#selected_builds[@]} == 0)); then
+            selection="none"
+          else
+            selection="$(IFS=', '; echo "${selected_builds[*]}")"
+          fi
+
+          {
+            echo "## Manual Runtime Image Build Plan"
+            echo ""
+            echo "- mode: \`${mode}\`"
+            echo "- reuse_existing_images: \`${REUSE_EXISTING_IMAGES}\`"
+            echo "- refresh_all_runtime_images: \`${REFRESH_ALL_RUNTIME_IMAGES}\`"
+            echo "- selected_builds: \`${selection}\`"
+            echo "- frontend_release_image: \`skipped (release flow uses STATIC_FRONTEND_IMAGE)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   create-draft-release:
     needs: prepare-release
@@ -136,15 +244,15 @@ jobs:
     with:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
-      build_backend: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images }}
-      build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
-      build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
-      build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
-      build_gitleaks_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
-      build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
-      build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
-      build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
-      build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && inputs.refresh_all_runtime_images || false }}
+      build_backend: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_backend) || false }}
+      build_yasa_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_yasa_runner) || false }}
+      build_opengrep_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_opengrep_runner) || false }}
+      build_bandit_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_bandit_runner) || false }}
+      build_gitleaks_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_gitleaks_runner) || false }}
+      build_phpstan_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_phpstan_runner) || false }}
+      build_flow_parser_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_flow_parser_runner) || false }}
+      build_pmd_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_pmd_runner) || false }}
+      build_sandbox_runner: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_sandbox_runner) || false }}
       multi_arch: true
       emit_release_manifest: true
       require_complete_manifest: true
