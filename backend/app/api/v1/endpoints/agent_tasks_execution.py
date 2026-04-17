@@ -96,11 +96,15 @@ async def _execute_agent_task(task_id: str):
     from app.services.agent.agents import OrchestratorAgent, ReconAgent, AnalysisAgent, VerificationAgent, ReportAgent, BusinessLogicReconAgent, BusinessLogicAnalysisAgent, ReconSubAgent
     from app.services.agent.workflow import WorkflowOrchestratorAgent
     from app.services.agent.event_manager import EventManager, AgentEventEmitter
+    from app.services.agent.core.context import set_task_id
     from app.services.llm.service import LLMService, LLMConfigError
     from app.services.agent.core import agent_registry
     from app.services.agent.tools import SandboxManager
     from app.core.config import settings
     import time
+
+    # Bind structured logging context for this async task and its child tasks.
+    set_task_id(str(task_id or "").strip())
     
     # 在任务最开始就初始化 Docker 沙箱管理器
     # 这样可以确保整个任务生命周期内使用同一个管理器，并且尽早发现 Docker 问题

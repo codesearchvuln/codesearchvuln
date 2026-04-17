@@ -111,6 +111,43 @@ class TreeSitterParser:
         self._parsers: dict[str, Any] = {}
         self._initialized = False
 
+    # Provider cache (class-level): resolve Python binding once per process.
+    _parser_factory: Any | None = None
+    _provider_name: str = ""
+    _provider_checked: bool = False
+    _missing_dependency_warned: bool = False
+
+    @classmethod
+    def _get_parser_factory(cls) -> Any | None:
+        """Resolve available tree-sitter Python binding once.
+
+        Prefer `tree_sitter_language_pack` (used by flow-parser runner image),
+        and keep `tree_sitter_languages` as compatibility fallback.
+        """
+        if cls._provider_checked:
+            return cls._parser_factory
+
+        cls._provider_checked = True
+        try:
+            from tree_sitter_language_pack import get_parser as get_parser_factory
+
+            cls._parser_factory = get_parser_factory
+            cls._provider_name = "tree_sitter_language_pack"
+            return cls._parser_factory
+        except ImportError:
+            pass
+
+        try:
+            from tree_sitter_languages import get_parser as get_parser_factory
+
+            cls._parser_factory = get_parser_factory
+            cls._provider_name = "tree_sitter_languages"
+            return cls._parser_factory
+        except ImportError:
+            cls._parser_factory = None
+            cls._provider_name = ""
+            return None
+
     def _ensure_initialized(self, language: str) -> bool:
         """确保语言解析器已初始化"""
         if language in self._parsers:
@@ -121,18 +158,29 @@ class TreeSitterParser:
             # 不是 tree-sitter 支持的语言，静默跳过
             return False
 
-        try:
-            from tree_sitter_language_pack import get_parser
+        parser_factory = self._get_parser_factory()
+        if parser_factory is None:
+            if not self.__class__._missing_dependency_warned:
+                logger.warning(
+                    "tree-sitter python bindings not installed "
+                    "(tried tree_sitter_language_pack/tree_sitter_languages), "
+                    "falling back to regex parsing"
+                )
+                self.__class__._missing_dependency_warned = True
+            return False
 
-            parser = get_parser(language)
+        try:
+            parser = parser_factory(language)
             self._parsers[language] = parser
             return True
-
-        except ImportError:
-            logger.warning("tree-sitter-languages not installed, falling back to regex parsing")
-            return False
         except Exception as e:
-            logger.warning(f"Failed to load tree-sitter parser for {language}: {e}")
+            provider_name = self.__class__._provider_name or "unknown_provider"
+            logger.warning(
+                "Failed to load tree-sitter parser for %s via %s: %s",
+                language,
+                provider_name,
+                e,
+            )
             return False
 
     def parse(self, code: str, language: str) -> Any | None:
