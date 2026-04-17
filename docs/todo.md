@@ -3,6 +3,7 @@
 - [ ] 前端文件/智能/混合扫描日志详情展示进度 (Recon → Analysis → Verication → End)
 ## Refactor
 - [x] 重构Recon
+- [ ] 优化文件上传功能，调整为异步
 
 ## Fix
 - [x] backend 报错。unclosed client session
