@@ -49,6 +49,7 @@ async def test_load_user_agent_workflow_config_uses_local_file_defaults(
     )
 
     assert loaded["recon_count"] == 4
+    assert loaded["recon_host_instances"] == 1
     assert loaded["analysis_count"] == 6
     assert loaded["verification_count"] == 2
     assert loaded["default_recon_count"] == 4
@@ -96,6 +97,7 @@ async def test_save_user_agent_workflow_config_preserves_other_config(
         "verification_count": 4,
     }
     assert saved["recon_count"] == 6
+    assert saved["recon_host_instances"] == 1
     assert saved["analysis_count"] == 9
     assert saved["verification_count"] == 4
     assert saved["source"] == "user_override"

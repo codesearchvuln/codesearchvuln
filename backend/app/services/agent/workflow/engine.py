@@ -91,6 +91,7 @@ class AuditWorkflowEngine:
         self.analysis_shared_pool_size = max(1, self.workflow_config.analysis_max_workers)
         self.analysis_shared_semaphore = asyncio.Semaphore(self.analysis_shared_pool_size)
         self.bl_analysis_worker_limit = self.analysis_shared_pool_size
+        self.recon_subagent_worker_limit = self.workflow_config.effective_recon_workers
 
         #  内存监控
         self.memory_monitor = MemoryMonitor()
@@ -107,7 +108,7 @@ class AuditWorkflowEngine:
 
         self.recon_executor = ReconModuleExecutor(
             orchestrator=orchestrator,
-            max_workers=self.workflow_config.recon_max_workers,
+            max_workers=self.recon_subagent_worker_limit,
             enable_parallel=self.workflow_config.should_parallelize_recon,
         )
 
@@ -136,7 +137,8 @@ class AuditWorkflowEngine:
 
         logger.info(
             f"[WorkflowEngine] Initialized with parallel config: "
-            f"recon_workers={self.workflow_config.recon_max_workers} "
+            f"recon_host_instances={self.workflow_config.recon_host_instances}, "
+            f"recon_subagent_workers={self.recon_subagent_worker_limit} "
             f"(enabled={self.workflow_config.should_parallelize_recon}), "
             f"analysis_workers={self.workflow_config.analysis_max_workers} "
             f"(shared_pool={self.analysis_shared_pool_size}, "

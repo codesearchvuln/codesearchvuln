@@ -23,6 +23,7 @@
 - `ReconAgent` 只负责项目建模与模块规划，不再承担所有模块的具体侦查细节。
 - 新增 `ReconSubAgent`（命名可再定），每个 SubAgent 只负责一个模块/子域的侦查。
 - Recon SubAgent 异步执行，可并发，且并发数与 Analysis / Verification 一样由用户手动配置。
+- `ReconAgent` 在单次 Workflow Run 内固定只启动 1 个 Host 实例；并发只作用于其派发的 `ReconSubAgent` 数量。
 - 保持 Workflow 主阶段顺序不变，仍然是 `Recon -> Analysis -> Verification -> Report`。
 - 保持 Recon 队列作为 Analysis 的唯一权威输入源，不改变下游队列驱动语义。
 
@@ -289,9 +290,9 @@ SubAgent 建议保留只读侦查工具：
 
 因此本规划建议采用 9.1。
 
-## 10. 并发控制设计
+## 10. 并发控制设计（单 Host + SubAgent 并发）
 
-### 10.1 新增用户配置项
+### 10.1 新增用户配置项（语义澄清）
 
 现有配置只包含：
 
@@ -303,6 +304,12 @@ SubAgent 建议保留只读侦查工具：
 - `recon_count`
 - `analysis_count`
 - `verification_count`
+
+其中：
+
+- `recon_count` 表示**单个 `ReconHostAgent` 可同时运行的 `ReconSubAgent` 最大数量**。
+- `recon_count` **不表示** `ReconAgent` 实例数。
+- `ReconAgent` 实例数固定为 1（每个 task 的 Recon 阶段只允许一个 Host）。
 
 对应修改点：
 
@@ -320,6 +327,7 @@ SubAgent 建议保留只读侦查工具：
 ```python
 class WorkflowConfig:
     enable_parallel_recon: bool = True
+    recon_host_instances: int = 1  # 固定值，不开放用户配置
     recon_max_workers: int = 3
 ```
 
@@ -327,18 +335,26 @@ class WorkflowConfig:
 
 ```python
 @property
+def effective_recon_workers(self) -> int:
+    if not self.enable_parallel_recon:
+        return 1
+    return max(1, self.recon_max_workers)
 
+@property
 def should_parallelize_recon(self) -> bool:
-    return self.enable_parallel_recon and self.recon_max_workers > 1
+    return self.effective_recon_workers > 1
 ```
 
 ### 10.3 调度语义
 
-Recon 并发语义与 Analysis/Verification 对齐：
+Recon SubAgent 并发语义与 Analysis/Verification 对齐，但增加 Host 单实例约束：
 
-- `recon_count = 1` 时，降级为串行模块侦查。
-- `recon_count > 1` 时，启用并行模块侦查。
-- 并发上限只限制模块 worker 数，不影响后续 Analysis/Verification 的 worker 数。
+1. 每个 Workflow task 的 Recon 阶段仅启动一个 `ReconHostAgent`（`recon_host_instances = 1`）。
+2. Host 建模后按模块 fan-out，SubAgent 的有效并发为：
+   `effective_workers = min(recon_count, module_count, system_safety_cap)`。
+3. `recon_count = 1` 时，降级为串行模块侦查（仍是单 Host）。
+4. `recon_count > 1` 时，启用并行模块侦查（仍是单 Host）。
+5. 并发上限只限制模块 worker/SubAgent 数，不影响后续 Analysis/Verification 的 worker 数。
 
 ## 11. Workflow 侧改造建议
 
@@ -474,7 +490,7 @@ _agent_results["recon"] = {
 1. 增加 `recon_count` 配置读写链路。
 2. 扩展 `WorkflowConfig`。
 3. 扩展 `agent_tasks_execution._build_workflow_config_from_user_config()`。
-4. 前端设置页增加 Recon 并发输入项。
+4. 前端设置页增加 Recon SubAgent 并发输入项（文案避免误解为多 ReconAgent）。
 
 验收标准：
 
@@ -522,14 +538,16 @@ _agent_results["recon"] = {
 ### 16.1 单元测试
 
 1. `test_recon_user_runtime_config_supports_recon_count`
-   - 验证 `recon_count` 的默认值、范围校验、保存与加载。
+   - 验证 `recon_count`（SubAgent 并发上限）的默认值、范围校验、保存与加载。
 2. `test_build_workflow_config_from_user_config_includes_recon_count`
-   - 验证任务启动时 `recon_max_workers` 生效。
-3. `test_recon_module_modeling_fallback_to_single_module`
+   - 验证任务启动时 `recon_max_workers` 生效，且不影响 Host 单实例约束。
+3. `test_workflow_config_recon_host_instances_is_fixed_one`
+   - 验证 `recon_host_instances` 固定为 1，不受用户配置影响。
+4. `test_recon_module_modeling_fallback_to_single_module`
    - 验证小项目回退单模块。
-4. `test_recon_module_modeling_respects_target_files`
+5. `test_recon_module_modeling_respects_target_files`
    - 验证 target_files 限制可以裁剪模块边界。
-5. `test_recon_module_result_merge_deduplicates_risk_points`
+6. `test_recon_module_result_merge_deduplicates_risk_points`
    - 验证跨模块重复风险点会被去重。
 
 ### 16.2 执行器测试
@@ -549,7 +567,7 @@ _agent_results["recon"] = {
 
 1. `GET /config/agent-workflow` 返回 `recon_count`
 2. `PUT /config/agent-workflow` 可更新 `recon_count`
-3. 前端配置页可展示、重置、保存 `Recon / Analysis / Verification` 三项并发设置
+3. 前端配置页可展示、重置、保存 `Recon(SubAgent) / Analysis / Verification` 三项并发设置
 
 ## 17. 主要风险
 
@@ -595,7 +613,7 @@ _agent_results["recon"] = {
 1. 保留 `ReconAgent` 作为 Host，不改名字。
 2. 新增 `ReconSubAgent`，不要让 `ReconAgent` 递归调用自己。
 3. 新增 `ReconModuleExecutor`，不要把 Recon fan-out 直接塞进 `ParallelPhaseExecutor`。
-4. 新增 `recon_count`，并与用户现有的 Analysis / Verification 并发设置并列。
+4. 新增 `recon_count`（仅表示 SubAgent 并发上限），并与用户现有的 Analysis / Verification 并发设置并列。
 5. 采用“SubAgent 返回结果，Host 统一入队”的结果归并模式。
 6. 本轮先不动 BusinessLogicRecon。
 

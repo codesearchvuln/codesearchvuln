@@ -1,4 +1,5 @@
 from app.api.v1.endpoints import agent_tasks_execution
+from app.services.agent.workflow.models import WorkflowConfig
 
 
 def test_build_workflow_config_from_user_config_uses_resolved_runtime_counts(
@@ -27,6 +28,15 @@ def test_build_workflow_config_from_user_config_uses_resolved_runtime_counts(
     )
 
     assert workflow_config.recon_max_workers == 3
+    assert workflow_config.recon_host_instances == 1
+    assert workflow_config.effective_recon_workers == 3
     assert workflow_config.analysis_max_workers == 7
     assert workflow_config.verification_max_workers == 2
     assert workflow_config.use_agent_count_config_file is False
+
+
+def test_workflow_config_recon_host_instances_is_fixed_one():
+    workflow_config = WorkflowConfig(recon_host_instances=8, recon_max_workers=4)
+
+    assert workflow_config.recon_host_instances == 1
+    assert workflow_config.effective_recon_workers == 4

@@ -79,6 +79,7 @@ def _build_workflow_config_from_user_config(user_config: Optional[Dict[str, Any]
         enable_parallel_analysis=settings.ENABLE_PARALLEL_ANALYSIS,
         enable_parallel_verification=settings.ENABLE_PARALLEL_VERIFICATION,
         enable_parallel_report=settings.ENABLE_PARALLEL_REPORT,
+        recon_host_instances=int(runtime_config.get("recon_host_instances", 1) or 1),
         recon_max_workers=runtime_config["recon_count"],
         analysis_max_workers=runtime_config["analysis_count"],
         verification_max_workers=runtime_config["verification_count"],

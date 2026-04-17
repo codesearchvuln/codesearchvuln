@@ -32,6 +32,7 @@ export type AgentWorkflowConfigSource =
   | "settings_default";
 
 export interface AgentWorkflowConfigPayload {
+  recon_host_instances: number;
   recon_count: number;
   analysis_count: number;
   verification_count: number;

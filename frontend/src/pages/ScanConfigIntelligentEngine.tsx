@@ -134,7 +134,7 @@ export default function ScanConfigIntelligentEngine() {
 		);
 
 		if (!Number.isInteger(reconCount) || reconCount < 1 || reconCount > 32) {
-			toast.error("Recon 并发数必须是 1 到 32 的整数");
+			toast.error("Recon(SubAgent) 并发数必须是 1 到 32 的整数");
 			return;
 		}
 		if (!Number.isInteger(analysisCount) || analysisCount < 1 || analysisCount > 32) {
@@ -267,13 +267,13 @@ export default function ScanConfigIntelligentEngine() {
 							</div>
 							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
 								<div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-									Recon 池
+									Recon(SubAgent) 池
 								</div>
 								<div className="mt-2 text-2xl font-semibold text-foreground">
 									{workflowLoading ? "--" : workflowConfig?.recon_count ?? "--"}
 								</div>
 								<div className="mt-2 text-xs leading-5 text-muted-foreground">
-									控制模块级 Recon SubAgent 的并发 worker 数
+									控制模块级 Recon SubAgent 的并发 worker 数（Recon Host 固定单实例）
 								</div>
 							</div>
 							<div className="rounded-sm border border-border/50 bg-background/20 p-4">
@@ -305,7 +305,7 @@ export default function ScanConfigIntelligentEngine() {
 						<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 							<div className="space-y-2">
 								<Label htmlFor="workflow-recon-count">
-									Recon 并发数
+									Recon(SubAgent) 并发数
 								</Label>
 								<Input
 									id="workflow-recon-count"
@@ -357,12 +357,12 @@ export default function ScanConfigIntelligentEngine() {
 						</div>
 
 						<div className="rounded-sm border border-dashed border-border/50 bg-background/10 p-3 text-sm leading-6 text-muted-foreground">
-							这里配置的是智能扫描 workflow 的 worker 池大小。保存后会作用于当前用户后续新发起的智能扫描 / 混合扫描任务，不会追溯修改正在运行的任务。
+							这里配置的是智能扫描 workflow 的 worker 池大小。Recon Host 固定为 1，Recon 配置仅影响 SubAgent 并发。保存后会作用于当前用户后续新发起的智能扫描 / 混合扫描任务，不会追溯修改正在运行的任务。
 						</div>
 
 						<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 							<div className="text-xs leading-5 text-muted-foreground">
-								本地默认值：Recon {workflowConfig?.default_recon_count ?? "--"} /
+								本地默认值：Recon(SubAgent) {workflowConfig?.default_recon_count ?? "--"} /
 								Analysis{" "}
 								{workflowConfig?.default_analysis_count ?? "--"} / Verification{" "}
 								{workflowConfig?.default_verification_count ?? "--"}

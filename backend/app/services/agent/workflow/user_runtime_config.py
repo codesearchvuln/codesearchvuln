@@ -11,6 +11,7 @@ from app.models.user_config import UserConfig
 
 USER_AGENT_WORKFLOW_CONFIG_KEY = "agent_workflow_config"
 AgentWorkflowConfigSource = Literal["user_override", "local_file", "settings_default"]
+_RECON_HOST_INSTANCES = 1
 
 _AGENT_COUNT_LIMITS: Dict[str, tuple[int, int]] = {
     "recon_count": (1, 32),
@@ -108,6 +109,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
     if saved_runtime is None:
         return {
             **default_config,
+            "recon_host_instances": _RECON_HOST_INSTANCES,
             "default_recon_count": default_config["recon_count"],
             "default_analysis_count": default_config["analysis_count"],
             "default_verification_count": default_config["verification_count"],
@@ -124,6 +126,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
     except ValueError:
         return {
             **default_config,
+            "recon_host_instances": _RECON_HOST_INSTANCES,
             "default_recon_count": default_config["recon_count"],
             "default_analysis_count": default_config["analysis_count"],
             "default_verification_count": default_config["verification_count"],
@@ -134,6 +137,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
 
     return {
         **effective_config,
+        "recon_host_instances": _RECON_HOST_INSTANCES,
         "default_recon_count": default_config["recon_count"],
         "default_analysis_count": default_config["analysis_count"],
         "default_verification_count": default_config["verification_count"],
@@ -146,6 +150,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
 def resolve_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str, int]:
     described = describe_effective_agent_workflow_config(raw_other_config)
     return {
+        "recon_host_instances": int(described.get("recon_host_instances") or _RECON_HOST_INSTANCES),
         "recon_count": int(described["recon_count"]),
         "analysis_count": int(described["analysis_count"]),
         "verification_count": int(described["verification_count"]),

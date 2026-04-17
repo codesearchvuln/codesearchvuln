@@ -26,9 +26,9 @@ class ReconModuleExecutor:
         enable_parallel: bool = True,
     ) -> None:
         self.orchestrator = orchestrator
-        self.max_workers = max_workers
+        self.max_workers = max(1, int(max_workers or 1))
         self.enable_parallel = enable_parallel
-        self.semaphore = asyncio.Semaphore(max_workers)
+        self.semaphore = asyncio.Semaphore(self.max_workers)
         self.lock = asyncio.Lock()
 
     def _clone_single_tool_for_worker(

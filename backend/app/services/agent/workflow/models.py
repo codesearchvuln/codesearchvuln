@@ -23,6 +23,7 @@ class WorkflowConfig:
     enable_parallel_analysis: bool = True
     enable_parallel_verification: bool = True
     enable_parallel_report: bool = True
+    recon_host_instances: int = 1
     recon_max_workers: int = 3
     analysis_max_workers: int = 3
     verification_max_workers: int = 3
@@ -31,10 +32,21 @@ class WorkflowConfig:
     use_agent_count_config_file: bool = True
     agent_count_config_path: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        # Recon Host 在单次 workflow 运行中固定单实例，用户不可调。
+        self.recon_host_instances = 1
+
+    @property
+    def effective_recon_workers(self) -> int:
+        """Recon SubAgent 的有效并发 worker 数（并发关闭时回退为 1）"""
+        if not self.enable_parallel_recon:
+            return 1
+        return max(1, int(self.recon_max_workers or 1))
+
     @property
     def should_parallelize_recon(self) -> bool:
         """是否应该并行化 Recon（workers > 1 且启用）"""
-        return self.enable_parallel_recon and self.recon_max_workers > 1
+        return self.effective_recon_workers > 1
 
     @property
     def should_parallelize_analysis(self) -> bool:
