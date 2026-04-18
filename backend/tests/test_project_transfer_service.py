@@ -151,6 +151,8 @@ async def test_export_projects_bundle_excludes_seed_projects_and_warns_missing_z
 
         bundle = await export_projects_bundle(db=db, current_user=demo_user)
         try:
+            assert bundle.filename.startswith("项目数据导出-v1-")
+            assert bundle.filename.endswith(".zip")
             with zipfile.ZipFile(bundle.path, "r") as archive:
                 manifest = json.loads(archive.read("manifest.json"))
                 exported_projects = json.loads(archive.read("data/projects.json"))

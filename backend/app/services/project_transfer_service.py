@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 TRANSFER_SCOPE = "project-domain"
 TRANSFER_EXPORT_VERSION = "project-export-v1"
-TRANSFER_BUNDLE_PREFIX = "Vulhunter-project-export-v1"
+TRANSFER_BUNDLE_PREFIX = "项目数据导出-v1"
 
 
 @dataclass

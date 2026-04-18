@@ -237,7 +237,7 @@ const routes: RouteConfig[] = [
 		navVisible: false,
 	},
 	{
-		name: "数据管理",
+		name: "导入导出",
 		nameKey: "route.dataManagement",
 		path: "/data-management",
 		element: <DataManagementPage />,

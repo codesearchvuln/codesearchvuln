@@ -169,7 +169,7 @@ export default function DataManagementPage() {
       <div className="relative z-10 flex flex-1 flex-col gap-6 p-6">
         <div className="flex items-center gap-3">
           <DatabaseBackup className="h-6 w-6 text-primary" />
-          <h1 className="text-lg font-bold tracking-tight">数据管理</h1>
+          <h1 className="text-lg font-bold tracking-tight">导入导出</h1>
         </div>
 
         <div className="cyber-card flex flex-1 flex-col p-4">

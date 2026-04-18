@@ -29,7 +29,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroupConfig[] = [
 	{
 		id: "devTest",
 		titleKey: "route.devTest",
-		fallbackLabel: "开发测试",
+		fallbackLabel: "数据管理",
 		icon: Code,
 		defaultEntryPath: "/data-management",
 	},

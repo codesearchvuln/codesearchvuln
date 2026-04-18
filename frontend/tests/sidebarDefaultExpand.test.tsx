@@ -36,6 +36,7 @@ test("Sidebar 默认宽版会展开全部分组子菜单", async () => {
 	assert.match(markup, /智能引擎/);
 	assert.match(markup, /外部工具/);
 	assert.match(markup, /数据管理/);
+	assert.match(markup, /导入导出/);
 	assert.doesNotMatch(markup, /Agent 测试/);
 	assert.doesNotMatch(markup, />\s*EN\s*</);
 });
@@ -56,7 +57,7 @@ test("Sidebar 分组父项不是可点击链接", async () => {
 	);
 	assert.doesNotMatch(
 		expandedMarkup,
-		/<a[^>]*href="\/data-management"[^>]*>[\s\S]*?<span[^>]*>开发测试<\/span><\/a>/,
+		/<a[^>]*href="\/data-management"[^>]*>[\s\S]*?<span[^>]*>数据管理<\/span><\/a>/,
 	);
 
 	const collapsedMarkup = await renderSidebar(true);
@@ -75,7 +76,8 @@ test("Sidebar 折叠态仍隐藏分组子菜单但保留一级导航", async () 
 	assert.doesNotMatch(markup, /扫描引擎/);
 	assert.doesNotMatch(markup, /智能引擎/);
 	assert.doesNotMatch(markup, /外部工具/);
-	assert.doesNotMatch(markup, /数据管理/);
+	assert.match(markup, /数据管理/);
+	assert.doesNotMatch(markup, /导入导出/);
 	assert.doesNotMatch(markup, /Agent 测试/);
 	assert.match(markup, /首页/);
 	assert.match(markup, /仪表盘/);
