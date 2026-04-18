@@ -241,6 +241,266 @@ async def list_agent_findings(
         ]
     return serialized_findings
 
+
+def _normalize_agent_finding_lookup_token(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _normalize_agent_finding_lookup_path(value: Any) -> str:
+    return _normalize_relative_file_path(str(value or "").strip(), None).lower()
+
+
+def _extract_agent_finding_lookup_payload(item: Any) -> Dict[str, Any]:
+    if isinstance(item, dict):
+        return item
+    return {}
+
+
+def _extract_agent_finding_lookup_aliases(item: Any) -> Dict[str, Any]:
+    payload = _extract_agent_finding_lookup_payload(item)
+    metadata = payload.get("finding_metadata")
+    verification_payload = payload.get("verification_result")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    if not isinstance(verification_payload, dict):
+        verification_payload = {}
+
+    title = (
+        str(payload.get("display_title") or "").strip()
+        or str(payload.get("title") or "").strip()
+    )
+
+    return {
+        "id": str(payload.get("id") or "").strip(),
+        "finding_identity": (
+            str(payload.get("finding_identity") or "").strip()
+            or str(metadata.get("finding_identity") or "").strip()
+            or str(verification_payload.get("finding_identity") or "").strip()
+        ),
+        "verification_fingerprint": (
+            str(payload.get("verification_fingerprint") or "").strip()
+            or str(metadata.get("verification_fingerprint") or "").strip()
+            or str(verification_payload.get("verification_fingerprint") or "").strip()
+        ),
+        "verification_todo_id": (
+            str(payload.get("verification_todo_id") or "").strip()
+            or str(metadata.get("verification_todo_id") or "").strip()
+            or str(verification_payload.get("verification_todo_id") or "").strip()
+        ),
+        "fingerprint": str(payload.get("fingerprint") or "").strip(),
+        "merge_key": str(payload.get("merge_key") or "").strip(),
+        "vulnerability_type": str(payload.get("vulnerability_type") or "").strip(),
+        "file_path": _normalize_relative_file_path(
+            str(payload.get("file_path") or "").strip(),
+            None,
+        ),
+        "line_start": _to_int(payload.get("line_start")),
+        "title": title,
+    }
+
+
+def _match_agent_finding_by_aliases(
+    findings: List[AgentFinding],
+    *,
+    requested_id: str,
+    aliases: Optional[Dict[str, Any]] = None,
+) -> Optional[AgentFinding]:
+    normalized_requested_id = _normalize_agent_finding_lookup_token(requested_id)
+    normalized_aliases = aliases or {}
+    normalized_identity = _normalize_agent_finding_lookup_token(
+        normalized_aliases.get("finding_identity"),
+    )
+    normalized_verification_fingerprint = _normalize_agent_finding_lookup_token(
+        normalized_aliases.get("verification_fingerprint"),
+    )
+    normalized_verification_todo_id = _normalize_agent_finding_lookup_token(
+        normalized_aliases.get("verification_todo_id"),
+    )
+    normalized_fingerprint = _normalize_agent_finding_lookup_token(
+        normalized_aliases.get("fingerprint"),
+    )
+    normalized_merge_key = _normalize_agent_finding_lookup_token(
+        normalized_aliases.get("merge_key"),
+    )
+    normalized_type = _normalize_agent_finding_lookup_token(
+        normalized_aliases.get("vulnerability_type"),
+    )
+    normalized_file_path = _normalize_agent_finding_lookup_path(
+        normalized_aliases.get("file_path"),
+    )
+    normalized_line_start = _to_int(normalized_aliases.get("line_start"))
+    normalized_title = _normalize_agent_finding_lookup_token(
+        normalized_aliases.get("title"),
+    )
+
+    direct_aliases = [
+        normalized_requested_id,
+        normalized_identity,
+        normalized_verification_fingerprint,
+        normalized_verification_todo_id,
+        normalized_fingerprint,
+        normalized_merge_key,
+    ]
+    direct_aliases = [value for value in direct_aliases if value]
+
+    for finding in findings:
+        finding_aliases = _extract_agent_finding_lookup_aliases(
+            {
+                "id": getattr(finding, "id", None),
+                "finding_identity": getattr(finding, "finding_identity", None),
+                "verification_fingerprint": None,
+                "verification_todo_id": None,
+                "fingerprint": getattr(finding, "fingerprint", None),
+                "merge_key": None,
+                "vulnerability_type": getattr(finding, "vulnerability_type", None),
+                "file_path": getattr(finding, "file_path", None),
+                "line_start": getattr(finding, "line_start", None),
+                "title": getattr(finding, "title", None),
+                "display_title": None,
+                "finding_metadata": getattr(finding, "finding_metadata", None),
+                "verification_result": getattr(finding, "verification_result", None),
+            }
+        )
+        candidate_direct_aliases = [
+            _normalize_agent_finding_lookup_token(finding_aliases.get("id")),
+            _normalize_agent_finding_lookup_token(
+                finding_aliases.get("finding_identity"),
+            ),
+            _normalize_agent_finding_lookup_token(
+                finding_aliases.get("verification_fingerprint"),
+            ),
+            _normalize_agent_finding_lookup_token(
+                finding_aliases.get("verification_todo_id"),
+            ),
+            _normalize_agent_finding_lookup_token(finding_aliases.get("fingerprint")),
+            _normalize_agent_finding_lookup_token(finding_aliases.get("merge_key")),
+        ]
+        if any(alias and alias in candidate_direct_aliases for alias in direct_aliases):
+            return finding
+
+    if not any(
+        [
+            normalized_type,
+            normalized_file_path,
+            normalized_line_start is not None,
+            normalized_title,
+        ]
+    ):
+        return None
+
+    heuristic_matches: List[AgentFinding] = []
+    for finding in findings:
+        finding_aliases = _extract_agent_finding_lookup_aliases(
+            {
+                "id": getattr(finding, "id", None),
+                "finding_identity": getattr(finding, "finding_identity", None),
+                "verification_fingerprint": None,
+                "verification_todo_id": None,
+                "fingerprint": getattr(finding, "fingerprint", None),
+                "merge_key": None,
+                "vulnerability_type": getattr(finding, "vulnerability_type", None),
+                "file_path": getattr(finding, "file_path", None),
+                "line_start": getattr(finding, "line_start", None),
+                "title": getattr(finding, "title", None),
+                "display_title": None,
+                "finding_metadata": getattr(finding, "finding_metadata", None),
+                "verification_result": getattr(finding, "verification_result", None),
+            }
+        )
+
+        if (
+            normalized_type
+            and _normalize_agent_finding_lookup_token(
+                finding_aliases.get("vulnerability_type"),
+            )
+            != normalized_type
+        ):
+            continue
+        if (
+            normalized_file_path
+            and _normalize_agent_finding_lookup_path(finding_aliases.get("file_path"))
+            != normalized_file_path
+        ):
+            continue
+        if (
+            normalized_line_start is not None
+            and _to_int(finding_aliases.get("line_start")) != normalized_line_start
+        ):
+            continue
+        if (
+            normalized_title
+            and _normalize_agent_finding_lookup_token(finding_aliases.get("title"))
+            != normalized_title
+        ):
+            continue
+        heuristic_matches.append(finding)
+
+    if not heuristic_matches:
+        return None
+
+    def _heuristic_sort_key(item: AgentFinding) -> float:
+        created_at = getattr(item, "created_at", None)
+        if isinstance(created_at, datetime):
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            return created_at.timestamp()
+        return 0.0
+
+    heuristic_matches.sort(key=_heuristic_sort_key, reverse=True)
+    return heuristic_matches[0]
+
+
+async def _resolve_agent_finding_from_lookup(
+    db: AsyncSession,
+    *,
+    task_id: str,
+    requested_id: str,
+) -> Optional[AgentFinding]:
+    normalized_requested_id = str(requested_id or "").strip()
+    if not normalized_requested_id:
+        return None
+
+    findings_result = await db.execute(
+        select(AgentFinding)
+        .where(AgentFinding.task_id == task_id)
+        .order_by(AgentFinding.created_at.desc())
+    )
+    findings = findings_result.scalars().all()
+    if not findings:
+        return None
+
+    direct_match = _match_agent_finding_by_aliases(
+        findings,
+        requested_id=normalized_requested_id,
+    )
+    if direct_match:
+        return direct_match
+
+    event_result = await db.execute(
+        select(AgentEvent)
+        .where(
+            (AgentEvent.task_id == task_id)
+            & (
+                (AgentEvent.finding_id == normalized_requested_id)
+                | (AgentEvent.id == normalized_requested_id)
+            )
+        )
+        .order_by(AgentEvent.sequence.desc(), AgentEvent.created_at.desc())
+        .limit(1)
+    )
+    event = event_result.scalars().first()
+    if not event:
+        return None
+
+    aliases = _extract_agent_finding_lookup_aliases(
+        getattr(event, "event_metadata", None),
+    )
+    return _match_agent_finding_by_aliases(
+        findings,
+        requested_id=normalized_requested_id,
+        aliases=aliases,
+    )
+
 @router.get("/{task_id}/findings/{finding_id}", response_model=AgentFindingResponse)
 async def get_agent_finding(
     task_id: str,
@@ -268,6 +528,12 @@ async def get_agent_finding(
         )
     )
     finding = result.scalar_one_or_none()
+    if not finding:
+        finding = await _resolve_agent_finding_from_lookup(
+            db,
+            task_id=task_id,
+            requested_id=finding_id,
+        )
     if not finding:
         raise HTTPException(status_code=404, detail="发现不存在")
 

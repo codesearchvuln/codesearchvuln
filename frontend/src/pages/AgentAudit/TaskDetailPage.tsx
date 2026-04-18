@@ -90,6 +90,7 @@ import {
 	getAgentAuditFindingDisplayStatus,
 	isFalsePositiveFinding,
 	readAgentAuditFindingsPagination,
+	resolveAgentFindingDetailId,
 	resolveAgentAuditBackTarget,
 	resolveAgentAuditDetailTitle,
 	writeAgentAuditFindingsPagination,
@@ -681,20 +682,6 @@ function toSafeTrimmedString(value: unknown): string {
 	return String(value ?? "").trim();
 }
 
-function isRealtimeFalsePositive(item: RealtimeMergedFindingItem): boolean {
-	return getAgentAuditFindingDisplayStatus(item) === "false_positive";
-}
-
-function isAgentFindingFalsePositiveSnapshot(
-	finding: AgentFinding | null | undefined,
-): boolean {
-	if (!finding) return false;
-	return (
-		toSafeTrimmedString(finding.status).toLowerCase() === "false_positive" ||
-		toSafeTrimmedString(finding.authenticity).toLowerCase() === "false_positive"
-	);
-}
-
 function toDialogFinding(item: RealtimeMergedFindingItem): AgentFinding {
 	const displayStatus = getAgentAuditFindingDisplayStatus(item);
 	const falsePositive = displayStatus === "false_positive";
@@ -988,6 +975,10 @@ function AgentAuditPageContent() {
 	const visibleManagedFindings = useMemo(
 		() => realtimeFindings,
 		[realtimeFindings],
+	);
+	const persistedFindingRouteItems = useMemo(
+		() => findings.map(agentFindingToRealtimeItem),
+		[findings],
 	);
 	const failedReason = useMemo(() => {
 		if (task?.status !== "failed") return null;
@@ -1381,10 +1372,14 @@ function AgentAuditPageContent() {
 	);
 
 	const openFindingDetailPage = useCallback(
-		(findingId: string, snapshot?: AgentFinding | null) => {
+		(item: RealtimeMergedFindingItem) => {
 			if (!taskId) return;
-			const falsePositive = isAgentFindingFalsePositiveSnapshot(snapshot);
-			if (falsePositive) return;
+			const snapshot = toDialogFinding(item);
+			const findingId = resolveAgentFindingDetailId({
+				requestedId: item.id,
+				realtimeFinding: item,
+				persistedFindings: persistedFindingRouteItems,
+			});
 			const target = buildAgentFindingDetailNavigation({
 				taskId,
 				findingId,
@@ -1393,7 +1388,7 @@ function AgentAuditPageContent() {
 			});
 			navigate(target.route, { state: target.state });
 		},
-		[currentRoute, navigate, taskId],
+		[currentRoute, navigate, persistedFindingRouteItems, taskId],
 	);
 
 	const handleDetailBack = useCallback(() => {
@@ -1630,16 +1625,24 @@ function AgentAuditPageContent() {
 		if (!detailType || !detailId) return;
 		if (detailType === "finding") {
 			if (!taskId) return;
+			const selectedRealtimeFinding =
+				visibleManagedFindings.find((item) => item.id === detailId) ?? null;
+			const resolvedDetailId = resolveAgentFindingDetailId({
+				requestedId: detailId,
+				realtimeFinding: selectedRealtimeFinding,
+				persistedFindings: persistedFindingRouteItems,
+			});
 			if (
 				findings.some(
-					(item) => !isFalsePositiveFinding(item) && item.id === detailId,
+					(item) =>
+						!isFalsePositiveFinding(item) && item.id === resolvedDetailId,
 				) ||
 				visibleManagedFindings.some((item) => item.id === detailId)
 			) {
 				navigate(
 					buildAgentFindingDetailRoute({
 						taskId,
-						findingId: detailId,
+						findingId: resolvedDetailId,
 						currentRoute,
 					}),
 					{ replace: true },
@@ -1668,6 +1671,7 @@ function AgentAuditPageContent() {
 		location.search,
 		logs,
 		navigate,
+		persistedFindingRouteItems,
 		taskId,
 		treeNodes,
 		visibleManagedFindings,
@@ -4097,12 +4101,7 @@ function AgentAuditPageContent() {
 				onPaginationChange={handleFindingsPaginationChange}
 				updatingKey={findingStatusUpdatingKey}
 				onToggleStatus={handleToggleFindingStatus}
-				onOpenDetail={(item) =>
-					openFindingDetailPage(
-						item.id,
-						isRealtimeFalsePositive(item) ? toDialogFinding(item) : null,
-					)
-				}
+				onOpenDetail={openFindingDetailPage}
 			/>
 		</div>
 	);

@@ -16,6 +16,7 @@ export interface TokenUsageAccumulator {
 
 export interface RealtimeFindingLike {
   id: string;
+  merge_key?: string | null;
   title?: string | null;
   display_title?: string | null;
   vulnerability_type?: string | null;
@@ -28,6 +29,8 @@ export interface RealtimeFindingLike {
   confidence?: number | null;
   is_verified?: boolean;
   fingerprint?: string | null;
+  verification_todo_id?: string | null;
+  verification_fingerprint?: string | null;
   timestamp?: string | null;
   status?: string | null;
   verification_status?: string | null;
@@ -361,6 +364,138 @@ function hasDisplayableConfidence(item: RealtimeFindingLike): boolean {
 
 function normalizeFindingStatusToken(value: unknown): string {
   return String(value || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+}
+
+function normalizeFindingLookupValue(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeFindingLocationPath(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .toLowerCase();
+}
+
+function findMatchingFindingByValue(
+  findings: RealtimeFindingLike[],
+  resolveValue: (item: RealtimeFindingLike) => unknown,
+  targetValue: unknown,
+): RealtimeFindingLike | null {
+  const normalizedTarget = normalizeFindingLookupValue(targetValue);
+  if (!normalizedTarget) {
+    return null;
+  }
+  return (
+    findings.find(
+      (item) =>
+        normalizeFindingLookupValue(resolveValue(item)) === normalizedTarget,
+    ) ?? null
+  );
+}
+
+export function resolveAgentFindingDetailId(input: {
+  requestedId: string;
+  realtimeFinding?: RealtimeFindingLike | null;
+  persistedFindings: RealtimeFindingLike[];
+}): string {
+  const requestedId = String(input.requestedId || "").trim();
+  if (!requestedId) {
+    return "";
+  }
+
+  const directMatch = findMatchingFindingByValue(
+    input.persistedFindings,
+    (item) => item.id,
+    requestedId,
+  );
+  if (directMatch?.id) {
+    return directMatch.id;
+  }
+
+  const realtimeFinding =
+    input.realtimeFinding ??
+    findMatchingFindingByValue(
+      input.persistedFindings,
+      (item) => item.id,
+      requestedId,
+    );
+  if (!realtimeFinding) {
+    return requestedId;
+  }
+
+  const aliasMatch =
+    findMatchingFindingByValue(
+      input.persistedFindings,
+      (item) => item.verification_fingerprint,
+      realtimeFinding.verification_fingerprint,
+    ) ||
+    findMatchingFindingByValue(
+      input.persistedFindings,
+      (item) => item.verification_todo_id,
+      realtimeFinding.verification_todo_id,
+    ) ||
+    findMatchingFindingByValue(
+      input.persistedFindings,
+      (item) => item.merge_key,
+      realtimeFinding.merge_key,
+    ) ||
+    findMatchingFindingByValue(
+      input.persistedFindings,
+      (item) => item.fingerprint,
+      realtimeFinding.fingerprint,
+    );
+  if (aliasMatch?.id) {
+    return aliasMatch.id;
+  }
+
+  const targetType = normalizeFindingLookupValue(
+    realtimeFinding.vulnerability_type,
+  );
+  const targetPath = normalizeFindingLocationPath(realtimeFinding.file_path);
+  const targetLine =
+    typeof realtimeFinding.line_start === "number" &&
+    Number.isFinite(realtimeFinding.line_start)
+      ? Math.trunc(realtimeFinding.line_start)
+      : null;
+  const targetTitle = normalizeFindingLookupValue(
+    realtimeFinding.display_title || realtimeFinding.title,
+  );
+
+  const heuristicMatch =
+    input.persistedFindings.find((item) => {
+      if (
+        targetType &&
+        normalizeFindingLookupValue(item.vulnerability_type) !== targetType
+      ) {
+        return false;
+      }
+      if (
+        targetPath &&
+        normalizeFindingLocationPath(item.file_path) !== targetPath
+      ) {
+        return false;
+      }
+      if (
+        targetLine !== null &&
+        (typeof item.line_start !== "number" ||
+          !Number.isFinite(item.line_start) ||
+          Math.trunc(item.line_start) !== targetLine)
+      ) {
+        return false;
+      }
+      if (
+        targetTitle &&
+        normalizeFindingLookupValue(item.display_title || item.title) !==
+          targetTitle
+      ) {
+        return false;
+      }
+      return true;
+    }) ?? null;
+
+  return heuristicMatch?.id || requestedId;
 }
 
 export function isFalsePositiveFinding(item: RealtimeFindingLike): boolean {

@@ -316,8 +316,7 @@ export default function FindingDetail() {
               setProject(null);
             }
           }
-          const canUseSnapshot =
-            agentFindingSnapshot && isAgentFalsePositiveFinding(agentFindingSnapshot);
+          const canUseSnapshot = Boolean(agentFindingSnapshot);
           const retryDelaysMs = canUseSnapshot ? [0, 1200, 2400] : [0];
           let resolved = false;
 

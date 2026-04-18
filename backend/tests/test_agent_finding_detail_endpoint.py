@@ -18,6 +18,25 @@ class _ScalarOneOrNoneResult:
         return self._value
 
 
+class _ScalarsProxy:
+    def __init__(self, values):
+        self._values = list(values)
+
+    def all(self):
+        return list(self._values)
+
+    def first(self):
+        return self._values[0] if self._values else None
+
+
+class _ScalarsResult:
+    def __init__(self, values):
+        self._values = list(values)
+
+    def scalars(self):
+        return _ScalarsProxy(self._values)
+
+
 def _build_agent_finding(
     *,
     finding_id: str,
@@ -110,7 +129,13 @@ async def test_get_agent_finding_returns_404_when_finding_not_found():
         return None
 
     db.get = AsyncMock(side_effect=get_side_effect)
-    db.execute = AsyncMock(return_value=_ScalarOneOrNoneResult(None))
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneOrNoneResult(None),
+            _ScalarsResult([]),
+            _ScalarsResult([]),
+        ]
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await get_agent_finding(
@@ -230,3 +255,94 @@ async def test_get_agent_finding_can_include_false_positive():
     assert result.verification_todo_id == "todo-1"
     assert result.verification_fingerprint == "fp-1"
     assert result.verification_evidence == "verified by harness"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_finding_resolves_stream_finding_id_via_event_aliases():
+    task_id = "task-1"
+    persisted_finding = _build_agent_finding(
+        finding_id="finding-db-1",
+        task_id=task_id,
+    )
+    stream_finding_id = "dcbb9a36-b6c2-49d0-bd6d-537b1e569851"
+
+    db = AsyncMock()
+
+    async def get_side_effect(model, _id):
+        if model is AgentTask:
+            return SimpleNamespace(id=task_id, project_id="project-1")
+        if model is Project:
+            return SimpleNamespace(id="project-1")
+        return None
+
+    db.get = AsyncMock(side_effect=get_side_effect)
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneOrNoneResult(None),
+            _ScalarsResult([persisted_finding]),
+            _ScalarsResult(
+                [
+                    SimpleNamespace(
+                        id="event-row-1",
+                        finding_id=stream_finding_id,
+                        event_metadata={
+                            "verification_fingerprint": "fp-1",
+                            "verification_todo_id": "todo-1",
+                            "vulnerability_type": "xss",
+                            "file_path": "app.py",
+                            "line_start": 10,
+                            "title": "confirmed issue",
+                        },
+                    )
+                ]
+            ),
+        ]
+    )
+
+    result = await get_agent_finding(
+        task_id=task_id,
+        finding_id=stream_finding_id,
+        include_false_positive=True,
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert result.id == "finding-db-1"
+    assert result.verification_fingerprint == "fp-1"
+    assert result.verification_todo_id == "todo-1"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_finding_resolves_verification_fingerprint_lookup():
+    task_id = "task-1"
+    persisted_finding = _build_agent_finding(
+        finding_id="finding-db-2",
+        task_id=task_id,
+    )
+
+    db = AsyncMock()
+
+    async def get_side_effect(model, _id):
+        if model is AgentTask:
+            return SimpleNamespace(id=task_id, project_id="project-1")
+        if model is Project:
+            return SimpleNamespace(id="project-1")
+        return None
+
+    db.get = AsyncMock(side_effect=get_side_effect)
+    db.execute = AsyncMock(
+        side_effect=[
+            _ScalarOneOrNoneResult(None),
+            _ScalarsResult([persisted_finding]),
+        ]
+    )
+
+    result = await get_agent_finding(
+        task_id=task_id,
+        finding_id="fp-1",
+        include_false_positive=True,
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    assert result.id == "finding-db-2"
