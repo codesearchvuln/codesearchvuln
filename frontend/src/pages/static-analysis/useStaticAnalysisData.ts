@@ -47,22 +47,38 @@ import {
   getUnifiedStaticFindings,
   type UnifiedStaticFindingsQuery,
 } from "@/shared/api/staticUnifiedFindings";
+import {
+  getStaticAnalysisFindingsSnapshot,
+  getStaticAnalysisTaskSnapshot,
+  isStaticAnalysisSnapshotFresh,
+  isStaticAnalysisSnapshotReusable,
+  requestStaticAnalysisFindingsSnapshot,
+  requestStaticAnalysisTaskSnapshot,
+} from "./staticAnalysisSnapshotStore";
 import type { Engine, FindingStatus, UnifiedFindingRow } from "./viewModel";
 import {
+  buildUnifiedFindingRows,
   isStaticAnalysisInterruptibleStatus,
   isStaticAnalysisPollableStatus,
-  buildUnifiedFindingRows,
   mapUnifiedFindingItemToRow,
 } from "./viewModel";
 
-function compareOptionalNumberAsc(left: number | null | undefined, right: number | null | undefined) {
+function compareOptionalNumberAsc(
+  left: number | null | undefined,
+  right: number | null | undefined,
+) {
   const leftValue = left ?? Number.MAX_SAFE_INTEGER;
   const rightValue = right ?? Number.MAX_SAFE_INTEGER;
   return leftValue - rightValue;
 }
 
-function compareTextAsc(left: string | null | undefined, right: string | null | undefined) {
-  return String(left || "").toLowerCase().localeCompare(String(right || "").toLowerCase());
+function compareTextAsc(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  return String(left || "")
+    .toLowerCase()
+    .localeCompare(String(right || "").toLowerCase());
 }
 
 function applyLocalUnifiedFindingsQuery(
@@ -91,7 +107,10 @@ function applyLocalUnifiedFindingsQuery(
     if (sortBy === "severity" && left.severityScore !== right.severityScore) {
       return direction * (left.severityScore - right.severityScore);
     }
-    if (sortBy === "confidence" && left.confidenceScore !== right.confidenceScore) {
+    if (
+      sortBy === "confidence" &&
+      left.confidenceScore !== right.confidenceScore
+    ) {
       return direction * (left.confidenceScore - right.confidenceScore);
     }
     if (sortBy === "file_path") {
@@ -106,7 +125,10 @@ function applyLocalUnifiedFindingsQuery(
     if (sortBy !== "severity" && left.severityScore !== right.severityScore) {
       return right.severityScore - left.severityScore;
     }
-    if (sortBy !== "confidence" && left.confidenceScore !== right.confidenceScore) {
+    if (
+      sortBy !== "confidence" &&
+      left.confidenceScore !== right.confidenceScore
+    ) {
       return right.confidenceScore - left.confidenceScore;
     }
     if (sortBy !== "file_path") {
@@ -182,6 +204,20 @@ function shouldFallbackToLegacyUnifiedFindings(error: unknown): boolean {
   return axios.isAxiosError(error) && error.response?.status === 404;
 }
 
+function hasCachedTaskSnapshot(engine: Engine, taskId: string): boolean {
+  if (!taskId) return true;
+  return Boolean(getStaticAnalysisTaskSnapshot(engine, taskId));
+}
+
+const INITIAL_TASK_REQUEST_SEQ: Record<Engine, number> = {
+  opengrep: 0,
+  gitleaks: 0,
+  bandit: 0,
+  phpstan: 0,
+  pmd: 0,
+  yasa: 0,
+};
+
 export function useStaticAnalysisData({
   hasEnabledEngine,
   opengrepTaskId,
@@ -201,25 +237,75 @@ export function useStaticAnalysisData({
   pmdTaskId: string;
   unifiedQuery: UnifiedStaticFindingsQuery;
 }) {
-  // Keep task lifecycle handling aligned across static engines.
-  const [opengrepTask, setOpengrepTask] = useState<OpengrepScanTask | null>(null);
-  const [gitleaksTask, setGitleaksTask] = useState<GitleaksScanTask | null>(null);
-  const [banditTask, setBanditTask] = useState<BanditScanTask | null>(null);
-  const [phpstanTask, setPhpstanTask] = useState<PhpstanScanTask | null>(null);
-  const [yasaTask, setYasaTask] = useState<YasaScanTask | null>(null);
-  const [pmdTask, setPmdTask] = useState<PmdScanTask | null>(null);
-  const [unifiedRows, setUnifiedRows] = useState<UnifiedFindingRow[]>([]);
-  const [unifiedTotal, setUnifiedTotal] = useState(0);
+  const initialOpengrepTask = opengrepTaskId
+    ? getStaticAnalysisTaskSnapshot<OpengrepScanTask>("opengrep", opengrepTaskId)
+    : null;
+  const initialGitleaksTask = gitleaksTaskId
+    ? getStaticAnalysisTaskSnapshot<GitleaksScanTask>("gitleaks", gitleaksTaskId)
+    : null;
+  const initialBanditTask = banditTaskId
+    ? getStaticAnalysisTaskSnapshot<BanditScanTask>("bandit", banditTaskId)
+    : null;
+  const initialPhpstanTask = phpstanTaskId
+    ? getStaticAnalysisTaskSnapshot<PhpstanScanTask>("phpstan", phpstanTaskId)
+    : null;
+  const initialPmdTask = pmdTaskId
+    ? getStaticAnalysisTaskSnapshot<PmdScanTask>("pmd", pmdTaskId)
+    : null;
+  const initialYasaTask = yasaTaskId
+    ? getStaticAnalysisTaskSnapshot<YasaScanTask>("yasa", yasaTaskId)
+    : null;
+  const initialFindingsSnapshot = hasEnabledEngine
+    ? getStaticAnalysisFindingsSnapshot(unifiedQuery)
+    : null;
+  const hasCachedTaskData =
+    hasCachedTaskSnapshot("opengrep", opengrepTaskId) &&
+    hasCachedTaskSnapshot("gitleaks", gitleaksTaskId) &&
+    hasCachedTaskSnapshot("bandit", banditTaskId) &&
+    hasCachedTaskSnapshot("phpstan", phpstanTaskId) &&
+    hasCachedTaskSnapshot("pmd", pmdTaskId) &&
+    hasCachedTaskSnapshot("yasa", yasaTaskId);
 
-  const [loadingInitial, setLoadingInitial] = useState(true);
-  const [loadingTask, setLoadingTask] = useState(false);
-  const [loadingFindings, setLoadingFindings] = useState(false);
+  const [opengrepTask, setOpengrepTask] = useState<OpengrepScanTask | null>(
+    () => initialOpengrepTask?.data ?? null,
+  );
+  const [gitleaksTask, setGitleaksTask] = useState<GitleaksScanTask | null>(
+    () => initialGitleaksTask?.data ?? null,
+  );
+  const [banditTask, setBanditTask] = useState<BanditScanTask | null>(
+    () => initialBanditTask?.data ?? null,
+  );
+  const [phpstanTask, setPhpstanTask] = useState<PhpstanScanTask | null>(
+    () => initialPhpstanTask?.data ?? null,
+  );
+  const [yasaTask, setYasaTask] = useState<YasaScanTask | null>(
+    () => initialYasaTask?.data ?? null,
+  );
+  const [pmdTask, setPmdTask] = useState<PmdScanTask | null>(
+    () => initialPmdTask?.data ?? null,
+  );
+  const [unifiedRows, setUnifiedRows] = useState<UnifiedFindingRow[]>(
+    () => initialFindingsSnapshot?.data.items ?? [],
+  );
+  const [unifiedTotal, setUnifiedTotal] = useState(
+    () => initialFindingsSnapshot?.data.total ?? 0,
+  );
+
+  const [loadingInitial, setLoadingInitial] = useState(
+    () => hasEnabledEngine && !hasCachedTaskData,
+  );
+  const [taskLoadingCount, setTaskLoadingCount] = useState(0);
+  const [loadingFindings, setLoadingFindings] = useState(
+    () => hasEnabledEngine && !initialFindingsSnapshot,
+  );
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
   const [interruptTarget, setInterruptTarget] = useState<Engine | null>(null);
   const [interrupting, setInterrupting] = useState(false);
 
+  const loadingTask = taskLoadingCount > 0;
   const unifiedQueryRef = useRef<UnifiedStaticFindingsQuery>(unifiedQuery);
   const unifiedRequestSeqRef = useRef(0);
+  const taskRequestSeqRef = useRef({ ...INITIAL_TASK_REQUEST_SEQ });
 
   const opengrepSilentRefreshRef = useRef(false);
   const gitleaksSilentRefreshRef = useRef(false);
@@ -228,211 +314,344 @@ export function useStaticAnalysisData({
   const yasaSilentRefreshRef = useRef(false);
   const pmdSilentRefreshRef = useRef(false);
 
-  const loadOpengrepTask = useCallback(async (silent = false) => {
-    if (!opengrepTaskId) {
-      setOpengrepTask(null);
-      return;
-    }
-    try {
-      if (!silent) setLoadingTask(true);
-      const task = await getOpengrepScanTask(opengrepTaskId);
-      setOpengrepTask(task);
-    } catch {
-      setOpengrepTask(null);
-      if (!silent) toast.error("加载 Opengrep 任务失败");
-    } finally {
-      if (!silent) setLoadingTask(false);
-    }
-  }, [opengrepTaskId]);
+  const beginTaskLoading = useCallback(() => {
+    setTaskLoadingCount((current) => current + 1);
+  }, []);
 
-  const loadGitleaksTask = useCallback(async (silent = false) => {
-    if (!gitleaksTaskId) {
-      setGitleaksTask(null);
-      return;
-    }
-    try {
-      if (!silent) setLoadingTask(true);
-      const task = await getGitleaksScanTask(gitleaksTaskId);
-      setGitleaksTask(task);
-    } catch {
-      setGitleaksTask(null);
-      if (!silent) toast.error("加载 Gitleaks 任务失败");
-    } finally {
-      if (!silent) setLoadingTask(false);
-    }
-  }, [gitleaksTaskId]);
+  const endTaskLoading = useCallback(() => {
+    setTaskLoadingCount((current) => Math.max(0, current - 1));
+  }, []);
 
-  const loadBanditTask = useCallback(async (silent = false) => {
-    if (!banditTaskId) {
-      setBanditTask(null);
-      return;
-    }
-    try {
-      if (!silent) setLoadingTask(true);
-      const task = await getBanditScanTask(banditTaskId);
-      setBanditTask(task);
-    } catch {
-      setBanditTask(null);
-      if (!silent) toast.error("加载 Bandit 任务失败");
-    } finally {
-      if (!silent) setLoadingTask(false);
-    }
-  }, [banditTaskId]);
-
-  const loadPhpstanTask = useCallback(async (silent = false) => {
-    if (!phpstanTaskId) {
-      setPhpstanTask(null);
-      return;
-    }
-    try {
-      if (!silent) setLoadingTask(true);
-      const task = await getPhpstanScanTask(phpstanTaskId);
-      setPhpstanTask(task);
-    } catch {
-      setPhpstanTask(null);
-      if (!silent) toast.error("加载 PHPStan 任务失败");
-    } finally {
-      if (!silent) setLoadingTask(false);
-    }
-  }, [phpstanTaskId]);
-
-  const loadPmdTask = useCallback(async (silent = false) => {
-    if (!pmdTaskId) {
-      setPmdTask(null);
-      return;
-    }
-    try {
-      if (!silent) setLoadingTask(true);
-      const task = await getPmdScanTask(pmdTaskId);
-      setPmdTask(task);
-    } catch {
-      setPmdTask(null);
-      if (!silent) toast.error("加载 PMD 任务失败");
-    } finally {
-      if (!silent) setLoadingTask(false);
-    }
-  }, [pmdTaskId]);
-
-  const loadYasaTask = useCallback(async (silent = false) => {
-    if (!yasaTaskId) {
-      setYasaTask(null);
-      return;
-    }
-    try {
-      if (!silent) setLoadingTask(true);
-      const task = await getYasaScanTask(yasaTaskId);
-      setYasaTask(task);
-    } catch {
-      setYasaTask(null);
-      if (!silent) toast.error("加载 YASA 任务失败");
-    } finally {
-      if (!silent) setLoadingTask(false);
-    }
-  }, [yasaTaskId]);
-
-  const loadUnifiedFindings = useCallback(async (
-    query: UnifiedStaticFindingsQuery,
-    silent = false,
-  ) => {
-    unifiedQueryRef.current = query;
-
-    if (!hasEnabledEngine) {
-      setUnifiedRows([]);
-      setUnifiedTotal(0);
-      if (!silent) setLoadingFindings(false);
-      return;
-    }
-
-    const requestSeq = unifiedRequestSeqRef.current + 1;
-    unifiedRequestSeqRef.current = requestSeq;
-
-    try {
-      if (!silent) setLoadingFindings(true);
-      const response = await getUnifiedStaticFindings(query);
-      if (requestSeq !== unifiedRequestSeqRef.current) {
+  const loadTask = useCallback(
+    async <T,>({
+      engine,
+      taskId,
+      silent = false,
+      force = false,
+      loader,
+      assign,
+      errorMessage,
+    }: {
+      engine: Engine;
+      taskId: string;
+      silent?: boolean;
+      force?: boolean;
+      loader: (taskId: string) => Promise<T>;
+      assign: (task: T | null) => void;
+      errorMessage: string;
+    }) => {
+      if (!taskId) {
+        assign(null);
         return;
       }
-      setUnifiedRows(response.items.map((item) => mapUnifiedFindingItemToRow(item)));
-      setUnifiedTotal(response.total);
-    } catch (error) {
-      if (shouldFallbackToLegacyUnifiedFindings(error)) {
-        try {
-          const fallback = await getLegacyUnifiedFindingsFallback(query);
-          if (requestSeq !== unifiedRequestSeqRef.current) {
-            return;
-          }
+
+      const requestSeq = taskRequestSeqRef.current[engine] + 1;
+      taskRequestSeqRef.current[engine] = requestSeq;
+
+      const cachedSnapshot = getStaticAnalysisTaskSnapshot<T>(engine, taskId);
+      if (cachedSnapshot) {
+        assign(cachedSnapshot.data ?? null);
+        if (!force && isStaticAnalysisSnapshotFresh(cachedSnapshot)) {
+          return;
+        }
+      }
+
+      const trackLoading =
+        !silent &&
+        (force || !cachedSnapshot || !isStaticAnalysisSnapshotReusable(cachedSnapshot));
+
+      try {
+        if (trackLoading) {
+          beginTaskLoading();
+        }
+        const snapshot = await requestStaticAnalysisTaskSnapshot({
+          engine,
+          taskId,
+          loader,
+        });
+        if (requestSeq !== taskRequestSeqRef.current[engine]) {
+          return;
+        }
+        assign(snapshot.data ?? null);
+      } catch {
+        if (requestSeq !== taskRequestSeqRef.current[engine]) {
+          return;
+        }
+        if (!cachedSnapshot) {
+          assign(null);
+        }
+        if (
+          !silent &&
+          (force || !cachedSnapshot || !isStaticAnalysisSnapshotReusable(cachedSnapshot))
+        ) {
+          toast.error(errorMessage);
+        }
+      } finally {
+        if (trackLoading) {
+          endTaskLoading();
+        }
+      }
+    },
+    [beginTaskLoading, endTaskLoading],
+  );
+
+  const loadOpengrepTask = useCallback(
+    async (silent = false, force = false) => {
+      await loadTask({
+        engine: "opengrep",
+        taskId: opengrepTaskId,
+        silent,
+        force,
+        loader: getOpengrepScanTask,
+        assign: setOpengrepTask,
+        errorMessage: "加载 Opengrep 任务失败",
+      });
+    },
+    [loadTask, opengrepTaskId],
+  );
+
+  const loadGitleaksTask = useCallback(
+    async (silent = false, force = false) => {
+      await loadTask({
+        engine: "gitleaks",
+        taskId: gitleaksTaskId,
+        silent,
+        force,
+        loader: getGitleaksScanTask,
+        assign: setGitleaksTask,
+        errorMessage: "加载 Gitleaks 任务失败",
+      });
+    },
+    [gitleaksTaskId, loadTask],
+  );
+
+  const loadBanditTask = useCallback(
+    async (silent = false, force = false) => {
+      await loadTask({
+        engine: "bandit",
+        taskId: banditTaskId,
+        silent,
+        force,
+        loader: getBanditScanTask,
+        assign: setBanditTask,
+        errorMessage: "加载 Bandit 任务失败",
+      });
+    },
+    [banditTaskId, loadTask],
+  );
+
+  const loadPhpstanTask = useCallback(
+    async (silent = false, force = false) => {
+      await loadTask({
+        engine: "phpstan",
+        taskId: phpstanTaskId,
+        silent,
+        force,
+        loader: getPhpstanScanTask,
+        assign: setPhpstanTask,
+        errorMessage: "加载 PHPStan 任务失败",
+      });
+    },
+    [loadTask, phpstanTaskId],
+  );
+
+  const loadPmdTask = useCallback(
+    async (silent = false, force = false) => {
+      await loadTask({
+        engine: "pmd",
+        taskId: pmdTaskId,
+        silent,
+        force,
+        loader: getPmdScanTask,
+        assign: setPmdTask,
+        errorMessage: "加载 PMD 任务失败",
+      });
+    },
+    [loadTask, pmdTaskId],
+  );
+
+  const loadYasaTask = useCallback(
+    async (silent = false, force = false) => {
+      await loadTask({
+        engine: "yasa",
+        taskId: yasaTaskId,
+        silent,
+        force,
+        loader: getYasaScanTask,
+        assign: setYasaTask,
+        errorMessage: "加载 YASA 任务失败",
+      });
+    },
+    [loadTask, yasaTaskId],
+  );
+
+  const fetchUnifiedFindingsPage = useCallback(
+    async (
+      query: UnifiedStaticFindingsQuery,
+    ): Promise<{ items: UnifiedFindingRow[]; total: number }> => {
+      try {
+        const response = await getUnifiedStaticFindings(query);
+        return {
+          items: response.items.map((item) => mapUnifiedFindingItemToRow(item)),
+          total: response.total,
+        };
+      } catch (error) {
+        if (shouldFallbackToLegacyUnifiedFindings(error)) {
           console.warn(
             "[StaticAnalysis] Unified findings endpoint unavailable, using legacy findings fallback.",
             error,
           );
-          setUnifiedRows(fallback.items);
-          setUnifiedTotal(fallback.total);
-          return;
-        } catch (fallbackError) {
-          error = fallbackError;
+          return getLegacyUnifiedFindingsFallback(query);
         }
+        throw error;
       }
-      if (requestSeq !== unifiedRequestSeqRef.current) {
+    },
+    [],
+  );
+
+  const loadUnifiedFindings = useCallback(
+    async (
+      query: UnifiedStaticFindingsQuery,
+      options?: { silent?: boolean; force?: boolean },
+    ) => {
+      const silent = Boolean(options?.silent);
+      const force = Boolean(options?.force);
+      unifiedQueryRef.current = query;
+
+      if (!hasEnabledEngine) {
+        setUnifiedRows([]);
+        setUnifiedTotal(0);
+        setLoadingFindings(false);
         return;
       }
-      setUnifiedRows([]);
-      setUnifiedTotal(0);
-      if (!silent) toast.error("加载漏洞列表失败");
-    } finally {
-      if (!silent && requestSeq === unifiedRequestSeqRef.current) {
+
+      const requestSeq = unifiedRequestSeqRef.current + 1;
+      unifiedRequestSeqRef.current = requestSeq;
+
+      const cachedSnapshot = getStaticAnalysisFindingsSnapshot(query);
+      if (cachedSnapshot) {
+        setUnifiedRows(cachedSnapshot.data.items);
+        setUnifiedTotal(cachedSnapshot.data.total);
         setLoadingFindings(false);
+        if (!force && isStaticAnalysisSnapshotFresh(cachedSnapshot)) {
+          return;
+        }
       }
-    }
-  }, [hasEnabledEngine]);
 
-  const refreshTasks = useCallback(async (silent = false) => {
-    if (!hasEnabledEngine) {
-      setLoadingInitial(false);
-      return;
-    }
+      const showLoading =
+        !silent &&
+        (force || !cachedSnapshot || !isStaticAnalysisSnapshotReusable(cachedSnapshot));
 
-    if (!silent) setLoadingInitial(true);
-    try {
+      try {
+        if (showLoading) {
+          setLoadingFindings(true);
+        }
+        const snapshot = await requestStaticAnalysisFindingsSnapshot({
+          query,
+          loader: fetchUnifiedFindingsPage,
+        });
+        if (requestSeq !== unifiedRequestSeqRef.current) {
+          return;
+        }
+        setUnifiedRows(snapshot.data.items);
+        setUnifiedTotal(snapshot.data.total);
+      } catch {
+        if (requestSeq !== unifiedRequestSeqRef.current) {
+          return;
+        }
+        if (!cachedSnapshot) {
+          setUnifiedRows([]);
+          setUnifiedTotal(0);
+        }
+        if (
+          !silent &&
+          (force || !cachedSnapshot || !isStaticAnalysisSnapshotReusable(cachedSnapshot))
+        ) {
+          toast.error("加载漏洞列表失败");
+        }
+      } finally {
+        if (showLoading && requestSeq === unifiedRequestSeqRef.current) {
+          setLoadingFindings(false);
+        }
+      }
+    },
+    [fetchUnifiedFindingsPage, hasEnabledEngine],
+  );
+
+  const refreshTasks = useCallback(
+    async (silent = false, force = false) => {
+      if (!hasEnabledEngine) {
+        setLoadingInitial(false);
+        return;
+      }
+
+      const hasHydratedTaskData =
+        hasCachedTaskSnapshot("opengrep", opengrepTaskId) &&
+        hasCachedTaskSnapshot("gitleaks", gitleaksTaskId) &&
+        hasCachedTaskSnapshot("bandit", banditTaskId) &&
+        hasCachedTaskSnapshot("phpstan", phpstanTaskId) &&
+        hasCachedTaskSnapshot("pmd", pmdTaskId) &&
+        hasCachedTaskSnapshot("yasa", yasaTaskId);
+
+      if (!silent && !hasHydratedTaskData) {
+        setLoadingInitial(true);
+      }
+
+      try {
+        await Promise.all([
+          loadOpengrepTask(silent, force),
+          loadGitleaksTask(silent, force),
+          loadBanditTask(silent, force),
+          loadPhpstanTask(silent, force),
+          loadPmdTask(silent, force),
+          loadYasaTask(silent, force),
+        ]);
+      } finally {
+        if (!silent) {
+          setLoadingInitial(false);
+        }
+      }
+    },
+    [
+      banditTaskId,
+      gitleaksTaskId,
+      hasEnabledEngine,
+      loadBanditTask,
+      loadGitleaksTask,
+      loadOpengrepTask,
+      loadPhpstanTask,
+      loadPmdTask,
+      loadYasaTask,
+      opengrepTaskId,
+      phpstanTaskId,
+      pmdTaskId,
+      yasaTaskId,
+    ],
+  );
+
+  const refreshAll = useCallback(
+    async (silent = false) => {
+      if (!hasEnabledEngine) {
+        setUnifiedRows([]);
+        setUnifiedTotal(0);
+        setLoadingInitial(false);
+        setLoadingFindings(false);
+        return;
+      }
+
       await Promise.all([
-        loadOpengrepTask(silent),
-        loadGitleaksTask(silent),
-        loadBanditTask(silent),
-        loadPhpstanTask(silent),
-        loadPmdTask(silent),
-        loadYasaTask(silent),
+        refreshTasks(silent, true),
+        loadUnifiedFindings(unifiedQueryRef.current, { silent, force: true }),
       ]);
-    } finally {
-      if (!silent) setLoadingInitial(false);
-    }
-  }, [
-    hasEnabledEngine,
-    loadBanditTask,
-    loadGitleaksTask,
-    loadOpengrepTask,
-    loadPhpstanTask,
-    loadPmdTask,
-    loadYasaTask,
-  ]);
-
-  const refreshAll = useCallback(async (silent = false) => {
-    if (!hasEnabledEngine) {
-      setUnifiedRows([]);
-      setUnifiedTotal(0);
-      setLoadingInitial(false);
-      return;
-    }
-
-    await Promise.all([
-      refreshTasks(silent),
-      loadUnifiedFindings(unifiedQueryRef.current, silent),
-    ]);
-  }, [hasEnabledEngine, loadUnifiedFindings, refreshTasks]);
+    },
+    [hasEnabledEngine, loadUnifiedFindings, refreshTasks],
+  );
 
   const refreshOpengrepSilently = useCallback(async () => {
     if (!opengrepTaskId || opengrepSilentRefreshRef.current) return;
     opengrepSilentRefreshRef.current = true;
     try {
-      await loadOpengrepTask(true);
+      await loadOpengrepTask(true, true);
     } finally {
       opengrepSilentRefreshRef.current = false;
     }
@@ -442,7 +661,7 @@ export function useStaticAnalysisData({
     if (!gitleaksTaskId || gitleaksSilentRefreshRef.current) return;
     gitleaksSilentRefreshRef.current = true;
     try {
-      await loadGitleaksTask(true);
+      await loadGitleaksTask(true, true);
     } finally {
       gitleaksSilentRefreshRef.current = false;
     }
@@ -452,7 +671,7 @@ export function useStaticAnalysisData({
     if (!banditTaskId || banditSilentRefreshRef.current) return;
     banditSilentRefreshRef.current = true;
     try {
-      await loadBanditTask(true);
+      await loadBanditTask(true, true);
     } finally {
       banditSilentRefreshRef.current = false;
     }
@@ -462,7 +681,7 @@ export function useStaticAnalysisData({
     if (!phpstanTaskId || phpstanSilentRefreshRef.current) return;
     phpstanSilentRefreshRef.current = true;
     try {
-      await loadPhpstanTask(true);
+      await loadPhpstanTask(true, true);
     } finally {
       phpstanSilentRefreshRef.current = false;
     }
@@ -472,7 +691,7 @@ export function useStaticAnalysisData({
     if (!pmdTaskId || pmdSilentRefreshRef.current) return;
     pmdSilentRefreshRef.current = true;
     try {
-      await loadPmdTask(true);
+      await loadPmdTask(true, true);
     } finally {
       pmdSilentRefreshRef.current = false;
     }
@@ -482,7 +701,7 @@ export function useStaticAnalysisData({
     if (!yasaTaskId || yasaSilentRefreshRef.current) return;
     yasaSilentRefreshRef.current = true;
     try {
-      await loadYasaTask(true);
+      await loadYasaTask(true, true);
     } finally {
       yasaSilentRefreshRef.current = false;
     }
@@ -534,58 +753,61 @@ export function useStaticAnalysisData({
     yasaTaskId,
   ]);
 
-  const handleToggleStatus = useCallback(async (
-    row: UnifiedFindingRow,
-    target: FindingStatus,
-  ) => {
-    const currentStatus = String(row.status || "open").toLowerCase();
-    const nextStatus: FindingStatus = currentStatus === target ? "open" : target;
-    const updateKey = `${row.engine}:${row.id}:${target}`;
-    setUpdatingKey(updateKey);
-    try {
-      if (row.engine === "opengrep") {
-        await updateOpengrepFindingStatus({
-          findingId: row.id,
-          status: nextStatus,
+  const handleToggleStatus = useCallback(
+    async (row: UnifiedFindingRow, target: FindingStatus) => {
+      const currentStatus = String(row.status || "open").toLowerCase();
+      const nextStatus: FindingStatus = currentStatus === target ? "open" : target;
+      const updateKey = `${row.engine}:${row.id}:${target}`;
+      setUpdatingKey(updateKey);
+      try {
+        if (row.engine === "opengrep") {
+          await updateOpengrepFindingStatus({
+            findingId: row.id,
+            status: nextStatus,
+          });
+        } else if (row.engine === "gitleaks") {
+          await updateGitleaksFindingStatus({
+            findingId: row.id,
+            status: nextStatus,
+          });
+        } else if (row.engine === "bandit") {
+          await updateBanditFindingStatus({
+            findingId: row.id,
+            status: nextStatus,
+          });
+        } else if (row.engine === "phpstan") {
+          await updatePhpstanFindingStatus({
+            findingId: row.id,
+            status: nextStatus,
+          });
+        } else if (row.engine === "pmd") {
+          await updatePmdFindingStatus(row.id, nextStatus);
+        } else {
+          await updateYasaFindingStatus({
+            findingId: row.id,
+            status: nextStatus,
+          });
+        }
+        await loadUnifiedFindings(unifiedQueryRef.current, {
+          silent: true,
+          force: true,
         });
-      } else if (row.engine === "gitleaks") {
-        await updateGitleaksFindingStatus({
-          findingId: row.id,
-          status: nextStatus,
-        });
-      } else if (row.engine === "bandit") {
-        await updateBanditFindingStatus({
-          findingId: row.id,
-          status: nextStatus,
-        });
-      } else if (row.engine === "phpstan") {
-        await updatePhpstanFindingStatus({
-          findingId: row.id,
-          status: nextStatus,
-        });
-      } else if (row.engine === "pmd") {
-        await updatePmdFindingStatus(row.id, nextStatus);
-      } else {
-        await updateYasaFindingStatus({
-          findingId: row.id,
-          status: nextStatus,
-        });
+      } catch {
+        toast.error("更新状态失败");
+      } finally {
+        setUpdatingKey(null);
       }
-      await loadUnifiedFindings(unifiedQueryRef.current, true);
-    } catch {
-      toast.error("更新状态失败");
-    } finally {
-      setUpdatingKey(null);
-    }
-  }, [loadUnifiedFindings]);
+    },
+    [loadUnifiedFindings],
+  );
 
   useEffect(() => {
-    void refreshTasks(false);
+    void refreshTasks(false, false);
   }, [refreshTasks]);
 
   useEffect(() => {
     unifiedQueryRef.current = unifiedQuery;
-    void loadUnifiedFindings(unifiedQuery, false);
+    void loadUnifiedFindings(unifiedQuery, { silent: false, force: false });
   }, [loadUnifiedFindings, unifiedQuery]);
 
   useEffect(() => {

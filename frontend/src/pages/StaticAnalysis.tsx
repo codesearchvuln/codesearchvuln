@@ -229,6 +229,8 @@ export default function StaticAnalysis() {
     );
   }, [taskId, toolParam, usesPathTaskIdFallback]);
 
+  const refreshing = loadingInitial || loadingTask || loadingFindings;
+
   const handleBack = () => {
     if (returnTo) {
       navigate(returnTo);
@@ -327,10 +329,10 @@ export default function StaticAnalysis() {
             variant="outline"
             className="cyber-btn-outline h-8"
             onClick={() => void refreshAll(false)}
-            disabled={loadingInitial || loadingTask || loadingFindings}
+            disabled={refreshing}
           >
             <RefreshCw
-              className={`w-3.5 h-3.5 mr-1.5 ${loadingInitial ? "animate-spin" : ""}`}
+              className={`w-3.5 h-3.5 mr-1.5 ${refreshing ? "animate-spin" : ""}`}
             />
             刷新
           </Button>

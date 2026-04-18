@@ -54,6 +54,12 @@ import {
 	buildAgentFindingDetailRoute,
 } from "@/shared/utils/findingRoute";
 import {
+	getAgentAuditTaskDetailSnapshot,
+	isAgentAuditTaskDetailSnapshotFresh,
+	isAgentAuditTaskDetailSnapshotReusable,
+	saveAgentAuditTaskDetailSnapshot,
+} from "./taskDetailSnapshotStore";
+import {
 	getTaskAutoScroll,
 	PROGRAMMATIC_SCROLL_GUARD_MS,
 	persistTaskAutoScroll,
@@ -794,6 +800,7 @@ function AgentAuditPageContent() {
 	const {
 		task,
 		findings,
+		agentTree,
 		logs,
 		isLoading,
 		isAutoScroll,
@@ -854,9 +861,7 @@ function AgentAuditPageContent() {
 		useState<RealtimeQueueSnapshot>(DEFAULT_REALTIME_QUEUE_SNAPSHOT);
 
 	// Realtime panels state
-	const [realtimeFindings, setRealtimeFindings] = useState<
-		RealtimeMergedFindingItem[]
-	>([]);
+	const [realtimeFindings, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
 	const [findingStatusUpdatingKey, setFindingStatusUpdatingKey] = useState<
 		string | null
 	>(null);
@@ -972,6 +977,10 @@ function AgentAuditPageContent() {
 	const [historicalEventsLoaded, setHistoricalEventsLoaded] =
 		useState<boolean>(false);
 	const { logoSrc, cycleLogoVariant } = useLogoVariant();
+	const cachedTaskDetailSnapshot = useMemo(
+		() => (taskId ? getAgentAuditTaskDetailSnapshot(taskId) : null),
+		[taskId],
+	);
 	const visibleManagedFindings = useMemo(
 		() => realtimeFindings,
 		[realtimeFindings],
@@ -990,6 +999,51 @@ function AgentAuditPageContent() {
 		() => (failedReason ? extractStepName(failedReason) : null),
 		[failedReason],
 	);
+	const hydrateTaskDetailSnapshot = useCallback(() => {
+		if (!cachedTaskDetailSnapshot) {
+			return;
+		}
+
+		const snapshot = cachedTaskDetailSnapshot.data;
+		if (snapshot.task) {
+			setTask(snapshot.task);
+		}
+		setFindings(snapshot.findings);
+		if (snapshot.agentTree) {
+			setAgentTree(snapshot.agentTree);
+		}
+		dispatch({ type: "SET_LOGS", payload: snapshot.logs });
+		setProjectName(snapshot.projectName);
+		setRealtimeFindings(snapshot.realtimeFindings);
+		setTokenUsage({
+			...snapshot.tokenUsage,
+			seenSequences: new Set(snapshot.tokenUsage.seenSequences),
+		});
+		setTerminalFailureReason(snapshot.terminalFailureReason);
+		logsRef.current = snapshot.logs;
+		findingsRef.current = snapshot.findings;
+		taskSnapshotRef.current = snapshot.task;
+		taskStatusRef.current = snapshot.task?.status;
+		taskStartedAtRef.current =
+			typeof snapshot.task?.started_at === "string"
+				? snapshot.task.started_at.trim() || null
+				: null;
+		currentLogPhaseLabelRef.current = normalizeEventLogPhaseLabel({
+			rawPhase: snapshot.task?.current_phase,
+			taskStatus: snapshot.task?.status,
+		});
+		lastEventSequenceRef.current = Math.max(0, snapshot.afterSequence);
+		setAfterSequence(lastEventSequenceRef.current);
+		hasLoadedHistoricalEventsRef.current = snapshot.historicalEventsLoaded;
+		setHistoricalEventsLoaded(snapshot.historicalEventsLoaded);
+		previousTaskStatusRef.current = snapshot.task?.status;
+	}, [
+		cachedTaskDetailSnapshot,
+		dispatch,
+		setAgentTree,
+		setFindings,
+		setTask,
+	]);
 
 	useEffect(() => {
 		const node = detailSplitContainerElement;
@@ -1435,6 +1489,47 @@ function AgentAuditPageContent() {
 		});
 	}, [task?.current_phase, task?.status]);
 
+	useEffect(() => {
+		if (!taskId) {
+			return;
+		}
+		if (
+			!task &&
+			!findings.length &&
+			!logs.length &&
+			!agentTree &&
+			!projectName &&
+			!visibleManagedFindings.length &&
+			!terminalFailureReason
+		) {
+			return;
+		}
+		saveAgentAuditTaskDetailSnapshot(taskId, {
+			task,
+			findings,
+			logs,
+			agentTree,
+			projectName,
+			realtimeFindings: visibleManagedFindings,
+			tokenUsage,
+			afterSequence,
+			historicalEventsLoaded,
+			terminalFailureReason,
+		});
+	}, [
+		afterSequence,
+		agentTree,
+		findings,
+		historicalEventsLoaded,
+		logs,
+		projectName,
+		task,
+		taskId,
+		terminalFailureReason,
+		tokenUsage,
+		visibleManagedFindings,
+	]);
+
 	const markTerminalBoundary = useCallback(
 		(status: string, sequence?: number) => {
 			const normalizedStatus = String(status || "")
@@ -1588,10 +1683,23 @@ function AgentAuditPageContent() {
 				triggeredAt: 0,
 			};
 			terminalBoundarySequenceRef.current = null;
+			if (cachedTaskDetailSnapshot) {
+				hydrateTaskDetailSnapshot();
+				setShowSplash(false);
+				setLoading(false);
+			}
 		}
 		setAutoScroll(getTaskAutoScroll(taskId || null));
 		previousTaskIdRef.current = taskId;
-	}, [taskId, reset, setAutoScroll, handleFindingsFiltersChange]);
+	}, [
+		cachedTaskDetailSnapshot,
+		handleFindingsFiltersChange,
+		hydrateTaskDetailSnapshot,
+		reset,
+		setAutoScroll,
+		setLoading,
+		taskId,
+	]);
 
 	useEffect(() => {
 		return () => {
@@ -3519,16 +3627,55 @@ function AgentAuditPageContent() {
 		}
 		initialBootstrapTaskIdRef.current = taskId;
 		setShowSplash(false);
-		setLoading(true);
-		setHistoricalEventsLoaded(false);
+		const cachedSnapshot = cachedTaskDetailSnapshot;
+		const cachedTaskStatus = String(cachedSnapshot?.data.task?.status || "")
+			.trim()
+			.toLowerCase();
+		const shouldSkipInitialReload = Boolean(
+			cachedSnapshot &&
+				isAgentAuditTaskDetailSnapshotFresh(cachedSnapshot) &&
+				cachedTaskStatus !== "running" &&
+				cachedTaskStatus !== "pending",
+		);
+		const shouldReuseSnapshot = Boolean(
+			cachedSnapshot &&
+				(isAgentAuditTaskDetailSnapshotReusable(cachedSnapshot) ||
+					isAgentAuditTaskDetailSnapshotFresh(cachedSnapshot)),
+		);
+		if (!shouldReuseSnapshot) {
+			setLoading(true);
+			setHistoricalEventsLoaded(false);
+		}
+		if (shouldSkipInitialReload) {
+			setLoading(false);
+			setHistoricalEventsLoaded(true);
+			return;
+		}
 
 		const loadAllData = async () => {
 			try {
 				// 先加载任务基本信息
-				await Promise.all([loadTask(), loadFindings(), loadAgentTree()]);
+				await Promise.all([
+					loadTask(),
+					loadFindings({ silent: shouldReuseSnapshot }),
+					loadAgentTree(),
+				]);
 
-				//  加载历史事件 - 无论任务是否运行都需要加载
-				await loadHistoricalEvents();
+				//  优先回补 snapshot 之后的新事件，避免重进页面整页重拉。
+				if (
+					shouldReuseSnapshot &&
+					cachedSnapshot?.data.historicalEventsLoaded &&
+					cachedSnapshot.data.afterSequence > 0
+				) {
+					await backfillEventsSince(
+						cachedSnapshot.data.afterSequence,
+						"task_detail_snapshot_revalidate",
+					);
+				} else {
+					//  加载历史事件 - 无论任务是否运行都需要加载
+					hasLoadedHistoricalEventsRef.current = false;
+					await loadHistoricalEvents();
+				}
 
 				// 标记历史事件已加载完成 (setAfterSequence 已在 loadHistoricalEvents 中调用)
 				setHistoricalEventsLoaded(true);
@@ -3542,12 +3689,14 @@ function AgentAuditPageContent() {
 
 		loadAllData();
 	}, [
-		taskId,
-		loadTask,
-		loadFindings,
+		backfillEventsSince,
+		cachedTaskDetailSnapshot,
 		loadAgentTree,
+		loadFindings,
 		loadHistoricalEvents,
+		loadTask,
 		setLoading,
+		taskId,
 	]);
 
 	// Stream connection -  在历史事件加载完成后连接
@@ -3720,18 +3869,18 @@ function AgentAuditPageContent() {
 			if (!container) return;
 			markProgrammaticScroll();
 			container.scrollTo({ top: container.scrollHeight, behavior });
-			if (typeof window !== "undefined") {
-				window.requestAnimationFrame(() => {
-					markProgrammaticScroll();
-				});
-				if (scrollGuardTimeoutRef.current) {
-					clearTimeout(scrollGuardTimeoutRef.current);
+				if (typeof window !== "undefined") {
+					window.requestAnimationFrame(() => {
+						markProgrammaticScroll();
+					});
+					if (scrollGuardTimeoutRef.current) {
+						clearTimeout(scrollGuardTimeoutRef.current);
+					}
+					scrollGuardTimeoutRef.current = setTimeout(() => {
+						markProgrammaticScroll();
+						scrollGuardTimeoutRef.current = null;
+					}, 120);
 				}
-				scrollGuardTimeoutRef.current = window.setTimeout(() => {
-					markProgrammaticScroll();
-					scrollGuardTimeoutRef.current = null;
-				}, 120);
-			}
 		},
 		[markProgrammaticScroll],
 	);

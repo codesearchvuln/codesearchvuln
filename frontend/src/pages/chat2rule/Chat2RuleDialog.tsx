@@ -238,15 +238,18 @@ export default function Chat2RuleDialog({
 					})),
 					draft_rule_text: currentDraft?.ruleText || undefined,
 				},
-				{
-					signal: controller.signal,
-					onEvent: (event) => {
-						if (event.engine_type) {
-							setEngineType(event.engine_type);
-						}
-						if (typeof event.save_supported === "boolean") {
-							setSaveSupported(event.save_supported);
-						}
+					{
+						signal: controller.signal,
+						onEvent: (event) => {
+							if ("engine_type" in event && event.engine_type) {
+								setEngineType(event.engine_type);
+							}
+							if (
+								"save_supported" in event &&
+								typeof event.save_supported === "boolean"
+							) {
+								setSaveSupported(event.save_supported);
+							}
 						if (event.type === "draft") {
 							setStreamingAssistantMessage(event.assistant_message || "");
 							setStreamingDraft({
