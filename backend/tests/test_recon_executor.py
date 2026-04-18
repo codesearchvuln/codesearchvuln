@@ -43,6 +43,7 @@ class _ScopedTool:
 class _FakeReconSubAgent:
     active_runs = 0
     max_seen = 0
+    seen_toolsets = []
 
     def __init__(self, llm_service=None, tools=None, event_emitter=None):
         self.llm_service = llm_service
@@ -53,6 +54,17 @@ class _FakeReconSubAgent:
         self._tool_runtime = None
         self._write_scope_guard = None
         self._cancel_callback = None
+
+    async def emit_event(self, event_type, message, metadata=None, **kwargs):
+        if self.event_emitter is not None:
+            self.event_emitter.events.append(
+                {
+                    "event_type": event_type,
+                    "message": message,
+                    "metadata": dict(metadata or {}),
+                    "extra": dict(kwargs or {}),
+                }
+            )
 
     def set_tool_runtime(self, runtime):
         self._tool_runtime = runtime
@@ -69,6 +81,7 @@ class _FakeReconSubAgent:
     async def run(self, input_data):
         type(self).active_runs += 1
         type(self).max_seen = max(type(self).max_seen, type(self).active_runs)
+        type(self).seen_toolsets.append(sorted(self.tools.keys()))
         try:
             await asyncio.sleep(0.02)
             scoped_files = sorted(self.tools["scoped"].target_files or [])
@@ -109,13 +122,41 @@ class _FakeReconSubAgent:
             type(self).active_runs -= 1
 
 
+class _FakeHostAgent:
+    def __init__(self, event_emitter=None):
+        self.name = "Recon"
+        self.event_emitter = event_emitter
+
+    async def emit_event(self, event_type, message, metadata=None, **kwargs):
+        if self.event_emitter is not None:
+            self.event_emitter.events.append(
+                {
+                    "event_type": event_type,
+                    "message": message,
+                    "metadata": dict(metadata or {}),
+                    "extra": dict(kwargs or {}),
+                }
+            )
+
+
+class _FakeEventEmitter:
+    def __init__(self):
+        self.events = []
+
+
 class _FakeOrchestrator:
     def __init__(self):
+        event_emitter = _FakeEventEmitter()
         self.sub_agents = {
+            "recon": _FakeHostAgent(event_emitter=event_emitter),
             "recon_subagent": _FakeReconSubAgent(
                 llm_service=object(),
-                tools={"scoped": _ScopedTool()},
-                event_emitter=None,
+                tools={
+                    "scoped": _ScopedTool(),
+                    "run_recon_subagent": object(),
+                    "push_risk_point_to_queue": object(),
+                },
+                event_emitter=event_emitter,
             )
         }
         self._runtime_context = {
@@ -128,12 +169,14 @@ class _FakeOrchestrator:
         self._tool_calls = 0
         self._iteration = 0
         self.is_cancelled = False
+        self.event_emitter = event_emitter
 
 
 @pytest.mark.asyncio
 async def test_recon_executor_respects_max_workers():
     _FakeReconSubAgent.active_runs = 0
     _FakeReconSubAgent.max_seen = 0
+    _FakeReconSubAgent.seen_toolsets = []
     orchestrator = _FakeOrchestrator()
     executor = ReconModuleExecutor(
         orchestrator=orchestrator,
@@ -187,3 +230,65 @@ async def test_recon_executor_respects_max_workers():
         ["src/payment/pay.py"],
         ["src/admin/panel.py"],
     ]
+
+
+@pytest.mark.asyncio
+async def test_recon_executor_emits_host_and_subagent_lifecycle_and_filters_host_tools():
+    _FakeReconSubAgent.active_runs = 0
+    _FakeReconSubAgent.max_seen = 0
+    _FakeReconSubAgent.seen_toolsets = []
+    orchestrator = _FakeOrchestrator()
+    executor = ReconModuleExecutor(
+        orchestrator=orchestrator,
+        max_workers=2,
+        enable_parallel=True,
+    )
+    state = WorkflowState()
+    model = ProjectReconModel(
+        project_root="/tmp/demo",
+        module_descriptors=[
+            ReconModuleDescriptor(
+                module_id="auth",
+                name="src/auth",
+                module_type="auth",
+                paths=["src/auth"],
+                description="Inspect auth",
+                risk_focus=["authentication"],
+                target_files=["src/auth/login.py"],
+            ),
+            ReconModuleDescriptor(
+                module_id="admin",
+                name="src/admin",
+                module_type="admin",
+                paths=["src/admin"],
+                description="Inspect admin",
+                risk_focus=["authorization"],
+                target_files=["src/admin/panel.py"],
+            ),
+        ],
+    )
+
+    results = await executor.run_parallel_recon(
+        state=state,
+        task_id="task-1",
+        project_model=model,
+    )
+
+    assert len(results) == 2
+    assert _FakeReconSubAgent.seen_toolsets
+    for toolset in _FakeReconSubAgent.seen_toolsets:
+        assert "run_recon_subagent" not in toolset
+        assert "push_risk_point_to_queue" not in toolset
+
+    messages = [event["message"] for event in orchestrator.event_emitter.events]
+    assert any("派发 2 个 ReconSubAgent" in message for message in messages)
+    assert any("已加入 ReconSubAgent 队列" in message for message in messages)
+    assert any("开始侦查模块 src/auth" in message for message in messages)
+    assert any("等待 ReconAgent 汇总结果" in message for message in messages)
+
+    subagent_names = [
+        event["metadata"].get("agent_name")
+        for event in orchestrator.event_emitter.events
+        if event["metadata"].get("agent_role") == "recon_subagent"
+    ]
+    assert any(str(name).startswith("ReconSubAgent[") for name in subagent_names)

@@ -2061,9 +2061,20 @@ function AgentAuditPageContent() {
 				(typeof metadata?.agent_name === "string" && metadata.agent_name) ||
 				(typeof metadata?.agent === "string" && metadata.agent) ||
 				undefined;
+			const agentRole =
+				typeof metadata?.agent_role === "string" && metadata.agent_role
+					? String(metadata.agent_role)
+					: undefined;
+			const agentModuleName =
+				(typeof metadata?.module_name === "string" && metadata.module_name) ||
+				(typeof metadata?.module_id === "string" && metadata.module_id) ||
+				undefined;
 			const agentName =
 				typeof agentRawName === "string" && agentRawName.trim()
-					? toZhAgentName(agentRawName)
+					? toZhAgentName(agentRawName, {
+							agentRole,
+							moduleName: agentModuleName,
+						})
 					: undefined;
 			const baseDetail = {
 				event_type: eventType,

@@ -133,6 +133,33 @@ class RunReconSubAgentTool(AgentTool):
         )
 
     @staticmethod
+    async def _emit_host_status(
+        orchestrator: Any,
+        *,
+        lifecycle: str,
+        message: str,
+        selected: Optional[List[ReconModuleDescriptor]] = None,
+    ) -> None:
+        recon_agent = getattr(orchestrator, "sub_agents", {}).get("recon")
+        emit = getattr(recon_agent, "emit_event", None)
+        if not callable(emit):
+            return
+        try:
+            await emit(
+                "info",
+                message,
+                metadata={
+                    "agent_name": getattr(recon_agent, "name", "Recon"),
+                    "agent_role": "recon_host",
+                    "recon_host_lifecycle": lifecycle,
+                    "recon_subagent_count": len(selected or []),
+                    "module_ids": [str(item.module_id) for item in (selected or [])],
+                },
+            )
+        except Exception:
+            pass
+
+    @staticmethod
     def _normalize_directories(raw_module: Dict[str, Any]) -> List[str]:
         directories = raw_module.get("directories")
         if not isinstance(directories, list) or not directories:
@@ -373,6 +400,14 @@ class RunReconSubAgentTool(AgentTool):
 
         effective_workers = max(1, int(max_workers or self._max_workers))
         effective_workers = min(effective_workers, len(selected))
+        await self._emit_host_status(
+            orchestrator,
+            lifecycle="waiting_subagents",
+            message=(
+                f"ReconAgent 已完成项目结构侦查，正在等待 {len(selected)} 个 ReconSubAgent 并发执行完成"
+            ),
+            selected=selected,
+        )
         model_for_run = copy.deepcopy(project_model)
         model_for_run.module_descriptors = list(selected)
 
@@ -393,6 +428,14 @@ class RunReconSubAgentTool(AgentTool):
             project_model=model_for_run,
             module_results=module_results,
             project_info=dict(host_input.get("project_info") or {}),
+        )
+        await self._emit_host_status(
+            orchestrator,
+            lifecycle="merge_and_queue",
+            message=(
+                f"ReconAgent 已收到 {len(selected)} 个 ReconSubAgent 结果，开始统一汇总并负责风险点入队"
+            ),
+            selected=selected,
         )
         for descriptor in selected:
             self._executed_module_ids.add(str(descriptor.module_id))

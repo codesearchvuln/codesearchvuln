@@ -15,6 +15,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_RECON_SUBAGENT_BLOCKED_TOOLS = {
+    "run_recon_subagent",
+    "push_risk_point_to_queue",
+    "push_risk_points_to_queue",
+    "get_recon_risk_queue_status",
+    "dequeue_recon_risk_point",
+    "peek_recon_risk_queue",
+    "clear_recon_risk_queue",
+    "is_recon_risk_point_in_queue",
+}
+
 
 class ReconModuleExecutor:
     """Fan-out/fan-in executor for module-scoped Recon workers."""
@@ -66,6 +77,7 @@ class ReconModuleExecutor:
         return {
             name: self._clone_single_tool_for_worker(name, tool, module_files)
             for name, tool in base_tools.items()
+            if str(name or "").strip().lower() not in _RECON_SUBAGENT_BLOCKED_TOOLS
         }
 
     def _create_worker_agent(
@@ -85,7 +97,8 @@ class ReconModuleExecutor:
             event_emitter=base_agent.event_emitter,
         )
         worker_agent.config = copy.deepcopy(base_agent.config)
-        worker_name = f"{base_agent.name}_worker_{worker_id}"
+        module_label = str(descriptor.name or descriptor.module_id or worker_id).strip() or str(worker_id)
+        worker_name = f"{base_agent.name}[{module_label}]"
         if isinstance(worker_agent.config, dict):
             worker_agent.config["name"] = worker_name
         else:
@@ -108,6 +121,60 @@ class ReconModuleExecutor:
         if cancel_callback is not None and hasattr(worker_agent, "set_cancel_callback"):
             worker_agent.set_cancel_callback(cancel_callback)
         return worker_agent
+
+    async def _emit_agent_status(
+        self,
+        agent: Any,
+        *,
+        descriptor: ReconModuleDescriptor,
+        lifecycle: str,
+        message: str,
+    ) -> None:
+        emit = getattr(agent, "emit_event", None)
+        if not callable(emit):
+            return
+        try:
+            await emit(
+                "info",
+                message,
+                metadata={
+                    "agent_name": getattr(agent, "name", "ReconSubAgent"),
+                    "agent_role": "recon_subagent",
+                    "parent_agent_name": "Recon",
+                    "module_id": descriptor.module_id,
+                    "module_name": descriptor.name,
+                    "module_paths": list(descriptor.paths or []),
+                    "subagent_lifecycle": lifecycle,
+                },
+            )
+        except Exception:
+            logger.debug("[ReconExecutor] failed to emit worker lifecycle event", exc_info=True)
+
+    async def _emit_host_status(
+        self,
+        *,
+        lifecycle: str,
+        message: str,
+        project_model: ProjectReconModel,
+    ) -> None:
+        recon_host = getattr(self.orchestrator, "sub_agents", {}).get("recon")
+        emit = getattr(recon_host, "emit_event", None)
+        if not callable(emit):
+            return
+        try:
+            await emit(
+                "info",
+                message,
+                metadata={
+                    "agent_name": getattr(recon_host, "name", "Recon"),
+                    "agent_role": "recon_host",
+                    "recon_host_lifecycle": lifecycle,
+                    "recon_subagent_count": len(project_model.module_descriptors or []),
+                    "module_ids": [str(item.module_id) for item in (project_model.module_descriptors or [])],
+                },
+            )
+        except Exception:
+            logger.debug("[ReconExecutor] failed to emit host lifecycle event", exc_info=True)
 
     def _build_worker_input(
         self,
@@ -192,7 +259,20 @@ class ReconModuleExecutor:
         project_model: ProjectReconModel,
         descriptor: ReconModuleDescriptor,
     ) -> ReconModuleResult:
+        worker_agent = self._create_worker_agent(worker_id=index, descriptor=descriptor)
+        await self._emit_agent_status(
+            worker_agent,
+            descriptor=descriptor,
+            lifecycle="queued",
+            message=f"模块 {descriptor.name} 已加入 ReconSubAgent 队列，等待可用 worker",
+        )
         if self.orchestrator.is_cancelled:
+            await self._emit_agent_status(
+                worker_agent,
+                descriptor=descriptor,
+                lifecycle="cancelled",
+                message=f"模块 {descriptor.name} 在执行前被取消",
+            )
             return ReconModuleResult(
                 module_id=descriptor.module_id,
                 module_name=descriptor.name,
@@ -204,6 +284,12 @@ class ReconModuleExecutor:
 
         async with self.semaphore:
             if self.orchestrator.is_cancelled:
+                await self._emit_agent_status(
+                    worker_agent,
+                    descriptor=descriptor,
+                    lifecycle="cancelled",
+                    message=f"模块 {descriptor.name} 在获取 worker 后被取消",
+                )
                 return ReconModuleResult(
                     module_id=descriptor.module_id,
                     module_name=descriptor.name,
@@ -213,7 +299,12 @@ class ReconModuleExecutor:
                     error="cancelled",
                 )
 
-            worker_agent = self._create_worker_agent(worker_id=index, descriptor=descriptor)
+            await self._emit_agent_status(
+                worker_agent,
+                descriptor=descriptor,
+                lifecycle="running",
+                message=f"开始侦查模块 {descriptor.name}",
+            )
             started = time.time()
             result = None
             error: str | None = None
@@ -243,6 +334,20 @@ class ReconModuleExecutor:
                 result=result,
                 error=error,
             )
+            if normalized.success:
+                await self._emit_agent_status(
+                    worker_agent,
+                    descriptor=descriptor,
+                    lifecycle="completed",
+                    message=f"模块 {descriptor.name} 侦查完成，等待 ReconAgent 汇总结果",
+                )
+            else:
+                await self._emit_agent_status(
+                    worker_agent,
+                    descriptor=descriptor,
+                    lifecycle="failed",
+                    message=f"模块 {descriptor.name} 侦查失败：{normalized.error or 'unknown'}",
+                )
             duration_ms = int((time.time() - started) * 1000)
 
             async with self.lock:
@@ -284,6 +389,13 @@ class ReconModuleExecutor:
         state.recon_modules_total = len(modules)
         if not modules:
             return []
+        await self._emit_host_status(
+            lifecycle="dispatching",
+            message=(
+                f"ReconAgent 已完成项目结构侦查，派发 {len(modules)} 个 ReconSubAgent 并等待统一回收结果"
+            ),
+            project_model=project_model,
+        )
 
         if not self.enable_parallel or self.max_workers <= 1:
             results: List[ReconModuleResult] = []
@@ -297,6 +409,11 @@ class ReconModuleExecutor:
                         descriptor=descriptor,
                     )
                 )
+            await self._emit_host_status(
+                lifecycle="fan_in",
+                message=f"ReconAgent 已收到全部 {len(results)} 个 ReconSubAgent 结果，开始统一汇总",
+                project_model=project_model,
+            )
             return results
 
         tasks = [
@@ -322,4 +439,10 @@ class ReconModuleExecutor:
             except asyncio.CancelledError:
                 pass
             raise
-        return [result for result in results if isinstance(result, ReconModuleResult)]
+        normalized_results = [result for result in results if isinstance(result, ReconModuleResult)]
+        await self._emit_host_status(
+            lifecycle="fan_in",
+            message=f"ReconAgent 已收到全部 {len(normalized_results)} 个 ReconSubAgent 结果，开始统一汇总",
+            project_model=project_model,
+        )
+        return normalized_results

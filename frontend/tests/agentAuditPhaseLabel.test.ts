@@ -43,11 +43,11 @@ test("normalizeEventLogPhaseLabel maps backend phases to the five allowed labels
 	);
 	assert.equal(
 		localization.normalizeEventLogPhaseLabel?.({ rawPhase: "verification" }),
-		"分析",
+		"验证",
 	);
 	assert.equal(
 		localization.normalizeEventLogPhaseLabel?.({ rawPhase: "reporting" }),
-		"分析",
+		"完成",
 	);
 });
 
@@ -71,7 +71,7 @@ test("normalizeEventLogPhaseLabel only returns 完成 for true completed termina
 			rawPhase: "verification",
 			taskStatus: "running",
 		}),
-		"分析",
+		"验证",
 	);
 	assert.equal(
 		localization.normalizeEventLogPhaseLabel?.({

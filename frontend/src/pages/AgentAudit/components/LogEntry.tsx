@@ -186,9 +186,16 @@ export const LogEntry = memo(function LogEntry({
 			? "border-rose-500/30 bg-rose-500/10 text-rose-300"
 			: item.type === "tool"
 				? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-				: item.type === "progress"
-					? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-					: "border-border/70 bg-background/60 text-muted-foreground";
+					: item.type === "progress"
+						? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+						: "border-border/70 bg-background/60 text-muted-foreground";
+	const agentBadgeClass = String(item.agentRawName || "")
+		.toLowerCase()
+		.includes("reconsubagent")
+		? "border-teal-500/30 bg-teal-500/10 text-teal-200"
+		: String(item.agentRawName || "").trim().toLowerCase() === "recon"
+			? "border-sky-500/30 bg-sky-500/10 text-sky-200"
+			: "border-border/70 bg-background/60 text-muted-foreground";
 	return (
 		<div
 			id={anchorId}
@@ -219,6 +226,15 @@ export const LogEntry = memo(function LogEntry({
 						>
 							{typeLabel}
 						</Badge>
+						{item.agentName ? (
+							<Badge
+								variant="outline"
+								className={`h-6 max-w-[12rem] truncate rounded-full px-2 text-[10px] font-medium ${agentBadgeClass}`}
+								title={item.agentName}
+							>
+								{item.agentName}
+							</Badge>
+						) : null}
 					</div>
 
 					<div className="min-w-0">

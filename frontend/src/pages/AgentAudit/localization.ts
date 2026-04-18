@@ -19,11 +19,27 @@ const LOG_TYPE_LABELS: Record<string, string> = {
   progress: "进度",
 };
 
-export function toZhAgentName(raw: string): string {
+export function toZhAgentName(
+  raw: string,
+  options?: {
+    agentRole?: string | null;
+    moduleName?: string | null;
+  },
+): string {
   const text = String(raw || "").trim();
   if (!text) return "";
   const lower = text.toLowerCase();
+  const agentRole = String(options?.agentRole || "").trim().toLowerCase();
+  const explicitModule = String(options?.moduleName || "").trim();
+  const bracketMatch = text.match(/\[(.+)\]/);
+  const moduleLabel = explicitModule || (bracketMatch?.[1]?.trim() ?? "");
   if (lower.includes("orchestrator")) return "编排智能体";
+  if (lower.includes("reconsubagent") || agentRole === "recon_subagent") {
+    return moduleLabel ? `侦查子智能体 · ${moduleLabel}` : "侦查子智能体";
+  }
+  if (lower === "recon" || lower === "reconagent" || agentRole === "recon_host") {
+    return "侦查主智能体";
+  }
   if (lower.includes("reconnaissance") || lower.includes("recon")) {
     return "侦查智能体";
   }
@@ -93,6 +109,8 @@ export function localizeAuditText(text: string): string {
   if (!text) return "";
   return String(text)
     .replace(/\borchestrator\b/gi, "编排智能体")
+    .replace(/\breconsubagent\b/gi, "侦查子智能体")
+    .replace(/\breconagent\b/gi, "侦查主智能体")
     .replace(/\breconnaissance\b/gi, "侦查智能体")
     .replace(/\brecon\b/gi, "侦查智能体")
     .replace(/\banalysis\b/gi, "分析智能体")
