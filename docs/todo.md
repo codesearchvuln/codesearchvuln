@@ -7,7 +7,7 @@
 ## Refactor
 - [x] 重构Recon
 - [x] 优化文件上传功能，调整为异步
-- [ ] 重构扫描详情页，时间日志改为拖动控制高度
+- [x] 重构扫描详情页，事件日志改为拖动控制高度
 - [x] 将一级标签”开发测试”改为“数据管理“，二级标签”数据管理”改为“导入导出“
 - [ ] 用AntDesign重构前端页面
   - 规划见 `docs/ant/normal-pages-antdesign-refactor-plan.md`
