@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import fnmatch
 import os
+import posixpath
 import re
 from typing import Any, Dict, Iterable, List, Sequence
 
@@ -181,6 +182,65 @@ _ENTRYPOINT_HINTS = (
 
 def _normalize_rel_path(path: str) -> str:
     return str(path or "").strip().replace("\\", "/").lstrip("./")
+
+
+def derive_module_root_directories(
+    paths: Sequence[str] | None = None,
+    *,
+    target_files: Sequence[str] | None = None,
+) -> List[str]:
+    """Collapse a module scope to the highest useful directory roots."""
+
+    candidates: List[str] = []
+    for file_path in target_files or []:
+        normalized = _normalize_rel_path(str(file_path or ""))
+        if not normalized:
+            continue
+        directory = posixpath.dirname(normalized) or "."
+        if directory not in candidates:
+            candidates.append(directory)
+
+    if not candidates:
+        for raw_path in paths or []:
+            normalized = _normalize_rel_path(str(raw_path or ""))
+            if not normalized:
+                continue
+            basename = posixpath.basename(normalized)
+            candidate = posixpath.dirname(normalized) if "." in basename else normalized
+            candidate = candidate or "."
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+    if not candidates:
+        return ["."]
+
+    normalized_candidates = sorted(
+        {
+            "." if item in {"", "."} else item.strip("/")
+            for item in candidates
+            if str(item or "").strip()
+        }
+    )
+    if not normalized_candidates:
+        return ["."]
+    if "." in normalized_candidates:
+        return ["."]
+
+    try:
+        shared_root = posixpath.commonpath(normalized_candidates)
+    except ValueError:
+        shared_root = ""
+    shared_root = _normalize_rel_path(shared_root)
+    if shared_root and shared_root != ".":
+        return [shared_root]
+
+    highest_roots: List[str] = []
+    for candidate in normalized_candidates:
+        top_level = candidate.split("/", 1)[0].strip()
+        root = top_level or "."
+        if root not in highest_roots:
+            highest_roots.append(root)
+    return highest_roots or ["."]
 
 
 def _slugify(value: str) -> str:

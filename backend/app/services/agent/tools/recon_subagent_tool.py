@@ -12,6 +12,7 @@ from ..workflow.recon_models import (
     ProjectReconModel,
     ReconModuleDescriptor,
     build_project_recon_model,
+    derive_module_root_directories,
     merge_recon_module_results,
 )
 
@@ -254,6 +255,10 @@ class RunReconSubAgentTool(AgentTool):
                 for file_path in all_files
                 if self._path_matches_any_directory(file_path, directories)
             ]
+            module_root_directories = derive_module_root_directories(
+                directories,
+                target_files=target_files,
+            )
             module_entrypoints = [
                 file_path
                 for file_path in entry_points
@@ -262,9 +267,9 @@ class RunReconSubAgentTool(AgentTool):
             planned_descriptors.append(
                 ReconModuleDescriptor(
                     module_id=module_id,
-                    name=directories[0],
+                    name=module_root_directories[0] if module_root_directories else directories[0],
                     module_type="custom",
-                    paths=list(directories),
+                    paths=list(module_root_directories or directories),
                     description=description,
                     entrypoints=module_entrypoints[:20],
                     language_hints=list(base_model.languages or []),

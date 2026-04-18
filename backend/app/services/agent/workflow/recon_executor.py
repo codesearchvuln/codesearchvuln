@@ -7,7 +7,12 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord
-from .recon_models import ProjectReconModel, ReconModuleDescriptor, ReconModuleResult
+from .recon_models import (
+    ProjectReconModel,
+    ReconModuleDescriptor,
+    ReconModuleResult,
+    derive_module_root_directories,
+)
 
 if TYPE_CHECKING:
     from ..agents.base import BaseAgent
@@ -96,6 +101,9 @@ class ReconModuleExecutor:
         )
         worker_agent.config = copy.deepcopy(base_agent.config)
         module_label = str(descriptor.name or descriptor.module_id or worker_id).strip() or str(worker_id)
+        module_id = str(descriptor.module_id or "").strip()
+        if module_id and module_id != module_label:
+            module_label = f"{module_label}#{module_id}"
         worker_name = f"{base_agent.name}[{module_label}]"
         if isinstance(worker_agent.config, dict):
             worker_agent.config["name"] = worker_name
@@ -192,9 +200,16 @@ class ReconModuleExecutor:
             if isinstance(runtime_context.get("config"), dict)
             else {}
         )
-        config["recon_module"] = descriptor.to_dict()
+        module_root_paths = derive_module_root_directories(
+            descriptor.paths,
+            target_files=descriptor.target_files,
+        )
+        module_payload = descriptor.to_dict()
+        module_payload["paths"] = list(module_root_paths or descriptor.paths or ["."])
+        module_payload["module_root_paths"] = list(module_payload["paths"])
+        config["recon_module"] = module_payload
         config["project_recon_model"] = project_model.to_dict()
-        module_paths = ", ".join(descriptor.paths or [])
+        module_paths = ", ".join(module_payload["paths"] or [])
         module_description = str(descriptor.description or "").strip()
         return {
             "task": (
