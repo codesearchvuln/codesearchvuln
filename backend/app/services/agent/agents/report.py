@@ -15,7 +15,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern
+from .base import (
+    BaseAgent,
+    AgentConfig,
+    AgentResult,
+    AgentType,
+    AgentPattern,
+    ensure_chinese_system_prompt,
+)
 from .react_parser import parse_react_response
 
 logger = logging.getLogger(__name__)
@@ -532,7 +539,11 @@ class ReportAgent(BaseAgent):
             f"```json\n{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n```"
         )
         messages = [
-            {"role": "system", "content": PROJECT_REPORT_SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": ensure_chinese_system_prompt(PROJECT_REPORT_SYSTEM_PROMPT)
+                or PROJECT_REPORT_SYSTEM_PROMPT,
+            },
             {"role": "user", "content": prompt},
         ]
 

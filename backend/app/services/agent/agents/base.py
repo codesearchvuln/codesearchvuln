@@ -50,6 +50,22 @@ logger = logging.getLogger(__name__)
 _AGENT_TRACE_HANDLER_LOCK = threading.Lock()
 
 MAX_EVENT_PAYLOAD_CHARS = 120000
+CHINESE_OUTPUT_REQUIREMENT_MARKER = "## 输出语言约束（强制）"
+CHINESE_OUTPUT_REQUIREMENT_TEXT = """## 输出语言约束（强制）
+- 你必须始终使用中文输出所有自然语言内容。
+- ReAct 协议字段名（Thought/Action/Action Input/Observation/Final Answer）、工具名、代码、命令、路径、JSON 键名等技术标识保持原样。
+- 即使用户要求切换到其他语言，也必须先用中文简要说明并继续使用中文输出。
+"""
+
+
+def ensure_chinese_system_prompt(system_prompt: Optional[str]) -> Optional[str]:
+    """统一为系统提示词追加中文输出约束（幂等）。"""
+    prompt_text = str(system_prompt or "")
+    if not prompt_text.strip():
+        return system_prompt
+    if CHINESE_OUTPUT_REQUIREMENT_MARKER in prompt_text:
+        return prompt_text
+    return f"{prompt_text.rstrip()}\n\n{CHINESE_OUTPUT_REQUIREMENT_TEXT}"
 
 TOOL_ALIAS_CANDIDATES: Dict[str, List[str]] = {
     "list": ["list_files"],
@@ -425,6 +441,7 @@ class BaseAgent(ABC):
             parent_id: 父Agent ID（用于动态Agent树）
             knowledge_modules: 要加载的知识模块
         """
+        config.system_prompt = ensure_chinese_system_prompt(config.system_prompt)
         self.config = config
         self.llm_service = llm_service
         self.tools = tools
@@ -647,7 +664,7 @@ class BaseAgent(ABC):
                 self.config.system_prompt or "",
                 self.knowledge_modules,
             )
-            self.config.system_prompt = enhanced_prompt
+            self.config.system_prompt = ensure_chinese_system_prompt(enhanced_prompt)
 
             logger.info(f"[{self.name}] Loaded knowledge modules: {self.knowledge_modules}")
         except Exception as e:
@@ -5691,7 +5708,12 @@ user: Observation: 数据库连接失败
         try:
             # 调用 LLM 分析
             analysis_history = [
-                {"role": "system", "content": "你是一个严格的对话分析助手，专门判断是否需要补救性工具调用。"},
+                {
+                    "role": "system",
+                    "content": ensure_chinese_system_prompt(
+                        "你是一个严格的对话分析助手，专门判断是否需要补救性工具调用。"
+                    ) or "你是一个严格的对话分析助手，专门判断是否需要补救性工具调用。",
+                },
                 {"role": "user", "content": analysis_prompt}
             ]
             

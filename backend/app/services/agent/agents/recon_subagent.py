@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 
 from app.services.json_safe import dump_json_safe
 
-from .base import AgentResult
+from .base import AgentResult, ensure_chinese_system_prompt
 from .recon import ReconAgent
 from ..json_parser import AgentJsonParser
 from ..workflow.recon_models import derive_module_root_directories
@@ -120,7 +120,7 @@ class ReconSubAgent(ReconAgent):
         tool_whitelist = ", ".join(sorted(tools.keys())) if tools else "无"
         self.config.name = "ReconSubAgent"
         self.name = "ReconSubAgent"
-        self.config.system_prompt = (
+        self.config.system_prompt = ensure_chinese_system_prompt(
             f"{RECON_SUBAGENT_SYSTEM_PROMPT}\n\n"
             f"## 当前工具白名单\n{tool_whitelist}\n"
             "只能调用以上工具。禁止尝试创建新的子 Agent；若白名单中存在 `push_risk_point_to_queue` / `push_risk_points_to_queue`，"
