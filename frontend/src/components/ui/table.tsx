@@ -24,15 +24,20 @@ function Table({ className, containerClassName, ...props }: TableProps) {
   );
 }
 
-function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
+const TableHeader = React.forwardRef<
+  HTMLTableSectionElement,
+  React.ComponentProps<"thead">
+>(({ className, ...props }, ref) => {
   return (
     <thead
+      ref={ref}
       data-slot="table-header"
       className={cn("bg-muted/50", className)}
       {...props}
     />
   );
-}
+});
+TableHeader.displayName = "TableHeader";
 
 function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
   return (
@@ -57,9 +62,13 @@ function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
   );
 }
 
-function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
+const TableRow = React.forwardRef<
+  HTMLTableRowElement,
+  React.ComponentProps<"tr">
+>(({ className, ...props }, ref) => {
   return (
     <tr
+      ref={ref}
       data-slot="table-row"
       className={cn(
         "hover:bg-muted/50 data-[state=selected]:bg-muted transition-colors",
@@ -68,7 +77,8 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
       {...props}
     />
   );
-}
+});
+TableRow.displayName = "TableRow";
 
 function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (

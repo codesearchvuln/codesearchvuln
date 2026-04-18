@@ -230,16 +230,26 @@ export interface FindingTableState {
 
 export function calculateResponsiveFindingsPageSize(
   availableHeight: number,
+  options?: {
+    headerHeight?: number;
+    rowHeight?: number;
+  },
 ): number {
   const normalizedHeight = Math.max(toFiniteNumber(availableHeight), 0);
-  const rowsHeight = Math.max(
-    normalizedHeight - AGENT_AUDIT_FINDINGS_TABLE_HEADER_HEIGHT,
-    AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT,
+  const headerHeight = Math.max(
+    toFiniteNumber(options?.headerHeight) ||
+      AGENT_AUDIT_FINDINGS_TABLE_HEADER_HEIGHT,
+    0,
   );
-  return Math.max(
+  const rowHeight = Math.max(
+    toFiniteNumber(options?.rowHeight) || AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT,
     1,
-    Math.floor(rowsHeight / AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT),
   );
+  const rowsHeight = Math.max(
+    normalizedHeight - headerHeight,
+    rowHeight,
+  );
+  return Math.max(1, Math.floor(rowsHeight / rowHeight));
 }
 
 function toFiniteNumber(value: unknown): number {

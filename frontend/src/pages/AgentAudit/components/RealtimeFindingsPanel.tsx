@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/table";
 import {
 	AGENT_AUDIT_FINDINGS_PAGE_SIZE,
+	AGENT_AUDIT_FINDINGS_TABLE_HEADER_HEIGHT,
+	AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT,
 	calculateResponsiveFindingsPageSize,
 	buildFindingTableState,
 	getAgentAuditFindingDisplayStatus,
@@ -99,6 +101,17 @@ const ACTIVE_FALSE_BUTTON_CLASS =
 	"cyber-btn-outline h-7 px-2.5 border-rose-500/70 bg-rose-500/15 text-rose-200 hover:bg-rose-500/20";
 const IDLE_FALSE_BUTTON_CLASS =
 	"cyber-btn-outline h-7 px-2.5 border-rose-500/40 text-rose-400 hover:bg-rose-500/10";
+
+function readMeasuredHeight(
+	element: Element | null | undefined,
+	fallback: number,
+): number {
+	if (!element) {
+		return fallback;
+	}
+	const measuredHeight = Math.round(element.getBoundingClientRect().height);
+	return measuredHeight > 0 ? measuredHeight : fallback;
+}
 
 function isFalsePositiveFinding(item: RealtimeMergedFindingItem): boolean {
 	return (
@@ -194,6 +207,8 @@ export default function RealtimeFindingsPanel(props: {
 	const previousFiltersRef = useRef<FindingsViewFilters>(props.filters);
 	const previousPropPageSizeRef = useRef<number | null>(null);
 	const viewportRef = useRef<HTMLDivElement | null>(null);
+	const tableHeaderRef = useRef<HTMLTableSectionElement | null>(null);
+	const firstRowRef = useRef<HTMLTableRowElement | null>(null);
 	const page =
 		typeof props.page === "number" &&
 		Number.isFinite(props.page) &&
@@ -298,27 +313,52 @@ export default function RealtimeFindingsPanel(props: {
 	]);
 
 	useEffect(() => {
-		if (typeof ResizeObserver === "undefined" || !viewportRef.current) {
+		const node = viewportRef.current;
+		if (!node) {
 			return;
 		}
 
-		const node = viewportRef.current;
-		const updatePageSize = (height: number) => {
-			const next = calculateResponsiveFindingsPageSize(height);
+		// Use actual rendered table metrics so the findings list can fill the
+		// available viewport even when the row density is tweaked later.
+		const updatePageSize = () => {
+			const next = calculateResponsiveFindingsPageSize(node.clientHeight, {
+				headerHeight: readMeasuredHeight(
+					tableHeaderRef.current,
+					AGENT_AUDIT_FINDINGS_TABLE_HEADER_HEIGHT,
+				),
+				rowHeight: readMeasuredHeight(
+					firstRowRef.current,
+					AGENT_AUDIT_FINDINGS_TABLE_ROW_HEIGHT,
+				),
+			});
 			if (pageSize !== next) {
 				updatePagination({ pageSize: next }, "layout");
 			}
 		};
 
-		updatePageSize(node.clientHeight);
-		const observer = new ResizeObserver((entries) => {
-			const entry = entries[0];
-			if (!entry) return;
-			updatePageSize(entry.contentRect.height);
+		updatePageSize();
+
+		if (typeof ResizeObserver === "undefined") {
+			return;
+		}
+
+		const observer = new ResizeObserver(() => {
+			updatePageSize();
 		});
 		observer.observe(node);
+		if (tableHeaderRef.current) {
+			observer.observe(tableHeaderRef.current);
+		}
+		if (firstRowRef.current) {
+			observer.observe(firstRowRef.current);
+		}
 		return () => observer.disconnect();
-	}, [pageSize, updatePagination]);
+	}, [
+		pageSize,
+		tableState.hasVisibleConfidence,
+		tableState.rows.length,
+		updatePagination,
+	]);
 
 	function getActionLabel(item: RealtimeMergedFindingItem): string {
 		if (!props.isRunning && isFalsePositiveFinding(item)) {
@@ -388,7 +428,7 @@ export default function RealtimeFindingsPanel(props: {
 								className="caption-bottom text-base font-mono"
 								style={{ minWidth: `${FINDINGS_TABLE_MIN_WIDTH_PX}px` }}
 							>
-								<TableHeader className="bg-transparent">
+								<TableHeader ref={tableHeaderRef} className="bg-transparent">
 									<TableRow className="border-b border-border/60 hover:bg-transparent">
 										<TableHead className="w-[72px]">序号</TableHead>
 										<TableHead className="w-auto">漏洞类型</TableHead>
@@ -428,6 +468,7 @@ export default function RealtimeFindingsPanel(props: {
 										return (
 											<TableRow
 												key={row.id}
+												ref={index === 0 ? firstRowRef : undefined}
 												id={`finding-item-${row.id}`}
 												className="border-b border-border/40 last:border-b-0"
 											>
