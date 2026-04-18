@@ -140,6 +140,9 @@ export function AuditDetailContent({
             <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="outline">{toZhLogType(logItem.type)}</Badge>
               <Badge variant="outline">{logItem.time}</Badge>
+              {logItem.repeatCount && logItem.repeatCount > 1 ? (
+                <Badge variant="outline">已合并 {logItem.repeatCount} 条</Badge>
+              ) : null}
               {logItem.agentName && (
                 <Badge variant="outline">{logItem.agentName}</Badge>
               )}

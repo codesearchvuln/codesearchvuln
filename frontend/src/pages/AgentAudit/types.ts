@@ -73,6 +73,7 @@ export interface LogItem {
   severity?: string;
   agentName?: string;
   agentRawName?: string;
+  repeatCount?: number;
   progressKey?: string; // 用于标识进度日志的唯一键，如 "index_progress"
   progressStatus?: ProgressStatus;
 }

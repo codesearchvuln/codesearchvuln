@@ -129,6 +129,7 @@ import type {
 } from "./types";
 import {
 	cleanThinkingContent,
+	compactAgentAuditDisplayLogs,
 	computeContainerAnchorScrollTop,
 	getTimeString,
 	resolveLogDisplayTime,
@@ -789,6 +790,10 @@ function AgentAuditPageContent() {
 	const [terminalFailureReason, setTerminalFailureReason] = useState<
 		string | null
 	>(null);
+	const displayLogs = useMemo(
+		() => compactAgentAuditDisplayLogs(filteredLogs),
+		[filteredLogs],
+	);
 	const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
 	const [, setHighlightedFindingId] = useState<string | null>(null);
 	const [, setHighlightedAgentId] = useState<string | null>(null);
@@ -3658,20 +3663,20 @@ function AgentAuditPageContent() {
 	// Default viewport: show latest logs (about 3 visible rows) when opening a task.
 	useEffect(() => {
 		if (!taskId || hasInitializedLogViewportRef.current) return;
-		if (filteredLogs.length === 0) return;
+		if (displayLogs.length === 0) return;
 		requestAnimationFrame(() => {
 			scrollLogsToBottom("auto");
 			hasInitializedLogViewportRef.current = true;
 		});
-	}, [filteredLogs.length, scrollLogsToBottom, taskId]);
+	}, [displayLogs.length, scrollLogsToBottom, taskId]);
 
 	// Auto scroll while stream keeps appending logs.
 	useEffect(() => {
-		const logCount = filteredLogs.length;
+		const logCount = displayLogs.length;
 		if (!isAutoScroll) return;
 		if (logCount === 0) return;
 		scrollLogsToBottom("smooth");
-	}, [filteredLogs.length, isAutoScroll, scrollLogsToBottom]);
+	}, [displayLogs.length, isAutoScroll, scrollLogsToBottom]);
 
 	// ============ Handlers ============
 
@@ -3915,16 +3920,16 @@ function AgentAuditPageContent() {
 						style={{ minWidth: `${EVENT_LOG_TABLE_MIN_WIDTH_PX}px` }}
 						className="h-full min-h-0 flex flex-col"
 					>
-						<div
-							className="grid items-center gap-3 border-b border-border/60 px-5 py-2 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground/80"
-							style={{ gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE }}
-						>
-							<span>时间戳</span>
-							<span>类型标签</span>
-							<span>事件概况</span>
-							<span>操作</span>
-						</div>
-						{filteredLogs.length === 0 ? (
+							<div
+								className="grid items-center gap-3 border-b border-border/60 px-5 py-2 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground/80"
+								style={{ gridTemplateColumns: EVENT_LOG_GRID_TEMPLATE }}
+							>
+								<span>时间戳</span>
+								<span>类型</span>
+								<span>事件概况</span>
+								<span>操作</span>
+							</div>
+						{displayLogs.length === 0 ? (
 							<div
 								ref={logsContainerRef}
 								onScroll={handleLogsScroll}
@@ -3949,7 +3954,7 @@ function AgentAuditPageContent() {
 							</div>
 						) : (
 							<EventLogVirtualList
-								items={filteredLogs}
+								items={displayLogs}
 								highlightedLogId={highlightedLogId}
 								onOpenDetail={handleOpenLogDetail}
 								scrollContainerRef={logsContainerRef}

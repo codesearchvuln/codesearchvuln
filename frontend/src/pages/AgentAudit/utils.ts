@@ -3,7 +3,7 @@
  * Helper functions for the Agent Scan page
  */
 
-import type { AgentTreeNode, LogItem } from "./types";
+import type { AgentTreeNode, LogItem, LogType } from "./types";
 import { isAgentAuditTerminalStatus } from "./taskStatus";
 
 const AUDIT_EMOJI_REGEX = /[\p{Extended_Pictographic}\uFE0F\u200D]/gu;
@@ -212,6 +212,89 @@ export function createLogItem(
     id: generateLogId(),
     time: typeof item.time === "string" && item.time.trim() ? item.time : getTimeString(),
   };
+}
+
+const COMPACTABLE_LOG_TYPES = new Set<LogType>(["thinking", "info", "dispatch"]);
+
+function normalizeCompactedLogText(value: unknown): string {
+  return sanitizeAuditText(String(value ?? ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildCompactedDisplaySignature(log: LogItem): string | null {
+  if (!COMPACTABLE_LOG_TYPES.has(log.type) || log.isStreaming) {
+    return null;
+  }
+
+  const normalizedTitle = normalizeCompactedLogText(log.title);
+  if (!normalizedTitle) {
+    return null;
+  }
+
+  return [
+    log.time,
+    log.type,
+    log.phaseLabel || "",
+    normalizedTitle,
+  ].join("|");
+}
+
+export function compactAgentAuditDisplayLogs(logs: LogItem[]): LogItem[] {
+  if (!Array.isArray(logs) || logs.length === 0) {
+    return [];
+  }
+
+  const compacted: LogItem[] = [];
+  for (const log of logs) {
+    const previous = compacted[compacted.length - 1];
+    const previousSignature = previous
+      ? buildCompactedDisplaySignature(previous)
+      : null;
+    const currentSignature = buildCompactedDisplaySignature(log);
+
+    if (
+      previous &&
+      previousSignature &&
+      currentSignature &&
+      previousSignature === currentSignature
+    ) {
+      const nextRepeatCount = (previous.repeatCount ?? 1) + 1;
+      const previousAgentNames = Array.isArray(previous.detail?.compacted_agent_names)
+        ? previous.detail.compacted_agent_names
+        : previous.agentName
+          ? [previous.agentName]
+          : [];
+      const nextAgentNames = log.agentName
+        ? [...previousAgentNames, log.agentName]
+        : [...previousAgentNames];
+      const uniqueAgentNames = Array.from(
+        new Set(nextAgentNames.map((item) => String(item || "").trim()).filter(Boolean)),
+      );
+      const previousLogIds = Array.isArray(previous.detail?.compacted_log_ids)
+        ? previous.detail.compacted_log_ids
+        : [previous.id];
+
+      compacted[compacted.length - 1] = {
+        ...previous,
+        repeatCount: nextRepeatCount,
+        detail: {
+          ...(previous.detail ?? {}),
+          compacted_repeat_count: nextRepeatCount,
+          compacted_agent_names: uniqueAgentNames,
+          compacted_log_ids: [...previousLogIds, log.id],
+        },
+      };
+      continue;
+    }
+
+    compacted.push({
+      ...log,
+      repeatCount: log.repeatCount && log.repeatCount > 1 ? log.repeatCount : undefined,
+    });
+  }
+
+  return compacted;
 }
 
 function toFiniteSequence(value: unknown): number | null {

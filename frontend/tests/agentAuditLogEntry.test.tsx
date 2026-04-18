@@ -191,7 +191,7 @@ test("LogEntry 工具行对 native_v1 缺失结构化证据显示明确终态摘
   assert.match(completedMarkup, /已完成，但未记录结构化证据/);
 });
 
-test("LogEntry 以四列表格化布局展示事件摘要并保留 Agent 标签", () => {
+test("LogEntry 以四列表格化布局展示事件摘要且不显示 Agent 标签", () => {
   const markup = renderLogEntry(
     createToolLog({
       agentName: "验证智能体",
@@ -205,11 +205,11 @@ test("LogEntry 以四列表格化布局展示事件摘要并保留 Agent 标签"
   );
   assert.match(markup, /min-width:640px/);
   assert.doesNotMatch(markup, /分析/);
-  assert.match(markup, /验证智能体/);
+  assert.doesNotMatch(markup, /验证智能体/);
   assert.match(markup, /查看详情/);
 });
 
-test("LogEntry 对 ReconSubAgent 单独展示子智能体标签", () => {
+test("LogEntry 不在列表中展示 ReconSubAgent 标签", () => {
   const markup = renderLogEntry(
     createToolLog({
       agentName: "侦查子智能体 · src/auth",
@@ -217,6 +217,18 @@ test("LogEntry 对 ReconSubAgent 单独展示子智能体标签", () => {
     }),
   );
 
-  assert.match(markup, /侦查子智能体 · src\/auth/);
+  assert.doesNotMatch(markup, /侦查子智能体 · src\/auth/);
   assert.doesNotMatch(markup, />侦查主智能体</);
+});
+
+test("LogEntry 对合并后的重复日志展示重复计数", () => {
+  const markup = renderLogEntry(
+    createToolLog({
+      type: "info",
+      title: "侦查智能体 Agent 启动，LLM 开始自主收集信息...",
+      repeatCount: 4,
+    }),
+  );
+
+  assert.match(markup, /侦查智能体 Agent 启动，LLM 开始自主收集信息\.\.\. ×4/);
 });

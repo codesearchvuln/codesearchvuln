@@ -173,14 +173,19 @@ export const LogEntry = memo(function LogEntry({
 		normalizedPreview !== formattedTitle &&
 		normalizedPreview !== normalizedTitle &&
 		!(normalizedTitle && normalizedPreview.startsWith(normalizedTitle));
-	const summaryText = isToolRow
+	const baseSummaryText = isToolRow
 		? toolListSummary || formattedTitle
 		: formattedTitle;
+	const repeatSuffix =
+		typeof item.repeatCount === "number" && item.repeatCount > 1
+			? ` ×${item.repeatCount}`
+			: "";
+	const summaryText = `${baseSummaryText}${repeatSuffix}`;
 	const summaryTitle = isToolRow
-		? toolListSummary || formattedTitle
+		? `${toolListSummary || formattedTitle}${repeatSuffix}`
 		: shouldRenderPreview
-			? `${formattedTitle} · ${contentPreview}`
-			: formattedTitle;
+			? `${formattedTitle}${repeatSuffix} · ${contentPreview}`
+			: `${formattedTitle}${repeatSuffix}`;
 	const typeBadgeClass =
 		item.type === "error"
 			? "border-rose-500/30 bg-rose-500/10 text-rose-300"
@@ -189,13 +194,6 @@ export const LogEntry = memo(function LogEntry({
 					: item.type === "progress"
 						? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
 						: "border-border/70 bg-background/60 text-muted-foreground";
-	const agentBadgeClass = String(item.agentRawName || "")
-		.toLowerCase()
-		.includes("reconsubagent")
-		? "border-teal-500/30 bg-teal-500/10 text-teal-200"
-		: String(item.agentRawName || "").trim().toLowerCase() === "recon"
-			? "border-sky-500/30 bg-sky-500/10 text-sky-200"
-			: "border-border/70 bg-background/60 text-muted-foreground";
 	return (
 		<div
 			id={anchorId}
@@ -218,7 +216,7 @@ export const LogEntry = memo(function LogEntry({
 						{item.time}
 					</div>
 
-					<div className="flex items-center gap-2">
+					<div className="flex min-w-0 items-center gap-2">
 						<span className="text-muted-foreground/80">{typeIcon}</span>
 						<Badge
 							variant="outline"
@@ -226,15 +224,6 @@ export const LogEntry = memo(function LogEntry({
 						>
 							{typeLabel}
 						</Badge>
-						{item.agentName ? (
-							<Badge
-								variant="outline"
-								className={`h-6 max-w-[12rem] truncate rounded-full px-2 text-[10px] font-medium ${agentBadgeClass}`}
-								title={item.agentName}
-							>
-								{item.agentName}
-							</Badge>
-						) : null}
 					</div>
 
 					<div className="min-w-0">
