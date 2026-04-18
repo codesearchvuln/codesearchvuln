@@ -20,7 +20,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_RECON_SUBAGENT_BLOCKED_TOOLS = {
+# Recon workers must keep direct queue-push tools so they can satisfy the
+# current SubAgent contract; only recursive dispatch and queue-management
+# reads are withheld from the worker toolset.
+RECON_SUBAGENT_BLOCKED_TOOLS = {
     "run_recon_subagent",
     "get_recon_risk_queue_status",
     "dequeue_recon_risk_point",
@@ -80,7 +83,7 @@ class ReconModuleExecutor:
         return {
             name: self._clone_single_tool_for_worker(name, tool, module_files)
             for name, tool in base_tools.items()
-            if str(name or "").strip().lower() not in _RECON_SUBAGENT_BLOCKED_TOOLS
+            if str(name or "").strip().lower() not in RECON_SUBAGENT_BLOCKED_TOOLS
         }
 
     def _create_worker_agent(

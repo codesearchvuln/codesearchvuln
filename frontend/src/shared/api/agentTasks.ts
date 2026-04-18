@@ -274,6 +274,36 @@ export interface AgentTaskSummary {
   duration_seconds: number | null;
 }
 
+export interface AgentTaskProgressResponse {
+  success: boolean;
+  queue_overview?: {
+    risk_queue?: {
+      recon?: number;
+      blrecon?: number;
+    };
+    vulnerability_queue?: {
+      finding?: number;
+      blfinding?: number;
+    };
+    result_queue?: {
+      current_size?: number;
+    };
+  };
+  recon_queue?: {
+    current_size?: number;
+  };
+  business_logic_queue?: {
+    current_size?: number;
+  };
+  analysis_queue?: {
+    finding_current_size?: number;
+    blfinding_current_size?: number;
+  };
+  result_queue?: {
+    current_size?: number;
+  };
+}
+
 export interface AgentFindingStatusUpdateResponse {
   message: string;
   finding_id: string;
@@ -418,6 +448,14 @@ export async function updateAgentFindingStatus(
  */
 export async function getAgentTaskSummary(taskId: string): Promise<AgentTaskSummary> {
   const response = await apiClient.get(`/agent-tasks/${taskId}/summary`);
+  return response.data;
+}
+
+/**
+ * 获取任务运行期综合进度（含实时队列统计）
+ */
+export async function getAgentTaskProgress(taskId: string): Promise<AgentTaskProgressResponse> {
+  const response = await apiClient.get(`/agent-tasks/${taskId}/progress`);
   return response.data;
 }
 

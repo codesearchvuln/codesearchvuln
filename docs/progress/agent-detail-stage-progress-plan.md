@@ -1,5 +1,18 @@
 # 前端扫描详情阶段进度改造规划（2026-04-17）
 
+## 0. 后续增补（实时队列计数）
+
+智能/混合扫描详情页的“事件日志”标题行已补充实时队列计数展示：
+
+- 风险队列：`recon / blrecon`
+- 漏洞队列：`finding / blfinding`
+- 结果队列：`current_size`（已验证但尚未生成漏洞报告）
+
+实现链路：
+
+- 后端：`GET /api/v1/agent-tasks/{taskId}/progress` 新增 `queue_overview` 与 `result_queue` 统计，并在 `analysis_queue` 中补充 `finding_current_size` / `blfinding_current_size`。
+- 前端：`frontend/src/pages/AgentAudit/TaskDetailPage.tsx` 轮询 progress 接口并实时渲染。
+
 ## 1. 背景
 
 当前智能扫描 / 混合扫描详情页顶部仍使用“百分比进度”表达任务推进情况，但这套百分比并不是来自真实 workflow 阶段，而是前端基于运行时长做的估算。

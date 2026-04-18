@@ -27,6 +27,9 @@ from app.models.project import Project
 from app.models.prompt_skill import PromptSkill
 from app.services.project_metrics import project_metrics_refresher
 from app.services.agent.write_scope import TaskWriteScopeGuard
+from app.services.agent.workflow.recon_executor import (
+    RECON_SUBAGENT_BLOCKED_TOOLS,
+)
 from app.services.agent.workflow.user_runtime_config import (
     resolve_effective_agent_workflow_config,
 )
@@ -46,6 +49,17 @@ from .agent_tasks_tool_runtime import *
 from .agent_tasks_runtime import *
 
 logger = logging.getLogger(__name__)
+
+
+def _build_recon_subagent_tools(recon_tools: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep ReconSubAgent writeback tools while stripping recursive/runtime controls."""
+    if not isinstance(recon_tools, dict):
+        return {}
+    return {
+        key: value
+        for key, value in recon_tools.items()
+        if str(key or "").strip().lower() not in RECON_SUBAGENT_BLOCKED_TOOLS
+    }
 
 
 def _normalize_terminal_agent_findings(
@@ -362,23 +376,9 @@ async def _execute_agent_task(task_id: str):
                 event_emitter=event_emitter,
             )
 
-            recon_subagent_tool_blacklist = {
-                "run_recon_subagent",
-                "push_risk_point_to_queue",
-                "push_risk_points_to_queue",
-                "get_recon_risk_queue_status",
-                "dequeue_recon_risk_point",
-                "peek_recon_risk_queue",
-                "clear_recon_risk_queue",
-                "is_recon_risk_point_in_queue",
-            }
             recon_subagent = ReconSubAgent(
                 llm_service=llm_service,
-                tools={
-                    key: value
-                    for key, value in tools.get("recon", {}).items()
-                    if key not in recon_subagent_tool_blacklist
-                },
+                tools=_build_recon_subagent_tools(tools.get("recon", {})),
                 event_emitter=event_emitter,
             )
 

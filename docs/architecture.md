@@ -263,6 +263,10 @@ AuditTool 是一个面向代码仓库安全扫描的平台。仓库名叫 `Audit
 - 页面：`/agent-audit/:taskId`
 - 契约：`frontend/src/shared/api/agentTasks.ts`
 - 实时流：`frontend/src/shared/api/agentStream.ts`
+- 事件日志标题行会实时显示三类队列数量（来自 `GET /api/v1/agent-tasks/{taskId}/progress`）：
+  - 风险队列：`recon / blrecon`
+  - 漏洞队列：`finding / blfinding`
+  - 结果队列：`current_size`（已验证但尚未生成漏洞报告）
 
 你可以把它理解成：
 

@@ -28,6 +28,9 @@ from app.models.agent_task import (
 from app.models.project import Project
 from app.models.user import User
 from app.services.project_metrics import project_metrics_refresher
+from app.services.agent.utils.vulnerability_naming import (
+    is_business_logic_vulnerability_type,
+)
 
 from .agent_tasks_contracts import *
 from .agent_tasks_findings import *
@@ -66,6 +69,99 @@ async def _recompute_task_finding_counters(
     task: AgentTask,
 ) -> None:
     await recompute_task_finding_counters(db, task)
+
+
+def _to_non_negative_int(value: Any) -> int:
+    try:
+        normalized = int(value)
+    except Exception:
+        return 0
+    return max(0, normalized)
+
+
+def _classify_vulnerability_queue(
+    queue_service: Any,
+    task_id: str,
+    current_size: int,
+) -> Dict[str, int]:
+    if current_size <= 0:
+        return {"finding": 0, "blfinding": 0}
+
+    queue_reader = getattr(queue_service, "peek_queue", None)
+    if not callable(queue_reader):
+        queue_reader = getattr(queue_service, "peek", None)
+    if not callable(queue_reader):
+        return {"finding": current_size, "blfinding": 0}
+
+    queued_items: List[Any] = []
+    try:
+        queued_items = queue_reader(task_id, limit=current_size)
+    except TypeError:
+        queued_items = queue_reader(task_id, current_size)
+    except Exception as exc:
+        logger.warning(
+            "[AgentTaskProgress] Failed to read vuln queue items: task_id=%s error=%s",
+            task_id,
+            exc,
+        )
+        return {"finding": current_size, "blfinding": 0}
+
+    if not isinstance(queued_items, list):
+        return {"finding": current_size, "blfinding": 0}
+
+    finding_count = 0
+    blfinding_count = 0
+    for item in queued_items:
+        if not isinstance(item, dict):
+            continue
+        if is_business_logic_vulnerability_type(
+            item.get("vulnerability_type"),
+            title=item.get("title"),
+            description=item.get("description"),
+            code_snippet=item.get("code_snippet"),
+        ):
+            blfinding_count += 1
+        else:
+            finding_count += 1
+
+    classified_count = finding_count + blfinding_count
+    if classified_count < current_size:
+        finding_count += current_size - classified_count
+
+    return {
+        "finding": _to_non_negative_int(finding_count),
+        "blfinding": _to_non_negative_int(blfinding_count),
+    }
+
+
+def _compute_result_queue_stats(findings: List[AgentFinding]) -> Dict[str, int]:
+    verified_total = 0
+    reported_total = 0
+    pending_total = 0
+
+    for finding in findings:
+        normalized_status = str(getattr(finding, "status", "") or "").strip().lower()
+        if normalized_status == FindingStatus.FALSE_POSITIVE:
+            continue
+
+        is_verified = bool(getattr(finding, "is_verified", False)) or _is_manually_verified_status(
+            normalized_status
+        )
+        if not is_verified:
+            continue
+
+        verified_total += 1
+        report_text = str(getattr(finding, "report", "") or "").strip()
+        if report_text:
+            reported_total += 1
+        else:
+            pending_total += 1
+
+    return {
+        "current_size": _to_non_negative_int(pending_total),
+        "verified_total": _to_non_negative_int(verified_total),
+        "reported_total": _to_non_negative_int(reported_total),
+    }
 
 @router.get("/{task_id}/findings", response_model=List[AgentFindingResponse])
 async def list_agent_findings(
@@ -1166,12 +1262,17 @@ async def get_task_progress(
     
     返回：
     - task: 任务基本信息和状态
-    - recon_queue: Recon 队列统计
-    - analysis_queue: Analysis 候选漏洞队列统计
+    - recon_queue: Recon 风险点队列统计
+    - business_logic_queue: BL Recon 风险点队列统计
+    - analysis_queue: Analysis 候选漏洞队列统计（含 finding / blfinding 拆分）
+    - result_queue: 报告阶段待产出结果队列统计（已验证但未生成报告）
     - verification: 验证后漏洞统计和分布
     """
     from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
     from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
+    from app.services.agent.business_logic_risk_queue import (
+        InMemoryBusinessLogicRiskQueue,
+    )
 
     # 获取任务信息
     task = await db.get(AgentTask, task_id)
@@ -1192,16 +1293,29 @@ async def get_task_progress(
         recon_queue_service = InMemoryReconRiskQueue()
     recon_stats = recon_queue_service.stats(task_id)
 
+    # 2. BL Recon 队列状态
+    bl_queue_service = _running_bl_queue_services.get(task_id)
+    if bl_queue_service is None:
+        bl_queue_service = InMemoryBusinessLogicRiskQueue()
+    bl_recon_stats = bl_queue_service.stats(task_id)
+
     # 2. Analysis 队列状态
     vuln_queue_service = _running_queue_services.get(task_id)
     if vuln_queue_service is None:
         vuln_queue_service = InMemoryVulnerabilityQueue()
     analysis_stats = vuln_queue_service.get_queue_stats(task_id)
+    vuln_queue_current_size = _to_non_negative_int(analysis_stats.get("current_size", 0))
+    vuln_queue_breakdown = _classify_vulnerability_queue(
+        vuln_queue_service,
+        task_id,
+        vuln_queue_current_size,
+    )
 
-    # 3. Verification 统计（从数据库）
+    # 3. Verification 与 Result Queue 统计（从数据库）
     findings_query = select(AgentFinding).where(AgentFinding.task_id == task_id)
     findings_result = await db.execute(findings_query)
     all_findings = findings_result.scalars().all()
+    result_queue_stats = _compute_result_queue_stats(all_findings)
 
     verified_findings = [f for f in all_findings if f.is_verified]
     false_positives = [f for f in all_findings if f.status == FindingStatus.FALSE_POSITIVE]
@@ -1244,11 +1358,33 @@ async def get_task_progress(
             "total_dequeued": recon_stats.get("total_dequeued", 0),
             "total_deduplicated": recon_stats.get("total_deduplicated", 0),
         },
+        "business_logic_queue": {
+            "current_size": bl_recon_stats.get("current_size", 0),
+            "total_enqueued": bl_recon_stats.get("total_enqueued", 0),
+            "total_dequeued": bl_recon_stats.get("total_dequeued", 0),
+            "total_deduplicated": bl_recon_stats.get("total_deduplicated", 0),
+        },
         "analysis_queue": {
             "current_size": analysis_stats.get("current_size", 0),
+            "finding_current_size": vuln_queue_breakdown.get("finding", 0),
+            "blfinding_current_size": vuln_queue_breakdown.get("blfinding", 0),
             "total_enqueued": analysis_stats.get("total_enqueued", 0),
             "total_dequeued": analysis_stats.get("total_dequeued", 0),
             "total_deduplicated": analysis_stats.get("total_deduplicated", 0),
+        },
+        "result_queue": result_queue_stats,
+        "queue_overview": {
+            "risk_queue": {
+                "recon": _to_non_negative_int(recon_stats.get("current_size", 0)),
+                "blrecon": _to_non_negative_int(bl_recon_stats.get("current_size", 0)),
+            },
+            "vulnerability_queue": {
+                "finding": _to_non_negative_int(vuln_queue_breakdown.get("finding", 0)),
+                "blfinding": _to_non_negative_int(vuln_queue_breakdown.get("blfinding", 0)),
+            },
+            "result_queue": {
+                "current_size": _to_non_negative_int(result_queue_stats.get("current_size", 0)),
+            },
         },
         "verification": {
             "total_findings": len(all_findings),

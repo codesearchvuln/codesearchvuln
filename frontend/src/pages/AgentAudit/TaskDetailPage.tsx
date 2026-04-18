@@ -34,10 +34,12 @@ import type { StreamErrorContext } from "@/shared/api/agentStream";
 import {
 	type AgentEvent,
 	type AgentFinding,
+	type AgentTaskProgressResponse,
 	cancelAgentTask,
 	getAgentEvents,
 	getAgentFindings,
 	getAgentTask,
+	getAgentTaskProgress,
 	getAgentTree,
 	updateAgentFindingStatus,
 } from "@/shared/api/agentTasks";
@@ -180,6 +182,70 @@ const LOG_TYPE_LABELS: Record<string, string> = {
 	user: "用户",
 	progress: "进度",
 };
+
+type RealtimeQueueSnapshot = {
+	riskQueue: {
+		recon: number;
+		blrecon: number;
+	};
+	vulnerabilityQueue: {
+		finding: number;
+		blfinding: number;
+	};
+	resultQueue: number;
+};
+
+const DEFAULT_REALTIME_QUEUE_SNAPSHOT: RealtimeQueueSnapshot = {
+	riskQueue: {
+		recon: 0,
+		blrecon: 0,
+	},
+	vulnerabilityQueue: {
+		finding: 0,
+		blfinding: 0,
+	},
+	resultQueue: 0,
+};
+
+function toNonNegativeInteger(value: unknown): number {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed)) {
+		return 0;
+	}
+	return Math.max(0, Math.floor(parsed));
+}
+
+function buildRealtimeQueueSnapshot(
+	progress: AgentTaskProgressResponse | null | undefined,
+): RealtimeQueueSnapshot {
+	const riskQueue = progress?.queue_overview?.risk_queue;
+	const vulnerabilityQueue = progress?.queue_overview?.vulnerability_queue;
+	const resultQueue = progress?.queue_overview?.result_queue;
+
+	return {
+		riskQueue: {
+			recon: toNonNegativeInteger(
+				riskQueue?.recon ?? progress?.recon_queue?.current_size,
+			),
+			blrecon: toNonNegativeInteger(
+				riskQueue?.blrecon ?? progress?.business_logic_queue?.current_size,
+			),
+		},
+		vulnerabilityQueue: {
+			finding: toNonNegativeInteger(
+				vulnerabilityQueue?.finding ??
+					progress?.analysis_queue?.finding_current_size,
+			),
+			blfinding: toNonNegativeInteger(
+				vulnerabilityQueue?.blfinding ??
+					progress?.analysis_queue?.blfinding_current_size,
+			),
+		},
+		resultQueue: toNonNegativeInteger(
+			resultQueue?.current_size ?? progress?.result_queue?.current_size,
+		),
+	};
+}
 
 function limitRealtimeFindings(
 	items: RealtimeMergedFindingItem[],
@@ -797,6 +863,8 @@ function AgentAuditPageContent() {
 	const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
 	const [, setHighlightedFindingId] = useState<string | null>(null);
 	const [, setHighlightedAgentId] = useState<string | null>(null);
+	const [realtimeQueueSnapshot, setRealtimeQueueSnapshot] =
+		useState<RealtimeQueueSnapshot>(DEFAULT_REALTIME_QUEUE_SNAPSHOT);
 
 	// Realtime panels state
 	const [realtimeFindings, setRealtimeFindings] = useState<
@@ -1755,6 +1823,16 @@ function AgentAuditPageContent() {
 			console.error(err);
 		}
 	}, [taskId, setAgentTree]);
+
+	const loadTaskProgress = useCallback(async () => {
+		if (!taskId) return;
+		try {
+			const progress = await getAgentTaskProgress(taskId);
+			setRealtimeQueueSnapshot(buildRealtimeQueueSnapshot(progress));
+		} catch (error) {
+			console.error("[AgentAudit] Failed to load task progress:", error);
+		}
+	}, [taskId]);
 
 	const debouncedLoadAgentTree = useCallback(() => {
 		const now = Date.now();
@@ -3554,6 +3632,22 @@ function AgentAuditPageContent() {
 	}, [taskId, isRunning, loadTask]);
 
 	useEffect(() => {
+		if (!taskId) {
+			setRealtimeQueueSnapshot(DEFAULT_REALTIME_QUEUE_SNAPSHOT);
+			return;
+		}
+		if (!isRunning) {
+			setRealtimeQueueSnapshot(DEFAULT_REALTIME_QUEUE_SNAPSHOT);
+			return;
+		}
+		void loadTaskProgress();
+		const interval = setInterval(() => {
+			void loadTaskProgress();
+		}, POLLING_INTERVALS.TASK_STATS);
+		return () => clearInterval(interval);
+	}, [taskId, isRunning, loadTaskProgress]);
+
+	useEffect(() => {
 		if (!taskId || !isRunning) return;
 		const interval = setInterval(() => {
 			void loadFindings({ silent: true });
@@ -3855,6 +3949,12 @@ function AgentAuditPageContent() {
 		},
 		[isAutoScroll, scrollLogsToBottom],
 	);
+	const riskQueueCount =
+		realtimeQueueSnapshot.riskQueue.recon +
+		realtimeQueueSnapshot.riskQueue.blrecon;
+	const vulnerabilityQueueCount =
+		realtimeQueueSnapshot.vulnerabilityQueue.finding +
+		realtimeQueueSnapshot.vulnerabilityQueue.blfinding;
 
 	const renderEventLogsPanel = () => (
 		<div className="h-full min-h-0 overflow-hidden rounded-xl bg-card/50 flex flex-col">
@@ -3869,6 +3969,19 @@ function AgentAuditPageContent() {
 						>
 							已连接
 						</Badge>
+					) : null}
+					{isRunning ? (
+						<div className="flex items-center gap-2 flex-wrap text-[11px] font-mono normal-case tracking-normal tabular-nums">
+							<span className="rounded-md bg-muted/50 px-2.5 py-1 text-foreground/80">
+								风险队列: {riskQueueCount} 个
+							</span>
+							<span className="rounded-md bg-muted/50 px-2.5 py-1 text-foreground/80">
+								漏洞队列: {vulnerabilityQueueCount} 个
+							</span>
+							<span className="rounded-md bg-muted/50 px-2.5 py-1 text-foreground/80">
+								结果队列: {realtimeQueueSnapshot.resultQueue} 个
+							</span>
+						</div>
 					) : null}
 				</div>
 
