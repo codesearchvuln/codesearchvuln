@@ -483,6 +483,120 @@ class BusinessLogicReconAgent(BaseAgent):
                 result[list_key] = normalized
         return result
 
+    @staticmethod
+    def _risk_point_fingerprint(candidate: Dict[str, Any]) -> str:
+        return "|".join(
+            [
+                str(candidate.get("file_path") or "").strip().lower(),
+                str(int(candidate.get("line_start") or 0)),
+                str(candidate.get("vulnerability_type") or "").strip().lower(),
+                str(candidate.get("entry_function") or "").strip().lower(),
+                str(candidate.get("route") or "").strip().lower(),
+                str(candidate.get("http_method") or "").strip().lower(),
+            ]
+        )
+
+    def _track_confirmed_risk_point(self, candidate: Any) -> bool:
+        normalized = self._normalize_risk_point(candidate)
+        if not normalized:
+            return False
+        fingerprint = self._risk_point_fingerprint(normalized)
+        for existing in self._risk_points_pushed:
+            if self._risk_point_fingerprint(existing) == fingerprint:
+                return False
+        self._risk_points_pushed.append(normalized)
+        return True
+
+    def _extract_push_candidates(self, action_name: str, action_input: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if action_name == "push_bl_risk_point_to_queue":
+            normalized = self._normalize_risk_point(action_input)
+            return [normalized] if normalized else []
+        if action_name == "push_bl_risk_points_to_queue":
+            candidates: List[Dict[str, Any]] = []
+            for item in (action_input.get("risk_points") or []):
+                normalized = self._normalize_risk_point(
+                    item.model_dump() if hasattr(item, "model_dump") else (
+                        item.dict() if hasattr(item, "dict") else item
+                    )
+                )
+                if normalized:
+                    candidates.append(normalized)
+            return candidates
+        return []
+
+    def _resolve_bl_queue_binding(self) -> tuple[Any, str] | tuple[None, None]:
+        for tool_name in ("push_bl_risk_points_to_queue", "push_bl_risk_point_to_queue"):
+            tool = self.tools.get(tool_name)
+            queue_service = getattr(tool, "queue_service", None)
+            task_id = getattr(tool, "task_id", None)
+            if queue_service is not None and task_id:
+                return queue_service, str(task_id)
+        return None, None
+
+    def _get_bl_queue_size(self) -> Optional[int]:
+        queue_service, task_id = self._resolve_bl_queue_binding()
+        if queue_service is None or not task_id:
+            return None
+        size = getattr(queue_service, "size", None)
+        if not callable(size):
+            return None
+        try:
+            value = size(task_id)
+        except Exception:
+            return None
+        try:
+            parsed = int(value)
+        except Exception:
+            return None
+        return parsed if parsed >= 0 else None
+
+    def _sync_confirmed_pushes(
+        self,
+        *,
+        action_name: str,
+        action_input: Dict[str, Any],
+        observation: Any,
+        before_size: Optional[int],
+        after_size: Optional[int],
+    ) -> int:
+        candidates = self._extract_push_candidates(action_name, action_input)
+        if not candidates:
+            return 0
+
+        confirmed_count = 0
+        if isinstance(observation, dict):
+            if action_name == "push_bl_risk_point_to_queue":
+                if str(observation.get("enqueue_status") or "").strip().lower() == "enqueued":
+                    confirmed_count = 1
+            elif action_name == "push_bl_risk_points_to_queue":
+                try:
+                    confirmed_count = max(0, int(observation.get("enqueued") or 0))
+                except Exception:
+                    confirmed_count = 0
+
+        if (
+            confirmed_count <= 0
+            and before_size is not None
+            and after_size is not None
+            and after_size > before_size
+        ):
+            confirmed_count = max(0, after_size - before_size)
+
+        if confirmed_count <= 0:
+            return 0
+
+        tracked = 0
+        for candidate in candidates[:confirmed_count]:
+            if self._track_confirmed_risk_point(candidate):
+                tracked += 1
+        return tracked
+
+    def _build_final_summary_message(self) -> str:
+        count = len(self._risk_points_pushed)
+        if count <= 0:
+            return "业务逻辑侦察完成，但未成功入队任何业务逻辑风险点。"
+        return f"业务逻辑侦察完成，实际成功入队 {count} 个业务逻辑风险点。"
+
     async def run(self, input_data: Dict[str, Any]) -> AgentResult:
         """
         执行业务逻辑侦察。
@@ -574,14 +688,15 @@ class BusinessLogicReconAgent(BaseAgent):
                 step = self._parse_llm_response(llm_response)
                 self._steps.append(step)
 
-                await self.emit_thinking(step.thought or "")
-
                 if step.is_final:
+                    await self.emit_thinking(self._build_final_summary_message())
                     await self.emit_event(
                         "info",
                         f"[BLRecon] 侦察完成，共推送 {len(self._risk_points_pushed)} 个业务逻辑风险点",
                     )
                     break
+
+                await self.emit_thinking(step.thought or "")
 
                 if not step.action:
                     self._conversation_history.append({
@@ -597,21 +712,11 @@ class BusinessLogicReconAgent(BaseAgent):
                 await self.emit_llm_action(step.action, step.action_input or {})
 
                 action_input = dict(step.action_input or {})
-
-                # 追踪推送到队列的风险点
-                if step.action == "push_bl_risk_point_to_queue":
-                    normalized = self._normalize_risk_point(action_input)
-                    if normalized:
-                        self._risk_points_pushed.append(normalized)
-                elif step.action == "push_bl_risk_points_to_queue":
-                    for rp in (action_input.get("risk_points") or []):
-                        normalized = self._normalize_risk_point(
-                            rp.model_dump() if hasattr(rp, "model_dump") else (
-                                rp.dict() if hasattr(rp, "dict") else rp
-                            )
-                        )
-                        if normalized:
-                            self._risk_points_pushed.append(normalized)
+                queue_size_before = (
+                    self._get_bl_queue_size()
+                    if step.action in {"push_bl_risk_point_to_queue", "push_bl_risk_points_to_queue"}
+                    else None
+                )
 
                 all_tool_calls += 1
 
@@ -622,6 +727,15 @@ class BusinessLogicReconAgent(BaseAgent):
                 except Exception as exc:
                     observation = f"工具调用失败: {exc}"
                     logger.error("[BLRecon] Tool call failed: %s", exc)
+
+                if step.action in {"push_bl_risk_point_to_queue", "push_bl_risk_points_to_queue"}:
+                    self._sync_confirmed_pushes(
+                        action_name=step.action,
+                        action_input=action_input,
+                        observation=observation,
+                        before_size=queue_size_before,
+                        after_size=self._get_bl_queue_size(),
+                    )
 
                 step.observation = observation
                 await self.emit_llm_observation(observation)

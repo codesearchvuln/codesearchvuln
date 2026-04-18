@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 
 _RECON_SUBAGENT_BLOCKED_TOOLS = {
     "run_recon_subagent",
-    "push_risk_point_to_queue",
-    "push_risk_points_to_queue",
     "get_recon_risk_queue_status",
     "dequeue_recon_risk_point",
     "peek_recon_risk_queue",
@@ -228,6 +226,7 @@ class ReconModuleExecutor:
             module_type=descriptor.module_type,
             success=bool(getattr(result, "success", False)) and not error,
             risk_points=list(payload.get("risk_points") or []),
+            risk_points_pushed=max(0, int(payload.get("risk_points_pushed") or 0)),
             files_read=list(coverage.get("files_read") or []),
             files_discovered=list(coverage.get("files_discovered") or []),
             directories_scanned=list(coverage.get("directories_scanned") or []),

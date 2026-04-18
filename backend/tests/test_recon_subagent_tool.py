@@ -52,6 +52,7 @@ class _FakeReconSubAgent:
                         "severity": "medium",
                     }
                 ],
+                "risk_points_pushed": 1,
                 "input_surfaces": [f"input:{primary}"],
                 "trust_boundaries": [f"boundary:{primary}"],
                 "target_files": list(scoped_files),
@@ -150,6 +151,7 @@ async def test_run_recon_subagent_tool_run_reuses_verbose_plan_payload(tmp_path)
     assert run_result.success is True
     assert run_result.data["selected_module_count"] == 1
     assert run_result.data["selected_module_ids"] == ["src_auth"]
+    assert run_result.data["risk_points_pushed"] == 1
     assert run_result.data["module_results"][0]["target_files"] == ["src/auth/login.py"]
     assert run_result.data["module_results"][0]["summary"] == "authentication, session"
 
@@ -182,3 +184,28 @@ async def test_run_recon_subagent_tool_plan_drops_extra_fields_before_validation
             "description": "Inspect auth handlers",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_recon_subagent_tool_run_defaults_to_high_value_modules(tmp_path):
+    (tmp_path / "pdns").mkdir(parents=True)
+    (tmp_path / "pdns" / "daemon.cc").write_text("int main() { return 0; }\n", encoding="utf-8")
+    (tmp_path / "modules").mkdir(parents=True)
+    (tmp_path / "modules" / "gmysqlbackend.cc").write_text("void query() {}\n", encoding="utf-8")
+    (tmp_path / "fuzzing").mkdir(parents=True)
+    (tmp_path / "fuzzing" / "packet_fuzz.cc").write_text("void fuzz() {}\n", encoding="utf-8")
+    (tmp_path / "ext").mkdir(parents=True)
+    (tmp_path / "ext" / "crypto.cc").write_text("void crypto() {}\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir(parents=True)
+    (tmp_path / "docs" / "api.rst").write_text("api docs\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# docs\n", encoding="utf-8")
+    (tmp_path / "meson.build").write_text("project('pdns')\n", encoding="utf-8")
+
+    orchestrator = _FakeOrchestrator(str(tmp_path))
+    tool = RunReconSubAgentTool(orchestrator_provider=lambda: orchestrator)
+
+    result = await tool.execute(action="run")
+
+    assert result.success is True
+    assert result.data["selected_module_ids"] == ["pdns", "modules", "fuzzing", "ext"]
+    assert result.data["selected_module_count"] == 4

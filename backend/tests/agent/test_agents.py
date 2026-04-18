@@ -194,6 +194,27 @@ class TestReconAgent:
         ]
         assert len(agent._risk_points_pushed) == 2
 
+    def test_recon_agent_preserves_subagent_pushed_count_in_host_mode(
+        self, mock_llm_service, mock_event_emitter
+    ):
+        agent = ReconAgent(
+            llm_service=mock_llm_service,
+            tools={},
+            event_emitter=mock_event_emitter,
+        )
+
+        result = agent._apply_subagent_runtime_payload(
+            {
+                "module_results": [
+                    {"module_id": "pdns", "risk_points_pushed": 2, "risk_points": []},
+                    {"module_id": "modules", "risk_points_pushed": 1, "risk_points": []},
+                ]
+            }
+        )
+        result = agent._apply_runtime_recon_state(result)
+
+        assert result["risk_points_pushed"] == 3
+
 class TestAnalysisAgent:
     """Analysis Agent 测试"""
     

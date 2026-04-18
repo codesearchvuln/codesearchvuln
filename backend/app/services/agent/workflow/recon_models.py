@@ -92,7 +92,40 @@ _SEMANTIC_MODULE_TYPES = {
     "components": "frontend",
 }
 
+_TOP_LEVEL_MODULE_TYPES = {
+    "pdns": "core_native",
+    "modules": "backend_native",
+    "fuzzing": "fuzzing",
+    "ext": "dependency_native",
+    "contrib": "deployment",
+    "dockerdata": "deployment",
+    "builder-support": "deployment",
+    "build-aux": "build",
+    "build-scripts": "build",
+    "meson": "build",
+    "website": "docs",
+    "docs": "docs",
+}
+
+_BUILD_FILE_NAMES = {
+    "meson.build",
+    "meson_options.txt",
+    "makefile",
+    "makefile.am",
+    "makefile.docker",
+    "tasks.py",
+    "dockerfile",
+    "dockerfile-auth",
+    "dockerfile-recursor",
+    "dockerfile-dnsdist",
+    "dockerfile-cifuzz",
+}
+
 _MODULE_PRIORITY = {
+    "core_native": 110,
+    "backend_native": 105,
+    "fuzzing": 100,
+    "dependency_native": 82,
     "auth": 100,
     "admin": 95,
     "payment": 92,
@@ -102,11 +135,18 @@ _MODULE_PRIORITY = {
     "worker": 75,
     "storage": 70,
     "cross_cutting": 65,
+    "deployment": 45,
+    "build": 35,
+    "docs": 20,
     "frontend": 50,
     "shared": 40,
 }
 
 _RISK_FOCUS_BY_MODULE = {
+    "core_native": ["network_parser", "memory_safety", "protocol_boundary"],
+    "backend_native": ["query_construction", "credential_handling", "boundary_validation"],
+    "fuzzing": ["parser_edge_cases", "coverage_gaps", "memory_safety"],
+    "dependency_native": ["unsafe_api_usage", "dependency_boundary", "crypto_configuration"],
     "auth": ["authentication", "authorization", "session", "credential_flow"],
     "admin": ["authorization", "privilege_boundary", "configuration"],
     "payment": ["amount_tampering", "state_machine", "callback_validation"],
@@ -116,6 +156,9 @@ _RISK_FOCUS_BY_MODULE = {
     "worker": ["deserialization", "message_validation", "task_injection"],
     "storage": ["sql_injection", "raw_query", "unsafe_persistence"],
     "cross_cutting": ["middleware_bypass", "security_headers", "shared_guardrails"],
+    "deployment": ["entrypoint_injection", "runtime_configuration", "secrets_handling"],
+    "build": ["build_integrity", "unsafe_defaults", "supply_chain"],
+    "docs": ["documented_attack_surface", "api_exposure"],
     "frontend": ["xss", "server_action", "api_route"],
     "shared": ["input_validation", "sensitive_helpers"],
 }
@@ -238,11 +281,25 @@ def _classify_module_anchor(path: str) -> tuple[str, str]:
     if not parts:
         return "root", "shared"
 
+    top_level = parts[0].lower()
+    top_level_type = _TOP_LEVEL_MODULE_TYPES.get(top_level)
+    if top_level_type:
+        return parts[0], top_level_type
+
     for idx, part in enumerate(parts[:-1]):
         module_type = _SEMANTIC_MODULE_TYPES.get(part.lower())
         if module_type:
             anchor = "/".join(parts[: idx + 1]) or "root"
             return anchor, module_type
+
+    if len(parts) == 1:
+        filename = parts[0]
+        ext = os.path.splitext(filename)[1].lower()
+        if filename.lower() in _BUILD_FILE_NAMES:
+            return "project_root_build", "build"
+        if ext in _LANGUAGE_BY_EXT:
+            return "project_root_code", "shared"
+        return "project_root_docs", "docs"
 
     if len(parts) >= 2 and parts[0] in {"src", "app", "server", "backend"}:
         anchor = "/".join(parts[:2])
@@ -298,6 +355,7 @@ class ReconModuleResult:
     module_id: str
     success: bool
     risk_points: List[Dict[str, Any]] = field(default_factory=list)
+    risk_points_pushed: int = 0
     files_read: List[str] = field(default_factory=list)
     files_discovered: List[str] = field(default_factory=list)
     directories_scanned: List[str] = field(default_factory=list)

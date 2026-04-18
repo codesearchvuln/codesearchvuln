@@ -304,6 +304,49 @@ class RunReconSubAgentTool(AgentTool):
         return project_model
 
     @staticmethod
+    def _select_default_focus_modules(
+        model: ProjectReconModel,
+        *,
+        force_rerun: bool,
+        executed_ids: set[str],
+    ) -> List[ReconModuleDescriptor]:
+        modules = list(model.module_descriptors or [])
+        if not modules:
+            return []
+
+        if not force_rerun and executed_ids:
+            modules = [item for item in modules if item.module_id not in executed_ids]
+        if not modules:
+            return []
+
+        preferred_types = {
+            "core_native",
+            "backend_native",
+            "fuzzing",
+            "dependency_native",
+            "auth",
+            "admin",
+            "payment",
+            "upload",
+            "webhook",
+            "api",
+            "worker",
+            "storage",
+            "cross_cutting",
+        }
+        fallback_types = {"shared", "deployment", "build"}
+
+        preferred = [item for item in modules if str(item.module_type or "").strip().lower() in preferred_types]
+        if preferred:
+            return preferred[:8]
+
+        fallback = [item for item in modules if str(item.module_type or "").strip().lower() in fallback_types]
+        if fallback:
+            return fallback[:6]
+
+        return modules[:6]
+
+    @staticmethod
     def _select_modules(
         *,
         model: ProjectReconModel,
@@ -378,13 +421,27 @@ class RunReconSubAgentTool(AgentTool):
             }
             return ToolResult(success=True, data=payload, metadata=payload)
 
-        selected = self._select_modules(
-            model=project_model,
-            module_ids=module_ids,
-            max_modules=max_modules,
-            force_rerun=bool(force_rerun),
-            executed_ids=self._executed_module_ids,
+        force_rerun_flag = bool(force_rerun)
+        explicit_selection_requested = bool(
+            modules
+            or self._planned_project_model is not None
+            or module_ids
+            or max_modules
         )
+        if explicit_selection_requested:
+            selected = self._select_modules(
+                model=project_model,
+                module_ids=module_ids,
+                max_modules=max_modules,
+                force_rerun=force_rerun_flag,
+                executed_ids=self._executed_module_ids,
+            )
+        else:
+            selected = self._select_default_focus_modules(
+                project_model,
+                force_rerun=force_rerun_flag,
+                executed_ids=self._executed_module_ids,
+            )
         if not selected:
             payload = {
                 "action": "run",
@@ -431,14 +488,19 @@ class RunReconSubAgentTool(AgentTool):
         )
         await self._emit_host_status(
             orchestrator,
-            lifecycle="merge_and_queue",
+            lifecycle="collect_results",
             message=(
-                f"ReconAgent 已收到 {len(selected)} 个 ReconSubAgent 结果，开始统一汇总并负责风险点入队"
+                f"ReconAgent 已收到 {len(selected)} 个 ReconSubAgent 结果，开始统一汇总子模块侦查结果"
             ),
             selected=selected,
         )
         for descriptor in selected:
             self._executed_module_ids.add(str(descriptor.module_id))
+
+        risk_points_pushed = sum(
+            max(0, int(getattr(item, "risk_points_pushed", 0) or 0))
+            for item in module_results
+        )
 
         payload = {
             "action": "run",
@@ -449,6 +511,7 @@ class RunReconSubAgentTool(AgentTool):
             "project_model": project_model.to_dict(),
             "module_results": [item.to_dict() for item in module_results],
             "risk_points": list(merged.get("risk_points") or []),
+            "risk_points_pushed": risk_points_pushed,
             "input_surfaces": list(merged.get("input_surfaces") or []),
             "trust_boundaries": list(merged.get("trust_boundaries") or []),
             "target_files": list(merged.get("target_files") or []),

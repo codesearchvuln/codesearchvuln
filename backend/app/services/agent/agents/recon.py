@@ -73,7 +73,7 @@ DATABASE_OBSERVATION_HINTS = {
     "SQLite": ("sqlite",),
 }
 SOURCE_FILE_PATTERN = re.compile(
-    r'[\w./@\-\[\]+]+\.(?:py|js|jsx|mjs|cjs|ts|tsx|mts|cts|java|php|go|rb)\b'
+    r'[\w./@\-\[\]+]+\.(?:py|js|jsx|mjs|cjs|ts|tsx|mts|cts|java|php|go|rb|rs|c|cc|cpp|cxx|h|hh|hpp)\b'
 )
 WEB_VULNERABILITY_FOCUS_DEFAULT = [
     "sql_injection",
@@ -90,112 +90,69 @@ WEB_VULNERABILITY_FOCUS_DEFAULT = [
 
 RECON_SYSTEM_PROMPT = """你是 VulHunter 的 Recon Host Agent。
 
-在当前结构化 workflow 中，你的身份首先是**功能模块规划者 / 目录级调度者**，不是文档阅读器，也不是全项目逐文件深挖执行者。
+你是“项目建模与模块派发”角色，负责建立全局地图、拆解侦查任务、汇总子模块结果，并为下游分析层提供结构化输入。你不在模块内部深挖代码细节。
 
-你的主职责不是亲自地毯式审每个模块，而是：
-1. 建立项目地图
-2. 识别**功能模块**边界与优先级
-3. 为 Recon SubAgent 准备清晰、可执行、**目录级**的模块上下文
-4. 汇总模块侦查结果，形成后续 Analysis 可消费的结构化产物
+项目可能是 Web 服务、原生网络服务、CLI 工具、daemon、worker/consumer、parser/importer、plugin/hook、library/SDK、构建/部署组件或混合 monorepo。不要预设项目一定属于某个语言、框架或架构。
 
-只有在没有可用的 Recon SubAgent / 模块化执行通道时，你才回退为亲自侦查并直接推送风险点。
+## 核心职责
+1. 建立项目画像：识别语言、构建系统、运行时、框架、关键目录、入口点与信任边界。
+2. 按功能边界和安全边界拆解模块：每个模块必须包含明确的 directories、description，并可补充 focus_areas。
+3. 派发侦查任务：调用 run_recon_subagent 执行（先 action=plan 规划，再 action=run 执行）。
+4. 聚合与推荐：去重合并子模块结果，评估初始风险，给下游分析层提供清晰边界与重点。
+5. 输出结构化侦察报告，供 Analysis 层直接消费。
 
-常规 Recon 重点关注代码安全风险；IDOR、状态机绕过、金额篡改、权限提升等业务逻辑问题默认由 BusinessLogicReconAgent 负责，除非白名单中不存在对应业务逻辑工具/队列。
+## 入口点识别（按适用项）
+- HTTP/RPC/gRPC handler、router、controller、resolver
+- queue consumer、worker、cron、job、scheduler
+- CLI main、subcommand、argument parser
+- daemon/service bootstrap、startup initializer
+- parser/decoder/importer/file loader
+- plugin hook、callback、extension point
+- auth filter、middleware、interceptor、guard
 
-═══════════════════════════════════════════════════════════════
+## 信任边界识别（按适用项）
+- network request/response
+- file path/file content/archive input
+- env/config/secret store
+- database/cache/message queue
+- IPC/FFI/system call
+- parser/serialization/deserialization boundary
+- user role/tenant/permission boundary
 
-## Host 模式下你的首要职责
+## 风险族群（按项目特征选择）
+- injection（SQL/NoSQL/command/template/code/expression）
+- filesystem/path boundary
+- parser/deserialization boundary
+- authn/authz/privilege boundary
+- outbound network trust/callback/SSRF
+- secrets/config/crypto misuse
+- memory safety/format string/unsafe native API
+- reflection/dynamic loading/plugin execution
+- concurrency/state machine/business logic clues
 
-| 职责 | 说明 |
-|------|------|
-| **项目建模** | 先看根目录、关键目录、关键配置文件，建立语言/框架/入口/目录布局认知 |
-| **模块拆分** | 把项目拆成适合并发侦查的**功能模块**，明确每个模块的 `directories` 和一段简短 `description` |
-| **调度导向** | 你的输出要服务于 SubAgent 实干，而不是自己陷入长时间的模块内逐文件深挖 |
-| **结果归并** | 汇总所有模块的 `risk_points`、`input_surfaces`、`trust_boundaries`、`target_files`、`coverage_summary` |
-| **兜底侦查** | 如果没有模块化执行能力，才回退为亲自搜索、确认、入队风险点 |
+## 工作流约束
+- 正常模式下，Recon 风险点由 SubAgent 直接入队，Host 仅负责汇总与调度，不重复推送。
+- `language_hints`、`framework_hints`、`module_type`、`risk_focus` 是软提示，不是事实；必须先用工具确认。
+- 禁止将 docs/、examples/、tests/、dist/、build/、node_modules/、.git/、__pycache__/ 等非功能目录规划为侦查模块，除非它们直接影响运行时行为。
+- 仅当 run_recon_subagent 工具不可用时，才回退为传统单点 Recon 并自行推送风险点。
+- 必须先调用工具收集信息，严禁未获取 Observation 直接输出 Final Answer。
 
-═══════════════════════════════════════════════════════════════
+## 输出格式要求（严格）
+- 只能输出纯文本 ReAct 字段：`Thought:`、`Action:`、`Action Input:`、`Final Answer:`。
+- 禁止在这些字段前后加 Markdown 强调符号（如 `**Thought:**`）。
+- `Action Input` 必须是完整 JSON 对象。
+- 不允许在未调用工具的情况下直接输出 `Final Answer`。
 
-## Host 模式下的硬约束
+## 防止幻觉（关键）
+- 任何 `file_path`、目录、入口点都必须来自真实工具结果。
+- 不要猜测文件名、目录结构或行号。
+- 如果证据不足，明确标记不确定性，不要伪造结论。
 
-1. **先建模，再拆分，再下发** —— 第一优先级是项目地图和模块规划，不要一上来陷入某个模块的细节代码窗口。
-2. **模块边界必须可执行** —— 每个模块至少要能回答：扫哪里，以及为什么扫。
-3. **不要把自己当成唯一执行者** —— 在有 SubAgent 的前提下，避免自己承担所有模块的深度侦查。
-4. **保留少量关键确认动作** —— Host 可以对项目根目录、关键配置、关键入口做必要确认，但不要把所有模块都亲自扫完。
-5. **输出必须结构化** —— 最终必须显式记录 `input_surfaces`、`trust_boundaries`、`target_files`，并为下游 Analysis 保留约束范围。
-6. **无子任务执行通道时允许回退** —— 若当前运行时没有 SubAgent 可用，你必须回退为直接侦查，并确保风险点可入队。
-7. **只识别功能模块，不把噪音目录当模块** —— `docs/`、`examples/`、`demo/`、`samples/`、`fixtures/`、`mocks/`、`coverage/`、`dist/`、`build/`、`node_modules/`、纯测试数据目录默认不是功能模块，不要为它们单独规划 Recon SubAgent。
-8. **SubAgent 必须拿到具体目录** —— `directories` 应优先是可执行的功能目录，例如 `src/auth`、`app/api`、`services/order`、`worker/jobs`，不要把整个项目根目录、`docs/`、或一堆零散说明文件直接交给 SubAgent。
-9. **优先使用 `run_recon_subagent` 工具** —— Host 在完成项目建模后，应通过该工具进行模块执行（先 `action=plan` 再按需 `action=run`），不要仅停留在规划文本。
-
-## Host 完成条件
-## 侦查完成条件（关键）
-
-1. 已建立可用项目地图
-2. 已识别一组合理的**功能模块**边界和优先级
-3. 已为每个模块给出明确的侦查焦点与**具体目录**
-4. 已汇总模块结果，或在回退模式下直接产出风险点
-5. 最终结果对 Analysis 可直接消费
-
-## Host 的推荐工作顺序
-
-1. `list_files` 看根目录
-2. `list_files` 看关键目录
-3. 读取技术栈/配置文件，建立项目画像
-4. 优先标记真实运行时相关的功能模块：入口模块、业务高风险模块、跨切面模块、共享基础设施模块
-5. 明确剔除文档、示例、测试样例、构建产物等无关目录，除非它们直接决定运行时入口
-6. 为 `run_recon_subagent` 准备 `modules=[{directories, description}]`，其中 `directories` 优先给**具体目录**
-7. 汇总模块结果；只有在缺少 SubAgent runtime 时，才亲自继续做 `search_code` + `get_code_window` 级侦查
-
-## `run_recon_subagent` 调用格式
-
-- `plan` 阶段只传：
-  - `action`
-  - `modules`，其中每项只包含 `directories` 和 `description`
-- `run` 阶段只传：
-  - `action`
-  - 可选 `module_ids` / `max_modules` / `max_workers` / `force_rerun`
-- 不要额外传 `priority`、`entrypoints`、`risk_focus`、`notes` 之外的自定义字段
-- 推荐示例：
-```json
-{"action":"plan","modules":[{"directories":["src/auth"],"description":"Inspect authentication flows in src/auth"}]}
-```
-```json
-{"action":"run","module_ids":["src_auth"],"max_workers":2}
-```
-
-## 回退模式要求
-
-如果当前没有可用的模块化执行通道，你需要切换为传统 Recon：
-- 使用 `list_files` -> `search_code` -> `get_code_window` / `get_file_outline`
-- 基于真实代码确认风险点
-- 直接调用 `push_risk_point_to_queue` / `push_risk_points_to_queue`
-- 输出结构化 `risk_points`
-
-## Host 禁止事项
-
-- 不要把 `docs/`、纯 Markdown/RST 文档、设计说明、发布说明当作功能模块主线
-- 不要为了“看起来覆盖全面”而给 SubAgent 派发 `docs`、`examples`、`tests` 这类非运行时目录
-- 不要把整个仓库根目录直接当一个大模块下发，除非项目极小且没有可分解的功能目录
-- 不要把“技术栈说明文档”误当成“运行时代码入口”
-
-## 风险点原则
-
-- 风险点是“值得下游深挖的可疑位置”，不是已验证漏洞
-- 必须基于真实代码，不得幻觉
-- 宁可低置信度标记，也不要漏掉高价值候选
-
-## 风险点入队最小要求
-
-- 风险点必须来自真实运行时代码，不来自纯文档说明
-- 至少能关联到具体 `file_path`，优先关联到明确功能目录
-- `confidence` 允许保守，但不能凭空捏造
-- 若 Recon 队列仍为空，先检查是否把时间浪费在文档/示例目录，而不是功能模块
-
-## 高风险区域与 TS 项目补充
-
-- 高风险区域优先从真实入口、控制器、路由、worker、consumer、middleware、auth、payment、upload、callback 目录中识别
-- TypeScript / Node 项目优先关注 `tsconfig.json`、`pages/api`、`app/api/**/route.ts`、`*.controller.ts`、`*.resolver.ts`
+## Final Answer 最低内容
+- `project_structure`、`tech_stack`、`entry_points`
+- `input_surfaces`、`trust_boundaries`、`target_files`
+- `project_model`（含模块划分）与 `module_results` 摘要
+- `coverage_summary`、`summary`
 """
 
 
@@ -561,7 +518,11 @@ class ReconAgent(BaseAgent):
         extracted_points = self._ensure_risk_points(result)
         merged_points = self._merge_risk_points(self._risk_points_pushed, extracted_points)
         result["risk_points"] = merged_points
-        result["risk_points_pushed"] = len(self._risk_points_pushed)
+        try:
+            existing_pushed = max(0, int(result.get("risk_points_pushed") or 0))
+        except Exception:
+            existing_pushed = 0
+        result["risk_points_pushed"] = max(existing_pushed, len(self._risk_points_pushed))
         high_risk_areas = self._normalize_string_list(result.get("high_risk_areas"), limit=64)
         for point in merged_points:
             file_path = str(point.get("file_path") or "").strip()
@@ -761,6 +722,28 @@ class ReconAgent(BaseAgent):
         await self._refresh_recon_queue_status()
         result["risk_points_pushed"] = len(self._risk_points_pushed)
         result["recon_queue_status"] = self._recon_queue_snapshot
+
+    async def _sync_or_capture_recon_queue(
+        self,
+        result: Dict[str, Any],
+        *,
+        in_module_worker_mode: bool,
+    ) -> None:
+        if not isinstance(result, dict):
+            return
+        used_subagent_runtime = bool(
+            not in_module_worker_mode
+            and (
+                self._latest_tool_module_results
+                or result.get("module_results")
+            )
+        )
+        if used_subagent_runtime:
+            result = self._apply_runtime_recon_state(result)
+            await self._refresh_recon_queue_status()
+            result["recon_queue_status"] = self._recon_queue_snapshot
+            return
+        await self._sync_recon_queue(result)
     
     def _parse_tool_output(self, raw_output: Any) -> Any:
         if isinstance(raw_output, dict) or isinstance(raw_output, list):
@@ -822,6 +805,19 @@ class ReconAgent(BaseAgent):
                 int(final_result.get("module_count") or 0),
                 len(module_results),
             )
+            try:
+                module_push_total = sum(
+                    max(0, int(item.get("risk_points_pushed") or 0))
+                    for item in module_results
+                    if isinstance(item, dict)
+                )
+            except Exception:
+                module_push_total = 0
+            try:
+                existing_push_total = max(0, int(final_result.get("risk_points_pushed") or 0))
+            except Exception:
+                existing_push_total = 0
+            final_result["risk_points_pushed"] = max(existing_push_total, module_push_total)
         if not isinstance(final_result.get("project_model"), dict) and self._latest_tool_project_model:
             final_result["project_model"] = dict(self._latest_tool_project_model)
         return final_result
@@ -927,35 +923,25 @@ class ReconAgent(BaseAgent):
 ## 任务上下文
 {task_context or task or '围绕单个模块执行深度 Recon，找出值得后续 Analysis 深挖的风险点。'}
 
-## 当前模式：Recon SubAgent / 模块侦查 Worker
-- 你是模块内实干执行者，不负责全项目建模
-- 你只对当前模块范围负责：父 Agent 提供的 `directories` 和 `description`
-- 你的首要目标是产出高质量结构化 `risk_points`、`input_surfaces`、`trust_boundaries`、`target_files`、`coverage_summary`
-- 父 Agent 传给你的 `directories` 应视为**具体目录边界**；你的任务是深挖这些目录，不要再自行扩展到 `docs/`、`examples/`、`tests/` 等噪音目录
-- 你的首要目标是产出高质量结构化 `risk_points`、`input_surfaces`、`trust_boundaries`、`target_files`、`coverage_summary`
-- 本模式下由父 Agent 统一归并结果；你应专注于模块内搜索、确认、提炼证据
+## 当前模式：Recon SubAgent（模块执行）
+- 仅侦查父 Agent 指定模块，不做项目建模和模块划分。
+- 先识别当前模块更像 handler、worker、CLI、parser、plugin、native service 还是 shared library，再决定侦查路径。
+- 在模块内按 `list_files` -> `search_code` -> 上下文确认推进，并沿 source -> validation/normalization -> boundary crossing -> sink 追踪。
+- 输出结构化结果：`risk_points`、`input_surfaces`、`trust_boundaries`、`target_files`、`coverage_summary`。
+- 对确认后的风险点由当前 SubAgent 直接调用 Recon 风险队列工具推送；单个点用 `push_risk_point_to_queue`，多个点优先用 `push_risk_points_to_queue`。
+- 不要等到 Final Answer 才统一写风险点；入队动作本身是完成标准的一部分。
+- 模块外路径只作为依赖线索记录，不扩散扫描。
 
-## 本轮侦查硬性目标
-- 第一个 Action 必须优先围绕当前模块做 `list_files`
-- 根据模块的语言/框架/入口/风险焦点，设计成组的 `search_code` 查询
-- `search_code` 命中过多时先用 `group_by_file=true` 或 `count_only=true` 看分布，再收敛
-- 命中候选后，必须用 `get_code_window` / `get_file_outline` / `get_function_summary` / `get_symbol_body` / `locate_enclosing_function` 确认
-- 先识别真实入口点，再沿着 input_surfaces -> trust_boundaries -> sink 的方向展开
-- 重点产出高价值候选点；不要把时间浪费在全项目目录漫游
-- 对存在后续分析价值但证据尚不完整的点，也应用较低 confidence 保留
-- 不要把 Markdown/RST 文档、使用说明、样例目录当成当前模块的主侦查对象，除非它们就是该模块唯一的真实运行时代码线索
+## 模块内覆盖（按适用项）
+- request/RPC handler、queue consumer、cron/job、CLI command、daemon bootstrap
+- parser/decoder/importer/deserializer、plugin hook、dynamic loader、FFI/native boundary
+- auth/session/permission/admin path、file/archive handling、template/expression/dynamic execution
+- SQL/ORM/raw query、cache/queue、webhook/callback、subprocess/system call、unsafe native memory handling
 
-## 模块内最低覆盖清单
-- 当前模块的路由/控制器/Resolver/API 入口
-- 当前模块的认证、授权、会话、管理员路径
-- 当前模块的文件上传/下载、模板渲染、动态执行、反序列化
-- 当前模块的 SQL/ORM/raw query、Webhook/Callback/OAuth、异步任务/消费者
-
-## 结束前自检
-- 是否已经基于真实代码产出 `risk_points`
-- 是否已经补齐 `input_surfaces`、`trust_boundaries`、`target_files`
-- 是否覆盖了当前模块的关键入口与敏感 sink
-- Final Answer 必须以模块结果为中心，而不是项目总览
+## 完成标准
+- Final Answer 必须说明：已推送风险点、推送数量、未推送原因。
+- 若白名单中有 Recon 入队工具，则“发现已确认风险点但未执行入队”视为未完成。
+- Final Answer 以当前模块结果为中心，不输出项目总览。
 
 ## 可用工具
 {self.get_tools_description()}
@@ -968,41 +954,25 @@ class ReconAgent(BaseAgent):
 ## 任务上下文
 {task_context or task or '进行项目建模、模块识别和 Recon 调度准备，为后续模块侦查提供清晰边界。'}
 
-## 当前模式：Recon Host / 调度与建模
-- 你的主职责是建模、拆分**功能模块**、定义优先级，而不是亲自扫完整个项目的每个模块
-- 先建立项目地图，再明确哪些模块应该由 Recon SubAgent 去做深度侦查
-- 你可以做少量关键确认，但不要陷入所有模块的逐文件深挖
-- 建模完成后，应调用 `run_recon_subagent`（先 `action=plan`，再 `action=run`）推进模块侦查
-- 若没有可用的模块化执行通道，再回退为亲自执行传统 Recon
-- 你要把模块规划成**可直接派发给 SubAgent 的具体目录**，而不是抽象主题或文档目录
+## 当前模式：Recon Host（建模与派发）
+- 第一职责是划分功能模块并派发 `ReconSubAgent`，不是自己深挖全部模块。
+- 先判断项目更像 Web 服务、网络服务、CLI、worker、parser、plugin、library、build/deploy 组件还是混合形态，再输出可执行模块。
+- 先做项目建模，再输出可执行模块：每个模块都要有 `directories` + `description`，必要时补充 focus_areas。
+- 建模后调用 `run_recon_subagent`（先 `action=plan`，再 `action=run`）推进侦查。
+- `run_recon_subagent` 成功后，Host 不再重复调用 Recon 风险队列推送工具。
+- 仅在没有 SubAgent 通道时，才回退为传统 Recon 并直接推送风险点。
+- 默认不要把 `docs/`、`examples/`、`tests/`、`dist/`、`build/`、`node_modules/` 规划为功能模块。
 
-## 本轮侦查硬性目标
-- 第一个 Action 必须是 `list_files`，先对根目录和关键目录建模
-- 优先识别：语言、框架、入口目录、配置文件、任务/消费者、共享中间件、认证/支付/上传/回调等高风险模块
-- 为每个模块准备明确边界：`directories` 和简短 `description`；其中 `directories` 应优先给出具体功能目录
-- 调 `run_recon_subagent` 时，优先使用最小 payload：`{{"action":"plan","modules":[{{"directories":[...],"description":"..."}}]}}`
-- 只对关键根目录/关键配置/关键入口做必要确认，不要一上来把所有模块都自己扫完
-- 如果运行时缺少 SubAgent 通道，才切换为传统 Recon：`search_code` + 上下文确认 + 风险点入队
-- 业务逻辑问题（如 IDOR/支付/状态机/权限提升）默认由 BusinessLogicReconAgent 负责；常规 Recon 优先产出代码安全风险点
-- 默认忽略 `docs/`、`examples/`、`demo/`、`fixtures/`、`mocks/`、`coverage/`、`dist/`、`build/`、纯测试样例目录，不要把它们规划成主模块；除非用户明确指定目标文件或它们直接决定运行时行为
+## 建模重点（按适用项）
+- 识别构建与运行入口：package manager、build files、main/bootstrap、service config、plugin manifest
+- 识别真实执行面：HTTP/RPC/gRPC、consumer/worker、CLI、daemon、parser/importer、native binary
+- 识别关键边界：network、filesystem、serialization、database/cache/queue、IPC/FFI、auth/permission
+- 按功能边界和安全边界拆模块，而不是只按框架层或目录名机械拆分
 
-## Host 最低覆盖清单
-- 根目录、关键目录、关键配置文件
-- 路由/控制器/Resolver/API 入口
-- 认证、授权、管理员、支付、上传、回调、下载、消费者、定时任务
-- 中间件、守卫、拦截器、共享安全基础设施
-- 只记录文档/样例目录是否存在，不要把它们当成功能模块主线
-
-## 结束前自检
-- 是否已经建立清晰的项目地图与模块划分
-- 是否已经识别 `input_surfaces`、`trust_boundaries`、`target_files`
-- 是否已明确哪些**具体目录模块**应优先被 SubAgent 深挖
-- 若没有 SubAgent 通道，是否已正确回退为直接 Recon 并产出风险点
-- Final Answer 必须体现：项目画像、模块划分、高风险模块、必要的风险点或模块结果摘要
-
-## TypeScript 项目补充要求
-- 若发现 `tsconfig.json`、`next.config.*`、`nest-cli.json`、`package.json`、`.ts`、`.tsx`，应按 TypeScript 项目处理，不要只按“泛 Node.js”略过
-- 优先枚举 `pages/api/`、`app/api/**/route.ts`、`src/main.ts`、`src/app.controller.ts`、`*.controller.ts`、`*.resolver.ts`、`middleware.ts`、`server.ts`、`worker.ts`
+## 完成标准
+- 有项目地图（语言/构建/运行形态/入口/关键目录/信任边界）。
+- 有可执行的功能模块划分（具体目录边界）。
+- 有模块执行结果汇总；若回退模式则有结构化风险点。 
 
 ## 可用工具
 {self.get_tools_description()}
@@ -1375,7 +1345,10 @@ Final Answer:""",
                 final_result = self._apply_subagent_runtime_payload(final_result)
                 final_result = self._apply_runtime_recon_state(final_result)
                 final_result = self._ensure_project_profile(final_result)
-                await self._sync_recon_queue(final_result)
+                await self._sync_or_capture_recon_queue(
+                    final_result,
+                    in_module_worker_mode=in_module_worker_mode,
+                )
             
             #  记录工作和洞察
             self.record_work(f"完成项目信息收集，发现 {len(final_result.get('entry_points', []))} 个入口点")
@@ -1549,6 +1522,15 @@ Final Answer:""",
                     self._append_unique(result["tech_stack"]["languages"], "PHP")
                 if ".rb" in obs_lower or "gemfile" in obs_lower:
                     self._append_unique(result["tech_stack"]["languages"], "Ruby")
+                if (
+                    "cmakelists.txt" in obs_lower
+                    or "meson.build" in obs_lower
+                    or "compile_commands.json" in obs_lower
+                    or re.search(r'\.(?:c|cc|cpp|cxx|h|hh|hpp)\b', obs_lower)
+                ):
+                    self._append_unique(result["tech_stack"]["languages"], "C/C++")
+                if "cargo.toml" in obs_lower or ".rs" in obs_lower:
+                    self._append_unique(result["tech_stack"]["languages"], "Rust")
                 
                 # 识别框架
                 self._extend_matches_from_hints(
@@ -1569,7 +1551,10 @@ Final Answer:""",
                     "api", "auth", "login", "password", "secret", "key", "token",
                     "admin", "upload", "download", "exec", "eval", "sql", "query",
                     "webhook", "callback", "route", "controller", "resolver",
-                    "middleware", "guard", "payment",
+                    "middleware", "guard", "payment", "parser", "deserialize",
+                    "pickle", "yaml", "xml", "socket", "recv", "send", "system",
+                    "subprocess", "include", "require", "load", "dlopen",
+                    "strcpy", "memcpy", "archive", "ffi",
                 ]
                 for keyword in risk_keywords:
                     if keyword in obs_lower:

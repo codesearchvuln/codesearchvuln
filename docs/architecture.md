@@ -380,6 +380,29 @@ AuditTool 是一个面向代码仓库安全扫描的平台。仓库名叫 `Audit
 
 如果你只改页面展示，不必立刻深入所有 Agent 实现；先看事件和契约通常更快。
 
+#### Recon Host / SubAgent 分工
+
+当前 Recon 链路已经明确区分 Host 和 SubAgent：
+
+- `ReconAgent`（Host）只做项目建模、功能模块划分、模块派发（`run_recon_subagent`）和结果汇总
+- `ReconSubAgent` 只侦查分配到的目标目录（功能模块），并直接调用 Recon 风险队列推送工具
+- Recon 的漏洞领域策略（漏洞类型覆盖、source->boundary->sink 搜索路径、入队标准）由 `ReconSubAgent` 执行
+- `ReconSubAgent` 的 Final Answer 必须回报：已推送风险点、推送数量、未推送原因
+- 正常 Host + SubAgent 模式下，Host 不直接写 Recon 风险队列；仅在没有 SubAgent 通道时才回退到 Host 直推
+
+如果你要改这条链路，优先看：
+
+- `backend/app/services/agent/agents/recon.py`
+- `backend/app/services/agent/agents/recon_subagent.py`
+- `backend/app/services/agent/tools/recon_subagent_tool.py`
+- `backend/app/services/agent/workflow/recon_executor.py`
+
+理解这条边界很重要，因为它决定了：
+
+- 哪一层负责“项目地图”
+- 哪一层负责“真实风险点入队”
+- 前端日志里哪一层应该显示为“结构规划”，哪一层应该显示为“模块执行 / 风险推送”
+
 ### 如果你要改 Agent 实时流
 
 优先看：

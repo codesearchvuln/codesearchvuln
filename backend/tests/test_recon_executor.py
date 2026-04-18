@@ -35,6 +35,30 @@ def test_build_project_recon_model_respects_target_files(tmp_path):
     assert sorted(model.target_files) == ["src/auth/login.py", "src/billing/payment.py"]
 
 
+def test_build_project_recon_model_groups_root_files_into_shared_modules(tmp_path):
+    (tmp_path / "pdns").mkdir(parents=True)
+    (tmp_path / "pdns" / "main.cc").write_text("int main() { return 0; }\n", encoding="utf-8")
+    (tmp_path / "modules").mkdir(parents=True)
+    (tmp_path / "modules" / "backend.cc").write_text("void backend() {}\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# pdns\n", encoding="utf-8")
+    (tmp_path / "AUTHORS").write_text("PowerDNS contributors\n", encoding="utf-8")
+    (tmp_path / "meson.build").write_text("project('pdns')\n", encoding="utf-8")
+
+    model = build_project_recon_model(
+        project_root=str(tmp_path),
+        project_info={"languages": ["C++"]},
+        config={},
+    )
+
+    module_names = {module.name for module in model.module_descriptors}
+    assert "pdns" in module_names
+    assert "modules" in module_names
+    assert "AUTHORS" not in module_names
+    assert "README.md" not in module_names
+    assert "project_root_docs" in module_names
+    assert "project_root_build" in module_names
+
+
 class _ScopedTool:
     def __init__(self):
         self.target_files = None
@@ -98,6 +122,7 @@ class _FakeReconSubAgent:
                             "severity": "medium",
                         }
                     ],
+                    "risk_points_pushed": 1,
                     "input_surfaces": [f"input:{primary}"],
                     "trust_boundaries": [f"boundary:{primary}"],
                     "target_files": scoped_files,
@@ -233,7 +258,7 @@ async def test_recon_executor_respects_max_workers():
 
 
 @pytest.mark.asyncio
-async def test_recon_executor_emits_host_and_subagent_lifecycle_and_filters_host_tools():
+async def test_recon_executor_emits_host_and_subagent_lifecycle_and_preserves_queue_push_tools():
     _FakeReconSubAgent.active_runs = 0
     _FakeReconSubAgent.max_seen = 0
     _FakeReconSubAgent.seen_toolsets = []
@@ -278,7 +303,7 @@ async def test_recon_executor_emits_host_and_subagent_lifecycle_and_filters_host
     assert _FakeReconSubAgent.seen_toolsets
     for toolset in _FakeReconSubAgent.seen_toolsets:
         assert "run_recon_subagent" not in toolset
-        assert "push_risk_point_to_queue" not in toolset
+        assert "push_risk_point_to_queue" in toolset
 
     messages = [event["message"] for event in orchestrator.event_emitter.events]
     assert any("派发 2 个 ReconSubAgent" in message for message in messages)
