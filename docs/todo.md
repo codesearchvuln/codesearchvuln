@@ -5,13 +5,15 @@
   - 任务管理页：运行中任务由百分比改为同口径阶段标签
   - 规划与实现见 `docs/progress/agent-detail-stage-progress-plan.md`
 - [x] 添加Bash Shell工具
+- [ ] 添加Agent日志导出功能
+- [ ] 混合扫描添加选用工具展示功能
+- [ ] 智能/混合扫描添加工具调用数量统计功能
+
 ## Refactor
 - [x] 重构Recon
 - [x] 优化文件上传功能，调整为异步
 - [x] 重构扫描详情页，事件日志改为拖动控制高度
 - [x] 将一级标签”开发测试”改为“数据管理“，二级标签”数据管理”改为“导入导出“
-- [ ] 用AntDesign重构前端页面
-  - 规划见 `docs/ant/normal-pages-antdesign-refactor-plan.md`
 
 ## Fix
 - [x] backend 报错。unclosed client session
