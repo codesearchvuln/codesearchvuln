@@ -374,7 +374,7 @@ class AnalysisAgent(BaseAgent):
 
         for finding in findings:
             result = await self.execute_tool("push_finding_to_queue", dict(finding))
-            if "成功" in result or "已入队" in result:
+            if "成功" in result or "已入队" in result or "duplicate_skipped" in result:
                 pushed_count += 1
 
         await self.emit_event(

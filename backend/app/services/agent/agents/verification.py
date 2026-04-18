@@ -3881,6 +3881,13 @@ class VerificationAgent(BaseAgent):
             return False
         if re.search(r"""['"]saved['"]\s*:\s*(true|True|1)""", text):
             return True
+        if re.search(r"""['"]already_saved['"]\s*:\s*(true|True|1)""", text):
+            return True
+        if re.search(
+            r"""['"]save_status['"]\s*:\s*['"](saved|duplicate_skipped|buffered)['"]""",
+            text,
+        ):
+            return True
         if "验证结果已保存" in text or "累计" in text and "条" in text:
             return True
         return False

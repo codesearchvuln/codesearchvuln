@@ -5798,7 +5798,7 @@ user: Observation: 数据库连接失败
                 for finding in findings:
                     try:
                         result = await self.execute_tool("push_finding_to_queue", finding)
-                        if "成功" in result or "已入队" in result:
+                        if "成功" in result or "已入队" in result or "duplicate_skipped" in result:
                             pushed_count += 1
                             logger.info(f"[{self.name}] 补救推送成功: {finding.get('title', 'N/A')}")
                     except Exception as e:

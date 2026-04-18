@@ -128,8 +128,8 @@ async def test_save_verification_result_is_saved_false_when_callback_saves_zero(
 
     assert result.success is True
     assert isinstance(result.data, dict)
-    assert result.data.get("total_saved") == 0
     assert result.data.get("saved") is False
+    assert result.data.get("save_status") == "not_saved"
     assert tool.saved_count == 0
     assert tool.is_saved is False
 
@@ -162,9 +162,10 @@ async def test_save_verification_result_zero_save_can_retry_same_payload():
 
     assert first.success is True
     assert first.data["saved"] is False
+    assert first.data["save_status"] == "not_saved"
     assert second.success is True
     assert second.data["saved"] is True
-    assert second.data["total_saved"] == 1
+    assert second.data["save_status"] == "saved"
     assert len(saved_batches) == 2
     assert len(tool.buffered_findings) == 1
 
@@ -235,6 +236,7 @@ async def test_save_verification_result_can_buffer_without_immediate_persistence
 
     assert result.success is True
     assert result.data["saved"] is False
+    assert result.data["save_status"] == "buffered"
     assert result.data["buffered"] is True
     assert result.data["deferred"] is True
     assert persisted_batches == []

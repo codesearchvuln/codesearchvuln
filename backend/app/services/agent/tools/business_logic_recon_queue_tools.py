@@ -119,7 +119,7 @@ class PushBLRiskPointToQueueTool(AgentTool):
             queue_service=queue_service,
             task_id=task_id,
             tool_name="push_bl_risk_point_to_queue",
-            required_callables=("enqueue", "size"),
+            required_callables=("enqueue",),
         )
         self.queue_service = queue_service
         self.task_id = task_id
@@ -141,7 +141,7 @@ class PushBLRiskPointToQueueTool(AgentTool):
         - context：附加上下文（如 HTTP 路由、相关参数）
 
         重复推送同一风险点时会执行幂等跳过，不视为失败。
-        调用后返回当前队列大小。"""
+        返回结果仅包含本次入队状态，不再回传当前队列大小。"""
 
     @property
     def args_schema(self):
@@ -153,13 +153,11 @@ class PushBLRiskPointToQueueTool(AgentTool):
             contains = getattr(self.queue_service, "contains", None)
             duplicate = bool(contains(self.task_id, data)) if callable(contains) else False
             success = self.queue_service.enqueue(self.task_id, data)
-            queue_size = self.queue_service.size(self.task_id)
             if success:
                 return ToolResult(
                     success=True,
                     data={
-                        "message": f"业务逻辑风险点已入队，当前队列大小 {queue_size}",
-                        "queue_size": queue_size,
+                        "message": "业务逻辑风险点已入队",
                         "enqueue_status": "enqueued",
                         "duplicate_skipped": False,
                     },
@@ -168,8 +166,7 @@ class PushBLRiskPointToQueueTool(AgentTool):
                 return ToolResult(
                     success=True,
                     data={
-                        "message": f"业务逻辑风险点重复，已跳过重复入队，当前队列大小 {queue_size}",
-                        "queue_size": queue_size,
+                        "message": "业务逻辑风险点重复，已跳过重复入队",
                         "enqueue_status": "duplicate_skipped",
                         "duplicate_skipped": True,
                     },
@@ -179,7 +176,6 @@ class PushBLRiskPointToQueueTool(AgentTool):
                 error="入队失败",
                 data={
                     "message": "入队失败",
-                    "queue_size": queue_size,
                     "enqueue_status": "failed",
                     "duplicate_skipped": False,
                 },
@@ -302,7 +298,7 @@ class PushBLRiskPointsBatchToQueueTool(AgentTool):
             queue_service=queue_service,
             task_id=task_id,
             tool_name="push_bl_risk_points_to_queue",
-            required_callables=("enqueue_batch", "size"),
+            required_callables=("enqueue_batch",),
         )
         self.queue_service = queue_service
         self.task_id = task_id
@@ -333,7 +329,7 @@ class PushBLRiskPointsBatchToQueueTool(AgentTool):
         }
 
         每条风险点的字段与 push_bl_risk_point_to_queue 相同。
-        返回成功入队数量、重复跳过数量和当前队列大小。"""
+        返回成功入队数量和重复跳过数量，不再回传当前队列大小。"""
 
     @property
     def args_schema(self):
@@ -350,11 +346,10 @@ class PushBLRiskPointsBatchToQueueTool(AgentTool):
         ]
         try:
             count = self.queue_service.enqueue_batch(self.task_id, data_list)
-            queue_size = self.queue_service.size(self.task_id)
             duplicate_skipped = max(0, len(data_list) - count)
             message = (
                 f"批量入队 {count}/{len(data_list)} 个业务逻辑风险点，"
-                f"跳过重复 {duplicate_skipped} 个，当前队列大小 {queue_size}"
+                f"跳过重复 {duplicate_skipped} 个"
             )
             return ToolResult(
                 success=True,
@@ -362,7 +357,6 @@ class PushBLRiskPointsBatchToQueueTool(AgentTool):
                     "message": message,
                     "enqueued": count,
                     "duplicate_skipped": duplicate_skipped,
-                    "queue_size": queue_size,
                 },
             )
         except Exception as exc:

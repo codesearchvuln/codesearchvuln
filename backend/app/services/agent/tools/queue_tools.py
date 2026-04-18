@@ -309,7 +309,10 @@ class PushFindingToQueueTool(AgentTool):
 - evidence_chain/attacker_flow/missing_checks/taint_flow: 证据与路径字段
 - finding_metadata: 额外元数据
 
-返回队列当前大小。"""
+返回结果仅包含入队状态：
+- enqueued: 入队成功
+- duplicate_skipped: 重复，已跳过
+- failed: 入队失败"""
 
     @property
     def args_schema(self):
@@ -324,6 +327,22 @@ class PushFindingToQueueTool(AgentTool):
                 payload.setdefault(str(key), value)
         payload.pop("finding", None)
         return payload
+
+    @staticmethod
+    def _extract_enqueue_counters(stats: Optional[Dict[str, Any]]) -> tuple[int, int]:
+        if not isinstance(stats, dict):
+            return 0, 0
+
+        def _safe_int(value: Any) -> int:
+            try:
+                return max(0, int(value or 0))
+            except Exception:
+                return 0
+
+        return (
+            _safe_int(stats.get("total_enqueued")),
+            _safe_int(stats.get("total_deduplicated")),
+        )
 
     async def _execute(
         self,
@@ -498,26 +517,43 @@ class PushFindingToQueueTool(AgentTool):
             if finding_metadata:
                 finding["finding_metadata"] = finding_metadata
 
+            before_stats = self.queue_service.get_queue_stats(self.task_id)
+            before_enqueued, before_deduplicated = self._extract_enqueue_counters(before_stats)
             success = self.queue_service.enqueue_finding(self.task_id, finding)
 
             if success:
-                queue_size = self.queue_service.get_queue_size(self.task_id)
+                after_stats = self.queue_service.get_queue_stats(self.task_id)
+                after_enqueued, after_deduplicated = self._extract_enqueue_counters(after_stats)
+                duplicate_skipped = (
+                    after_deduplicated > before_deduplicated
+                    and after_enqueued == before_enqueued
+                )
+                enqueue_status = "duplicate_skipped" if duplicate_skipped else "enqueued"
+                message = "漏洞重复，已跳过重复入队" if duplicate_skipped else "漏洞已入队"
                 logger.info(
-                    f"[Queue] Finding enqueued for task {self.task_id}: "
-                    f"{file_path} (queue size: {queue_size})"
+                    "[Queue] Push finding for task %s: %s (%s)",
+                    self.task_id,
+                    file_path,
+                    enqueue_status,
                 )
                 return ToolResult(
                     success=True,
                     data={
-                        "message": f"漏洞已入队，当前队列大小: {queue_size}",
-                        "queue_size": queue_size,
+                        "message": message,
+                        "enqueue_status": enqueue_status,
+                        "duplicate_skipped": duplicate_skipped,
                     }
                 )
             else:
                 logger.error(f"[Queue] Failed to enqueue finding for task {self.task_id}")
                 return ToolResult(
                     success=False,
-                    error="Failed to enqueue finding"
+                    error="Failed to enqueue finding",
+                    data={
+                        "message": "漏洞入队失败",
+                        "enqueue_status": "failed",
+                        "duplicate_skipped": False,
+                    },
                 )
 
         except Exception as e:

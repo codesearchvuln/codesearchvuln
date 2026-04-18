@@ -60,7 +60,7 @@ async def test_business_logic_recon_counts_only_confirmed_queue_pushes():
         return steps.pop(0)
 
     async def fake_execute_tool(_tool_name, _tool_input):
-        return "业务逻辑风险点重复，已跳过重复入队，当前队列大小 0"
+        return "业务逻辑风险点重复，已跳过重复入队"
 
     async def fake_emit_thinking(message: str):
         emitted_thoughts.append(str(message))
@@ -127,7 +127,7 @@ async def test_business_logic_recon_tracks_queue_growth_as_confirmed_push():
 
     async def fake_execute_tool(_tool_name, _tool_input):
         queue.grow(1)
-        return "业务逻辑风险点已入队，当前队列大小 1"
+        return "业务逻辑风险点已入队"
 
     async def _noop(*_args, **_kwargs):
         return None

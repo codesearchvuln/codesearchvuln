@@ -1107,7 +1107,7 @@ class SaveVerificationResultTool(AgentTool):
 
     返回：
     - saved: 是否成功保存（布尔值）
-    - total_saved: 任务累计已保存的 findings 数量
+    - save_status: saved / duplicate_skipped / buffered / not_saved / failed
     - message: 人类可读的结果描述
     """
 
@@ -1180,7 +1180,7 @@ class SaveVerificationResultTool(AgentTool):
 
 返回值：
 - saved: 是否成功保存
-- total_saved: 任务累计保存数
+- save_status: saved / duplicate_skipped / buffered / not_saved / failed
 - message: 结果描述"""
 
     @property
@@ -1309,7 +1309,7 @@ class SaveVerificationResultTool(AgentTool):
             其他可选参数...
 
         Returns:
-            ToolResult，包含 saved、total_saved、message
+            ToolResult，包含 saved、save_status、message
         """
         task_id = self.task_id
         finding_payload = (
@@ -1331,7 +1331,7 @@ class SaveVerificationResultTool(AgentTool):
                 return ToolResult(
                     success=False,
                     error="findings 为空或格式无效",
-                    data={"saved": False, "total_saved": int(self._saved_count or 0)},
+                    data={"saved": False, "save_status": "failed"},
                 )
             attempted_count = 0
             saved_count = 0
@@ -1353,10 +1353,14 @@ class SaveVerificationResultTool(AgentTool):
                 success=failed_count == 0,
                 data={
                     "saved": saved_count > 0,
+                    "save_status": (
+                        "saved"
+                        if failed_count == 0 and saved_count > 0
+                        else ("buffered" if failed_count == 0 else "failed")
+                    ),
                     "attempted_count": attempted_count,
                     "saved_count": saved_count,
                     "failed_count": failed_count,
-                    "total_saved": int(self._saved_count or 0),
                     "message": (
                         f"批量保存完成：saved={saved_count}, failed={failed_count}, "
                         f"attempted={attempted_count}"
@@ -1859,14 +1863,13 @@ class SaveVerificationResultTool(AgentTool):
                 task_id,
                 payload_digest,
             )
-            current_saved = int(self._saved_count or 0)
             return ToolResult(
                 success=True,
                 data={
                     "saved": False,
-                    "total_saved": current_saved,
+                    "save_status": "duplicate_skipped",
                     "already_saved": True,
-                    "message": f"重复 finding 已跳过（{title}），累计 total_saved={current_saved}",
+                    "message": f"重复 finding 已跳过（{title}）",
                 },
             )
 
@@ -1899,7 +1902,7 @@ class SaveVerificationResultTool(AgentTool):
                 success=True,
                 data={
                     "saved": False,
-                    "total_saved": int(self._saved_count or 0),
+                    "save_status": "buffered",
                     "buffered": True,
                     "deferred": self._defer_persistence,
                     "message": (
@@ -1929,10 +1932,12 @@ class SaveVerificationResultTool(AgentTool):
                 success=True,
                 data={
                     "saved": saved > 0,
-                    "total_saved": self._saved_count,
+                    "save_status": "saved" if saved > 0 else "not_saved",
                     "message": (
                         f"验证结果已保存：{title}（status={normalized_status}, verdict={normalized_verdict}, "
-                        f"confidence={normalized_confidence:.2f}），累计 {self._saved_count} 条"
+                        f"confidence={normalized_confidence:.2f}）"
+                        if saved > 0
+                        else f"验证结果未持久化：{title}"
                     ),
                 },
             )
@@ -1948,7 +1953,7 @@ class SaveVerificationResultTool(AgentTool):
                 error=str(exc),
                 data={
                     "saved": False,
-                    "total_saved": self._saved_count or 0,
+                    "save_status": "failed",
                     "message": f"持久化失败: {exc}",
                 },
             )
