@@ -1,36 +1,36 @@
 {
-  "revision": "fbfc19a214b26b91f1e35ba7d9f3b8e685003b8c",
+  "revision": "adba99305fbc1ebaeb83cc7e4f509a7f7a31824f",
   "bundle_template": "images/vulhunter-services-images-{arch}.tar.zst",
   "images": {
     "backend": {
       "env_var": "BACKEND_IMAGE",
-      "source_ref": "ghcr.io/codesearchvuln/vulhunter-backend@sha256:4db610f98edc0d68d7fdf5caff35b2c40d61045bbe8414cac659d297a6239a89",
-      "local_tag": "vulhunter-local/backend:fbfc19a214b26b91f1e35ba7d9f3b8e685003b8c"
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-backend@sha256:73f156f364202231e54324a566ce0aaa68c4219b3ab69bc4624b9b5871241a5a",
+      "local_tag": "vulhunter-local/backend:adba99305fbc1ebaeb83cc7e4f509a7f7a31824f"
     },
     "postgres": {
       "env_var": "POSTGRES_IMAGE",
       "source_ref": "docker.io/library/postgres:15-alpine@sha256:1c52f5ad23db5d7648a63634444af76de48e63b860fccbe3e3a5458b2812eaed",
-      "local_tag": "vulhunter-local/postgres:fbfc19a214b26b91f1e35ba7d9f3b8e685003b8c"
+      "local_tag": "vulhunter-local/postgres:adba99305fbc1ebaeb83cc7e4f509a7f7a31824f"
     },
     "redis": {
       "env_var": "REDIS_IMAGE",
       "source_ref": "docker.io/library/redis:7-alpine@sha256:efc27681bf81e6ed55cb581718b7818c6c04c39b1f9aa40854edd3ea2241b6ed",
-      "local_tag": "vulhunter-local/redis:fbfc19a214b26b91f1e35ba7d9f3b8e685003b8c"
+      "local_tag": "vulhunter-local/redis:adba99305fbc1ebaeb83cc7e4f509a7f7a31824f"
     },
     "adminer": {
       "env_var": "ADMINER_IMAGE",
       "source_ref": "docker.io/library/adminer:latest@sha256:41898b976011fd87f2d3037366ad97f7d89fddfebc8aa8b3a7d77d0c465aa37b",
-      "local_tag": "vulhunter-local/adminer:fbfc19a214b26b91f1e35ba7d9f3b8e685003b8c"
+      "local_tag": "vulhunter-local/adminer:adba99305fbc1ebaeb83cc7e4f509a7f7a31824f"
     },
     "scan_workspace_init": {
       "env_var": "SCAN_WORKSPACE_INIT_IMAGE",
       "source_ref": "docker.io/library/alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
-      "local_tag": "vulhunter-local/scan-workspace-init:fbfc19a214b26b91f1e35ba7d9f3b8e685003b8c"
+      "local_tag": "vulhunter-local/scan-workspace-init:adba99305fbc1ebaeb83cc7e4f509a7f7a31824f"
     },
     "static_frontend": {
       "env_var": "STATIC_FRONTEND_IMAGE",
       "source_ref": "docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
-      "local_tag": "vulhunter-local/static-frontend:fbfc19a214b26b91f1e35ba7d9f3b8e685003b8c"
+      "local_tag": "vulhunter-local/static-frontend:adba99305fbc1ebaeb83cc7e4f509a7f7a31824f"
     }
   }
 }
