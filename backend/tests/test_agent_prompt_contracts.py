@@ -6,6 +6,7 @@ from app.services.agent.agents.business_logic_analysis import BL_ANALYSIS_SYSTEM
 from app.services.agent.agents.business_logic_recon import BL_RECON_SYSTEM_PROMPT
 from app.services.agent.agents.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from app.services.agent.agents.recon import RECON_SYSTEM_PROMPT
+from app.services.agent.agents.recon_subagent import RECON_SUBAGENT_SYSTEM_PROMPT
 from app.services.agent.agents.verification import VERIFICATION_SYSTEM_PROMPT
 from app.services.agent.prompts.system_prompts import TOOL_USAGE_GUIDE
 
@@ -55,6 +56,11 @@ def test_recon_prompt_requires_input_surfaces_and_trust_boundaries():
     assert "tsconfig.json" in RECON_SYSTEM_PROMPT
     assert "pages/api" in RECON_SYSTEM_PROMPT
     assert "app/api/**/route.ts" in RECON_SYSTEM_PROMPT
+
+
+def test_recon_subagent_prompt_includes_bash_shell_tool():
+    assert "bash_shell" in RECON_SUBAGENT_SYSTEM_PROMPT
+    assert "必要时可用 bash_shell" in RECON_SUBAGENT_SYSTEM_PROMPT
 
 
 

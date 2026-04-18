@@ -93,7 +93,7 @@
    - 历史回放打开详情页
    - SSE 实时推进
    - 任务终态（completed / failed / cancelled / interrupted）
-4. 不要求本轮修改后端任务模型；优先复用现有 `current_phase`、`current_step` 和 bootstrap 事件元数据完成前端改造。
+4. 运行中阶段必须和真实 workflow 一一对应；若现有字段不足，则允许补充响应字段，但不要求新增数据库列。
 5. 保持现有日志列表、findings 面板、导出功能不回退。
 6. 任务管理页运行中任务不再显示百分比，而显示同口径阶段标签。
 
@@ -124,7 +124,7 @@
 - 静态扫描详情页自己的百分比卡片
 - workflow 真正新增 `static_bootstrap` phase 枚举
 
-换句话说，本轮是 **详情页 + 任务管理页展示层重构**，不是后端 phase 协议重构。
+换句话说，本轮是 **详情页 + 任务管理页展示层重构**；允许补充 API 响应字段，但不引入新的持久化 phase 列。
 
 ---
 
@@ -146,6 +146,24 @@
 - `TaskDetailPage.tsx`
 - `StatsPanel.tsx`
 - `localization.ts`
+
+### 5.1.1 现有接口可行性分析
+
+实际排查后，原接口链路存在两个问题：
+
+1. `task.current_phase` 在进入 `orchestrator.run(...)` 前就被提前写成了 `analysis`，因此真实还在 Recon 时，前端拿到的却已经是 `analysis`。
+2. 任务列表接口只有 `current_phase/current_step`，没有稳定暴露运行中的真实 workflow phase；detail 页还能结合日志兜底，但列表页做不到稳定一比一。
+
+因此本轮结论是：
+
+- **仅复用原始 `current_phase` 不足以保证一比一对应。**
+- 需要两步一起做：
+  - 后端把 `current_phase/current_step` 改成跟随 workflow 实时同步；
+  - 任务响应补充只读字段：
+    - `workflow_phase`：后端真实 workflow phase
+    - `display_phase`：后端归一后的产品阶段
+
+这样详情页和任务列表都可以直接消费同一口径，而不是各自猜测。
 
 ### 5.2 展示阶段定义
 

@@ -4,6 +4,7 @@
   - 详情页：文件/智能扫描 `侦查 → 分析 → 验证 → 完成`，混合扫描 `静态扫描 → 侦查 → 分析 → 验证 → 完成`
   - 任务管理页：运行中任务由百分比改为同口径阶段标签
   - 规划与实现见 `docs/progress/agent-detail-stage-progress-plan.md`
+- [x] 添加Bash Shell工具
 ## Refactor
 - [x] 重构Recon
 - [x] 优化文件上传功能，调整为异步

@@ -170,6 +170,41 @@ function resolveStageKeyFromPhase(
   return null;
 }
 
+function resolveStageKeyFromTask(task: AgentTask | null): AgentDisplayStageKey | null {
+  const displayPhase = normalizeToken(task?.display_phase);
+  if (
+    displayPhase === "static_scan" ||
+    displayPhase === "recon" ||
+    displayPhase === "analysis" ||
+    displayPhase === "verification" ||
+    displayPhase === "complete"
+  ) {
+    return displayPhase;
+  }
+
+  const workflowPhase = normalizeToken(task?.workflow_phase);
+  if (
+    workflowPhase === "recon" ||
+    workflowPhase === "business_logic_recon"
+  ) {
+    return "recon";
+  }
+  if (
+    workflowPhase === "analysis" ||
+    workflowPhase === "business_logic_analysis"
+  ) {
+    return "analysis";
+  }
+  if (workflowPhase === "verification") {
+    return "verification";
+  }
+  if (workflowPhase === "report" || workflowPhase === "complete") {
+    return "complete";
+  }
+
+  return null;
+}
+
 function buildHybridBootstrapHint(
   bootstrap: HybridBootstrapProgressSnapshot,
 ): string | null {
@@ -232,7 +267,9 @@ export function buildAgentDisplayStageSummary(input: {
   const phase = normalizeToken(task.current_phase);
   const bootstrap = collectBootstrapSnapshot(logs);
 
-  let currentStageKey = resolveStageKeyFromPhase(mode, phase, bootstrap);
+  let currentStageKey =
+    resolveStageKeyFromTask(task) ||
+    resolveStageKeyFromPhase(mode, phase, bootstrap);
   if (!currentStageKey) {
     if (TERMINAL_COMPLETED_STATUSES.has(status)) {
       currentStageKey = "complete";

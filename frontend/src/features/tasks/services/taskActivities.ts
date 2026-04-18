@@ -88,6 +88,8 @@ export interface TaskActivityItem {
 	status: string;
 	currentPhase?: string | null;
 	currentStep?: string | null;
+	workflowPhase?: string | null;
+	displayPhase?: TaskActivityStageKey | null;
 	targetFiles?: string[] | null;
 	gitleaksEnabled?: boolean;
 	staticFindingStats?: SeverityCounts;
@@ -237,7 +239,13 @@ function normalizeStatus(status: string | null | undefined): string {
 function resolveTaskActivityStageKey(
 	activity: Pick<
 		TaskActivityItem,
-		"kind" | "sourceMode" | "status" | "currentPhase" | "currentStep"
+		| "kind"
+		| "sourceMode"
+		| "status"
+		| "currentPhase"
+		| "currentStep"
+		| "workflowPhase"
+		| "displayPhase"
 	>,
 ): TaskActivityStageKey | null {
 	const status = normalizeStatus(activity.status);
@@ -250,7 +258,13 @@ function resolveTaskActivityStageKey(
 		return null;
 	}
 
-	const phase = normalizeStatus(activity.currentPhase);
+	if (activity.displayPhase) {
+		return activity.displayPhase;
+	}
+
+	const phase =
+		normalizeStatus(activity.workflowPhase) ||
+		normalizeStatus(activity.currentPhase);
 	const step = String(activity.currentStep || "").trim();
 
 	if (/验证/.test(step) || phase === "verification") {
@@ -293,7 +307,13 @@ function resolveTaskActivityStageKey(
 export function getTaskActivityStageBadgeMeta(
 	activity: Pick<
 		TaskActivityItem,
-		"kind" | "sourceMode" | "status" | "currentPhase" | "currentStep"
+		| "kind"
+		| "sourceMode"
+		| "status"
+		| "currentPhase"
+		| "currentStep"
+		| "workflowPhase"
+		| "displayPhase"
 	>,
 ): TaskActivityStageBadgeMeta | null {
 	const status = normalizeStatus(activity.status);
@@ -651,6 +671,8 @@ function toAgentActivities(
 		status: task.status,
 		currentPhase: task.current_phase,
 		currentStep: task.current_step,
+		workflowPhase: task.workflow_phase ?? null,
+		displayPhase: task.display_phase ?? null,
 		targetFiles: task.target_files,
 		agentFindingStats: getAgentTaskDefectSummaryStats(task),
 		createdAt: task.created_at,

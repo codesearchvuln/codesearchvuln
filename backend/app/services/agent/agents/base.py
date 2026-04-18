@@ -105,6 +105,7 @@ NON_CACHEABLE_TOOL_NAMES: Set[str] = {
     "clear_bl_risk_queue",
     "is_bl_risk_point_in_queue",
     "run_recon_subagent",
+    "bash_shell",
 }
 STRICT_MODE_LOCAL_ONLY_TOOL_NAMES: Set[str] = {
     "push_risk_point_to_queue",

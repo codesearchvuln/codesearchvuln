@@ -21,6 +21,14 @@ export interface AgentTask {
   status: string;
   current_phase: string | null;
   current_step: string | null;
+  workflow_phase?: string | null;
+  display_phase?:
+    | "static_scan"
+    | "recon"
+    | "analysis"
+    | "verification"
+    | "complete"
+    | null;
 
   // 统计
   total_files: number;

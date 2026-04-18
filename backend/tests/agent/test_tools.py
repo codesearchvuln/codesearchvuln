@@ -14,6 +14,7 @@ from app.services.agent.tools import (
     PatternMatchTool, ExtractFunctionTool, CreateVulnerabilityReportTool,
     DataFlowAnalysisTool, ControlFlowAnalysisLightTool,
     SmartScanTool, QuickAuditTool, VulnerabilityVerifyTool, LogicAuthzAnalysisTool,
+    BashShellTool,
 )
 from app.services.agent.tools.base import ToolResult
 
@@ -43,14 +44,35 @@ class TestFileTools:
         assert "不存在" in result.error or "not found" in result.error.lower()
     
     @pytest.mark.asyncio
-    async def test_file_read_tool_path_traversal_blocked(self, temp_project_dir):
-        """测试文件读取工具 - 路径遍历被阻止"""
+    async def test_file_read_tool_supports_outside_project_path(self, temp_project_dir):
+        """测试文件读取工具 - 支持读取项目目录外文件"""
         tool = FileReadTool(temp_project_dir)
-        
-        result = await tool.execute(file_path="../../../etc/passwd")
-        
-        assert result.success is False
-        assert "安全" in result.error or "security" in result.error.lower()
+        outside_file = os.path.join(os.path.dirname(temp_project_dir), "outside-read.txt")
+        with open(outside_file, "w", encoding="utf-8") as f:
+            f.write("outside-content")
+
+        result = await tool.execute(file_path=outside_file)
+
+        assert result.success is True
+        assert "outside-content" in result.data
+
+    @pytest.mark.asyncio
+    async def test_bash_shell_tool_executes_command(self, temp_project_dir):
+        tool = BashShellTool(temp_project_dir)
+
+        result = await tool.execute(command="echo hello-bash-shell")
+
+        assert result.success is True
+        assert "hello-bash-shell" in result.data
+
+    @pytest.mark.asyncio
+    async def test_bash_shell_tool_supports_relative_cwd(self, temp_project_dir):
+        tool = BashShellTool(temp_project_dir)
+
+        result = await tool.execute(command="pwd", cwd="src")
+
+        assert result.success is True
+        assert f"{temp_project_dir}/src" in result.data
     
     @pytest.mark.asyncio
     async def test_file_search_tool(self, temp_project_dir):
@@ -61,6 +83,19 @@ class TestFileTools:
         
         assert result.success is True
         assert "sql_vuln.py" in result.data
+
+    @pytest.mark.asyncio
+    async def test_file_search_tool_supports_absolute_file_path(self, temp_project_dir):
+        tool = FileSearchTool(temp_project_dir)
+        outside_file = os.path.join(os.path.dirname(temp_project_dir), "outside-search.py")
+        marker = "OUTSIDE_FILE_SEARCH_MARKER"
+        with open(outside_file, "w", encoding="utf-8") as f:
+            f.write(f"token = '{marker}'\n")
+
+        result = await tool.execute(keyword=marker, file_path=outside_file)
+
+        assert result.success is True
+        assert marker in result.data
 
     @pytest.mark.asyncio
     async def test_file_search_tool_supports_multi_file_patterns(self, temp_project_dir):
@@ -224,6 +259,20 @@ class TestFileTools:
         assert result.success is True
         assert "sql_vuln.py" in result.data
         assert "requirements.txt" in result.data
+
+    @pytest.mark.asyncio
+    async def test_list_files_tool_supports_outside_directory(self, temp_project_dir):
+        tool = ListFilesTool(temp_project_dir)
+        outside_dir = os.path.join(os.path.dirname(temp_project_dir), "outside-list")
+        os.makedirs(outside_dir, exist_ok=True)
+        outside_file = os.path.join(outside_dir, "outside-list.py")
+        with open(outside_file, "w", encoding="utf-8") as f:
+            f.write("print('outside')\n")
+
+        result = await tool.execute(directory=outside_dir, recursive=False)
+
+        assert result.success is True
+        assert "outside-list.py" in result.data
     
     @pytest.mark.asyncio
     async def test_list_files_tool_pattern(self, temp_project_dir):

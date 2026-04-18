@@ -12,7 +12,7 @@ WorkflowOrchestratorAgent - 基于确定性 Workflow 的编排 Agent
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ..agents.orchestrator import OrchestratorAgent
 from ..agents.base import AgentResult
@@ -83,6 +83,30 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
         self._vuln_queue_service = vuln_queue_service
         self._workflow_config = workflow_config or WorkflowConfig()
         self._business_logic_queue_service = business_logic_queue_service
+        self._current_workflow_phase: Optional[str] = None
+        self._workflow_phase_callback: Optional[
+            Callable[[str], Awaitable[None]]
+        ] = None
+
+    def set_workflow_phase_callback(
+        self,
+        callback: Optional[Callable[[str], Awaitable[None]]],
+    ) -> None:
+        self._workflow_phase_callback = callback
+
+    def get_current_workflow_phase(self) -> Optional[str]:
+        phase = str(self._current_workflow_phase or "").strip().lower()
+        return phase or None
+
+    async def update_workflow_phase(self, phase: WorkflowPhase | str) -> None:
+        phase_value = getattr(phase, "value", phase)
+        normalized = str(phase_value or "").strip().lower()
+        if not normalized:
+            return
+        self._current_workflow_phase = normalized
+        if self._workflow_phase_callback is None:
+            return
+        await self._workflow_phase_callback(normalized)
 
     # ------------------------------------------------------------------
     # 核心入口：覆盖父类 run()
@@ -130,6 +154,7 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
         self._iteration = 0
         self._total_tokens = 0
         self._tool_calls = 0
+        self._current_workflow_phase = None
 
         await self.emit_thinking("WorkflowOrchestrator 启动，执行确定性 Workflow 模式...")
 

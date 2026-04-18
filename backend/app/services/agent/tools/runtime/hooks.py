@@ -133,6 +133,12 @@ class ProjectPathNormalizeHook(ToolHook):
 
 class ProjectScopeGuardHook(ToolHook):
     async def pre_policy(self, *, tool: Any, context: ToolCallContext) -> ToolHookResult:
+        # 默认不做项目根目录边界限制，支持 Agent 访问任意路径。
+        # 仅在运行时显式要求时才启用旧的 project scope 校验。
+        runtime_policy = dict(context.runtime_policy or {})
+        if not bool(runtime_policy.get("enforce_project_scope")):
+            return ToolHookResult()
+
         payload = dict(context.validated_input or context.normalized_input or context.raw_input or {})
         project_root = str(getattr(tool, "project_root", "") or "").strip()
         if not project_root:

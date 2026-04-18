@@ -134,6 +134,7 @@ type EventLogPhaseLabel =
   | "编排"
   | "侦查"
   | "分析"
+  | "验证"
   | "完成";
 
 const PHASE_LABEL_SET = new Set<EventLogPhaseLabel>([
@@ -141,6 +142,7 @@ const PHASE_LABEL_SET = new Set<EventLogPhaseLabel>([
   "编排",
   "侦查",
   "分析",
+  "验证",
   "完成",
 ]);
 
@@ -202,12 +204,17 @@ export function normalizeEventLogPhaseLabel(input: {
 
   if (
     rawPhase === "analysis" ||
-    rawPhase === "business_logic_analysis" ||
-    rawPhase === "verification" ||
-    rawPhase === "report" ||
-    rawPhase === "reporting"
+    rawPhase === "business_logic_analysis"
   ) {
     return "分析";
+  }
+
+  if (rawPhase === "verification") {
+    return "验证";
+  }
+
+  if (rawPhase === "report" || rawPhase === "reporting") {
+    return "完成";
   }
 
   if (

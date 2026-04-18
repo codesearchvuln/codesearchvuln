@@ -109,6 +109,10 @@ class AgentTaskResponse(BaseModel):
     status: str
     current_phase: Optional[str]
     current_step: Optional[str] = None
+    workflow_phase: Optional[str] = None
+    display_phase: Optional[
+        Literal["static_scan", "recon", "analysis", "verification", "complete"]
+    ] = None
     
     # 进度统计
     total_files: int = 0

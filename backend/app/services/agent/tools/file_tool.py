@@ -97,13 +97,7 @@ def _normalize_reason_path(path_value: Any, project_root: str) -> Optional[str]:
         return None
     candidate = text
     if os.path.isabs(candidate):
-        try:
-            rel = os.path.relpath(candidate, project_root).replace("\\", "/")
-            if rel.startswith(".."):
-                return None
-            candidate = rel
-        except Exception:
-            return None
+        return os.path.normpath(candidate).replace("\\", "/")
     candidate = _normalize_rel_path(candidate)
     if not candidate:
         return None
@@ -123,7 +117,7 @@ def _normalize_display_path(path_value: str, project_root: str) -> str:
                 return _normalize_rel_path(rel)
         except Exception:
             pass
-        return os.path.basename(text)
+        return os.path.normpath(text).replace("\\", "/")
     return _normalize_rel_path(text)
 
 
@@ -150,16 +144,10 @@ def _resolve_project_file(
 
     if os.path.isabs(candidate):
         full_path = os.path.normpath(candidate)
-        if not _is_path_within_root(full_path, project_root):
-            return None, None, "安全错误：不允许访问项目目录外的文件"
-        relative_path = _normalize_rel_path(
-            os.path.relpath(full_path, project_root).replace("\\", "/")
-        )
+        relative_path = _normalize_display_path(full_path, project_root)
     else:
         relative_path = _normalize_rel_path(candidate)
         full_path = os.path.normpath(os.path.join(project_root, relative_path))
-        if not _is_path_within_root(full_path, project_root):
-            return None, None, "安全错误：不允许访问项目目录外的文件"
 
     if not relative_path:
         return None, None, "必须提供 file_path"
@@ -287,7 +275,7 @@ def _extract_related_symbols(text: str, limit: int = 8) -> List[str]:
 
 class FileReadInput(BaseModel):
     """文件读取输入"""
-    file_path: str = Field(description="文件路径（相对于项目根目录）")
+    file_path: str = Field(description="文件路径（支持相对项目根目录或绝对路径）")
     start_line: Optional[int] = Field(default=None, description="起始行号（从1开始）")
     end_line: Optional[int] = Field(default=None, description="结束行号")
     max_lines: int = Field(default=500, description="最大返回行数")
@@ -372,7 +360,7 @@ class FileReadTool(AgentTool):
 - 获取配置文件内容
 
 输入:
-- file_path: 文件路径（相对于项目根目录）
+- file_path: 文件路径（支持相对项目根目录或绝对路径）
 - start_line: 可选，起始行号
 - end_line: 可选，结束行号
 - max_lines: 最大返回行数（默认500）
@@ -427,20 +415,14 @@ class FileReadTool(AgentTool):
                 end_line = parsed_end_line
 
             requested_path = str(file_path or "").strip()
+            if not requested_path:
+                return ToolResult(success=False, error="必须提供 file_path")
             candidate_path = requested_path
             if os.path.isabs(candidate_path):
                 full_path = os.path.realpath(candidate_path)
             else:
                 full_path = os.path.realpath(os.path.join(self.project_root, candidate_path))
-
-            root_path = os.path.realpath(self.project_root)
-            if not full_path.startswith(root_path):
-                return ToolResult(
-                    success=False,
-                    error="安全错误：不允许访问项目目录外的文件",
-                )
-
-            display_path = _normalize_display_path(candidate_path, self.project_root)
+            display_path = _normalize_display_path(full_path if os.path.isabs(candidate_path) else candidate_path, self.project_root)
             if project_scope and not os.path.exists(full_path):
                 scoped_match = await self._resolve_project_scope_match(display_path or candidate_path)
                 if scoped_match:
@@ -559,7 +541,7 @@ class FileReadTool(AgentTool):
 class FileSearchInput(BaseModel):
     """文件搜索输入"""
     keyword: str = Field(description="搜索关键字或正则表达式")
-    file_path: Optional[str] = Field(default=None, description="可选，限定搜索到单个文件（相对项目根目录）")
+    file_path: Optional[str] = Field(default=None, description="可选，限定搜索到单个文件（支持相对项目根目录或绝对路径）")
     path: Optional[str] = Field(default=None, description="兼容字段：可选，限定搜索到单个文件")
     file_pattern: Optional[str] = Field(default=None, description="文件名模式，如 *.py, *.js")
     directory: Optional[str] = Field(default=None, description="搜索目录（相对路径）")
@@ -621,22 +603,16 @@ class FileSearchTool(AgentTool):
         return _read_lines_sync(file_path)
 
     def _normalize_directory(self, directory: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
-        root_norm = os.path.normpath(self.project_root)
         raw = str(directory or "").strip().replace("\\", "/")
         if not raw or raw == ".":
             return ".", self.project_root, None
 
         if os.path.isabs(raw):
             search_dir = os.path.normpath(raw)
-            if not _is_path_within_root(search_dir, root_norm):
-                return None, None, "安全错误：不允许搜索项目目录外的内容"
-            rel = os.path.relpath(search_dir, self.project_root).replace("\\", "/")
-            rel = "." if rel == "." else _normalize_rel_path(rel)
+            rel = _normalize_display_path(search_dir, self.project_root)
         else:
             rel = _normalize_rel_path(raw)
             search_dir = os.path.normpath(os.path.join(self.project_root, rel))
-            if not _is_path_within_root(search_dir, root_norm):
-                return None, None, "安全错误：不允许搜索项目目录外的内容"
 
         if not os.path.exists(search_dir):
             return None, None, f"目录不存在: {raw or rel}"
@@ -668,16 +644,10 @@ class FileSearchTool(AgentTool):
 
         if os.path.isabs(candidate):
             full_path = os.path.normpath(candidate)
-            if not _is_path_within_root(full_path, self.project_root):
-                return None, None, "安全错误：不允许搜索项目目录外的内容"
-            relative_path = _normalize_rel_path(
-                os.path.relpath(full_path, self.project_root).replace("\\", "/")
-            )
+            relative_path = _normalize_display_path(full_path, self.project_root)
         else:
             relative_path = _normalize_rel_path(candidate)
             full_path = os.path.normpath(os.path.join(self.project_root, relative_path))
-            if not _is_path_within_root(full_path, self.project_root):
-                return None, None, "安全错误：不允许搜索项目目录外的内容"
 
         if not relative_path:
             return None, None, "必须提供 file_path"
@@ -780,12 +750,8 @@ class FileSearchTool(AgentTool):
             except Exception:
                 column_number = None
 
-            full_path = os.path.normpath(path_part)
-            if not _is_path_within_root(full_path, self.project_root):
-                continue
-            relative_path = _normalize_rel_path(
-                os.path.relpath(full_path, self.project_root).replace("\\", "/")
-            )
+            full_path = os.path.normpath(path_part) if os.path.isabs(path_part) else os.path.normpath(os.path.join(search_dir, path_part))
+            relative_path = _normalize_display_path(full_path, self.project_root)
             filename = os.path.basename(relative_path)
             if self._should_skip_candidate(relative_path, filename):
                 continue
@@ -875,12 +841,8 @@ class FileSearchTool(AgentTool):
                 line_number = int(line_part)
             except Exception:
                 continue
-            full_path = os.path.normpath(path_part)
-            if not _is_path_within_root(full_path, self.project_root):
-                continue
-            relative_path = _normalize_rel_path(
-                os.path.relpath(full_path, self.project_root).replace("\\", "/")
-            )
+            full_path = os.path.normpath(path_part) if os.path.isabs(path_part) else os.path.normpath(os.path.join(search_dir, path_part))
+            relative_path = _normalize_display_path(full_path, self.project_root)
             filename = os.path.basename(relative_path)
             if self._should_skip_candidate(relative_path, filename):
                 continue
@@ -923,8 +885,8 @@ class FileSearchTool(AgentTool):
         file_match_counts: Dict[str, int] = {}
 
         for root, dirs, files in os.walk(search_dir):
-            rel_dir = os.path.relpath(root, self.project_root).replace("\\", "/")
-            if rel_dir == ".":
+            rel_dir = _normalize_display_path(root, self.project_root)
+            if rel_dir in {".", ""}:
                 rel_dir = ""
             dirs[:] = [
                 d
@@ -939,9 +901,7 @@ class FileSearchTool(AgentTool):
                 ):
                     continue
                 file_path = os.path.join(root, filename)
-                relative_path = _normalize_rel_path(
-                    os.path.relpath(file_path, self.project_root).replace("\\", "/")
-                )
+                relative_path = _normalize_display_path(file_path, self.project_root)
                 if self._should_skip_candidate(relative_path, filename):
                     continue
                 try:
@@ -1034,10 +994,10 @@ class FileSearchTool(AgentTool):
 
 输入:
 - keyword: 搜索关键字或正则表达式
-- file_path: 可选，限定到单个文件（相对于项目根目录）
+- file_path: 可选，限定到单个文件（支持相对项目根目录或绝对路径）
 - path: 可选，file_path 的兼容别名
 - file_pattern: 可选，文件名模式（如 *.py）
-- directory: 可选，搜索目录 (相对于项目根目录)
+- directory: 可选，搜索目录（支持相对项目根目录或绝对路径）
 - case_sensitive: 是否区分大小写（默认 false）
 - is_regex: 是否使用正则表达式（默认 false）
 - max_results: 最大返回结果数（默认10，最多50）
@@ -1319,7 +1279,7 @@ class FileSearchTool(AgentTool):
 
 
 class CodeWindowInput(BaseModel):
-    file_path: str = Field(description="文件路径（相对于项目根目录）")
+    file_path: str = Field(description="文件路径（支持相对项目根目录或绝对路径）")
     anchor_line: int = Field(description="锚点行号（从1开始）")
     before_lines: int = Field(default=2, description="向前读取的行数")
     after_lines: int = Field(default=2, description="向后读取的行数")
@@ -1350,7 +1310,7 @@ class CodeWindowTool(AgentTool):
         return """围绕锚点返回极小代码窗口，用于取证和前端代码展示。
 
 输入:
-- file_path: 文件路径（相对于项目根目录）
+- file_path: 文件路径（支持相对项目根目录或绝对路径）
 - anchor_line: 锚点行号（从1开始）
 - before_lines: 可选，向前读取的行数（默认2）
 - after_lines: 可选，向后读取的行数（默认2）"""
@@ -1441,7 +1401,7 @@ class CodeWindowTool(AgentTool):
 
 
 class FileOutlineInput(BaseModel):
-    file_path: str = Field(description="文件路径（相对于项目根目录）")
+    file_path: str = Field(description="文件路径（支持相对项目根目录或绝对路径）")
 
 
 class FileOutlineTool(AgentTool):
@@ -1469,7 +1429,7 @@ class FileOutlineTool(AgentTool):
         return """返回文件职责、关键符号、imports、入口点和风险提示，不输出大段源码。
 
 输入:
-- file_path: 文件路径（相对于项目根目录）"""
+- file_path: 文件路径（支持相对项目根目录或绝对路径）"""
 
     @property
     def args_schema(self):
@@ -1558,7 +1518,7 @@ class FileOutlineTool(AgentTool):
 
 
 class FunctionSummaryInput(BaseModel):
-    file_path: str = Field(description="文件路径（相对于项目根目录）")
+    file_path: str = Field(description="文件路径（支持相对项目根目录或绝对路径）")
     function_name: Optional[str] = Field(default=None, description="目标函数名")
     line: Optional[int] = Field(default=None, description="函数内任意锚点行")
 
@@ -1589,7 +1549,7 @@ class FunctionSummaryTool(AgentTool):
         return """解释单个函数的职责、输入输出、关键调用与风险点，不返回大段源码。
 
 输入:
-- file_path: 文件路径（相对于项目根目录）
+- file_path: 文件路径（支持相对项目根目录或绝对路径）
 - function_name: 可选，目标函数名
 - line: 可选，函数内任意锚点行（当 function_name 缺失时用于定位）"""
 
@@ -1694,7 +1654,7 @@ class FunctionSummaryTool(AgentTool):
 
 
 class SymbolBodyInput(BaseModel):
-    file_path: str = Field(description="文件路径（相对于项目根目录）")
+    file_path: str = Field(description="文件路径（支持相对项目根目录或绝对路径）")
     symbol_name: str = Field(description="目标符号名")
 
 
@@ -1723,7 +1683,7 @@ class SymbolBodyTool(AgentTool):
         return """提取函数/方法主体源码，只负责源码提取，不负责语义解释。
 
 输入:
-- file_path: 文件路径（相对于项目根目录）
+- file_path: 文件路径（支持相对项目根目录或绝对路径）
 - symbol_name: 目标符号名（函数/方法名）"""
 
     @property
@@ -1797,7 +1757,7 @@ class SymbolBodyTool(AgentTool):
 
 class ListFilesInput(BaseModel):
     """列出文件输入"""
-    directory: str = Field(default=".", description="目录路径（相对于项目根目录）")
+    directory: str = Field(default=".", description="目录路径（支持相对项目根目录或绝对路径）")
     pattern: Optional[str] = Field(default=None, description="文件名模式，如 *.py")
     recursive: bool = Field(default=False, description="是否递归列出子目录")
     max_files: int = Field(default=100, description="最大文件数")
@@ -1854,7 +1814,7 @@ class ListFilesTool(AgentTool):
 - 浏览目录内容
 
 输入:
-- directory: 目录路径 (相对于项目根目录)
+- directory: 目录路径（支持相对项目根目录或绝对路径）
 - pattern: 可选，文件名模式
 - recursive: 是否递归
 - max_files: 最大文件数
@@ -1866,6 +1826,8 @@ class ListFilesTool(AgentTool):
         return ListFilesInput
 
     def _repair_directory_hint(self, directory: str) -> Optional[str]:
+        if os.path.isabs(str(directory or "").strip()):
+            return None
         wanted = _normalize_rel_path(directory)
         if not wanted or wanted == ".":
             return None
@@ -1905,12 +1867,11 @@ class ListFilesTool(AgentTool):
                 max_files = int(max_entries)
             max_files = max(1, min(int(max_files or 100), 200))
 
-            target_dir = os.path.normpath(os.path.join(self.project_root, directory))
-            if not target_dir.startswith(os.path.normpath(self.project_root)):
-                return ToolResult(
-                    success=False,
-                    error="安全错误：不允许访问项目目录外的目录",
-                )
+            normalized_directory = str(directory or "").strip()
+            if os.path.isabs(normalized_directory):
+                target_dir = os.path.normpath(normalized_directory)
+            else:
+                target_dir = os.path.normpath(os.path.join(self.project_root, normalized_directory))
 
             if not os.path.exists(target_dir):
                 repaired = self._repair_directory_hint(directory)
@@ -1951,8 +1912,7 @@ class ListFilesTool(AgentTool):
                             continue
                         
                         full_path = os.path.join(root, filename)
-                        relative_path = os.path.relpath(full_path, self.project_root)
-                        relative_path = _normalize_rel_path(relative_path)
+                        relative_path = _normalize_display_path(full_path, self.project_root)
                         if _has_hidden_or_test_segment(relative_path):
                             continue
                         
@@ -1995,8 +1955,7 @@ class ListFilesTool(AgentTool):
                             continue
                         
                         full_path = os.path.join(target_dir, item)
-                        relative_path = os.path.relpath(full_path, self.project_root)
-                        relative_path = _normalize_rel_path(relative_path)
+                        relative_path = _normalize_display_path(full_path, self.project_root)
                         if _has_hidden_or_test_segment(relative_path):
                             continue
                         
@@ -2027,8 +1986,7 @@ class ListFilesTool(AgentTool):
                             continue
                         
                         full_path = os.path.join(target_dir, item)
-                        relative_path = os.path.relpath(full_path, self.project_root)
-                        relative_path = _normalize_rel_path(relative_path)
+                        relative_path = _normalize_display_path(full_path, self.project_root)
                         if _has_hidden_or_test_segment(relative_path):
                             continue
                         
@@ -2131,7 +2089,7 @@ class ListFilesTool(AgentTool):
 
 
 class LocateEnclosingFunctionInput(BaseModel):
-    file_path: str = Field(description="文件路径（相对于项目根目录）")
+    file_path: str = Field(description="文件路径（支持相对项目根目录或绝对路径）")
     line: int = Field(description="目标行号（从1开始）")
 
     @model_validator(mode="after")
@@ -2325,28 +2283,33 @@ class LocateEnclosingFunctionTool(AgentTool):
         return """根据 file_path + line 定位包含该行的函数/方法，并返回符号范围与签名事实。
 
 输入:
-- file_path: 文件路径（相对于项目根目录）
+- file_path: 文件路径（支持相对项目根目录或绝对路径）
 - line: 目标行号（从1开始）"""
 
     @property
     def args_schema(self):
         return LocateEnclosingFunctionInput
 
-    def _resolve_full_path(self, file_path: str) -> tuple[Optional[str], Optional[str]]:
-        normalized = _normalize_rel_path(file_path)
-        if not normalized:
-            return None, "必须提供 file_path"
-        full_path = os.path.normpath(os.path.join(self.project_root, normalized))
-        root_path = os.path.normpath(self.project_root)
-        if not _is_path_within_root(full_path, root_path):
-            return None, "安全错误：不允许读取项目目录外的内容"
-        if self.target_files and normalized not in self.target_files:
-            return None, f"文件不在审计范围内: {normalized}"
+    def _resolve_full_path(self, file_path: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        requested = str(file_path or "").strip()
+        if not requested:
+            return None, None, "必须提供 file_path"
+        if os.path.isabs(requested):
+            full_path = os.path.normpath(requested)
+            display_path = _normalize_display_path(full_path, self.project_root)
+        else:
+            normalized = _normalize_rel_path(requested)
+            if not normalized:
+                return None, None, "必须提供 file_path"
+            full_path = os.path.normpath(os.path.join(self.project_root, normalized))
+            display_path = normalized
+        if self.target_files and display_path not in self.target_files:
+            return None, None, f"文件不在审计范围内: {display_path}"
         if not os.path.exists(full_path):
-            return None, f"文件不存在: {normalized}"
+            return None, None, f"文件不存在: {display_path}"
         if not os.path.isfile(full_path):
-            return None, f"不是文件: {normalized}"
-        return full_path, None
+            return None, None, f"不是文件: {display_path}"
+        return full_path, display_path, None
 
     async def _execute(
         self,
@@ -2356,13 +2319,12 @@ class LocateEnclosingFunctionTool(AgentTool):
         effective_path = str(file_path or "").strip()
         normalized_line = max(1, int(line))
 
-        full_path, error = self._resolve_full_path(effective_path)
+        full_path, relative_path, error = self._resolve_full_path(effective_path)
         if full_path is None:
             error_text = error or "文件定位失败"
-            error_code = "path_out_of_scope" if "项目目录外" in error_text or "审计范围" in error_text else "not_found"
+            error_code = "path_out_of_scope" if "审计范围" in error_text else "not_found"
             return ToolResult(success=False, error=error_text, error_code=error_code)
-
-        relative_path = _normalize_rel_path(effective_path)
+        relative_path = relative_path or _normalize_display_path(full_path, self.project_root)
         file_lines = await asyncio.to_thread(_read_lines_sync, full_path)
         total_lines = len(file_lines)
         if total_lines <= 0:

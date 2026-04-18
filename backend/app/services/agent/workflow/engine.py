@@ -312,7 +312,7 @@ class AuditWorkflowEngine:
 
         try:
             # ── 阶段 1: RECON ──────────────────────────────────────────────
-            state.phase = WorkflowPhase.RECON
+            await self._set_runtime_phase(state, WorkflowPhase.RECON)
             seeded_count = 0
             if should_seed_bootstrap_before_recon:
                 seeded_count = self._seed_bootstrap_findings_to_recon_queue(
@@ -359,11 +359,11 @@ class AuditWorkflowEngine:
                 self.memory_monitor.take_snapshot(phase="recon_done", agent_name="recon")
 
             if orc.is_cancelled:
-                state.phase = WorkflowPhase.CANCELLED
+                await self._set_runtime_phase(state, WorkflowPhase.CANCELLED)
                 return state
 
             # ── 阶段 2: ANALYSIS（逐条消耗 Recon 风险点队列）+ BUSINESS_LOGIC_ANALYSIS（并行）───
-            state.phase = WorkflowPhase.ANALYSIS
+            await self._set_runtime_phase(state, WorkflowPhase.ANALYSIS)
             recon_queue_size = self.recon_queue.size(task_id)
             state.analysis_risk_points_total = recon_queue_size
 
@@ -408,11 +408,11 @@ class AuditWorkflowEngine:
                 self.memory_monitor.take_snapshot(phase="analysis_done", agent_name="analysis")
 
             if orc.is_cancelled:
-                state.phase = WorkflowPhase.CANCELLED
+                await self._set_runtime_phase(state, WorkflowPhase.CANCELLED)
                 return state
 
             # ── 阶段 3: VERIFICATION（逐条消耗漏洞验证队列）────────────────
-            state.phase = WorkflowPhase.VERIFICATION
+            await self._set_runtime_phase(state, WorkflowPhase.VERIFICATION)
             vuln_queue_size = self.vuln_queue.get_queue_size(task_id)
 
             # 安全护栏：Analysis 已产出发现，但验证队列意外为空时，回填队列避免跳过 Verification
@@ -471,11 +471,11 @@ class AuditWorkflowEngine:
                 self._ensure_verification_reports()
 
             if orc.is_cancelled:
-                state.phase = WorkflowPhase.CANCELLED
+                await self._set_runtime_phase(state, WorkflowPhase.CANCELLED)
                 return state
 
             # ── 阶段 4: REPORT（为每条 confirmed/likely 漏洞生成详情报告）──
-            state.phase = WorkflowPhase.REPORT
+            await self._set_runtime_phase(state, WorkflowPhase.REPORT)
             await orc.emit_event("info", "[Workflow] 开始 Report 阶段，生成漏洞详情报告")
             await self._run_report_phase(state, project_info, config)
 
@@ -484,11 +484,11 @@ class AuditWorkflowEngine:
                 self.memory_monitor.take_snapshot(phase="report_done", agent_name="report")
 
             if orc.is_cancelled:
-                state.phase = WorkflowPhase.CANCELLED
+                await self._set_runtime_phase(state, WorkflowPhase.CANCELLED)
                 return state
 
             # ── 完成 ──────────────────────────────────────────────────────
-            state.phase = WorkflowPhase.COMPLETE
+            await self._set_runtime_phase(state, WorkflowPhase.COMPLETE)
             state.all_findings = list(orc._all_findings)  # 同步最终发现
             await orc.emit_event(
                 "info",
@@ -502,17 +502,28 @@ class AuditWorkflowEngine:
 
 
         except asyncio.CancelledError:
-            state.phase = WorkflowPhase.CANCELLED
+            await self._set_runtime_phase(state, WorkflowPhase.CANCELLED)
             state.all_findings = list(orc._all_findings)
             logger.info("[WorkflowEngine] Workflow cancelled")
 
         except Exception as exc:
             logger.exception("[WorkflowEngine] Unexpected error: %s", exc)
-            state.phase = WorkflowPhase.FAILED
+            await self._set_runtime_phase(state, WorkflowPhase.FAILED)
             state.error = str(exc)
             state.all_findings = list(orc._all_findings)
 
         return state
+
+    async def _set_runtime_phase(
+        self,
+        state: WorkflowState,
+        phase: WorkflowPhase,
+    ) -> None:
+        state.phase = phase
+        update_phase = getattr(self.orchestrator, "update_workflow_phase", None)
+        if update_phase is None or not callable(update_phase):
+            return
+        await update_phase(phase)
 
     # ─────────────────────────────────────────────────────────────────────────
     # 去重方法

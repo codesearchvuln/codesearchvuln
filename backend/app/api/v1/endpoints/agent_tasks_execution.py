@@ -339,7 +339,7 @@ async def _execute_agent_task(task_id: str):
                 event_emitter,
                 _initialize_tools_once,
             )
-            task.current_step = "索引已完成，进入分析阶段"
+            task.current_step = "索引已完成，准备进入侦查阶段"
             await db.commit()
 
             # 注入 write-scope guard
@@ -449,6 +449,32 @@ async def _execute_agent_task(task_id: str):
             if hasattr(orchestrator, "set_write_scope_guard"):
                 orchestrator.set_write_scope_guard(write_scope_guard)
 
+            async def _sync_runtime_workflow_phase(phase: str) -> None:
+                normalized = str(phase or "").strip().lower()
+                if not normalized:
+                    return
+
+                phase_mapping = {
+                    "recon": (AgentTaskPhase.RECONNAISSANCE, "侦查阶段进行中"),
+                    "business_logic_recon": (AgentTaskPhase.RECONNAISSANCE, "侦查阶段进行中"),
+                    "analysis": (AgentTaskPhase.ANALYSIS, "分析阶段进行中"),
+                    "business_logic_analysis": (AgentTaskPhase.ANALYSIS, "分析阶段进行中"),
+                    "verification": (AgentTaskPhase.VERIFICATION, "验证阶段进行中"),
+                    "report": (AgentTaskPhase.REPORTING, "报告生成中"),
+                    "complete": (AgentTaskPhase.REPORTING, "扫描已完成，正在收尾"),
+                }
+                mapped = phase_mapping.get(normalized)
+                if mapped is None:
+                    return
+
+                next_phase, next_step = mapped
+                task.current_phase = next_phase
+                task.current_step = next_step
+                await db.commit()
+
+            if hasattr(orchestrator, "set_workflow_phase_callback"):
+                orchestrator.set_workflow_phase_callback(_sync_runtime_workflow_phase)
+
             recon_runtime_tool = tools.get("recon", {}).get("run_recon_subagent")
             if recon_runtime_tool and hasattr(recon_runtime_tool, "set_orchestrator"):
                 recon_runtime_tool.set_orchestrator(orchestrator)
@@ -492,16 +518,22 @@ async def _execute_agent_task(task_id: str):
                 exclude_patterns=task.exclude_patterns,
                 target_files=task.target_files,
             )
+            source_mode = _resolve_agent_task_source_mode(task.name, task.description)
+            static_bootstrap_config = _resolve_static_bootstrap_config(task, source_mode)
             task.current_phase = AgentTaskPhase.RECONNAISSANCE
+            task.current_step = (
+                "静态预扫进行中"
+                if static_bootstrap_config["mode"] == "embedded"
+                else "侦查阶段准备中"
+            )
             await db.commit()
 
             bootstrap_findings: List[Dict[str, Any]] = []
             bootstrap_task_id: Optional[str] = None
             bootstrap_source = "disabled"
-            source_mode = _resolve_agent_task_source_mode(task.name, task.description)
-            static_bootstrap_config = _resolve_static_bootstrap_config(task, source_mode)
 
             if static_bootstrap_config["mode"] == "embedded":
+                await _set_current_step("静态预扫进行中")
                 async def _prepare_bootstrap_once():
                     return await _prepare_embedded_bootstrap_findings(
                         db=db,
@@ -542,6 +574,7 @@ async def _execute_agent_task(task_id: str):
                     event_emitter,
                     _prepare_bootstrap_once,
                 )
+                await _set_current_step("静态预扫完成，准备进入侦查阶段")
             else:
                 await event_emitter.emit_info(
                     "当前任务未启用静态预扫，直接进入入口点回退流程",
@@ -1046,8 +1079,8 @@ async def _execute_agent_task(task_id: str):
 
             # 执行 Orchestrator
             await event_emitter.emit_phase_start("orchestration", "🎯 Orchestrator 开始编排审计流程")
-            task.current_phase = AgentTaskPhase.ANALYSIS
-            task.current_step = "分析阶段进行中"
+            task.current_phase = AgentTaskPhase.RECONNAISSANCE
+            task.current_step = "侦查阶段准备中"
             await db.commit()
 
             async def _run_orchestrator_once():
@@ -1793,6 +1826,7 @@ async def _initialize_tools(
         SandboxTool,
         VulnerabilityVerifyTool,
         RunCodeTool,
+        BashShellTool,
         SmartScanTool,
         QuickAuditTool,
         SymbolBodyTool,
@@ -1851,6 +1885,7 @@ async def _initialize_tools(
             exclude_patterns,
             target_files,
         ),
+        "bash_shell": BashShellTool(project_root),
     }
 
     recon_tools = {**base_tools}
@@ -2011,6 +2046,7 @@ async def _initialize_tools(
             "get_file_outline": FileOutlineTool(project_root, exclude_patterns, target_files),
             "get_function_summary": FunctionSummaryTool(project_root, exclude_patterns, target_files),
             "get_symbol_body": SymbolBodyTool(project_root, exclude_patterns, target_files),
+            "bash_shell": BashShellTool(project_root),
             "dataflow_analysis": DataFlowAnalysisTool(llm_service, project_root=project_root),
             **(
                 {"update_vulnerability_finding": report_update_tool}

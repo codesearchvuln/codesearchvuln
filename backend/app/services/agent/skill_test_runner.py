@@ -31,6 +31,7 @@ from app.services.agent.tools import (
     QuickAuditTool,
     SmartScanTool,
     SymbolBodyTool,
+    BashShellTool,
 )
 from app.services.agent.tools.base import ToolResult
 from app.services.flow_parser_runner import get_flow_parser_runner_client
@@ -46,6 +47,7 @@ _SUPPORTED_TOOL_BUILDERS = {
     "pattern_match": lambda project_root, llm_service: PatternMatchTool(project_root),
     "smart_scan": lambda project_root, llm_service: SmartScanTool(project_root),
     "quick_audit": lambda project_root, llm_service: QuickAuditTool(project_root),
+    "bash_shell": lambda project_root, llm_service: BashShellTool(project_root),
 }
 
 

@@ -29,6 +29,7 @@ from .smart_scan_tool import SmartScanTool, QuickAuditTool
 from .business_logic_scan_tool import BusinessLogicScanTool
 from .run_code import RunCodeTool
 from .run_code import ExtractFunctionTool
+from .bash_shell_tool import BashShellTool
 from .control_flow_tool import ControlFlowAnalysisLightTool
 from .logic_authz_tool import LogicAuthzAnalysisTool
 from .verification_result_tools import SaveVerificationResultTool, UpdateVulnerabilityFindingTool
@@ -66,6 +67,7 @@ __all__ = [
     "QuickAuditTool",
     "BusinessLogicScanTool",
     "RunCodeTool",
+    "BashShellTool",
     "ControlFlowAnalysisLightTool",
     "LogicAuthzAnalysisTool",
     "SaveVerificationResultTool",

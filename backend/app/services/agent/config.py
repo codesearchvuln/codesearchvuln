@@ -472,13 +472,13 @@ def get_agent_type_config(agent_type: str) -> AgentTypeConfig:
             agent_type="orchestrator",
             max_iterations=config.orchestrator_max_iterations,
             timeout_seconds=config.orchestrator_timeout_seconds,
-            tools=["dispatch_agent", "finish"],
+            tools=["dispatch_agent", "finish", "bash_shell"],
         ),
         "recon": AgentTypeConfig(
             agent_type="recon",
             max_iterations=config.recon_max_iterations,
             timeout_seconds=config.sub_agent_timeout_seconds,
-            tools=["list_files", "search_code", "get_file_outline", "get_code_window"],
+            tools=["list_files", "search_code", "get_file_outline", "get_code_window", "bash_shell"],
             knowledge_modules=["project_analysis"],
         ),
         "analysis": AgentTypeConfig(
@@ -488,7 +488,7 @@ def get_agent_type_config(agent_type: str) -> AgentTypeConfig:
             tools=[
                 "smart_scan", "pattern_match", "dataflow_analysis",
                 "search_code", "get_code_window", "get_function_summary", "get_symbol_body",
-                "opengrep_scan", "bandit_scan"
+                "opengrep_scan", "bandit_scan", "bash_shell"
             ],
             knowledge_modules=["sql_injection", "xss", "command_injection"],
         ),
@@ -496,7 +496,7 @@ def get_agent_type_config(agent_type: str) -> AgentTypeConfig:
             agent_type="verification",
             max_iterations=config.verification_max_iterations,
             timeout_seconds=config.sub_agent_timeout_seconds,
-            tools=["validate_vulnerability", "dataflow_analysis", "sandbox_execute"],
+            tools=["validate_vulnerability", "dataflow_analysis", "sandbox_execute", "bash_shell"],
             knowledge_modules=["vulnerability_verification"],
         ),
     }

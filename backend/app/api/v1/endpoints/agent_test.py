@@ -280,6 +280,7 @@ def _build_base_tools(project_root: str) -> Dict[str, Any]:
         ListFilesTool,
         LocateEnclosingFunctionTool,
         SymbolBodyTool,
+        BashShellTool,
     )
     return {
         "list_files": ListFilesTool(project_root),
@@ -289,6 +290,7 @@ def _build_base_tools(project_root: str) -> Dict[str, Any]:
         "get_function_summary": FunctionSummaryTool(project_root),
         "get_symbol_body": SymbolBodyTool(project_root),
         "locate_enclosing_function": LocateEnclosingFunctionTool(project_root),
+        "bash_shell": BashShellTool(project_root),
     }
 
 

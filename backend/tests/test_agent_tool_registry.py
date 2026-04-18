@@ -47,6 +47,7 @@ PUBLIC_CORE_SKILLS = {
     "controlflow_analysis_light",
     "logic_authz_analysis",
     "run_code",
+    "bash_shell",
     "sandbox_exec",
     "verify_vulnerability",
     "create_vulnerability_report",
@@ -71,13 +72,14 @@ async def test_smart_audit_tool_registry_contains_only_core_scan_surface(tmp_pat
     orchestrator_names = set(tools["orchestrator"].keys())
     recon_names = set(tools["recon"].keys())
 
-    assert {"search_code", "list_files", "get_file_outline", "get_code_window"}.issubset(recon_names)
+    assert {"search_code", "list_files", "get_file_outline", "get_code_window", "bash_shell"}.issubset(recon_names)
     assert {
         "search_code",
         "list_files",
         "get_code_window",
         "get_function_summary",
         "get_symbol_body",
+        "bash_shell",
         "smart_scan",
         "quick_audit",
         "pattern_match",
@@ -91,12 +93,13 @@ async def test_smart_audit_tool_registry_contains_only_core_scan_surface(tmp_pat
         "get_code_window",
         "get_function_summary",
         "get_symbol_body",
+        "bash_shell",
         "run_code",
         "sandbox_exec",
         "verify_vulnerability",
         "create_vulnerability_report",
     }.issubset(verification_names)
-    assert {"search_code", "list_files", "get_code_window", "get_file_outline"}.issubset(
+    assert {"search_code", "list_files", "get_code_window", "get_file_outline", "bash_shell"}.issubset(
         orchestrator_names
     )
 

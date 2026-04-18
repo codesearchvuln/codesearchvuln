@@ -1,7 +1,8 @@
 """Shared access and response helpers for agent task routes."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Mapping
+import re
+from typing import Any, Dict, Mapping, Optional
 
 from fastapi import HTTPException
 
@@ -9,6 +10,78 @@ from app.models.agent_task import AgentTask, AgentTaskStatus
 from app.models.project import Project
 from .agent_tasks_contracts import AgentTaskDefectSummary, AgentTaskResponse
 from .agent_tasks_runtime import _collect_orchestrator_stats, _running_orchestrators
+
+_HYBRID_STATIC_SCAN_STEP_PATTERN = re.compile(r"静态预扫|内嵌预扫|bootstrap", re.IGNORECASE)
+
+
+def _normalize_token(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _resolve_agent_task_source_mode(task: AgentTask) -> str:
+    combined = f"{str(task.name or '').strip().lower()} {str(task.description or '').strip().lower()}"
+    return "hybrid" if "[hybrid]" in combined or "混合扫描" in combined else "intelligent"
+
+
+def _resolve_runtime_workflow_phase(
+    task: AgentTask,
+    orchestrator: Any = None,
+) -> Optional[str]:
+    phase = ""
+    if orchestrator is not None and hasattr(orchestrator, "get_current_workflow_phase"):
+        try:
+            phase = str(orchestrator.get_current_workflow_phase() or "").strip().lower()
+        except Exception:
+            phase = ""
+    if phase:
+        return phase
+
+    audit_plan = task.audit_plan if isinstance(task.audit_plan, dict) else {}
+    phase = str(audit_plan.get("workflow_phase") or "").strip().lower()
+    if phase:
+        return phase
+
+    if _normalize_token(task.status) == AgentTaskStatus.COMPLETED:
+        return "complete"
+
+    phase = _normalize_token(task.current_phase)
+    return phase or None
+
+
+def _resolve_display_phase(
+    task: AgentTask,
+    workflow_phase: Optional[str],
+) -> Optional[str]:
+    status = _normalize_token(task.status)
+    source_mode = _resolve_agent_task_source_mode(task)
+    current_step = str(task.current_step or "").strip()
+    phase = _normalize_token(workflow_phase)
+    if phase in {"failed", "cancelled"}:
+        phase = _normalize_token(task.current_phase)
+
+    if status == AgentTaskStatus.COMPLETED:
+        return "complete"
+
+    if (
+        source_mode == "hybrid"
+        and status in {AgentTaskStatus.PENDING, AgentTaskStatus.INITIALIZING, AgentTaskStatus.RUNNING}
+        and _HYBRID_STATIC_SCAN_STEP_PATTERN.search(current_step)
+    ):
+        return "static_scan"
+
+    if phase in {"planning", "indexing", "reconnaissance", "recon", "business_logic_recon"}:
+        return "recon"
+    if phase in {"analysis", "business_logic_analysis"}:
+        return "analysis"
+    if phase == "verification":
+        return "verification"
+    if phase in {"reporting", "report", "complete"}:
+        return "complete"
+
+    if status in {AgentTaskStatus.PENDING, AgentTaskStatus.INITIALIZING, AgentTaskStatus.RUNNING}:
+        return "recon"
+
+    return None
 
 
 def ensure_project_access(task: AgentTask, project: Project | None) -> Project:
@@ -45,6 +118,9 @@ def build_agent_task_response(
         tool_calls_count = max(tool_calls_count, int(runtime_stats["tool_calls"]))
         tokens_used = max(tokens_used, int(runtime_stats["tokens_used"]))
 
+    workflow_phase = _resolve_runtime_workflow_phase(task, orchestrator)
+    display_phase = _resolve_display_phase(task, workflow_phase)
+
     return AgentTaskResponse(
         id=task.id,
         project_id=task.project_id,
@@ -54,6 +130,8 @@ def build_agent_task_response(
         status=task.status,
         current_phase=task.current_phase,
         current_step=task.current_step,
+        workflow_phase=workflow_phase,
+        display_phase=display_phase,
         total_files=task.total_files or 0,
         indexed_files=task.indexed_files or 0,
         analyzed_files=task.analyzed_files or 0,
