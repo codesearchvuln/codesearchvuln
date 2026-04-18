@@ -75,22 +75,27 @@ class ReconSubAgent(ReconAgent):
         project_model = runtime_config.get("project_recon_model")
 
         if isinstance(module, dict):
+            paths = module.get("paths") or []
+            if not isinstance(paths, list):
+                paths = []
+            description = str(module.get("description") or "").strip()
+            if not description:
+                risk_focus = module.get("risk_focus") or []
+                if isinstance(risk_focus, list):
+                    description = ", ".join(str(item) for item in risk_focus[:12] if str(item).strip())
+                elif isinstance(risk_focus, str):
+                    description = risk_focus.strip()
+            if not description:
+                description = f"Inspect {module.get('name') or module.get('module_id') or 'current module'}"
             module_lines = [
                 "当前仅允许侦查单个模块，你是该模块的实际执行者，请严格收敛范围：",
-                f"- module_id: {module.get('module_id') or 'unknown'}",
-                f"- module_name: {module.get('name') or module.get('module_id') or 'unknown'}",
-                f"- module_type: {module.get('module_type') or 'shared'}",
+                "- directories: " + ", ".join(str(item) for item in paths[:20]) if paths else "- directories: unknown",
+                f"- description: {description}",
             ]
-            paths = module.get("paths") or []
-            if isinstance(paths, list) and paths:
-                module_lines.append("- module_paths: " + ", ".join(str(item) for item in paths[:20]))
             target_files = module.get("target_files") or []
             if isinstance(target_files, list) and target_files:
                 preview = ", ".join(str(item) for item in target_files[:40])
                 module_lines.append(f"- module_target_files({len(target_files)}): {preview}")
-            risk_focus = module.get("risk_focus") or []
-            if isinstance(risk_focus, list) and risk_focus:
-                module_lines.append("- risk_focus: " + ", ".join(str(item) for item in risk_focus[:12]))
             entrypoints = module.get("entrypoints") or []
             if isinstance(entrypoints, list) and entrypoints:
                 module_lines.append("- entrypoints: " + ", ".join(str(item) for item in entrypoints[:20]))

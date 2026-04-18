@@ -245,6 +245,72 @@ class PushFindingInputCanonicalizationHook(ToolHook):
         return ToolHookResult(normalized_input=normalized)
 
 
+class RunReconSubAgentInputCanonicalizationHook(ToolHook):
+    @staticmethod
+    def _normalize_directories(raw_module: Any) -> list[str]:
+        if not isinstance(raw_module, dict):
+            return []
+        directories = raw_module.get("directories")
+        if not isinstance(directories, list) or not directories:
+            directories = raw_module.get("paths")
+        normalized: list[str] = []
+        for item in directories or []:
+            text = str(item or "").replace("\\", "/").strip().lstrip("./")
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized
+
+    @classmethod
+    def _normalize_description(cls, raw_module: Any, directories: list[str]) -> str:
+        if not isinstance(raw_module, dict):
+            return ""
+        description = str(raw_module.get("description") or "").strip()
+        if description:
+            return description
+        risk_focus = raw_module.get("risk_focus")
+        if isinstance(risk_focus, list):
+            joined = ", ".join(str(item or "").strip() for item in risk_focus if str(item or "").strip())
+            if joined:
+                return joined
+        elif isinstance(risk_focus, str) and risk_focus.strip():
+            return risk_focus.strip()
+        name = str(raw_module.get("name") or "").strip()
+        if name:
+            return f"Inspect {name}"
+        if directories:
+            return f"Inspect {directories[0]}"
+        return ""
+
+    async def pre_normalize(self, *, tool: Any, context: ToolCallContext) -> ToolHookResult:
+        payload = dict(context.normalized_input or context.raw_input or {})
+        modules = payload.get("modules")
+        if isinstance(modules, list):
+            normalized_modules: list[dict[str, Any]] = []
+            for raw_module in modules:
+                directories = self._normalize_directories(raw_module)
+                if not directories:
+                    continue
+                normalized_modules.append(
+                    {
+                        "directories": directories,
+                        "description": self._normalize_description(raw_module, directories),
+                    }
+                )
+            payload["modules"] = normalized_modules
+
+        allowed = {
+            "action",
+            "modules",
+            "notes",
+            "module_ids",
+            "max_modules",
+            "max_workers",
+            "force_rerun",
+        }
+        payload = {key: value for key, value in payload.items() if str(key) in allowed}
+        return ToolHookResult(normalized_input=payload)
+
+
 class LocatorOutputContractHook(ToolHook):
     async def post_validate(self, *, tool: Any, context: ToolCallContext, result: Any) -> ToolHookResult:
         payload = getattr(result, "data", None)

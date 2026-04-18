@@ -129,13 +129,16 @@ class ReconModuleExecutor:
         )
         config["recon_module"] = descriptor.to_dict()
         config["project_recon_model"] = project_model.to_dict()
+        module_paths = ", ".join(descriptor.paths or [])
+        module_description = str(descriptor.description or "").strip()
         return {
-            "task": f"针对模块 {descriptor.name} 进行安全 Recon，识别该模块内的高风险代码区域",
+            "task": (
+                f"针对目录 {module_paths or descriptor.name} 进行安全 Recon，"
+                "识别该范围内的高风险代码区域"
+            ),
             "task_context": (
-                f"module_id={descriptor.module_id}\n"
-                f"module_type={descriptor.module_type}\n"
-                f"module_paths={', '.join(descriptor.paths)}\n"
-                f"risk_focus={', '.join(descriptor.risk_focus)}"
+                f"directories={module_paths}\n"
+                f"description={module_description or ('Inspect ' + (descriptor.name or 'module'))}"
             ),
             "project_info": project_info,
             "config": config,

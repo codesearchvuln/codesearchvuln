@@ -20,6 +20,7 @@ from .hooks import (
     ProjectPathNormalizeHook,
     ProjectScopeGuardHook,
     ReasoningPreflightHook,
+    RunReconSubAgentInputCanonicalizationHook,
     StableErrorCodeHook,
     StrictUnknownFieldHook,
     ToolHook,
@@ -57,6 +58,9 @@ class ToolExecutionCoordinator:
             ],
             "push_finding_to_queue": [
                 PushFindingInputCanonicalizationHook(),
+            ],
+            "run_recon_subagent": [
+                RunReconSubAgentInputCanonicalizationHook(),
             ],
         }
 

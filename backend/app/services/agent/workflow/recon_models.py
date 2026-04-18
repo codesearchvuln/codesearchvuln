@@ -261,6 +261,7 @@ class ReconModuleDescriptor:
     name: str
     module_type: str
     paths: List[str] = field(default_factory=list)
+    description: str = ""
     entrypoints: List[str] = field(default_factory=list)
     language_hints: List[str] = field(default_factory=list)
     framework_hints: List[str] = field(default_factory=list)
@@ -387,6 +388,7 @@ def build_project_recon_model(
             name=anchor,
             module_type=module_type,
             paths=[anchor],
+            description=f"Inspect {anchor} for {module_type} risks",
             entrypoints=entrypoints[:20],
             language_hints=list(payload.get("languages") or []),
             framework_hints=list(frameworks),
@@ -405,6 +407,7 @@ def build_project_recon_model(
                 name="root_module",
                 module_type="shared",
                 paths=["."],
+                description="Inspect the project root for shared risks",
                 entrypoints=entry_points[:20],
                 language_hints=list(model_languages),
                 framework_hints=list(frameworks),

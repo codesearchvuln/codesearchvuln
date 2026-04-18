@@ -21,6 +21,17 @@ class RunReconSubAgentInput(BaseModel):
         default="run",
         description="plan: 仅返回模块规划；run: 执行 ReconSubAgent 并返回归并结果",
     )
+    modules: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "可选的 Host 模块规划。每项只需要 directories 和 description；"
+            "兼容旧格式 paths/name/risk_focus，工具会自动归一化。"
+        ),
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        description="兼容旧调用的备注字段；当前会被忽略。",
+    )
     module_ids: Optional[List[str]] = Field(
         default=None,
         description="仅运行指定模块ID；为空时按优先级自动选择",
@@ -57,6 +68,7 @@ class RunReconSubAgentTool(AgentTool):
         self._orchestrator: Any = None
         self._max_workers = max(1, int(max_workers or 1))
         self._executed_module_ids: set[str] = set()
+        self._planned_project_model: ProjectReconModel | None = None
 
     @property
     def name(self) -> str:
@@ -67,6 +79,7 @@ class RunReconSubAgentTool(AgentTool):
         return (
             "让 ReconHost 按需执行模块级 ReconSubAgent。"
             "支持先 plan 查看模块，再 run 按模块并发侦查并返回结构化归并结果。"
+            "推荐最小 plan payload：modules=[{directories, description}]。"
         )
 
     @property
@@ -81,6 +94,7 @@ class RunReconSubAgentTool(AgentTool):
 
     def reset_execution_cache(self) -> None:
         self._executed_module_ids = set()
+        self._planned_project_model = None
 
     def _resolve_orchestrator(self) -> Any:
         if self._orchestrator is not None:
@@ -119,6 +133,150 @@ class RunReconSubAgentTool(AgentTool):
         )
 
     @staticmethod
+    def _normalize_directories(raw_module: Dict[str, Any]) -> List[str]:
+        directories = raw_module.get("directories")
+        if not isinstance(directories, list) or not directories:
+            directories = raw_module.get("paths")
+        normalized: List[str] = []
+        for item in directories or []:
+            text = str(item or "").replace("\\", "/").strip().lstrip("./")
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized
+
+    @staticmethod
+    def _normalize_description(raw_module: Dict[str, Any], directories: List[str]) -> str:
+        description = str(raw_module.get("description") or "").strip()
+        if description:
+            return description
+
+        risk_focus = raw_module.get("risk_focus")
+        if isinstance(risk_focus, list):
+            joined = ", ".join(str(item or "").strip() for item in risk_focus if str(item or "").strip())
+            if joined:
+                return joined
+        elif isinstance(risk_focus, str) and risk_focus.strip():
+            return risk_focus.strip()
+
+        name = str(raw_module.get("name") or "").strip()
+        if name:
+            return f"Inspect {name}"
+        if directories:
+            return f"Inspect {directories[0]}"
+        return "Inspect module"
+
+    @staticmethod
+    def _path_matches_any_directory(path: str, directories: List[str]) -> bool:
+        normalized_path = str(path or "").replace("\\", "/").strip().lstrip("./")
+        if not normalized_path:
+            return False
+        for directory in directories:
+            normalized_directory = str(directory or "").replace("\\", "/").strip().lstrip("./").rstrip("/")
+            if not normalized_directory or normalized_directory == ".":
+                return True
+            if normalized_path == normalized_directory or normalized_path.startswith(normalized_directory + "/"):
+                return True
+        return False
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        sanitized = [
+            ch.lower() if ch.isalnum() else "_"
+            for ch in str(value or "").strip()
+        ]
+        slug = "".join(sanitized).strip("_")
+        while "__" in slug:
+            slug = slug.replace("__", "_")
+        return slug or "module"
+
+    def _build_planned_project_model(
+        self,
+        *,
+        base_model: ProjectReconModel,
+        modules: List[Dict[str, Any]],
+    ) -> ProjectReconModel:
+        all_files = sorted(
+            {
+                str(path or "")
+                for descriptor in (base_model.module_descriptors or [])
+                for path in (descriptor.target_files or [])
+                if str(path or "").strip()
+            }
+        )
+        entry_points = [str(path or "") for path in (base_model.entry_points or []) if str(path or "").strip()]
+
+        planned_descriptors: List[ReconModuleDescriptor] = []
+        seen_module_ids: set[str] = set()
+        for index, raw_module in enumerate(modules or []):
+            if not isinstance(raw_module, dict):
+                continue
+            directories = self._normalize_directories(raw_module)
+            if not directories:
+                continue
+            description = self._normalize_description(raw_module, directories)
+            module_id_base = self._slugify("__".join(directories))
+            module_id = module_id_base
+            suffix = 2
+            while module_id in seen_module_ids:
+                module_id = f"{module_id_base}_{suffix}"
+                suffix += 1
+            seen_module_ids.add(module_id)
+
+            target_files = [
+                file_path
+                for file_path in all_files
+                if self._path_matches_any_directory(file_path, directories)
+            ]
+            module_entrypoints = [
+                file_path
+                for file_path in entry_points
+                if self._path_matches_any_directory(file_path, directories)
+            ]
+            planned_descriptors.append(
+                ReconModuleDescriptor(
+                    module_id=module_id,
+                    name=directories[0],
+                    module_type="custom",
+                    paths=list(directories),
+                    description=description,
+                    entrypoints=module_entrypoints[:20],
+                    language_hints=list(base_model.languages or []),
+                    framework_hints=list(base_model.frameworks or []),
+                    risk_focus=[description] if description else [],
+                    priority=max(1, 1000 - index),
+                    estimated_size=len(target_files),
+                    target_files=target_files,
+                )
+            )
+
+        target_files = sorted(
+            {
+                str(path or "")
+                for descriptor in planned_descriptors
+                for path in (descriptor.target_files or [])
+                if str(path or "").strip()
+            }
+        )
+        project_model = ProjectReconModel(
+            project_root=base_model.project_root,
+            languages=list(base_model.languages or []),
+            frameworks=list(base_model.frameworks or []),
+            entry_points=list(base_model.entry_points or []),
+            key_directories=list(base_model.key_directories or []),
+            module_descriptors=planned_descriptors,
+            global_risk_themes=[],
+            cross_cutting_paths=list(base_model.cross_cutting_paths or []),
+            target_files=target_files,
+            scope_limited=bool(base_model.scope_limited),
+        )
+        project_model.global_risk_themes = [
+            descriptor.description
+            for descriptor in planned_descriptors
+            if str(descriptor.description or "").strip()
+        ]
+        return project_model
+
+    @staticmethod
     def _select_modules(
         *,
         model: ProjectReconModel,
@@ -147,13 +305,15 @@ class RunReconSubAgentTool(AgentTool):
     async def _execute(
         self,
         action: Literal["plan", "run"] = "run",
+        modules: Optional[List[Dict[str, Any]]] = None,
+        notes: Optional[str] = None,
         module_ids: Optional[List[str]] = None,
         max_modules: Optional[int] = None,
         max_workers: Optional[int] = None,
         force_rerun: bool = False,
         **kwargs,
     ) -> ToolResult:
-        _ = kwargs
+        _ = (notes, kwargs)
         orchestrator = self._resolve_orchestrator()
         if orchestrator is None:
             return ToolResult(success=False, error="ReconSubAgent runtime unavailable: orchestrator not ready")
@@ -163,13 +323,30 @@ class RunReconSubAgentTool(AgentTool):
             return ToolResult(success=False, error="ReconSubAgent runtime unavailable: recon_subagent not registered")
 
         host_input = self._build_host_input(orchestrator)
-        project_model = self._resolve_project_model(orchestrator, host_input)
+        base_project_model = self._resolve_project_model(orchestrator, host_input)
+        project_model = (
+            self._build_planned_project_model(base_model=base_project_model, modules=modules)
+            if modules
+            else self._planned_project_model
+            if self._planned_project_model is not None
+            else base_project_model
+        )
+        if modules:
+            self._planned_project_model = project_model
         all_modules = list(project_model.module_descriptors or [])
 
         if action == "plan":
             payload = {
                 "action": "plan",
                 "module_count": len(all_modules),
+                "planned_modules": [
+                    {
+                        "module_id": str(module.module_id),
+                        "directories": list(module.paths or []),
+                        "description": str(module.description or ""),
+                    }
+                    for module in all_modules
+                ],
                 "project_model": project_model.to_dict(),
             }
             return ToolResult(success=True, data=payload, metadata=payload)
