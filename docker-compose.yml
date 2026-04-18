@@ -42,7 +42,7 @@ services:
       - vulhunter-network
 
   db-bootstrap:
-    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:4ce75702b732de8542e4940ffbd85c29a2723f776c1bebd2a679f3fc8b579d60}
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:e70f11b9a9b1100d09a8de6c0f3dd80ad759f1c94bbffae8cd573dc6108c47fb}
     restart: "no"
     working_dir: /app
     volumes:
@@ -64,7 +64,7 @@ services:
       - vulhunter-network
 
   backend:
-    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:4ce75702b732de8542e4940ffbd85c29a2723f776c1bebd2a679f3fc8b579d60}
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:e70f11b9a9b1100d09a8de6c0f3dd80ad759f1c94bbffae8cd573dc6108c47fb}
     restart: unless-stopped
     working_dir: /app
     volumes:
