@@ -26,3 +26,4 @@
   - 修复规划见 `docs/verification-taskbar-sync-plan.md`
 - [x] 漏洞不存在或已被清理
 ![漏洞不存在或已被清理](./images/4.png)
+- [ ] 项目管理页面的 AI 验证数量不一致

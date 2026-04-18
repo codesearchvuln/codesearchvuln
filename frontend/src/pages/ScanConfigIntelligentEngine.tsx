@@ -38,7 +38,7 @@ type WorkflowDraftState = {
 
 const WORKFLOW_SOURCE_LABELS: Record<AgentWorkflowConfigSource, string> = {
 	user_override: "用户覆盖",
-	local_file: "本地 config.yml",
+	local_file: "配置文件",
 	settings_default: "系统默认",
 };
 
@@ -396,36 +396,6 @@ export default function ScanConfigIntelligentEngine() {
 						</div>
 					</div>
 					/* 已移除历史搜索增强配置入口 */}
-					<div className="section-header mb-0">
-						<KeyRound className="w-4 h-4 text-primary" />
-						<div className="font-mono font-bold uppercase text-sm text-foreground">
-							Skill 管理
-						</div>
-					</div>
-					<div className="cyber-card p-4 space-y-4">
-						<div className="rounded-sm border border-border/50 bg-background/20 p-4">
-							<div className="space-y-3">
-								<div className="text-sm font-semibold text-foreground">
-									Prompt Skill 已迁移到外部工具页
-								</div>
-								<p className="text-sm leading-6 text-muted-foreground">
-									统一列表页现在同时展示 scan-core、内置 Prompt Skill 和自定义 Prompt Skill。
-									后续新增、启停和详情查看都从外部工具页进入。
-								</p>
-							</div>
-						</div>
-						<div className="flex justify-end">
-							<Button
-								asChild
-								type="button"
-								variant="outline"
-								className="cyber-btn-ghost"
-							>
-								<Link to="/scan-config/external-tools">前往外部工具管理</Link>
-							</Button>
-						</div>
-					</div>
-
 				</div>
 			</div>
 		</div>
