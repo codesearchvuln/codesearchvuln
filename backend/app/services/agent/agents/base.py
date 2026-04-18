@@ -2619,9 +2619,13 @@ class BaseAgent(ABC):
             return True
         return bool(re.search(r"\{\d+(?:,\d*)?\}", text))
 
-    def _resolve_tool_timeout(self, resolved_tool_name: str) -> int:
+    def _resolve_tool_timeout(self, resolved_tool_name: str) -> Optional[int]:
         default_tool_timeout = int(self._timeout_config.get('tool_timeout', 60) or 60)
         normalized_tool_name = str(resolved_tool_name or "").strip().lower()
+        # Recon Host fan-out tools manage their own worker lifecycle; do not kill them
+        # with the generic 60s tool watchdog.
+        if normalized_tool_name == "run_recon_subagent":
+            return None
         if normalized_tool_name == "dataflow_analysis":
             return max(default_tool_timeout, 150)
         tool_timeouts = {
@@ -5283,10 +5287,13 @@ class BaseAgent(ABC):
                             pass
 
             try:
-                result = await asyncio.wait_for(
-                    execute_with_cancel_check(),
-                    timeout=timeout
-                )
+                if timeout is None:
+                    result = await execute_with_cancel_check()
+                else:
+                    result = await asyncio.wait_for(
+                        execute_with_cancel_check(),
+                        timeout=timeout
+                    )
             except asyncio.TimeoutError:
                 duration_ms = int((time.time() - start) * 1000)
                 await self.emit_tool_result(

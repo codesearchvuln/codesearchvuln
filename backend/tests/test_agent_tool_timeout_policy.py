@@ -42,3 +42,9 @@ def test_resolve_tool_timeout_keeps_default_for_unknown_verifier():
     agent = _make_agent(tool_timeout=60)
 
     assert agent._resolve_tool_timeout("legacy_deep_verifier") == 60
+
+
+def test_resolve_tool_timeout_disables_watchdog_for_recon_subagent_tool():
+    agent = _make_agent(tool_timeout=60)
+
+    assert agent._resolve_tool_timeout("run_recon_subagent") is None
