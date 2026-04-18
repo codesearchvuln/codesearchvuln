@@ -173,7 +173,6 @@ overlay_release_templates() {
 
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
-  cp "$TEMPLATE_DIR/README-COMPOSE.md" "$OUTPUT_DIR/scripts/README-COMPOSE.md"
   cp "$TEMPLATE_DIR/offline-up.sh" "$OUTPUT_DIR/scripts/offline-up.sh"
   cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/lib/compose-env.sh"
   cp "$TEMPLATE_DIR/lib/startup-banner.sh" "$OUTPUT_DIR/scripts/lib/startup-banner.sh"
@@ -294,7 +293,6 @@ validate_release_tree() {
     "docker-compose.yml"
     "images-manifest-services.json"
     "images-manifest-scanner.json"
-    "scripts/README-COMPOSE.md"
     "scripts/offline-up.sh"
     "scripts/lib/compose-env.sh"
     "scripts/lib/startup-banner.sh"
@@ -367,7 +365,7 @@ validate_release_tree() {
     die "release tree still contains source or dev residue"
   fi
 
-  for doc_path in "README.md" "README_EN.md" "scripts/README-COMPOSE.md"; do
+  for doc_path in "README.md" "README_EN.md"; do
     if grep -Fq "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" "$OUTPUT_DIR/$doc_path"; then
       die "release docs still reference hybrid local-build compose entrypoint: $doc_path"
     fi

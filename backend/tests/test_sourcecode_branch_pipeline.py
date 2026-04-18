@@ -121,6 +121,10 @@ def test_sourcecode_templates_and_setup_env_expose_full_only_entrypoint() -> Non
 
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in template_readme
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in template_readme_en
+    assert "# 部署指南" in template_readme
+    assert "# Deployment Guide" in template_readme_en
+    assert "podman compose" not in template_readme
+    assert "podman compose" not in template_readme_en
     assert "make up-full" in template_makefile
     assert "\nup:\n" not in template_makefile
     assert "\nup-build:\n" not in template_makefile

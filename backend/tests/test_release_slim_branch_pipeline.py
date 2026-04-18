@@ -581,7 +581,6 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "docker-compose.yml",
         "images-manifest-services.json",
         "images-manifest-scanner.json",
-        "scripts/README-COMPOSE.md",
         "scripts/offline-up.sh",
         "scripts/lib/compose-env.sh",
         "scripts/lib/startup-banner.sh",
@@ -729,7 +728,6 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
     docs = (
         (output_dir / "README.md").read_text(encoding="utf-8"),
         (output_dir / "README_EN.md").read_text(encoding="utf-8"),
-        (output_dir / "scripts" / "README-COMPOSE.md").read_text(encoding="utf-8"),
     )
     for doc in docs:
         assert "offline-up.sh" in doc
@@ -750,14 +748,18 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "./scripts/online-up.sh" not in doc
         assert "LLM_API_KEY" in doc
         assert "cloud" in doc.lower() or "云端" in doc
-        assert "does not support online deployment" in doc or "不支持在线部署" in doc
         assert "chmod +x" not in doc
         assert "chmod 666" not in doc
+        assert "does not support online deployment" not in doc
+        assert "不支持在线部署" not in doc
 
-    compose_doc = docs[2]
-    assert "VULHUNTER_RELEASE_PROJECT_NAME" in compose_doc
-    assert "vulhunter-release" in compose_doc
-    assert "volume" in compose_doc.lower() or "卷" in compose_doc
+    assert "# 部署指南" in docs[0]
+    assert "# Deployment Guide" in docs[1]
+    assert not (output_dir / "scripts" / "README-COMPOSE.md").exists()
+    assert "VULHUNTER_RELEASE_PROJECT_NAME" in docs[0]
+    assert "VULHUNTER_RELEASE_PROJECT_NAME" in docs[1]
+    assert "vulhunter-release" in docs[0]
+    assert "vulhunter-release" in docs[1]
 
 
 def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tmp_path: Path) -> None:
@@ -773,7 +775,6 @@ def test_release_generator_validate_mode_accepts_static_frontend_release_docs(tm
     docs = (
         (output_dir / "README.md").read_text(encoding="utf-8"),
         (output_dir / "README_EN.md").read_text(encoding="utf-8"),
-        (output_dir / "scripts" / "README-COMPOSE.md").read_text(encoding="utf-8"),
     )
     for doc in docs:
         assert re.search(r"(^|[^A-Z_])FRONTEND_IMAGE([^A-Z_]|$)", doc) is None
