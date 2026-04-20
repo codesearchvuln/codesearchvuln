@@ -2,10 +2,13 @@ import asyncio
 import logging
 import os
 import signal
+import subprocess
 import warnings
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,7 +58,7 @@ warnings.filterwarnings(
 )
 
 
-async def check_agent_services():
+async def check_agent_services() -> list[str]:
     """检查 Agent 必须服务的可用性"""
     issues = []
 
@@ -64,7 +67,7 @@ async def check_agent_services():
     try:
         import docker
 
-        client = docker.from_env()
+        client = cast(Any, docker).from_env()
         client.ping()
         logger.info("  - Docker 服务可用")
     except ImportError:
@@ -169,7 +172,7 @@ RECOVERABLE_YASA_TASK_STATUSES = {"pending", "running"}
 RECOVERABLE_PMD_TASK_STATUSES = {"pending", "running"}
 
 
-def _mark_task_interrupted(task) -> bool:
+def _mark_task_interrupted(task: Any) -> bool:
     changed = False
     if str(getattr(task, "status", "")).lower() != "interrupted":
         task.status = "interrupted"
@@ -217,8 +220,9 @@ async def recover_interrupted_tasks() -> dict[str, int]:
         ]
 
         for model, recoverable_statuses, counter_key in recovery_specs:
+            status_column: Any = model.status  # type: ignore[attr-defined]
             result = await db.execute(
-                select(model).where(model.status.in_(sorted(recoverable_statuses)))
+                select(model).where(status_column.in_(sorted(recoverable_statuses)))
             )
             for task in result.scalars().all():
                 if _mark_task_interrupted(task):
@@ -324,7 +328,7 @@ async def cleanup_stale_yasa_processes() -> dict[str, int]:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     应用生命周期管理
     启动时初始化数据库（创建默认账户等）和全局缓存管理
@@ -450,11 +454,11 @@ async def lifespan(app: FastAPI):
 
     # 停止每日清理任务
     try:
-        stop_event = getattr(app.state, "cache_cleanup_stop", None)
-        task = getattr(app.state, "cache_cleanup_task", None)
-        if stop_event and task:
-            stop_event.set()
-            await task
+        stop_event_attr = getattr(app.state, "cache_cleanup_stop", None)
+        task_attr = getattr(app.state, "cache_cleanup_task", None)
+        if isinstance(stop_event_attr, asyncio.Event) and isinstance(task_attr, asyncio.Task):
+            stop_event_attr.set()
+            await task_attr
     except Exception as e:
         logger.warning(f"停止定时清理任务失败: {e}")
 
@@ -508,12 +512,12 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/")
-async def root():
+async def root() -> dict[str, str]:
     return {
         "message": "Welcome to VulHunter API",
         "docs": "/docs",

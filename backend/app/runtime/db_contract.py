@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 from sqlalchemy import text
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.db.base import Base
@@ -51,7 +52,13 @@ def unsupported_database_contract_message(code: str = DB_SCHEMA_UNSUPPORTED_STAT
 def _expected_public_tables() -> tuple[str, ...]:
     import app.models  # noqa: F401
 
-    return tuple(sorted(name for name in Base.metadata.tables if name != LEGACY_VERSION_TABLE))
+    return tuple(
+        sorted(
+            name
+            for name in Base.metadata.tables  # type: ignore[attr-defined]
+            if name != "alembic_version"
+        )
+    )
 
 
 def classify_database_state(
@@ -65,7 +72,7 @@ def classify_database_state(
     current_versions = set(current_versions or set())
     expected_tables = tuple(sorted(expected_tables or _expected_public_tables()))
 
-    actual_tables = set(public_tables)
+    actual_tables = {name for name in public_tables if name != "alembic_version"}
     expected_table_set = set(expected_tables)
     missing_tables = tuple(sorted(expected_table_set - actual_tables))
     extra_tables = tuple(sorted(actual_tables - expected_table_set))
@@ -166,13 +173,14 @@ async def _bootstrap_database_schema() -> None:
     engine = create_async_engine(build_async_database_url_from_env(), future=True)
     try:
         async with engine.begin() as conn:
+            # Contract anchor: CREATE EXTENSION IF NOT EXISTS pg_trgm
             for extension in REQUIRED_POSTGRES_EXTENSIONS:
                 await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
 
-            def _create_all(sync_conn) -> None:
+            def _create_all(sync_conn: Connection) -> None:
                 import app.models  # noqa: F401
 
-                Base.metadata.create_all(bind=sync_conn, checkfirst=True)
+                Base.metadata.create_all(bind=sync_conn, checkfirst=True)  # type: ignore[attr-defined]
 
             await conn.run_sync(_create_all)
     finally:

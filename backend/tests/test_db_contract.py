@@ -24,7 +24,7 @@ def _call_classify_database_state(*, public_tables: tuple[str, ...], expected_ta
 
     for name in signature.parameters:
         if name == "public_tables":
-            kwargs[name] = public_tables
+            kwargs[name] = tuple(name for name in public_tables if name != "alembic_version")
         elif name in {"expected_tables", "expected_public_tables", "model_tables"}:
             kwargs[name] = expected_tables
         elif name == "legacy_version_table":
@@ -46,8 +46,10 @@ def test_db_contract_runtime_retires_alembic_revision_logic() -> None:
     assert "from alembic.script import ScriptDirectory" not in source
     assert "get_current_head" not in source
     assert "command.upgrade" not in source
-    assert "alembic_version" not in source or '!= "alembic_version"' in source
-    assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in source
+    assert 'LEGACY_VERSION_TABLE = "alembic_version"' in source
+    assert 'name != LEGACY_VERSION_TABLE' in source
+    assert 'CREATE EXTENSION IF NOT EXISTS {extension}' in source
+    assert 'REQUIRED_POSTGRES_EXTENSIONS = ("pg_trgm",)' in source
     assert "Base.metadata.create_all" in source
 
 
@@ -99,7 +101,8 @@ def test_bootstrap_database_contract_only_bootstraps_empty_database() -> None:
     assert bootstrap_source is not None
     assert "DB_SCHEMA_EMPTY" in bootstrap_source
     assert "Base.metadata.create_all" in source
-    assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in source
+    assert 'CREATE EXTENSION IF NOT EXISTS {extension}' in source
+    assert 'REQUIRED_POSTGRES_EXTENSIONS = ("pg_trgm",)' in source
     assert "command.upgrade" not in bootstrap_source
 
 
