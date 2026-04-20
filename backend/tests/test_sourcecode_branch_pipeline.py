@@ -64,6 +64,8 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert (output_dir / "Makefile").is_file()
     assert (output_dir / "scripts" / "setup-env.sh").is_file()
     assert (output_dir / "docker" / "env" / "backend" / "env.example").is_file()
+    assert (output_dir / "backend" / "app").is_dir()
+    assert (output_dir / "frontend" / "src").is_dir()
 
     assert not (output_dir / ".github").exists()
     assert not (output_dir / "docs").exists()
@@ -71,6 +73,8 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert not (output_dir / "agent_checkpoints").exists()
     assert not (output_dir / "docker-compose.hybrid.yml").exists()
     assert not (output_dir / "CLAUDE.md").exists()
+    assert not (output_dir / "backend" / "tests").exists()
+    assert not (output_dir / "frontend" / "tests").exists()
 
     assert sorted(path.relative_to(output_dir / "scripts").as_posix() for path in (output_dir / "scripts").rglob("*")) == [
         "setup-env.sh"

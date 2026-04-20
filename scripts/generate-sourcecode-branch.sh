@@ -62,6 +62,8 @@ prune_public_tree() {
     "$OUTPUT_DIR/docs" \
     "$OUTPUT_DIR/deploy" \
     "$OUTPUT_DIR/agent_checkpoints" \
+    "$OUTPUT_DIR/backend/tests" \
+    "$OUTPUT_DIR/frontend/tests" \
     "$OUTPUT_DIR/CLAUDE.md" \
     "$OUTPUT_DIR/docker-compose.hybrid.yml"
 
@@ -105,6 +107,8 @@ validate_sourcecode_tree() {
     "docs"
     "deploy"
     "agent_checkpoints"
+    "backend/tests"
+    "frontend/tests"
     "CLAUDE.md"
     "docker-compose.hybrid.yml"
     "scripts/build-frontend.sh"
