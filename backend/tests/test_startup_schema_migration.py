@@ -17,9 +17,18 @@ def _load_assert_database_schema_is_latest() -> ast.AsyncFunctionDef:
 
 def test_assert_database_schema_is_latest_delegates_to_db_contract_check() -> None:
     function_node = _load_assert_database_schema_is_latest()
+    statements = [
+        statement
+        for statement in function_node.body
+        if not (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        )
+    ]
 
-    assert len(function_node.body) == 1
-    statement = function_node.body[0]
+    assert len(statements) == 1
+    statement = statements[0]
     assert isinstance(statement, ast.Expr)
     assert isinstance(statement.value, ast.Await)
     call = statement.value.value

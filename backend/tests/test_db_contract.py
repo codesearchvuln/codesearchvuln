@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import inspect
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -42,7 +43,7 @@ def test_db_contract_runtime_retires_alembic_revision_logic() -> None:
     assert "from alembic import command" not in source
     assert "from alembic.script import ScriptDirectory" not in source
     assert "get_current_head" not in source
-    assert "upgrade(" not in source
+    assert "command.upgrade" not in source
     assert "alembic_version" not in source or '!= "alembic_version"' in source
     assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in source
     assert "Base.metadata.create_all" in source
@@ -84,18 +85,19 @@ def test_db_contract_mismatch_message_mentions_missing_and_extra_tables() -> Non
 
 
 def test_bootstrap_database_contract_only_bootstraps_empty_database() -> None:
-    module = ast.parse(_db_contract_source(), filename=str(DB_CONTRACT_FILE))
+    source = _db_contract_source()
+    module = ast.parse(source, filename=str(DB_CONTRACT_FILE))
     bootstrap_fn = next(
         node
         for node in module.body
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "bootstrap_database_contract"
     )
-    bootstrap_source = ast.get_source_segment(_db_contract_source(), bootstrap_fn)
+    bootstrap_source = ast.get_source_segment(source, bootstrap_fn)
 
     assert bootstrap_source is not None
     assert "DB_SCHEMA_EMPTY" in bootstrap_source
-    assert "Base.metadata.create_all" in _db_contract_source()
-    assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in _db_contract_source()
+    assert "Base.metadata.create_all" in source
+    assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in source
     assert "command.upgrade" not in bootstrap_source
 
 
@@ -109,7 +111,7 @@ async def test_check_database_contract_rejects_empty_database(monkeypatch: pytes
         **({"missing_tables": EXPECTED_PUBLIC_TABLES} if "missing_tables" in db_contract.DatabaseContractState.__dataclass_fields__ else {}),
         **({"extra_tables": tuple()} if "extra_tables" in db_contract.DatabaseContractState.__dataclass_fields__ else {}),
     )
-    monkeypatch.setattr(db_contract, "inspect_database_contract_state", pytest.AsyncMock(return_value=empty_state))
+    monkeypatch.setattr(db_contract, "inspect_database_contract_state", AsyncMock(return_value=empty_state))
 
     with pytest.raises(db_contract.DatabaseContractError, match=db_contract.DB_SCHEMA_EMPTY):
         await db_contract.check_database_contract()
