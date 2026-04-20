@@ -42,7 +42,7 @@ services:
       - vulhunter-network
 
   db-bootstrap:
-    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:b49c1165153f5c025250296cc05bd8cc353fb9ef6b0ab7f5b75443a5d900bd24}
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:0ad6c9f1e8857a5535be85a66f339ee44cec73c2e32d8389ebdc810c20a56b5d}
     restart: "no"
     working_dir: /app
     volumes:
@@ -64,7 +64,7 @@ services:
       - vulhunter-network
 
   backend:
-    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:b49c1165153f5c025250296cc05bd8cc353fb9ef6b0ab7f5b75443a5d900bd24}
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:0ad6c9f1e8857a5535be85a66f339ee44cec73c2e32d8389ebdc810c20a56b5d}
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -171,7 +171,7 @@ services:
       - vulhunter-network
 
   redis:
-    image: ${REDIS_IMAGE:-docker.io/library/redis:7-alpine@sha256:efc27681bf81e6ed55cb581718b7818c6c04c39b1f9aa40854edd3ea2241b6ed}
+    image: ${REDIS_IMAGE:-docker.io/library/redis:7-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6}
     restart: unless-stopped
     ports:
       - "6379:6379"

@@ -10,7 +10,7 @@ cp docker/env/backend/env.example docker/env/backend/.env
 2. Review at least these variables:
    `LLM_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`
 
-3. If you are preparing an deployment, also copy the image mapping template:
+3. If you are preparing a deployment, also copy the image mapping template:
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
@@ -26,6 +26,7 @@ If you use a cloud model provider, runtime network access to that API is still r
 - deployment also requires: `zstd`, `python3`
 - bundle filenames are fixed as `vulhunter-services-images-<arch>.tar.zst` and `vulhunter-scanner-images-<arch>.tar.zst`
 - Both bundles must come from the same snapshot as the current release tree and must be placed in the release root or `images/`
+- The release stack compose project name can be overridden with `VULHUNTER_RELEASE_PROJECT_NAME`; the default is `vulhunter-release`
 
 ## Deployment Commands
 

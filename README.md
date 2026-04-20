@@ -26,6 +26,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 - 部署额外需要：`zstd`、`python3`
 - 镜像包文件名固定为 `vulhunter-services-images-<arch>.tar.zst` 和 `vulhunter-scanner-images-<arch>.tar.zst`
 - 两份镜像包必须与当前 release tree 使用同一个 snapshot，并放在 release 根目录或 `images/`
+- release stack 的 compose project 名称可通过 `VULHUNTER_RELEASE_PROJECT_NAME` 覆盖；默认值是 `vulhunter-release`
 
 ## 部署命令
 
