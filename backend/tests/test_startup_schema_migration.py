@@ -1,74 +1,38 @@
-import sys
-import types
-from types import SimpleNamespace
+from __future__ import annotations
 
-import pytest
-
-fastmcp_module = types.ModuleType("fastmcp")
-fastmcp_module.Client = object
-fastmcp_client_module = types.ModuleType("fastmcp.client")
-fastmcp_transports_module = types.ModuleType("fastmcp.client.transports")
-fastmcp_transports_module.StdioTransport = object
-fastmcp_transports_module.StreamableHttpTransport = object
-docker_module = types.ModuleType("docker")
-docker_module.from_env = lambda: None
-docker_module.errors = SimpleNamespace(
-    DockerException=RuntimeError,
-    ImageNotFound=type("ImageNotFound", (Exception,), {}),
-)
-git_module = types.ModuleType("git")
-
-sys.modules.setdefault("fastmcp", fastmcp_module)
-sys.modules.setdefault("docker", docker_module)
-sys.modules.setdefault("fastmcp.client", fastmcp_client_module)
-sys.modules.setdefault("fastmcp.client.transports", fastmcp_transports_module)
-sys.modules.setdefault("git", git_module)
-
-from app.main import assert_database_schema_is_latest
-from app.runtime.db_contract import DatabaseContractError
+import ast
+from pathlib import Path
 
 
-@pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_delegates_to_strict_db_contract_check(monkeypatch):
-    called = []
-
-    async def _fake_check():
-        called.append("called")
-
-    monkeypatch.setattr("app.main.check_database_contract", _fake_check)
-
-    await assert_database_schema_is_latest()
-
-    assert called == ["called"]
+MAIN_FILE = Path(__file__).resolve().parents[1] / "app" / "main.py"
 
 
-@pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_rejects_schema_mismatch_without_auto_bootstrap(
-    monkeypatch,
-):
-    async def _fake_check():
-        raise DatabaseContractError(
-            "DB_SCHEMA_MISMATCH",
-            "DB_SCHEMA_MISMATCH 当前数据库不受此版本支持；请使用空库初始化或恢复匹配版本快照。",
-        )
-
-    monkeypatch.setattr("app.main.check_database_contract", _fake_check)
-
-    with pytest.raises(DatabaseContractError, match="DB_SCHEMA_MISMATCH"):
-        await assert_database_schema_is_latest()
+def _load_assert_database_schema_is_latest() -> ast.AsyncFunctionDef:
+    module = ast.parse(MAIN_FILE.read_text(encoding="utf-8"), filename=str(MAIN_FILE))
+    for node in module.body:
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "assert_database_schema_is_latest":
+            return node
+    raise AssertionError("assert_database_schema_is_latest not found")
 
 
-@pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_rejects_database_with_unsupported_state(
-    monkeypatch,
-):
-    async def _fake_check():
-        raise DatabaseContractError(
-            "DB_SCHEMA_UNSUPPORTED_STATE",
-            "DB_SCHEMA_UNSUPPORTED_STATE 当前数据库不受此版本支持；请使用空库初始化或恢复匹配版本快照。",
-        )
+def test_assert_database_schema_is_latest_delegates_to_db_contract_check() -> None:
+    function_node = _load_assert_database_schema_is_latest()
 
-    monkeypatch.setattr("app.main.check_database_contract", _fake_check)
+    assert len(function_node.body) == 1
+    statement = function_node.body[0]
+    assert isinstance(statement, ast.Expr)
+    assert isinstance(statement.value, ast.Await)
+    call = statement.value.value
+    assert isinstance(call, ast.Call)
+    assert isinstance(call.func, ast.Name)
+    assert call.func.id == "check_database_contract"
+    assert not call.args
+    assert not call.keywords
 
-    with pytest.raises(DatabaseContractError, match="DB_SCHEMA_UNSUPPORTED_STATE"):
-        await assert_database_schema_is_latest()
+
+def test_assert_database_schema_is_latest_does_not_bootstrap_or_upgrade() -> None:
+    function_source = ast.get_source_segment(MAIN_FILE.read_text(encoding="utf-8"), _load_assert_database_schema_is_latest())
+
+    assert function_source is not None
+    assert "bootstrap_database_contract" not in function_source
+    assert "upgrade" not in function_source
