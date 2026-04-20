@@ -1,4 +1,4 @@
-name: Backend Migration Smoke
+name: Backend DB Contract Smoke
 
 on:
   pull_request:
@@ -12,14 +12,14 @@ on:
       - ".github/workflows/backend-migration-smoke.yml"
 
 concurrency:
-  group: migration-smoke-${{ github.ref }}
+  group: db-contract-smoke-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  migration-smoke:
+  db-contract-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -57,7 +57,7 @@ jobs:
         run: |
           uv sync --frozen --no-dev
 
-      - name: Run Alembic upgrade head
+      - name: Bootstrap database contract on empty database
         working-directory: backend
         env:
           POSTGRES_SERVER: 127.0.0.1
@@ -65,9 +65,9 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: vulhunter
         run: |
-          uv run alembic upgrade head
+          uv run python -m app.runtime.db_contract bootstrap
 
-      - name: Verify Alembic current equals single head
+      - name: Verify database contract after bootstrap
         working-directory: backend
         env:
           POSTGRES_SERVER: 127.0.0.1
@@ -75,27 +75,17 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: vulhunter
         run: |
-          uv run python - <<'PY'
-          import subprocess
+          uv run python -m app.runtime.db_contract check
 
-          current = subprocess.check_output(["alembic", "current"], text=True)
-          heads = subprocess.check_output(["alembic", "heads"], text=True)
+      - name: Verify Alembic revision files are retired
+        working-directory: backend
+        run: |
+          uv run python - <<'PY2'
+          from pathlib import Path
 
-          current_revs = {
-              line.split()[0]
-              for line in current.splitlines()
-              if line and line[0].isalnum()
-          }
-          head_revs = {
-              line.split()[0]
-              for line in heads.splitlines()
-              if line and line[0].isalnum()
-          }
-
-          print("current:", sorted(current_revs))
-          print("heads:", sorted(head_revs))
-          if len(head_revs) != 1:
-              raise SystemExit(f"Expected exactly one Alembic head, got {sorted(head_revs)}")
-          if current_revs != head_revs:
-              raise SystemExit("Alembic current does not match heads")
-          PY
+          versions_dir = Path("alembic/versions")
+          revision_files = sorted(str(path) for path in versions_dir.glob("*.py")) if versions_dir.exists() else []
+          print("revision_files:", revision_files)
+          if revision_files:
+              raise SystemExit(f"Expected no Alembic revision files, found {revision_files}")
+          PY2
