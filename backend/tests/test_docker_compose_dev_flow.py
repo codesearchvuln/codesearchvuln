@@ -201,8 +201,11 @@ def test_full_overlay_restores_full_local_build_defaults() -> None:
         assert f"\n  {runner_service}:" not in full_overlay_text
     assert "vulhunter/backend-local:latest" in full_overlay_text
     assert "db-bootstrap:\n    image: vulhunter/backend-local:latest" in full_overlay_text
+    assert "db-bootstrap:\n    image: vulhunter/backend-local:latest\n    pull_policy: never" in full_overlay_text
     assert "vulhunter/backend-dev-local:latest" not in full_overlay_text
     assert "vulhunter/frontend-local:latest" in full_overlay_text
+    assert "backend:\n    image: vulhunter/backend-local:latest\n    pull_policy: build" in full_overlay_text
+    assert "frontend:\n    image: vulhunter/frontend-local:latest\n    pull_policy: build" in full_overlay_text
     assert "./nexus-web/dist:/app/public/nexus:ro" in full_overlay_text
     assert "./nexus-itemDetail/dist:/app/public/nexus-item-detail:ro" in full_overlay_text
     assert "context: ." in full_overlay_text
@@ -247,6 +250,9 @@ def test_hybrid_overlay_uses_frontend_dev_without_default_polling_and_with_resou
     assert "target: dev" in hybrid_overlay_text
     assert "\n  db-bootstrap:\n" in hybrid_overlay_text
     assert "db-bootstrap:\n    image: vulhunter/backend-local:latest" in hybrid_overlay_text
+    assert "db-bootstrap:\n    image: vulhunter/backend-local:latest\n    pull_policy: never" in hybrid_overlay_text
+    assert "backend:\n    image: vulhunter/backend-local:latest\n    pull_policy: build" in hybrid_overlay_text
+    assert "frontend:\n    image: vulhunter/frontend-local:latest\n    pull_policy: build" in hybrid_overlay_text
     assert "${VULHUNTER_FRONTEND_PORT:-3000}:5173" in hybrid_overlay_text
     assert "CHOKIDAR_USEPOLLING: ${FRONTEND_CHOKIDAR_USEPOLLING:-false}" in hybrid_overlay_text
     assert "mem_limit: 1536m" in hybrid_overlay_text

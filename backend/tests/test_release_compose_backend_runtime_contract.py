@@ -44,11 +44,14 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "docker-compose.full.yml" not in hybrid_text
     assert "build: !override" in hybrid_text
     assert hybrid_text.count("build: !override") == 2
+    assert "backend:\n    image: vulhunter/backend-local:latest\n    pull_policy: build" in hybrid_text
     assert "frontend:\n    image: vulhunter/frontend-local:latest" in hybrid_text
+    assert "frontend:\n    image: vulhunter/frontend-local:latest\n    pull_policy: build" in hybrid_text
     assert "backend:\n    image: vulhunter/backend-local:latest" in hybrid_text
     assert "target: runtime-plain" in hybrid_text
     assert "\n  db-bootstrap:\n" in hybrid_text
     assert "db-bootstrap:\n    image: vulhunter/backend-local:latest" in hybrid_text
+    assert "db-bootstrap:\n    image: vulhunter/backend-local:latest\n    pull_policy: never" in hybrid_text
     assert "context: ./frontend" in hybrid_text
     assert "context: ." in hybrid_text
     assert (
