@@ -108,7 +108,6 @@ async def check_agent_services():
 
 
 async def assert_database_schema_is_latest() -> None:
-    """Fail fast when the runtime database contract is not satisfied."""
     await check_database_contract()
 
 
