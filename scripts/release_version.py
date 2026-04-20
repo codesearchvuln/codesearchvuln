@@ -29,6 +29,12 @@ class SemanticTag:
     version: tuple[int, int, int]
 
 
+@dataclass(frozen=True)
+class ManagedSemanticTag:
+    semantic: SemanticTag
+    metadata: dict[str, str]
+
+
 def _run_git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -77,9 +83,28 @@ def _parse_tag_annotation(repo: Path, tag: str) -> dict[str, str]:
     if missing:
         raise ReleaseVersionError(
             f"annotated release tag {tag} is missing required metadata fields: {', '.join(missing)}. "
-            "Clean up legacy public tags before enabling this workflow; see scripts/release-tag-cleanup.txt."
+            "Managed v0.0.* tags must keep release metadata intact."
         )
     return metadata
+
+
+def _is_managed_track(version: tuple[int, int, int]) -> bool:
+    major, minor, _patch = version
+    return (major, minor) == (0, 0)
+
+
+def _list_managed_tags(repo: Path, semantic_tags: list[SemanticTag]) -> list[ManagedSemanticTag]:
+    managed_tags: list[ManagedSemanticTag] = []
+    for semantic_tag in semantic_tags:
+        if not _is_managed_track(semantic_tag.version):
+            continue
+        managed_tags.append(
+            ManagedSemanticTag(
+                semantic=semantic_tag,
+                metadata=_parse_tag_annotation(repo, semantic_tag.name),
+            )
+        )
+    return managed_tags
 
 
 def _commit_subjects_since(repo: Path, previous_source_sha: str, source_sha: str) -> list[str]:
@@ -88,13 +113,10 @@ def _commit_subjects_since(repo: Path, previous_source_sha: str, source_sha: str
 
 
 def _classify_bump(commit_subjects: list[str]) -> str | None:
-    saw_fix = False
     for subject in commit_subjects:
-        if FEAT_RE.match(subject) or REFACTOR_RE.match(subject):
-            return "minor"
-        if FIX_RE.match(subject) or ":" not in subject:
-            saw_fix = True
-    return "patch" if saw_fix else None
+        if FEAT_RE.match(subject) or REFACTOR_RE.match(subject) or FIX_RE.match(subject) or ":" not in subject:
+            return "patch"
+    return None
 
 
 def _format_version(version: tuple[int, int, int]) -> str:
@@ -103,8 +125,6 @@ def _format_version(version: tuple[int, int, int]) -> str:
 
 def _increment_version(current: tuple[int, int, int], bump_type: str) -> tuple[int, int, int]:
     major, minor, patch = current
-    if bump_type == "minor":
-        return (major, minor + 1, 0)
     if bump_type == "patch":
         return (major, minor, patch + 1)
     raise ReleaseVersionError(f"unsupported bump type: {bump_type}")
@@ -116,8 +136,8 @@ def _resolve_current_subject(repo: Path, source_sha: str) -> list[str]:
 
 
 def resolve_release_version(repo: Path, source_sha: str) -> dict[str, object]:
-    semantic_tags = _list_semantic_tags(repo)
-    latest_tag = semantic_tags[-1] if semantic_tags else None
+    managed_tags = _list_managed_tags(repo, _list_semantic_tags(repo))
+    latest_tag = managed_tags[-1] if managed_tags else None
 
     if latest_tag is None:
         return {
@@ -131,20 +151,23 @@ def resolve_release_version(repo: Path, source_sha: str) -> dict[str, object]:
             "commit_subjects": _resolve_current_subject(repo, source_sha),
         }
 
-    latest_metadata = _parse_tag_annotation(repo, latest_tag.name)
-    previous_source_sha = latest_metadata["source_sha"]
-
-    if previous_source_sha == source_sha:
+    existing_managed_tag = next(
+        (managed_tag for managed_tag in reversed(managed_tags) if managed_tag.metadata["source_sha"] == source_sha),
+        None,
+    )
+    if existing_managed_tag is not None:
         return {
             "should_release": True,
-            "version": latest_tag.name,
-            "bump_type": latest_metadata["bump_type"],
+            "version": existing_managed_tag.semantic.name,
+            "bump_type": existing_managed_tag.metadata["bump_type"],
             "existing_tag": True,
-            "previous_version": latest_tag.name,
-            "previous_source_sha": previous_source_sha,
+            "previous_version": existing_managed_tag.semantic.name,
+            "previous_source_sha": existing_managed_tag.metadata["source_sha"],
             "source_sha": source_sha,
             "commit_subjects": [],
         }
+
+    previous_source_sha = latest_tag.metadata["source_sha"]
 
     commit_subjects = _commit_subjects_since(repo, previous_source_sha, source_sha)
     bump_type = _classify_bump(commit_subjects)
@@ -154,7 +177,7 @@ def resolve_release_version(repo: Path, source_sha: str) -> dict[str, object]:
             "version": None,
             "bump_type": None,
             "existing_tag": False,
-            "previous_version": latest_tag.name,
+            "previous_version": latest_tag.semantic.name,
             "previous_source_sha": previous_source_sha,
             "source_sha": source_sha,
             "commit_subjects": commit_subjects,
@@ -162,10 +185,10 @@ def resolve_release_version(repo: Path, source_sha: str) -> dict[str, object]:
 
     return {
         "should_release": True,
-        "version": _format_version(_increment_version(latest_tag.version, bump_type)),
+        "version": _format_version(_increment_version(latest_tag.semantic.version, bump_type)),
         "bump_type": bump_type,
         "existing_tag": False,
-        "previous_version": latest_tag.name,
+        "previous_version": latest_tag.semantic.name,
         "previous_source_sha": previous_source_sha,
         "source_sha": source_sha,
         "commit_subjects": commit_subjects,

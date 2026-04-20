@@ -38,6 +38,7 @@ RESOLVED_SOURCE_SHA="$(git -C "${ROOT_DIR}" rev-parse "${SOURCE_SHA}")"
 
 echo "[INFO] release.sh 已切换为只读预览模式"
 echo "[INFO] 版本真源为 release workflow 创建的 Git tag"
+echo "[INFO] 当前受管版本轨道: v0.0.*"
 echo "[INFO] 预览 source_sha: ${RESOLVED_SOURCE_SHA}"
 echo
 

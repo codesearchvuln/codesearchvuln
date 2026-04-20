@@ -245,3 +245,4 @@ backend/pytest*
 backend/log/
 .codex
 .omx/
+.alma-snapshots
