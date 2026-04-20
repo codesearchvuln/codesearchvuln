@@ -257,17 +257,17 @@ CODEQL_RAM_MB: ${CODEQL_RAM_MB:-8192}
 
 用途：规则启停与软删除（与 Bandit/PHPStan 规则管理一致化）。首版可选。
 
-### 6.4 Alembic 迁移
+### 6.4 数据库 schema bootstrap
 
-新增迁移文件，命名建议：
-
-- `xxxx_add_codeql_scan_tables.py`
+仓库已切换到无 Alembic revision 链模式；新增表结构时应直接更新运行时 schema/bootstrap 契约，
+并使用 `app.runtime.db_contract` 的 bootstrap/check 路径验证空库初始化与契约检查。
 
 执行：
 
 ```bash
 cd backend
-uv run alembic upgrade head
+uv run python -m app.runtime.db_contract bootstrap
+uv run python -m app.runtime.db_contract check
 ```
 
 ---
@@ -618,7 +618,7 @@ codeql database analyze /scan/output/db/cpp \
 - `docker/codeql-runner.Dockerfile`
 - `backend/app/core/config.py`
 - `backend/app/models/codeql.py`
-- `backend/alembic/versions/*_add_codeql_scan_tables.py`
+- `backend/app/runtime/db_contract.py`
 - `backend/app/api/v1/endpoints/static_tasks_codeql.py`
 - `backend/app/api/v1/endpoints/static_tasks.py`
 - `backend/app/services/runner_preflight.py`
