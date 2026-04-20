@@ -215,6 +215,32 @@ image_contracts = contract.get("images")
 if not isinstance(image_contracts, dict):
     raise SystemExit("bundle contract images section is required")
 
+
+def resolve_backend_provenance(manifest_payload: dict[str, object]) -> tuple[str, str | None]:
+    images = manifest_payload.get("images")
+    if not isinstance(images, dict):
+        return ("built_this_run", None)
+
+    backend = images.get("backend")
+    if not isinstance(backend, dict):
+        return ("built_this_run", None)
+
+    provenance = backend.get("provenance")
+    if not isinstance(provenance, dict):
+        return ("built_this_run", None)
+
+    mode = str(provenance.get("mode", "")).strip() or "built_this_run"
+    if mode not in {"built_this_run", "resolved_fallback"}:
+        raise SystemExit(f"unsupported backend provenance mode: {mode}")
+
+    source_tag = None
+    if mode == "resolved_fallback":
+        source_tag = str(provenance.get("source_tag", "")).strip()
+        if not source_tag:
+            raise SystemExit("resolved_fallback backend provenance requires source_tag")
+
+    return (mode, source_tag)
+
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
     "# Then run bash ./scripts/offline-up.sh.",
@@ -266,12 +292,17 @@ scanner_images_payload = build_payload("scanner")
 
 services_bundle_contract = bundle_contracts["services"]
 scanner_bundle_contract = bundle_contracts["scanner"]
+backend_provenance_mode, backend_provenance_source_tag = resolve_backend_provenance(manifest)
 
 services_metadata = {
     "revision": revision,
     "bundle_template": f"images/{services_bundle_contract['asset_name_template']}",
+    "backend_provenance_mode": backend_provenance_mode,
     "images": services_images_payload,
 }
+if backend_provenance_source_tag:
+    services_metadata["backend_provenance_source_tag"] = backend_provenance_source_tag
+
 scanner_metadata = {
     "revision": revision,
     "bundle_template": f"images/{scanner_bundle_contract['asset_name_template']}",

@@ -41,7 +41,10 @@ def test_release_workflow_push_and_dispatch_paths_own_runtime_builds() -> None:
     workflow_text = _release_workflow_text()
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
-    assert "if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}" in workflow_text
+    assert (
+        "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
+        "'workflow_dispatch') }}"
+    ) in workflow_text
     assert "detect-changes:" in workflow_text
     assert "dorny/paths-filter@v3" in workflow_text
     assert "build_frontend: false" in workflow_text

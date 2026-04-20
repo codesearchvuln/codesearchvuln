@@ -68,3 +68,12 @@ def test_release_workflow_summarizes_manual_runtime_image_build_plan() -> None:
     assert "selected_builds" in workflow_text
     assert "frontend_release_image" in workflow_text
     assert "release flow uses STATIC_FRONTEND_IMAGE" in workflow_text
+
+
+def test_release_workflow_dispatch_not_blocked_by_push_only_detect_changes_job() -> None:
+    workflow_text = _workflow_text()
+
+    assert (
+        "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
+        "'workflow_dispatch') }}"
+    ) in workflow_text

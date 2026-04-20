@@ -284,7 +284,10 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "finalize-publish:" in workflow_text
     assert "cleanup-draft-release:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
-    assert "if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}" in workflow_text
+    assert (
+        "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
+        "'workflow_dispatch') }}"
+    ) in workflow_text
     assert "build_frontend: false" in workflow_text
     assert (
         "build_backend: ${{ (github.event_name == 'push' && "
@@ -871,6 +874,29 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "load_container_socket_gid_env" in offline_up_script
     assert "load_container_socket_env" in compose_env_helper
     assert "load_container_socket_gid_env" in compose_env_helper
+
+
+def test_release_generator_preserves_resolved_fallback_backend_provenance_source_tag(tmp_path: Path) -> None:
+    output_dir = tmp_path / "release-tree"
+    manifest_path = tmp_path / "release-manifest.json"
+    frontend_bundle_path = _write_frontend_bundle(tmp_path / "frontend-release-bundle")
+    manifest = _write_release_manifest(manifest_path)
+    manifest["images"]["backend"]["provenance"] = {
+        "mode": "resolved_fallback",
+        "source_tag": "ghcr.io/acme-sec/vulhunter-backend:latest",
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    result = _run_release_generator(output_dir, manifest_path, frontend_bundle_path)
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode == 0, combined_output
+
+    services_metadata = json.loads((output_dir / "images-manifest-services.json").read_text(encoding="utf-8"))
+    assert services_metadata["backend_provenance_mode"] == "resolved_fallback"
+    assert (
+        services_metadata["backend_provenance_source_tag"]
+        == "ghcr.io/acme-sec/vulhunter-backend:latest"
+    )
 
 
 def test_package_release_images_script_supports_single_arch_mode() -> None:

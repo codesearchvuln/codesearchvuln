@@ -447,7 +447,7 @@ jobs:
           echo "snapshot_url=${html_url}" >> "$GITHUB_OUTPUT"
 
   publish-runtime-images:
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     needs:
       - detect-changes
       - prepare-release

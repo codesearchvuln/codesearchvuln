@@ -244,7 +244,12 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     metadata = json.load(handle)
 
 backend_image = metadata["images"]["backend"]
-print(f"{metadata['revision']}\t{backend_image['source_ref']}\t{backend_image['local_tag']}")
+provenance_mode = str(metadata.get("backend_provenance_mode", "built_this_run")).strip() or "built_this_run"
+provenance_source_tag = str(metadata.get("backend_provenance_source_tag", "")).strip()
+print(
+    f"{metadata['revision']}\t{backend_image['source_ref']}\t{backend_image['local_tag']}\t"
+    f"{provenance_mode}\t{provenance_source_tag}"
+)
 PY
 }
 
@@ -268,10 +273,10 @@ ensure_images_ready() {
 }
 
 validate_backend_image_provenance() {
-  local contract expected_revision source_ref local_tag actual_revision
+  local contract expected_revision source_ref local_tag provenance_mode provenance_source_tag actual_revision
 
   contract="$(read_backend_image_contract)"
-  IFS=$'\t' read -r expected_revision source_ref local_tag <<<"$contract"
+  IFS=$'\t' read -r expected_revision source_ref local_tag provenance_mode provenance_source_tag <<<"$contract"
 
   actual_revision="$(
     docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$local_tag" \
@@ -286,6 +291,14 @@ validate_backend_image_provenance() {
   log_info "backend image provenance: local=${local_tag} source=${source_ref} revision=${actual_revision}"
 
   if [[ "$actual_revision" != "$expected_revision" ]]; then
+    if [[ "$provenance_mode" == "resolved_fallback" ]]; then
+      if [[ -n "$provenance_source_tag" ]]; then
+        log_warn "backend image provenance mismatch allowed in resolved_fallback mode: expected ${expected_revision}, got ${actual_revision} for ${local_tag} (source_tag=${provenance_source_tag})"
+      else
+        log_warn "backend image provenance mismatch allowed in resolved_fallback mode: expected ${expected_revision}, got ${actual_revision} for ${local_tag}"
+      fi
+      return 0
+    fi
     die "backend image provenance mismatch: expected ${expected_revision}, got ${actual_revision} for ${local_tag}"
   fi
 }

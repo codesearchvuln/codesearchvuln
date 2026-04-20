@@ -244,3 +244,4 @@ backend/data/
 backend/pytest*
 backend/log/
 .codex
+.omx/
