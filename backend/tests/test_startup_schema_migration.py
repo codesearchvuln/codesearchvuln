@@ -1,5 +1,6 @@
 import sys
 import types
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,9 +10,16 @@ fastmcp_client_module = types.ModuleType("fastmcp.client")
 fastmcp_transports_module = types.ModuleType("fastmcp.client.transports")
 fastmcp_transports_module.StdioTransport = object
 fastmcp_transports_module.StreamableHttpTransport = object
+docker_module = types.ModuleType("docker")
+docker_module.from_env = lambda: None
+docker_module.errors = SimpleNamespace(
+    DockerException=RuntimeError,
+    ImageNotFound=type("ImageNotFound", (Exception,), {}),
+)
 git_module = types.ModuleType("git")
 
 sys.modules.setdefault("fastmcp", fastmcp_module)
+sys.modules.setdefault("docker", docker_module)
 sys.modules.setdefault("fastmcp.client", fastmcp_client_module)
 sys.modules.setdefault("fastmcp.client.transports", fastmcp_transports_module)
 sys.modules.setdefault("git", git_module)
