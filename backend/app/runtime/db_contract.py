@@ -3,15 +3,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, field
+from functools import lru_cache
 
-from alembic import command
-from alembic.config import Config as AlembicConfig
-from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.db.base import Base
 from app.runtime.db_env import build_async_database_url_from_env
 
 DB_SCHEMA_OK = "DB_SCHEMA_OK"
@@ -22,14 +20,20 @@ DB_SCHEMA_UNSUPPORTED_STATE = "DB_SCHEMA_UNSUPPORTED_STATE"
 DATABASE_CONTRACT_UNSUPPORTED_MESSAGE = (
     "当前数据库不受此版本支持；请使用空库初始化或恢复匹配版本快照。"
 )
+LEGACY_VERSION_TABLE = "alembic_version"
+REQUIRED_POSTGRES_EXTENSIONS = ("pg_trgm",)
 
 
 @dataclass(frozen=True)
 class DatabaseContractState:
     kind: str
-    current_versions: set[str]
-    expected_head: str | None
-    public_tables: tuple[str, ...]
+    current_versions: set[str] = field(default_factory=set)
+    expected_head: str | None = None
+    public_tables: tuple[str, ...] = ()
+    expected_tables: tuple[str, ...] = ()
+    missing_tables: tuple[str, ...] = ()
+    extra_tables: tuple[str, ...] = ()
+    legacy_version_table: bool = False
 
 
 class DatabaseContractError(RuntimeError):
@@ -43,66 +47,47 @@ def unsupported_database_contract_message(code: str = DB_SCHEMA_UNSUPPORTED_STAT
     return f"{code} {DATABASE_CONTRACT_UNSUPPORTED_MESSAGE}"
 
 
-def _backend_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+@lru_cache(maxsize=1)
+def _expected_public_tables() -> tuple[str, ...]:
+    import app.models  # noqa: F401
 
-
-def _alembic_config() -> AlembicConfig:
-    backend_root = _backend_root()
-    cfg = AlembicConfig(str(backend_root / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", build_async_database_url_from_env())
-    return cfg
-
-
-def _expected_head_from_alembic() -> str | None:
-    script = ScriptDirectory.from_config(_alembic_config())
-    head = str(script.get_current_head() or "").strip()
-    return head or None
+    return tuple(sorted(name for name in Base.metadata.tables if name != LEGACY_VERSION_TABLE))
 
 
 def classify_database_state(
     *,
     public_tables: tuple[str, ...],
-    current_versions: set[str],
+    current_versions: set[str] | None,
     expected_head: str | None,
+    expected_tables: tuple[str, ...] | None = None,
+    legacy_version_table: bool = False,
 ) -> DatabaseContractState:
-    if not public_tables and not current_versions:
-        return DatabaseContractState(
-            kind=DB_SCHEMA_EMPTY,
-            current_versions=current_versions,
-            expected_head=expected_head,
-            public_tables=public_tables,
-        )
+    current_versions = set(current_versions or set())
+    expected_tables = tuple(sorted(expected_tables or _expected_public_tables()))
 
-    if not current_versions:
-        return DatabaseContractState(
-            kind=DB_SCHEMA_UNSUPPORTED_STATE,
-            current_versions=current_versions,
-            expected_head=expected_head,
-            public_tables=public_tables,
-        )
+    actual_tables = set(public_tables)
+    expected_table_set = set(expected_tables)
+    missing_tables = tuple(sorted(expected_table_set - actual_tables))
+    extra_tables = tuple(sorted(actual_tables - expected_table_set))
 
-    if len(current_versions) != 1 or not expected_head:
-        return DatabaseContractState(
-            kind=DB_SCHEMA_UNSUPPORTED_STATE,
-            current_versions=current_versions,
-            expected_head=expected_head,
-            public_tables=public_tables,
-        )
-
-    if current_versions == {expected_head}:
-        return DatabaseContractState(
-            kind=DB_SCHEMA_OK,
-            current_versions=current_versions,
-            expected_head=expected_head,
-            public_tables=public_tables,
-        )
+    if not actual_tables and not current_versions and not legacy_version_table:
+        kind = DB_SCHEMA_EMPTY
+    elif not missing_tables and not extra_tables:
+        kind = DB_SCHEMA_OK
+    elif not actual_tables and (current_versions or legacy_version_table):
+        kind = DB_SCHEMA_UNSUPPORTED_STATE
+    else:
+        kind = DB_SCHEMA_MISMATCH
 
     return DatabaseContractState(
-        kind=DB_SCHEMA_MISMATCH,
+        kind=kind,
         current_versions=current_versions,
         expected_head=expected_head,
-        public_tables=public_tables,
+        public_tables=tuple(sorted(actual_tables)),
+        expected_tables=expected_tables,
+        missing_tables=missing_tables,
+        extra_tables=extra_tables,
+        legacy_version_table=legacy_version_table,
     )
 
 
@@ -120,27 +105,14 @@ async def inspect_database_contract_state() -> DatabaseContractState:
                     """
                 )
             )
-            public_tables = tuple(
-                str(item).strip()
-                for item in tables_result.scalars().all()
-                if str(item).strip() and str(item).strip() != "alembic_version"
+            discovered_tables = tuple(
+                str(item).strip() for item in tables_result.scalars().all() if str(item).strip()
             )
-
-            alembic_table_exists_result = await conn.execute(
-                text(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM pg_catalog.pg_tables
-                        WHERE schemaname = 'public' AND tablename = 'alembic_version'
-                    )
-                    """
-                )
-            )
-            alembic_table_exists = bool(alembic_table_exists_result.scalar())
+            public_tables = tuple(name for name in discovered_tables if name != LEGACY_VERSION_TABLE)
+            legacy_version_table = LEGACY_VERSION_TABLE in discovered_tables
 
             current_versions: set[str] = set()
-            if alembic_table_exists:
+            if legacy_version_table:
                 versions_result = await conn.execute(text("SELECT version_num FROM alembic_version"))
                 current_versions = {
                     str(item).strip()
@@ -153,25 +125,29 @@ async def inspect_database_contract_state() -> DatabaseContractState:
     return classify_database_state(
         public_tables=public_tables,
         current_versions=current_versions,
-        expected_head=_expected_head_from_alembic(),
+        expected_head=None,
+        expected_tables=_expected_public_tables(),
+        legacy_version_table=legacy_version_table,
     )
 
 
 def _format_state_message(state: DatabaseContractState) -> str:
     if state.kind == DB_SCHEMA_EMPTY:
-        return f"{DB_SCHEMA_EMPTY} 数据库为空；请显式执行 bootstrap 初始化到当前版本。"
-
-    if state.kind == DB_SCHEMA_MISMATCH:
         return (
-            f"{DB_SCHEMA_MISMATCH} {DATABASE_CONTRACT_UNSUPPORTED_MESSAGE} "
-            f"current={sorted(state.current_versions)} expected={[state.expected_head] if state.expected_head else []}"
+            f"{DB_SCHEMA_EMPTY} 数据库为空；请显式执行 bootstrap 初始化到当前版本。 "
+            f"expected_tables={list(state.expected_tables)}"
         )
 
-    return (
-        f"{DB_SCHEMA_UNSUPPORTED_STATE} {DATABASE_CONTRACT_UNSUPPORTED_MESSAGE} "
-        f"current={sorted(state.current_versions)} expected={[state.expected_head] if state.expected_head else []} "
-        f"public_tables={list(state.public_tables)}"
-    )
+    details = [
+        f"public_tables={list(state.public_tables)}",
+        f"missing_tables={list(state.missing_tables)}",
+        f"extra_tables={list(state.extra_tables)}",
+    ]
+    if state.current_versions or state.legacy_version_table:
+        details.append(f"legacy_versions={sorted(state.current_versions)}")
+        details.append(f"legacy_version_table={state.legacy_version_table}")
+
+    return f"{state.kind} {DATABASE_CONTRACT_UNSUPPORTED_MESSAGE} " + " ".join(details)
 
 
 def _raise_for_state(state: DatabaseContractState) -> None:
@@ -186,8 +162,21 @@ async def check_database_contract() -> DatabaseContractState:
     return state
 
 
-async def _upgrade_database_to_head() -> None:
-    await asyncio.to_thread(command.upgrade, _alembic_config(), "head")
+async def _bootstrap_database_schema() -> None:
+    engine = create_async_engine(build_async_database_url_from_env(), future=True)
+    try:
+        async with engine.begin() as conn:
+            for extension in REQUIRED_POSTGRES_EXTENSIONS:
+                await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
+
+            def _create_all(sync_conn) -> None:
+                import app.models  # noqa: F401
+
+                Base.metadata.create_all(bind=sync_conn, checkfirst=True)
+
+            await conn.run_sync(_create_all)
+    finally:
+        await engine.dispose()
 
 
 async def bootstrap_database_contract() -> DatabaseContractState:
@@ -197,7 +186,7 @@ async def bootstrap_database_contract() -> DatabaseContractState:
     if state.kind != DB_SCHEMA_EMPTY:
         _raise_for_state(state)
 
-    await _upgrade_database_to_head()
+    await _bootstrap_database_schema()
     final_state = await inspect_database_contract_state()
     _raise_for_state(final_state)
     return final_state
@@ -209,14 +198,14 @@ async def _run_cli(command_name: str) -> int:
             state = await bootstrap_database_contract()
             print(
                 f"[DBContract] {state.kind} bootstrap complete: "
-                f"current={sorted(state.current_versions)} expected={[state.expected_head] if state.expected_head else []}"
+                f"tables={list(state.public_tables)} expected={list(state.expected_tables)}"
             )
             return 0
 
         state = await check_database_contract()
         print(
             f"[DBContract] {state.kind} check complete: "
-            f"current={sorted(state.current_versions)} expected={[state.expected_head] if state.expected_head else []}"
+            f"tables={list(state.public_tables)} expected={list(state.expected_tables)}"
         )
         return 0
     except DatabaseContractError as exc:

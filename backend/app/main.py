@@ -353,9 +353,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"tiktoken 启动预热初始化失败: {e}")
 
-    # 迁移版本检查：不一致时拒绝启动，避免运行时因缺表导致 500。
+    # 数据库契约检查：不一致时拒绝启动，避免运行时因缺表导致 500。
     await assert_database_schema_is_latest()
-    logger.info("  - 数据库迁移版本检查通过")
+    logger.info("  - 数据库契约检查通过")
 
     # 初始化数据库（创建默认账户）
     try:
