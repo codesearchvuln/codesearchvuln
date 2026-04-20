@@ -27,6 +27,8 @@ def _call_classify_database_state(*, public_tables: tuple[str, ...], expected_ta
             kwargs[name] = public_tables
         elif name in {"expected_tables", "expected_public_tables", "model_tables"}:
             kwargs[name] = expected_tables
+        elif name == "legacy_version_table":
+            kwargs[name] = "alembic_version" in public_tables
         elif name == "current_versions":
             kwargs[name] = set()
         elif name == "expected_head":
