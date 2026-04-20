@@ -22,7 +22,7 @@ services:
     build: !override
       context: .
       dockerfile: docker/backend.Dockerfile
-      # 本地开发显式使用源码 target，避免误走发布用 runtime/runtime-cython
+      # 本地开发显式使用源码 target，避免误走其他发布 target
       target: runtime-plain
       args:
         - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}

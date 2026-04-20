@@ -1,5 +1,3 @@
-import ast
-import fnmatch
 from pathlib import Path
 
 
@@ -74,10 +72,6 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
         encoding="utf-8"
     )
 
-    runtime_cython_section = backend_text.split("FROM runtime-base AS runtime-cython", maxsplit=1)[1].split(
-        "FROM runtime-base AS runtime",
-        maxsplit=1,
-    )[0]
     runtime_section = backend_text.split("FROM runtime-base AS runtime", maxsplit=1)[1].split(
         "FROM runtime-base AS runtime-plain",
         maxsplit=1,
@@ -85,9 +79,15 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
     runtime_plain_section = backend_text.split("FROM runtime-base AS runtime-plain", maxsplit=1)[1]
 
     assert "FROM runtime-base AS runtime-release" not in backend_text
+    assert "FROM builder AS selective-cython-compiler" not in backend_text
     assert "FROM selective-cython-compiler AS runtime-release-app-assembler" not in backend_text
+    assert "FROM builder AS cython-compiler" not in backend_text
+    assert "FROM cython-compiler AS runtime-app-assembler" not in backend_text
+    assert "FROM runtime-base AS runtime-cython" not in backend_text
+    assert "COPY backend/cython_build /build/cython_build" not in backend_text
+    assert "cython_build/setup.py build_ext" not in backend_text
 
-    for section in (runtime_cython_section, runtime_section, runtime_plain_section):
+    for section in (runtime_section, runtime_plain_section):
         assert "/opt/backend-build-context" not in section
         assert "backend/docs/agent-tools" not in section
         assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in section
@@ -95,6 +95,7 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
 
     assert "COPY backend/app /app/app" in runtime_plain_section
     assert "COPY --from=runtime-release-app-assembler /final/app /app/app" not in runtime_plain_section
+    assert "COPY --from=runtime-app-assembler /final/app /app/app" not in runtime_plain_section
     assert "selective hardening verifications PASSED" not in runtime_plain_section
 
     assert "subprocess.run(" not in runner_preflight_text
@@ -103,7 +104,7 @@ def test_backend_runtime_targets_do_not_embed_local_runner_build_context() -> No
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in runner_preflight_text
 
 
-def test_backend_release_publish_workflow_uses_runtime_plain_by_default_and_optional_hardened_lane() -> None:
+def test_backend_release_publish_workflow_uses_runtime_plain_by_default() -> None:
     publish_workflow_text = (REPO_ROOT / ".github" / "workflows" / "publish-runtime-images.yml").read_text(
         encoding="utf-8"
     )
@@ -222,6 +223,7 @@ def test_backend_release_defaults_do_not_depend_on_release_only_cython_inputs() 
     assert "removed cythonized source" not in backend_text
     assert "remaining non-preserved .py count" not in backend_text
     assert "selective hardening verifications PASSED" not in backend_text
+    assert not (REPO_ROOT / "backend" / "cython_build").exists()
     assert not (REPO_ROOT / "backend" / "cython_build" / "release_allowlist.txt").exists()
     assert not (REPO_ROOT / "backend" / "cython_build" / "release_exclusion_list.txt").exists()
 
