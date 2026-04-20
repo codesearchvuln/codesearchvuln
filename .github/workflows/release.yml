@@ -791,6 +791,8 @@ jobs:
           set -euo pipefail
 
           PUBLISH_DIR="${RUNNER_TEMP}/release-publish"
+          COMPARE_DIR="${RUNNER_TEMP}/release-compare"
+          PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
           git worktree add --detach --force "${PUBLISH_DIR}" HEAD
 
           cleanup() {
@@ -798,31 +800,53 @@ jobs:
           }
           trap cleanup EXIT
 
-          cd "${PUBLISH_DIR}"
+          git_tree_hash_for_dir() {
+            local source_dir="$1"
+            local repo_dir="$2"
+
+            rm -rf "${repo_dir}"
+            mkdir -p "${repo_dir}"
+            git init -q "${repo_dir}"
+
+            if [[ -d "${source_dir}" ]]; then
+              cp -a "${source_dir}/." "${repo_dir}/"
+            fi
+
+            git -C "${repo_dir}" add -A
+            git -C "${repo_dir}" write-tree
+          }
+
+          rm -rf "${PUBLISH_READY_DIR}"
+          mkdir -p "${PUBLISH_READY_DIR}"
+          cp -a "${RELEASE_DIR}/." "${PUBLISH_READY_DIR}/"
+          rm -rf "${PUBLISH_READY_DIR}/images"
+          candidate_tree="$(git_tree_hash_for_dir "${PUBLISH_READY_DIR}" "${COMPARE_DIR}")"
+
           if git ls-remote --exit-code --heads origin release >/dev/null 2>&1; then
             git fetch --force origin release:refs/remotes/origin/release
-            git checkout -B release origin/release
-          else
-            git checkout --orphan "release-publish-${GITHUB_RUN_ID}"
+            remote_tree="$(git rev-parse refs/remotes/origin/release^{tree})"
+
+            if [[ "${candidate_tree}" == "${remote_tree}" ]]; then
+              echo "release_commit_sha=$(git rev-parse refs/remotes/origin/release)" >> "$GITHUB_OUTPUT"
+              echo "Release branch is already up to date; skipping push."
+              exit 0
+            fi
           fi
 
+          cd "${PUBLISH_DIR}"
+          git checkout --orphan "release-publish-${GITHUB_RUN_ID}"
+
+          git rm -rf --cached . >/dev/null 2>&1 || true
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a "${RELEASE_DIR}/." .
-          rm -rf ./images
+          cp -a "${PUBLISH_READY_DIR}/." .
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
 
-          if git diff --cached --quiet --ignore-submodules --; then
-            echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-            echo "Release branch is already up to date; skipping push."
-            exit 0
-          fi
-
           git commit -m "chore: refresh release branch snapshot"
           echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          git push origin HEAD:release
+          git push --force origin HEAD:release
 
       - name: Resolve semantic release version
         id: resolve_semantic_version

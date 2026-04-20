@@ -32,6 +32,19 @@ def _run_sourcecode_generator(output_dir: Path, *, validate: bool = False) -> su
     )
 
 
+def _git_tree_hash(source_dir: Path, repo_dir: Path) -> str:
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(repo_dir)], check=True)
+    shutil.copytree(source_dir, repo_dir, dirs_exist_ok=True)
+    subprocess.run(["git", "-C", str(repo_dir), "add", "-A"], check=True)
+    return subprocess.run(
+        ["git", "-C", str(repo_dir), "write-tree"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(tmp_path: Path) -> None:
     output_dir = tmp_path / "sourcecode-tree"
 
@@ -147,5 +160,48 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
     assert "git worktree add --detach --force" in workflow_text
     assert "generate-sourcecode-branch.sh" in workflow_text
     assert "git ls-remote --exit-code --heads origin sourcecode" in workflow_text
+    assert 'COMPARE_DIR="${RUNNER_TEMP}/sourcecode-compare"' in workflow_text
+    assert "git_tree_hash_for_dir()" in workflow_text
+    assert 'git rev-parse refs/remotes/origin/sourcecode^{tree}' in workflow_text
+    assert 'candidate_tree="$(git_tree_hash_for_dir "${SOURCECODE_DIR}" "${COMPARE_DIR}")"' in workflow_text
     assert 'git checkout --orphan "sourcecode-publish-${GITHUB_RUN_ID}"' in workflow_text
-    assert "git push origin HEAD:sourcecode" in workflow_text
+    assert "git checkout -B sourcecode origin/sourcecode" not in workflow_text
+    assert "git push origin HEAD:sourcecode" not in workflow_text
+    assert "git push --force origin HEAD:sourcecode" in workflow_text
+
+
+def test_git_tree_hash_ignores_empty_directories_when_comparing_sourcecode_snapshots(tmp_path: Path) -> None:
+    baseline_dir = tmp_path / "baseline"
+    sourcecode_dir = tmp_path / "sourcecode"
+    (baseline_dir / "scripts").mkdir(parents=True)
+    (sourcecode_dir / "scripts").mkdir(parents=True)
+    (sourcecode_dir / "data").mkdir()
+
+    baseline_script = baseline_dir / "scripts" / "setup-env.sh"
+    sourcecode_script = sourcecode_dir / "scripts" / "setup-env.sh"
+    baseline_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    sourcecode_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    baseline_script.chmod(0o755)
+    sourcecode_script.chmod(0o755)
+
+    assert _git_tree_hash(sourcecode_dir, tmp_path / "source-repo") == _git_tree_hash(
+        baseline_dir, tmp_path / "baseline-repo"
+    )
+
+
+def test_git_tree_hash_detects_executable_bit_changes(tmp_path: Path) -> None:
+    executable_dir = tmp_path / "executable"
+    non_executable_dir = tmp_path / "non-executable"
+    (executable_dir / "scripts").mkdir(parents=True)
+    (non_executable_dir / "scripts").mkdir(parents=True)
+
+    executable_script = executable_dir / "scripts" / "setup-env.sh"
+    non_executable_script = non_executable_dir / "scripts" / "setup-env.sh"
+    executable_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    non_executable_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    executable_script.chmod(0o755)
+    non_executable_script.chmod(0o644)
+
+    assert _git_tree_hash(executable_dir, tmp_path / "exec-repo") != _git_tree_hash(
+        non_executable_dir, tmp_path / "non-exec-repo"
+    )

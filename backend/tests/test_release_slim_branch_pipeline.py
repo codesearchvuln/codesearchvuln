@@ -418,23 +418,31 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'case "${dashboard_status_code}" in' not in workflow_text
     assert 'case "${projects_status_code}" in' not in workflow_text
     assert "http://127.0.0.1:3000/" not in workflow_text
-    assert "git push origin HEAD:release" in workflow_text
+    assert "git push origin HEAD:release" not in workflow_text
+    assert "git push --force origin HEAD:release" in workflow_text
     assert "- name: Download snapshot draft release assets" in workflow_text
     assert "./scripts/download-release-assets.py" in workflow_text
     assert workflow_text.index("write-release-snapshot-lock.py") < workflow_text.index(
-        'git push origin HEAD:release'
+        'git push --force origin HEAD:release'
     )
-    assert workflow_text.index('git push origin HEAD:release') < workflow_text.index(
+    assert workflow_text.index('git push --force origin HEAD:release') < workflow_text.index(
         '- name: Resolve semantic release version'
     )
     assert "fetch-depth: 0" in workflow_text
     assert "git checkout --orphan" in workflow_text
     assert "git ls-remote --exit-code --heads origin release" in workflow_text
     assert "git fetch --force origin release:refs/remotes/origin/release" in workflow_text
-    assert "git checkout -B release origin/release" in workflow_text
+    assert 'COMPARE_DIR="${RUNNER_TEMP}/release-compare"' in workflow_text
+    assert "git_tree_hash_for_dir()" in workflow_text
+    assert 'PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"' in workflow_text
+    assert 'cp -a "${RELEASE_DIR}/." "${PUBLISH_READY_DIR}/"' in workflow_text
+    assert 'rm -rf "${PUBLISH_READY_DIR}/images"' in workflow_text
+    assert 'git rev-parse refs/remotes/origin/release^{tree}' in workflow_text
+    assert 'candidate_tree="$(git_tree_hash_for_dir "${PUBLISH_READY_DIR}" "${COMPARE_DIR}")"' in workflow_text
+    assert 'echo "release_commit_sha=$(git rev-parse refs/remotes/origin/release)" >> "$GITHUB_OUTPUT"' in workflow_text
+    assert "git checkout -B release origin/release" not in workflow_text
     assert "git fetch --force --tags origin" in workflow_text
     assert "git push origin --delete" not in workflow_text
-    assert "git push --force origin HEAD:release" not in workflow_text
     assert "release-tag-cleanup.txt" not in workflow_text
     assert "release-assets-latest" not in workflow_text
     assert "docker-publish.yml" not in workflow_text

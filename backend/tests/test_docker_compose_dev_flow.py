@@ -741,9 +741,13 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert 'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/artifacts"' not in workflow_text
     assert 'actions/artifacts/${artifact_id}/zip' not in workflow_text
     assert "release-manifest-json" not in workflow_text
-    assert "git push origin HEAD:release" in workflow_text
+    assert "git push origin HEAD:release" not in workflow_text
+    assert "git push --force origin HEAD:release" in workflow_text
     assert "git ls-remote --exit-code --heads origin release" in workflow_text
-    assert "git checkout -B release origin/release" in workflow_text
+    assert 'COMPARE_DIR="${RUNNER_TEMP}/release-compare"' in workflow_text
+    assert "git_tree_hash_for_dir()" in workflow_text
+    assert 'PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"' in workflow_text
+    assert "git checkout -B release origin/release" not in workflow_text
     assert 'repos/${GITHUB_REPOSITORY}/releases/${SNAPSHOT_RELEASE_ID}' in workflow_text
     assert 'repos/${GITHUB_REPOSITORY}/releases/tags/${SNAPSHOT_TAG}' not in workflow_text
     assert "./scripts/release_version.py" in workflow_text

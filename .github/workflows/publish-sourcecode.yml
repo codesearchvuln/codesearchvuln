@@ -44,6 +44,7 @@ jobs:
           set -euo pipefail
 
           PUBLISH_DIR="${RUNNER_TEMP}/sourcecode-publish"
+          COMPARE_DIR="${RUNNER_TEMP}/sourcecode-compare"
           git worktree add --detach --force "${PUBLISH_DIR}" HEAD
 
           cleanup() {
@@ -51,14 +52,38 @@ jobs:
           }
           trap cleanup EXIT
 
-          cd "${PUBLISH_DIR}"
+          git_tree_hash_for_dir() {
+            local source_dir="$1"
+            local repo_dir="$2"
+
+            rm -rf "${repo_dir}"
+            mkdir -p "${repo_dir}"
+            git init -q "${repo_dir}"
+
+            if [[ -d "${source_dir}" ]]; then
+              cp -a "${source_dir}/." "${repo_dir}/"
+            fi
+
+            git -C "${repo_dir}" add -A
+            git -C "${repo_dir}" write-tree
+          }
+
+          candidate_tree="$(git_tree_hash_for_dir "${SOURCECODE_DIR}" "${COMPARE_DIR}")"
+
           if git ls-remote --exit-code --heads origin sourcecode >/dev/null 2>&1; then
             git fetch --force origin sourcecode:refs/remotes/origin/sourcecode
-            git checkout -B sourcecode origin/sourcecode
-          else
-            git checkout --orphan "sourcecode-publish-${GITHUB_RUN_ID}"
+            remote_tree="$(git rev-parse refs/remotes/origin/sourcecode^{tree})"
+
+            if [[ "${candidate_tree}" == "${remote_tree}" ]]; then
+              echo "Sourcecode branch is already up to date; skipping push."
+              exit 0
+            fi
           fi
 
+          cd "${PUBLISH_DIR}"
+          git checkout --orphan "sourcecode-publish-${GITHUB_RUN_ID}"
+
+          git rm -rf --cached . >/dev/null 2>&1 || true
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a "${SOURCECODE_DIR}/." .
 
@@ -66,10 +91,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
 
-          if git diff --cached --quiet --ignore-submodules --; then
-            echo "Sourcecode branch is already up to date; skipping push."
-            exit 0
-          fi
-
           git commit -m "chore: refresh sourcecode branch snapshot"
-          git push origin HEAD:sourcecode
+          git push --force origin HEAD:sourcecode
