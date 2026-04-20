@@ -35,6 +35,17 @@ def test_image_candidates_selection(monkeypatch):
     assert client._select_image() == "registry.example.com/acme/sandbox-runner:test"
 
 
+def test_image_selection_requires_configured_runner_image(monkeypatch):
+    """测试缺少镜像配置时会显式报错，而不是回退到旧默认值"""
+    monkeypatch.setattr(settings, "SANDBOX_RUNNER_IMAGE", "", raising=False)
+
+    client = SandboxRunnerClient()
+
+    assert client._get_image_candidates() == []
+    with pytest.raises(RuntimeError, match="SANDBOX_RUNNER_IMAGE must be configured"):
+        client._select_image()
+
+
 def test_workspace_creation():
     """测试 workspace 创建"""
     client = SandboxRunnerClient()

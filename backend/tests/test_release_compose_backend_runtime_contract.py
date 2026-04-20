@@ -10,22 +10,22 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     compose_text = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     hybrid_text = (REPO_ROOT / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
 
-    assert "docker compose up" in compose_text
-    assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" in compose_text
-    assert "docker-compose.full.yml" not in compose_text
+    assert "docker compose up" not in compose_text
+    assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in compose_text
+    assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in compose_text
     assert "docker-compose.release.yml" not in compose_text
     assert "docker-compose.release-cython.yml" not in compose_text
     assert "docker-compose.self-contained.yml" not in compose_text
     assert (
-        "image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "image: ${BACKEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert (
-        "image: ${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "image: ${FRONTEND_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-frontend:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert (
-        "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
     assert "\n  nexus-web:\n" not in compose_text
@@ -52,7 +52,7 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "context: ./frontend" in hybrid_text
     assert "context: ." in hybrid_text
     assert (
-        "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-unbengable12}/"
+        "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in hybrid_text
     assert "\n  nexus-web:\n" not in hybrid_text
@@ -127,16 +127,11 @@ def test_backend_release_publish_workflow_uses_runtime_plain_by_default_and_opti
         maxsplit=1,
     )[0]
     publish_backend_section = publish_workflow_text.split("  publish-backend:\n", maxsplit=1)[1].split(
-        "\n  publish-backend-hardened:\n",
-        maxsplit=1,
-    )[0]
-    hardened_section = publish_workflow_text.split("  publish-backend-hardened:\n", maxsplit=1)[1].split(
-        "\n  publish-yasa-runner:\n",
+        "\n  publish-yasa-runner-amd64:\n",
         maxsplit=1,
     )[0]
 
-    assert "publish_backend_hardened:" in publish_workflow_text
-    assert "default: false" in publish_workflow_text
+    assert "publish_backend_hardened:" not in publish_workflow_text
 
     assert "if: ${{ inputs.build_frontend }}" in publish_frontend_amd64_section
     assert "runs-on: ubuntu-latest" in publish_frontend_amd64_section
@@ -210,20 +205,7 @@ def test_backend_release_publish_workflow_uses_runtime_plain_by_default_and_opti
     assert 'echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"' in publish_backend_section
     assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
 
-    assert "if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}" in hardened_section
-    assert "platforms: linux/amd64" in hardened_section
-    assert "target: runtime-cython" in hardened_section
-    assert "tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-hardened" in hardened_section
-    assert "scope=backend-runtime-cython" in hardened_section
-    assert "vulhunter-backend:buildcache-runtime-cython" in hardened_section
-    assert 'IMAGE_TAG: ${{ format(\'{0}-hardened\', needs.prepare.outputs.tag) }}' in hardened_section
-
-    assert "publish_backend_hardened:" in release_workflow_text
-    assert "build_backend: true" in release_workflow_text
-    assert (
-        "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
-        "inputs.publish_backend_hardened || false }}"
-    ) in release_workflow_text
+    assert "publish_backend_hardened:" not in release_workflow_text
 
 
 def test_backend_release_defaults_do_not_depend_on_release_only_cython_inputs() -> None:
@@ -260,7 +242,7 @@ def test_backend_release_defaults_do_not_depend_on_release_only_cython_inputs() 
 
 
 def test_runner_dockerfile_specific_ignore_files_and_workflow_paths_contract() -> None:
-    workflow_text = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
 
@@ -301,6 +283,13 @@ def test_runner_dockerfile_specific_ignore_files_and_workflow_paths_contract() -
         content = (REPO_ROOT / rel_path).read_text(encoding="utf-8").splitlines()
         assert content == expected_lines
 
-    assert "- 'docker/*.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/bandit-runner.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/gitleaks-runner.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/pmd-runner.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/opengrep-runner.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/phpstan-runner.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/flow-parser-runner.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/sandbox-runner.Dockerfile.dockerignore'" in workflow_text
+    assert "- 'docker/yasa-runner.Dockerfile.dockerignore'" in workflow_text
     assert "- 'docker/flow-parser-runner.requirements.txt'" in workflow_text
     assert "- 'docker/sandbox-runner.requirements.txt'" in workflow_text

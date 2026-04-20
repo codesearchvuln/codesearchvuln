@@ -10,7 +10,7 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "compose-up-with-fallback.sh"
 _EXPLICIT_MIRROR_ENV = {
     "DOCKERHUB_LIBRARY_MIRROR": "docker.m.daocloud.io/library",
     "GHCR_REGISTRY": "ghcr.io",
-    "VULHUNTER_IMAGE_NAMESPACE": "unbengable12",
+    "VULHUNTER_IMAGE_NAMESPACE": "codesearchvuln",
     "VULHUNTER_IMAGE_TAG": "latest",
     "FRONTEND_NPM_REGISTRY": "https://registry.npmmirror.com",
     "FRONTEND_NPM_REGISTRY_FALLBACK": "https://registry.npmjs.org",
@@ -346,7 +346,7 @@ def test_wrapper_failure_surfaces_remote_image_hint(tmp_path: Path) -> None:
 
     assert result.returncode == 1, combined_output
     assert "anonymous GHCR pull failed or the image namespace/tag is incorrect" in combined_output
-    assert "ghcr.io/unbengable12/vulhunter-backend:latest" in combined_output
+    assert "ghcr.io/codesearchvuln/vulhunter-backend:latest" in combined_output
 
 
 # ─── Local build fallback tests ──────────────────────────────────────────────

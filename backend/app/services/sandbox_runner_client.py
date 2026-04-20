@@ -44,9 +44,7 @@ class SandboxRunnerClient:
         获取唯一的 sandbox-runner 镜像候选列表
         """
         candidate = str(getattr(settings, "SANDBOX_RUNNER_IMAGE", "") or "").strip()
-        if candidate:
-            return [candidate]
-        return ["ghcr.io/vulhunter/vulhunter-sandbox-runner:latest"]
+        return [candidate] if candidate else []
 
     def _select_image(self) -> str:
         """
@@ -60,7 +58,7 @@ class SandboxRunnerClient:
         if candidates:
             return candidates[0]
 
-        return "ghcr.io/vulhunter/vulhunter-sandbox-runner:latest"
+        raise RuntimeError("SANDBOX_RUNNER_IMAGE must be configured before selecting a sandbox runner image")
 
     def _create_workspace(self, run_id: Optional[str] = None) -> Path:
         """

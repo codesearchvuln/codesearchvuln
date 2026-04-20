@@ -25,7 +25,7 @@ def _default_tag(env_name: str, fallback: str = "latest") -> str:
 def _default_image(name: str) -> str:
     return (
         f"{_default_ghcr_registry()}/"
-        f"{_default_namespace('VULHUNTER_IMAGE_NAMESPACE', 'unbengable12')}/"
+        f"{_default_namespace('VULHUNTER_IMAGE_NAMESPACE', 'codesearchvuln')}/"
         f"{name}:{_default_tag('VULHUNTER_IMAGE_TAG')}"
     )
 
@@ -139,7 +139,7 @@ class Settings(BaseSettings):
     SCAN_WORKSPACE_ROOT: str = "/tmp/vulhunter/scans"
     SCAN_WORKSPACE_VOLUME: str = "vulhunter_scan_workspace"
     GHCR_REGISTRY: str = _default_ghcr_registry()
-    VULHUNTER_IMAGE_NAMESPACE: str = _default_namespace("VULHUNTER_IMAGE_NAMESPACE", "unbengable12")
+    VULHUNTER_IMAGE_NAMESPACE: str = _default_namespace("VULHUNTER_IMAGE_NAMESPACE", "codesearchvuln")
     VULHUNTER_IMAGE_TAG: str = _default_tag("VULHUNTER_IMAGE_TAG")
     SCANNER_YASA_IMAGE: str = _default_image("vulhunter-yasa-runner")
     SCANNER_OPENGREP_IMAGE: str = _default_image("vulhunter-opengrep-runner")
