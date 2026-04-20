@@ -19,6 +19,7 @@ sys.modules.setdefault("git", git_module)
 from app.main import assert_database_schema_is_latest
 from app.runtime.db_contract import DatabaseContractError
 
+
 @pytest.mark.asyncio
 async def test_assert_database_schema_is_latest_delegates_to_strict_db_contract_check(monkeypatch):
     called = []
@@ -34,7 +35,7 @@ async def test_assert_database_schema_is_latest_delegates_to_strict_db_contract_
 
 
 @pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_rejects_revision_mismatch_without_auto_upgrade(
+async def test_assert_database_schema_is_latest_rejects_schema_mismatch_without_auto_bootstrap(
     monkeypatch,
 ):
     async def _fake_check():
@@ -50,7 +51,7 @@ async def test_assert_database_schema_is_latest_rejects_revision_mismatch_withou
 
 
 @pytest.mark.asyncio
-async def test_assert_database_schema_is_latest_rejects_database_with_multiple_recorded_versions(
+async def test_assert_database_schema_is_latest_rejects_database_with_unsupported_state(
     monkeypatch,
 ):
     async def _fake_check():
