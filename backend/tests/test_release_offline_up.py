@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import re
+import socket
 import stat
 import subprocess
 import threading
@@ -13,6 +14,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASE_PROJECT_NAME = "vulhunter-release"
+
+
+def _bind_fake_unix_socket(socket_path: Path) -> None:
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind(str(socket_path))
+    finally:
+        sock.close()
 
 
 @contextmanager
@@ -536,7 +545,7 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
         offline_env_file.unlink()
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -621,7 +630,7 @@ def test_offline_up_bash_empty_release_stack_continues_without_warning(tmp_path:
     script_path = output_dir / "scripts" / "offline-up.sh"
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -673,7 +682,7 @@ def test_offline_up_bash_warns_and_continues_when_release_stack_discovery_is_ben
     script_path = output_dir / "scripts" / "offline-up.sh"
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -726,7 +735,7 @@ def test_offline_up_bash_fails_when_release_stack_discovery_reports_docker_permi
     script_path = output_dir / "scripts" / "offline-up.sh"
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -770,7 +779,7 @@ def test_offline_up_bash_auto_installs_missing_zstd_on_supported_ubuntu_before_b
     script_path = output_dir / "scripts" / "offline-up.sh"
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     apt_log = tmp_path / "apt.log"
@@ -820,7 +829,7 @@ def test_offline_up_bash_refuses_automatic_install_on_unsupported_host(tmp_path:
     script_path = output_dir / "scripts" / "offline-up.sh"
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     apt_log = tmp_path / "apt.log"
@@ -874,7 +883,7 @@ def test_offline_up_bash_fails_when_backend_image_revision_label_does_not_match_
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -922,7 +931,7 @@ def test_offline_up_bash_allows_backend_revision_mismatch_for_resolved_fallback_
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -968,7 +977,7 @@ def test_offline_up_bash_fails_when_backend_image_revision_label_is_missing(
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1009,7 +1018,7 @@ def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(t
 
     before_offline_env = (env_dir / "offline-images.env").read_text(encoding="utf-8-sig")
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1052,7 +1061,7 @@ def test_offline_up_bash_attach_logs_mode_runs_foreground_compose_up(tmp_path: P
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1149,7 +1158,7 @@ def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1199,7 +1208,7 @@ def test_offline_up_bash_fails_prevalidation_before_load_when_lock_bundle_name_i
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1249,7 +1258,7 @@ def test_offline_up_bash_fails_prevalidation_before_load_when_lock_checksum_mism
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1300,7 +1309,7 @@ def test_offline_up_bash_fails_prevalidation_before_load_when_current_arch_entry
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1345,7 +1354,7 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
@@ -1417,7 +1426,7 @@ def test_offline_up_bash_backend_readiness_failure_collects_dependency_logs(tmp_
     )
 
     socket_path = tmp_path / "docker.sock"
-    socket_path.write_text("", encoding="utf-8")
+    _bind_fake_unix_socket(socket_path)
     docker_log = tmp_path / "docker.log"
     zstd_log = tmp_path / "zstd.log"
     fake_bin = tmp_path / "bin"
