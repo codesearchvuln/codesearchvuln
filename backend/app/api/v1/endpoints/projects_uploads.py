@@ -388,9 +388,13 @@ async def upload_project_directory(
                 total_size += file_size
                 file_count += 1
 
-                # 检查总大小是否超过限制（500MB）
-                if total_size > 500 * 1024 * 1024:
-                    raise HTTPException(status_code=400, detail="文件总大小不能超过 500MB")
+                # 检查总大小是否超过限制（与压缩包上传上限保持一致）
+                if total_size > UploadManager.MAX_FILE_SIZE:
+                    max_size_gb = UploadManager.MAX_FILE_SIZE / (1024 * 1024 * 1024)
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"文件总大小不能超过 {max_size_gb:.0f}GB",
+                    )
 
                 # 完整的目标路径
                 target_path = os.path.join(temp_base_dir, file_path)

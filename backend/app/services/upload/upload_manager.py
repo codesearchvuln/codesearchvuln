@@ -18,11 +18,11 @@ class UploadManager:
     4. 管理文件生命周期
     """
     
-    # 支持的最大文件大小：500MB
-    MAX_FILE_SIZE = 500 * 1024 * 1024
+    # 支持的最大文件大小：2GB
+    MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024
     
-    # 支持的最大目录大小：1GB
-    MAX_DIRECTORY_SIZE = 1 * 1024 * 1024 * 1024
+    # 支持的最大目录大小：4GB（为 2GB 压缩包预留解压空间）
+    MAX_DIRECTORY_SIZE = 4 * 1024 * 1024 * 1024
     
     @staticmethod
     def validate_file(file_path: str) -> tuple[bool, Optional[str]]:

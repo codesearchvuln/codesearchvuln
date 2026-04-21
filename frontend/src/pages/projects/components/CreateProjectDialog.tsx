@@ -392,7 +392,7 @@ export default function CreateProjectDialog({
 										拖拽多个压缩包到这里
 									</h3>
 									<p className="text-xs font-mono text-muted-foreground mb-4">
-										最大: 500MB / 支持: .zip .tar .tar.gz .tar.bz2 .7z .rar
+										最大: 2GB / 支持: .zip .tar .tar.gz .tar.bz2 .7z .rar
 									</p>
 									<Button
 										type="button"

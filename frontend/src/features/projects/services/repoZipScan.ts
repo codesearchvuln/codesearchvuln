@@ -12,10 +12,10 @@ export function validateZipFile(file: File): { valid: boolean; error?: string } 
     };
   }
 
-  // 检查文件大小 (限制为500MB)
-  const maxSize = 500 * 1024 * 1024;
+  // 检查文件大小 (限制为2GB)
+  const maxSize = 2 * 1024 * 1024 * 1024;
   if (file.size > maxSize) {
-    return { valid: false, error: '文件大小不能超过500MB' };
+    return { valid: false, error: '文件大小不能超过2GB' };
   }
 
   return { valid: true };
