@@ -940,7 +940,7 @@ jobs:
             "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json"
             "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
             "${RELEASE_TREE}/release-snapshot-lock.json"
-            "./scripts/release-assets/offline-bootstrap.sh#AuditTool-offline-bootstrap.sh"
+            "./scripts/release-assets/offline-bootstrap.sh#Vulhunter-offline-bootstrap.sh"
           )
 
           max_parallel="${UPLOAD_PARALLELISM}"

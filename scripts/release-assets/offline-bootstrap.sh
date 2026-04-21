@@ -24,7 +24,7 @@ die() {
 
 usage() {
   cat <<'EOF'
-Usage: bash ./AuditTool-offline-bootstrap.sh
+Usage: bash ./Vulhunter-offline-bootstrap.sh
 
 Run from a directory that contains:
   - exactly one AuditTool-*.*.*.zip or AuditTool-*.*.*.tar.gz

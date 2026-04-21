@@ -279,7 +279,7 @@ def test_offline_bootstrap_standalone_asset_refuses_auto_install_on_unsupported_
     _write_bundle(workdir, services_bundle)
     _write_bundle(workdir, scanner_bundle)
 
-    standalone_script = workdir / "AuditTool-offline-bootstrap.sh"
+    standalone_script = workdir / "Vulhunter-offline-bootstrap.sh"
     standalone_script.write_text(SCRIPT_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     standalone_script.chmod(standalone_script.stat().st_mode | stat.S_IXUSR)
 

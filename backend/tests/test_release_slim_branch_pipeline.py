@@ -372,8 +372,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release edit "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release upload "${SEMANTIC_TAG}"' in workflow_text
-    assert "./scripts/release-assets/offline-bootstrap.sh#AuditTool-offline-bootstrap.sh" in workflow_text
-    assert workflow_text.count("AuditTool-offline-bootstrap.sh") == 1
+    assert "./scripts/release-assets/offline-bootstrap.sh#Vulhunter-offline-bootstrap.sh" in workflow_text
+    assert workflow_text.count("Vulhunter-offline-bootstrap.sh") == 1
     assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
     assert "generated_by=release.yml" in workflow_text
     assert "./scripts/release_version.py" in workflow_text
