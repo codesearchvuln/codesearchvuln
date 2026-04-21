@@ -12,7 +12,7 @@ def test_release_workflow_generates_local_sourcecode_archives_for_semantic_relea
     assert "generate-sourcecode-branch.sh" in workflow_text
     assert "${RUNNER_TEMP}/sourcecode-tree" in workflow_text
     assert "--validate" in workflow_text
-    assert "semantic-release-archives" in workflow_text
+    assert "semantic-release-assets" in workflow_text
     assert "source_code.zip" in workflow_text
     assert "source_code.tar.gz" in workflow_text
     assert "release_code.zip" in workflow_text
