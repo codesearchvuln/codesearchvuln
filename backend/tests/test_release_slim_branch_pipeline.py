@@ -447,6 +447,23 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "--validate" in workflow_text
     assert 'git rev-parse refs/remotes/origin/release^{tree}' in workflow_text
     assert 'candidate_tree="$(git_tree_hash_for_dir "${PUBLISH_READY_DIR}" "${COMPARE_DIR}")"' in workflow_text
+    assert "generate-sourcecode-branch.sh" in workflow_text
+    assert 'SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"' in workflow_text
+    assert '--output "${SOURCECODE_DIR}"' in workflow_text
+    assert "--validate" in workflow_text
+    assert "semantic-release-assets" in workflow_text
+    assert "release_code.zip" in workflow_text
+    assert "release_code.tar.gz" in workflow_text
+    assert "source_code.zip" in workflow_text
+    assert "source_code.tar.gz" in workflow_text
+    assert "origin/sourcecode" not in workflow_text
+    assert "refs/remotes/origin/sourcecode" not in workflow_text
+    assert workflow_text.index('PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"') < workflow_text.index(
+        "generate-sourcecode-branch.sh"
+    )
+    assert workflow_text.index("generate-sourcecode-branch.sh") < workflow_text.index(
+        'gh release upload "${SEMANTIC_TAG}"'
+    )
     assert 'echo "release_commit_sha=$(git rev-parse refs/remotes/origin/release)" >> "$GITHUB_OUTPUT"' in workflow_text
     assert "git checkout -B release origin/release" not in workflow_text
     assert "git fetch --force --tags origin" in workflow_text
