@@ -36,6 +36,7 @@ import {
 	type AgentFinding,
 	type AgentTaskProgressResponse,
 	cancelAgentTask,
+	downloadAgentLogs,
 	getAgentEvents,
 	getAgentFindings,
 	getAgentTask,
@@ -177,18 +178,6 @@ const PROGRESS_PATTERNS: { pattern: RegExp; key: string }[] = [
 	{ pattern: /扫描进度[:：]?\s*\d+/, key: "scan_progress" },
 	{ pattern: /分析进度[:：]?\s*\d+/, key: "analyze_progress" },
 ];
-
-const LOG_TYPE_LABELS: Record<string, string> = {
-	thinking: "思考",
-	tool: "工具",
-	phase: "阶段",
-	finding: "漏洞",
-	dispatch: "调度",
-	info: "信息",
-	error: "错误",
-	user: "用户",
-	progress: "进度",
-};
 
 type RealtimeQueueSnapshot = {
 	riskQueue: {
@@ -651,24 +640,6 @@ function isRetryingTimeoutWarning(
 			: isTruthyMetadataFlag(metadata?.retryable);
 	const terminal = isTruthyMetadataFlag(metadata?.is_terminal);
 	return retryClass === "timeout_error" && retryable && !terminal;
-}
-
-function toSafeFilename(value: string): string {
-	const text = String(value || "").trim();
-	if (!text) return "task";
-	return text.replace(/[^\w.-]+/g, "_").slice(0, 60) || "task";
-}
-
-function downloadTextFile(content: string, filename: string, mime: string) {
-	const blob = new Blob([content], { type: mime });
-	const url = URL.createObjectURL(blob);
-	const a = document.createElement("a");
-	a.href = url;
-	a.download = filename;
-	document.body.appendChild(a);
-	a.click();
-	document.body.removeChild(a);
-	URL.revokeObjectURL(url);
 }
 
 function toSafeNumber(value: unknown): number | null {
@@ -3970,80 +3941,26 @@ function AgentAuditPageContent() {
 	};
 
 	const handleExportLogs = useCallback(
-		(format: "json" | "markdown") => {
+		async (format: "json" | "markdown") => {
 			if (!task) {
 				toast.error("任务信息未加载，无法导出");
 				return;
 			}
-			const date = new Date();
-			const ymd = date.toISOString().slice(0, 10);
-			const taskName = toSafeFilename(task.name || task.id.slice(0, 8));
-			const base = `agent_audit_logs_${taskName}_${ymd}`;
-
-			if (format === "json") {
-				const payload = {
-					meta: {
-						task_id: task.id,
-						task_name: task.name,
-						project_id: task.project_id,
-						exported_at: date.toISOString(),
-						status: task.status,
-						current_phase: task.current_phase,
-						current_step: task.current_step,
-					},
-					logs,
-				};
-				downloadTextFile(
-					JSON.stringify(payload, null, 2),
-					`${base}.json`,
-					"application/json",
+			try {
+				await downloadAgentLogs(task.id, format, {
+					taskName: task.name,
+				});
+				toast.success(
+					format === "json"
+						? "活动日志已导出为 JSON"
+						: "活动日志已导出为 Markdown",
 				);
-				toast.success("活动日志已导出为 JSON");
-				return;
+			} catch (error) {
+				console.error("Failed to export agent logs:", error);
+				toast.error("导出活动日志失败，请重试");
 			}
-
-			const lines: string[] = [];
-			lines.push(`# 智能扫描活动日志`);
-			lines.push(`- task_id: ${task.id}`);
-			lines.push(`- task_name: ${task.name || "-"}`);
-			lines.push(`- project_id: ${task.project_id}`);
-			lines.push(`- status: ${task.status}`);
-			lines.push(`- phase: ${task.current_phase || "-"}`);
-			lines.push(`- step: ${task.current_step || "-"}`);
-			lines.push(`- exported_at: ${date.toISOString()}`);
-			lines.push("");
-
-			for (const item of logs) {
-				const typeLabel = LOG_TYPE_LABELS[item.type] || item.type;
-				const agentLabel = item.agentName ? `【${item.agentName}】` : "";
-				lines.push(
-					`## [${item.time}] [${typeLabel}] ${agentLabel} ${item.title}`,
-				);
-				if (item.tool?.name) {
-					lines.push(
-						`- tool: ${item.tool.name} (${item.tool.status || "-"})` +
-							(item.tool.duration ? `, ${item.tool.duration}ms` : ""),
-					);
-				}
-				if (item.content) {
-					lines.push("");
-					lines.push("```text");
-					lines.push(item.content);
-					lines.push("```");
-				}
-				if (item.detail) {
-					lines.push("");
-					lines.push("```json");
-					lines.push(JSON.stringify(item.detail, null, 2));
-					lines.push("```");
-				}
-				lines.push("");
-			}
-
-			downloadTextFile(lines.join("\n"), `${base}.md`, "text/markdown");
-			toast.success("活动日志已导出为 Markdown");
 		},
-		[logs, task],
+		[task],
 	);
 
 	const handleToggleAutoScroll = useCallback(() => {

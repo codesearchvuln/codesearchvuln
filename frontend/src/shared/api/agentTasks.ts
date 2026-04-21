@@ -6,6 +6,7 @@
 import { apiClient } from "./serverClient";
 import { buildApiUrl } from "./apiBase";
 import {
+  buildLogDownloadBaseName,
   buildReportDownloadBaseName,
   resolveFilenameFromDisposition,
 } from "../utils/reportExportFilename";
@@ -650,6 +651,41 @@ export async function downloadAgentReport(taskId: string, format: "markdown" | "
   filename = resolveFilenameFromDisposition(contentDisposition, filename);
 
   link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode?.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function downloadAgentLogs(
+  taskId: string,
+  format: "json" | "markdown" = "json",
+  options?: {
+    taskName?: string | null;
+  },
+): Promise<void> {
+  const response = await apiClient.get(`/agent-tasks/${taskId}/logs/export`, {
+    params: { format },
+    responseType: "blob",
+  });
+
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement("a");
+  link.href = url;
+
+  const baseName = buildLogDownloadBaseName(
+    options?.taskName,
+    taskId.slice(0, 8),
+  );
+  const fallbackFilename =
+    format === "markdown" ? `${baseName}.md` : `${baseName}.json`;
+  const contentDisposition = response.headers["content-disposition"];
+  const filename = resolveFilenameFromDisposition(
+    contentDisposition,
+    fallbackFilename,
+  );
+
+  link.setAttribute("download", filename);
   document.body.appendChild(link);
   link.click();
   link.parentNode?.removeChild(link);
