@@ -774,8 +774,54 @@ jobs:
           }
           trap cleanup EXIT
 
+          docker_server_arch="$(docker version --format '{{.Server.Arch}}' | tr -d '\r' | tail -n 1)"
+          case "$(printf '%s' "${docker_server_arch}" | tr '[:upper:]' '[:lower:]')" in
+            amd64|x86_64)
+              smoke_arch="amd64"
+              ;;
+            arm64|aarch64)
+              smoke_arch="arm64"
+              ;;
+            *)
+              echo "::error::Unsupported Docker server architecture for smoke test: ${docker_server_arch}"
+              exit 1
+              ;;
+          esac
+
+          mapfile -t smoke_bundle_assets < <(
+            python3 - "${RUNNER_TEMP}/release-tree/release-snapshot-lock.json" "${smoke_arch}" <<'PY'
+          from __future__ import annotations
+
+          import json
+          import sys
+          from pathlib import Path
+
+
+          lock_path = Path(sys.argv[1])
+          arch = sys.argv[2]
+          lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
+
+          for bundle in ("services", "scanner"):
+              entry = lock_payload.get("bundles", {}).get(bundle, {}).get(arch)
+              if not isinstance(entry, dict):
+                  raise SystemExit(f"missing lock entry bundles/{bundle}/{arch}: {lock_path}")
+              asset_name = str(entry.get("asset_name") or "").strip()
+              if not asset_name:
+                  raise SystemExit(f"missing asset_name for {bundle}/{arch}: {lock_path}")
+              print(asset_name)
+          PY
+          )
+          [[ "${#smoke_bundle_assets[@]}" -eq 2 ]] || {
+            echo "::error::Expected exactly two smoke-test bundle assets for ${smoke_arch}, got ${#smoke_bundle_assets[@]}."
+            exit 1
+          }
+
           mkdir -p "${RUNNER_TEMP}/release-tree/images"
-          cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"
+          for asset_name in "${smoke_bundle_assets[@]}"; do
+            cp --reflink=auto \
+              "${SNAPSHOT_ASSET_DIR}/${asset_name}" \
+              "${RUNNER_TEMP}/release-tree/images/${asset_name}"
+          done
 
           if ! bash ./Vulhunter-offline-bootstrap.sh --deploy; then
             dump_debug

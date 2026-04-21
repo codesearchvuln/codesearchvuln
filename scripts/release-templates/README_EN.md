@@ -62,14 +62,3 @@ docker compose down -v
 ```
 
 `docker compose down -v` removes persistent volumes and should only be used when you intentionally want to wipe runtime data. For routine refresh / stop / cleanup work, use `Vulhunter-offline-bootstrap.sh --deploy|--stop|--cleanup|--cleanup-all` instead of treating plain `docker compose down` / `down -v` as the full maintenance flow.
-
-## Real Ubuntu host smoke checklist
-
-Run at least one validation round on a real `Ubuntu 22.04 / 24.04` host:
-
-1. Temporarily remove one or more of `docker`, `docker compose`, `zstd`, or `python3`, and confirm `Vulhunter-offline-bootstrap.sh --deploy` reports the missing prerequisites up front.
-2. Confirm the script tries domestic Ubuntu apt mirrors first; then simulate mirror failure and confirm it falls back to the official Ubuntu mirrors.
-3. Confirm the script still performs Docker readiness checks after package installation instead of treating package presence as success.
-4. Repeat once on WSL Ubuntu and confirm the script stops with explicit guidance when Docker Desktop / socket integration is still missing.
-5. Repeat once on an unsupported host (for example Debian) and confirm the script only prints manual remediation guidance and does not mutate host apt configuration.
-6. Finish with one full offline deployment and confirm bundle validation, image import, backend/frontend readiness, and the `/nexus/` + `/nexus-item-detail/` probes all pass.

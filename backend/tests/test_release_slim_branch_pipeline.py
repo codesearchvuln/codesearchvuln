@@ -389,8 +389,19 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert workflow_text.count("set -euo pipefail") >= 10
     assert "DOCKER_SOCKET_GID" in workflow_text
     assert "stat -c '%g'" in workflow_text
+    assert "docker_server_arch" in workflow_text
+    assert "smoke_arch" in workflow_text
+    assert "docker version --format '{{.Server.Arch}}'" in workflow_text
+    assert "Unsupported Docker server architecture for smoke test" in workflow_text
+    assert 'python3 - "${RUNNER_TEMP}/release-tree/release-snapshot-lock.json" "${smoke_arch}"' in workflow_text
+    assert "mapfile -t smoke_bundle_assets" in workflow_text
+    assert 'for bundle in ("services", "scanner"):' in workflow_text
+    assert 'Expected exactly two smoke-test bundle assets for ${smoke_arch}' in workflow_text
     assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
-    assert 'cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"' in workflow_text
+    assert 'cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"' not in workflow_text
+    assert 'for asset_name in "${smoke_bundle_assets[@]}"; do' in workflow_text
+    assert '"${SNAPSHOT_ASSET_DIR}/${asset_name}"' in workflow_text
+    assert '"${RUNNER_TEMP}/release-tree/images/${asset_name}"' in workflow_text
     assert "bash ./Vulhunter-offline-bootstrap.sh --deploy" in workflow_text
     assert "bash ./scripts/offline-up.sh" not in workflow_text
     assert "SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets" in workflow_text

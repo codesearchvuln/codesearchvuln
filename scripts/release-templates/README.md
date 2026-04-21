@@ -62,14 +62,3 @@ docker compose down -v
 ```
 
 `docker compose down -v` 会删除持久化 volumes，只应在明确需要清空数据时使用。日常 refresh / 停服 / 清理请优先使用 `Vulhunter-offline-bootstrap.sh` 的 `--deploy` / `--stop` / `--cleanup` / `--cleanup-all`，不要只把 `docker compose down` / `down -v` 当成完整的发布维护流程。
-
-## 真实 Ubuntu 宿主机 smoke checklist
-
-建议在真实 `Ubuntu 22.04 / 24.04` 宿主机上至少补测一次：
-
-1. 临时移除 `docker` / `docker compose` / `zstd` / `python3` 中的一个或多个依赖，确认 `Vulhunter-offline-bootstrap.sh --deploy` 会先做聚合检测。
-2. 确认脚本会优先尝试国内 Ubuntu apt 镜像；若人为模拟镜像失败，再确认会回退官方 Ubuntu 源。
-3. 确认自动安装后还会继续做 Docker readiness 校验，而不是只看包是否安装成功。
-4. 在 WSL Ubuntu 再跑一轮，确认当 Docker Desktop / socket integration 缺失时，脚本会明确停止并给出提示。
-5. 在 unsupported host（例如 Debian）补测一轮，确认脚本只输出手工安装提示，不会修改宿主机 apt 配置。
-6. 最后完成一次完整离线部署，确认 bundle 校验、镜像导入、backend/frontend readiness 与 `/nexus/`、`/nexus-item-detail/` 探针全部通过。
