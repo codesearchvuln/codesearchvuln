@@ -1,6 +1,5 @@
 import os
 import shutil
-import stat
 import subprocess
 from pathlib import Path
 
@@ -10,12 +9,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _run_sourcecode_generator(output_dir: Path, *, validate: bool = False) -> subprocess.CompletedProcess[str]:
     script_path = REPO_ROOT / "scripts" / "generate-sourcecode-branch.sh"
-    script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
 
     env = os.environ.copy()
     env["PATH"] = f"/usr/bin:/bin:{env['PATH']}"
 
     command = [
+        "bash",
         str(script_path),
         "--output",
         str(output_dir),
@@ -162,7 +161,7 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
     assert "branches:" in workflow_text
     assert "- main" in workflow_text
     assert "git worktree add --detach --force" in workflow_text
-    assert "generate-sourcecode-branch.sh" in workflow_text
+    assert "bash ./scripts/generate-sourcecode-branch.sh" in workflow_text
     assert "git ls-remote --exit-code --heads origin sourcecode" in workflow_text
     assert 'COMPARE_DIR="${RUNNER_TEMP}/sourcecode-compare"' in workflow_text
     assert "git_tree_hash_for_dir()" in workflow_text
@@ -172,6 +171,18 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
     assert "git checkout -B sourcecode origin/sourcecode" not in workflow_text
     assert "git push origin HEAD:sourcecode" not in workflow_text
     assert "git push --force origin HEAD:sourcecode" in workflow_text
+
+
+def test_generate_sourcecode_branch_script_is_tracked_executable_in_git_index() -> None:
+    result = subprocess.run(
+        ["git", "ls-files", "--stage", "scripts/generate-sourcecode-branch.sh"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.startswith("100755 "), result.stdout
 
 
 def test_git_tree_hash_ignores_empty_directories_when_comparing_sourcecode_snapshots(tmp_path: Path) -> None:

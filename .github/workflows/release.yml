@@ -855,7 +855,7 @@ jobs:
 
           SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"
           rm -rf "${SOURCECODE_DIR}"
-          ./scripts/generate-sourcecode-branch.sh \
+          bash ./scripts/generate-sourcecode-branch.sh \
             --output "${SOURCECODE_DIR}" \
             --ref "${SOURCE_SHA}" \
             --validate

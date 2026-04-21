@@ -442,7 +442,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"' in workflow_text
     assert 'cp -a "${RELEASE_DIR}/." "${PUBLISH_READY_DIR}/"' in workflow_text
     assert 'rm -rf "${PUBLISH_READY_DIR}/images"' in workflow_text
-    assert "./scripts/generate-sourcecode-branch.sh" in workflow_text
+    assert "bash ./scripts/generate-sourcecode-branch.sh" in workflow_text
     assert '--output "${SOURCECODE_DIR}"' in workflow_text
     assert "--validate" in workflow_text
     assert 'git rev-parse refs/remotes/origin/release^{tree}' in workflow_text

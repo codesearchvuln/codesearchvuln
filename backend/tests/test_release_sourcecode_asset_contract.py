@@ -9,7 +9,7 @@ def test_release_workflow_generates_local_sourcecode_archives_for_semantic_relea
         encoding="utf-8"
     )
 
-    assert "generate-sourcecode-branch.sh" in workflow_text
+    assert "bash ./scripts/generate-sourcecode-branch.sh" in workflow_text
     assert "${RUNNER_TEMP}/sourcecode-tree" in workflow_text
     assert "--validate" in workflow_text
     assert "semantic-release-archives" in workflow_text
