@@ -5,6 +5,7 @@ from .project_management_metrics import ProjectManagementMetrics
 from .project_info import ProjectInfo
 from .analysis import InstantAnalysis
 from .prompt_template import PromptTemplate
+from .prompt_skill import PromptSkill
 from .audit_rule import AuditRuleSet, AuditRule
 from .agent_task import (
     AgentTask, AgentEvent, AgentFinding,
