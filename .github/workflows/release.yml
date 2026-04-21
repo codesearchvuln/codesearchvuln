@@ -866,7 +866,6 @@ jobs:
 
           PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
           SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"
-          # semantic-release-assets legacy naming breadcrumb for regression discovery.
           SEMANTIC_ARCHIVE_DIR="${RUNNER_TEMP}/semantic-release-archives"
 
           rm -rf "${SEMANTIC_ARCHIVE_DIR}"

@@ -447,11 +447,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "--validate" in workflow_text
     assert 'git rev-parse refs/remotes/origin/release^{tree}' in workflow_text
     assert 'candidate_tree="$(git_tree_hash_for_dir "${PUBLISH_READY_DIR}" "${COMPARE_DIR}")"' in workflow_text
-    assert "generate-sourcecode-branch.sh" in workflow_text
-    assert 'SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"' in workflow_text
-    assert '--output "${SOURCECODE_DIR}"' in workflow_text
-    assert "--validate" in workflow_text
-    assert "semantic-release-assets" in workflow_text
+    assert "semantic-release-archives" in workflow_text
     assert "release_code.zip" in workflow_text
     assert "release_code.tar.gz" in workflow_text
     assert "source_code.zip" in workflow_text
