@@ -773,17 +773,26 @@ main() {
   services_bundle="$(prevalidate_bundle "services" "$arch")"
   scanner_bundle="$(prevalidate_bundle "scanner" "$arch")"
 
+  log_info "[trace] parse_and_export_offline_env"
   parse_and_export_offline_env
+  log_info "[trace] validate_compose_images_local_only"
   validate_compose_images_local_only
+  log_info "[trace] validate_compose_images_local_only completed"
 
   [[ -n "${DOCKER_SOCKET_PATH:-}" ]] && log_info "detected Docker socket path: ${DOCKER_SOCKET_PATH}"
   [[ -n "${DOCKER_SOCKET_GID:-}" ]] && log_info "detected Docker socket gid: ${DOCKER_SOCKET_GID}"
 
+  log_info "[trace] entering cleanup_release_stack"
   cleanup_release_stack
+  log_info "[trace] cleanup_release_stack completed"
 
+  log_info "[trace] loading services bundle"
   load_bundle "$services_bundle"
+  log_info "[trace] loading scanner bundle"
   load_bundle "$scanner_bundle"
+  log_info "[trace] ensuring images ready"
   ensure_images_ready
+  log_info "[trace] validating backend image provenance"
   validate_backend_image_provenance
 
   log_info "starting docker compose up -d db redis db-bootstrap backend"
