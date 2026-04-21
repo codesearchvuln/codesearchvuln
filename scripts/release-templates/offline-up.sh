@@ -693,7 +693,7 @@ main() {
   source "$STARTUP_BANNER_HELPER"
   # shellcheck disable=SC1090
   source "$RELEASE_REFRESH_HELPER"
-  enable_offline_up_cleanup_discovery_tolerance
+  enable_offline_up_release_stack_cleanup_fallback
   load_container_socket_env
   load_container_socket_gid_env
   export OFFLINE_HOST_PREREQ_LOG_PREFIX="[offline-up]"
