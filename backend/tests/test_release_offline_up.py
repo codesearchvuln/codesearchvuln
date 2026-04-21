@@ -220,6 +220,20 @@ if [ "${1:-}" = "compose" ]; then
   fi
 
   if [ "${1:-}" = "config" ]; then
+    if [ -n "${FAKE_COMPOSE_CONFIG_COUNTER_FILE:-}" ]; then
+      count=0
+      if [ -f "${FAKE_COMPOSE_CONFIG_COUNTER_FILE}" ]; then
+        count="$(cat "${FAKE_COMPOSE_CONFIG_COUNTER_FILE}")"
+      fi
+      count=$((count + 1))
+      printf '%s' "$count" >"${FAKE_COMPOSE_CONFIG_COUNTER_FILE}"
+    else
+      count=1
+    fi
+    if [ "${FAKE_COMPOSE_CONFIG_FAIL_ON_NTH:-0}" != "0" ] && [ "$count" = "${FAKE_COMPOSE_CONFIG_FAIL_ON_NTH}" ]; then
+      [ -n "${FAKE_COMPOSE_CONFIG_STDERR:-}" ] && echo "${FAKE_COMPOSE_CONFIG_STDERR}" >&2
+      exit "${FAKE_COMPOSE_CONFIG_EXIT_CODE:-1}"
+    fi
     cat <<EOF
 services:
   db-bootstrap:
@@ -726,6 +740,120 @@ def test_offline_up_bash_warns_and_continues_when_release_stack_discovery_is_ben
     assert services_load in docker_commands
     assert backend_up in docker_commands
     assert "inspect --format {{.Image}} fake-backend" not in docker_commands
+
+
+def test_offline_up_bash_warns_and_continues_when_compose_image_discovery_is_benign_non_zero(
+    tmp_path: Path,
+) -> None:
+    output_dir, manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    _bind_fake_unix_socket(socket_path)
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    config_counter = tmp_path / "compose-config-count.txt"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["FAKE_COMPOSE_CONFIG_COUNTER_FILE"] = str(config_counter)
+    env["FAKE_COMPOSE_CONFIG_FAIL_ON_NTH"] = "2"
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode == 0, combined_output
+    assert "warning: release-stack compose image discovery failed" in combined_output
+    docker_commands = _read_logged_commands(docker_log)
+    config_command = _compose_command("config", project_name=RELEASE_PROJECT_NAME)
+    assert docker_commands.count(config_command) == 2
+    assert f"load -i {output_dir / 'vulhunter-services-images-amd64.tar'}" in docker_commands
+    assert f"load -i {output_dir / 'vulhunter-scanner-images-amd64.tar'}" in docker_commands
+    assert _compose_command(
+        "up", "-d", "db", "redis", "db-bootstrap", "backend", project_name=RELEASE_PROJECT_NAME
+    ) in docker_commands
+    assert _compose_command("up", "-d", "frontend", project_name=RELEASE_PROJECT_NAME) in docker_commands
+    assert any(path in request_log for path in _expected_release_probe_paths())
+    assert any(
+        "org.opencontainers.image.revision" in command
+        and f'vulhunter-local/backend:{manifest["revision"]}' in command
+        for command in docker_commands
+    )
+
+
+def test_offline_up_bash_fails_when_compose_image_discovery_reports_real_error(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    _bind_fake_unix_socket(socket_path)
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    config_counter = tmp_path / "compose-config-count.txt"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["FAKE_COMPOSE_CONFIG_COUNTER_FILE"] = str(config_counter)
+    env["FAKE_COMPOSE_CONFIG_FAIL_ON_NTH"] = "2"
+    env["FAKE_COMPOSE_CONFIG_STDERR"] = "permission denied while reading compose config"
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "warning: release-stack compose image discovery failed" in combined_output
+    assert "permission denied while reading compose config" in combined_output
+    docker_commands = _read_logged_commands(docker_log)
+    assert docker_commands.count(_compose_command("config", project_name=RELEASE_PROJECT_NAME)) == 2
+    assert not any(command.startswith("load -i ") for command in docker_commands)
+    assert _compose_command(
+        "up", "-d", "db", "redis", "db-bootstrap", "backend", project_name=RELEASE_PROJECT_NAME
+    ) not in docker_commands
 
 
 def test_offline_up_bash_fails_when_release_stack_discovery_reports_docker_permission_error(

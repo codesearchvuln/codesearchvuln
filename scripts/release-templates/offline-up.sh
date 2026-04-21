@@ -616,6 +616,7 @@ ensure_compose_ready() {
 }
 
 OFFLINE_UP_RELEASE_STACK_DISCOVERY_WARNING="warning: release-stack container discovery failed; treating as no existing containers and continuing cleanup"
+OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING="warning: release-stack compose image discovery failed; skipping stale image cleanup and continuing deploy"
 
 enable_offline_up_release_stack_cleanup_fallback() {
   collect_release_stack_container_ids() {
@@ -640,6 +641,50 @@ enable_offline_up_release_stack_cleanup_fallback() {
 
     printf '%s\n' "$discovery_output" >&2
     return "$status"
+  }
+
+  collect_current_compose_image_ids() {
+    local compose_output image_refs status stderr_file stderr_output
+
+    stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-config.XXXXXX")"
+    set +e
+    compose_output="$(compose_release config 2>"$stderr_file")"
+    status=$?
+    set -e
+
+    stderr_output="$(tr -d '\r' <"$stderr_file")"
+    rm -f "$stderr_file"
+
+    if [[ "$status" -ne 0 ]]; then
+      release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
+      if [[ -z "$stderr_output" ]]; then
+        return 0
+      fi
+
+      printf '%s\n' "$stderr_output" >&2
+      return "$status"
+    fi
+
+    image_refs="$(
+      COMPOSE_CONFIG="$compose_output" python3 - <<'PY'
+from __future__ import annotations
+
+import os
+import re
+
+seen: set[str] = set()
+for line in os.environ.get("COMPOSE_CONFIG", "").splitlines():
+    match = re.match(r"^\s*image:\s*(\S+)\s*$", line)
+    if not match:
+        continue
+    image_ref = match.group(1).strip()
+    if not image_ref or image_ref in seen:
+        continue
+    seen.add(image_ref)
+    print(image_ref)
+PY
+    )"
+    collect_image_ids_for_refs "$image_refs"
   }
 }
 
