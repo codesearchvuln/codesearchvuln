@@ -646,13 +646,16 @@ enable_offline_up_release_stack_cleanup_fallback() {
   collect_current_compose_image_ids() {
     local compose_output_file image_refs parse_status refs_file status stderr_file stderr_output
 
+    log_info "[trace:compose-discovery] entering collect_current_compose_image_ids"
     stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-config.XXXXXX")"
     compose_output_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-output.XXXXXX")"
     refs_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-refs.XXXXXX")"
+    log_info "[trace:compose-discovery] running compose_release config"
     set +e
     compose_release config >"$compose_output_file" 2>"$stderr_file"
     status=$?
     set -e
+    log_info "[trace:compose-discovery] compose config exited with status=$status"
 
     stderr_output="$(tr -d '\r' <"$stderr_file")"
     rm -f "$stderr_file"
@@ -661,9 +664,11 @@ enable_offline_up_release_stack_cleanup_fallback() {
       rm -f "$compose_output_file" "$refs_file"
       release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
       [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
+      log_info "[trace:compose-discovery] returning 0 after compose config failure"
       return 0
     fi
 
+    log_info "[trace:compose-discovery] running python3 image ref parser"
     stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-refs-stderr.XXXXXX")"
     set +e
     python3 - "$compose_output_file" >"$refs_file" 2>"$stderr_file" <<'PY'
@@ -686,6 +691,7 @@ for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
 PY
     parse_status=$?
     set -e
+    log_info "[trace:compose-discovery] python3 parser exited with status=$parse_status"
 
     stderr_output="$(tr -d '\r' <"$stderr_file")"
     rm -f "$stderr_file"
@@ -694,12 +700,15 @@ PY
       rm -f "$compose_output_file" "$refs_file"
       release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
       [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
+      log_info "[trace:compose-discovery] returning 0 after python3 parser failure"
       return 0
     fi
 
     image_refs="$(cat "$refs_file")"
     rm -f "$compose_output_file" "$refs_file"
+    log_info "[trace:compose-discovery] calling collect_image_ids_for_refs with ${#image_refs} chars"
     collect_image_ids_for_refs "$image_refs"
+    log_info "[trace:compose-discovery] collect_image_ids_for_refs completed"
   }
 }
 
