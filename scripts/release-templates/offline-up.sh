@@ -573,6 +573,34 @@ ensure_compose_ready() {
   docker compose version >/dev/null 2>&1 || die "docker compose not found or unavailable"
 }
 
+OFFLINE_UP_RELEASE_STACK_DISCOVERY_WARNING="warning: release-stack container discovery failed; treating as no existing containers and continuing cleanup"
+
+enable_offline_up_release_stack_cleanup_fallback() {
+  collect_release_stack_container_ids() {
+    local discovery_output status
+
+    set +e
+    discovery_output="$(
+      docker ps -aq --filter "label=com.docker.compose.project=$(release_compose_project_name)" 2>&1 | tr -d '\r'
+    )"
+    status=$?
+    set -e
+
+    if [[ "$status" -eq 0 ]]; then
+      printf '%s' "$discovery_output"
+      return 0
+    fi
+
+    if [[ -z "$discovery_output" ]]; then
+      release_refresh_log_warn "$OFFLINE_UP_RELEASE_STACK_DISCOVERY_WARNING"
+      return 0
+    fi
+
+    printf '%s\n' "$discovery_output" >&2
+    return "$status"
+  }
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -623,6 +651,7 @@ main() {
   source "$STARTUP_BANNER_HELPER"
   # shellcheck disable=SC1090
   source "$RELEASE_REFRESH_HELPER"
+  enable_offline_up_release_stack_cleanup_fallback
   load_container_socket_env
   load_container_socket_gid_env
   export OFFLINE_HOST_PREREQ_LOG_PREFIX="[offline-up]"
