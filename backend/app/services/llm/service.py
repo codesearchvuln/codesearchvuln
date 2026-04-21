@@ -53,10 +53,10 @@ class LLMService:
         user_llm_config = self._user_config.get('llmConfig', {})
 
         return {
-            'llm_first_token_timeout': user_llm_config.get('llmFirstTokenTimeout') or getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 45),
-            'llm_stream_timeout': user_llm_config.get('llmStreamTimeout') or getattr(settings, 'LLM_STREAM_TIMEOUT', 120),
+            'llm_first_token_timeout': user_llm_config.get('llmFirstTokenTimeout') or getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 120),
+            'llm_stream_timeout': user_llm_config.get('llmStreamTimeout') or getattr(settings, 'LLM_STREAM_TIMEOUT', 300),
             'agent_timeout': user_llm_config.get('agentTimeout') or getattr(settings, 'AGENT_TIMEOUT_SECONDS', 1800),
-            'sub_agent_timeout': user_llm_config.get('subAgentTimeout') or getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),
+            'sub_agent_timeout': user_llm_config.get('subAgentTimeout') or getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 1200),
             'tool_timeout': user_llm_config.get('toolTimeout') or getattr(settings, 'TOOL_TIMEOUT_SECONDS', 60),
         }
     
@@ -124,7 +124,7 @@ class LLMService:
                 timeout = int(timeout_ms / 1000) if timeout_ms > 1000 else int(timeout_ms)
             else:
                 # 环境变量是秒
-                timeout = int(getattr(settings, 'LLM_TIMEOUT', 150))
+                timeout = int(getattr(settings, 'LLM_TIMEOUT', 300))
             
             #  Temperature 优先级：用户配置 > 环境变量
             temperature = user_llm_config.get('llmTemperature') if user_llm_config.get('llmTemperature') is not None else float(getattr(settings, 'LLM_TEMPERATURE', 0.1))

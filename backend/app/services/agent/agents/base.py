@@ -687,10 +687,10 @@ class BaseAgent(ABC):
 
         # 回退到环境变量默认值
         return {
-            'llm_first_token_timeout': getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 45),
-            'llm_stream_timeout': getattr(settings, 'LLM_STREAM_TIMEOUT', 120),
+            'llm_first_token_timeout': getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 120),
+            'llm_stream_timeout': getattr(settings, 'LLM_STREAM_TIMEOUT', 300),
             'agent_timeout': getattr(settings, 'AGENT_TIMEOUT_SECONDS', 1800),
-            'sub_agent_timeout': getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),
+            'sub_agent_timeout': getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 1200),
             'tool_timeout': getattr(settings, 'TOOL_TIMEOUT_SECONDS', 60),
         }
     

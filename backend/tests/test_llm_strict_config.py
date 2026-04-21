@@ -128,8 +128,19 @@ def test_llm_factory_create_adapter_does_not_reuse_cache(monkeypatch):
 def test_default_config_uses_updated_agent_stream_timeouts():
     config = get_default_config()
 
-    assert config["llmConfig"]["llmFirstTokenTimeout"] == 45
-    assert config["llmConfig"]["llmStreamTimeout"] == 120
+    assert config["llmConfig"]["llmFirstTokenTimeout"] == 120
+    assert config["llmConfig"]["llmStreamTimeout"] == 300
+
+
+def test_llm_service_timeout_config_uses_updated_global_defaults():
+    service = LLMService(user_config={"llmConfig": {}})
+
+    timeout_config = service.get_agent_timeout_config()
+
+    assert timeout_config["llm_first_token_timeout"] == 120
+    assert timeout_config["llm_stream_timeout"] == 300
+    assert timeout_config["sub_agent_timeout"] == 1200
+    assert timeout_config["tool_timeout"] == 60
 
 
 @pytest.mark.asyncio
