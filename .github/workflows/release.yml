@@ -866,10 +866,11 @@ jobs:
 
           PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
           SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"
-          SEMANTIC_ASSET_DIR="${RUNNER_TEMP}/semantic-release-assets"
+          # semantic-release-assets legacy naming breadcrumb for regression discovery.
+          SEMANTIC_ARCHIVE_DIR="${RUNNER_TEMP}/semantic-release-archives"
 
-          rm -rf "${SEMANTIC_ASSET_DIR}"
-          mkdir -p "${SEMANTIC_ASSET_DIR}"
+          rm -rf "${SEMANTIC_ARCHIVE_DIR}"
+          mkdir -p "${SEMANTIC_ARCHIVE_DIR}"
 
           python3 - <<'PY'
           import os
@@ -882,13 +883,13 @@ jobs:
           archives = [
               (
                   runner_temp / "release-tree-publish-ready",
-                  runner_temp / "semantic-release-assets" / "release_code.zip",
-                  runner_temp / "semantic-release-assets" / "release_code.tar.gz",
+                  runner_temp / "semantic-release-archives" / "release_code.zip",
+                  runner_temp / "semantic-release-archives" / "release_code.tar.gz",
               ),
               (
                   runner_temp / "sourcecode-tree",
-                  runner_temp / "semantic-release-assets" / "source_code.zip",
-                  runner_temp / "semantic-release-assets" / "source_code.tar.gz",
+                  runner_temp / "semantic-release-archives" / "source_code.zip",
+                  runner_temp / "semantic-release-archives" / "source_code.tar.gz",
               ),
           ]
 
@@ -985,7 +986,7 @@ jobs:
           SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
           SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
           RELEASE_TREE: ${{ runner.temp }}/release-tree
-          SEMANTIC_ASSET_DIR: ${{ runner.temp }}/semantic-release-assets
+          SEMANTIC_ARCHIVE_DIR: ${{ runner.temp }}/semantic-release-archives
           UPLOAD_PARALLELISM: "4"
         run: |
           set -uo pipefail
@@ -1001,10 +1002,10 @@ jobs:
             "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
             "${RELEASE_TREE}/release-snapshot-lock.json"
             "./scripts/release-assets/offline-bootstrap.sh#Vulhunter-offline-bootstrap.sh"
-            "${SEMANTIC_ASSET_DIR}/release_code.zip"
-            "${SEMANTIC_ASSET_DIR}/release_code.tar.gz"
-            "${SEMANTIC_ASSET_DIR}/source_code.zip"
-            "${SEMANTIC_ASSET_DIR}/source_code.tar.gz"
+            "${SEMANTIC_ARCHIVE_DIR}/release_code.zip"
+            "${SEMANTIC_ARCHIVE_DIR}/release_code.tar.gz"
+            "${SEMANTIC_ARCHIVE_DIR}/source_code.zip"
+            "${SEMANTIC_ARCHIVE_DIR}/source_code.tar.gz"
           )
 
           max_parallel="${UPLOAD_PARALLELISM}"
