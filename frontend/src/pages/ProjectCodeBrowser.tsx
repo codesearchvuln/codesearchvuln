@@ -9,36 +9,36 @@ import {
 } from "react";
 import {
 	ArrowLeft,
-	ArrowDown,
-	ArrowUp,
 	ChevronDown,
 	ChevronRight,
 	FileCode2,
 	Folder,
 	FolderOpen,
-	LocateFixed,
-	Plus,
 	Search,
-	Sparkles,
-	Trash2,
+	// ArrowDown,
+	// ArrowUp,
+	// LocateFixed,
+	// Plus,
+	// Sparkles,
+	// Trash2,
 } from "lucide-react";
-import { toast } from "sonner";
+// import { toast } from "sonner";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import FindingCodeWindow, {
 	type FindingCodeWindowAppearance,
 } from "@/pages/AgentAudit/components/FindingCodeWindow";
-import Chat2RuleDialog from "@/pages/chat2rule/Chat2RuleDialog";
-import Chat2RuleSelectionPreview from "@/pages/chat2rule/Chat2RuleSelectionPreview";
-import {
-	buildChat2RuleSelectionItem,
-	clampChat2RuleRange,
-	getDefaultChat2RuleLineRange,
-	mergeChat2RuleSelectionItemsForFile,
-	type Chat2RuleSelectionItem,
-} from "@/pages/chat2rule/snippetUtils";
-import { Badge } from "@/components/ui/badge";
+// import Chat2RuleDialog from "@/pages/chat2rule/Chat2RuleDialog";
+// import Chat2RuleSelectionPreview from "@/pages/chat2rule/Chat2RuleSelectionPreview";
+// import {
+// 	buildChat2RuleSelectionItem,
+// 	clampChat2RuleRange,
+// 	getDefaultChat2RuleLineRange,
+// 	mergeChat2RuleSelectionItemsForFile,
+// 	type Chat2RuleSelectionItem,
+// } from "@/pages/chat2rule/snippetUtils";
+// import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+// import { Label } from "@/components/ui/label";
 import { api } from "@/shared/api/database";
 import type { Project } from "@/shared/types";
 import { cn } from "@/shared/utils/utils";
@@ -89,9 +89,9 @@ interface ProjectCodeBrowserWorkspaceProps {
 	selectedFilePath: string | null;
 	displayFilePath?: string | null;
 	selectedFileState: ProjectCodeBrowserFileViewState;
-	chat2RuleSelections?: Chat2RuleSelectionItem[];
-	chat2RuleStartLine?: number;
-	chat2RuleEndLine?: number;
+	// chat2RuleSelections?: Chat2RuleSelectionItem[];
+	// chat2RuleStartLine?: number;
+	// chat2RuleEndLine?: number;
 	browserMode?: ProjectCodeBrowserMode;
 	fileQuickOpenQuery?: string;
 	searchQuery?: string;
@@ -101,8 +101,8 @@ interface ProjectCodeBrowserWorkspaceProps {
 	searchResults?: ProjectCodeBrowserSearchResult[];
 	onToggleFolder: (folderPath: string) => void;
 	onSelectFile: (filePath: string) => void;
-	onAddChat2RuleSelection?: () => void;
-	onChat2RuleRangeChange?: (startLine: number, endLine: number) => void;
+	// onAddChat2RuleSelection?: () => void;
+	// onChat2RuleRangeChange?: (startLine: number, endLine: number) => void;
 	onSelectMode?: (mode: ProjectCodeBrowserMode) => void;
 	onFileQuickOpenQueryChange?: (query: string) => void;
 	onSearchQueryChange?: (query: string) => void;
@@ -121,12 +121,12 @@ interface ProjectCodeBrowserContentProps extends ProjectCodeBrowserWorkspaceProp
 	error: string | null;
 	filesCount: number;
 	onBack: () => void;
-	onOpenChat2Rule: () => void;
-	onRemoveChat2RuleSelection?: (selectionId: string) => void;
-	onClearChat2RuleSelections?: () => void;
-	onMoveChat2RuleSelectionUp?: (selectionId: string) => void;
-	onMoveChat2RuleSelectionDown?: (selectionId: string) => void;
-	onJumpToChat2RuleSelection?: (selection: Chat2RuleSelectionItem) => void;
+	// onOpenChat2Rule: () => void;
+	// onRemoveChat2RuleSelection?: (selectionId: string) => void;
+	// onClearChat2RuleSelections?: () => void;
+	// onMoveChat2RuleSelectionUp?: (selectionId: string) => void;
+	// onMoveChat2RuleSelectionDown?: (selectionId: string) => void;
+	// onJumpToChat2RuleSelection?: (selection: Chat2RuleSelectionItem) => void;
 }
 
 interface ProjectCodeBrowserTreeProps {
@@ -557,28 +557,28 @@ function ProjectCodeBrowserPreview({
 	selectedFilePath,
 	displayFilePath,
 	selectedFileState,
-	chat2RuleSelections,
-	chat2RuleStartLine = 1,
-	chat2RuleEndLine = 80,
+	// chat2RuleSelections,
+	// chat2RuleStartLine = 1,
+	// chat2RuleEndLine = 80,
 	appearance,
 	previewDecorations,
-	onAddChat2RuleSelection,
-	onChat2RuleRangeChange,
+	// onAddChat2RuleSelection,
+	// onChat2RuleRangeChange,
 }: Pick<
 	ProjectCodeBrowserWorkspaceProps,
 	| "selectedFilePath"
 	| "displayFilePath"
 	| "selectedFileState"
-	| "chat2RuleSelections"
-	| "chat2RuleStartLine"
-	| "chat2RuleEndLine"
+	// | "chat2RuleSelections"
+	// | "chat2RuleStartLine"
+	// | "chat2RuleEndLine"
 	| "appearance"
 	| "previewDecorations"
-	| "onAddChat2RuleSelection"
-	| "onChat2RuleRangeChange"
+	// | "onAddChat2RuleSelection"
+	// | "onChat2RuleRangeChange"
 >) {
-	const [isMouseSelecting, setIsMouseSelecting] = useState(false);
-	const [selectionAnchorLine, setSelectionAnchorLine] = useState<number | null>(null);
+	// const [isMouseSelecting, setIsMouseSelecting] = useState(false);
+	// const [selectionAnchorLine, setSelectionAnchorLine] = useState<number | null>(null);
 	const requestedPathForDecoration =
 		selectedFileState.status === "ready"
 			? selectedFileState.requestedFilePath
@@ -586,27 +586,27 @@ function ProjectCodeBrowserPreview({
 	const previewDecoration = requestedPathForDecoration
 		? previewDecorations?.[requestedPathForDecoration]
 		: undefined;
-	const persistedSelectionRanges = useMemo(() => {
-		if (selectedFileState.status !== "ready") return [];
-		return (chat2RuleSelections ?? [])
-			.filter((selection) => selection.filePath === selectedFileState.requestedFilePath)
-			.map((selection) => ({
-				startLine: selection.startLine,
-				endLine: selection.endLine,
-			}));
-	}, [chat2RuleSelections, selectedFileState]);
+	// const persistedSelectionRanges = useMemo(() => {
+	// 	if (selectedFileState.status !== "ready") return [];
+	// 	return (chat2RuleSelections ?? [])
+	// 		.filter((selection) => selection.filePath === selectedFileState.requestedFilePath)
+	// 		.map((selection) => ({
+	// 			startLine: selection.startLine,
+	// 			endLine: selection.endLine,
+	// 		}));
+	// }, [chat2RuleSelections, selectedFileState]);
 
-	useEffect(() => {
-		if (!isMouseSelecting) return undefined;
-		const stopSelecting = () => {
-			setIsMouseSelecting(false);
-			setSelectionAnchorLine(null);
-		};
-		window.addEventListener("mouseup", stopSelecting);
-		return () => {
-			window.removeEventListener("mouseup", stopSelecting);
-		};
-	}, [isMouseSelecting]);
+	// useEffect(() => {
+	// 	if (!isMouseSelecting) return undefined;
+	// 	const stopSelecting = () => {
+	// 		setIsMouseSelecting(false);
+	// 		setSelectionAnchorLine(null);
+	// 	};
+	// 	window.addEventListener("mouseup", stopSelecting);
+	// 	return () => {
+	// 		window.removeEventListener("mouseup", stopSelecting);
+	// 	};
+	// }, [isMouseSelecting]);
 
 	if (selectedFileState.status === "loading") {
 		return <div className={getEmptyStateClasses()}>正在加载文件内容...</div>;
@@ -622,11 +622,11 @@ function ProjectCodeBrowserPreview({
 
 	if (selectedFileState.status === "ready") {
 		const lineEnd = selectedFileState.displayLines.length;
-		const selectedRange = clampChat2RuleRange(
-			selectedFileState.content,
-			chat2RuleStartLine,
-			chat2RuleEndLine,
-		);
+		// const selectedRange = clampChat2RuleRange(
+		// 	selectedFileState.content,
+		// 	chat2RuleStartLine,
+		// 	chat2RuleEndLine,
+		// );
 		const meta =
 			selectedFileState.syntaxLanguageLabel &&
 				selectedFileState.syntaxStatus === "highlighted"
@@ -637,6 +637,7 @@ function ProjectCodeBrowserPreview({
 					: ["纯文本"];
 		return (
 			<div className="flex h-full min-h-0 flex-col gap-3">
+				{/*
 				<div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
 					<div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
 						<div className="flex flex-wrap items-end gap-3">
@@ -669,6 +670,7 @@ function ProjectCodeBrowserPreview({
 						</div>
 					</div>
 				</div>
+				*/}
 
 				<div className="min-h-0 flex-1">
 					<FindingCodeWindow
@@ -680,31 +682,31 @@ function ProjectCodeBrowserPreview({
 						highlightStartLine={previewDecoration?.highlightStartLine ?? undefined}
 						highlightEndLine={previewDecoration?.highlightEndLine ?? undefined}
 						focusLine={previewDecoration?.focusLine ?? undefined}
-						persistedSelectionRanges={persistedSelectionRanges}
-						selectionStartLine={selectedRange.safeStart}
-						selectionEndLine={selectedRange.safeEnd}
-						onLineSelectionStart={(lineNumber) => {
-							setSelectionAnchorLine(lineNumber);
-							setIsMouseSelecting(true);
-							onChat2RuleRangeChange?.(lineNumber, lineNumber);
-						}}
-						onLineSelectionExtend={(lineNumber) => {
-							if (!isMouseSelecting || selectionAnchorLine === null) return;
-							onChat2RuleRangeChange?.(
-								Math.min(selectionAnchorLine, lineNumber),
-								Math.max(selectionAnchorLine, lineNumber),
-							);
-						}}
-						onLineSelectionEnd={(lineNumber) => {
-							const anchorLine =
-								selectionAnchorLine ?? chat2RuleStartLine ?? lineNumber;
-							onChat2RuleRangeChange?.(
-								Math.min(anchorLine, lineNumber),
-								Math.max(anchorLine, lineNumber),
-							);
-							setIsMouseSelecting(false);
-							setSelectionAnchorLine(null);
-						}}
+						// persistedSelectionRanges={persistedSelectionRanges}
+						// selectionStartLine={selectedRange.safeStart}
+						// selectionEndLine={selectedRange.safeEnd}
+						// onLineSelectionStart={(lineNumber) => {
+						// 	setSelectionAnchorLine(lineNumber);
+						// 	setIsMouseSelecting(true);
+						// 	onChat2RuleRangeChange?.(lineNumber, lineNumber);
+						// }}
+						// onLineSelectionExtend={(lineNumber) => {
+						// 	if (!isMouseSelecting || selectionAnchorLine === null) return;
+						// 	onChat2RuleRangeChange?.(
+						// 		Math.min(selectionAnchorLine, lineNumber),
+						// 		Math.max(selectionAnchorLine, lineNumber),
+						// 	);
+						// }}
+						// onLineSelectionEnd={(lineNumber) => {
+						// 	const anchorLine =
+						// 		selectionAnchorLine ?? chat2RuleStartLine ?? lineNumber;
+						// 	onChat2RuleRangeChange?.(
+						// 		Math.min(anchorLine, lineNumber),
+						// 		Math.max(anchorLine, lineNumber),
+						// 	);
+						// 	setIsMouseSelecting(false);
+						// 	setSelectionAnchorLine(null);
+						// }}
 						meta={meta}
 						variant="detail"
 						appearance={appearance}
@@ -802,6 +804,7 @@ function ProjectCodeBrowserSidePanel({
 	);
 }
 
+/*
 interface ProjectCodeBrowserSelectedSnippetsPanelProps {
 	selections: Chat2RuleSelectionItem[];
 	selectedFilePath: string | null;
@@ -955,15 +958,16 @@ function ProjectCodeBrowserSelectedSnippetsPanel({
 		</section>
 	);
 }
+*/
 
 export function ProjectCodeBrowserWorkspace({
 	tree,
 	expandedFolders,
 	selectedFilePath,
 	selectedFileState,
-	chat2RuleSelections = [],
-	chat2RuleStartLine = 1,
-	chat2RuleEndLine = 80,
+	// chat2RuleSelections = [],
+	// chat2RuleStartLine = 1,
+	// chat2RuleEndLine = 80,
 	browserMode = "files",
 	fileQuickOpenQuery = "",
 	searchQuery = "",
@@ -973,8 +977,8 @@ export function ProjectCodeBrowserWorkspace({
 	searchResults = [],
 	onToggleFolder,
 	onSelectFile,
-	onAddChat2RuleSelection = () => { },
-	onChat2RuleRangeChange = () => { },
+	// onAddChat2RuleSelection = () => { },
+	// onChat2RuleRangeChange = () => { },
 	onSelectMode = () => { },
 	onFileQuickOpenQueryChange = () => { },
 	onSearchQueryChange = () => { },
@@ -1039,23 +1043,34 @@ export function ProjectCodeBrowserWorkspace({
 					"min-h-[360px] overflow-hidden xl:min-h-0",
 				)}
 			>
-				<div className="flex h-full min-h-0 flex-col">
-					<div className="flex min-h-0 flex-1 flex-col p-3">
-						<ProjectCodeBrowserPreview
-							selectedFilePath={selectedFilePath}
-							displayFilePath={selectedDisplayPath}
-							selectedFileState={selectedFileState}
-							chat2RuleSelections={chat2RuleSelections}
-							chat2RuleStartLine={chat2RuleStartLine}
-							chat2RuleEndLine={chat2RuleEndLine}
-							appearance={appearance}
-							previewDecorations={previewDecorations}
-							onAddChat2RuleSelection={onAddChat2RuleSelection}
-							onChat2RuleRangeChange={onChat2RuleRangeChange}
-						/>
+					<div className="flex h-full min-h-0 flex-col">
+						<div className="flex min-h-0 flex-1 flex-col p-3">
+							<>
+								{/*
+								<ProjectCodeBrowserPreview
+									selectedFilePath={selectedFilePath}
+									displayFilePath={selectedDisplayPath}
+									selectedFileState={selectedFileState}
+									chat2RuleSelections={chat2RuleSelections}
+									chat2RuleStartLine={chat2RuleStartLine}
+									chat2RuleEndLine={chat2RuleEndLine}
+									appearance={appearance}
+									previewDecorations={previewDecorations}
+									onAddChat2RuleSelection={onAddChat2RuleSelection}
+									onChat2RuleRangeChange={onChat2RuleRangeChange}
+								/>
+								*/}
+								<ProjectCodeBrowserPreview
+									selectedFilePath={selectedFilePath}
+									displayFilePath={selectedDisplayPath}
+									selectedFileState={selectedFileState}
+									appearance={appearance}
+									previewDecorations={previewDecorations}
+								/>
+							</>
+						</div>
 					</div>
 				</div>
-			</div>
 		</section>
 	);
 }
@@ -1069,9 +1084,9 @@ export function ProjectCodeBrowserContent({
 	expandedFolders,
 	selectedFilePath,
 	selectedFileState,
-	chat2RuleSelections = [],
-	chat2RuleStartLine = 1,
-	chat2RuleEndLine = 80,
+	// chat2RuleSelections = [],
+	// chat2RuleStartLine = 1,
+	// chat2RuleEndLine = 80,
 	browserMode = "files",
 	fileQuickOpenQuery = "",
 	searchQuery = "",
@@ -1080,16 +1095,16 @@ export function ProjectCodeBrowserContent({
 	searchStatus = { state: "idle", scanned: 0, total: 0 },
 	searchResults = [],
 	onBack,
-	onOpenChat2Rule,
-	onRemoveChat2RuleSelection = () => {},
-	onClearChat2RuleSelections = () => {},
-	onMoveChat2RuleSelectionUp = () => {},
-	onMoveChat2RuleSelectionDown = () => {},
-	onJumpToChat2RuleSelection = () => {},
+	// onOpenChat2Rule,
+	// onRemoveChat2RuleSelection = () => {},
+	// onClearChat2RuleSelections = () => {},
+	// onMoveChat2RuleSelectionUp = () => {},
+	// onMoveChat2RuleSelectionDown = () => {},
+	// onJumpToChat2RuleSelection = () => {},
 	onToggleFolder,
 	onSelectFile,
-	onAddChat2RuleSelection = () => {},
-	onChat2RuleRangeChange = () => {},
+	// onAddChat2RuleSelection = () => {},
+	// onChat2RuleRangeChange = () => {},
 	onSelectMode = () => {},
 	onFileQuickOpenQueryChange = () => {},
 	onSearchQueryChange = () => {},
@@ -1124,6 +1139,7 @@ export function ProjectCodeBrowserContent({
 							</h1>
 						</div>
 					</div>
+					{/*
 					<div className="flex flex-wrap items-center gap-2">
 						<Badge variant="outline" className="border-white/12 text-white/72">
 							已选中片段片段 {chat2RuleSelections.length}
@@ -1139,9 +1155,11 @@ export function ProjectCodeBrowserContent({
 							对话生成规则
 						</Button>
 					</div>
+					*/}
 				</div>
 			</section>
 
+			{/*
 			{!loading && !error && project && isZipProject ? (
 				<ProjectCodeBrowserSelectedSnippetsPanel
 					selections={chat2RuleSelections}
@@ -1153,6 +1171,7 @@ export function ProjectCodeBrowserContent({
 					onJumpToSelection={onJumpToChat2RuleSelection}
 				/>
 			) : null}
+			*/}
 
 			{loading ? (
 				<section className="flex flex-1 items-center justify-center rounded-2xl border border-white/10 bg-black/80 p-6 text-sm text-white/56">
@@ -1171,36 +1190,65 @@ export function ProjectCodeBrowserContent({
 					仅 ZIP 类型项目支持代码浏览
 				</section>
 			) : (
-				<ProjectCodeBrowserWorkspace
-					tree={tree}
-					expandedFolders={expandedFolders}
-					selectedFilePath={selectedFilePath}
-					selectedFileState={selectedFileState}
-					chat2RuleSelections={chat2RuleSelections}
-					chat2RuleStartLine={chat2RuleStartLine}
-					chat2RuleEndLine={chat2RuleEndLine}
-					browserMode={browserMode}
-					fileQuickOpenQuery={fileQuickOpenQuery}
-					searchQuery={searchQuery}
-					includeFileQuery={includeFileQuery}
-					excludeFileQuery={excludeFileQuery}
-					searchStatus={searchStatus}
-					searchResults={searchResults}
-					onToggleFolder={onToggleFolder}
-					onSelectFile={onSelectFile}
-					onAddChat2RuleSelection={onAddChat2RuleSelection}
-					onChat2RuleRangeChange={onChat2RuleRangeChange}
-					onSelectMode={onSelectMode}
-					onFileQuickOpenQueryChange={onFileQuickOpenQueryChange}
-					onSearchQueryChange={onSearchQueryChange}
-					onIncludeFileQueryChange={onIncludeFileQueryChange}
-					onExcludeFileQueryChange={onExcludeFileQueryChange}
-					onSelectSearchResult={onSelectSearchResult}
-					appearance={appearance}
-					previewDecorations={previewDecorations}
-					searchInputRef={searchInputRef}
-					className="flex-1 min-h-0 overflow-hidden"
-				/>
+				<>
+					{/*
+					<ProjectCodeBrowserWorkspace
+						tree={tree}
+						expandedFolders={expandedFolders}
+						selectedFilePath={selectedFilePath}
+						selectedFileState={selectedFileState}
+						chat2RuleSelections={chat2RuleSelections}
+						chat2RuleStartLine={chat2RuleStartLine}
+						chat2RuleEndLine={chat2RuleEndLine}
+						browserMode={browserMode}
+						fileQuickOpenQuery={fileQuickOpenQuery}
+						searchQuery={searchQuery}
+						includeFileQuery={includeFileQuery}
+						excludeFileQuery={excludeFileQuery}
+						searchStatus={searchStatus}
+						searchResults={searchResults}
+						onToggleFolder={onToggleFolder}
+						onSelectFile={onSelectFile}
+						onAddChat2RuleSelection={onAddChat2RuleSelection}
+						onChat2RuleRangeChange={onChat2RuleRangeChange}
+						onSelectMode={onSelectMode}
+						onFileQuickOpenQueryChange={onFileQuickOpenQueryChange}
+						onSearchQueryChange={onSearchQueryChange}
+						onIncludeFileQueryChange={onIncludeFileQueryChange}
+						onExcludeFileQueryChange={onExcludeFileQueryChange}
+						onSelectSearchResult={onSelectSearchResult}
+						appearance={appearance}
+						previewDecorations={previewDecorations}
+						searchInputRef={searchInputRef}
+						className="flex-1 min-h-0 overflow-hidden"
+					/>
+					*/}
+					<ProjectCodeBrowserWorkspace
+						tree={tree}
+						expandedFolders={expandedFolders}
+						selectedFilePath={selectedFilePath}
+						selectedFileState={selectedFileState}
+						browserMode={browserMode}
+						fileQuickOpenQuery={fileQuickOpenQuery}
+						searchQuery={searchQuery}
+						includeFileQuery={includeFileQuery}
+						excludeFileQuery={excludeFileQuery}
+						searchStatus={searchStatus}
+						searchResults={searchResults}
+						onToggleFolder={onToggleFolder}
+						onSelectFile={onSelectFile}
+						onSelectMode={onSelectMode}
+						onFileQuickOpenQueryChange={onFileQuickOpenQueryChange}
+						onSearchQueryChange={onSearchQueryChange}
+						onIncludeFileQueryChange={onIncludeFileQueryChange}
+						onExcludeFileQueryChange={onExcludeFileQueryChange}
+						onSelectSearchResult={onSelectSearchResult}
+						appearance={appearance}
+						previewDecorations={previewDecorations}
+						searchInputRef={searchInputRef}
+						className="flex-1 min-h-0 overflow-hidden"
+					/>
+				</>
 			)}
 		</div>
 	);
@@ -1237,10 +1285,10 @@ export default function ProjectCodeBrowser() {
 	const [previewDecorations, setPreviewDecorations] = useState<
 		Record<string, ProjectCodeBrowserPreviewDecoration | undefined>
 	>({});
-	const [isChat2RuleOpen, setIsChat2RuleOpen] = useState(false);
-	const [chat2RuleSelections, setChat2RuleSelections] = useState<Chat2RuleSelectionItem[]>([]);
-	const [chat2RuleStartLine, setChat2RuleStartLine] = useState(1);
-	const [chat2RuleEndLine, setChat2RuleEndLine] = useState(80);
+	// const [isChat2RuleOpen, setIsChat2RuleOpen] = useState(false);
+	// const [chat2RuleSelections, setChat2RuleSelections] = useState<Chat2RuleSelectionItem[]>([]);
+	// const [chat2RuleStartLine, setChat2RuleStartLine] = useState(1);
+	// const [chat2RuleEndLine, setChat2RuleEndLine] = useState(80);
 	const searchInputRef = useRef<HTMLInputElement | null>(null);
 	const fileStatesRef = useRef<Record<string, ProjectCodeBrowserFileViewState>>({});
 	const pendingFileLoadsRef = useRef<
@@ -1423,9 +1471,9 @@ export default function ProjectCodeBrowser() {
 			setSearchStatus({ state: "idle", scanned: 0, total: 0 });
 			setSearchResults([]);
 			setPreviewDecorations({});
-			setChat2RuleSelections([]);
-			setChat2RuleStartLine(1);
-			setChat2RuleEndLine(80);
+			// setChat2RuleSelections([]);
+			// setChat2RuleStartLine(1);
+			// setChat2RuleEndLine(80);
 			appliedNavigationTargetRef.current = null;
 
 			if (!id) {
@@ -1592,166 +1640,166 @@ export default function ProjectCodeBrowser() {
 		}
 		return fileStates[selectedFilePath] ?? { status: "idle" };
 	}, [fileStates, selectedFilePath]);
-	const selectedPreviewDecoration = useMemo(() => {
-		if (!selectedFilePath) return undefined;
-		return previewDecorations[selectedFilePath];
-	}, [previewDecorations, selectedFilePath]);
+	// const selectedPreviewDecoration = useMemo(() => {
+	// 	if (!selectedFilePath) return undefined;
+	// 	return previewDecorations[selectedFilePath];
+	// }, [previewDecorations, selectedFilePath]);
 
-	useEffect(() => {
-		if (selectedFileState.status !== "ready") return;
-		const defaultRange = getDefaultChat2RuleLineRange(
-			selectedFileState,
-			selectedPreviewDecoration,
-		);
-		setChat2RuleStartLine(defaultRange.startLine);
-		setChat2RuleEndLine(defaultRange.endLine);
-	}, [selectedFileState, selectedPreviewDecoration]);
+	// useEffect(() => {
+	// 	if (selectedFileState.status !== "ready") return;
+	// 	const defaultRange = getDefaultChat2RuleLineRange(
+	// 		selectedFileState,
+	// 		selectedPreviewDecoration,
+	// 	);
+	// 	setChat2RuleStartLine(defaultRange.startLine);
+	// 	setChat2RuleEndLine(defaultRange.endLine);
+	// }, [selectedFileState, selectedPreviewDecoration]);
 
-	const handleAddChat2RuleSelection = useCallback(() => {
-		if (selectedFileState.status !== "ready") {
-			toast.error("先打开一个可预览的文本文件，再添加片段");
-			return;
-		}
+	// const handleAddChat2RuleSelection = useCallback(() => {
+	// 	if (selectedFileState.status !== "ready") {
+	// 		toast.error("先打开一个可预览的文本文件，再添加片段");
+	// 		return;
+	// 	}
+	//
+	// 	const nextSelection = buildChat2RuleSelectionItem(
+	// 		selectedFileState.requestedFilePath,
+	// 		selectedFileState.content,
+	// 		chat2RuleStartLine,
+	// 		chat2RuleEndLine,
+	// 	);
+	//
+	// 	setChat2RuleSelections((current) => {
+	// 		const alreadyExists = current.some(
+	// 			(selection) => selection.id === nextSelection.id,
+	// 		);
+	// 		if (alreadyExists) {
+	// 			toast.error(
+	// 				`该片段已存在：${nextSelection.filePath}:${nextSelection.startLine}-${nextSelection.endLine}`,
+	// 			);
+	// 			return current;
+	// 		}
+	// 		const mergedSelections = mergeChat2RuleSelectionItemsForFile(
+	// 			current,
+	// 			{
+	// 				filePath: selectedFileState.requestedFilePath,
+	// 				startLine: nextSelection.startLine,
+	// 				endLine: nextSelection.endLine,
+	// 			},
+	// 			selectedFileState.content,
+	// 		);
+	// 		const wasMerged =
+	// 			current.some((selection) => selection.filePath === nextSelection.filePath) &&
+	// 			!mergedSelections.some((selection) => selection.id === nextSelection.id);
+	// 		toast.success(
+	// 			wasMerged
+	// 				? `已合并重叠片段：${nextSelection.filePath}:${nextSelection.startLine}-${nextSelection.endLine}`
+	// 				: `已添加片段：${nextSelection.filePath}:${nextSelection.startLine}-${nextSelection.endLine}`,
+	// 		);
+	// 		return mergedSelections;
+	// 	});
+	// }, [chat2RuleEndLine, chat2RuleStartLine, selectedFileState]);
 
-		const nextSelection = buildChat2RuleSelectionItem(
-			selectedFileState.requestedFilePath,
-			selectedFileState.content,
-			chat2RuleStartLine,
-			chat2RuleEndLine,
-		);
+	// const handleRemoveChat2RuleSelection = useCallback((selectionId: string) => {
+	// 	setChat2RuleSelections((current) =>
+	// 		current.filter((selection) => selection.id !== selectionId),
+	// 	);
+	// }, []);
 
-		setChat2RuleSelections((current) => {
-			const alreadyExists = current.some(
-				(selection) => selection.id === nextSelection.id,
-			);
-			if (alreadyExists) {
-				toast.error(
-					`该片段已存在：${nextSelection.filePath}:${nextSelection.startLine}-${nextSelection.endLine}`,
-				);
-				return current;
-			}
-			const mergedSelections = mergeChat2RuleSelectionItemsForFile(
-				current,
-				{
-					filePath: selectedFileState.requestedFilePath,
-					startLine: nextSelection.startLine,
-					endLine: nextSelection.endLine,
-				},
-				selectedFileState.content,
-			);
-			const wasMerged =
-				current.some((selection) => selection.filePath === nextSelection.filePath) &&
-				!mergedSelections.some((selection) => selection.id === nextSelection.id);
-			toast.success(
-				wasMerged
-					? `已合并重叠片段：${nextSelection.filePath}:${nextSelection.startLine}-${nextSelection.endLine}`
-					: `已添加片段：${nextSelection.filePath}:${nextSelection.startLine}-${nextSelection.endLine}`,
-			);
-			return mergedSelections;
-		});
-	}, [chat2RuleEndLine, chat2RuleStartLine, selectedFileState]);
+	// const handleClearChat2RuleSelections = useCallback(() => {
+	// 	setChat2RuleSelections([]);
+	// 	toast.success("已清空当前已选片段");
+	// }, []);
 
-	const handleRemoveChat2RuleSelection = useCallback((selectionId: string) => {
-		setChat2RuleSelections((current) =>
-			current.filter((selection) => selection.id !== selectionId),
-		);
-	}, []);
+	// const handleMoveChat2RuleSelection = useCallback(
+	// 	(selectionId: string, direction: "up" | "down") => {
+	// 		setChat2RuleSelections((current) => {
+	// 			const currentIndex = current.findIndex((selection) => selection.id === selectionId);
+	// 			if (currentIndex < 0) return current;
+	//
+	// 			const targetIndex =
+	// 				direction === "up" ? currentIndex - 1 : currentIndex + 1;
+	// 			if (targetIndex < 0 || targetIndex >= current.length) {
+	// 				return current;
+	// 			}
+	//
+	// 			const nextSelections = [...current];
+	// 			const [selection] = nextSelections.splice(currentIndex, 1);
+	// 			nextSelections.splice(targetIndex, 0, selection);
+	// 			return nextSelections;
+	// 		});
+	// 	},
+	// 	[],
+	// );
 
-	const handleClearChat2RuleSelections = useCallback(() => {
-		setChat2RuleSelections([]);
-		toast.success("已清空当前已选片段");
-	}, []);
+	// const handleJumpToChat2RuleSelection = useCallback(
+	// 	async (selection: Chat2RuleSelectionItem) => {
+	// 		if (project?.source_type !== "zip") {
+	// 			toast.error("当前项目暂不支持片段跳转");
+	// 			return;
+	// 		}
+	//
+	// 		const resolvedFilePath =
+	// 			resolveProjectCodeBrowserNavigationFilePath(selection.filePath, projectFiles) ??
+	// 			selection.filePath;
+	//
+	// 		setExpandedFolders((current) =>
+	// 			buildProjectCodeBrowserExpandedFoldersForSelection(
+	// 				current,
+	// 				tree,
+	// 				resolvedFilePath,
+	// 			),
+	// 		);
+	// 		setPreviewDecorations({
+	// 			[resolvedFilePath]: {
+	// 				focusLine: selection.startLine,
+	// 				highlightStartLine: selection.startLine,
+	// 				highlightEndLine: selection.endLine,
+	// 			},
+	// 		});
+	//
+	// 		const nextState = await loadFileState(resolvedFilePath, { selectFile: true });
+	// 		if (nextState.status !== "ready") {
+	// 			toast.error(`跳转失败：${selection.filePath}`);
+	// 			return;
+	// 		}
+	//
+	// 		setChat2RuleStartLine(selection.startLine);
+	// 		setChat2RuleEndLine(selection.endLine);
+	// 	},
+	// 	[loadFileState, project?.source_type, projectFiles, tree],
+	// );
 
-	const handleMoveChat2RuleSelection = useCallback(
-		(selectionId: string, direction: "up" | "down") => {
-			setChat2RuleSelections((current) => {
-				const currentIndex = current.findIndex((selection) => selection.id === selectionId);
-				if (currentIndex < 0) return current;
+	// const handleChat2RuleStartLineChange = useCallback(
+	// 	(nextLine: number) => {
+	// 		if (selectedFileState.status !== "ready") {
+	// 			setChat2RuleStartLine(nextLine);
+	// 			return;
+	// 		}
+	// 		const { safeStart } = clampChat2RuleRange(
+	// 			selectedFileState.content,
+	// 			nextLine,
+	// 			chat2RuleEndLine,
+	// 		);
+	// 		setChat2RuleStartLine(safeStart);
+	// 	},
+	// 	[chat2RuleEndLine, selectedFileState],
+	// );
 
-				const targetIndex =
-					direction === "up" ? currentIndex - 1 : currentIndex + 1;
-				if (targetIndex < 0 || targetIndex >= current.length) {
-					return current;
-				}
-
-				const nextSelections = [...current];
-				const [selection] = nextSelections.splice(currentIndex, 1);
-				nextSelections.splice(targetIndex, 0, selection);
-				return nextSelections;
-			});
-		},
-		[],
-	);
-
-	const handleJumpToChat2RuleSelection = useCallback(
-		async (selection: Chat2RuleSelectionItem) => {
-			if (project?.source_type !== "zip") {
-				toast.error("当前项目暂不支持片段跳转");
-				return;
-			}
-
-			const resolvedFilePath =
-				resolveProjectCodeBrowserNavigationFilePath(selection.filePath, projectFiles) ??
-				selection.filePath;
-
-			setExpandedFolders((current) =>
-				buildProjectCodeBrowserExpandedFoldersForSelection(
-					current,
-					tree,
-					resolvedFilePath,
-				),
-			);
-			setPreviewDecorations({
-				[resolvedFilePath]: {
-					focusLine: selection.startLine,
-					highlightStartLine: selection.startLine,
-					highlightEndLine: selection.endLine,
-				},
-			});
-
-			const nextState = await loadFileState(resolvedFilePath, { selectFile: true });
-			if (nextState.status !== "ready") {
-				toast.error(`跳转失败：${selection.filePath}`);
-				return;
-			}
-
-			setChat2RuleStartLine(selection.startLine);
-			setChat2RuleEndLine(selection.endLine);
-		},
-		[loadFileState, project?.source_type, projectFiles, tree],
-	);
-
-	const handleChat2RuleStartLineChange = useCallback(
-		(nextLine: number) => {
-			if (selectedFileState.status !== "ready") {
-				setChat2RuleStartLine(nextLine);
-				return;
-			}
-			const { safeStart } = clampChat2RuleRange(
-				selectedFileState.content,
-				nextLine,
-				chat2RuleEndLine,
-			);
-			setChat2RuleStartLine(safeStart);
-		},
-		[chat2RuleEndLine, selectedFileState],
-	);
-
-	const handleChat2RuleEndLineChange = useCallback(
-		(nextLine: number) => {
-			if (selectedFileState.status !== "ready") {
-				setChat2RuleEndLine(nextLine);
-				return;
-			}
-			const { safeEnd } = clampChat2RuleRange(
-				selectedFileState.content,
-				chat2RuleStartLine,
-				nextLine,
-			);
-			setChat2RuleEndLine(safeEnd);
-		},
-		[chat2RuleStartLine, selectedFileState],
-	);
+	// const handleChat2RuleEndLineChange = useCallback(
+	// 	(nextLine: number) => {
+	// 		if (selectedFileState.status !== "ready") {
+	// 			setChat2RuleEndLine(nextLine);
+	// 			return;
+	// 		}
+	// 		const { safeEnd } = clampChat2RuleRange(
+	// 			selectedFileState.content,
+	// 			chat2RuleStartLine,
+	// 			nextLine,
+	// 		);
+	// 		setChat2RuleEndLine(safeEnd);
+	// 	},
+	// 	[chat2RuleStartLine, selectedFileState],
+	// );
 
 	const handleBack = useCallback(() => {
 		const target = resolveProjectCodeBrowserBackTarget({
@@ -1831,6 +1879,7 @@ export default function ProjectCodeBrowser() {
 
 	return (
 		<>
+			{/*
 			<ProjectCodeBrowserContent
 				project={project}
 				loading={loading}
@@ -1884,6 +1933,35 @@ export default function ProjectCodeBrowser() {
 				projectName={project?.name}
 				selections={chat2RuleSelections}
 				onRemoveSelection={handleRemoveChat2RuleSelection}
+			/>
+			*/}
+			<ProjectCodeBrowserContent
+				project={project}
+				loading={loading}
+				error={error}
+				filesCount={filesCount}
+				tree={filteredFileTree}
+				expandedFolders={expandedFolders}
+				selectedFilePath={selectedFilePath}
+				selectedFileState={selectedFileState}
+				browserMode={browserMode}
+				fileQuickOpenQuery={fileQuickOpenQuery}
+				searchQuery={searchQuery}
+				includeFileQuery={includeFileQuery}
+				excludeFileQuery={excludeFileQuery}
+				searchStatus={searchStatus}
+				searchResults={searchResults}
+				onBack={handleBack}
+				onToggleFolder={handleToggleFolder}
+				onSelectFile={handleSelectFile}
+				onSelectMode={handleSelectMode}
+				onFileQuickOpenQueryChange={setFileQuickOpenQuery}
+				onSearchQueryChange={setSearchQuery}
+				onIncludeFileQueryChange={setIncludeFileQuery}
+				onExcludeFileQueryChange={setExcludeFileQuery}
+				onSelectSearchResult={handleSelectSearchResult}
+				previewDecorations={previewDecorations}
+				searchInputRef={searchInputRef}
 			/>
 		</>
 	);
