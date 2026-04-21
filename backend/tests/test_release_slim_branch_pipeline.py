@@ -808,6 +808,9 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     )
     offline_up_script = (output_dir / "scripts" / "offline-up.sh").read_text(encoding="utf-8")
     compose_env_helper = (output_dir / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8")
+    offline_prereq_helper = (output_dir / "scripts" / "lib" / "offline-host-prereqs.sh").read_text(
+        encoding="utf-8"
+    )
     startup_banner_helper = (output_dir / "scripts" / "lib" / "startup-banner.sh").read_text(encoding="utf-8")
     release_refresh_helper = (output_dir / "scripts" / "lib" / "release-refresh.sh").read_text(encoding="utf-8")
     assert not (output_dir / "scripts" / "online-up.sh").exists()
@@ -861,6 +864,7 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "images-manifest-services.json" in offline_up_script
     assert "images-manifest-scanner.json" in offline_up_script
     assert "docker/env/backend/offline-images.env" in offline_up_script
+    assert "offline-host-prereqs.sh" in offline_up_script
     assert "docker compose up -d" in offline_up_script
     assert "load_container_socket_env" in offline_up_script
     assert "compose exec -T frontend sh -lc" not in offline_up_script
@@ -882,6 +886,7 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "load_container_socket_gid_env" in offline_up_script
     assert "load_container_socket_env" in compose_env_helper
     assert "load_container_socket_gid_env" in compose_env_helper
+    assert "offline_host_ensure_release_prereqs" in offline_prereq_helper
 
 
 def test_release_generator_preserves_resolved_fallback_backend_provenance_source_tag(tmp_path: Path) -> None:

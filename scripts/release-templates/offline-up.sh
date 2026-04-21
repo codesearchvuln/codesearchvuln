@@ -13,6 +13,7 @@ BACKEND_ENV_EXAMPLE="${BACKEND_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/env.exa
 OFFLINE_ENV_FILE="${OFFLINE_ENV_FILE:-$ROOT_DIR/docker/env/backend/offline-images.env}"
 OFFLINE_ENV_EXAMPLE="${OFFLINE_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/offline-images.env.example}"
 COMPOSE_ENV_HELPER="${COMPOSE_ENV_HELPER:-$ROOT_DIR/scripts/lib/compose-env.sh}"
+HOST_PREREQ_HELPER="${HOST_PREREQ_HELPER:-$ROOT_DIR/scripts/lib/offline-host-prereqs.sh}"
 STARTUP_BANNER_HELPER="${STARTUP_BANNER_HELPER:-$ROOT_DIR/scripts/lib/startup-banner.sh}"
 RELEASE_REFRESH_HELPER="${RELEASE_REFRESH_HELPER:-$ROOT_DIR/scripts/lib/release-refresh.sh}"
 ATTACH_LOGS="false"
@@ -589,11 +590,10 @@ parse_args() {
 main() {
   parse_args "$@"
 
-  require_command docker
-  require_command python3
   [[ -f "$SERVICES_METADATA_FILE" ]] || die "images manifest not found: $SERVICES_METADATA_FILE"
   [[ -f "$SCANNER_METADATA_FILE" ]] || die "images manifest not found: $SCANNER_METADATA_FILE"
   [[ -f "$COMPOSE_ENV_HELPER" ]] || die "missing compose env helper: $COMPOSE_ENV_HELPER"
+  [[ -f "$HOST_PREREQ_HELPER" ]] || die "missing host prereq helper: $HOST_PREREQ_HELPER"
   [[ -f "$STARTUP_BANNER_HELPER" ]] || die "missing startup banner helper: $STARTUP_BANNER_HELPER"
   [[ -f "$RELEASE_REFRESH_HELPER" ]] || die "missing release refresh helper: $RELEASE_REFRESH_HELPER"
 
@@ -608,16 +608,23 @@ main() {
     "offline env file" \
     "The generated offline env usually needs no edits unless you want custom image overrides."
 
-  ensure_compose_ready
-
   # shellcheck disable=SC1090
   source "$COMPOSE_ENV_HELPER"
+  # shellcheck disable=SC1090
+  source "$HOST_PREREQ_HELPER"
   # shellcheck disable=SC1090
   source "$STARTUP_BANNER_HELPER"
   # shellcheck disable=SC1090
   source "$RELEASE_REFRESH_HELPER"
   load_container_socket_env
   load_container_socket_gid_env
+  export OFFLINE_HOST_PREREQ_LOG_PREFIX="[offline-up]"
+  offline_host_ensure_release_prereqs
+
+  require_command docker
+  require_command python3
+  require_command zstd
+  ensure_compose_ready
 
   local arch services_bundle scanner_bundle
   arch="$(detect_server_arch)"

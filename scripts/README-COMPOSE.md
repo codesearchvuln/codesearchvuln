@@ -19,6 +19,9 @@ release refresh 脚本默认固定 Compose project name 为 `VULHUNTER_RELEASE_P
 - backend 容器必须能够访问宿主机 Docker Socket（默认 `/var/run/docker.sock`）；若实际路径或组 ID 不同，请自行设置 `DOCKER_SOCKET_PATH` 与 `DOCKER_SOCKET_GID`
 - release tree 是 GitHub Workflow 生成的 image-only 运行包，不支持非 Docker、Kubernetes、源码直跑或其他衍生部署方式
 - generated release tree 的离线路径只提供 `offline-up.sh` 单入口；离线路径额外依赖 `docker`、`zstd`，其中 Bash/WSL 路径还依赖 `python3`
+- `offline-up.sh` 会在正式部署前统一检测 `docker`、`docker compose`、`zstd`、`python3`；对受支持的 Ubuntu / WSL Ubuntu 宿主机，缺失时会优先通过国内 Ubuntu apt 镜像（默认阿里云、清华）自动安装，失败后回退官方 Ubuntu 源
+- 自动安装只面向上述受支持宿主机；其他发行版只输出手工安装提示，不会修改宿主机 apt 配置
+- 包安装完成后，脚本仍会继续校验 Docker daemon / socket / compose readiness；若 Docker 仍不可用（尤其是 WSL 缺少 Docker Desktop / socket 集成），部署会停止并给出明确提示
 - 推荐运行配置为 `8 核 CPU`、`16 GB 内存`。低于该配置时，镜像拉取、runner 预检、扫描任务和 LLM 交互可能明显变慢甚至失败
 - 浏览器支持范围为 `Safari`、`Chrome`、`Edge`，建议禁用所有浏览器插件 / 扩展。由插件、内容拦截器或不受支持浏览器导致的问题不在适配范围内
 
@@ -67,6 +70,17 @@ bash ./scripts/offline-up.sh --attach-logs
 - `offline-up.sh` 不会删除这些 volumes；只有你手工执行 `docker compose down -v` 时才会删除它们
 - 如执行 `docker compose down -v`，上述持久化数据会被一并删除
 - 跨版本升级前必须先备份 `postgres_data` 与 `backend_uploads`；不要把 `down -v` 当成普通升级流程
+
+## 真实 Ubuntu 宿主机 smoke checklist
+
+建议在一台真实的 `Ubuntu 22.04 / 24.04` 宿主机上至少补测一次：
+
+1. 临时移除 `docker` / `docker compose` / `zstd` / `python3` 中的一个或多个依赖，确认 `offline-up.sh` 会先做聚合检测。
+2. 确认脚本会优先尝试国内 Ubuntu apt 镜像；若人为模拟镜像失败，再确认会回退到官方 Ubuntu 源。
+3. 确认自动安装后还会继续做 Docker readiness 校验，而不是只看包是否安装成功。
+4. 在 WSL Ubuntu 再跑一轮，确认当 Docker Desktop / socket integration 缺失时，脚本会明确停止并给出提示。
+5. 在 unsupported host（例如 Debian）补测一轮，确认脚本只输出手工安装提示，不会修改宿主机 apt 配置。
+6. 最后完成一次完整离线部署，确认 bundle 校验、镜像导入、backend/frontend readiness 与 `/nexus/`、`/nexus-item-detail/` 探针全部通过。
 
 默认访问地址：
 

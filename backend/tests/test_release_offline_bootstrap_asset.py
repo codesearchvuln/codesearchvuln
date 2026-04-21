@@ -8,7 +8,6 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "release-assets" / "offline-bootstrap.sh"
 
@@ -89,6 +88,13 @@ def _symlink_command(bin_dir: Path, name: str) -> None:
     target = shutil.which(name)
     assert target is not None, name
     (bin_dir / name).symlink_to(target)
+
+
+def _write_os_release(path: Path, *, distro_id: str, version_id: str, codename: str) -> None:
+    path.write_text(
+        f'ID={distro_id}\nVERSION_ID="{version_id}"\nUBUNTU_CODENAME={codename}\nVERSION_CODENAME={codename}\n',
+        encoding="utf-8",
+    )
 
 
 def test_offline_bootstrap_supports_zip_release_archive(tmp_path: Path) -> None:
@@ -252,7 +258,7 @@ def test_offline_bootstrap_reports_missing_unzip_for_zip_archives(tmp_path: Path
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("bash", "find", "mv", "tar", "mktemp", "rm", "mkdir"):
+    for name in ("bash", "find", "mv", "tar", "mktemp", "rm", "mkdir", "dirname", "cat"):
         _symlink_command(bin_dir, name)
 
     env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
@@ -262,6 +268,88 @@ def test_offline_bootstrap_reports_missing_unzip_for_zip_archives(tmp_path: Path
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode != 0
     assert "required command not found: unzip" in combined_output
+
+
+def test_offline_bootstrap_standalone_asset_refuses_auto_install_on_unsupported_host(tmp_path: Path) -> None:
+    workdir = tmp_path / "downloads"
+    workdir.mkdir()
+    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    services_bundle = "vulhunter-services-images-amd64.tar.zst"
+    scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
+    _write_bundle(workdir, services_bundle)
+    _write_bundle(workdir, scanner_bundle)
+
+    standalone_script = workdir / "AuditTool-offline-bootstrap.sh"
+    standalone_script.write_text(SCRIPT_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    standalone_script.chmod(standalone_script.stat().st_mode | stat.S_IXUSR)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("bash", "find", "mv", "tar", "mktemp", "rm", "mkdir", "grep", "awk", "id", "cat"):
+        _symlink_command(bin_dir, name)
+
+    docker_path = bin_dir / "docker"
+    docker_path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then
+  echo "Docker Compose version fake"
+  exit 0
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    docker_path.chmod(docker_path.stat().st_mode | stat.S_IXUSR)
+
+    python3_path = bin_dir / "python3"
+    python3_target = shutil.which("python3")
+    assert python3_target is not None
+    python3_path.symlink_to(python3_target)
+
+    sudo_path = bin_dir / "sudo"
+    sudo_path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'sudo %s\\n' "$*" >>"${FAKE_APT_LOG:?}"
+exec "$@"
+""",
+        encoding="utf-8",
+    )
+    sudo_path.chmod(sudo_path.stat().st_mode | stat.S_IXUSR)
+
+    apt_get_path = bin_dir / "apt-get"
+    apt_get_path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'apt-get %s\\n' "$*" >>"${FAKE_APT_LOG:?}"
+exit 0
+""",
+        encoding="utf-8",
+    )
+    apt_get_path.chmod(apt_get_path.stat().st_mode | stat.S_IXUSR)
+
+    os_release = tmp_path / "os-release"
+    _write_os_release(os_release, distro_id="debian", version_id="12", codename="bookworm")
+    apt_log = tmp_path / "apt.log"
+    env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
+    env["PATH"] = str(bin_dir)
+    env["OFFLINE_UP_OS_RELEASE_PATH"] = str(os_release)
+    env["FAKE_APT_LOG"] = str(apt_log)
+
+    result = subprocess.run(
+        ["/bin/bash", str(standalone_script)],
+        cwd=workdir,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    assert result.returncode != 0
+    assert "unsupported host for automatic prerequisite installation" in combined_output
+    assert not (workdir / "offline-up.log").exists()
+    assert not apt_log.exists() or apt_log.read_text(encoding="utf-8") == ""
 
 
 def test_offline_bootstrap_invokes_release_tree_offline_up_from_resolved_root(tmp_path: Path) -> None:
@@ -281,4 +369,3 @@ def test_offline_bootstrap_invokes_release_tree_offline_up_from_resolved_root(tm
     extracted_root = workdir / "AuditTool-1.2.3"
     log_text = (workdir / "offline-up.log").read_text(encoding="utf-8")
     assert f"cwd={extracted_root}" in log_text
-

@@ -11,7 +11,6 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASE_PROJECT_NAME = "vulhunter-release"
 
@@ -24,7 +23,7 @@ def _serve_release_probe_endpoints(status_by_path: dict[str, int]):
         def do_GET(self) -> None:  # noqa: N802 - stdlib hook
             request_log.append(self.path)
             status = status_by_path.get(self.path, 404)
-            body = f"status={status}\n".encode("utf-8")
+            body = f"status={status}\n".encode()
             self.send_response(status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -73,9 +72,15 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
 def _write_frontend_bundle(path: Path) -> Path:
     site_dir = path / "site"
     nginx_dir = path / "nginx"
+    assets_dir = site_dir / "assets"
     site_dir.mkdir(parents=True, exist_ok=True)
     nginx_dir.mkdir(parents=True, exist_ok=True)
-    (site_dir / "index.html").write_text("<!doctype html><title>release frontend</title>\n", encoding="utf-8")
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (site_dir / "index.html").write_text(
+        '<!doctype html><html><head><script type="module" src="/assets/app.js"></script></head><body>release frontend</body></html>\n',
+        encoding="utf-8",
+    )
+    (assets_dir / "app.js").write_text("console.log('release frontend');\n", encoding="utf-8")
     (nginx_dir / "default.conf").write_text(
         (REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8"),
         encoding="utf-8",
@@ -110,7 +115,7 @@ def _expected_nexus_bundle_probe_paths() -> list[str]:
 def _expected_release_probe_paths() -> list[str]:
     return [
         "/",
-        *_expected_asset_probe_paths(REPO_ROOT / "frontend" / "dist" / "index.html"),
+        "/assets/app.js",
         "/api/v1/openapi.json",
         "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
         "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
@@ -405,6 +410,61 @@ cat
     zstd_path.chmod(zstd_path.stat().st_mode | stat.S_IXUSR)
 
 
+def _write_fake_apt_tools(bin_dir: Path, install_bin: Path, log_path: Path) -> None:
+    sudo_path = bin_dir / "sudo"
+    sudo_path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'sudo %s\\n' "$*" >>"${FAKE_APT_LOG:?}"
+exec "$@"
+""",
+        encoding="utf-8",
+    )
+    sudo_path.chmod(sudo_path.stat().st_mode | stat.S_IXUSR)
+
+    apt_get_path = bin_dir / "apt-get"
+    apt_get_path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'apt-get %s\\n' "$*" >>"${FAKE_APT_LOG:?}"
+if [[ "${1:-}" == *"update"* ]] || [[ "${2:-}" == "update" ]]; then
+  exit 0
+fi
+if printf ' %s ' "$*" | grep -q ' install '; then
+  mkdir -p "${FAKE_INSTALL_BIN:?}"
+  if printf ' %s ' "$*" | grep -q ' zstd '; then
+    cat >"${FAKE_INSTALL_BIN}/zstd" <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"${FAKE_ZSTD_LOG:?}"
+cat
+EOS
+    chmod +x "${FAKE_INSTALL_BIN}/zstd"
+  fi
+  if printf ' %s ' "$*" | grep -q ' python3 '; then
+    target="$(command -v python3)"
+    ln -sf "$target" "${FAKE_INSTALL_BIN}/python3"
+  fi
+  if printf ' %s ' "$*" | grep -q ' docker-compose-v2 '; then
+    exit 0
+  fi
+  exit 0
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    apt_get_path.chmod(apt_get_path.stat().st_mode | stat.S_IXUSR)
+    log_path.touch()
+
+
+def _write_os_release(path: Path, *, distro_id: str, version_id: str, codename: str) -> None:
+    path.write_text(
+        f'ID={distro_id}\nVERSION_ID="{version_id}"\nUBUNTU_CODENAME={codename}\nVERSION_CODENAME={codename}\n',
+        encoding="utf-8",
+    )
+
+
 def _write_release_snapshot_lock(
     output_dir: Path,
     *,
@@ -486,7 +546,7 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -548,6 +608,102 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert "All services are up." in combined_output
     assert f"http://localhost:{frontend_port}" in combined_output
     assert request_log == _expected_release_probe_paths()
+
+
+def test_offline_up_bash_auto_installs_missing_zstd_on_supported_ubuntu_before_bundle_load(
+    tmp_path: Path,
+) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    apt_log = tmp_path / "apt.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    install_bin = tmp_path / "installed-bin"
+    install_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+    _write_fake_apt_tools(fake_bin, install_bin, apt_log)
+    os_release = tmp_path / "os-release"
+    _write_os_release(os_release, distro_id="ubuntu", version_id="24.04", codename="noble")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{install_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["FAKE_APT_LOG"] = str(apt_log)
+    env["FAKE_INSTALL_BIN"] = str(install_bin)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["OFFLINE_UP_OS_RELEASE_PATH"] = str(os_release)
+    env["OFFLINE_UP_FORCE_MISSING"] = "zstd"
+
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode == 0, combined_output
+    apt_text = apt_log.read_text(encoding="utf-8")
+    assert "apt-get" in apt_text
+    assert "install -y --no-install-recommends" in apt_text
+    assert "zstd" in apt_text
+    assert "attempting prerequisite install via apt mirror" in combined_output
+    assert (install_bin / "zstd").exists()
+
+
+def test_offline_up_bash_refuses_automatic_install_on_unsupported_host(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    apt_log = tmp_path / "apt.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    install_bin = tmp_path / "installed-bin"
+    install_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+    _write_fake_apt_tools(fake_bin, install_bin, apt_log)
+    os_release = tmp_path / "os-release"
+    _write_os_release(os_release, distro_id="debian", version_id="12", codename="bookworm")
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{install_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["FAKE_APT_LOG"] = str(apt_log)
+    env["FAKE_INSTALL_BIN"] = str(install_bin)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["OFFLINE_UP_OS_RELEASE_PATH"] = str(os_release)
+    env["OFFLINE_UP_FORCE_MISSING"] = "zstd"
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "unsupported host for automatic prerequisite installation" in combined_output
+    assert apt_log.read_text(encoding="utf-8") == ""
+    assert not zstd_log.exists() or zstd_log.read_text(encoding="utf-8") == ""
 
 
 def test_offline_up_bash_fails_when_backend_image_revision_label_does_not_match_release_revision(
@@ -714,7 +870,7 @@ def test_offline_up_bash_parses_crlf_env_and_keeps_socket_values_process_local(t
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "4321"
 
-    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -757,7 +913,7 @@ def test_offline_up_bash_attach_logs_mode_runs_foreground_compose_up(tmp_path: P
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
         env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
         result = subprocess.run(
@@ -1035,7 +1191,7 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
     env["OFFLINE_UP_MAX_ATTEMPTS"] = "1"
     env["OFFLINE_UP_RETRY_DELAY_SECONDS"] = "0"
 
-    status_by_path = {path: 200 for path in _expected_release_probe_paths()}
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
     status_by_path["/api/v1/openapi.json"] = 502
     status_by_path["/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"] = 403
     with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
