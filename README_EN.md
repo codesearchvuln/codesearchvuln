@@ -38,13 +38,13 @@ bash ./scripts/offline-up.sh --attach-logs
 
 Use this when you have preloaded the offline image bundle and want the same runtime stack to refresh onto local `vulhunter-local/*` tags, including a local `sandbox-runner` tag for code execution. The script validates the tar bundles first, then cleans up the current `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release-stack containers and images without removing volumes. The offline path is now Bash/WSL-only; native Windows PowerShell is no longer part of the release contract. Offline reruns still require both tar bundles to remain available. The default mode stays detached; `--attach-logs` switches to foreground output after backend health turns green.
 
-If you downloaded an unreleased GitHub release archive instead of an already extracted release tree, you can also use the standalone bootstrap asset `Vulhunter-offline-bootstrap.sh` that is uploaded with the final semantic release. Put it in the same directory as `AuditTool-*.*.*.zip` or `AuditTool-*.*.*.tar.gz` and the two offline image bundles, then run:
+If you downloaded the semantic-release source archive instead of an already extracted release tree, you can also use the standalone bootstrap asset `Vulhunter-offline-bootstrap.sh` that is uploaded with the final semantic release. Put it in the same directory as `release_code.zip` or `release_code.tar.gz` and the two offline image bundles, then run:
 
 ```bash
 bash ./Vulhunter-offline-bootstrap.sh
 ```
 
-That helper only auto-discovers the files, extracts the release archive, moves the two `vulhunter-*.tar.zst` bundles into the release root, and then delegates to `bash ./scripts/offline-up.sh` inside the extracted release tree. Once you are already inside an extracted release tree, the canonical entrypoint remains `bash ./scripts/offline-up.sh`.
+That helper only auto-discovers the files, extracts the `release_code` archive, moves the two `vulhunter-*.tar.zst` bundles into the release root, and then delegates to `bash ./scripts/offline-up.sh` inside the extracted release tree. Once you are already inside an extracted release tree, the canonical entrypoint remains `bash ./scripts/offline-up.sh`.
 
 ## Explicitly outside the release contract
 

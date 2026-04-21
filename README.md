@@ -44,13 +44,13 @@ bash ./scripts/offline-up.sh --attach-logs
 用途：
 预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签刷新同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。脚本会先校验 tar bundle，再清理当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与镜像，但不会删除 volumes。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层；离线重跑前，两份 tar bundle 也必须仍然存在。默认模式不附着日志，传 `--attach-logs` 才会在 backend 健康后切到前台输出。
 
-如你下载的是尚未解压的 GitHub release 主压缩包，也可以使用最终 semantic release 额外提供的独立引导脚本资产 `Vulhunter-offline-bootstrap.sh`。把它与 `AuditTool-*.*.*.zip` 或 `AuditTool-*.*.*.tar.gz`、以及两份离线镜像包放在同一目录后执行：
+如你下载的是尚未解压的 GitHub semantic release 源码包，也可以使用最终 semantic release 额外提供的独立引导脚本资产 `Vulhunter-offline-bootstrap.sh`。把它与 `release_code.zip` 或 `release_code.tar.gz`、以及两份离线镜像包放在同一目录后执行：
 
 ```bash
 bash ./Vulhunter-offline-bootstrap.sh
 ```
 
-该脚本只负责自动发现、解压 release 主压缩包、把两份 `vulhunter-*.tar.zst` 落到 release 根目录，再委托执行解压后 release tree 内的 `bash ./scripts/offline-up.sh`。一旦你已经进入解压后的 release tree，正式入口仍然是 `bash ./scripts/offline-up.sh`。
+该脚本只负责自动发现、解压 `release_code` 压缩包、把两份 `vulhunter-*.tar.zst` 落到 release 根目录，再委托执行解压后 release tree 内的 `bash ./scripts/offline-up.sh`。一旦你已经进入解压后的 release tree，正式入口仍然是 `bash ./scripts/offline-up.sh`。
 
 ## 明确不属于 release contract 的路径
 

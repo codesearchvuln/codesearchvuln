@@ -50,13 +50,20 @@ def _create_archive(workdir: Path, archive_name: str, *, valid_root: bool = True
         _write_invalid_archive_root(release_root)
 
     archive_path = workdir / archive_name
+    flatten_archive = archive_name.startswith(("release_code.", "source_code."))
+    archive_files = sorted(release_root.rglob("*"))
+    archive_base = release_root if flatten_archive else source_parent
     if archive_name.endswith(".zip"):
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for path in sorted(release_root.rglob("*")):
-                archive.write(path, arcname=path.relative_to(source_parent))
+            for path in archive_files:
+                archive.write(path, arcname=path.relative_to(archive_base))
     else:
         with tarfile.open(archive_path, "w:gz") as archive:
-            archive.add(release_root, arcname=release_root.name)
+            if flatten_archive:
+                for path in archive_files:
+                    archive.add(path, arcname=path.relative_to(release_root))
+            else:
+                archive.add(release_root, arcname=release_root.name)
     return archive_path
 
 
@@ -100,7 +107,7 @@ def _write_os_release(path: Path, *, distro_id: str, version_id: str, codename: 
 def test_offline_bootstrap_supports_zip_release_archive(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.zip")
+    _create_archive(workdir, "release_code.zip")
     services_bundle = "vulhunter-services-images-amd64.tar.zst"
     scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
     _write_bundle(workdir, services_bundle)
@@ -111,7 +118,7 @@ def test_offline_bootstrap_supports_zip_release_archive(tmp_path: Path) -> None:
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
-    extracted_root = workdir / "AuditTool-1.2.3"
+    extracted_root = workdir / "release_code"
     assert extracted_root.exists()
     assert (extracted_root / services_bundle).exists()
     assert (extracted_root / scanner_bundle).exists()
@@ -123,7 +130,7 @@ def test_offline_bootstrap_supports_zip_release_archive(tmp_path: Path) -> None:
 def test_offline_bootstrap_supports_tar_gz_release_archive(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    _create_archive(workdir, "release_code.tar.gz")
     services_bundle = "vulhunter-services-images-arm64.tar.zst"
     scanner_bundle = "vulhunter-scanner-images-arm64.tar.zst"
     _write_bundle(workdir, services_bundle)
@@ -134,7 +141,7 @@ def test_offline_bootstrap_supports_tar_gz_release_archive(tmp_path: Path) -> No
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
-    extracted_root = workdir / "AuditTool-1.2.3"
+    extracted_root = workdir / "release_code"
     assert extracted_root.exists()
     assert (extracted_root / services_bundle).exists()
     assert (extracted_root / scanner_bundle).exists()
@@ -144,8 +151,8 @@ def test_offline_bootstrap_supports_tar_gz_release_archive(tmp_path: Path) -> No
 def test_offline_bootstrap_fails_when_multiple_release_archives_exist(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.zip")
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    _create_archive(workdir, "release_code.zip")
+    _create_archive(workdir, "release_code.tar.gz")
     _write_bundle(workdir, "vulhunter-services-images-amd64.tar.zst")
     _write_bundle(workdir, "vulhunter-scanner-images-amd64.tar.zst")
 
@@ -160,32 +167,30 @@ def test_offline_bootstrap_fails_when_multiple_release_archives_exist(tmp_path: 
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode != 0
-    assert "expected exactly one release archive" in combined_output
+    assert "expected exactly one release_code.zip or release_code.tar.gz" in combined_output
 
 
-def test_offline_bootstrap_ignores_supplementary_source_and_release_code_assets(tmp_path: Path) -> None:
+def test_offline_bootstrap_uses_release_code_archive_while_ignoring_source_code_assets(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    _create_archive(workdir, "release_code.tar.gz")
     services_bundle = "vulhunter-services-images-amd64.tar.zst"
     scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
     _write_bundle(workdir, services_bundle)
     _write_bundle(workdir, scanner_bundle)
 
     for archive_name in (
-        "release_code.zip",
-        "release_code.tar.gz",
         "source_code.zip",
         "source_code.tar.gz",
     ):
-        (workdir / archive_name).write_text("supplementary semantic asset\n", encoding="utf-8")
+        _create_archive(workdir, archive_name)
 
     env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
     result = _run_wrapper(workdir, env=env)
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
-    extracted_root = workdir / "AuditTool-1.2.3"
+    extracted_root = workdir / "release_code"
     assert extracted_root.exists()
     assert (extracted_root / services_bundle).exists()
     assert (extracted_root / scanner_bundle).exists()
@@ -194,7 +199,7 @@ def test_offline_bootstrap_ignores_supplementary_source_and_release_code_assets(
 def test_offline_bootstrap_fails_when_both_arch_pairs_exist(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    _create_archive(workdir, "release_code.tar.gz")
     _write_bundle(workdir, "vulhunter-services-images-amd64.tar.zst")
     _write_bundle(workdir, "vulhunter-scanner-images-amd64.tar.zst")
     _write_bundle(workdir, "vulhunter-services-images-arm64.tar.zst")
@@ -217,7 +222,7 @@ def test_offline_bootstrap_fails_when_both_arch_pairs_exist(tmp_path: Path) -> N
 def test_offline_bootstrap_fails_when_bundle_arches_do_not_match(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    _create_archive(workdir, "release_code.tar.gz")
     _write_bundle(workdir, "vulhunter-services-images-amd64.tar.zst")
     _write_bundle(workdir, "vulhunter-scanner-images-arm64.tar.zst")
 
@@ -238,7 +243,7 @@ def test_offline_bootstrap_fails_when_bundle_arches_do_not_match(tmp_path: Path)
 def test_offline_bootstrap_fails_when_release_root_cannot_be_resolved(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz", valid_root=False)
+    _create_archive(workdir, "release_code.tar.gz", valid_root=False)
     _write_bundle(workdir, "vulhunter-services-images-amd64.tar.zst")
     _write_bundle(workdir, "vulhunter-scanner-images-amd64.tar.zst")
 
@@ -261,7 +266,7 @@ def test_offline_bootstrap_refuses_to_overwrite_existing_bundle_in_release_root(
     workdir.mkdir()
     services_bundle = "vulhunter-services-images-amd64.tar.zst"
     scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz", existing_bundle_name=services_bundle)
+    _create_archive(workdir, "release_code.tar.gz", existing_bundle_name=services_bundle)
     _write_bundle(workdir, services_bundle)
     _write_bundle(workdir, scanner_bundle)
 
@@ -278,7 +283,7 @@ def test_offline_bootstrap_refuses_to_overwrite_existing_bundle_in_release_root(
 def test_offline_bootstrap_reports_missing_unzip_for_zip_archives(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.zip")
+    _create_archive(workdir, "release_code.zip")
     services_bundle = "vulhunter-services-images-amd64.tar.zst"
     scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
     _write_bundle(workdir, services_bundle)
@@ -301,7 +306,7 @@ def test_offline_bootstrap_reports_missing_unzip_for_zip_archives(tmp_path: Path
 def test_offline_bootstrap_standalone_asset_refuses_auto_install_on_unsupported_host(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    _create_archive(workdir, "release_code.tar.gz")
     services_bundle = "vulhunter-services-images-amd64.tar.zst"
     scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
     _write_bundle(workdir, services_bundle)
@@ -383,7 +388,7 @@ exit 0
 def test_offline_bootstrap_invokes_release_tree_offline_up_from_resolved_root(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
-    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    _create_archive(workdir, "release_code.tar.gz")
     services_bundle = "vulhunter-services-images-amd64.tar.zst"
     scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
     _write_bundle(workdir, services_bundle)
@@ -394,6 +399,6 @@ def test_offline_bootstrap_invokes_release_tree_offline_up_from_resolved_root(tm
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
-    extracted_root = workdir / "AuditTool-1.2.3"
+    extracted_root = workdir / "release_code"
     log_text = (workdir / "offline-up.log").read_text(encoding="utf-8")
     assert f"cwd={extracted_root}" in log_text

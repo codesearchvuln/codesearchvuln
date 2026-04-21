@@ -27,7 +27,7 @@ usage() {
 Usage: bash ./Vulhunter-offline-bootstrap.sh
 
 Run from a directory that contains:
-  - exactly one AuditTool-*.*.*.zip or AuditTool-*.*.*.tar.gz
+  - exactly one release_code.zip or release_code.tar.gz
   - exactly one vulhunter-services-images-(amd64|arm64).tar.zst
   - exactly one vulhunter-scanner-images-(amd64|arm64).tar.zst
 
@@ -442,15 +442,13 @@ discover_single_release_archive() {
   local candidate
 
   for candidate in \
-    "$CURRENT_DIR"/AuditTool-*.zip \
-    "$CURRENT_DIR"/AuditTool-*.tar.gz \
-    "$CURRENT_DIR"/codesearchvuln-*.zip \
-    "$CURRENT_DIR"/codesearchvuln-*.tar.gz; do
+    "$CURRENT_DIR"/release_code.zip \
+    "$CURRENT_DIR"/release_code.tar.gz; do
     [[ -f "$candidate" ]] || continue
     matches+=("$candidate")
   done
 
-  [[ "${#matches[@]}" -eq 1 ]] || die "expected exactly one release archive in $CURRENT_DIR"
+  [[ "${#matches[@]}" -eq 1 ]] || die "expected exactly one release_code.zip or release_code.tar.gz in $CURRENT_DIR"
   printf '%s' "${matches[0]}"
 }
 
