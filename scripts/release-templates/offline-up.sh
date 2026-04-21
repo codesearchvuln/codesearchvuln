@@ -644,11 +644,12 @@ enable_offline_up_release_stack_cleanup_fallback() {
   }
 
   collect_current_compose_image_ids() {
-    local compose_output image_refs status stderr_file stderr_output
+    local compose_output_file image_refs status stderr_file stderr_output
 
     stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-config.XXXXXX")"
+    compose_output_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-output.XXXXXX")"
     set +e
-    compose_output="$(compose_release config 2>"$stderr_file")"
+    compose_release config >"$compose_output_file" 2>"$stderr_file"
     status=$?
     set -e
 
@@ -656,34 +657,22 @@ enable_offline_up_release_stack_cleanup_fallback() {
     rm -f "$stderr_file"
 
     if [[ "$status" -ne 0 ]]; then
+      rm -f "$compose_output_file"
       release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
-      if [[ -z "$stderr_output" ]]; then
-        return 0
-      fi
-
-      printf '%s\n' "$stderr_output" >&2
-      return "$status"
+      [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
+      return 0
     fi
 
-    image_refs="$(
-      COMPOSE_CONFIG="$compose_output" python3 - <<'PY'
-from __future__ import annotations
-
-import os
-import re
-
-seen: set[str] = set()
-for line in os.environ.get("COMPOSE_CONFIG", "").splitlines():
-    match = re.match(r"^\s*image:\s*(\S+)\s*$", line)
-    if not match:
-        continue
-    image_ref = match.group(1).strip()
-    if not image_ref or image_ref in seen:
-        continue
-    seen.add(image_ref)
-    print(image_ref)
-PY
-    )"
+    image_refs="$(awk '
+      match($0, /^[[:space:]]*image:[[:space:]]*(\S+)[[:space:]]*$/, matches) {
+        image_ref = matches[1]
+        if (!(image_ref in seen)) {
+          seen[image_ref] = 1
+          print image_ref
+        }
+      }
+    ' "$compose_output_file")"
+    rm -f "$compose_output_file"
     collect_image_ids_for_refs "$image_refs"
   }
 }

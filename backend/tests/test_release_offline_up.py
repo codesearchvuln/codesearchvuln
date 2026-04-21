@@ -805,8 +805,10 @@ def test_offline_up_bash_warns_and_continues_when_compose_image_discovery_is_ben
     )
 
 
-def test_offline_up_bash_fails_when_compose_image_discovery_reports_real_error(tmp_path: Path) -> None:
-    output_dir, _manifest = _generate_release_tree(tmp_path)
+def test_offline_up_bash_warns_and_continues_when_compose_image_discovery_has_stderr(
+    tmp_path: Path,
+) -> None:
+    output_dir, manifest = _generate_release_tree(tmp_path)
     script_path = output_dir / "scripts" / "offline-up.sh"
 
     env_dir = output_dir / "docker" / "env" / "backend"
@@ -836,24 +838,28 @@ def test_offline_up_bash_fails_when_compose_image_discovery_reports_real_error(t
     env["DOCKER_SOCKET_PATH"] = str(socket_path)
     env["DOCKER_SOCKET_GID"] = "1234"
 
-    result = subprocess.run(
-        ["bash", str(script_path)],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
-    assert result.returncode != 0
+    assert result.returncode == 0, combined_output
     assert "warning: release-stack compose image discovery failed" in combined_output
     assert "permission denied while reading compose config" in combined_output
     docker_commands = _read_logged_commands(docker_log)
     assert docker_commands.count(_compose_command("config", project_name=RELEASE_PROJECT_NAME)) == 2
-    assert not any(command.startswith("load -i ") for command in docker_commands)
+    assert f"load -i {output_dir / 'vulhunter-services-images-amd64.tar'}" in docker_commands
+    assert f"load -i {output_dir / 'vulhunter-scanner-images-amd64.tar'}" in docker_commands
     assert _compose_command(
         "up", "-d", "db", "redis", "db-bootstrap", "backend", project_name=RELEASE_PROJECT_NAME
-    ) not in docker_commands
+    ) in docker_commands
 
 
 def test_offline_up_bash_fails_when_release_stack_discovery_reports_docker_permission_error(
@@ -1270,6 +1276,16 @@ def test_release_tree_omits_online_up_script(tmp_path: Path) -> None:
     output_dir, _manifest = _generate_release_tree(tmp_path)
 
     assert not (output_dir / "scripts" / "online-up.sh").exists()
+
+
+def test_release_tree_offline_up_avoids_env_reparse_for_compose_image_discovery(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_text = (output_dir / "scripts" / "offline-up.sh").read_text(encoding="utf-8")
+
+    assert 'compose_output_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-output.XXXXXX")"' in script_text
+    assert 'compose_release config >"$compose_output_file" 2>"$stderr_file"' in script_text
+    assert 'offline-up-compose-output.XXXXXX' in script_text
+    assert 'awk \'' in script_text
 
 
 def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(tmp_path: Path) -> None:
