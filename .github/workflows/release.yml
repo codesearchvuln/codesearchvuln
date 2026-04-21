@@ -711,22 +711,6 @@ jobs:
             --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
             --validate
 
-      - name: Prepare publish-ready release tree
-        env:
-          RELEASE_DIR: ${{ runner.temp }}/release-tree
-        run: |
-          set -euo pipefail
-
-          PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
-          rm -rf "${PUBLISH_READY_DIR}"
-          mkdir -p "${PUBLISH_READY_DIR}"
-          cp -a "${RELEASE_DIR}/." "${PUBLISH_READY_DIR}/"
-          rm -rf "${PUBLISH_READY_DIR}/images"
-          [[ ! -e "${PUBLISH_READY_DIR}/images" ]] || {
-            echo "::error::publish-ready release tree must not contain images/"
-            exit 1
-          }
-
       - name: Validate compose entrypoint
         working-directory: ${{ runner.temp }}/release-tree
         run: |
@@ -799,42 +783,6 @@ jobs:
             exit 1
           fi
 
-      - name: Generate sourcecode tree for semantic release assets
-        run: |
-          set -euo pipefail
-
-          bash ./scripts/generate-sourcecode-branch.sh \
-            --output "${RUNNER_TEMP}/sourcecode-tree" \
-            --validate
-
-      - name: Package semantic release source archives
-        run: |
-          set -euo pipefail
-
-          ARCHIVE_ROOT="${RUNNER_TEMP}/semantic-release-archive-roots"
-          ARCHIVE_DIR="${RUNNER_TEMP}/semantic-release-archives"
-          RELEASE_CODE_DIR="${ARCHIVE_ROOT}/release_code"
-          SOURCE_CODE_DIR="${ARCHIVE_ROOT}/source_code"
-
-          rm -rf "${ARCHIVE_ROOT}" "${ARCHIVE_DIR}"
-          mkdir -p "${RELEASE_CODE_DIR}" "${SOURCE_CODE_DIR}" "${ARCHIVE_DIR}"
-
-          cp -a "${RUNNER_TEMP}/release-tree-publish-ready/." "${RELEASE_CODE_DIR}/"
-          cp -a "${RUNNER_TEMP}/sourcecode-tree/." "${SOURCE_CODE_DIR}/"
-
-          [[ ! -e "${RELEASE_CODE_DIR}/images" ]] || {
-            echo "::error::release_code archives must be generated from a publish-ready tree without images/"
-            exit 1
-          }
-
-          (
-            cd "${ARCHIVE_ROOT}"
-            tar -czf "${ARCHIVE_DIR}/release_code.tar.gz" release_code
-            zip -qr "${ARCHIVE_DIR}/release_code.zip" release_code
-            tar -czf "${ARCHIVE_DIR}/source_code.tar.gz" source_code
-            zip -qr "${ARCHIVE_DIR}/source_code.zip" source_code
-          )
-
       - name: Publish release branch
         id: publish_release_branch
         env:
@@ -867,6 +815,10 @@ jobs:
             git -C "${repo_dir}" add -A
             git -C "${repo_dir}" write-tree
           }
+          rm -rf "${PUBLISH_READY_DIR}"
+          mkdir -p "${PUBLISH_READY_DIR}"
+          cp -a "${RELEASE_DIR}/." "${PUBLISH_READY_DIR}/"
+          rm -rf "${PUBLISH_READY_DIR}/images"
           candidate_tree="$(git_tree_hash_for_dir "${PUBLISH_READY_DIR}" "${COMPARE_DIR}")"
 
           if git ls-remote --exit-code --heads origin release >/dev/null 2>&1; then
@@ -894,6 +846,43 @@ jobs:
           git commit -m "chore: refresh release branch snapshot"
           echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git push --force origin HEAD:release
+
+      - name: Generate sourcecode tree for semantic release assets
+        run: |
+          set -euo pipefail
+
+          bash ./scripts/generate-sourcecode-branch.sh \
+            --output "${RUNNER_TEMP}/sourcecode-tree" \
+            --validate
+
+      - name: Package semantic release source archives
+        run: |
+          set -euo pipefail
+
+          ARCHIVE_ROOT="${RUNNER_TEMP}/semantic-release-archive-roots"
+          ARCHIVE_DIR="${RUNNER_TEMP}/semantic-release-archives"
+          RELEASE_CODE_DIR="${ARCHIVE_ROOT}/release_code"
+          SOURCE_CODE_DIR="${ARCHIVE_ROOT}/source_code"
+          PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
+
+          rm -rf "${ARCHIVE_ROOT}" "${ARCHIVE_DIR}"
+          mkdir -p "${RELEASE_CODE_DIR}" "${SOURCE_CODE_DIR}" "${ARCHIVE_DIR}"
+
+          cp -a "${PUBLISH_READY_DIR}/." "${RELEASE_CODE_DIR}/"
+          cp -a "${RUNNER_TEMP}/sourcecode-tree/." "${SOURCE_CODE_DIR}/"
+
+          [[ ! -e "${RELEASE_CODE_DIR}/images" ]] || {
+            echo "::error::release_code archives must be generated from a publish-ready tree without images/"
+            exit 1
+          }
+
+          (
+            cd "${ARCHIVE_ROOT}"
+            tar -czf "${ARCHIVE_DIR}/release_code.tar.gz" release_code
+            zip -qr "${ARCHIVE_DIR}/release_code.zip" release_code
+            tar -czf "${ARCHIVE_DIR}/source_code.tar.gz" source_code
+            zip -qr "${ARCHIVE_DIR}/source_code.zip" source_code
+          )
 
       - name: Resolve semantic release version
         id: resolve_semantic_version
