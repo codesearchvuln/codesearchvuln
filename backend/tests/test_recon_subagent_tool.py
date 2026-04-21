@@ -118,12 +118,22 @@ async def test_run_recon_subagent_tool_plan_accepts_minimal_modules(tmp_path):
             "module_id": "src_auth",
             "directories": ["src/auth"],
             "description": "Inspect authentication flows in src/auth",
+            "module_type": "custom",
+            "estimated_size": 1,
+            "entrypoint_count": 0,
+            "target_file_count": 1,
         }
     ]
-    planned_module = result.data["project_model"]["module_descriptors"][0]
-    assert planned_module["paths"] == ["src/auth"]
-    assert planned_module["description"] == "Inspect authentication flows in src/auth"
-    assert planned_module["target_files"] == ["src/auth/login.py"]
+    assert result.data["project_model"] == {
+        "project_root": str(tmp_path),
+        "languages": ["Python"],
+        "frameworks": [],
+        "key_directories": ["src/auth"],
+        "entry_points": [],
+        "cross_cutting_paths": [],
+        "global_risk_themes": ["Inspect authentication flows in src/auth"],
+        "scope_limited": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -182,6 +192,10 @@ async def test_run_recon_subagent_tool_plan_drops_extra_fields_before_validation
             "module_id": "src_auth",
             "directories": ["src/auth"],
             "description": "Inspect auth handlers",
+            "module_type": "custom",
+            "estimated_size": 1,
+            "entrypoint_count": 0,
+            "target_file_count": 1,
         }
     ]
 

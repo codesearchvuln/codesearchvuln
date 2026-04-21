@@ -377,6 +377,36 @@ class RunReconSubAgentTool(AgentTool):
             selected = selected[: int(max_modules)]
         return selected
 
+    @staticmethod
+    def _build_plan_project_model_summary(project_model: ProjectReconModel) -> Dict[str, Any]:
+        return {
+            "project_root": str(project_model.project_root or "."),
+            "languages": list(project_model.languages or []),
+            "frameworks": list(project_model.frameworks or []),
+            "key_directories": list(project_model.key_directories or [])[:20],
+            "entry_points": list(project_model.entry_points or [])[:20],
+            "cross_cutting_paths": list(project_model.cross_cutting_paths or [])[:20],
+            "global_risk_themes": list(project_model.global_risk_themes or [])[:20],
+            "scope_limited": bool(project_model.scope_limited),
+        }
+
+    @staticmethod
+    def _build_planned_modules_summary(
+        modules: List[ReconModuleDescriptor],
+    ) -> List[Dict[str, Any]]:
+        return [
+            {
+                "module_id": str(module.module_id),
+                "directories": list(module.paths or []),
+                "description": str(module.description or ""),
+                "module_type": str(module.module_type or ""),
+                "estimated_size": int(module.estimated_size or 0),
+                "entrypoint_count": len(module.entrypoints or []),
+                "target_file_count": len(module.target_files or []),
+            }
+            for module in modules
+        ]
+
     async def _execute(
         self,
         action: Literal["plan", "run"] = "run",
@@ -414,15 +444,12 @@ class RunReconSubAgentTool(AgentTool):
             payload = {
                 "action": "plan",
                 "module_count": len(all_modules),
-                "planned_modules": [
-                    {
-                        "module_id": str(module.module_id),
-                        "directories": list(module.paths or []),
-                        "description": str(module.description or ""),
-                    }
-                    for module in all_modules
-                ],
-                "project_model": project_model.to_dict(),
+                "planned_modules": self._build_planned_modules_summary(all_modules),
+                "project_model": self._build_plan_project_model_summary(project_model),
+                "summary": (
+                    f"已完成 {len(all_modules)} 个模块的规划，可继续调用 "
+                    "`run_recon_subagent` with `action=run` 执行模块侦查。"
+                ),
             }
             return ToolResult(success=True, data=payload, metadata=payload)
 

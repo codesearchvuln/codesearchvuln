@@ -6,6 +6,7 @@ Agent 单元测试
 import pytest
 import asyncio
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from app.services.agent.agents.base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern
@@ -214,6 +215,155 @@ class TestReconAgent:
         result = agent._apply_runtime_recon_state(result)
 
         assert result["risk_points_pushed"] == 3
+
+    @pytest.mark.asyncio
+    async def test_recon_host_requires_run_after_plan_before_accepting_final_answer(
+        self, mock_llm_service, mock_event_emitter
+    ):
+        agent = ReconAgent(
+            llm_service=mock_llm_service,
+            tools={
+                "run_recon_subagent": SimpleNamespace(
+                    description="Run recon subagents",
+                    args_schema=None,
+                )
+            },
+            event_emitter=mock_event_emitter,
+        )
+
+        llm_outputs = iter(
+            [
+                """Thought: 先规划模块
+Action: run_recon_subagent
+Action Input: {"action":"plan","modules":[{"directories":["src/auth"],"description":"Inspect auth flows"}]}""",
+                """Thought: 已完成规划
+Final Answer: {"summary":"当前已有模块规划"}""",
+                """Thought: 开始执行模块侦查
+Action: run_recon_subagent
+Action Input: {"action":"run"}""",
+                """Thought: 已收到模块结果
+Final Answer: {"summary":"模块侦查完成"}""",
+            ]
+        )
+        tool_calls = []
+
+        async def fake_stream_llm_call(_messages, *args, **kwargs):
+            return next(llm_outputs), 10
+
+        async def fake_execute_tool(tool_name, tool_input):
+            tool_calls.append((tool_name, dict(tool_input)))
+            if tool_input.get("action") == "plan":
+                payload = {
+                    "action": "plan",
+                    "module_count": 1,
+                    "planned_modules": [
+                        {
+                            "module_id": "src_auth",
+                            "directories": ["src/auth"],
+                            "description": "Inspect auth flows",
+                            "module_type": "custom",
+                            "estimated_size": 1,
+                            "entrypoint_count": 0,
+                            "target_file_count": 1,
+                        }
+                    ],
+                    "project_model": {
+                        "project_root": ".",
+                        "languages": ["Python"],
+                        "frameworks": [],
+                        "key_directories": ["src"],
+                        "entry_points": [],
+                        "cross_cutting_paths": [],
+                        "global_risk_themes": ["Inspect auth flows"],
+                        "scope_limited": False,
+                    },
+                }
+            else:
+                payload = {
+                    "action": "run",
+                    "module_count": 1,
+                    "selected_module_count": 1,
+                    "selected_module_ids": ["src_auth"],
+                    "project_model": {
+                        "project_root": ".",
+                        "languages": ["Python"],
+                        "frameworks": [],
+                        "entry_points": [],
+                        "key_directories": ["src"],
+                        "module_descriptors": [
+                            {
+                                "module_id": "src_auth",
+                                "name": "src/auth",
+                                "module_type": "custom",
+                                "paths": ["src/auth"],
+                                "description": "Inspect auth flows",
+                                "entrypoints": [],
+                                "language_hints": ["Python"],
+                                "framework_hints": [],
+                                "risk_focus": ["Inspect auth flows"],
+                                "priority": 999,
+                                "estimated_size": 1,
+                                "target_files": ["src/auth/login.py"],
+                            }
+                        ],
+                        "global_risk_themes": ["Inspect auth flows"],
+                        "cross_cutting_paths": [],
+                        "target_files": ["src/auth/login.py"],
+                        "scope_limited": False,
+                    },
+                    "module_results": [
+                        {
+                            "module_id": "src_auth",
+                            "success": True,
+                            "risk_points": [],
+                            "risk_points_pushed": 0,
+                            "files_read": ["src/auth/login.py"],
+                            "files_discovered": ["src/auth/login.py"],
+                            "directories_scanned": ["src/auth"],
+                            "input_surfaces": [],
+                            "trust_boundaries": [],
+                            "target_files": ["src/auth/login.py"],
+                            "summary": "Inspect auth flows",
+                            "error": None,
+                            "module_name": "src/auth",
+                            "module_type": "custom",
+                        }
+                    ],
+                    "risk_points": [],
+                    "risk_points_pushed": 0,
+                    "input_surfaces": [],
+                    "trust_boundaries": [],
+                    "target_files": ["src/auth/login.py"],
+                    "coverage_summary": {
+                        "directories_scanned": ["src/auth"],
+                        "files_discovered": ["src/auth/login.py"],
+                        "files_read": ["src/auth/login.py"],
+                    },
+                    "summary": "Inspect auth flows",
+                    "modules_processed": 1,
+                    "modules_failed": 0,
+                }
+            agent._last_successful_tool_context = {
+                "tool_name": tool_name,
+                "tool_input": dict(tool_input),
+                "tool_metadata": payload,
+            }
+            return payload
+
+        agent.stream_llm_call = fake_stream_llm_call
+        agent.execute_tool = fake_execute_tool
+
+        result = await agent.run(
+            {
+                "project_info": {"name": "demo", "root": "."},
+                "config": {},
+            }
+        )
+
+        assert result.success is True
+        assert [payload["action"] for _name, payload in tool_calls] == ["plan", "run"]
+        assert result.data["module_results"][0]["module_id"] == "src_auth"
+        assert result.data["project_model"]["module_descriptors"][0]["target_files"] == ["src/auth/login.py"]
 
 class TestAnalysisAgent:
     """Analysis Agent 测试"""

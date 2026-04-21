@@ -217,6 +217,9 @@ class ReconAgent(BaseAgent):
         self._coverage_files_read: List[str] = []
         self._latest_tool_module_results: List[Dict[str, Any]] = []
         self._latest_tool_project_model: Dict[str, Any] = {}
+        self._subagent_plan_seen = False
+        self._subagent_run_seen = False
+        self._subagent_last_plan_module_count = 0
     
     def _parse_llm_response(self, response: str) -> ReconStep:
         """解析 LLM 响应（共享 ReAct 解析器）"""
@@ -262,6 +265,68 @@ class ReconAgent(BaseAgent):
         except Exception:
             return None
         return parsed if parsed > 0 else None
+
+    @staticmethod
+    def _safe_nonnegative_int(value: Any) -> Optional[int]:
+        try:
+            parsed = int(value)
+        except Exception:
+            return None
+        return parsed if parsed >= 0 else None
+
+    def _record_subagent_tool_progress(self, metadata: Dict[str, Any]) -> str:
+        if not isinstance(metadata, dict):
+            return ""
+        action = str(metadata.get("action") or "").strip().lower()
+        if action == "plan":
+            self._subagent_plan_seen = True
+            module_count = self._safe_nonnegative_int(metadata.get("module_count"))
+            if module_count is not None:
+                self._subagent_last_plan_module_count = module_count
+        elif action == "run":
+            self._subagent_run_seen = True
+        return action
+
+    def _validate_host_completion_gate(
+        self,
+        *,
+        final_result: Dict[str, Any],
+        in_module_worker_mode: bool,
+    ) -> Tuple[bool, List[str]]:
+        if in_module_worker_mode:
+            return True, []
+        if "run_recon_subagent" not in self.tools:
+            return True, []
+        if not self._subagent_plan_seen:
+            return True, []
+        if self._subagent_run_seen:
+            return True, []
+
+        planned_count = self._safe_nonnegative_int(final_result.get("module_count"))
+        if planned_count is None:
+            planned_count = self._subagent_last_plan_module_count
+        planned_hint = (
+            f"（当前 plan 模块数: {planned_count}）"
+            if planned_count and planned_count > 0
+            else ""
+        )
+        return False, [
+            "已执行 `run_recon_subagent(action=plan)` 但尚未执行 `action=run`，"
+            f"当前只完成模块规划{planned_hint}，不能视为 Recon 完成。"
+        ]
+
+    def _build_host_continue_prompt(self, missing_items: List[str]) -> str:
+        checklist = "\n".join(f"- {item}" for item in missing_items[:6])
+        return (
+            "当前 Recon Host 任务尚未完成，暂不接受 Final Answer。\n"
+            "仍缺少以下关键步骤：\n"
+            f"{checklist}\n\n"
+            "请继续执行 Action，不要结束。优先顺序：\n"
+            "1. 立即调用 `run_recon_subagent`；\n"
+            "2. `Action Input` 至少包含 `{"
+            "\"action\":\"run\"}`，必要时补充 `module_ids` / `max_modules`；\n"
+            "3. 等待模块结果返回后，再输出包含 `module_results` 摘要的 Final Answer。"
+        )
 
     @staticmethod
     def _normalize_risk_point_text(value: Any) -> str:
@@ -573,6 +638,10 @@ class ReconAgent(BaseAgent):
             metadata = {}
 
         if action_name == "run_recon_subagent":
+            subagent_action = self._record_subagent_tool_progress(metadata)
+            if subagent_action != "run":
+                return
+
             module_results = metadata.get("module_results")
             if isinstance(module_results, list):
                 self._latest_tool_module_results = [
@@ -851,6 +920,9 @@ class ReconAgent(BaseAgent):
         self._coverage_files_read = []
         self._latest_tool_module_results = []
         self._latest_tool_project_model = {}
+        self._subagent_plan_seen = False
+        self._subagent_run_seen = False
+        self._subagent_last_plan_module_count = 0
         for target_file in target_files if isinstance(target_files, list) else []:
             self._remember_target_file(target_file)
             self._remember_discovered_file(target_file)
@@ -1136,12 +1208,35 @@ Final Answer: [JSON格式的结果]"""
                 # 检查是否完成
                 if step.is_final:
                     no_action_streak = 0
+                    proposed_result = (
+                        step.final_answer
+                        if isinstance(step.final_answer, dict)
+                        else self._summarize_from_steps()
+                    )
+                    if isinstance(proposed_result, dict):
+                        proposed_result = self._apply_subagent_runtime_payload(dict(proposed_result))
+                        proposed_result = self._apply_runtime_recon_state(proposed_result)
+                        proposed_result = self._ensure_project_profile(proposed_result)
+                        ready, missing_items = self._validate_host_completion_gate(
+                            final_result=proposed_result,
+                            in_module_worker_mode=in_module_worker_mode,
+                        )
+                        if not ready:
+                            await self.emit_llm_decision("继续侦查", "Recon Host 尚未完成 SubAgent 执行")
+                            self._conversation_history.append({
+                                "role": "user",
+                                "content": self._build_host_continue_prompt(missing_items),
+                            })
+                            continue
+                        final_result = proposed_result
+                    else:
+                        final_result = proposed_result
+
                     await self.emit_llm_decision("完成信息收集", "LLM 判断已收集足够信息")
                     await self.emit_llm_complete(
                         f"信息收集完成，共 {self._iteration} 轮思考",
                         self._total_tokens
                     )
-                    final_result = step.final_answer
                     break
                 
                 # 执行工具
@@ -1345,6 +1440,25 @@ Final Answer:""",
                 final_result = self._apply_subagent_runtime_payload(final_result)
                 final_result = self._apply_runtime_recon_state(final_result)
                 final_result = self._ensure_project_profile(final_result)
+                host_ready, host_missing_items = self._validate_host_completion_gate(
+                    final_result=final_result,
+                    in_module_worker_mode=in_module_worker_mode,
+                )
+                if not host_ready:
+                    await self.emit_event(
+                        "warning",
+                        "Recon Host 仅完成模块规划，尚未执行 SubAgent run；当前结果不视为完成",
+                        metadata={"missing_items": host_missing_items[:4]},
+                    )
+                    return AgentResult(
+                        success=False,
+                        error=host_missing_items[0],
+                        data=final_result,
+                        iterations=self._iteration,
+                        tool_calls=self._tool_calls,
+                        tokens_used=self._total_tokens,
+                        duration_ms=duration_ms,
+                    )
                 await self._sync_or_capture_recon_queue(
                     final_result,
                     in_module_worker_mode=in_module_worker_mode,
