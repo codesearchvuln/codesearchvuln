@@ -124,9 +124,13 @@ cleanup_release_stack() {
   local project_name container_ids image_ids image_id compose_image_ids
 
   project_name="$(release_compose_project_name)"
+  release_refresh_log_info "[trace:cleanup] collecting container ids"
   container_ids="$(collect_release_stack_container_ids)"
+  release_refresh_log_info "[trace:cleanup] collecting stack image ids"
   image_ids="$(collect_release_stack_image_ids "$container_ids")"
+  release_refresh_log_info "[trace:cleanup] collecting compose image ids"
   compose_image_ids="$(collect_current_compose_image_ids)"
+  release_refresh_log_info "[trace:cleanup] compose image ids collected (${#compose_image_ids} chars)"
   if [[ -n "$compose_image_ids" ]]; then
     image_ids="$(printf '%s\n%s\n' "$image_ids" "$compose_image_ids" | awk 'NF && !seen[$0]++')"
   fi
