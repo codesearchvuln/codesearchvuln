@@ -405,12 +405,15 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "bash ./Vulhunter-offline-bootstrap.sh --deploy" in workflow_text
     assert "bash ./scripts/offline-up.sh" not in workflow_text
     assert "SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets" in workflow_text
+    assert "VULHUNTER_RELEASE_PROJECT_NAME: vulhunter-release-smoke" in workflow_text
     assert "SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}" in workflow_text
     assert "Finalize preflight" in workflow_text
     assert "Inspect snapshot draft release" in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text
-    assert "docker compose logs db redis scan-workspace-init db-bootstrap backend frontend" in workflow_text
+    assert 'docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" ps || true' in workflow_text
+    assert 'docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" logs db redis scan-workspace-init db-bootstrap backend frontend || true' in workflow_text
+    assert 'docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" down -v || true' in workflow_text
     assert "service_cid()" not in workflow_text
     assert "docker compose ps -q \"$1\"" not in workflow_text
     assert "service_health()" not in workflow_text

@@ -756,6 +756,7 @@ jobs:
         working-directory: ${{ runner.temp }}/release-tree
         env:
           SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+          VULHUNTER_RELEASE_PROJECT_NAME: vulhunter-release-smoke
         run: |
           set -euo pipefail
 
@@ -765,12 +766,12 @@ jobs:
           fi
 
           dump_debug() {
-            docker compose ps || true
-            docker compose logs db redis scan-workspace-init db-bootstrap backend frontend || true
+            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" ps || true
+            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" logs db redis scan-workspace-init db-bootstrap backend frontend || true
           }
 
           cleanup() {
-            docker compose down -v || true
+            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" down -v || true
           }
           trap cleanup EXIT
 
