@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     LLM_API_KEY: Optional[str] = None
     LLM_MODEL: Optional[str] = None  # 不指定时使用provider的默认模型
     LLM_BASE_URL: Optional[str] = None  # 自定义API端点（如中转站）
-    LLM_TIMEOUT: int = 150  # 超时时间（秒）
+    LLM_TIMEOUT: int = 300  # 超时时间（秒）
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 4096
     LLM_TOKEN_COUNTING_MODE: str = "heuristic"  # heuristic, auto, precise

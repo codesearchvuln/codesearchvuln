@@ -672,10 +672,10 @@ def get_default_config() -> dict:
             "llmMaxTokens": settings.LLM_MAX_TOKENS,
             "llmCustomHeaders": "",
             # Agent超时配置（秒）
-            "llmFirstTokenTimeout": getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 45),
-            "llmStreamTimeout": getattr(settings, 'LLM_STREAM_TIMEOUT', 120),
+            "llmFirstTokenTimeout": getattr(settings, 'LLM_FIRST_TOKEN_TIMEOUT', 120),
+            "llmStreamTimeout": getattr(settings, 'LLM_STREAM_TIMEOUT', 300),
             "agentTimeout": settings.AGENT_TIMEOUT_SECONDS,
-            "subAgentTimeout": getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 600),
+            "subAgentTimeout": getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 1200),
             "toolTimeout": getattr(settings, 'TOOL_TIMEOUT_SECONDS', 60),
             # 平台专用配置
             "geminiApiKey": settings.GEMINI_API_KEY or "",
