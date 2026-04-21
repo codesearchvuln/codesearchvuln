@@ -603,6 +603,8 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
         and f'vulhunter-local/backend:{manifest["revision"]}' in command
         for command in docker_commands
     )
+    assert "deprecated" in combined_output.lower()
+    assert "Vulhunter-offline-bootstrap.sh --deploy" in combined_output
     assert "backend image provenance" in combined_output
     assert "所有服务已启动" in combined_output
     assert "All services are up." in combined_output
@@ -953,8 +955,27 @@ def test_offline_up_bash_attach_logs_mode_runs_foreground_compose_up(tmp_path: P
     assert _compose_command("up", "-d", "frontend", project_name=RELEASE_PROJECT_NAME) not in docker_commands
     assert _compose_command("up", "-d", "db", "redis", "db-bootstrap", "backend") not in docker_commands
     assert not any("http://127.0.0.1/api/v1/openapi.json" in line for line in docker_commands)
+    assert "deprecated" in combined_output.lower()
+    assert "Vulhunter-offline-bootstrap.sh --deploy" in combined_output
     assert combined_output.count("所有服务已启动") == 1
     assert combined_output.count("All services are up.") == 1
+
+
+def test_offline_up_bash_rejects_bootstrap_only_maintenance_flags(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    for flag in ("--stop", "--cleanup", "--cleanup-all"):
+        result = subprocess.run(
+            ["bash", str(script_path), flag],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+        assert result.returncode != 0
+        assert "Vulhunter-offline-bootstrap.sh" in combined_output
+        assert "bootstrap" in combined_output.lower()
 
 
 def test_release_tree_omits_online_up_script(tmp_path: Path) -> None:

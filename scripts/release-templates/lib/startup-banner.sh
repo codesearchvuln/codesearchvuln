@@ -36,7 +36,13 @@ startup_banner_local_frontend_root_url() {
 
 startup_banner_release_root_dir() {
   local helper_dir
+  local release_root
   helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  release_root="$(cd "$helper_dir/.." && pwd)"
+  if [[ -f "$release_root/docker-compose.yml" ]]; then
+    printf '%s' "$release_root"
+    return 0
+  fi
   printf '%s' "$(cd "$helper_dir/../.." && pwd)"
 }
 

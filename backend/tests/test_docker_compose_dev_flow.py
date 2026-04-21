@@ -428,7 +428,7 @@ def test_readmes_document_backend_managed_preflight_behavior() -> None:
         assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in doc
         assert "docker/env/backend/env.example" in doc
         assert "offline-images.env.example" in doc
-        assert "offline-up.sh" in doc
+        assert "Vulhunter-offline-bootstrap.sh" in doc
         assert "offline-up.ps1" not in doc
         assert "/nexus/" in doc
         assert "/nexus-item-detail/" in doc
@@ -733,7 +733,7 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert '--arch "${ARCH}"' in workflow_text
     assert "build_sandbox:" not in workflow_text
     assert "docker compose config" in workflow_text
-    assert "bash ./scripts/offline-up.sh" in workflow_text
+    assert "bash ./Vulhunter-offline-bootstrap.sh --deploy" in workflow_text
     assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text

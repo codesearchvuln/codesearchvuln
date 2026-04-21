@@ -105,25 +105,40 @@ image_id_is_protected() {
   return 1
 }
 
+stop_release_stack() {
+  local project_name
+
+  project_name="$(release_compose_project_name)"
+  release_refresh_log_info "stopping release stack containers for project ${project_name}"
+  compose_release stop || true
+}
+
+collect_release_project_volume_names() {
+  docker volume ls --format '{{.Name}} {{.Labels}}' 2>/dev/null | awk -v project="$(release_compose_project_name)" '
+    index($0, "com.docker.compose.project=" project) > 0 { print $1 }
+  '
+}
+
 cleanup_release_stack() {
   local protected_image_ids="${1:-}"
-  local project_name container_ids image_ids image_id
+  local project_name container_ids image_ids image_id compose_image_ids
 
   project_name="$(release_compose_project_name)"
   container_ids="$(collect_release_stack_container_ids)"
-
-  if [[ -z "$container_ids" ]]; then
-    release_refresh_log_info "no existing release stack containers found for project ${project_name}"
-    return 0
+  image_ids="$(collect_release_stack_image_ids "$container_ids")"
+  compose_image_ids="$(collect_current_compose_image_ids)"
+  if [[ -n "$compose_image_ids" ]]; then
+    image_ids="$(printf '%s\n%s\n' "$image_ids" "$compose_image_ids" | awk 'NF && !seen[$0]++')"
   fi
 
-  image_ids="$(collect_release_stack_image_ids "$container_ids")"
+  if [[ -z "$container_ids" ]]; then
+    release_refresh_log_info "no existing release stack containers found for project ${project_name}; continuing cleanup for networks/images"
+  else
+    stop_release_stack
+  fi
 
-  release_refresh_log_info "stopping current release stack containers for project ${project_name}"
-  compose_release stop
-
-  release_refresh_log_info "removing current release stack containers for project ${project_name}"
-  compose_release down --remove-orphans
+  release_refresh_log_info "removing release stack containers and networks for project ${project_name} (volumes preserved)"
+  compose_release down --remove-orphans || true
 
   while IFS= read -r image_id; do
     [[ -n "$image_id" ]] || continue
@@ -137,4 +152,24 @@ cleanup_release_stack() {
     fi
     release_refresh_log_warn "unable to remove previous release image (likely still used elsewhere): ${image_id}"
   done <<<"$image_ids"
+
+  release_refresh_log_info "cleanup completed for project ${project_name}; volumes were preserved"
+}
+
+cleanup_release_stack_and_volumes() {
+  local project_name volume_name
+
+  project_name="$(release_compose_project_name)"
+  cleanup_release_stack "$@"
+
+  while IFS= read -r volume_name; do
+    [[ -n "$volume_name" ]] || continue
+    if docker volume rm "$volume_name" >/dev/null 2>&1; then
+      release_refresh_log_info "removed release project volume: ${volume_name}"
+      continue
+    fi
+    release_refresh_log_warn "unable to remove release project volume (likely still used elsewhere): ${volume_name}"
+  done < <(collect_release_project_volume_names)
+
+  release_refresh_log_info "cleanup-all completed for project ${project_name}; release project volumes were removed"
 }

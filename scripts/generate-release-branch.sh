@@ -167,17 +167,18 @@ copy_frontend_runtime_bundle() {
 overlay_release_templates() {
   mkdir -p \
     "$OUTPUT_DIR/scripts" \
-    "$OUTPUT_DIR/scripts/lib" \
     "$OUTPUT_DIR/docker" \
     "$OUTPUT_DIR/docker/env/backend"
 
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
+  cp "$ROOT_DIR/scripts/release-assets/offline-bootstrap.sh" "$OUTPUT_DIR/Vulhunter-offline-bootstrap.sh"
   cp "$TEMPLATE_DIR/offline-up.sh" "$OUTPUT_DIR/scripts/offline-up.sh"
-  cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/lib/compose-env.sh"
-  cp "$ROOT_DIR/scripts/lib/offline-host-prereqs.sh" "$OUTPUT_DIR/scripts/lib/offline-host-prereqs.sh"
-  cp "$TEMPLATE_DIR/lib/startup-banner.sh" "$OUTPUT_DIR/scripts/lib/startup-banner.sh"
-  cp "$TEMPLATE_DIR/lib/release-refresh.sh" "$OUTPUT_DIR/scripts/lib/release-refresh.sh"
+  cp "$ROOT_DIR/scripts/lib/compose-env.sh" "$OUTPUT_DIR/scripts/compose-env.sh"
+  cp "$ROOT_DIR/scripts/lib/offline-host-prereqs.sh" "$OUTPUT_DIR/scripts/offline-host-prereqs.sh"
+  cp "$TEMPLATE_DIR/lib/startup-banner.sh" "$OUTPUT_DIR/scripts/startup-banner.sh"
+  cp "$TEMPLATE_DIR/lib/release-refresh.sh" "$OUTPUT_DIR/scripts/release-refresh.sh"
+  chmod +x "$OUTPUT_DIR/Vulhunter-offline-bootstrap.sh"
   chmod +x "$OUTPUT_DIR/scripts/offline-up.sh"
   render_release_compose
   python3 - \
@@ -244,7 +245,7 @@ def resolve_backend_provenance(manifest_payload: dict[str, object]) -> tuple[str
 
 offline_env_lines = [
     "# Copy this file to offline-images.env before using offline mode.",
-    "# Then run bash ./scripts/offline-up.sh.",
+    "# Then run bash ./Vulhunter-offline-bootstrap.sh --deploy.",
     "# This release tree does not support rebuilding backend/frontend from source.",
     "# The default backend runtime image in this release tree comes from the runtime-plain target.",
     "RUNNER_PREFLIGHT_OFFLINE_MODE=true",
@@ -322,14 +323,15 @@ validate_release_tree() {
   required_paths=(
     "README.md"
     "README_EN.md"
+    "Vulhunter-offline-bootstrap.sh"
     "docker-compose.yml"
     "images-manifest-services.json"
     "images-manifest-scanner.json"
     "scripts/offline-up.sh"
-    "scripts/lib/compose-env.sh"
-    "scripts/lib/offline-host-prereqs.sh"
-    "scripts/lib/startup-banner.sh"
-    "scripts/lib/release-refresh.sh"
+    "scripts/compose-env.sh"
+    "scripts/offline-host-prereqs.sh"
+    "scripts/startup-banner.sh"
+    "scripts/release-refresh.sh"
     "docker/env/backend/env.example"
     "docker/env/backend/offline-images.env.example"
     "deploy/runtime/frontend/site/index.html"

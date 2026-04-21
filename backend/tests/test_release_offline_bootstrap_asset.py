@@ -23,13 +23,32 @@ def _write_release_root(root: Path, *, existing_bundle_name: str | None = None) 
         """#!/usr/bin/env bash
 set -euo pipefail
 printf 'cwd=%s\\n' "$PWD" >> "${OFFLINE_UP_LOG:?}"
+printf 'args=%s\\n' "$*" >> "${OFFLINE_UP_LOG:?}"
 for bundle in "${EXPECTED_SERVICES_BUNDLE:?}" "${EXPECTED_SCANNER_BUNDLE:?}"; do
-  [[ -f "$bundle" ]] || { echo "missing bundle: $bundle" >&2; exit 1; }
+  [[ -f "$bundle" || -f "images/$bundle" ]] || { echo "missing bundle: $bundle" >&2; exit 1; }
 done
 """,
         encoding="utf-8",
     )
     offline_up.chmod(offline_up.stat().st_mode | stat.S_IXUSR)
+    (root / "scripts" / "release-refresh.sh").write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+
+stop_release_stack() {
+  printf 'action=stop\\n' >> "${RELEASE_REFRESH_LOG:?}"
+}
+
+cleanup_release_stack() {
+  printf 'action=cleanup\\n' >> "${RELEASE_REFRESH_LOG:?}"
+}
+
+cleanup_release_stack_and_volumes() {
+  printf 'action=cleanup-all\\n' >> "${RELEASE_REFRESH_LOG:?}"
+}
+""",
+        encoding="utf-8",
+    )
     return root
 
 
@@ -73,9 +92,13 @@ def _write_bundle(workdir: Path, bundle_name: str) -> Path:
     return path
 
 
-def _run_wrapper(workdir: Path, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def _run_wrapper(
+    workdir: Path,
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["/bin/bash", str(SCRIPT_PATH)],
+        ["/bin/bash", str(SCRIPT_PATH), *args],
         cwd=workdir,
         env=env,
         capture_output=True,
@@ -86,6 +109,7 @@ def _run_wrapper(workdir: Path, *, env: dict[str, str] | None = None) -> subproc
 def _base_env(workdir: Path, *, services_bundle: str, scanner_bundle: str) -> dict[str, str]:
     env = os.environ.copy()
     env["OFFLINE_UP_LOG"] = str(workdir / "offline-up.log")
+    env["RELEASE_REFRESH_LOG"] = str(workdir / "release-refresh.log")
     env["EXPECTED_SERVICES_BUNDLE"] = services_bundle
     env["EXPECTED_SCANNER_BUNDLE"] = scanner_bundle
     return env
@@ -95,6 +119,22 @@ def _symlink_command(bin_dir: Path, name: str) -> None:
     target = shutil.which(name)
     assert target is not None, name
     (bin_dir / name).symlink_to(target)
+
+
+def _write_fake_docker(bin_dir: Path) -> None:
+    docker_path = bin_dir / "docker"
+    docker_path.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then
+  echo "Docker Compose version fake"
+  exit 0
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    docker_path.chmod(docker_path.stat().st_mode | stat.S_IXUSR)
 
 
 def _write_os_release(path: Path, *, distro_id: str, version_id: str, codename: str) -> None:
@@ -114,7 +154,7 @@ def test_offline_bootstrap_supports_zip_release_archive(tmp_path: Path) -> None:
     _write_bundle(workdir, scanner_bundle)
 
     env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
-    result = _run_wrapper(workdir, env=env)
+    result = _run_wrapper(workdir, "--deploy", env=env)
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
@@ -137,7 +177,7 @@ def test_offline_bootstrap_supports_tar_gz_release_archive(tmp_path: Path) -> No
     _write_bundle(workdir, scanner_bundle)
 
     env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
-    result = _run_wrapper(workdir, env=env)
+    result = _run_wrapper(workdir, "--deploy", env=env)
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
@@ -158,6 +198,7 @@ def test_offline_bootstrap_fails_when_multiple_release_archives_exist(tmp_path: 
 
     result = _run_wrapper(
         workdir,
+        "--deploy",
         env=_base_env(
             workdir,
             services_bundle="vulhunter-services-images-amd64.tar.zst",
@@ -186,7 +227,7 @@ def test_offline_bootstrap_uses_release_code_archive_while_ignoring_source_code_
         _create_archive(workdir, archive_name)
 
     env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
-    result = _run_wrapper(workdir, env=env)
+    result = _run_wrapper(workdir, "--deploy", env=env)
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
@@ -207,6 +248,7 @@ def test_offline_bootstrap_fails_when_both_arch_pairs_exist(tmp_path: Path) -> N
 
     result = _run_wrapper(
         workdir,
+        "--deploy",
         env=_base_env(
             workdir,
             services_bundle="vulhunter-services-images-amd64.tar.zst",
@@ -228,6 +270,7 @@ def test_offline_bootstrap_fails_when_bundle_arches_do_not_match(tmp_path: Path)
 
     result = _run_wrapper(
         workdir,
+        "--deploy",
         env=_base_env(
             workdir,
             services_bundle="vulhunter-services-images-amd64.tar.zst",
@@ -249,6 +292,7 @@ def test_offline_bootstrap_fails_when_release_root_cannot_be_resolved(tmp_path: 
 
     result = _run_wrapper(
         workdir,
+        "--deploy",
         env=_base_env(
             workdir,
             services_bundle="vulhunter-services-images-amd64.tar.zst",
@@ -272,6 +316,7 @@ def test_offline_bootstrap_refuses_to_overwrite_existing_bundle_in_release_root(
 
     result = _run_wrapper(
         workdir,
+        "--deploy",
         env=_base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle),
     )
 
@@ -291,12 +336,12 @@ def test_offline_bootstrap_reports_missing_unzip_for_zip_archives(tmp_path: Path
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("bash", "find", "mv", "tar", "mktemp", "rm", "mkdir", "dirname", "cat"):
+    for name in ("bash", "find", "mv", "tar", "mktemp", "rm", "mkdir", "dirname", "cat", "awk"):
         _symlink_command(bin_dir, name)
 
     env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
     env["PATH"] = str(bin_dir)
-    result = _run_wrapper(workdir, env=env)
+    result = _run_wrapper(workdir, "--deploy", env=env)
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode != 0
@@ -371,7 +416,7 @@ exit 0
     env["FAKE_APT_LOG"] = str(apt_log)
 
     result = subprocess.run(
-        ["/bin/bash", str(standalone_script)],
+        ["/bin/bash", str(standalone_script), "--deploy"],
         cwd=workdir,
         env=env,
         capture_output=True,
@@ -395,10 +440,110 @@ def test_offline_bootstrap_invokes_release_tree_offline_up_from_resolved_root(tm
     _write_bundle(workdir, scanner_bundle)
 
     env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
-    result = _run_wrapper(workdir, env=env)
+    result = _run_wrapper(workdir, "--deploy", env=env)
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     assert result.returncode == 0, combined_output
     extracted_root = workdir / "release_code"
     log_text = (workdir / "offline-up.log").read_text(encoding="utf-8")
     assert f"cwd={extracted_root}" in log_text
+
+
+def test_offline_bootstrap_deploy_prefers_existing_release_root_over_sibling_archive(tmp_path: Path) -> None:
+    workdir = tmp_path / "downloads"
+    workdir.mkdir()
+    release_root = _write_release_root(workdir / "release_code")
+    _create_archive(workdir, "release_code.tar.gz")
+    services_bundle = "vulhunter-services-images-amd64.tar.zst"
+    scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
+    _write_bundle(workdir, services_bundle)
+    _write_bundle(workdir, scanner_bundle)
+
+    env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
+    result = _run_wrapper(workdir, "--deploy", env=env)
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    assert result.returncode == 0, combined_output
+    log_text = (workdir / "offline-up.log").read_text(encoding="utf-8")
+    assert f"cwd={release_root}" in log_text
+    assert f"args=--deploy" not in log_text
+
+
+def test_offline_bootstrap_deploy_supports_existing_release_root_with_bundles_in_images_dir(tmp_path: Path) -> None:
+    workdir = tmp_path / "downloads"
+    workdir.mkdir()
+    release_root = _write_release_root(workdir / "release_code")
+    (release_root / "images").mkdir(parents=True, exist_ok=True)
+    services_bundle = "vulhunter-services-images-amd64.tar.zst"
+    scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
+    (release_root / "images" / services_bundle).write_text("services\n", encoding="utf-8")
+    (release_root / "images" / scanner_bundle).write_text("scanner\n", encoding="utf-8")
+
+    env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
+    result = _run_wrapper(workdir, "--deploy", env=env)
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    assert result.returncode == 0, combined_output
+    log_text = (workdir / "offline-up.log").read_text(encoding="utf-8")
+    assert f"cwd={release_root}" in log_text
+
+
+def test_offline_bootstrap_stop_mode_uses_existing_release_root_without_bundles(tmp_path: Path) -> None:
+    workdir = tmp_path / "downloads"
+    workdir.mkdir()
+    _write_release_root(workdir / "release_code")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir)
+
+    env = _base_env(
+        workdir,
+        services_bundle="vulhunter-services-images-amd64.tar.zst",
+        scanner_bundle="vulhunter-scanner-images-amd64.tar.zst",
+    )
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = _run_wrapper(workdir, "--stop", env=env)
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    assert result.returncode == 0, combined_output
+    assert not (workdir / "offline-up.log").exists()
+    assert "action=stop" in (workdir / "release-refresh.log").read_text(encoding="utf-8")
+
+
+def test_offline_bootstrap_cleanup_all_mode_preserves_bundle_free_maintenance_path(tmp_path: Path) -> None:
+    workdir = tmp_path / "downloads"
+    workdir.mkdir()
+    _write_release_root(workdir / "release_code")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker(bin_dir)
+
+    env = _base_env(
+        workdir,
+        services_bundle="vulhunter-services-images-amd64.tar.zst",
+        scanner_bundle="vulhunter-scanner-images-amd64.tar.zst",
+    )
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = _run_wrapper(workdir, "--cleanup-all", env=env)
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    assert result.returncode == 0, combined_output
+    assert not (workdir / "offline-up.log").exists()
+    assert "action=cleanup-all" in (workdir / "release-refresh.log").read_text(encoding="utf-8")
+
+
+def test_offline_bootstrap_rejects_attach_logs_without_deploy(tmp_path: Path) -> None:
+    workdir = tmp_path / "downloads"
+    workdir.mkdir()
+    _write_release_root(workdir / "release_code")
+
+    env = _base_env(
+        workdir,
+        services_bundle="vulhunter-services-images-amd64.tar.zst",
+        scanner_bundle="vulhunter-scanner-images-amd64.tar.zst",
+    )
+    result = _run_wrapper(workdir, "--stop", "--attach-logs", env=env)
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    assert result.returncode != 0
+    assert "attach" in combined_output.lower()

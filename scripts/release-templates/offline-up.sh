@@ -12,10 +12,10 @@ BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$ROOT_DIR/docker/env/backend/.env}"
 BACKEND_ENV_EXAMPLE="${BACKEND_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/env.example}"
 OFFLINE_ENV_FILE="${OFFLINE_ENV_FILE:-$ROOT_DIR/docker/env/backend/offline-images.env}"
 OFFLINE_ENV_EXAMPLE="${OFFLINE_ENV_EXAMPLE:-$ROOT_DIR/docker/env/backend/offline-images.env.example}"
-COMPOSE_ENV_HELPER="${COMPOSE_ENV_HELPER:-$ROOT_DIR/scripts/lib/compose-env.sh}"
-HOST_PREREQ_HELPER="${HOST_PREREQ_HELPER:-$ROOT_DIR/scripts/lib/offline-host-prereqs.sh}"
-STARTUP_BANNER_HELPER="${STARTUP_BANNER_HELPER:-$ROOT_DIR/scripts/lib/startup-banner.sh}"
-RELEASE_REFRESH_HELPER="${RELEASE_REFRESH_HELPER:-$ROOT_DIR/scripts/lib/release-refresh.sh}"
+COMPOSE_ENV_HELPER="${COMPOSE_ENV_HELPER:-$ROOT_DIR/scripts/compose-env.sh}"
+HOST_PREREQ_HELPER="${HOST_PREREQ_HELPER:-$ROOT_DIR/scripts/offline-host-prereqs.sh}"
+STARTUP_BANNER_HELPER="${STARTUP_BANNER_HELPER:-$ROOT_DIR/scripts/startup-banner.sh}"
+RELEASE_REFRESH_HELPER="${RELEASE_REFRESH_HELPER:-$ROOT_DIR/scripts/release-refresh.sh}"
 ATTACH_LOGS="false"
 LAST_RELEASE_PROBE_RESULTS=""
 
@@ -40,6 +40,10 @@ Options:
   --attach-logs   After backend becomes healthy, run foreground
                   `docker compose up` so startup logs stay attached.
   -h, --help      Show this help text.
+
+Note:
+  This script is a deploy-only compatibility worker. The public lifecycle
+  entrypoint is now `bash ./Vulhunter-offline-bootstrap.sh --deploy`.
 EOF
 }
 
@@ -572,6 +576,9 @@ ensure_compose_ready() {
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --stop|--cleanup|--cleanup-all)
+        die "maintenance mode moved to bootstrap: use bash ./Vulhunter-offline-bootstrap.sh $1"
+        ;;
       --attach-logs)
         ATTACH_LOGS="true"
         shift
@@ -620,6 +627,8 @@ main() {
   load_container_socket_gid_env
   export OFFLINE_HOST_PREREQ_LOG_PREFIX="[offline-up]"
   offline_host_ensure_release_prereqs
+
+  log_warn "deprecated direct deploy entrypoint: use bash ./Vulhunter-offline-bootstrap.sh --deploy"
 
   require_command docker
   require_command python3

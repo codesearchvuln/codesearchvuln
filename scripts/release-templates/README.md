@@ -24,7 +24,7 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 - 宿主机：`Ubuntu 22.04 LTS`、`Ubuntu 24.04 LTS`、`Windows 10 WSL2 + Ubuntu 22.04 LTS`、`Windows 11 WSL2 + Ubuntu 22.04 LTS`
 - 必需组件：`docker`、`docker compose`
 - 部署额外需要：`zstd`、`python3`
-- `offline-up.sh` 会在正式部署前统一检测 `docker`、`docker compose`、`zstd`、`python3`
+- `Vulhunter-offline-bootstrap.sh --deploy` 会通过内部 deploy worker 统一检测 `docker`、`docker compose`、`zstd`、`python3`
 - 对受支持的 Ubuntu / WSL Ubuntu 宿主机，若缺少上述依赖，脚本会优先尝试通过国内 Ubuntu apt 镜像自动安装（默认阿里云、清华），失败后再回退官方 Ubuntu 源
 - 自动安装只面向上述受支持宿主机；其他发行版只做检测并输出手工安装提示，不会修改宿主机 apt 配置
 - 即使包安装成功，脚本仍会继续校验 Docker daemon / socket / compose readiness；WSL 下若仍未接通 Docker Desktop / socket，部署会明确失败并给出提示
@@ -37,16 +37,16 @@ cp docker/env/backend/offline-images.env.example docker/env/backend/offline-imag
 ### 部署
 
 ```bash
-bash ./scripts/offline-up.sh
+bash ./Vulhunter-offline-bootstrap.sh --deploy
 ```
 
 如需在终端持续查看启动日志：
 
 ```bash
-bash ./scripts/offline-up.sh --attach-logs
+bash ./Vulhunter-offline-bootstrap.sh --deploy --attach-logs
 ```
 
-入口会先校验 bundle 文件名和 SHA256，再导入本地镜像并刷新同一套 release stack。
+公开入口会先解析 release root / archive，再通过内部 deploy worker 校验 bundle 文件名和 SHA256、导入本地镜像并刷新同一套 release stack。
 若 prereq 自动安装被触发，脚本会先完成依赖修复与 Docker readiness 校验，再继续 bundle 校验与镜像导入。
 
 ## 常用维护指令
@@ -54,18 +54,20 @@ bash ./scripts/offline-up.sh --attach-logs
 ```bash
 docker compose ps
 docker compose logs -f
-bash ./scripts/offline-up.sh
+bash ./Vulhunter-offline-bootstrap.sh --stop
+bash ./Vulhunter-offline-bootstrap.sh --cleanup
+bash ./Vulhunter-offline-bootstrap.sh --cleanup-all
 docker compose down
 docker compose down -v
 ```
 
-`docker compose down -v` 会删除持久化 volumes，只应在明确需要清空数据时使用。日常 refresh 或升级请优先重跑 `offline-up.sh`，不要只把 `docker compose down` / `down -v` 当成完整的发布维护流程。
+`docker compose down -v` 会删除持久化 volumes，只应在明确需要清空数据时使用。日常 refresh / 停服 / 清理请优先使用 `Vulhunter-offline-bootstrap.sh` 的 `--deploy` / `--stop` / `--cleanup` / `--cleanup-all`，不要只把 `docker compose down` / `down -v` 当成完整的发布维护流程。
 
 ## 真实 Ubuntu 宿主机 smoke checklist
 
 建议在真实 `Ubuntu 22.04 / 24.04` 宿主机上至少补测一次：
 
-1. 临时移除 `docker` / `docker compose` / `zstd` / `python3` 中的一个或多个依赖，确认 `offline-up.sh` 会先做聚合检测。
+1. 临时移除 `docker` / `docker compose` / `zstd` / `python3` 中的一个或多个依赖，确认 `Vulhunter-offline-bootstrap.sh --deploy` 会先做聚合检测。
 2. 确认脚本会优先尝试国内 Ubuntu apt 镜像；若人为模拟镜像失败，再确认会回退官方 Ubuntu 源。
 3. 确认自动安装后还会继续做 Docker readiness 校验，而不是只看包是否安装成功。
 4. 在 WSL Ubuntu 再跑一轮，确认当 Docker Desktop / socket integration 缺失时，脚本会明确停止并给出提示。

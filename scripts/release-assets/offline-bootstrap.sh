@@ -24,15 +24,20 @@ die() {
 
 usage() {
   cat <<'EOF'
-Usage: bash ./Vulhunter-offline-bootstrap.sh
+Usage:
+  bash ./Vulhunter-offline-bootstrap.sh --deploy [--attach-logs]
+  bash ./Vulhunter-offline-bootstrap.sh --stop
+  bash ./Vulhunter-offline-bootstrap.sh --cleanup
+  bash ./Vulhunter-offline-bootstrap.sh --cleanup-all
 
-Run from a directory that contains:
-  - exactly one release_code.zip or release_code.tar.gz
-  - exactly one vulhunter-services-images-(amd64|arm64).tar.zst
-  - exactly one vulhunter-scanner-images-(amd64|arm64).tar.zst
-
-The script extracts the release archive, moves both bundle files into the
-resolved release root, then delegates to bash ./scripts/offline-up.sh.
+Modes:
+  --deploy       Public deploy entrypoint. Prefer an existing extracted release
+                 root when present; otherwise extract exactly one release_code
+                 archive. Bundles may already live in the release root or images/.
+  --stop         Stop the current release stack only.
+  --cleanup      Remove release-stack containers/images/networks and preserve volumes.
+  --cleanup-all  Remove release-stack containers/images/networks and release-project volumes.
+  --attach-logs  Deploy-only flag. Attach startup logs after backend becomes healthy.
 EOF
 }
 
@@ -54,8 +59,10 @@ source_host_prereq_contract() {
   local helper_candidate
   for helper_candidate in \
     "${HOST_PREREQ_HELPER:-}" \
-    "$BOOTSTRAP_SCRIPT_DIR/../lib/offline-host-prereqs.sh" \
+    "$BOOTSTRAP_SCRIPT_DIR/../offline-host-prereqs.sh" \
     "$BOOTSTRAP_SCRIPT_DIR/../../scripts/lib/offline-host-prereqs.sh" \
+    "$BOOTSTRAP_SCRIPT_DIR/../../scripts/offline-host-prereqs.sh" \
+    "$CURRENT_DIR/scripts/offline-host-prereqs.sh" \
     "$CURRENT_DIR/scripts/lib/offline-host-prereqs.sh"; do
     [[ -n "$helper_candidate" ]] || continue
     if [[ -f "$helper_candidate" ]]; then
@@ -550,23 +557,225 @@ extract_archive() {
   esac
 }
 
-main() {
-  local archive_path
+MODE=""
+ATTACH_LOGS="false"
+
+set_mode() {
+  local requested_mode="$1"
+  [[ -z "$MODE" ]] || die "exactly one primary mode is required: --deploy, --stop, --cleanup, or --cleanup-all"
+  MODE="$requested_mode"
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --deploy)
+        set_mode "deploy"
+        shift
+        ;;
+      --stop)
+        set_mode "stop"
+        shift
+        ;;
+      --cleanup)
+        set_mode "cleanup"
+        shift
+        ;;
+      --cleanup-all)
+        set_mode "cleanup-all"
+        shift
+        ;;
+      --attach-logs)
+        ATTACH_LOGS="true"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$MODE" ]] || die "exactly one primary mode is required: --deploy, --stop, --cleanup, or --cleanup-all"
+  if [[ "$MODE" != "deploy" && "$ATTACH_LOGS" == "true" ]]; then
+    die "--attach-logs is supported only with --deploy"
+  fi
+}
+
+is_release_root() {
+  local candidate="$1"
+  [[ -d "$candidate" ]] || return 1
+  [[ -f "$candidate/docker-compose.yml" ]] || return 1
+  [[ -f "$candidate/release-snapshot-lock.json" ]] || return 1
+  [[ -f "$candidate/scripts/offline-up.sh" ]] || return 1
+}
+
+discover_existing_release_roots() {
+  local candidate
+
+  if is_release_root "$CURRENT_DIR"; then
+    printf '%s\n' "$CURRENT_DIR"
+  fi
+
+  while IFS= read -r candidate; do
+    candidate="${candidate%/docker-compose.yml}"
+    [[ "$candidate" == "$CURRENT_DIR" ]] && continue
+    is_release_root "$candidate" || continue
+    printf '%s\n' "$candidate"
+  done < <(find "$CURRENT_DIR" -mindepth 2 -maxdepth 2 -type f -name docker-compose.yml)
+}
+
+count_nonempty_lines() {
+  local count=0
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    count=$((count + 1))
+  done <<<"${1:-}"
+  printf '%s' "$count"
+}
+
+resolve_release_root_for_mode() {
+  local archive_path="${1:-}"
+  local roots_text root_count release_root
+
+  roots_text="$(discover_existing_release_roots)"
+  root_count="$(count_nonempty_lines "$roots_text")"
+
+  if [[ "$root_count" -gt 1 ]]; then
+    die "expected exactly one extracted release root in $CURRENT_DIR"
+  fi
+
+  if [[ "$root_count" -eq 1 ]]; then
+    release_root="$(printf '%s\n' "$roots_text" | awk 'NF {print; exit}')"
+    printf '%s' "$release_root"
+    return 0
+  fi
+
+  [[ -n "$archive_path" ]] || archive_path="$(discover_single_release_archive)"
+  case "$archive_path" in
+    *.zip)
+      require_command unzip
+      ;;
+  esac
+  extract_archive "$archive_path"
+  release_root="$(resolve_release_root "$STAGING_DIR")"
+  release_root="$(materialize_release_root "$release_root" "$archive_path")"
+  printf '%s' "$release_root"
+}
+
+bundle_exists_in_release_root() {
+  local release_root="$1"
+  local bundle_name="$2"
+  [[ -f "$release_root/$bundle_name" || -f "$release_root/images/$bundle_name" ]]
+}
+
+discover_existing_release_root_bundle() {
+  local release_root="$1"
+  local label="$2"
+  local matches=()
+  local base_dir
+
+  for base_dir in "$release_root" "$release_root/images"; do
+    [[ -d "$base_dir" ]] || continue
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      matches+=("$candidate")
+    done < <(find "$base_dir" -maxdepth 1 -type f \
+      \( -name "vulhunter-${label}-images-*.tar" -o -name "vulhunter-${label}-images-*.tar.zst" \))
+  done
+
+  [[ "${#matches[@]}" -le 1 ]] || die "expected exactly one ${label} bundle in extracted release root ${release_root}"
+  [[ "${#matches[@]}" -eq 1 ]] || return 1
+  printf '%s' "${matches[0]}"
+}
+
+ensure_release_root_has_deploy_bundles() {
+  local release_root="$1"
   local services_bundle
   local scanner_bundle
   local services_arch
   local scanner_arch
-  local resolved_root
-  local release_root
-  local target_path
+  local existing_services_bundle
+  local existing_scanner_bundle
 
-  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    usage
-    exit 0
+  if existing_services_bundle="$(discover_existing_release_root_bundle "$release_root" "services" 2>/dev/null)"; then
+    :
+  else
+    existing_services_bundle=""
+  fi
+  if existing_scanner_bundle="$(discover_existing_release_root_bundle "$release_root" "scanner" 2>/dev/null)"; then
+    :
+  else
+    existing_scanner_bundle=""
+  fi
+  if [[ -n "$existing_services_bundle" && -n "$existing_scanner_bundle" ]]; then
+    return 0
   fi
 
-  [[ "$#" -eq 0 ]] || die "this script does not accept positional arguments"
+  services_bundle="$(discover_single_bundle "services")"
+  scanner_bundle="$(discover_single_bundle "scanner")"
+  services_arch="$(bundle_arch "$(path_basename "$services_bundle")")"
+  scanner_arch="$(bundle_arch "$(path_basename "$scanner_bundle")")"
+  [[ "$services_arch" == "$scanner_arch" ]] || die "bundle architectures do not match: services=${services_arch}, scanner=${scanner_arch}"
 
+  log_info "bundle pair: $(path_basename "$services_bundle"), $(path_basename "$scanner_bundle")"
+  log_info "bundle arch: $services_arch"
+
+  if bundle_exists_in_release_root "$release_root" "$(path_basename "$services_bundle")"; then
+    die "target bundle already exists: $release_root/$(path_basename "$services_bundle")"
+  fi
+  if bundle_exists_in_release_root "$release_root" "$(path_basename "$scanner_bundle")"; then
+    die "target bundle already exists: $release_root/$(path_basename "$scanner_bundle")"
+  fi
+
+  if ! bundle_exists_in_release_root "$release_root" "$(path_basename "$services_bundle")"; then
+    mv "$services_bundle" "$release_root/"
+  fi
+  if ! bundle_exists_in_release_root "$release_root" "$(path_basename "$scanner_bundle")"; then
+    mv "$scanner_bundle" "$release_root/"
+  fi
+}
+
+run_release_maintenance() {
+  local release_root="$1"
+  local helper_path="$release_root/scripts/release-refresh.sh"
+
+  [[ -f "$helper_path" ]] || die "release refresh helper not found: $helper_path"
+  ROOT_DIR="$release_root"
+  # shellcheck disable=SC1090
+  source "$helper_path"
+
+  require_command docker
+  docker compose version >/dev/null 2>&1 || die "docker compose not found or unavailable"
+
+  case "$MODE" in
+    stop)
+      stop_release_stack
+      ;;
+    cleanup)
+      cleanup_release_stack
+      ;;
+    cleanup-all)
+      cleanup_release_stack_and_volumes
+      ;;
+    *)
+      die "unsupported maintenance mode: $MODE"
+      ;;
+  esac
+}
+
+main() {
+  local archive_path=""
+  local release_root
+  local current_archive=""
+  local existing_roots
+  local existing_root_count
+
+  parse_args "$@"
   trap cleanup EXIT
 
   source_host_prereq_contract
@@ -579,42 +788,47 @@ main() {
   require_command mktemp
   require_command rm
 
-  archive_path="$(discover_single_release_archive)"
-  services_bundle="$(discover_single_bundle "services")"
-  scanner_bundle="$(discover_single_bundle "scanner")"
-  services_arch="$(bundle_arch "$(path_basename "$services_bundle")")"
-  scanner_arch="$(bundle_arch "$(path_basename "$scanner_bundle")")"
+  existing_roots="$(discover_existing_release_roots)"
+  existing_root_count="$(count_nonempty_lines "$existing_roots")"
 
-  case "$archive_path" in
-    *.zip)
-      require_command unzip
-      ;;
-  esac
+  if [[ "$MODE" == "deploy" ]]; then
+    if [[ "$existing_root_count" -eq 0 ]]; then
+      current_archive="$(discover_single_release_archive)"
+    else
+      if current_archive="$(discover_single_release_archive 2>/dev/null)"; then
+        :
+      else
+        current_archive=""
+      fi
+    fi
+    if [[ -n "$current_archive" ]]; then
+      case "$current_archive" in
+        *.zip)
+          require_command unzip
+          ;;
+      esac
+      log_info "release archive: $(path_basename "$current_archive")"
+    fi
+    offline_host_ensure_release_prereqs
+    release_root="$(resolve_release_root_for_mode "$current_archive")"
+    ensure_release_root_has_deploy_bundles "$release_root"
+    log_info "release root: $release_root"
+    log_info "delegating to bash ./scripts/offline-up.sh"
+    cd "$release_root"
+    if [[ "$ATTACH_LOGS" == "true" ]]; then
+      exec bash ./scripts/offline-up.sh --attach-logs
+    fi
+    exec bash ./scripts/offline-up.sh
+  fi
 
-  [[ "$services_arch" == "$scanner_arch" ]] || die "bundle architectures do not match: services=${services_arch}, scanner=${scanner_arch}"
-
-  log_info "release archive: $(path_basename "$archive_path")"
-  log_info "bundle pair: $(path_basename "$services_bundle"), $(path_basename "$scanner_bundle")"
-  log_info "bundle arch: $services_arch"
-  offline_host_ensure_release_prereqs
-
-  extract_archive "$archive_path"
-  resolved_root="$(resolve_release_root "$STAGING_DIR")"
-  release_root="$(materialize_release_root "$resolved_root" "$archive_path")"
-
-  for target_path in \
-    "$release_root/$(path_basename "$services_bundle")" \
-    "$release_root/$(path_basename "$scanner_bundle")"; do
-    [[ ! -e "$target_path" ]] || die "target bundle already exists: $target_path"
-  done
-
-  mv "$services_bundle" "$release_root/"
-  mv "$scanner_bundle" "$release_root/"
-
+  if archive_path="$(discover_single_release_archive 2>/dev/null)"; then
+    :
+  else
+    archive_path=""
+  fi
+  release_root="$(resolve_release_root_for_mode "$archive_path")"
   log_info "release root: $release_root"
-  log_info "delegating to bash ./scripts/offline-up.sh"
-  cd "$release_root"
-  exec bash ./scripts/offline-up.sh
+  run_release_maintenance "$release_root"
 }
 
 main "$@"

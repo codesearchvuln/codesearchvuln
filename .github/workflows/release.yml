@@ -777,9 +777,9 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/release-tree/images"
           cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"
 
-          if ! bash ./scripts/offline-up.sh; then
+          if ! bash ./Vulhunter-offline-bootstrap.sh --deploy; then
             dump_debug
-            echo "::error::Release offline-up.sh failed for generated release tree."
+            echo "::error::Release Vulhunter-offline-bootstrap.sh --deploy failed for generated release tree."
             exit 1
           fi
 

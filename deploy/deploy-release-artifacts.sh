@@ -14,9 +14,10 @@ cat >&2 <<'MSG'
 [deploy-release]     docker compose up -d
 [deploy-release]
 [deploy-release]   Offline:
-[deploy-release]     bash ./scripts/offline-up.sh
-[deploy-release]     # Current release contract keeps only the Bash/WSL entrypoint:
-[deploy-release]     bash ./scripts/offline-up.sh
+[deploy-release]     cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
+[deploy-release]     bash ./Vulhunter-offline-bootstrap.sh --deploy
+[deploy-release]     # Attach startup logs if needed:
+[deploy-release]     bash ./Vulhunter-offline-bootstrap.sh --deploy --attach-logs
 [deploy-release]
 [deploy-release] If you still depend on the old source tarball flow, migrate that automation before the next release cut.
 MSG

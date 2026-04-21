@@ -377,7 +377,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'gh release edit "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release upload "${SEMANTIC_TAG}"' in workflow_text
     assert "./scripts/release-assets/offline-bootstrap.sh#Vulhunter-offline-bootstrap.sh" in workflow_text
-    assert workflow_text.count("Vulhunter-offline-bootstrap.sh") == 1
+    assert workflow_text.count("Vulhunter-offline-bootstrap.sh") >= 1
     assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
     assert "generated_by=release.yml" in workflow_text
     assert "./scripts/release_version.py" in workflow_text
@@ -391,7 +391,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "stat -c '%g'" in workflow_text
     assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
     assert 'cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"' in workflow_text
-    assert "bash ./scripts/offline-up.sh" in workflow_text
+    assert "bash ./Vulhunter-offline-bootstrap.sh --deploy" in workflow_text
+    assert "bash ./scripts/offline-up.sh" not in workflow_text
     assert "SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets" in workflow_text
     assert "SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}" in workflow_text
     assert "Finalize preflight" in workflow_text
@@ -610,13 +611,15 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
     required_paths = [
         "README.md",
         "README_EN.md",
+        "Vulhunter-offline-bootstrap.sh",
         "docker-compose.yml",
         "images-manifest-services.json",
         "images-manifest-scanner.json",
         "scripts/offline-up.sh",
-        "scripts/lib/compose-env.sh",
-        "scripts/lib/startup-banner.sh",
-        "scripts/lib/release-refresh.sh",
+        "scripts/compose-env.sh",
+        "scripts/offline-host-prereqs.sh",
+        "scripts/startup-banner.sh",
+        "scripts/release-refresh.sh",
         "docker/env/backend/env.example",
         "docker/env/backend/offline-images.env.example",
         "deploy/runtime/frontend/site/index.html",
@@ -650,6 +653,10 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "scripts/load-images.sh",
         "scripts/use-offline-env.sh",
         "deploy/compose",
+        "scripts/lib/compose-env.sh",
+        "scripts/lib/offline-host-prereqs.sh",
+        "scripts/lib/startup-banner.sh",
+        "scripts/lib/release-refresh.sh",
     ]
     for rel_path in forbidden_paths:
         assert not (output_dir / rel_path).exists(), rel_path
@@ -762,7 +769,8 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         (output_dir / "README_EN.md").read_text(encoding="utf-8"),
     )
     for doc in docs:
-        assert "offline-up.sh" in doc
+        assert "Vulhunter-offline-bootstrap.sh" in doc
+        assert "--deploy" in doc
         assert "bash ./scripts/online-up.sh" not in doc
         assert "load-images.sh" not in doc
         assert "use-offline-env.sh" not in doc
@@ -776,7 +784,7 @@ def test_generated_release_docs_only_publish_runtime_distribution_command(tmp_pa
         assert "LLM_API_KEY" in doc
         assert "WSL" in doc or "Bash" in doc
         assert "cp " in doc
-        assert "./scripts/offline-up.sh" in doc
+        assert "./Vulhunter-offline-bootstrap.sh --deploy" in doc
         assert "./scripts/online-up.sh" not in doc
         assert "LLM_API_KEY" in doc
         assert "cloud" in doc.lower() or "云端" in doc
@@ -827,14 +835,14 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     offline_env = (output_dir / "docker" / "env" / "backend" / "offline-images.env.example").read_text(
         encoding="utf-8"
     )
+    bootstrap_script = (output_dir / "Vulhunter-offline-bootstrap.sh").read_text(encoding="utf-8")
     offline_up_script = (output_dir / "scripts" / "offline-up.sh").read_text(encoding="utf-8")
-    compose_env_helper = (output_dir / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8")
-    offline_prereq_helper = (output_dir / "scripts" / "lib" / "offline-host-prereqs.sh").read_text(
-        encoding="utf-8"
-    )
-    startup_banner_helper = (output_dir / "scripts" / "lib" / "startup-banner.sh").read_text(encoding="utf-8")
-    release_refresh_helper = (output_dir / "scripts" / "lib" / "release-refresh.sh").read_text(encoding="utf-8")
+    compose_env_helper = (output_dir / "scripts" / "compose-env.sh").read_text(encoding="utf-8")
+    offline_prereq_helper = (output_dir / "scripts" / "offline-host-prereqs.sh").read_text(encoding="utf-8")
+    startup_banner_helper = (output_dir / "scripts" / "startup-banner.sh").read_text(encoding="utf-8")
+    release_refresh_helper = (output_dir / "scripts" / "release-refresh.sh").read_text(encoding="utf-8")
     assert not (output_dir / "scripts" / "online-up.sh").exists()
+    assert not (output_dir / "scripts" / "lib").exists()
 
     assert services_metadata["revision"] == manifest["revision"]
     assert services_metadata["bundle_template"] == "images/vulhunter-services-images-{arch}.tar.zst"
@@ -877,7 +885,9 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "\nNEXUS_ITEM_DETAIL_IMAGE=" not in offline_env
     assert "\nFRONTEND_IMAGE=" not in offline_env
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
-    assert "offline-up" in offline_env
+    assert "Vulhunter-offline-bootstrap.sh --deploy" in offline_env
+    assert "--deploy" in bootstrap_script
+    assert "--cleanup-all" in bootstrap_script
     assert "[offline-up]" in offline_up_script
     assert "RELEASE_REFRESH_HELPER" in offline_up_script
     assert "compose_release" in offline_up_script

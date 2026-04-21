@@ -24,7 +24,7 @@ If you use a cloud model provider, runtime network access to that API is still r
 - Hosts: `Ubuntu 22.04 LTS`, `Ubuntu 24.04 LTS`, `Windows 10 WSL2 + Ubuntu 22.04 LTS`, `Windows 11 WSL2 + Ubuntu 22.04 LTS`
 - Required components: `docker`, `docker compose`
 - deployment also requires: `zstd`, `python3`
-- `offline-up.sh` now aggregates prerequisite detection for `docker`, `docker compose`, `zstd`, and `python3` before normal deployment work begins
+- `Vulhunter-offline-bootstrap.sh --deploy` now delegates into the internal deploy worker that aggregates prerequisite detection for `docker`, `docker compose`, `zstd`, and `python3`
 - On supported Ubuntu / WSL Ubuntu hosts, missing prerequisites are auto-installed through Ubuntu apt mirrors with a domestic-first order (Aliyun, Tsinghua by default) and an official Ubuntu fallback
 - Auto-install is limited to the supported Ubuntu / WSL Ubuntu hosts above; other distros only receive detection + manual remediation guidance and the script will not mutate host apt configuration
 - Package installation success is not treated as deployment readiness: the script still verifies Docker daemon / socket / compose usability and will stop with explicit WSL / Docker guidance if readiness is still broken
@@ -37,16 +37,16 @@ If you use a cloud model provider, runtime network access to that API is still r
 ### Deployment
 
 ```bash
-bash ./scripts/offline-up.sh
+bash ./Vulhunter-offline-bootstrap.sh --deploy
 ```
 
 If you want startup logs attached in the terminal:
 
 ```bash
-bash ./scripts/offline-up.sh --attach-logs
+bash ./Vulhunter-offline-bootstrap.sh --deploy --attach-logs
 ```
 
-The entrypoint validates the bundle filename and SHA256 first, then imports the local images and refreshes the same release stack.
+The public entrypoint resolves the release root/archive first, then delegates into the internal deploy worker that validates the bundle filename and SHA256, imports the local images, and refreshes the same release stack.
 If host prerequisite auto-install is triggered, that remediation + Docker readiness pass runs before bundle validation and image import.
 
 ## Common Maintenance Commands
@@ -54,18 +54,20 @@ If host prerequisite auto-install is triggered, that remediation + Docker readin
 ```bash
 docker compose ps
 docker compose logs -f
-bash ./scripts/offline-up.sh
+bash ./Vulhunter-offline-bootstrap.sh --stop
+bash ./Vulhunter-offline-bootstrap.sh --cleanup
+bash ./Vulhunter-offline-bootstrap.sh --cleanup-all
 docker compose down
 docker compose down -v
 ```
 
-`docker compose down -v` removes persistent volumes and should only be used when you intentionally want to wipe runtime data. For routine refresh or upgrade work, rerun `offline-up.sh` instead of treating plain `docker compose down` / `down -v` as the full maintenance flow.
+`docker compose down -v` removes persistent volumes and should only be used when you intentionally want to wipe runtime data. For routine refresh / stop / cleanup work, use `Vulhunter-offline-bootstrap.sh --deploy|--stop|--cleanup|--cleanup-all` instead of treating plain `docker compose down` / `down -v` as the full maintenance flow.
 
 ## Real Ubuntu host smoke checklist
 
 Run at least one validation round on a real `Ubuntu 22.04 / 24.04` host:
 
-1. Temporarily remove one or more of `docker`, `docker compose`, `zstd`, or `python3`, and confirm `offline-up.sh` reports the missing prerequisites up front.
+1. Temporarily remove one or more of `docker`, `docker compose`, `zstd`, or `python3`, and confirm `Vulhunter-offline-bootstrap.sh --deploy` reports the missing prerequisites up front.
 2. Confirm the script tries domestic Ubuntu apt mirrors first; then simulate mirror failure and confirm it falls back to the official Ubuntu mirrors.
 3. Confirm the script still performs Docker readiness checks after package installation instead of treating package presence as success.
 4. Repeat once on WSL Ubuntu and confirm the script stops with explicit guidance when Docker Desktop / socket integration is still missing.

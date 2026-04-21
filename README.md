@@ -32,25 +32,25 @@ generated release tree 现在只支持离线部署，不支持在线部署，也
 
 ```bash
 cp docker/env/backend/offline-images.env.example docker/env/backend/offline-images.env
-bash ./scripts/offline-up.sh
+bash ./Vulhunter-offline-bootstrap.sh --deploy
 ```
 
 如需在终端里持续查看启动日志：
 
 ```bash
-bash ./scripts/offline-up.sh --attach-logs
+bash ./Vulhunter-offline-bootstrap.sh --deploy --attach-logs
 ```
 
 用途：
-预先加载离线镜像包后，改用本地 `vulhunter-local/*` 标签刷新同一套运行栈；代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。脚本会先校验 tar bundle，再清理当前 `VULHUNTER_RELEASE_PROJECT_NAME=vulhunter-release` release stack 的容器与镜像，但不会删除 volumes。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层；离线重跑前，两份 tar bundle 也必须仍然存在。默认模式不附着日志，传 `--attach-logs` 才会在 backend 健康后切到前台输出。
+预先加载离线镜像包后，通过 `Vulhunter-offline-bootstrap.sh` 统一负责 release root / archive 解析、部署启动、停服和清理；deploy 路径会进入内部 deploy worker，使用本地 `vulhunter-local/*` 标签刷新同一套运行栈，代码执行统一由本地 `sandbox-runner` 标签承接，主 frontend 仍按 `STATIC_FRONTEND_IMAGE` 与 `deploy/runtime/frontend/*` 运行。默认 `--cleanup` 不删除 volumes，只有 `--cleanup-all` 才会删除当前 release compose project 的 volumes。当前离线路径只保留 Bash/WSL 单入口，不再提供 Windows PowerShell 兼容层；离线重跑前，两份 tar bundle 也必须仍然存在。
 
 如你下载的是尚未解压的 GitHub semantic release 源码包，也可以使用最终 semantic release 额外提供的独立引导脚本资产 `Vulhunter-offline-bootstrap.sh`。把它与 `release_code.zip` 或 `release_code.tar.gz`、以及两份离线镜像包放在同一目录后执行：
 
 ```bash
-bash ./Vulhunter-offline-bootstrap.sh
+bash ./Vulhunter-offline-bootstrap.sh --deploy
 ```
 
-该脚本只负责自动发现、解压 `release_code` 压缩包、把两份 `vulhunter-*.tar.zst` 落到 release 根目录，再委托执行解压后 release tree 内的 `bash ./scripts/offline-up.sh`。一旦你已经进入解压后的 release tree，正式入口仍然是 `bash ./scripts/offline-up.sh`。
+该脚本现在是 release tree 的正式运维入口：`--deploy` 负责解压/解析并启动服务，`--stop` 负责停服，`--cleanup` 负责删除当前 release stack 的容器/镜像/网络但保留 volumes，`--cleanup-all` 负责进一步删除当前 release compose project 的 volumes。`bash ./scripts/offline-up.sh` 仅保留为 deploy-only 兼容 worker，不再作为公开入口。
 
 ## 明确不属于 release contract 的路径
 
