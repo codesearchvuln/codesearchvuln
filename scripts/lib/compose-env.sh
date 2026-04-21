@@ -87,11 +87,26 @@ resolve_container_socket_path() {
   return 1
 }
 
+
+validate_configured_container_socket_path() {
+  if [ -z "${DOCKER_SOCKET_PATH:-}" ]; then
+    return 0
+  fi
+  if [ -S "${DOCKER_SOCKET_PATH}" ]; then
+    return 0
+  fi
+
+  compose_env_log_error "configured DOCKER_SOCKET_PATH is not a Unix socket: ${DOCKER_SOCKET_PATH}"
+  return 1
+}
+
 # ─── 自动注入 DOCKER_SOCKET_PATH（仅在运行时探测，不修改文件）────────────────
 # 供 compose-up-with-fallback.sh 等脚本调用：若 .env 未设置 DOCKER_SOCKET_PATH
 # 且当前 socket 是 Podman socket，则自动 export，使 compose 变量替换生效。
 # 已在 .env 中明确设置时直接跳过（优先级最高）。
 load_container_socket_env() {
+  validate_configured_container_socket_path || return 1
+
   # 若 .env 或调用方已设置，跳过探测
   if [ -n "${DOCKER_SOCKET_PATH:-}" ]; then
     return 0
@@ -100,7 +115,11 @@ load_container_socket_env() {
   local detected_socket
   detected_socket="$(resolve_container_socket_path || true)"
   case "${detected_socket}" in
-    ""|/var/run/docker.sock|/run/docker.sock)
+    "")
+      compose_env_log_warn "container socket auto-detection skipped: no local docker/podman socket found"
+      return 0
+      ;;
+    /var/run/docker.sock|/run/docker.sock)
       return 0
       ;;
     *)
@@ -113,19 +132,27 @@ load_container_socket_env() {
 
 
 load_container_socket_gid_env() {
+  validate_configured_container_socket_path || return 1
+
   if [ -n "${DOCKER_SOCKET_GID:-}" ]; then
     return 0
   fi
 
   local resolved_socket
   resolved_socket="$(resolve_container_socket_path || true)"
-  if [ -z "${resolved_socket}" ] || [ ! -S "${resolved_socket}" ]; then
+  if [ -z "${resolved_socket}" ]; then
+    compose_env_log_warn "container socket gid auto-detection skipped: no local docker/podman socket found"
+    return 0
+  fi
+  if [ ! -S "${resolved_socket}" ]; then
+    compose_env_log_warn "container socket gid auto-detection skipped: resolved path is not a Unix socket: ${resolved_socket}"
     return 0
   fi
 
   local socket_gid
   socket_gid="$(compose_env_stat_group_id "${resolved_socket}" 2>/dev/null || true)"
   if [ -z "${socket_gid}" ]; then
+    compose_env_log_warn "container socket gid auto-detection skipped: unable to stat socket group id for ${resolved_socket}"
     return 0
   fi
 

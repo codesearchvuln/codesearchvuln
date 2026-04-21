@@ -119,6 +119,24 @@ def _run_release_generator(
     )
 
 
+def _run_helper_snippet(
+    helper_path: Path, snippet: str, *, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    shell_env = os.environ.copy()
+    shell_env["PATH"] = f"/usr/bin:/bin:{shell_env['PATH']}"
+    shell_env["HELPER_PATH"] = str(helper_path)
+    if env:
+        shell_env.update(env)
+
+    return subprocess.run(
+        ["bash", "-lc", f'set -euo pipefail; source "$HELPER_PATH"; {snippet}'],
+        cwd=REPO_ROOT,
+        env=shell_env,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _install_fake_runtime_tools(tmp_path: Path) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -931,7 +949,68 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert "load_container_socket_gid_env" in offline_up_script
     assert "load_container_socket_env" in compose_env_helper
     assert "load_container_socket_gid_env" in compose_env_helper
+    assert "configured DOCKER_SOCKET_PATH is not a Unix socket:" in compose_env_helper
+    assert "container socket auto-detection skipped: no local docker/podman socket found" in compose_env_helper
+    assert "container socket gid auto-detection skipped: no local docker/podman socket found" in compose_env_helper
     assert "offline_host_ensure_release_prereqs" in offline_prereq_helper
+
+
+def test_compose_env_helper_keeps_invalid_socket_config_fatal(tmp_path: Path) -> None:
+    helper_path = REPO_ROOT / "scripts" / "lib" / "compose-env.sh"
+    missing_socket = tmp_path / "missing.sock"
+
+    result = _run_helper_snippet(
+        helper_path,
+        "load_container_socket_env",
+        env={"DOCKER_SOCKET_PATH": str(missing_socket)},
+    )
+
+    assert result.returncode != 0
+    assert (
+        f"[ERROR] configured DOCKER_SOCKET_PATH is not a Unix socket: {missing_socket}" in result.stderr
+    )
+
+
+def test_compose_env_helper_warns_on_tolerated_socket_discovery_failure() -> None:
+    helper_path = REPO_ROOT / "scripts" / "lib" / "compose-env.sh"
+
+    result = _run_helper_snippet(
+        helper_path,
+        """
+resolve_container_socket_path() { return 1; }
+load_container_socket_env
+load_container_socket_gid_env
+""",
+    )
+
+    assert result.returncode == 0
+    assert "[WARN] container socket auto-detection skipped: no local docker/podman socket found" in result.stderr
+    assert (
+        "[WARN] container socket gid auto-detection skipped: no local docker/podman socket found"
+        in result.stderr
+    )
+
+
+def test_offline_host_prereqs_keep_docker_readiness_failures_fatal() -> None:
+    helper_path = REPO_ROOT / "scripts" / "lib" / "offline-host-prereqs.sh"
+
+    result = _run_helper_snippet(
+        helper_path,
+        """
+offline_host_collect_missing_release_prereqs() { return 0; }
+offline_host_docker_ready() { return 1; }
+offline_host_is_wsl() { return 1; }
+offline_host_ensure_release_prereqs
+""",
+    )
+
+    assert result.returncode != 0
+    assert "[offline-prereqs] host prerequisites already satisfied: docker, docker compose, zstd, python3" in result.stdout
+    assert "[offline-prereqs] manual remediation required for: docker readiness" in result.stderr
+    assert (
+        "[offline-prereqs] docker is installed but the daemon/socket is not ready for offline deployment"
+        in result.stderr
+    )
 
 
 def test_release_generator_preserves_resolved_fallback_backend_provenance_source_tag(tmp_path: Path) -> None:
