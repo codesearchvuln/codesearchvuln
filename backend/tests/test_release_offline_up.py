@@ -1285,7 +1285,9 @@ def test_release_tree_offline_up_avoids_env_reparse_for_compose_image_discovery(
     assert 'compose_output_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-output.XXXXXX")"' in script_text
     assert 'compose_release config >"$compose_output_file" 2>"$stderr_file"' in script_text
     assert 'offline-up-compose-output.XXXXXX' in script_text
-    assert 'awk \'' in script_text
+    assert 'refs_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-refs.XXXXXX")"' in script_text
+    assert 'python3 - "$compose_output_file" >"$refs_file" 2>"$stderr_file"' in script_text
+    assert "match = re.match" in script_text
 
 
 def test_offline_up_bash_fails_when_compose_runtime_escapes_two_bundle_contract(tmp_path: Path) -> None:

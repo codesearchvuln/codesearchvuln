@@ -644,10 +644,11 @@ enable_offline_up_release_stack_cleanup_fallback() {
   }
 
   collect_current_compose_image_ids() {
-    local compose_output_file image_refs status stderr_file stderr_output
+    local compose_output_file image_refs parse_status refs_file status stderr_file stderr_output
 
     stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-config.XXXXXX")"
     compose_output_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-output.XXXXXX")"
+    refs_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-refs.XXXXXX")"
     set +e
     compose_release config >"$compose_output_file" 2>"$stderr_file"
     status=$?
@@ -657,22 +658,47 @@ enable_offline_up_release_stack_cleanup_fallback() {
     rm -f "$stderr_file"
 
     if [[ "$status" -ne 0 ]]; then
-      rm -f "$compose_output_file"
+      rm -f "$compose_output_file" "$refs_file"
       release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
       [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
       return 0
     fi
 
-    image_refs="$(awk '
-      match($0, /^[[:space:]]*image:[[:space:]]*(\S+)[[:space:]]*$/, matches) {
-        image_ref = matches[1]
-        if (!(image_ref in seen)) {
-          seen[image_ref] = 1
-          print image_ref
-        }
-      }
-    ' "$compose_output_file")"
-    rm -f "$compose_output_file"
+    stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-refs-stderr.XXXXXX")"
+    set +e
+    python3 - "$compose_output_file" >"$refs_file" 2>"$stderr_file" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+seen: set[str] = set()
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    match = re.match(r"^\s*image:\s*(\S+)\s*$", line)
+    if not match:
+        continue
+    image_ref = match.group(1).strip()
+    if not image_ref or image_ref in seen:
+        continue
+    seen.add(image_ref)
+    print(image_ref)
+PY
+    parse_status=$?
+    set -e
+
+    stderr_output="$(tr -d '\r' <"$stderr_file")"
+    rm -f "$stderr_file"
+
+    if [[ "$parse_status" -ne 0 ]]; then
+      rm -f "$compose_output_file" "$refs_file"
+      release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
+      [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
+      return 0
+    fi
+
+    image_refs="$(cat "$refs_file")"
+    rm -f "$compose_output_file" "$refs_file"
     collect_image_ids_for_refs "$image_refs"
   }
 }
