@@ -346,6 +346,10 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "--frontend-bundle" in workflow_text
     assert "release-manifest.json" in workflow_text
     assert "release-snapshot-lock.json" in workflow_text
+    assert "release_code.zip" in workflow_text
+    assert "release_code.tar.gz" in workflow_text
+    assert "source_code.zip" in workflow_text
+    assert "source_code.tar.gz" in workflow_text
     assert "images-manifest-services-amd64.json" in workflow_text
     assert "images-manifest-services-arm64.json" in workflow_text
     assert "images-manifest-scanner-amd64.json" in workflow_text
@@ -435,8 +439,12 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'COMPARE_DIR="${RUNNER_TEMP}/release-compare"' in workflow_text
     assert "git_tree_hash_for_dir()" in workflow_text
     assert 'PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"' in workflow_text
+    assert 'SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"' in workflow_text
     assert 'cp -a "${RELEASE_DIR}/." "${PUBLISH_READY_DIR}/"' in workflow_text
     assert 'rm -rf "${PUBLISH_READY_DIR}/images"' in workflow_text
+    assert "./scripts/generate-sourcecode-branch.sh" in workflow_text
+    assert '--output "${SOURCECODE_DIR}"' in workflow_text
+    assert "--validate" in workflow_text
     assert 'git rev-parse refs/remotes/origin/release^{tree}' in workflow_text
     assert 'candidate_tree="$(git_tree_hash_for_dir "${PUBLISH_READY_DIR}" "${COMPARE_DIR}")"' in workflow_text
     assert 'echo "release_commit_sha=$(git rev-parse refs/remotes/origin/release)" >> "$GITHUB_OUTPUT"' in workflow_text

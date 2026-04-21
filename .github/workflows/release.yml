@@ -847,42 +847,65 @@ jobs:
           echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git push --force origin HEAD:release
 
-      - name: Generate sourcecode tree for semantic release assets
+      - name: Generate validated sourcecode tree for semantic release archives
+        env:
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
         run: |
           set -euo pipefail
 
-          bash ./scripts/generate-sourcecode-branch.sh \
-            --output "${RUNNER_TEMP}/sourcecode-tree" \
+          SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"
+          rm -rf "${SOURCECODE_DIR}"
+          ./scripts/generate-sourcecode-branch.sh \
+            --output "${SOURCECODE_DIR}" \
+            --ref "${SOURCE_SHA}" \
             --validate
 
-      - name: Package semantic release source archives
+      - name: Package supplementary semantic release archives
         run: |
           set -euo pipefail
 
-          ARCHIVE_ROOT="${RUNNER_TEMP}/semantic-release-archive-roots"
-          ARCHIVE_DIR="${RUNNER_TEMP}/semantic-release-archives"
-          RELEASE_CODE_DIR="${ARCHIVE_ROOT}/release_code"
-          SOURCE_CODE_DIR="${ARCHIVE_ROOT}/source_code"
           PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
+          SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"
+          SEMANTIC_ASSET_DIR="${RUNNER_TEMP}/semantic-release-assets"
 
-          rm -rf "${ARCHIVE_ROOT}" "${ARCHIVE_DIR}"
-          mkdir -p "${RELEASE_CODE_DIR}" "${SOURCE_CODE_DIR}" "${ARCHIVE_DIR}"
+          rm -rf "${SEMANTIC_ASSET_DIR}"
+          mkdir -p "${SEMANTIC_ASSET_DIR}"
 
-          cp -a "${PUBLISH_READY_DIR}/." "${RELEASE_CODE_DIR}/"
-          cp -a "${RUNNER_TEMP}/sourcecode-tree/." "${SOURCE_CODE_DIR}/"
+          python3 - <<'PY'
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
 
-          [[ ! -e "${RELEASE_CODE_DIR}/images" ]] || {
-            echo "::error::release_code archives must be generated from a publish-ready tree without images/"
-            exit 1
-          }
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
 
-          (
-            cd "${ARCHIVE_ROOT}"
-            tar -czf "${ARCHIVE_DIR}/release_code.tar.gz" release_code
-            zip -qr "${ARCHIVE_DIR}/release_code.zip" release_code
-            tar -czf "${ARCHIVE_DIR}/source_code.tar.gz" source_code
-            zip -qr "${ARCHIVE_DIR}/source_code.zip" source_code
-          )
+          archives = [
+              (
+                  runner_temp / "release-tree-publish-ready",
+                  runner_temp / "semantic-release-assets" / "release_code.zip",
+                  runner_temp / "semantic-release-assets" / "release_code.tar.gz",
+              ),
+              (
+                  runner_temp / "sourcecode-tree",
+                  runner_temp / "semantic-release-assets" / "source_code.zip",
+                  runner_temp / "semantic-release-assets" / "source_code.tar.gz",
+              ),
+          ]
+
+          for source_dir, zip_path, tar_path in archives:
+              if not source_dir.is_dir():
+                  raise SystemExit(f"missing archive source directory: {source_dir}")
+
+              files = sorted(path for path in source_dir.rglob("*") if path.is_file())
+
+              with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                  for path in files:
+                      archive.write(path, path.relative_to(source_dir))
+
+              with tarfile.open(tar_path, "w:gz") as archive:
+                  for path in files:
+                      archive.add(path, arcname=path.relative_to(source_dir))
+          PY
 
       - name: Resolve semantic release version
         id: resolve_semantic_version
@@ -962,6 +985,7 @@ jobs:
           SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
           SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
           RELEASE_TREE: ${{ runner.temp }}/release-tree
+          SEMANTIC_ASSET_DIR: ${{ runner.temp }}/semantic-release-assets
           UPLOAD_PARALLELISM: "4"
         run: |
           set -uo pipefail
@@ -981,6 +1005,10 @@ jobs:
             "${RUNNER_TEMP}/semantic-release-archives/source_code.tar.gz"
             "${RELEASE_TREE}/release-snapshot-lock.json"
             "./scripts/release-assets/offline-bootstrap.sh#Vulhunter-offline-bootstrap.sh"
+            "${SEMANTIC_ASSET_DIR}/release_code.zip"
+            "${SEMANTIC_ASSET_DIR}/release_code.tar.gz"
+            "${SEMANTIC_ASSET_DIR}/source_code.zip"
+            "${SEMANTIC_ASSET_DIR}/source_code.tar.gz"
           )
 
           max_parallel="${UPLOAD_PARALLELISM}"
