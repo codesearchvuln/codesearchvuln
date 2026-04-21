@@ -32,6 +32,48 @@ die() {
   exit 1
 }
 
+offline_up_release_stack_discovery_is_fatal() {
+  local discovery_stderr="${1:-}"
+
+  [[ -n "$discovery_stderr" ]] || return 1
+
+  grep -Eiq \
+    'permission denied|docker socket access was denied|docker\.sock|cannot connect to the docker daemon|is the docker daemon running|error during connect|server api version|context .* does not exist|current context|config file|certificate|tls|connection refused|dial unix|no such host' \
+    <<<"$discovery_stderr"
+}
+
+enable_offline_up_cleanup_discovery_tolerance() {
+  collect_release_stack_container_ids() {
+    local stderr_file status container_ids discovery_stderr
+
+    stderr_file="$(mktemp)"
+    set +e
+    container_ids="$(
+      docker ps -aq --filter "label=com.docker.compose.project=$(release_compose_project_name)" \
+        2>"$stderr_file" | tr -d '\r'
+    )"
+    status="$?"
+    set -e
+
+    discovery_stderr="$(cat "$stderr_file")"
+    rm -f "$stderr_file"
+
+    if [[ "$status" -eq 0 ]]; then
+      printf '%s' "$container_ids"
+      return 0
+    fi
+
+    if offline_up_release_stack_discovery_is_fatal "$discovery_stderr"; then
+      [[ -n "$discovery_stderr" ]] && printf '%s\n' "$discovery_stderr" >&2
+      return "$status"
+    fi
+
+    log_warn "warning: release-stack container discovery failed; treating as no existing containers and continuing cleanup"
+    [[ -n "$discovery_stderr" ]] && printf '%s\n' "$discovery_stderr" >&2
+    return 0
+  }
+}
+
 usage() {
   cat <<'EOF'
 Usage: bash ./scripts/offline-up.sh [--attach-logs]
@@ -651,7 +693,7 @@ main() {
   source "$STARTUP_BANNER_HELPER"
   # shellcheck disable=SC1090
   source "$RELEASE_REFRESH_HELPER"
-  enable_offline_up_release_stack_cleanup_fallback
+  enable_offline_up_cleanup_discovery_tolerance
   load_container_socket_env
   load_container_socket_gid_env
   export OFFLINE_HOST_PREREQ_LOG_PREFIX="[offline-up]"
