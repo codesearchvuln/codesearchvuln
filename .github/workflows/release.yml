@@ -767,7 +767,7 @@ jobs:
 
           dump_debug() {
             docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" ps || true
-            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" logs db redis scan-workspace-init db-bootstrap backend frontend || true
+            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" logs --tail=200 db redis scan-workspace-init db-bootstrap backend frontend || true
           }
 
           cleanup() {
