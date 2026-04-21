@@ -282,6 +282,10 @@ EOF
 fi
 
 if [ "${1:-}" = "ps" ] && [ "${2:-}" = "-aq" ] && [ "${3:-}" = "--filter" ]; then
+  if [ "${FAKE_RELEASE_STACK_PS_EXIT_CODE:-0}" != "0" ]; then
+    [ -n "${FAKE_RELEASE_STACK_PS_STDERR:-}" ] && echo "${FAKE_RELEASE_STACK_PS_STDERR}" >&2
+    exit "${FAKE_RELEASE_STACK_PS_EXIT_CODE}"
+  fi
   if [ "${FAKE_RELEASE_STACK_EMPTY:-0}" = "1" ]; then
     exit 0
   fi
@@ -610,6 +614,153 @@ def test_offline_up_bash_default_flow_bootstraps_env_and_starts_compose(tmp_path
     assert "All services are up." in combined_output
     assert f"http://localhost:{frontend_port}" in combined_output
     assert request_log == _expected_release_probe_paths()
+
+
+def test_offline_up_bash_empty_release_stack_continues_without_warning(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["FAKE_RELEASE_STACK_EMPTY"] = "1"
+
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode == 0, combined_output
+    assert "warning: release-stack container discovery failed" not in combined_output
+    assert "no existing release stack containers found" in combined_output
+
+    docker_commands = _read_logged_commands(docker_log)
+    cleanup_stop = _compose_command("stop", project_name=RELEASE_PROJECT_NAME)
+    cleanup_down = _compose_command("down", "--remove-orphans", project_name=RELEASE_PROJECT_NAME)
+    services_load = f"load -i {output_dir / 'vulhunter-services-images-amd64.tar'}"
+    backend_up = _compose_command(
+        "up", "-d", "db", "redis", "db-bootstrap", "backend", project_name=RELEASE_PROJECT_NAME
+    )
+    assert f"ps -aq --filter label=com.docker.compose.project={RELEASE_PROJECT_NAME}" in docker_commands
+    assert cleanup_stop not in docker_commands
+    assert cleanup_down in docker_commands
+    assert services_load in docker_commands
+    assert backend_up in docker_commands
+
+
+def test_offline_up_bash_warns_and_continues_when_release_stack_discovery_is_benign_non_zero(
+    tmp_path: Path,
+) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["FAKE_RELEASE_STACK_PS_EXIT_CODE"] = "7"
+
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, _request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode == 0, combined_output
+    assert "warning: release-stack container discovery failed; treating as no existing containers and continuing cleanup" in combined_output
+    assert "no existing release stack containers found" in combined_output
+
+    docker_commands = _read_logged_commands(docker_log)
+    cleanup_stop = _compose_command("stop", project_name=RELEASE_PROJECT_NAME)
+    cleanup_down = _compose_command("down", "--remove-orphans", project_name=RELEASE_PROJECT_NAME)
+    services_load = f"load -i {output_dir / 'vulhunter-services-images-amd64.tar'}"
+    backend_up = _compose_command(
+        "up", "-d", "db", "redis", "db-bootstrap", "backend", project_name=RELEASE_PROJECT_NAME
+    )
+    assert f"ps -aq --filter label=com.docker.compose.project={RELEASE_PROJECT_NAME}" in docker_commands
+    assert cleanup_stop not in docker_commands
+    assert cleanup_down in docker_commands
+    assert services_load in docker_commands
+    assert backend_up in docker_commands
+    assert "inspect --format {{.Image}} fake-backend" not in docker_commands
+
+
+def test_offline_up_bash_fails_when_release_stack_discovery_reports_docker_permission_error(
+    tmp_path: Path,
+) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    socket_path = tmp_path / "docker.sock"
+    socket_path.write_text("", encoding="utf-8")
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["FAKE_RELEASE_STACK_PS_EXIT_CODE"] = "7"
+    env["FAKE_RELEASE_STACK_PS_STDERR"] = (
+        "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock"
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "warning: release-stack container discovery failed" not in combined_output
+    assert "permission denied" in combined_output.lower()
+
+    docker_commands = _read_logged_commands(docker_log)
+    assert _compose_command("config", project_name=RELEASE_PROJECT_NAME) in docker_commands
+    _assert_release_cleanup_not_started(docker_commands)
+    assert not any(command.startswith("load ") for command in docker_commands)
 
 
 def test_offline_up_bash_auto_installs_missing_zstd_on_supported_ubuntu_before_bundle_load(
