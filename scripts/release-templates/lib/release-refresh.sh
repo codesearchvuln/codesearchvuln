@@ -82,9 +82,18 @@ collect_image_ids_for_refs() {
 }
 
 collect_current_compose_image_ids() {
-  local image_refs
+  local image_refs compose_status
 
-  image_refs="$(collect_compose_image_refs)"
+  set +e
+  image_refs="$(collect_compose_image_refs 2>/dev/null)"
+  compose_status=$?
+  set -e
+
+  if [[ "$compose_status" -ne 0 ]]; then
+    release_refresh_log_warn "warning: compose image discovery failed (status=$compose_status); skipping stale image cleanup"
+    return 0
+  fi
+
   collect_image_ids_for_refs "$image_refs"
 }
 
@@ -129,9 +138,12 @@ cleanup_release_stack() {
   release_refresh_log_info "[trace:cleanup] collecting stack image ids"
   image_ids="$(collect_release_stack_image_ids "$container_ids")"
   release_refresh_log_info "[trace:cleanup] collecting compose image ids"
+  set +e
   compose_image_ids="$(collect_current_compose_image_ids)"
-  release_refresh_log_info "[trace:cleanup] compose image ids collected (${#compose_image_ids} chars)"
-  if [[ -n "$compose_image_ids" ]]; then
+  local _cid_status=$?
+  set -e
+  release_refresh_log_info "[trace:cleanup] compose image ids collected (status=$_cid_status, ${#compose_image_ids} chars)"
+  if [[ -n "$compose_image_ids" ]] && [[ "$_cid_status" -eq 0 ]]; then
     image_ids="$(printf '%s\n%s\n' "$image_ids" "$compose_image_ids" | awk 'NF && !seen[$0]++')"
   fi
 
