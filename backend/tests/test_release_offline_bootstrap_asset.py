@@ -163,6 +163,34 @@ def test_offline_bootstrap_fails_when_multiple_release_archives_exist(tmp_path: 
     assert "expected exactly one release archive" in combined_output
 
 
+def test_offline_bootstrap_ignores_supplementary_source_and_release_code_assets(tmp_path: Path) -> None:
+    workdir = tmp_path / "downloads"
+    workdir.mkdir()
+    _create_archive(workdir, "AuditTool-1.2.3.tar.gz")
+    services_bundle = "vulhunter-services-images-amd64.tar.zst"
+    scanner_bundle = "vulhunter-scanner-images-amd64.tar.zst"
+    _write_bundle(workdir, services_bundle)
+    _write_bundle(workdir, scanner_bundle)
+
+    for archive_name in (
+        "release_code.zip",
+        "release_code.tar.gz",
+        "source_code.zip",
+        "source_code.tar.gz",
+    ):
+        (workdir / archive_name).write_text("supplementary semantic asset\n", encoding="utf-8")
+
+    env = _base_env(workdir, services_bundle=services_bundle, scanner_bundle=scanner_bundle)
+    result = _run_wrapper(workdir, env=env)
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    assert result.returncode == 0, combined_output
+    extracted_root = workdir / "AuditTool-1.2.3"
+    assert extracted_root.exists()
+    assert (extracted_root / services_bundle).exists()
+    assert (extracted_root / scanner_bundle).exists()
+
+
 def test_offline_bootstrap_fails_when_both_arch_pairs_exist(tmp_path: Path) -> None:
     workdir = tmp_path / "downloads"
     workdir.mkdir()
