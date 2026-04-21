@@ -4048,9 +4048,9 @@ function AgentAuditPageContent() {
 							<span className="rounded-md bg-muted/50 px-2.5 py-1 text-foreground/80">
 								漏洞队列: {vulnerabilityQueueCount} 个
 							</span>
-							<span className="rounded-md bg-muted/50 px-2.5 py-1 text-foreground/80">
+							{/* <span className="rounded-md bg-muted/50 px-2.5 py-1 text-foreground/80">
 								结果队列: {realtimeQueueSnapshot.resultQueue} 个
-							</span>
+							</span> */}
 						</div>
 					) : null}
 				</div>
