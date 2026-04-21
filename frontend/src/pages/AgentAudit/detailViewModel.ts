@@ -708,15 +708,35 @@ export function buildStatsSummary(input: {
   now: Date;
 }): AgentAuditStatsSummary {
   const { task, displayFindings, tokenUsage, now } = input;
-  const managedFindings = displayFindings.filter((item) =>
+  const summaryStatusCounts = task?.defect_summary?.status_counts;
+  const hasSummaryStatus =
+    typeof summaryStatusCounts?.pending === "number" ||
+    typeof summaryStatusCounts?.verified === "number" ||
+    typeof summaryStatusCounts?.false_positive === "number";
+  const totalFindings = hasSummaryStatus
+    ? Math.max(
+        toFiniteNumber(summaryStatusCounts?.pending) +
+          toFiniteNumber(summaryStatusCounts?.verified),
+        0,
+      )
+    : Math.max(toFiniteNumber(task?.findings_count), 0);
+  const falsePositiveFindings = hasSummaryStatus
+    ? Math.max(toFiniteNumber(summaryStatusCounts?.false_positive), 0)
+    : Math.max(toFiniteNumber(task?.false_positive_count), 0);
+  const fallbackManagedFindings = displayFindings.filter((item) =>
     isVisibleManagedFinding(item),
   );
-  const totalFindings = managedFindings.length
-    ? managedFindings.length
-    : Math.max(toFiniteNumber(task?.findings_count), 0);
-  const falsePositiveFindings = displayFindings.length
-    ? displayFindings.filter((item) => isFalsePositiveFinding(item)).length
-    : Math.max(toFiniteNumber(task?.false_positive_count), 0);
+  const fallbackFalsePositives = displayFindings.filter((item) =>
+    isFalsePositiveFinding(item),
+  ).length;
+  const resolvedTotalFindings =
+    !task && fallbackManagedFindings.length > 0
+      ? fallbackManagedFindings.length
+      : totalFindings;
+  const resolvedFalsePositives =
+    !task && fallbackFalsePositives > 0
+      ? fallbackFalsePositives
+      : falsePositiveFindings;
 
   const startedAt = task?.started_at ? new Date(task.started_at).getTime() : Number.NaN;
   const completedAt = task?.completed_at ? new Date(task.completed_at).getTime() : Number.NaN;
@@ -745,9 +765,9 @@ export function buildStatsSummary(input: {
       now.getTime(),
     ),
     durationMs,
-    totalFindings,
-    effectiveFindings: totalFindings,
-    falsePositiveFindings,
+    totalFindings: resolvedTotalFindings,
+    effectiveFindings: resolvedTotalFindings,
+    falsePositiveFindings: resolvedFalsePositives,
     iterations: Math.max(toFiniteNumber(task?.total_iterations), 0),
     toolCalls: Math.max(toFiniteNumber(task?.tool_calls_count), 0),
     tokensTotal,

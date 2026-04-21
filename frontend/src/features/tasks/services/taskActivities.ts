@@ -440,6 +440,7 @@ function getAgentTaskDefectSummaryStats(
 				| "high_count"
 				| "medium_count"
 				| "low_count"
+				| "defect_summary"
 		  >
 		| null,
 ): {
@@ -449,6 +450,28 @@ function getAgentTaskDefectSummaryStats(
 	low: number;
 	total: number;
 } {
+	const summarySeverity = task?.defect_summary?.severity_counts;
+	const summaryStatus = task?.defect_summary?.status_counts;
+	const summaryHasSeverity =
+		typeof summarySeverity?.critical === "number" ||
+		typeof summarySeverity?.high === "number" ||
+		typeof summarySeverity?.medium === "number" ||
+		typeof summarySeverity?.low === "number";
+	const summaryHasStatus =
+		typeof summaryStatus?.pending === "number" ||
+		typeof summaryStatus?.verified === "number";
+	if (summaryHasSeverity || summaryHasStatus) {
+		return {
+			critical: toNonNegativeInt(summarySeverity?.critical),
+			high: toNonNegativeInt(summarySeverity?.high),
+			medium: toNonNegativeInt(summarySeverity?.medium),
+			low: toNonNegativeInt(summarySeverity?.low),
+			total:
+				toNonNegativeInt(summaryStatus?.pending) +
+				toNonNegativeInt(summaryStatus?.verified),
+		};
+	}
+
 	return {
 		critical: toNonNegativeInt(task?.critical_count),
 		high: toNonNegativeInt(task?.high_count),

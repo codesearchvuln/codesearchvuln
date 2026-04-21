@@ -70,6 +70,53 @@ test("buildStatsSummary treats terminal agent states as 100 percent regardless o
   }
 });
 
+test("buildStatsSummary prioritizes backend defect_summary counters over realtime list length", () => {
+  const now = new Date("2026-03-12T08:00:00.000Z");
+  const summary = buildStatsSummary({
+    task: {
+      status: "completed",
+      created_at: "2026-03-12T07:00:00.000Z",
+      started_at: "2026-03-12T07:10:00.000Z",
+      completed_at: "2026-03-12T07:50:00.000Z",
+      findings_count: 99,
+      false_positive_count: 99,
+      defect_summary: {
+        scope: "all_findings",
+        total_count: 9,
+        severity_counts: {
+          critical: 1,
+          high: 2,
+          medium: 3,
+          low: 2,
+          info: 1,
+        },
+        status_counts: {
+          pending: 3,
+          verified: 2,
+          false_positive: 4,
+        },
+      },
+    },
+    displayFindings: [
+      { id: "rt-1", status: "verified", is_verified: true },
+      { id: "rt-2", status: "verified", is_verified: true },
+      { id: "rt-3", status: "verified", is_verified: true },
+      { id: "rt-4", status: "verified", is_verified: true },
+      { id: "rt-5", status: "verified", is_verified: true },
+      { id: "rt-6", status: "verified", is_verified: true },
+      { id: "rt-7", status: "verified", is_verified: true },
+      { id: "rt-8", status: "verified", is_verified: true },
+      { id: "rt-9", status: "verified", is_verified: true },
+      { id: "rt-10", status: "verified", is_verified: true },
+    ],
+    tokenUsage: createTokenUsageAccumulator(),
+    now,
+  });
+
+  assert.equal(summary.totalFindings, 5);
+  assert.equal(summary.falsePositiveFindings, 4);
+});
+
 test("buildFindingTableState 仅按可见字段筛选，不再命中文件路径和原标题", () => {
   const state = detailViewModel.buildFindingTableState({
     items: [
@@ -388,7 +435,7 @@ test("isVisibleVerifiedVulnerability 会过滤各类误报信号", () => {
   );
 });
 
-test("buildStatsSummary 统计当前管理列表中的非误报漏洞", () => {
+test("buildStatsSummary 统计优先使用任务聚合口径，不受当前实时列表波动影响", () => {
   const summary = buildStatsSummary({
     task: {
       status: "completed",
@@ -440,9 +487,9 @@ test("buildStatsSummary 统计当前管理列表中的非误报漏洞", () => {
     now: new Date("2026-03-12T08:00:00.000Z"),
   });
 
-  assert.equal(summary.totalFindings, 3);
-  assert.equal(summary.effectiveFindings, 3);
-  assert.equal(summary.falsePositiveFindings, 2);
+  assert.equal(summary.totalFindings, 99);
+  assert.equal(summary.effectiveFindings, 99);
+  assert.equal(summary.falsePositiveFindings, 10);
 });
 
 test("buildStatsSummary 在无展示数据时回退到 task.findings_count 和 false_positive_count", () => {

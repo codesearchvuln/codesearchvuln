@@ -156,11 +156,11 @@ test("fetchTaskActivities maps effective severity stats for intelligent and hybr
 
     assert.equal(intelligent.length, 1);
     assert.deepEqual(intelligent[0]?.agentFindingStats, {
-      critical: 1,
-      high: 2,
-      medium: 3,
+      critical: 2,
+      high: 3,
+      medium: 1,
       low: 1,
-      total: 7,
+      total: 6,
     });
 
     assert.equal(hybrid.length, 1);

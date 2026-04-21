@@ -240,3 +240,36 @@ test("mergeRealtimeFindingsBatch 允许数据库 pending 状态覆盖之前的 v
   assert.equal(merged[0]?.is_verified, false);
   assert.equal(merged[0]?.verification_progress, "pending");
 });
+
+test("mergeRealtimeFindingsBatch performs secondary dedupe when merge_key drifts but id/fingerprint matches", () => {
+  const merged = mergeRealtimeFindingsBatch(
+    [
+      createFinding({
+        id: "finding-dup",
+        merge_key: "event-merge-key",
+        fingerprint: "fp-dup",
+        status: "verified",
+        is_verified: true,
+        timestamp: "2026-03-23T08:00:00.000Z",
+      }),
+    ],
+    [
+      createFinding({
+        id: "finding-dup",
+        merge_key: "db-merge-key",
+        fingerprint: "fp-dup",
+        status: "needs_review",
+        is_verified: false,
+        verification_progress: "pending",
+        timestamp: "2026-03-23T08:10:00.000Z",
+      }),
+    ],
+    { source: "db" },
+  );
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.id, "finding-dup");
+  assert.equal(merged[0]?.merge_key, "db-merge-key");
+  assert.equal(merged[0]?.status, "needs_review");
+  assert.equal(merged[0]?.is_verified, false);
+});

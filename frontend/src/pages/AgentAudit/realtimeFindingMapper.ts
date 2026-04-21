@@ -107,11 +107,15 @@ function shouldIncludeEventFinding(
 function buildMergeKey(input: {
   verificationTodoId?: unknown;
   verificationFingerprint?: unknown;
+  findingId?: unknown;
+  fallbackId?: unknown;
   fallbackFingerprint: string;
 }): string {
   return (
     toOptionalString(input.verificationTodoId) ||
     toOptionalString(input.verificationFingerprint) ||
+    toOptionalString(input.findingId) ||
+    toOptionalString(input.fallbackId) ||
     input.fallbackFingerprint
   );
 }
@@ -184,6 +188,7 @@ export function fromAgentFinding(
   const mergeKey = buildMergeKey({
     verificationTodoId: findingRecord.verification_todo_id,
     verificationFingerprint: findingRecord.verification_fingerprint,
+    findingId: finding.id,
     fallbackFingerprint: fingerprint,
   });
   const falsePositive = isFalsePositiveSignal({
@@ -291,6 +296,8 @@ export function fromAgentEvent(event: AgentEvent): RealtimeMergedFindingItem | n
   const mergeKey = buildMergeKey({
     verificationTodoId: metadata.verification_todo_id,
     verificationFingerprint: metadata.verification_fingerprint,
+    findingId: event.finding_id,
+    fallbackId: metadata.id,
     fallbackFingerprint: fingerprint,
   });
 

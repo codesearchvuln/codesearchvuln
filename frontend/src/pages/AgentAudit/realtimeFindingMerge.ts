@@ -23,6 +23,10 @@ function normalizeRealtimeToken(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeIdentityToken(value: unknown): string {
+  return String(value || "").trim();
+}
+
 function resolveMergedFalsePositiveState(input: {
   mergedAuthenticity: string | null;
   mergedSeverity: string;
@@ -52,6 +56,49 @@ function resolveMergedFalsePositiveState(input: {
         ? input.mergedDisplaySeverity
         : normalizeDisplaySeverity(input.mergedSeverity, false),
     detailMode: "detail",
+  };
+}
+
+function mergeDuplicateFindingEntry(
+  primary: RealtimeMergedFindingItem,
+  secondary: RealtimeMergedFindingItem,
+): RealtimeMergedFindingItem {
+  const mergedStatus = primary.status ?? secondary.status ?? null;
+  const mergedVerificationStatus =
+    primary.verification_status ?? secondary.verification_status ?? null;
+  const verificationProgress =
+    String(mergedStatus || "").trim().toLowerCase() === "verified" ||
+    String(mergedVerificationStatus || "").trim().toLowerCase() === "verified"
+      ? "verified"
+      : "pending";
+  const mergedSeverity = primary.severity || secondary.severity || "medium";
+  const mergedDisplaySeverity =
+    primary.display_severity || secondary.display_severity;
+  const mergedAuthenticity =
+    primary.authenticity ?? secondary.authenticity ?? null;
+  const mergedDetailMode = primary.detailMode ?? secondary.detailMode ?? "detail";
+  const falsePositiveState = resolveMergedFalsePositiveState({
+    mergedAuthenticity,
+    mergedSeverity,
+    mergedDisplaySeverity,
+    mergedDetailMode,
+  });
+
+  return {
+    ...secondary,
+    ...primary,
+    merge_key: primary.merge_key || secondary.merge_key || undefined,
+    id: primary.id || secondary.id,
+    fingerprint: primary.fingerprint || secondary.fingerprint || "",
+    severity: mergedSeverity,
+    display_severity: falsePositiveState.displaySeverity,
+    verification_progress: verificationProgress,
+    status: mergedStatus,
+    verification_status: mergedVerificationStatus,
+    authenticity: mergedAuthenticity,
+    detailMode: falsePositiveState.detailMode,
+    timestamp: pickNewerIsoTimestamp(primary.timestamp, secondary.timestamp),
+    is_verified: String(mergedStatus || "").trim().toLowerCase() === "verified",
   };
 }
 
@@ -202,5 +249,44 @@ export function mergeRealtimeFindingsBatch(
   merged.sort((a, b) =>
     String(b.timestamp || "").localeCompare(String(a.timestamp || "")),
   );
-  return merged.slice(0, 500);
+
+  const deduped: RealtimeMergedFindingItem[] = [];
+  const idToIndex = new Map<string, number>();
+  const fingerprintToIndex = new Map<string, number>();
+  for (const item of merged) {
+    const idKey = normalizeIdentityToken(item.id);
+    const fingerprintKey = normalizeIdentityToken(item.fingerprint);
+    const existingIndexById =
+      idKey.length > 0 ? idToIndex.get(idKey) : undefined;
+    const existingIndexByFingerprint =
+      fingerprintKey.length > 0
+        ? fingerprintToIndex.get(fingerprintKey)
+        : undefined;
+    const existingIndex =
+      existingIndexById ?? existingIndexByFingerprint ?? -1;
+
+    if (existingIndex >= 0) {
+      const mergedItem = mergeDuplicateFindingEntry(deduped[existingIndex], item);
+      deduped[existingIndex] = mergedItem;
+      const mergedId = normalizeIdentityToken(mergedItem.id);
+      const mergedFingerprint = normalizeIdentityToken(mergedItem.fingerprint);
+      if (mergedId) {
+        idToIndex.set(mergedId, existingIndex);
+      }
+      if (mergedFingerprint) {
+        fingerprintToIndex.set(mergedFingerprint, existingIndex);
+      }
+      continue;
+    }
+
+    deduped.push(item);
+    const index = deduped.length - 1;
+    if (idKey.length > 0) {
+      idToIndex.set(idKey, index);
+    }
+    if (fingerprintKey.length > 0) {
+      fingerprintToIndex.set(fingerprintKey, index);
+    }
+  }
+  return deduped.slice(0, 500);
 }
