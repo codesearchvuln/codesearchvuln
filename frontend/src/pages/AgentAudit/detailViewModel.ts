@@ -900,7 +900,7 @@ export function buildFindingTableState(input: {
   const keyword = input.filters.keyword.trim().toLowerCase();
   const severityFilter = String(input.filters.severity || "all").trim().toLowerCase();
 
-  const filteredRows = input.items
+  const matchedRows = input.items
     .map((item) => buildFindingRow(item))
     .filter((row) => {
       const matchedKeyword =
@@ -928,6 +928,12 @@ export function buildFindingTableState(input: {
       if (leftLine !== rightLine) return leftLine - rightLine;
       return left.stableKey.localeCompare(right.stableKey);
     });
+
+  const rowsWithConfidence = matchedRows.filter(
+    (row) => typeof row.confidence === "number" && Number.isFinite(row.confidence),
+  );
+  const filteredRows =
+    rowsWithConfidence.length > 0 ? rowsWithConfidence : matchedRows;
 
   const totalRows = filteredRows.length;
   const hasVisibleConfidence = filteredRows.some((row) => Boolean(row.confidenceLabel));

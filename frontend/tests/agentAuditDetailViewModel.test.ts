@@ -167,6 +167,81 @@ test("buildFindingTableState 仅按可见字段筛选，不再命中文件路径
   assert.equal(titleOnlyState.totalRows, 0);
 });
 
+test("buildFindingTableState 仅展示有置信度的漏洞条目", () => {
+  const state = detailViewModel.buildFindingTableState({
+    items: [
+      {
+        id: "finding-with-confidence",
+        title: "命令注入",
+        vulnerability_type: "command_injection",
+        severity: "high",
+        display_severity: "high",
+        verification_progress: "pending",
+        confidence: 0.61,
+        is_verified: false,
+      },
+      {
+        id: "finding-without-confidence",
+        title: "命令注入(事件态)",
+        vulnerability_type: "command_injection",
+        severity: "high",
+        display_severity: "high",
+        verification_progress: "pending",
+        confidence: null,
+        is_verified: false,
+      },
+    ],
+    filters: {
+      keyword: "",
+      severity: "all",
+    },
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(state.totalRows, 1);
+  assert.equal(state.rows.length, 1);
+  assert.equal(state.rows[0]?.id, "finding-with-confidence");
+  assert.equal(state.hasVisibleConfidence, true);
+});
+
+test("buildFindingTableState 在结果全都无置信度时回退展示全部条目", () => {
+  const state = detailViewModel.buildFindingTableState({
+    items: [
+      {
+        id: "event-finding-1",
+        title: "事件态漏洞1",
+        vulnerability_type: "command_injection",
+        severity: "high",
+        display_severity: "high",
+        verification_progress: "pending",
+        confidence: null,
+        is_verified: false,
+      },
+      {
+        id: "event-finding-2",
+        title: "事件态漏洞2",
+        vulnerability_type: "hardcoded_secret",
+        severity: "medium",
+        display_severity: "medium",
+        verification_progress: "pending",
+        confidence: null,
+        is_verified: false,
+      },
+    ],
+    filters: {
+      keyword: "",
+      severity: "all",
+    },
+    page: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(state.totalRows, 2);
+  assert.equal(state.rows.length, 2);
+  assert.equal(state.hasVisibleConfidence, false);
+});
+
 test("calculateResponsiveFindingsPageSize 会随着可用高度增加而返回更多条目", () => {
   assert.equal(
     detailViewModel.calculateResponsiveFindingsPageSize?.(180),

@@ -952,14 +952,22 @@ function AgentAuditPageContent() {
 		() => (taskId ? getAgentAuditTaskDetailSnapshot(taskId) : null),
 		[taskId],
 	);
-	const visibleManagedFindings = useMemo(
-		() => realtimeFindings,
-		[realtimeFindings],
-	);
 	const persistedFindingRouteItems = useMemo(
 		() => findings.map(agentFindingToRealtimeItem),
 		[findings],
 	);
+	const isTerminalTask = useMemo(() => {
+		const normalizedTaskStatus = String(task?.status || "")
+			.trim()
+			.toLowerCase();
+		return TERMINAL_STATUSES.has(normalizedTaskStatus);
+	}, [task?.status]);
+	const visibleManagedFindings = useMemo(() => {
+		if (isTerminalTask && persistedFindingRouteItems.length > 0) {
+			return persistedFindingRouteItems;
+		}
+		return realtimeFindings;
+	}, [isTerminalTask, persistedFindingRouteItems, realtimeFindings]);
 	const failedReason = useMemo(() => {
 		if (task?.status !== "failed") return null;
 		const reason = terminalFailureReason || task.error_message || "";
@@ -1758,8 +1766,8 @@ function AgentAuditPageContent() {
 
 	// ============ Data Loading ============
 
-	const loadTask = useCallback(async () => {
-		if (!taskId) return;
+	const loadTask = useCallback(async (): Promise<AgentTask | null> => {
+		if (!taskId) return null;
 		try {
 			const data = await getAgentTask(taskId);
 			setTask(data);
@@ -1769,8 +1777,10 @@ function AgentAuditPageContent() {
 					setTerminalFailureReason(message);
 				}
 			}
+			return data;
 		} catch {
 			toast.error("加载任务失败");
+			return null;
 		}
 	}, [taskId, setTask]);
 
@@ -1802,18 +1812,23 @@ function AgentAuditPageContent() {
 	}, [task?.project_id]);
 
 	const loadFindings = useCallback(
-		async (options?: { silent?: boolean }) => {
+		async (options?: { silent?: boolean; taskStatusOverride?: string | null }) => {
 			if (!taskId) return;
 			const silent = options?.silent ?? false;
 			if (!silent) {
 				setIsFindingsLoading(true);
 			}
 			setFindingsError(null);
-			const normalizedTaskStatus = String(task?.status || "")
+			const normalizedTaskStatus = String(
+				options?.taskStatusOverride ?? task?.status ?? "",
+			)
 				.trim()
 				.toLowerCase();
 			if (!TERMINAL_STATUSES.has(normalizedTaskStatus)) {
-				setFindings([]);
+				// 仅在明确可判定为非终态时清空；避免首屏并发加载时用空状态误清空已落库漏洞。
+				if (normalizedTaskStatus) {
+					setFindings([]);
+				}
 				if (!silent) {
 					setIsFindingsLoading(false);
 				}
@@ -3602,12 +3617,7 @@ function AgentAuditPageContent() {
 		const cachedTaskStatus = String(cachedSnapshot?.data.task?.status || "")
 			.trim()
 			.toLowerCase();
-		const shouldSkipInitialReload = Boolean(
-			cachedSnapshot &&
-				isAgentAuditTaskDetailSnapshotFresh(cachedSnapshot) &&
-				cachedTaskStatus !== "running" &&
-				cachedTaskStatus !== "pending",
-		);
+		const shouldSkipInitialReload = false;
 		const shouldReuseSnapshot = Boolean(
 			cachedSnapshot &&
 				(isAgentAuditTaskDetailSnapshotReusable(cachedSnapshot) ||
@@ -3625,10 +3635,13 @@ function AgentAuditPageContent() {
 
 		const loadAllData = async () => {
 			try {
-				// 先加载任务基本信息
+				// 先拿到任务终态，再决定是否拉取持久化 findings，避免并发竞态导致误清空。
+				const taskSnapshot = await loadTask();
 				await Promise.all([
-					loadTask(),
-					loadFindings({ silent: shouldReuseSnapshot }),
+					loadFindings({
+						silent: shouldReuseSnapshot,
+						taskStatusOverride: taskSnapshot?.status ?? null,
+					}),
 					loadAgentTree(),
 				]);
 
