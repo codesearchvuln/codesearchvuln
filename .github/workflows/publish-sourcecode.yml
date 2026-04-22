@@ -19,7 +19,7 @@ permissions:
 jobs:
   publish-sourcecode:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - name: Checkout source repository
@@ -37,20 +37,14 @@ jobs:
             --output "${OUTPUT_DIR}" \
             --validate
 
-      - name: Publish sourcecode branch
+      - name: Detect sourcecode changes
+        id: detect_changes
         env:
           SOURCECODE_DIR: ${{ runner.temp }}/sourcecode-tree
         run: |
           set -euo pipefail
 
-          PUBLISH_DIR="${RUNNER_TEMP}/sourcecode-publish"
           COMPARE_DIR="${RUNNER_TEMP}/sourcecode-compare"
-          git worktree add --detach --force "${PUBLISH_DIR}" HEAD
-
-          cleanup() {
-            git worktree remove --force "${PUBLISH_DIR}" || true
-          }
-          trap cleanup EXIT
 
           git_tree_hash_for_dir() {
             local source_dir="$1"
@@ -69,16 +63,76 @@ jobs:
           }
 
           candidate_tree="$(git_tree_hash_for_dir "${SOURCECODE_DIR}" "${COMPARE_DIR}")"
+          echo "candidate_tree=${candidate_tree}" >> "$GITHUB_OUTPUT"
 
+          has_changes=true
           if git ls-remote --exit-code --heads origin sourcecode >/dev/null 2>&1; then
             git fetch --force origin sourcecode:refs/remotes/origin/sourcecode
             remote_tree="$(git rev-parse refs/remotes/origin/sourcecode^{tree})"
-
             if [[ "${candidate_tree}" == "${remote_tree}" ]]; then
-              echo "Sourcecode branch is already up to date; skipping push."
-              exit 0
+              has_changes=false
+              echo "Sourcecode branch is already up to date."
             fi
           fi
+          echo "has_changes=${has_changes}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test sourcecode build
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        working-directory: ${{ runner.temp }}/sourcecode-tree
+        env:
+          VULHUNTER_SOURCECODE_PROJECT_NAME: vulhunter-sourcecode-smoke
+        run: |
+          set -euo pipefail
+
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
+
+          export RUNNER_PREFLIGHT_ENABLED=false
+
+          dump_debug() {
+            docker compose \
+              -f docker-compose.yml -f docker-compose.full.yml \
+              -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
+              ps || true
+            docker compose \
+              -f docker-compose.yml -f docker-compose.full.yml \
+              -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
+              logs --tail=200 db redis backend frontend || true
+          }
+
+          cleanup() {
+            docker compose \
+              -f docker-compose.yml -f docker-compose.full.yml \
+              -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
+              down -v || true
+          }
+          trap cleanup EXIT
+
+          if ! docker compose \
+            -f docker-compose.yml -f docker-compose.full.yml \
+            -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
+            up --build -d --wait --wait-timeout 300; then
+            dump_debug
+            echo "::error::Sourcecode full build smoke test failed: services did not become healthy."
+            exit 1
+          fi
+
+      - name: Publish sourcecode branch
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        env:
+          SOURCECODE_DIR: ${{ runner.temp }}/sourcecode-tree
+        run: |
+          set -euo pipefail
+
+          PUBLISH_DIR="${RUNNER_TEMP}/sourcecode-publish"
+          git worktree add --detach --force "${PUBLISH_DIR}" HEAD
+
+          cleanup() {
+            git worktree remove --force "${PUBLISH_DIR}" || true
+          }
+          trap cleanup EXIT
 
           cd "${PUBLISH_DIR}"
           git checkout --orphan "sourcecode-publish-${GITHUB_RUN_ID}"

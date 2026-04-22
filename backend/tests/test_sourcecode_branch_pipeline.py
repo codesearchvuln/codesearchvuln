@@ -162,15 +162,46 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
     assert "- main" in workflow_text
     assert "git worktree add --detach --force" in workflow_text
     assert "bash ./scripts/generate-sourcecode-branch.sh" in workflow_text
-    assert "git ls-remote --exit-code --heads origin sourcecode" in workflow_text
-    assert 'COMPARE_DIR="${RUNNER_TEMP}/sourcecode-compare"' in workflow_text
     assert "git_tree_hash_for_dir()" in workflow_text
     assert 'git rev-parse refs/remotes/origin/sourcecode^{tree}' in workflow_text
-    assert 'candidate_tree="$(git_tree_hash_for_dir "${SOURCECODE_DIR}" "${COMPARE_DIR}")"' in workflow_text
     assert 'git checkout --orphan "sourcecode-publish-${GITHUB_RUN_ID}"' in workflow_text
     assert "git checkout -B sourcecode origin/sourcecode" not in workflow_text
     assert "git push origin HEAD:sourcecode" not in workflow_text
     assert "git push --force origin HEAD:sourcecode" in workflow_text
+
+    # Detect-changes step gates smoke test and publish
+    assert "id: detect_changes" in workflow_text
+    assert 'has_changes=${has_changes}' in workflow_text
+    gate_condition = "steps.detect_changes.outputs.has_changes == 'true'"
+    assert workflow_text.count(gate_condition) == 2, (
+        f"Expected detect_changes gate on both smoke test and publish steps (2 occurrences), "
+        f"found {workflow_text.count(gate_condition)}"
+    )
+
+    # Verify each gated step has the condition immediately after its name
+    import re
+    gated_steps = re.findall(
+        r"-\s+name:\s*(.+)\n\s+if:\s*" + re.escape(gate_condition),
+        workflow_text,
+    )
+    assert "Smoke test sourcecode build" in gated_steps, (
+        f"Smoke test step missing detect_changes gate; gated steps: {gated_steps}"
+    )
+    assert "Publish sourcecode branch" in gated_steps, (
+        f"Publish step missing detect_changes gate; gated steps: {gated_steps}"
+    )
+
+    # Smoke test step exists and uses full build compose command
+    assert "Smoke test sourcecode build" in workflow_text
+    assert "docker-compose.full.yml" in workflow_text
+    assert "RUNNER_PREFLIGHT_ENABLED=false" in workflow_text
+    assert "up --build -d --wait" in workflow_text
+
+    # Both smoke test and publish are conditional on detect_changes
+    smoke_idx = workflow_text.index("Smoke test sourcecode build")
+    publish_idx = workflow_text.index("Publish sourcecode branch")
+    detect_idx = workflow_text.index("Detect sourcecode changes")
+    assert detect_idx < smoke_idx < publish_idx
 
 
 def test_generate_sourcecode_branch_script_is_tracked_executable_in_git_index() -> None:
