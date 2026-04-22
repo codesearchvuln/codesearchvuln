@@ -39,6 +39,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_nexus_web:
+        description: '构建 nexus-web 独立容器镜像（手动发布时按需启用,首次发布需开启）'
+        required: false
+        type: boolean
+        default: false
       build_yasa_runner:
         description: '构建 YASA runner 镜像（手动发布时按需启用）'
         required: false
@@ -94,6 +99,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       backend: ${{ steps.filter.outputs.backend || 'false' }}
+      nexus_web: ${{ steps.filter.outputs.nexus_web || 'false' }}
       yasa_runner: ${{ steps.filter.outputs.yasa_runner || 'false' }}
       opengrep_runner: ${{ steps.filter.outputs.opengrep_runner || 'false' }}
       bandit_runner: ${{ steps.filter.outputs.bandit_runner || 'false' }}
@@ -120,6 +126,10 @@ jobs:
               - 'docker/backend.Dockerfile'
               - 'docker/backend.Dockerfile.dockerignore'
               - 'backend/**'
+            nexus_web:
+              - 'docker/nexus-web.Dockerfile'
+              - 'docker/nexus-web.Dockerfile.dockerignore'
+              - '.gitmodules'
             yasa_runner:
               - 'docker/yasa-runner.Dockerfile'
               - 'docker/yasa-runner.Dockerfile.dockerignore'
@@ -461,6 +471,7 @@ jobs:
     with:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
+      build_nexus_web: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.nexus_web == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_nexus_web)) || false }}
       build_backend: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_backend)) || false }}
       build_yasa_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.yasa_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_yasa_runner)) || false }}
       build_opengrep_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.opengrep_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_opengrep_runner)) || false }}

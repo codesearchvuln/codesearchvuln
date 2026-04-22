@@ -12,6 +12,10 @@ on:
         required: false
         type: boolean
         default: false
+      build_nexus_web:
+        required: false
+        type: boolean
+        default: false
       build_backend:
         required: false
         type: boolean
@@ -247,6 +251,189 @@ jobs:
           FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-frontend:${{ needs.prepare.outputs.tag }}
           AMD64_TAG: ${{ needs.publish-frontend-amd64.outputs.tag }}
           ARM64_TAG: ${{ needs.publish-frontend-arm64.outputs.tag }}
+          MULTI_ARCH: ${{ inputs.multi_arch }}
+          EXPECTED_PLATFORMS: ${{ inputs.multi_arch && 'linux/amd64 linux/arm64' || 'linux/amd64' }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${MULTI_ARCH}" == "true" ]]; then
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}" "${ARM64_TAG}"
+          else
+            docker buildx imagetools create -t "${FINAL_TAG}" "${AMD64_TAG}"
+          fi
+
+          digest="$(docker buildx imagetools inspect "${FINAL_TAG}" --format '{{.Manifest.Digest}}')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+
+          raw_json="$(docker buildx imagetools inspect "${FINAL_TAG}" --raw)"
+          RAW_JSON="${raw_json}" EXPECTED_PLATFORMS="${EXPECTED_PLATFORMS}" python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+
+          raw = os.environ["RAW_JSON"]
+          data = json.loads(raw)
+          manifests = data.get("manifests", [])
+          platforms = {
+              f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
+              for entry in manifests
+          }
+          expected = set(os.environ["EXPECTED_PLATFORMS"].split())
+          missing = sorted(expected - platforms)
+          if missing:
+              raise SystemExit(f"missing manifest platforms: {', '.join(missing)}")
+          print(f"validated platforms: {', '.join(sorted(platforms))}")
+          PY
+
+  publish-nexus-web-amd64:
+    name: Publish nexus-web image (amd64)
+    needs: prepare
+    if: ${{ inputs.build_nexus_web }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.capture.outputs.tag }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 amd64 nexus-web Docker 镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/nexus-web.Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:buildcache-nexus-web-runtime-amd64
+            type=gha,scope=nexus-web-runtime-amd64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:buildcache-nexus-web-runtime-amd64,mode=max
+            type=gha,mode=max,scope=nexus-web-runtime-amd64
+          provenance: false
+          sbom: false
+
+      - name: 记录 amd64 nexus-web 镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-nexus-web-arm64:
+    name: Publish nexus-web image (arm64)
+    needs: prepare
+    if: ${{ inputs.build_nexus_web && inputs.multi_arch }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.capture.outputs.tag }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送 arm64 nexus-web Docker 镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./docker/nexus-web.Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          cache-from: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:buildcache-nexus-web-runtime-arm64
+            type=gha,scope=nexus-web-runtime-arm64
+          cache-to: |
+            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:buildcache-nexus-web-runtime-arm64,mode=max
+            type=gha,mode=max,scope=nexus-web-runtime-arm64
+          provenance: false
+          sbom: false
+
+      - name: 记录 arm64 nexus-web 镜像标签
+        id: capture
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:${{ needs.prepare.outputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+        run: |
+          set -euo pipefail
+          echo "tag=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+  publish-nexus-web:
+    name: Publish nexus-web image
+    needs:
+      - prepare
+      - publish-nexus-web-amd64
+      - publish-nexus-web-arm64
+    if: ${{ always() && inputs.build_nexus_web && needs.publish-nexus-web-amd64.result == 'success' && (needs.publish-nexus-web-arm64.result == 'success' || needs.publish-nexus-web-arm64.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.assemble.outputs.digest }}
+      ref: ${{ steps.assemble.outputs.ref }}
+
+    steps:
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 组装多架构 nexus-web manifest
+        id: assemble
+        env:
+          IMAGE: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+          FINAL_TAG: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:${{ needs.prepare.outputs.tag }}
+          AMD64_TAG: ${{ needs.publish-nexus-web-amd64.outputs.tag }}
+          ARM64_TAG: ${{ needs.publish-nexus-web-arm64.outputs.tag }}
           MULTI_ARCH: ${{ inputs.multi_arch }}
           EXPECTED_PLATFORMS: ${{ inputs.multi_arch && 'linux/amd64 linux/arm64' || 'linux/amd64' }}
         run: |
@@ -1750,6 +1937,7 @@ jobs:
     name: Update published GHCR package visibility
     needs:
       - publish-frontend
+      - publish-nexus-web
       - publish-backend
       - publish-yasa-runner
       - publish-opengrep-runner
@@ -1781,6 +1969,7 @@ jobs:
 
           mapping = {
               "publish-frontend": "vulhunter-frontend",
+              "publish-nexus-web": "vulhunter-nexus-web",
               "publish-backend": "vulhunter-backend",
               "publish-yasa-runner": "vulhunter-yasa-runner",
               "publish-opengrep-runner": "vulhunter-opengrep-runner",
@@ -1839,6 +2028,7 @@ jobs:
     needs:
       - prepare
       - publish-backend
+      - publish-nexus-web
       - publish-yasa-runner
       - publish-opengrep-runner
       - publish-bandit-runner
@@ -1904,6 +2094,7 @@ jobs:
           SCAN_WORKSPACE_INIT_IMAGE: docker.io/library/alpine:3.20
           STATIC_FRONTEND_IMAGE: docker.io/library/nginx:1.27-alpine
           BACKEND_REF: ${{ needs.publish-backend.outputs.ref }}
+          NEXUS_WEB_REF: ${{ needs.publish-nexus-web.outputs.ref }}
           SANDBOX_RUNNER_REF: ${{ needs.publish-sandbox-runner.outputs.ref }}
           SCANNER_YASA_REF: ${{ needs.publish-yasa-runner.outputs.ref }}
           SCANNER_OPENGREP_REF: ${{ needs.publish-opengrep-runner.outputs.ref }}
@@ -1980,6 +2171,7 @@ jobs:
           resolve_external_ref "${ADMINER_IMAGE}" "ADMINER"
           resolve_external_ref "${SCAN_WORKSPACE_INIT_IMAGE}" "SCAN_WORKSPACE_INIT"
           resolve_external_ref "${STATIC_FRONTEND_IMAGE}" "STATIC_FRONTEND"
+          resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-nexus-web" "${NEXUS_WEB_REF}" "NEXUS_WEB"
           resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-sandbox-runner" "${SANDBOX_RUNNER_REF}" "SANDBOX_RUNNER"
           resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-yasa-runner" "${SCANNER_YASA_REF}" "SCANNER_YASA"
           resolve_ref "${GHCR_REGISTRY}/${VULHUNTER_IMAGE_NAMESPACE}/vulhunter-opengrep-runner" "${SCANNER_OPENGREP_REF}" "SCANNER_OPENGREP"
@@ -2048,6 +2240,7 @@ jobs:
             "adminer:ADMINER"
             "scan_workspace_init:SCAN_WORKSPACE_INIT"
             "static_frontend:STATIC_FRONTEND"
+            "nexus_web:NEXUS_WEB"
             "sandbox_runner:SANDBOX_RUNNER"
             "scanner_yasa:SCANNER_YASA"
             "scanner_opengrep:SCANNER_OPENGREP"
@@ -2092,6 +2285,7 @@ jobs:
               "adminer": "ADMINER",
               "scan_workspace_init": "SCAN_WORKSPACE_INIT",
               "static_frontend": "STATIC_FRONTEND",
+              "nexus_web": "NEXUS_WEB",
               "sandbox_runner": "SANDBOX_RUNNER",
               "scanner_yasa": "SCANNER_YASA",
               "scanner_opengrep": "SCANNER_OPENGREP",
