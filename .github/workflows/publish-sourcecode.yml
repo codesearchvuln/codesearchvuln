@@ -126,12 +126,35 @@ jobs:
             exit 1
           fi
 
-          # Phase 2: start all services and verify they become healthy.
-          if ! "${compose_cmd[@]}" up -d --wait --wait-timeout 300; then
-            dump_debug
-            echo "::error::Sourcecode smoke test failed: services did not become healthy."
-            exit 1
-          fi
+          # Phase 2: bring up all services, then wait for the long-running ones
+          # to become healthy.  One-shot init containers (scan-workspace-init,
+          # backend-uploads-init, db-bootstrap) exit after completing their work
+          # and cause --wait to report failure, so we start everything first and
+          # then poll only the persistent services.
+          "${compose_cmd[@]}" up -d
+
+          healthy_services=(db redis backend frontend nexus-web)
+          deadline=$((SECONDS + 300))
+          while true; do
+            all_healthy=true
+            for svc in "${healthy_services[@]}"; do
+              status="$("${compose_cmd[@]}" ps --format '{{.Health}}' "${svc}" 2>/dev/null || echo "")"
+              case "${status}" in
+                healthy|"") ;;  # healthy or no healthcheck defined
+                *) all_healthy=false; break ;;
+              esac
+            done
+            if [[ "${all_healthy}" == "true" ]]; then
+              echo "All core services are healthy."
+              break
+            fi
+            if (( SECONDS >= deadline )); then
+              dump_debug
+              echo "::error::Sourcecode smoke test failed: core services did not become healthy within 300s."
+              exit 1
+            fi
+            sleep 5
+          done
 
       - name: Publish sourcecode branch
         if: steps.detect_changes.outputs.has_changes == 'true'
