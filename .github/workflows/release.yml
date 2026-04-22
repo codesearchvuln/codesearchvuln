@@ -1031,6 +1031,8 @@ jobs:
         run: |
           set -uo pipefail
 
+          cp "./scripts/release-assets/offline-bootstrap.sh" "${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"
+
           assets=(
             "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst"
             "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst"
@@ -1041,7 +1043,7 @@ jobs:
             "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json"
             "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
             "${RELEASE_TREE}/release-snapshot-lock.json"
-            "./scripts/release-assets/offline-bootstrap.sh#Vulhunter-offline-bootstrap.sh"
+            "${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"
             "${SEMANTIC_ARCHIVE_DIR}/release_code.zip"
             "${SEMANTIC_ARCHIVE_DIR}/release_code.tar.gz"
             "${SEMANTIC_ARCHIVE_DIR}/source_code.zip"
