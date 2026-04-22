@@ -11,7 +11,8 @@
         "redis",
         "adminer",
         "scan_workspace_init",
-        "static_frontend"
+        "static_frontend",
+        "nexus_web"
       ]
     },
     "scanner": {
@@ -54,6 +55,10 @@
     "static_frontend": {
       "env_var": "STATIC_FRONTEND_IMAGE",
       "local_repo": "vulhunter-local/static-frontend"
+    },
+    "nexus_web": {
+      "env_var": "NEXUS_WEB_IMAGE",
+      "local_repo": "vulhunter-local/nexus-web"
     },
     "sandbox_runner": {
       "env_var": "SANDBOX_RUNNER_IMAGE",

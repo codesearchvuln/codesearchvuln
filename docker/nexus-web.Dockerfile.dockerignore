@@ -1,0 +1,19 @@
+# Only the nexus-web submodule contents are needed as build context.
+**
+!nexus-web/**
+
+# Drop build artifacts and transient files from within nexus-web itself.
+nexus-web/.git
+nexus-web/.github
+nexus-web/node_modules
+nexus-web/dist
+nexus-web/.cache
+nexus-web/.next
+nexus-web/coverage
+nexus-web/tmp
+nexus-web/.env*
+nexus-web/npm-debug.log*
+nexus-web/yarn-debug.log*
+nexus-web/yarn-error.log*
+nexus-web/pnpm-debug.log*
+nexus-web/.DS_Store

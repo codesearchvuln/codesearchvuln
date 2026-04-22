@@ -7,8 +7,9 @@
 # Runtime env templates needed by the release tree.
 docker/env/backend/env.example
 
-# Bundled local Nexus static pages retained for main frontend mounting.
-nexus-web/
+# Bundled local nexus-itemDetail static pages retained for main frontend mounting.
+# nexus-web is now shipped as an independent container image (see services bundle);
+# the main frontend proxies /nexus/ to http://nexus-web:5174/ instead of mounting dist.
 nexus-itemDetail/
 
 # Legal files retained in the generated release tree.

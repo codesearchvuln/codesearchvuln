@@ -2,25 +2,25 @@
 # scripts/lib/nexus.sh — nexus-web submodule 同步与本地启动
 # 依赖 common.sh 已被 source。
 #
-# nexus-web 源码通过 git submodule 管理（nexus-web/src/），
-# 不再在运行时克隆外部仓库；每次 git pull 后执行
-#   git submodule update --init --remote nexus-web/src
+# nexus-web 源码通过 git submodule 管理（nexus-web/），整目录指向上游
+# https://github.com/happytraveller-alone/nexus-web。每次 git pull 后执行
+#   git submodule update --init --remote nexus-web
 # 即可同步到上游最新 commit。
 
-NEXUS_SRC_DIR="${REPO_ROOT}/nexus-web/src"
+NEXUS_SRC_DIR="${REPO_ROOT}/nexus-web"
 NEXUS_PNPM_VERSION="${NEXUS_WEB_PNPM_VERSION:-10.32.1}"
 
 # ─── 同步 submodule ────────────────────────────────────────────────────────────
-# 确保 nexus-web/src submodule 已初始化并拉到最新 commit
+# 确保 nexus-web submodule 已初始化并拉到最新 commit
 nexus_fetch_source() {
   if [ ! -f "${NEXUS_SRC_DIR}/package.json" ]; then
     log_step "nexus-web submodule 未初始化，执行 git submodule update --init ..."
-    git -C "${REPO_ROOT}" submodule update --init nexus-web/src \
+    git -C "${REPO_ROOT}" submodule update --init nexus-web \
       || { log_error "git submodule update 失败，请检查网络或手动执行"; exit 1; }
   else
     log_step "同步 nexus-web submodule 到最新 commit ..."
     # --remote 跟踪上游分支最新 commit（等效于在 submodule 内执行 git pull）
-    git -C "${REPO_ROOT}" submodule update --remote --merge nexus-web/src \
+    git -C "${REPO_ROOT}" submodule update --remote --merge nexus-web \
       || log_warn "nexus-web submodule 同步失败，使用当前已有代码继续。"
   fi
 }
