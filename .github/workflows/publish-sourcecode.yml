@@ -5,6 +5,17 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      ref:
+        description: '要发布的分支或 commit SHA（留空则使用当前默认分支 HEAD）'
+        required: false
+        type: string
+        default: ''
+      skip_smoke_test:
+        description: '跳过 sourcecode smoke test（加速手动发布）'
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -25,6 +36,7 @@ jobs:
       - name: Checkout source repository
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
           submodules: recursive
 
@@ -78,7 +90,7 @@ jobs:
           echo "has_changes=${has_changes}" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test sourcecode build
-        if: steps.detect_changes.outputs.has_changes == 'true'
+        if: steps.detect_changes.outputs.has_changes == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.skip_smoke_test)
         working-directory: ${{ runner.temp }}/sourcecode-tree
         env:
           VULHUNTER_SOURCECODE_PROJECT_NAME: vulhunter-sourcecode-smoke

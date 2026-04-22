@@ -84,6 +84,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_offline_images:
+        description: '构建 package-offline-images 离线镜像包（手动发布时按需启用，默认不构建）'
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -556,6 +561,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   package-offline-images:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_offline_images }}
     needs:
       - prepare-release
       - create-draft-release
@@ -622,6 +628,7 @@ jobs:
             --clobber
 
   finalize-publish:
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.create-draft-release.result == 'success' && needs.resolve-release-manifest.result == 'success' && (needs.package-offline-images.result == 'success' || needs.package-offline-images.result == 'skipped') }}
     needs:
       - prepare-release
       - create-draft-release
@@ -757,6 +764,7 @@ jobs:
           docker compose config >/dev/null
 
       - name: Download snapshot draft release assets
+        if: ${{ needs.package-offline-images.result == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
@@ -774,6 +782,7 @@ jobs:
             --max-workers 4
 
       - name: Validate snapshot assets and write release-snapshot-lock.json
+        if: ${{ needs.package-offline-images.result == 'success' }}
         env:
           SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
           SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
@@ -787,6 +796,7 @@ jobs:
             --asset-dir "${SNAPSHOT_ASSET_DIR}"
 
       - name: Smoke test offline release runtime
+        if: ${{ needs.package-offline-images.result == 'success' }}
         working-directory: ${{ runner.temp }}/release-tree
         env:
           SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
@@ -1028,22 +1038,30 @@ jobs:
           RELEASE_TREE: ${{ runner.temp }}/release-tree
           SEMANTIC_ARCHIVE_DIR: ${{ runner.temp }}/semantic-release-archives
           UPLOAD_PARALLELISM: "4"
+          HAS_OFFLINE_IMAGES: ${{ needs.package-offline-images.result == 'success' }}
         run: |
           set -uo pipefail
 
           cp "./scripts/release-assets/offline-bootstrap.sh" "${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"
 
-          assets=(
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst"
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst"
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst"
-            "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst"
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-amd64.json"
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-services-arm64.json"
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json"
-            "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
-            "${RELEASE_TREE}/release-snapshot-lock.json"
-            "${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"
+          assets=()
+
+          if [[ "${HAS_OFFLINE_IMAGES}" == "true" ]]; then
+            assets+=(
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-services-amd64.json"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-services-arm64.json"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
+              "${RELEASE_TREE}/release-snapshot-lock.json"
+              "${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"
+            )
+          fi
+
+          assets+=(
             "${SEMANTIC_ARCHIVE_DIR}/release_code.zip"
             "${SEMANTIC_ARCHIVE_DIR}/release_code.tar.gz"
             "${SEMANTIC_ARCHIVE_DIR}/source_code.zip"
