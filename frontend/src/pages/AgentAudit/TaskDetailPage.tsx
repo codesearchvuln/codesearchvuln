@@ -29,6 +29,7 @@ import {
 	ResizablePanel,
 	ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import type { StreamErrorContext } from "@/shared/api/agentStream";
 import {
@@ -4069,31 +4070,57 @@ function AgentAuditPageContent() {
 				</div>
 
 				<div className="flex items-center gap-2">
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
+					{(() => {
+						const logExportDisabled = isRunning;
+
+						const triggerButton = (
 							<button
 								type="button"
-								className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+								disabled={logExportDisabled}
+								className={
+									logExportDisabled
+										? "flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground/40 cursor-not-allowed"
+										: "flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+								}
 							>
 								<Download className="w-3.5 h-3.5" />
 								<span>导出日志</span>
 							</button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end">
-							<DropdownMenuItem onClick={() => handleExportLogs("json")}>
-								导出为 JSON
-							</DropdownMenuItem>
-							<DropdownMenuItem onClick={() => handleExportLogs("markdown")}>
-								导出为 Markdown
-							</DropdownMenuItem>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem
-								onClick={() => toast.info("导出范围：全部活动日志")}
-							>
-								当前为全部导出
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
+						);
+
+						return logExportDisabled ? (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span tabIndex={0} className="inline-flex">
+										{triggerButton}
+									</span>
+								</TooltipTrigger>
+								<TooltipContent side="bottom">
+									扫描任务执行中，完成后可导出日志
+								</TooltipContent>
+							</Tooltip>
+						) : (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									{triggerButton}
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end">
+									<DropdownMenuItem onClick={() => handleExportLogs("json")}>
+										导出为 JSON
+									</DropdownMenuItem>
+									<DropdownMenuItem onClick={() => handleExportLogs("markdown")}>
+										导出为 Markdown
+									</DropdownMenuItem>
+									<DropdownMenuSeparator />
+									<DropdownMenuItem
+										onClick={() => toast.info("导出范围：全部活动日志")}
+									>
+										当前为全部导出
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						);
+					})()}
 
 					<button
 						type="button"
