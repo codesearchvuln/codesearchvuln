@@ -1,0 +1,210 @@
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-docker.io/library/postgres:15-alpine@sha256:eb72e44fdca6270e882be90645eaf7af032f55a45dbf096ba4dd9d08195b08e3}
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-vulhunter}
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
+    networks:
+      - vulhunter-network
+
+  scan-workspace-init:
+    image: ${SCAN_WORKSPACE_INIT_IMAGE:-docker.io/library/alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc}
+    restart: "no"
+    volumes:
+      - scan_workspace:/tmp/vulhunter/scans
+    command:
+      - sh
+      - -ec
+      - |
+        mkdir -p /tmp/vulhunter/scans
+        chown -R 1001:1001 /tmp/vulhunter/scans
+        chmod -R u+rwX,g+rwX /tmp/vulhunter/scans
+        touch /tmp/vulhunter/scans/.scan-workspace-ready
+        sleep 15
+    healthcheck:
+      test: [ "CMD-SHELL", "test -f /tmp/vulhunter/scans/.scan-workspace-ready" ]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    networks:
+      - vulhunter-network
+
+  db-bootstrap:
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:c9aa7bf98da2033ca99d1aa3f4b10632c0737f9fc24f17bace747d8dd833a2f2}
+    restart: "no"
+    working_dir: /app
+    volumes:
+      - ./docker/env/backend:/docker/env/backend
+    env_file:
+      - path: ./docker/env/backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
+    command:
+      - /opt/backend-venv/bin/python
+      - -m
+      - app.runtime.db_contract
+      - bootstrap
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - vulhunter-network
+
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/codesearchvuln/vulhunter-backend@sha256:c9aa7bf98da2033ca99d1aa3f4b10632c0737f9fc24f17bace747d8dd833a2f2}
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./docker/env/backend:/docker/env/backend
+      - backend_uploads:/app/uploads
+      - backend_runtime_data:/app/data/runtime
+      - scan_workspace:/tmp/vulhunter/scans
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_SOCKET_GID:-1001}"
+    ports:
+      - "${VULHUNTER_BACKEND_PORT:-8000}:8000"
+    env_file:
+      - path: ./docker/env/backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
+      ASYNCPG_DSN: postgresql://postgres:postgres@db:5432/${POSTGRES_DB:-vulhunter}
+      REDIS_URL: redis://redis:6379/0
+      RESET_STATIC_SCAN_TABLES_ON_DEPLOY: "false"
+      AGENT_ENABLED: "true"
+      SANDBOX_ENABLED: "true"
+      YASA_ENABLED: ${YASA_ENABLED:-true}
+      SCAN_WORKSPACE_ROOT: ${SCAN_WORKSPACE_ROOT:-/tmp/vulhunter/scans}
+      SCAN_WORKSPACE_VOLUME: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}
+      RUNNER_PREFLIGHT_ENABLED: "${RUNNER_PREFLIGHT_ENABLED:-true}"
+      RUNNER_PREFLIGHT_STRICT: "${RUNNER_PREFLIGHT_STRICT:-true}"
+      RUNNER_PREFLIGHT_OFFLINE_MODE: "${RUNNER_PREFLIGHT_OFFLINE_MODE:-false}"
+      RUNNER_PREFLIGHT_TIMEOUT_SECONDS: "${RUNNER_PREFLIGHT_TIMEOUT_SECONDS:-30}"
+      RUNNER_PREFLIGHT_MAX_CONCURRENCY: "${RUNNER_PREFLIGHT_MAX_CONCURRENCY:-2}"
+      DOCKERHUB_LIBRARY_MIRROR: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+      BACKEND_APT_MIRROR_PRIMARY: ${BACKEND_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}
+      BACKEND_APT_SECURITY_PRIMARY: ${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
+      BACKEND_APT_MIRROR_FALLBACK: ${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}
+      BACKEND_APT_SECURITY_FALLBACK: ${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
+      BACKEND_PYPI_INDEX_PRIMARY: ${BACKEND_PYPI_INDEX_PRIMARY:-}
+      BACKEND_PYPI_INDEX_FALLBACK: ${BACKEND_PYPI_INDEX_FALLBACK:-}
+      BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.bfsu.edu.cn/pypi/web/simple/,https://pypi.org/simple}
+      SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-ghcr.io/codesearchvuln/vulhunter-yasa-runner@sha256:23e1522110129192d8c4aa36a73f01838ed4683cfdd405ba0375219b75e7cf72}
+      SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-ghcr.io/codesearchvuln/vulhunter-opengrep-runner@sha256:a365f690bc6e1146a293c1c304d5ff7213e53fb8b41c123bb7c93134c16b7d71}
+      SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-ghcr.io/codesearchvuln/vulhunter-bandit-runner@sha256:b9fce58358eff4eda81e3c88afed5b3444d07ec41f0678a9489907b99c70d324}
+      SCANNER_GITLEAKS_IMAGE: ${SCANNER_GITLEAKS_IMAGE:-ghcr.io/codesearchvuln/vulhunter-gitleaks-runner@sha256:2b894057b692459a4203dea5e092ff1991204ce76f16743fc7f15dff6b505108}
+      SCANNER_PHPSTAN_IMAGE: ${SCANNER_PHPSTAN_IMAGE:-ghcr.io/codesearchvuln/vulhunter-phpstan-runner@sha256:1f9d822f97fc29a8c1910e84986f2727a8c2d0cc2a7c2ddef24b13a42467aea5}
+      SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-ghcr.io/codesearchvuln/vulhunter-pmd-runner@sha256:58bf2a94e73aa2309a9c193df685b688c4496a353959dec5fae897f16dcf0c65}
+      FLOW_PARSER_RUNNER_IMAGE: ${FLOW_PARSER_RUNNER_IMAGE:-ghcr.io/codesearchvuln/vulhunter-flow-parser-runner@sha256:6a6c1d1cf77200e4a0a9e8ee1155730be2b16bb6cd5aede42d2ae1d5d2988ba8}
+      SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:-ghcr.io/codesearchvuln/vulhunter-sandbox-runner@sha256:cd19822000cad34dadd607a5fa0a8e9acdc59a1c45e9b17604599e9509f395f3}
+      FLOW_PARSER_RUNNER_ENABLED: "${FLOW_PARSER_RUNNER_ENABLED:-true}"
+      FLOW_PARSER_RUNNER_TIMEOUT_SECONDS: "${FLOW_PARSER_RUNNER_TIMEOUT_SECONDS:-120}"
+      FLOW_PARSER_RUNNER_BATCH_MAX_FILES: "${FLOW_PARSER_RUNNER_BATCH_MAX_FILES:-100}"
+      FLOW_PARSER_RUNNER_BATCH_MAX_BYTES: "${FLOW_PARSER_RUNNER_BATCH_MAX_BYTES:-8388608}"
+      YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}
+      GIT_MIRROR_ENABLED: ${GIT_MIRROR_ENABLED:-true}
+      GIT_MIRROR_PREFIX: ${GIT_MIRROR_PREFIX:-https://gh-proxy.org}
+      GIT_MIRROR_PREFIXES: ${GIT_MIRROR_PREFIXES:-https://gh-proxy.org,https://v6.gh-proxy.org}
+      GIT_MIRROR_HOSTS: ${GIT_MIRROR_HOSTS:-github.com}
+      GIT_MIRROR_ALLOW_AUTH_URL: ${GIT_MIRROR_ALLOW_AUTH_URL:-false}
+      GIT_MIRROR_FALLBACK_TO_ORIGIN: ${GIT_MIRROR_FALLBACK_TO_ORIGIN:-false}
+      XDG_DATA_HOME: /app/data/runtime/xdg-data
+      XDG_CACHE_HOME: /app/data/runtime/xdg-cache
+      XDG_CONFIG_HOME: /app/data/runtime/xdg-config
+      DOCKER_HOST: ${DOCKER_HOST:-}
+      CONTAINER_CLI: ${CONTAINER_CLI:-docker}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      NO_PROXY: "*"
+    healthcheck:
+      test:
+        - "CMD"
+        - "/opt/backend-venv/bin/python"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      start_period: 180s
+      retries: 120
+    depends_on:
+      db:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      scan-workspace-init:
+        condition: service_healthy
+    networks:
+      - vulhunter-network
+
+  frontend:
+    image: ${STATIC_FRONTEND_IMAGE:-docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10}
+    restart: unless-stopped
+    volumes:
+      - ./deploy/runtime/frontend/site:/usr/share/nginx/html:ro
+      - ./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nexus-web/dist:/srv/nexus-web:ro
+      - ./nexus-itemDetail/dist:/srv/nexus-item-detail:ro
+    ports:
+      - "${VULHUNTER_FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - vulhunter-network
+
+  redis:
+    image: ${REDIS_IMAGE:-docker.io/library/redis:7-alpine@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6}
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vulhunter-network
+
+  adminer:
+    image: ${ADMINER_IMAGE:-docker.io/library/adminer:latest@sha256:41898b976011fd87f2d3037366ad97f7d89fddfebc8aa8b3a7d77d0c465aa37b}
+    restart: unless-stopped
+    profiles: [ "tools" ]
+    ports:
+      - "8081:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - vulhunter-network
+
+networks:
+  vulhunter-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  backend_uploads:
+  backend_runtime_data:
+  scan_workspace:
+    name: ${SCAN_WORKSPACE_VOLUME:-vulhunter_scan_workspace}
+  redis_data:
