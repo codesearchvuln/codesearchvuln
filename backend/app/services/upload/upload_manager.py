@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import json
@@ -88,15 +89,19 @@ class UploadManager:
                 shutil.rmtree(extract_to)
                 return False, [], f"解压文件数超过 {max_files} 个限制"
             
-            # 检查解压后的大小
-            total_size = 0
-            for root, dirs, files in os.walk(extract_to):
-                for file in files:
-                    file_path_full = os.path.join(root, file)
-                    total_size += os.path.getsize(file_path_full)
-                    if total_size > UploadManager.MAX_DIRECTORY_SIZE:
-                        shutil.rmtree(extract_to)
-                        return False, [], f"解压后大小超过 {UploadManager.MAX_DIRECTORY_SIZE / (1024*1024*1024):.0f}GB 限制"
+            # 检查解压后的大小（在线程池中执行，避免阻塞事件循环）
+            total_size, exceeded_limit = await asyncio.to_thread(
+                UploadManager._get_directory_size_with_limit,
+                extract_to,
+                UploadManager.MAX_DIRECTORY_SIZE,
+            )
+            if exceeded_limit:
+                shutil.rmtree(extract_to)
+                return (
+                    False,
+                    [],
+                    f"解压后大小超过 {UploadManager.MAX_DIRECTORY_SIZE / (1024*1024*1024):.0f}GB 限制",
+                )
             
             return True, extracted_files, None
         
@@ -105,6 +110,20 @@ class UploadManager:
             if os.path.exists(extract_to):
                 shutil.rmtree(extract_to)
             return False, [], f"解压失败: {str(e)}"
+
+    @staticmethod
+    def _get_directory_size_with_limit(
+        directory: str,
+        max_size: int,
+    ) -> tuple[int, bool]:
+        total_size = 0
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                file_path_full = os.path.join(root, file)
+                total_size += os.path.getsize(file_path_full)
+                if total_size > max_size:
+                    return total_size, True
+        return total_size, False
     
     @staticmethod
     def get_file_list_preview(

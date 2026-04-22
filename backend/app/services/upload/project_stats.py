@@ -105,6 +105,8 @@ PYGOUNT_LANGUAGE_ALIAS_MAP = {
     "Docker": "Dockerfile",
     "Protocol Buffer": "Protocol Buffers",
 }
+PYGOUNT_ENCODING = "automatic"
+PYGOUNT_FALLBACK_ENCODING = "latin-1"
 
 
 def _should_skip_dir(dir_name: str) -> bool:
@@ -214,6 +216,8 @@ def _run_pygount_sync(project_dir: str) -> str:
                 analysis = SourceAnalysis.from_file(
                     str(file_path),
                     group="project",
+                    encoding=PYGOUNT_ENCODING,
+                    fallback_encoding=PYGOUNT_FALLBACK_ENCODING,
                     generated_regexes=[],
                     generated_name_regexes=[],
                 )
@@ -505,10 +509,11 @@ class ProjectDescriptionAnalyzer:
         project_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """构建项目静态画像后只调用一次 LLM 生成 1-2 句用途描述。"""
-        profile = self._build_project_profile(
+        profile = await asyncio.to_thread(
+            self._build_project_profile,
             project_dir,
-            max_files=max_files,
-            project_name=project_name,
+            max_files,
+            project_name,
         )
         project_description = ""
         try:

@@ -70,3 +70,34 @@ def test_is_non_empty_language_payload():
     assert not project_stats._is_non_empty_language_payload(
         '{"total": 0, "total_files": 0, "languages": {}}'
     )
+
+
+def test_run_pygount_sync_uses_latin1_fallback(monkeypatch, tmp_path):
+    (tmp_path / "main.py").write_text("print('fallback-encoding')\n", encoding="utf-8")
+
+    captured: dict[str, str] = {}
+
+    class _FakeSourceAnalysisClass:
+        @staticmethod
+        def from_file(source_path, group, **kwargs):
+            _ = (source_path, group)
+            captured["encoding"] = str(kwargs.get("encoding") or "")
+            captured["fallback_encoding"] = str(kwargs.get("fallback_encoding") or "")
+            return type(
+                "_FakeAnalysis",
+                (),
+                {
+                    "state": project_stats.SourceState.analyzed,
+                    "language": "Python",
+                    "source_count": 1,
+                },
+            )()
+
+    monkeypatch.setattr(project_stats, "SourceAnalysis", _FakeSourceAnalysisClass)
+
+    payload = project_stats._run_pygount_sync(str(tmp_path))
+    parsed = json.loads(payload)
+    assert parsed["total"] == 1
+    assert parsed["total_files"] == 1
+    assert captured["encoding"] == "automatic"
+    assert captured["fallback_encoding"] == "latin-1"

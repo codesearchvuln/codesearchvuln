@@ -18,14 +18,16 @@ from app.services.zip_storage import load_project_zip
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LANGUAGE_INFO_JSON = '{"total": 0, "total_files": 0, "languages": {}}'
+_DEFAULT_REFRESH_CONCURRENCY = 2
 
 
 class ProjectInfoRefresher:
     """上传后异步刷新项目语言统计与简介。"""
 
-    def __init__(self) -> None:
+    def __init__(self, max_concurrent_refreshes: int = _DEFAULT_REFRESH_CONCURRENCY) -> None:
         self._running: dict[str, tuple[asyncio.Task, Optional[str]]] = {}
         self._next_expected_hash: dict[str, Optional[str]] = {}
+        self._refresh_semaphore = asyncio.Semaphore(max(1, int(max_concurrent_refreshes)))
 
     def enqueue(
         self,
@@ -135,30 +137,31 @@ class ProjectInfoRefresher:
                 if not zip_path or not os.path.exists(zip_path):
                     raise FileNotFoundError("未找到项目压缩包")
 
-                with tempfile.TemporaryDirectory(
-                    prefix="VulHunter_",
-                    suffix="_project_info_refresh",
-                ) as temp_dir:
-                    extracted_dir = os.path.join(temp_dir, "extracted")
-                    os.makedirs(extracted_dir, exist_ok=True)
+                async with self._refresh_semaphore:
+                    with tempfile.TemporaryDirectory(
+                        prefix="VulHunter_",
+                        suffix="_project_info_refresh",
+                    ) as temp_dir:
+                        extracted_dir = os.path.join(temp_dir, "extracted")
+                        os.makedirs(extracted_dir, exist_ok=True)
 
-                    success, extracted_files, error = await UploadManager.extract_file(
-                        zip_path,
-                        extracted_dir,
-                        max_files=100000,
-                    )
-                    if not success:
-                        raise RuntimeError(error or "解压失败")
-
-                    description, language_info_json, _description_source = (
-                        await _resolve_project_description_bundle(
-                            extracted_dir=extracted_dir,
-                            extracted_files=extracted_files,
-                            project_name=project.name,
-                            db=db,
-                            user_id=project.owner_id,
+                        success, extracted_files, error = await UploadManager.extract_file(
+                            zip_path,
+                            extracted_dir,
+                            max_files=100000,
                         )
-                    )
+                        if not success:
+                            raise RuntimeError(error or "解压失败")
+
+                        description, language_info_json, _description_source = (
+                            await _resolve_project_description_bundle(
+                                extracted_dir=extracted_dir,
+                                extracted_files=extracted_files,
+                                project_name=project.name,
+                                db=db,
+                                user_id=project.owner_id,
+                            )
+                        )
 
                 await db.refresh(project)
                 latest_zip_hash = str(project.zip_file_hash or "")

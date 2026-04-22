@@ -1,8 +1,7 @@
+import asyncio
 import zipfile
 import tarfile
-import os
 from typing import List, Dict, Any, Optional
-from pathlib import Path
 from .compression_strategy import CompressionStrategy
 
 
@@ -31,6 +30,9 @@ class ZipCompressionStrategy(CompressionStrategy):
         return [".zip", ".ZIP"]
 
     async def extract(self, file_path: str, extract_to: str) -> List[str]:
+        return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
+
+    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
         """解压 ZIP 文件"""
         extracted_files = []
         try:
@@ -48,7 +50,7 @@ class ZipCompressionStrategy(CompressionStrategy):
 
             return extracted_files
         except zipfile.BadZipFile as e:
-            raise ValueError(f"无效的 ZIP 文件: {str(e)}")
+            raise ValueError(f"无效的 ZIP 文件: {str(e)}") from e
 
     def validate(self, file_path: str) -> bool:
         """验证 ZIP 文件"""
@@ -85,6 +87,9 @@ class TarCompressionStrategy(CompressionStrategy):
         return [".tar"]
 
     async def extract(self, file_path: str, extract_to: str) -> List[str]:
+        return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
+
+    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
         """解压 TAR 文件"""
         extracted_files = []
         try:
@@ -95,7 +100,7 @@ class TarCompressionStrategy(CompressionStrategy):
                         extracted_files.append(member.name)
             return extracted_files
         except tarfile.ReadError as e:
-            raise ValueError(f"无效的 TAR 文件: {str(e)}")
+            raise ValueError(f"无效的 TAR 文件: {str(e)}") from e
 
     def validate(self, file_path: str) -> bool:
         """验证 TAR 文件"""
@@ -126,6 +131,9 @@ class TarGzCompressionStrategy(CompressionStrategy):
         return [".tar.gz", ".tgz", ".tar.gzip"]
 
     async def extract(self, file_path: str, extract_to: str) -> List[str]:
+        return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
+
+    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
         """解压 TAR.GZ 文件"""
         extracted_files = []
         try:
@@ -136,7 +144,7 @@ class TarGzCompressionStrategy(CompressionStrategy):
                         extracted_files.append(member.name)
             return extracted_files
         except (tarfile.ReadError, EOFError) as e:
-            raise ValueError(f"无效的 TAR.GZ 文件: {str(e)}")
+            raise ValueError(f"无效的 TAR.GZ 文件: {str(e)}") from e
 
     def validate(self, file_path: str) -> bool:
         """验证 TAR.GZ 文件"""
@@ -167,6 +175,9 @@ class TarBz2CompressionStrategy(CompressionStrategy):
         return [".tar.bz2", ".tbz", ".tbz2"]
 
     async def extract(self, file_path: str, extract_to: str) -> List[str]:
+        return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
+
+    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
         """解压 TAR.BZ2 文件"""
         extracted_files = []
         try:
@@ -177,7 +188,7 @@ class TarBz2CompressionStrategy(CompressionStrategy):
                         extracted_files.append(member.name)
             return extracted_files
         except (tarfile.ReadError, EOFError) as e:
-            raise ValueError(f"无效的 TAR.BZ2 文件: {str(e)}")
+            raise ValueError(f"无效的 TAR.BZ2 文件: {str(e)}") from e
 
     def validate(self, file_path: str) -> bool:
         """验证 TAR.BZ2 文件"""
@@ -208,6 +219,9 @@ class SevenZCompressionStrategy(CompressionStrategy):
         return [".7z"]
 
     async def extract(self, file_path: str, extract_to: str) -> List[str]:
+        return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
+
+    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
         """解压 7Z 文件"""
         # 需要安装 py7zr 包: pip install py7zr
         try:
@@ -224,7 +238,7 @@ class SevenZCompressionStrategy(CompressionStrategy):
                     if not info.is_directory:
                         extracted_files.append(name)
         except Exception as e:
-            raise ValueError(f"无效的 7Z 文件: {str(e)}")
+            raise ValueError(f"无效的 7Z 文件: {str(e)}") from e
 
         return extracted_files
 
@@ -265,6 +279,9 @@ class RarCompressionStrategy(CompressionStrategy):
         return [".rar"]
 
     async def extract(self, file_path: str, extract_to: str) -> List[str]:
+        return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
+
+    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
         """解压 RAR 文件"""
         # 需要安装 rarfile 包: pip install rarfile
         try:
@@ -280,7 +297,7 @@ class RarCompressionStrategy(CompressionStrategy):
                         rar_ref.extract(member, extract_to)
                         extracted_files.append(member.filename)
         except Exception as e:
-            raise ValueError(f"无效的 RAR 文件: {str(e)}")
+            raise ValueError(f"无效的 RAR 文件: {str(e)}") from e
 
         return extracted_files
 
