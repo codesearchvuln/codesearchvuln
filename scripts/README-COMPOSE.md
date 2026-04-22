@@ -80,24 +80,24 @@ bash ./Vulhunter-offline-bootstrap.sh --deploy --attach-logs
 3. 确认自动安装后还会继续做 Docker readiness 校验，而不是只看包是否安装成功。
 4. 在 WSL Ubuntu 再跑一轮，确认当 Docker Desktop / socket integration 缺失时，脚本会明确停止并给出提示。
 5. 在 unsupported host（例如 Debian）补测一轮，确认脚本只输出手工安装提示，不会修改宿主机 apt 配置。
-6. 最后完成一次完整离线部署，确认 bundle 校验、镜像导入、backend/frontend readiness 与 `/nexus/`、`/nexus-item-detail/` 探针全部通过。
+6. 最后完成一次完整离线部署,确认 bundle 校验、镜像导入、backend/frontend readiness、独立 `nexus-web` 容器(`:5174/`)以及 `/nexus-item-detail/` 探针全部通过。
 
-默认访问地址：
+默认访问地址:
 
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
-- `nexus-web`: `http://localhost:3000/nexus/`
-- `nexus-itemDetail`: `http://localhost:3000/nexus-item-detail/`
+- `nexus-web`(独立容器,`docker/nexus-web.Dockerfile` 构建): `http://localhost:5174/`
+- `nexus-itemDetail`(仍以静态 bundle 挂载到主前端): `http://localhost:3000/nexus-item-detail/`
 
-验收时至少补做：
+验收时至少补做:
 
 ```bash
 curl -fsS http://localhost:3000/api/v1/openapi.json >/dev/null
-curl -fsS http://localhost:3000/nexus/ >/dev/null
+curl -fsS http://localhost:5174/ >/dev/null
 curl -fsS http://localhost:3000/nexus-item-detail/ >/dev/null
 curl -i "http://localhost:3000/api/v1/projects/?skip=0&limit=1&include_metrics=true"
 curl -i "http://localhost:3000/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"
 ```
 
-`/nexus/` 与 `/nexus-item-detail/` 返回 `200` 只说明入口 HTML 可访问，还要继续确认它们引用的 JS/CSS 静态资源也能正常返回。不要只看 `/` 或 `:8000/health`。
+`http://localhost:5174/` 与 `/nexus-item-detail/` 返回 `200` 只说明入口 HTML 可访问,还要继续确认它们引用的 JS/CSS 静态资源也能正常返回。不要只看 `/` 或 `:8000/health`。

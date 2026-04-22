@@ -237,8 +237,8 @@ output/
 backend/data/
 
 ./dist/
-# 强制允许提交 nexus-web 下的 dist 目录
-!nexus-web/dist/
+# nexus-web 作为独立容器镜像发布 (docker/nexus-web.Dockerfile),不再通过主仓跟踪 dist。
+# nexus-itemDetail 仍以静态 bundle 形式挂载到 frontend,保留 dist 白名单。
 !nexus-itemDetail/dist/
 
 backend/pytest*

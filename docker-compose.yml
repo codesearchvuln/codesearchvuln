@@ -201,7 +201,6 @@ services:
     mem_limit: 512m
     pids_limit: 256
     volumes:
-      - ./nexus-web/dist:/srv/nexus-web:ro
       - ./nexus-itemDetail/dist:/srv/nexus-item-detail:ro
     ports:
       - "${VULHUNTER_FRONTEND_PORT:-3000}:80"
@@ -215,8 +214,26 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      nexus-web:
+        condition: service_started
     logging:
       driver: "none"
+    networks:
+      - vulhunter-network
+
+  nexus-web:
+    image: ${NEXUS_WEB_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/vulhunter-nexus-web:${VULHUNTER_IMAGE_TAG:-latest}}
+    restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 256
+    ports:
+      - "${VULHUNTER_NEXUS_WEB_PORT:-5174}:5174"
+    environment:
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      NO_PROXY: "*"
     networks:
       - vulhunter-network
 

@@ -26,9 +26,9 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
         "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in compose_text
-    assert "\n  nexus-web:\n" not in compose_text
+    assert "\n  nexus-web:\n" in compose_text
     assert "\n  nexus-itemDetail:\n" not in compose_text
-    assert "./nexus-web/dist:/srv/nexus-web:ro" in compose_text
+    assert "./nexus-web/dist:/srv/nexus-web:ro" not in compose_text
     assert "./nexus-itemDetail/dist:/srv/nexus-item-detail:ro" in compose_text
     assert "/usr/share/nginx/html/nexus:ro" not in compose_text
     assert "/usr/share/nginx/html/nexus-item-detail:ro" not in compose_text
@@ -41,7 +41,8 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" in hybrid_text
     assert "docker-compose.full.yml" not in hybrid_text
     assert "build: !override" in hybrid_text
-    assert hybrid_text.count("build: !override") == 2
+    # backend + frontend + nexus-web override 各一处
+    assert hybrid_text.count("build: !override") == 3
     assert "backend:\n    image: vulhunter/backend-local:latest\n    pull_policy: build" in hybrid_text
     assert "frontend:\n    image: vulhunter/frontend-local:latest" in hybrid_text
     assert "frontend:\n    image: vulhunter/frontend-local:latest\n    pull_policy: build" in hybrid_text
@@ -56,9 +57,9 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
         "SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-${GHCR_REGISTRY:-ghcr.io}/${VULHUNTER_IMAGE_NAMESPACE:-codesearchvuln}/"
         "vulhunter-yasa-runner:${VULHUNTER_IMAGE_TAG:-latest}}"
     ) in hybrid_text
-    assert "\n  nexus-web:\n" not in hybrid_text
+    assert "\n  nexus-web:\n" in hybrid_text
     assert "\n  nexus-itemDetail:\n" not in hybrid_text
-    assert "./nexus-web/dist:/app/public/nexus:ro" in hybrid_text
+    assert "./nexus-web/dist:/app/public/nexus:ro" not in hybrid_text
     assert "./nexus-itemDetail/dist:/app/public/nexus-item-detail:ro" in hybrid_text
     assert "-runner-local:latest" not in hybrid_text
     assert "group_add:" in hybrid_text and '${DOCKER_SOCKET_GID:-1001}' in hybrid_text

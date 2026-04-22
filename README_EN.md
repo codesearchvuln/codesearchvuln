@@ -58,7 +58,7 @@ That script is now the canonical public lifecycle entrypoint for the generated r
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
-- `nexus-web` page: `http://localhost:3000/nexus/`
+- `nexus-web` (standalone container): `http://localhost:5174/`
 - `nexus-itemDetail` page: `http://localhost:3000/nexus-item-detail/`
 
 See [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md) for the compose contract.

@@ -114,6 +114,7 @@ required_keys = {
     "adminer": "__ADMINER_IMAGE_REF__",
     "scan_workspace_init": "__SCAN_WORKSPACE_INIT_IMAGE_REF__",
     "static_frontend": "__STATIC_FRONTEND_IMAGE_REF__",
+    "nexus_web": "__NEXUS_WEB_IMAGE_REF__",
     "sandbox_runner": "__SANDBOX_RUNNER_IMAGE_REF__",
     "scanner_yasa": "__SCANNER_YASA_IMAGE_REF__",
     "scanner_opengrep": "__SCANNER_OPENGREP_IMAGE_REF__",
@@ -336,8 +337,6 @@ validate_release_tree() {
     "docker/env/backend/offline-images.env.example"
     "deploy/runtime/frontend/site/index.html"
     "deploy/runtime/frontend/nginx/default.conf"
-    "nexus-web/dist/index.html"
-    "nexus-web/nginx.conf"
     "nexus-itemDetail/dist/index.html"
     "nexus-itemDetail/nginx.conf"
   )
@@ -383,7 +382,9 @@ validate_release_tree() {
     [[ ! -e "$OUTPUT_DIR/deploy/compose" ]] || die "release tree leaked deploy compose overlays"
   fi
 
-  for rel_path in nexus-web nexus-itemDetail; do
+  # nexus-web 已迁移为独立镜像 (services bundle 中的 nexus_web),不再以静态 bundle 形式出现在 release tree 中。
+  [[ ! -e "$OUTPUT_DIR/nexus-web" ]] || die "release tree leaked nexus-web source (now shipped as independent container image)"
+  for rel_path in nexus-itemDetail; do
     [[ -d "$OUTPUT_DIR/$rel_path/dist" ]] || die "missing runtime bundle dist directory: $rel_path/dist"
     [[ -f "$OUTPUT_DIR/$rel_path/nginx.conf" ]] || die "missing runtime bundle nginx config: $rel_path/nginx.conf"
     [[ "$(find "$OUTPUT_DIR/$rel_path" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]] || \
@@ -480,7 +481,9 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   copy_allowlisted_entry "$line"
 done < "$ALLOWLIST_PATH"
 
-prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-web"
+# nexus-web 以独立容器镜像形式发布 (services bundle 包含 nexus_web),不再需要 dist bundle;
+# 若 allowlist 未来误包含 nexus-web 源码,在此处显式剥离。
+rm -rf "$OUTPUT_DIR/nexus-web"
 prune_nexus_runtime_bundle "$OUTPUT_DIR/nexus-itemDetail"
 overlay_release_templates
 copy_frontend_runtime_bundle "$FRONTEND_BUNDLE_DIR"

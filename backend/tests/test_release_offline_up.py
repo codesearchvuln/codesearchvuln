@@ -64,6 +64,7 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "adminer": {"ref": "ghcr.io/acme-sec/adminer@sha256:" + "c" * 64},
             "scan_workspace_init": {"ref": "ghcr.io/acme-sec/scan-workspace-init@sha256:" + "d" * 64},
             "static_frontend": {"ref": "ghcr.io/acme-sec/nginx@sha256:" + "e" * 64},
+            "nexus_web": {"ref": "ghcr.io/acme-sec/nexus-web@sha256:" + "f" * 64},
             "sandbox_runner": {"ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64},
             "scanner_yasa": {"ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "3" * 64},
             "scanner_opengrep": {"ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "4" * 64},
@@ -108,8 +109,9 @@ def _expected_asset_probe_paths(index_path: Path, public_prefix: str = "/") -> l
 
 
 def _expected_nexus_bundle_probe_paths() -> list[str]:
+    # nexus-web 已迁移为独立容器 (nexus-web:5174),不再由 frontend 容器在 /nexus/ 路径承载。
+    # 此处仅保留 nexus-itemDetail 的 frontend nginx 路径探测。
     bundle_contracts = (
-        ("nexus-web", "/nexus/"),
         ("nexus-itemDetail", "/nexus-item-detail/"),
     )
     probe_paths: list[str] = []

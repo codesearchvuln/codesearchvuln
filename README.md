@@ -65,7 +65,7 @@ bash ./Vulhunter-offline-bootstrap.sh --deploy
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
-- `nexus-web` 页面：`http://localhost:3000/nexus/`
+- `nexus-web`(独立容器)：`http://localhost:5174/`
 - `nexus-itemDetail` 页面：`http://localhost:3000/nexus-item-detail/`
 
 补充说明见 [`scripts/README-COMPOSE.md`](scripts/README-COMPOSE.md)。

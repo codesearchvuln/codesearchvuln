@@ -27,6 +27,7 @@ echo "[INFO] COMPOSE_PARALLEL_LIMIT=$COMPOSE_PARALLEL_LIMIT"
 
 "${COMPOSE[@]}" build backend
 "${COMPOSE[@]}" build frontend
+"${COMPOSE[@]}" build nexus-web
 "${COMPOSE[@]}" up -d
 
 echo "[INFO] Local-build services started."

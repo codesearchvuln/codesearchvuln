@@ -46,6 +46,9 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "static_frontend": {
                 "ref": "ghcr.io/acme-sec/static-frontend@sha256:" + "e" * 64,
             },
+            "nexus_web": {
+                "ref": "ghcr.io/acme-sec/nexus-web@sha256:" + "f" * 64,
+            },
             "sandbox_runner": {
                 "ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64,
             },
@@ -660,8 +663,6 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "docker/env/backend/offline-images.env.example",
         "deploy/runtime/frontend/site/index.html",
         "deploy/runtime/frontend/nginx/default.conf",
-        "nexus-web/dist/index.html",
-        "nexus-web/nginx.conf",
         "nexus-itemDetail/dist/index.html",
         "nexus-itemDetail/nginx.conf",
     ]
@@ -693,11 +694,13 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "scripts/lib/offline-host-prereqs.sh",
         "scripts/lib/startup-banner.sh",
         "scripts/lib/release-refresh.sh",
+        # nexus-web 现在以独立容器镜像方式发布 (services bundle 中的 nexus_web),
+        # release tree 中不应携带其源码或静态 bundle。
+        "nexus-web",
     ]
     for rel_path in forbidden_paths:
         assert not (output_dir / rel_path).exists(), rel_path
 
-    _assert_nexus_runtime_bundle(output_dir, "nexus-web")
     _assert_nexus_runtime_bundle(output_dir, "nexus-itemDetail")
 
 
@@ -738,12 +741,16 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert "./deploy/runtime/frontend/site:/usr/share/nginx/html:ro" in compose_text
     assert "./deploy/runtime/frontend/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro" in compose_text
     assert 'group_add:\n      - "${DOCKER_SOCKET_GID:-1001}"' in compose_text
-    assert "./nexus-web/dist:/srv/nexus-web:ro" in compose_text
+    assert "./nexus-web/dist:/srv/nexus-web:ro" not in compose_text
     assert "./nexus-itemDetail/dist:/srv/nexus-item-detail:ro" in compose_text
     assert "/usr/share/nginx/html/nexus:ro" not in compose_text
     assert "/usr/share/nginx/html/nexus-item-detail:ro" not in compose_text
     assert "vulhunter-backend:${VULHUNTER_IMAGE_TAG:-latest}" not in compose_text
     assert "image: ${FRONTEND_IMAGE:-" not in compose_text
+    # nexus-web 作为独立容器服务写入 release compose,digest-pinned image 来自 manifest。
+    assert "\n  nexus-web:\n" in compose_text
+    assert manifest["images"]["nexus_web"]["ref"] in compose_text
+    assert "image: ${NEXUS_WEB_IMAGE:-ghcr.io/acme-sec/nexus-web@sha256:" in compose_text
 
     generated_nginx = (output_dir / "deploy" / "runtime" / "frontend" / "nginx" / "default.conf").read_text(
         encoding="utf-8"
@@ -752,9 +759,9 @@ def test_release_generator_renders_digest_pinned_runtime_compose(tmp_path: Path)
     assert generated_nginx == source_nginx
     assert "location /api/" in generated_nginx
     assert "proxy_pass http://backend:8000/api/;" in generated_nginx
-    assert "location ^~ /nexus/" in generated_nginx
-    assert "alias /srv/nexus-web/;" in generated_nginx
-    assert "try_files $uri $uri/ /nexus/index.html;" in generated_nginx
+    # nexus-web 已迁移为独立容器,主前端 nginx 不再在 /nexus/ 路径承载。
+    assert "location ^~ /nexus/" not in generated_nginx
+    assert "alias /srv/nexus-web/;" not in generated_nginx
     assert "location ^~ /nexus-item-detail/" in generated_nginx
     assert "alias /srv/nexus-item-detail/;" in generated_nginx
     assert "try_files $uri $uri/ /nexus-item-detail/index.html;" in generated_nginx
@@ -897,7 +904,12 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
         f"vulhunter-local/static-frontend:{manifest['revision']}"
     )
     assert "sandbox_runner" not in services_metadata["images"]
-    assert "nexus_web" not in services_metadata["images"]
+    # nexus-web 以独立容器镜像发布,现在属于 services bundle。
+    assert services_metadata["images"]["nexus_web"]["env_var"] == "NEXUS_WEB_IMAGE"
+    assert services_metadata["images"]["nexus_web"]["source_ref"] == manifest["images"]["nexus_web"]["ref"]
+    assert services_metadata["images"]["nexus_web"]["local_tag"] == (
+        f"vulhunter-local/nexus-web:{manifest['revision']}"
+    )
     assert "nexus_item_detail" not in services_metadata["images"]
     assert scanner_metadata["revision"] == manifest["revision"]
     assert scanner_metadata["bundle_template"] == "images/vulhunter-scanner-images-{arch}.tar.zst"
@@ -1084,7 +1096,7 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_serv
         "package start:",
         "image order:",
         "pull start: backend",
-        "pull end: static_frontend",
+        "pull end: nexus_web",
         "all pulls complete",
         "bundle stream start:",
         "compression heartbeat:",
@@ -1103,9 +1115,10 @@ def test_package_release_images_script_logs_progress_and_preserves_expected_serv
         f"pull --platform linux/amd64 {manifest['images']['adminer']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['scan_workspace_init']['ref']}",
         f"pull --platform linux/amd64 {manifest['images']['static_frontend']['ref']}",
+        f"pull --platform linux/amd64 {manifest['images']['nexus_web']['ref']}",
     ]
     assert pull_commands == expected_pulls
-    assert pull_commands[-1].endswith(manifest["images"]["static_frontend"]["ref"])
+    assert pull_commands[-1].endswith(manifest["images"]["nexus_web"]["ref"])
     assert zstd_log.read_text(encoding="utf-8").splitlines() == [
         f"-T0 -3 -q -o {output_dir / 'vulhunter-services-images-amd64.tar.zst'}"
     ]
