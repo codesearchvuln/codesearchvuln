@@ -740,7 +740,7 @@ ensure_release_root_has_deploy_bundles() {
   fi
 }
 
-run_release_maintenance() {
+source_release_refresh() {
   local release_root="$1"
   local helper_path="$release_root/scripts/release-refresh.sh"
 
@@ -748,9 +748,27 @@ run_release_maintenance() {
   ROOT_DIR="$release_root"
   # shellcheck disable=SC1090
   source "$helper_path"
+}
 
+ensure_docker_compose() {
   require_command docker
   docker compose version >/dev/null 2>&1 || die "docker compose not found or unavailable"
+}
+
+pre_deploy_cleanup() {
+  local release_root="$1"
+
+  source_release_refresh "$release_root"
+  ensure_docker_compose
+  log_info "cleaning up previous release stack (containers/images/networks) before deploy; volumes preserved"
+  cleanup_release_stack
+}
+
+run_release_maintenance() {
+  local release_root="$1"
+
+  source_release_refresh "$release_root"
+  ensure_docker_compose
 
   case "$MODE" in
     stop)
@@ -810,6 +828,11 @@ main() {
       log_info "release archive: $(path_basename "$current_archive")"
     fi
     offline_host_ensure_release_prereqs
+    if [[ "$existing_root_count" -eq 1 ]]; then
+      local existing_root
+      existing_root="$(printf '%s\n' "$existing_roots" | awk 'NF {print; exit}')"
+      pre_deploy_cleanup "$existing_root"
+    fi
     release_root="$(resolve_release_root_for_mode "$current_archive")"
     ensure_release_root_has_deploy_bundles "$release_root"
     log_info "release root: $release_root"

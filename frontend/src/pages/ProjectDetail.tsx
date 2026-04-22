@@ -591,42 +591,41 @@ export default function ProjectDetail() {
 		}
 	}, [project]);
 
-	const nexusIframeRef = useRef<HTMLIFrameElement>(null);
-	const iframeReadyRef = useRef(false);
-	const archiveSentRef = useRef(false);  // 新增
-
-	const sendArchiveToIframe = useCallback(async (projectId: string) => {
-		if (archiveSentRef.current) return;  // 已发过，跳过
-		archiveSentRef.current = true;       // 标记已发
-		try {
-			const archive = await api.downloadProjectArchive(projectId);
-			const arrayBuffer = await archive.blob.arrayBuffer();
-			nexusIframeRef.current?.contentWindow?.postMessage(
-				{ type: 'LOAD_PROJECT_ZIP', filename: archive.filename, buffer: arrayBuffer },
-				'*',
-				[arrayBuffer],
-			);
-		} catch (error) {
-			archiveSentRef.current = false;    // 失败时重置，允许重试
-			console.error('Failed to fetch project archive:', error);
-			toast.error('获取项目压缩包失败');
-		}
-	}, []);
-
-	// iframe onLoad 时标记 ready，如果 project 已经有了就直接发
-	const handleIframeLoad = useCallback(() => {
-		iframeReadyRef.current = true;
-		if (project?.id) {
-			void sendArchiveToIframe(project.id);
-		}
-	}, [project, sendArchiveToIframe]);
-
-	// project 加载完成后，如果 iframe 已经 ready 就补发
-	useEffect(() => {
-		if (project?.id && iframeReadyRef.current) {
-			void sendArchiveToIframe(project.id);
-		}
-	}, [project?.id, sendArchiveToIframe]);
+	// TODO: nexus-itemDetail 暂未就绪，后期开发完成后取消注释
+	// const nexusIframeRef = useRef<HTMLIFrameElement>(null);
+	// const iframeReadyRef = useRef(false);
+	// const archiveSentRef = useRef(false);
+	//
+	// const sendArchiveToIframe = useCallback(async (projectId: string) => {
+	// 	if (archiveSentRef.current) return;
+	// 	archiveSentRef.current = true;
+	// 	try {
+	// 		const archive = await api.downloadProjectArchive(projectId);
+	// 		const arrayBuffer = await archive.blob.arrayBuffer();
+	// 		nexusIframeRef.current?.contentWindow?.postMessage(
+	// 			{ type: 'LOAD_PROJECT_ZIP', filename: archive.filename, buffer: arrayBuffer },
+	// 			'*',
+	// 			[arrayBuffer],
+	// 		);
+	// 	} catch (error) {
+	// 		archiveSentRef.current = false;
+	// 		console.error('Failed to fetch project archive:', error);
+	// 		toast.error('获取项目压缩包失败');
+	// 	}
+	// }, []);
+	//
+	// const handleIframeLoad = useCallback(() => {
+	// 	iframeReadyRef.current = true;
+	// 	if (project?.id) {
+	// 		void sendArchiveToIframe(project.id);
+	// 	}
+	// }, [project, sendArchiveToIframe]);
+	//
+	// useEffect(() => {
+	// 	if (project?.id && iframeReadyRef.current) {
+	// 		void sendArchiveToIframe(project.id);
+	// 	}
+	// }, [project?.id, sendArchiveToIframe]);
 
 	useEffect(() => {
 		if (
@@ -933,6 +932,7 @@ export default function ProjectDetail() {
 					</Button> */}
 				</div>
 			</div>
+			{/* TODO: nexus-itemDetail 暂未就绪，后期开发完成后取消注释
 			<div className="relative z-10">
 				<iframe
 					ref={nexusIframeRef}
@@ -942,7 +942,7 @@ export default function ProjectDetail() {
 					style={{ height: '600px' }}
 					onLoad={handleIframeLoad}
 				/>
-			</div>
+			</div> */}
 			<div className="relative z-10 space-y-4 mt-6">
 				<ProjectDescriptionSection
 					description={project.description || ""}
