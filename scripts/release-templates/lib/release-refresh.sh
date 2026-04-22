@@ -149,7 +149,7 @@ PY
 
   image_refs="$(cat "$refs_file")"
   rm -f "$compose_output_file" "$refs_file"
-  collect_image_ids_for_refs "$image_refs"
+  collect_image_ids_for_refs "$image_refs" || true
 }
 
 image_id_is_protected() {
@@ -190,7 +190,7 @@ cleanup_release_stack() {
   project_name="$(release_compose_project_name)"
   container_ids="$(collect_release_stack_container_ids)"
   image_ids="$(collect_release_stack_image_ids "$container_ids")"
-  compose_image_ids="$(collect_current_compose_image_ids)"
+  compose_image_ids="$(collect_current_compose_image_ids || true)"
   if [[ -n "$compose_image_ids" ]]; then
     image_ids="$(printf '%s\n%s\n' "$image_ids" "$compose_image_ids" | awk 'NF && !seen[$0]++')"
   fi
