@@ -538,22 +538,24 @@ async def _resolve_project_description_bundle(
     )
     description_source: Literal["llm", "static"] = "static"
 
-    user_config = await _get_user_config(db, user_id)
-    if user_config:
-        try:
-            llm_result = await generate_project_description_from_extracted_dir(
-                extracted_dir,
-                user_config=user_config,
-                project_name=(project_name or "").strip() or None,
-            )
-            llm_description = ""
-            if isinstance(llm_result, dict):
-                llm_description = str(llm_result.get("project_description") or "").strip()
-            if llm_description:
-                description = llm_description
-                description_source = "llm"
-        except Exception as e:
-            logger.warning(f"生成项目描述时 LLM 失败，已回退静态描述: {e}")
+    # 暂时禁用 LLM 项目简介生成，仅保留静态统计描述。
+    # 如需恢复，请取消以下逻辑的注释。
+    # user_config = await _get_user_config(db, user_id)
+    # if user_config:
+    #     try:
+    #         llm_result = await generate_project_description_from_extracted_dir(
+    #             extracted_dir,
+    #             user_config=user_config,
+    #             project_name=(project_name or "").strip() or None,
+    #         )
+    #         llm_description = ""
+    #         if isinstance(llm_result, dict):
+    #             llm_description = str(llm_result.get("project_description") or "").strip()
+    #         if llm_description:
+    #             description = llm_description
+    #             description_source = "llm"
+    #     except Exception as e:
+    #         logger.warning(f"生成项目描述时 LLM 失败，已回退静态描述: {e}")
 
     return description, language_info_json, description_source
 
