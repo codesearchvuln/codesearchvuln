@@ -93,8 +93,29 @@ permissions:
   contents: read
 
 jobs:
-  detect-changes:
+  commit-gate:
     if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check commit message prefix
+        id: check
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          first_line="$(printf '%s' "${COMMIT_MSG}" | head -n1)"
+          if printf '%s' "${first_line}" | grep -iqE '^ci(\(|:|\s)'; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Commit message does not start with 'ci' prefix, skipping release."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  detect-changes:
+    if: ${{ github.event_name == 'push' && needs.commit-gate.outputs.should_run == 'true' }}
+    needs: commit-gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -168,6 +189,8 @@ jobs:
               - 'docker/sandbox-runner.requirements.txt'
 
   await-turn:
+    if: ${{ always() && (github.event_name != 'push' || needs.commit-gate.outputs.should_run == 'true') }}
+    needs: commit-gate
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
@@ -457,7 +480,7 @@ jobs:
           echo "snapshot_url=${html_url}" >> "$GITHUB_OUTPUT"
 
   publish-runtime-images:
-    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'push' || needs.detect-changes.result == 'success') }}
     needs:
       - detect-changes
       - prepare-release

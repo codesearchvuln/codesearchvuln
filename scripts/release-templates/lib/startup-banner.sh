@@ -180,13 +180,16 @@ probe_specs.extend(
 )
 
 bundle_specs = (
-    ("frontend-nexus", release_root / "nexus-web" / "dist" / "index.html", "nexus"),
     (
         "frontend-item-detail",
         release_root / "nexus-itemDetail" / "dist" / "index.html",
         "nexus-item-detail",
     ),
 )
+
+# nexus-web is now an independent container image; probe its URL directly
+# instead of reading a dist bundle from the release tree.
+probe_specs.append(("frontend-nexus", f"{base_url}/nexus/", "200"))
 
 for label, index_path, public_prefix in bundle_specs:
     probe_specs.append((label, f"{base_url}/{public_prefix}/", "200"))
