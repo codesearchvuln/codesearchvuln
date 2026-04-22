@@ -27,8 +27,42 @@ compose_release() {
   )
 }
 
+release_refresh_discovery_is_fatal() {
+  local stderr="${1:-}"
+  [[ -n "$stderr" ]] || return 1
+  grep -Eiq \
+    'permission denied|docker socket access was denied|docker\.sock|cannot connect to the docker daemon|is the docker daemon running|error during connect|server api version|context .* does not exist|current context|config file|certificate|tls|connection refused|dial unix|no such host' \
+    <<<"$stderr"
+}
+
 collect_release_stack_container_ids() {
-  docker ps -aq --filter "label=com.docker.compose.project=$(release_compose_project_name)" | tr -d '\r'
+  local stderr_file status container_ids discovery_stderr
+
+  stderr_file="$(mktemp)"
+  set +e
+  container_ids="$(
+    docker ps -aq --filter "label=com.docker.compose.project=$(release_compose_project_name)" \
+      2>"$stderr_file" | tr -d '\r'
+  )"
+  status="$?"
+  set -e
+
+  discovery_stderr="$(cat "$stderr_file")"
+  rm -f "$stderr_file"
+
+  if [[ "$status" -eq 0 ]]; then
+    printf '%s' "$container_ids"
+    return 0
+  fi
+
+  if release_refresh_discovery_is_fatal "$discovery_stderr"; then
+    [[ -n "$discovery_stderr" ]] && printf '%s\n' "$discovery_stderr" >&2
+    return "$status"
+  fi
+
+  release_refresh_log_warn "warning: release-stack container discovery failed; treating as no existing containers and continuing cleanup"
+  [[ -n "$discovery_stderr" ]] && printf '%s\n' "$discovery_stderr" >&2
+  return 0
 }
 
 collect_release_stack_image_ids() {
@@ -42,30 +76,6 @@ collect_release_stack_image_ids() {
     image_id="$(docker inspect --format '{{.Image}}' "$container_id" 2>/dev/null || true)"
     [[ -n "$image_id" ]] && printf '%s\n' "$image_id"
   done <<<"$container_ids" | awk 'NF && !seen[$0]++'
-}
-
-collect_compose_image_refs() {
-  local compose_output
-
-  compose_output="$(compose_release config)"
-
-  COMPOSE_CONFIG="$compose_output" python3 - <<'PY'
-from __future__ import annotations
-
-import os
-import re
-
-seen: set[str] = set()
-for line in os.environ.get("COMPOSE_CONFIG", "").splitlines():
-    match = re.match(r"^\s*image:\s*(\S+)\s*$", line)
-    if not match:
-        continue
-    image_ref = match.group(1).strip()
-    if not image_ref or image_ref in seen:
-        continue
-    seen.add(image_ref)
-    print(image_ref)
-PY
 }
 
 collect_image_ids_for_refs() {
@@ -82,18 +92,63 @@ collect_image_ids_for_refs() {
 }
 
 collect_current_compose_image_ids() {
-  local image_refs compose_status
+  local compose_output_file image_refs refs_file status parse_status
+  local stderr_file stderr_output
+
+  compose_output_file="$(mktemp "${TMPDIR:-/tmp}/release-refresh-compose-output.XXXXXX")"
+  refs_file="$(mktemp "${TMPDIR:-/tmp}/release-refresh-compose-refs.XXXXXX")"
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/release-refresh-compose-stderr.XXXXXX")"
 
   set +e
-  image_refs="$(collect_compose_image_refs 2>/dev/null)"
-  compose_status=$?
+  compose_release config >"$compose_output_file" 2>"$stderr_file"
+  status=$?
   set -e
 
-  if [[ "$compose_status" -ne 0 ]]; then
-    release_refresh_log_warn "warning: compose image discovery failed (status=$compose_status); skipping stale image cleanup"
+  stderr_output="$(tr -d '\r' <"$stderr_file")"
+  rm -f "$stderr_file"
+
+  if [[ "$status" -ne 0 ]]; then
+    rm -f "$compose_output_file" "$refs_file"
+    release_refresh_log_warn "warning: compose image discovery failed (status=$status); skipping stale image cleanup"
+    [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
     return 0
   fi
 
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/release-refresh-compose-refs-stderr.XXXXXX")"
+  set +e
+  python3 - "$compose_output_file" >"$refs_file" 2>"$stderr_file" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+seen: set[str] = set()
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    match = re.match(r"^\s*image:\s*(\S+)\s*$", line)
+    if not match:
+        continue
+    image_ref = match.group(1).strip()
+    if not image_ref or image_ref in seen:
+        continue
+    seen.add(image_ref)
+    print(image_ref)
+PY
+  parse_status=$?
+  set -e
+
+  stderr_output="$(tr -d '\r' <"$stderr_file")"
+  rm -f "$stderr_file"
+
+  if [[ "$parse_status" -ne 0 ]]; then
+    rm -f "$compose_output_file" "$refs_file"
+    release_refresh_log_warn "warning: compose image discovery failed (status=$parse_status); skipping stale image cleanup"
+    [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
+    return 0
+  fi
+
+  image_refs="$(cat "$refs_file")"
+  rm -f "$compose_output_file" "$refs_file"
   collect_image_ids_for_refs "$image_refs"
 }
 
@@ -133,17 +188,10 @@ cleanup_release_stack() {
   local project_name container_ids image_ids image_id compose_image_ids
 
   project_name="$(release_compose_project_name)"
-  release_refresh_log_info "[trace:cleanup] collecting container ids"
   container_ids="$(collect_release_stack_container_ids)"
-  release_refresh_log_info "[trace:cleanup] collecting stack image ids"
   image_ids="$(collect_release_stack_image_ids "$container_ids")"
-  release_refresh_log_info "[trace:cleanup] collecting compose image ids"
-  set +e
   compose_image_ids="$(collect_current_compose_image_ids)"
-  local _cid_status=$?
-  set -e
-  release_refresh_log_info "[trace:cleanup] compose image ids collected (status=$_cid_status, ${#compose_image_ids} chars)"
-  if [[ -n "$compose_image_ids" ]] && [[ "$_cid_status" -eq 0 ]]; then
+  if [[ -n "$compose_image_ids" ]]; then
     image_ids="$(printf '%s\n%s\n' "$image_ids" "$compose_image_ids" | awk 'NF && !seen[$0]++')"
   fi
 

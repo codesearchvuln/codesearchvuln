@@ -407,19 +407,23 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert workflow_text.count("set -euo pipefail") >= 10
     assert "DOCKER_SOCKET_GID" in workflow_text
     assert "stat -c '%g'" in workflow_text
-    assert "docker_server_arch" in workflow_text
-    assert "smoke_arch" in workflow_text
-    assert "docker version --format '{{.Server.Arch}}'" in workflow_text
-    assert "Unsupported Docker server architecture for smoke test" in workflow_text
-    assert 'python3 - "${RUNNER_TEMP}/release-tree/release-snapshot-lock.json" "${smoke_arch}"' in workflow_text
-    assert "mapfile -t smoke_bundle_assets" in workflow_text
-    assert 'for bundle in ("services", "scanner"):' in workflow_text
-    assert 'Expected exactly two smoke-test bundle assets for ${smoke_arch}' in workflow_text
-    assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
-    assert 'cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"' not in workflow_text
-    assert 'for asset_name in "${smoke_bundle_assets[@]}"; do' in workflow_text
-    assert '"${SNAPSHOT_ASSET_DIR}/${asset_name}"' in workflow_text
-    assert '"${RUNNER_TEMP}/release-tree/images/${asset_name}"' in workflow_text
+    assert "docker_server_arch" not in workflow_text
+    assert "smoke_arch" not in workflow_text
+    assert "mapfile -t smoke_bundle_assets" not in workflow_text
+    assert "prepare-smoke-test.sh" in workflow_text
+    assert 'prepare-smoke-test.sh" \\\n            --release-tree "${RUNNER_TEMP}/release-tree" \\\n            --snapshot-assets "${SNAPSHOT_ASSET_DIR}"' in workflow_text
+
+    smoke_helper_path = REPO_ROOT / "scripts" / "prepare-smoke-test.sh"
+    assert smoke_helper_path.exists(), "scripts/prepare-smoke-test.sh must exist"
+    smoke_helper_text = smoke_helper_path.read_text(encoding="utf-8")
+    assert "docker version --format '{{.Server.Arch}}'" in smoke_helper_text
+    assert 'for bundle in ("services", "scanner"):' in smoke_helper_text
+    assert "release-snapshot-lock.json" in smoke_helper_text
+    assert "cp --reflink=auto" in smoke_helper_text
+    assert "--release-tree" in smoke_helper_text
+    assert "--snapshot-assets" in smoke_helper_text
+    assert "set -euo pipefail" in smoke_helper_text
+
     assert "bash ./Vulhunter-offline-bootstrap.sh --deploy" in workflow_text
     assert "bash ./scripts/offline-up.sh" not in workflow_text
     assert "SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets" in workflow_text

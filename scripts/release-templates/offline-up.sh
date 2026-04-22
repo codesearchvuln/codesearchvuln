@@ -32,48 +32,6 @@ die() {
   exit 1
 }
 
-offline_up_release_stack_discovery_is_fatal() {
-  local discovery_stderr="${1:-}"
-
-  [[ -n "$discovery_stderr" ]] || return 1
-
-  grep -Eiq \
-    'permission denied|docker socket access was denied|docker\.sock|cannot connect to the docker daemon|is the docker daemon running|error during connect|server api version|context .* does not exist|current context|config file|certificate|tls|connection refused|dial unix|no such host' \
-    <<<"$discovery_stderr"
-}
-
-enable_offline_up_cleanup_discovery_tolerance() {
-  collect_release_stack_container_ids() {
-    local stderr_file status container_ids discovery_stderr
-
-    stderr_file="$(mktemp)"
-    set +e
-    container_ids="$(
-      docker ps -aq --filter "label=com.docker.compose.project=$(release_compose_project_name)" \
-        2>"$stderr_file" | tr -d '\r'
-    )"
-    status="$?"
-    set -e
-
-    discovery_stderr="$(cat "$stderr_file")"
-    rm -f "$stderr_file"
-
-    if [[ "$status" -eq 0 ]]; then
-      printf '%s' "$container_ids"
-      return 0
-    fi
-
-    if offline_up_release_stack_discovery_is_fatal "$discovery_stderr"; then
-      [[ -n "$discovery_stderr" ]] && printf '%s\n' "$discovery_stderr" >&2
-      return "$status"
-    fi
-
-    log_warn "warning: release-stack container discovery failed; treating as no existing containers and continuing cleanup"
-    [[ -n "$discovery_stderr" ]] && printf '%s\n' "$discovery_stderr" >&2
-    return 0
-  }
-}
-
 usage() {
   cat <<'EOF'
 Usage: bash ./scripts/offline-up.sh [--attach-logs]
@@ -615,103 +573,6 @@ ensure_compose_ready() {
   docker compose version >/dev/null 2>&1 || die "docker compose not found or unavailable"
 }
 
-OFFLINE_UP_RELEASE_STACK_DISCOVERY_WARNING="warning: release-stack container discovery failed; treating as no existing containers and continuing cleanup"
-OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING="warning: release-stack compose image discovery failed; skipping stale image cleanup and continuing deploy"
-
-enable_offline_up_release_stack_cleanup_fallback() {
-  collect_release_stack_container_ids() {
-    local discovery_output status
-
-    set +e
-    discovery_output="$(
-      docker ps -aq --filter "label=com.docker.compose.project=$(release_compose_project_name)" 2>&1 | tr -d '\r'
-    )"
-    status=$?
-    set -e
-
-    if [[ "$status" -eq 0 ]]; then
-      printf '%s' "$discovery_output"
-      return 0
-    fi
-
-    if [[ -z "$discovery_output" ]]; then
-      release_refresh_log_warn "$OFFLINE_UP_RELEASE_STACK_DISCOVERY_WARNING"
-      return 0
-    fi
-
-    printf '%s\n' "$discovery_output" >&2
-    return "$status"
-  }
-
-  collect_current_compose_image_ids() {
-    local compose_output_file image_refs parse_status refs_file status stderr_file stderr_output
-
-    log_info "[trace:compose-discovery] entering collect_current_compose_image_ids"
-    stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-config.XXXXXX")"
-    compose_output_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-output.XXXXXX")"
-    refs_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-refs.XXXXXX")"
-    log_info "[trace:compose-discovery] running compose_release config"
-    set +e
-    compose_release config >"$compose_output_file" 2>"$stderr_file"
-    status=$?
-    set -e
-    log_info "[trace:compose-discovery] compose config exited with status=$status"
-
-    stderr_output="$(tr -d '\r' <"$stderr_file")"
-    rm -f "$stderr_file"
-
-    if [[ "$status" -ne 0 ]]; then
-      rm -f "$compose_output_file" "$refs_file"
-      release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
-      [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
-      log_info "[trace:compose-discovery] returning 0 after compose config failure"
-      return 0
-    fi
-
-    log_info "[trace:compose-discovery] running python3 image ref parser"
-    stderr_file="$(mktemp "${TMPDIR:-/tmp}/offline-up-compose-refs-stderr.XXXXXX")"
-    set +e
-    python3 - "$compose_output_file" >"$refs_file" 2>"$stderr_file" <<'PY'
-from __future__ import annotations
-
-import re
-import sys
-from pathlib import Path
-
-seen: set[str] = set()
-for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-    match = re.match(r"^\s*image:\s*(\S+)\s*$", line)
-    if not match:
-        continue
-    image_ref = match.group(1).strip()
-    if not image_ref or image_ref in seen:
-        continue
-    seen.add(image_ref)
-    print(image_ref)
-PY
-    parse_status=$?
-    set -e
-    log_info "[trace:compose-discovery] python3 parser exited with status=$parse_status"
-
-    stderr_output="$(tr -d '\r' <"$stderr_file")"
-    rm -f "$stderr_file"
-
-    if [[ "$parse_status" -ne 0 ]]; then
-      rm -f "$compose_output_file" "$refs_file"
-      release_refresh_log_warn "$OFFLINE_UP_COMPOSE_IMAGE_DISCOVERY_WARNING"
-      [[ -n "$stderr_output" ]] && printf '%s\n' "$stderr_output" >&2
-      log_info "[trace:compose-discovery] returning 0 after python3 parser failure"
-      return 0
-    fi
-
-    image_refs="$(cat "$refs_file")"
-    rm -f "$compose_output_file" "$refs_file"
-    log_info "[trace:compose-discovery] calling collect_image_ids_for_refs with ${#image_refs} chars"
-    collect_image_ids_for_refs "$image_refs"
-    log_info "[trace:compose-discovery] collect_image_ids_for_refs completed"
-  }
-}
-
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -762,7 +623,6 @@ main() {
   source "$STARTUP_BANNER_HELPER"
   # shellcheck disable=SC1090
   source "$RELEASE_REFRESH_HELPER"
-  enable_offline_up_release_stack_cleanup_fallback
   load_container_socket_env
   load_container_socket_gid_env
   export OFFLINE_HOST_PREREQ_LOG_PREFIX="[offline-up]"
@@ -782,26 +642,17 @@ main() {
   services_bundle="$(prevalidate_bundle "services" "$arch")"
   scanner_bundle="$(prevalidate_bundle "scanner" "$arch")"
 
-  log_info "[trace] parse_and_export_offline_env"
   parse_and_export_offline_env
-  log_info "[trace] validate_compose_images_local_only"
   validate_compose_images_local_only
-  log_info "[trace] validate_compose_images_local_only completed"
 
   [[ -n "${DOCKER_SOCKET_PATH:-}" ]] && log_info "detected Docker socket path: ${DOCKER_SOCKET_PATH}"
   [[ -n "${DOCKER_SOCKET_GID:-}" ]] && log_info "detected Docker socket gid: ${DOCKER_SOCKET_GID}"
 
-  log_info "[trace] entering cleanup_release_stack"
   cleanup_release_stack
-  log_info "[trace] cleanup_release_stack completed"
 
-  log_info "[trace] loading services bundle"
   load_bundle "$services_bundle"
-  log_info "[trace] loading scanner bundle"
   load_bundle "$scanner_bundle"
-  log_info "[trace] ensuring images ready"
   ensure_images_ready
-  log_info "[trace] validating backend image provenance"
   validate_backend_image_provenance
 
   log_info "starting docker compose up -d db redis db-bootstrap backend"

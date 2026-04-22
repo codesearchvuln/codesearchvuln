@@ -734,14 +734,12 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     assert "build_sandbox:" not in workflow_text
     assert "docker compose config" in workflow_text
     assert "bash ./Vulhunter-offline-bootstrap.sh --deploy" in workflow_text
-    assert "docker_server_arch" in workflow_text
-    assert "smoke_arch" in workflow_text
-    assert 'python3 - "${RUNNER_TEMP}/release-tree/release-snapshot-lock.json" "${smoke_arch}"' in workflow_text
+    assert "docker_server_arch" not in workflow_text
+    assert "smoke_arch" not in workflow_text
+    assert "mapfile -t smoke_bundle_assets" not in workflow_text
+    assert "prepare-smoke-test.sh" in workflow_text
+    assert 'prepare-smoke-test.sh" \\\n            --release-tree "${RUNNER_TEMP}/release-tree" \\\n            --snapshot-assets "${SNAPSHOT_ASSET_DIR}"' in workflow_text
     assert "VULHUNTER_RELEASE_PROJECT_NAME: vulhunter-release-smoke" in workflow_text
-    assert 'Expected exactly two smoke-test bundle assets for ${smoke_arch}' in workflow_text
-    assert 'mkdir -p "${RUNNER_TEMP}/release-tree/images"' in workflow_text
-    assert 'cp --reflink=auto "${SNAPSHOT_ASSET_DIR}/"* "${RUNNER_TEMP}/release-tree/images/"' not in workflow_text
-    assert 'for asset_name in "${smoke_bundle_assets[@]}"; do' in workflow_text
     assert "docker compose up -d db redis backend" not in workflow_text
     assert "docker compose up -d frontend" not in workflow_text
     assert 'docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" ps || true' in workflow_text
