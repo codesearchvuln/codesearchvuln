@@ -47,13 +47,25 @@ clean_generated_tree() {
 export_tracked_tree() {
   if [[ -n "$SOURCE_REF" ]]; then
     git -C "$SOURCE_DIR" archive --format=tar "$SOURCE_REF" | tar -xf - -C "$OUTPUT_DIR"
-    return 0
+  else
+    (
+      cd "$SOURCE_DIR"
+      git ls-files -z | tar --null -T - -cf -
+    ) | tar -xf - -C "$OUTPUT_DIR"
   fi
 
-  (
-    cd "$SOURCE_DIR"
-    git ls-files -z | tar --null -T - -cf -
-  ) | tar -xf - -C "$OUTPUT_DIR"
+  # git ls-files / git archive do not include submodule contents.
+  # Copy each initialised submodule into the output tree.
+  git -C "$SOURCE_DIR" submodule --quiet foreach --recursive '
+    rel="${sm_path}"
+    src="${toplevel}/${rel}"
+    dst="'"$OUTPUT_DIR"'/${rel}"
+    if [ -d "${src}" ]; then
+      rm -rf "${dst}"
+      mkdir -p "${dst}"
+      git -C "${src}" ls-files -z | (cd "${src}" && tar --null -T - -cf -) | tar -xf - -C "${dst}"
+    fi
+  '
 }
 
 prune_public_tree() {

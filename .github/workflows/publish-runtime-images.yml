@@ -383,9 +383,7 @@ jobs:
           cache-from: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:buildcache-nexus-web-runtime-arm64
             type=gha,scope=nexus-web-runtime-arm64
-          cache-to: |
-            type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-nexus-web:buildcache-nexus-web-runtime-arm64,mode=max
-            type=gha,mode=max,scope=nexus-web-runtime-arm64
+          cache-to: type=gha,mode=max,scope=nexus-web-runtime-arm64
           provenance: false
           sbom: false
 
