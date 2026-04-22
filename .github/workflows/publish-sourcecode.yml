@@ -82,6 +82,18 @@ jobs:
         working-directory: ${{ runner.temp }}/sourcecode-tree
         env:
           VULHUNTER_SOURCECODE_PROJECT_NAME: vulhunter-sourcecode-smoke
+          # CI runs on GitHub-hosted runners — use Docker Hub directly instead
+          # of China-region mirrors that are unreachable from GitHub infra.
+          DOCKERHUB_LIBRARY_MIRROR: docker.io/library
+          FRONTEND_NPM_REGISTRY: https://registry.npmjs.org
+          FRONTEND_NPM_REGISTRY_FALLBACK: https://registry.npmjs.org
+          BACKEND_APT_MIRROR_PRIMARY: deb.debian.org
+          BACKEND_APT_SECURITY_PRIMARY: security.debian.org
+          BACKEND_APT_MIRROR_FALLBACK: deb.debian.org
+          BACKEND_APT_SECURITY_FALLBACK: security.debian.org
+          BACKEND_PYPI_INDEX_PRIMARY: https://pypi.org/simple
+          BACKEND_PYPI_INDEX_FALLBACK: https://pypi.org/simple
+          BACKEND_PYPI_INDEX_CANDIDATES: https://pypi.org/simple
         run: |
           set -euo pipefail
 
@@ -92,31 +104,32 @@ jobs:
 
           export RUNNER_PREFLIGHT_ENABLED=false
 
+          compose_cmd=(
+            docker compose
+            -f docker-compose.yml -f docker-compose.full.yml
+            -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}"
+          )
+
           dump_debug() {
-            docker compose \
-              -f docker-compose.yml -f docker-compose.full.yml \
-              -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
-              ps || true
-            docker compose \
-              -f docker-compose.yml -f docker-compose.full.yml \
-              -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
-              logs --tail=200 db redis backend frontend || true
+            "${compose_cmd[@]}" ps || true
+            "${compose_cmd[@]}" logs --tail=200 db redis backend nexus-web || true
           }
 
           cleanup() {
-            docker compose \
-              -f docker-compose.yml -f docker-compose.full.yml \
-              -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
-              down -v || true
+            "${compose_cmd[@]}" down -v || true
           }
           trap cleanup EXIT
 
-          if ! docker compose \
-            -f docker-compose.yml -f docker-compose.full.yml \
-            -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}" \
-            up --build -d --wait --wait-timeout 300; then
+          # Phase 1: verify all images build successfully.
+          if ! "${compose_cmd[@]}" build; then
+            echo "::error::Sourcecode full build failed: one or more images did not build."
+            exit 1
+          fi
+
+          # Phase 2: start all services and verify they become healthy.
+          if ! "${compose_cmd[@]}" up -d --wait --wait-timeout 300; then
             dump_debug
-            echo "::error::Sourcecode full build smoke test failed: services did not become healthy."
+            echo "::error::Sourcecode smoke test failed: services did not become healthy."
             exit 1
           fi
 

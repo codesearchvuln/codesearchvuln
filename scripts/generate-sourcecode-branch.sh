@@ -94,6 +94,7 @@ overlay_templates() {
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/Makefile" "$OUTPUT_DIR/Makefile"
+  cp "$TEMPLATE_DIR/docker-compose.full.yml" "$OUTPUT_DIR/docker-compose.full.yml"
 }
 
 validate_sourcecode_tree() {
