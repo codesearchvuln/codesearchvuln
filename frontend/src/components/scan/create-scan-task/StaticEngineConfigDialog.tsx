@@ -175,7 +175,7 @@ export function StaticEngineConfigDialogContent({
             </div>
             {showYasaAutoSkipHint ? (
               <p className="text-xs text-amber-300">
-                YASA 将自动跳过（不影响其它引擎）：未检测到可支持语言
+                YASA 已启用：当前未检测到可支持语言，请手动指定 java/golang/typescript/python
               </p>
             ) : null}
           </div>

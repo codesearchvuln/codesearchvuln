@@ -7,13 +7,16 @@ import {
   resolveYasaLanguageFromProgrammingLanguages,
 } from "../src/shared/utils/yasaLanguage.ts";
 
-test("isYasaBlockedProjectLanguage blocks projects without whitelist languages", () => {
+test("isYasaBlockedProjectLanguage only blocks projects with explicit unsupported languages", () => {
   assert.equal(isYasaBlockedProjectLanguage('["cpp","java"]'), false);
   assert.equal(isYasaBlockedProjectLanguage("c++,python"), false);
   assert.equal(isYasaBlockedProjectLanguage(["cc", "golang"]), false);
   assert.equal(isYasaBlockedProjectLanguage('["typescript","swift"]'), false);
   assert.equal(isYasaBlockedProjectLanguage('["javascript"]'), true);
   assert.equal(isYasaBlockedProjectLanguage('["java","python"]'), false);
+  assert.equal(isYasaBlockedProjectLanguage([]), false);
+  assert.equal(isYasaBlockedProjectLanguage(undefined), false);
+  assert.equal(isYasaBlockedProjectLanguage(""), false);
 });
 
 test("resolveYasaLanguageFromProgrammingLanguages returns null for blocked projects", () => {

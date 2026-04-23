@@ -35,7 +35,7 @@ test("StaticEngineConfigDialogContent renders YASA controls and footer actions",
   assert.match(markup, /YASA 规则配置/);
   assert.match(markup, /YASA 语言/);
   assert.match(markup, /前往扫描引擎配置页/);
-  assert.match(markup, /YASA 将自动跳过/);
+  assert.match(markup, /请手动指定 java\/golang\/typescript\/python/);
 });
 
 test("StaticEngineConfigDialogContent renders placeholder text for opengrep", () => {

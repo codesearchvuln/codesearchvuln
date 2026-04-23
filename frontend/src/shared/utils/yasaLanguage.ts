@@ -57,7 +57,8 @@ function parseProgrammingLanguages(value: unknown): string[] {
 
 export function isYasaBlockedProjectLanguage(programmingLanguages: unknown): boolean {
   const parsed = parseProgrammingLanguages(programmingLanguages);
-  if (parsed.length === 0) return true;
+  // Unknown/empty language metadata should not hard-block YASA in UI.
+  if (parsed.length === 0) return false;
   return !parsed.some((item) => {
     const normalized = String(item || "").trim().toLowerCase();
     return Boolean(YASA_LANGUAGE_ALIAS[normalized]);

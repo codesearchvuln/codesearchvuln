@@ -24,7 +24,7 @@ import {
 	getYasaRuleConfigs,
 	type YasaRuleConfig,
 } from "@/shared/api/yasa";
-import { getZipFileInfo, uploadZipFile } from "@/shared/utils/zipStorage";
+import { getZipFileInfo } from "@/shared/utils/zipStorage";
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import {
 	HYBRID_TASK_NAME_MARKER,
@@ -97,6 +97,12 @@ interface StaticTaskCreateResult {
 	params: URLSearchParams;
 }
 
+type UploadProjectStatus =
+	| "idle"
+	| "uploading_and_creating_project"
+	| "project_ready"
+	| "project_create_failed";
+
 export default function CreateProjectScanDialog({
 	open,
 	onOpenChange,
@@ -126,6 +132,10 @@ export default function CreateProjectScanDialog({
 	const [selectedProjectId, setSelectedProjectId] = useState("");
 	const [newProjectName, setNewProjectName] = useState("");
 	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
+	const [uploadProjectStatus, setUploadProjectStatus] =
+		useState<UploadProjectStatus>("idle");
+	const [uploadProjectError, setUploadProjectError] = useState<string | null>(null);
+	const [uploadedProject, setUploadedProject] = useState<Project | null>(null);
 	const [mode, setMode] = useState<ScanCreateMode>("static");
 	const [targetFilesInput, setTargetFilesInput] = useState("");
 	const [opengrepEnabled, setOpengrepEnabled] = useState(true);
@@ -275,6 +285,9 @@ export default function CreateProjectScanDialog({
 		setSelectedProjectId(preselectedProjectId || "");
 		setNewProjectName("");
 		setNewProjectFile(null);
+		setUploadProjectStatus("idle");
+		setUploadProjectError(null);
+		setUploadedProject(null);
 		setMode(initialMode || "static");
 		setTargetFilesInput("");
 		setOpengrepEnabled(true);
@@ -413,10 +426,17 @@ export default function CreateProjectScanDialog({
 		};
 	}, [open, isLlmMode, llmQuickInitialized]);
 
+	const uploadProjectReady = useMemo(
+		() =>
+			sourceMode !== "upload" || uploadProjectStatus === "project_ready",
+		[sourceMode, uploadProjectStatus],
+	);
+
 	const canCreate = useMemo(() => {
 		let baseCanCreate = false;
 		if (sourceMode === "upload") {
 			if (!newProjectName.trim() || !newProjectFile) return false;
+			if (!uploadedProject || uploadProjectStatus !== "project_ready") return false;
 			if (mode === "agent") {
 				baseCanCreate = true;
 			} else if (mode === "hybrid") {
@@ -472,6 +492,8 @@ export default function CreateProjectScanDialog({
 		phpstanEnabled,
 		pmdEnabled,
 		yasaEnabled,
+		uploadedProject,
+		uploadProjectStatus,
 		isLlmMode,
 		llmQuickInitialized,
 		quickFixPanelOpening,
@@ -482,8 +504,8 @@ export default function CreateProjectScanDialog({
 		if (sourceMode === "existing") {
 			return selectedProject?.programming_languages;
 		}
-		return undefined;
-	}, [sourceMode, selectedProject?.programming_languages]);
+		return uploadedProject?.programming_languages;
+	}, [sourceMode, selectedProject?.programming_languages, uploadedProject?.programming_languages]);
 
 	const isYasaBlockedProject = useMemo(
 		() => isYasaBlockedProjectLanguage(selectedOrUploadedProjectLanguages),
@@ -516,14 +538,33 @@ export default function CreateProjectScanDialog({
 		[selectedOrUploadedProjectLanguages],
 	);
 
+	const selectedYasaRuleConfig = useMemo(
+		() =>
+			yasaRuleConfigs.find((item) => item.id === selectedYasaRuleConfigId),
+		[yasaRuleConfigs, selectedYasaRuleConfigId],
+	);
+
 	const resolvedRequestedYasaLanguage = useMemo(() => {
-		const selectedRuleConfig = yasaRuleConfigs.find(
-			(item) => item.id === selectedYasaRuleConfigId,
-		);
-		if (selectedRuleConfig) return parseYasaLanguageOption(selectedRuleConfig.language);
+		if (selectedYasaRuleConfig) {
+			return parseYasaLanguageOption(selectedYasaRuleConfig.language);
+		}
 		if (yasaLanguage !== "auto") return yasaLanguage;
 		return resolvedAutoYasaLanguage;
-	}, [yasaLanguage, resolvedAutoYasaLanguage, yasaRuleConfigs, selectedYasaRuleConfigId]);
+	}, [yasaLanguage, resolvedAutoYasaLanguage, selectedYasaRuleConfig]);
+
+	const requiresManualYasaLanguageSelection = useMemo(
+		() =>
+			Boolean(yasaEnabled) &&
+			selectedYasaRuleConfigId === "default" &&
+			yasaLanguage === "auto" &&
+			!resolvedRequestedYasaLanguage,
+		[
+			yasaEnabled,
+			selectedYasaRuleConfigId,
+			yasaLanguage,
+			resolvedRequestedYasaLanguage,
+		],
+	);
 
 	const showYasaAutoSkipHint =
 		Boolean(yasaEnabled) && yasaLanguage === "auto" && !resolvedRequestedYasaLanguage;
@@ -537,9 +578,7 @@ export default function CreateProjectScanDialog({
 		let phpstanTask: { id: string } | null = null;
 		let pmdTask: { id: string } | null = null;
 		let yasaTask: { id: string } | null = null;
-		const selectedRuleConfig = yasaRuleConfigs.find(
-			(item) => item.id === selectedYasaRuleConfigId,
-		);
+		const selectedRuleConfig = selectedYasaRuleConfig;
 		const requestedYasaLanguage =
 			selectedRuleConfig?.language ||
 			(yasaLanguage !== "auto" ? yasaLanguage : undefined);
@@ -563,6 +602,18 @@ export default function CreateProjectScanDialog({
 						: undefined,
 				)}，请至少启用一个其他扫描引擎`,
 			);
+		}
+		const resolvedProjectAutoYasaLanguage =
+			resolveYasaLanguageFromProgrammingLanguages(
+				project.programming_languages,
+			);
+		if (
+			shouldRunYasa &&
+			!selectedRuleConfig &&
+			yasaLanguage === "auto" &&
+			!resolvedProjectAutoYasaLanguage
+		) {
+			throw new Error("请先手动指定 YASA 语言（java/golang/typescript/python）");
 		}
 		const taskNamePrefix = "静态分析";
 		const staticBatchId = createStaticScanBatchId();
@@ -967,7 +1018,39 @@ export default function CreateProjectScanDialog({
 		}
 	};
 
-	const handleNewProjectFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
+	const handleCreateProjectFromUpload = async (
+		projectName: string,
+		file: File,
+	) => {
+		setUploadProjectStatus("uploading_and_creating_project");
+		setUploadProjectError(null);
+		setUploadedProject(null);
+		try {
+			const createdProject = await api.createProjectWithZip(
+				{
+					name: projectName,
+					source_type: "zip",
+					repository_type: "other",
+					repository_url: undefined,
+					default_branch: "main",
+					programming_languages: [],
+				} as any,
+				file,
+			);
+			setUploadedProject(createdProject);
+			setUploadProjectStatus("project_ready");
+			toast.success("项目已创建并完成语言识别");
+			const data = await api.getProjects();
+			setProjects(data);
+		} catch (error) {
+			const msg = extractCreateProjectScanApiErrorMessage(error);
+			setUploadProjectStatus("project_create_failed");
+			setUploadProjectError(msg);
+			toast.error(`项目创建失败: ${msg}`);
+		}
+	};
+
+	const handleNewProjectFileSelect = async (event: ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0] || null;
 		if (!file) return;
 		const validation = validateZipFile(file);
@@ -979,7 +1062,31 @@ export default function CreateProjectScanDialog({
 		setNewProjectFile(file);
 		const inferredName = stripCreateProjectScanArchiveSuffix(file.name).trim();
 		if (inferredName) setNewProjectName(inferredName);
+		const projectName = inferredName || newProjectName.trim();
+		if (!projectName) {
+			setUploadProjectStatus("project_create_failed");
+			setUploadProjectError("请输入项目名称后再上传");
+			toast.error("请输入项目名称后再上传");
+			event.target.value = "";
+			return;
+		}
+		await handleCreateProjectFromUpload(projectName, file);
 		event.target.value = "";
+	};
+
+	const handleSourceModeChange = (nextMode: "existing" | "upload") => {
+		setSourceMode(nextMode);
+		if (nextMode === "upload") {
+			setUploadProjectStatus("idle");
+			setUploadProjectError(null);
+			setUploadedProject(null);
+			setNewProjectFile(null);
+			return;
+		}
+		setUploadProjectStatus("idle");
+		setUploadProjectError(null);
+		setUploadedProject(null);
+		setNewProjectFile(null);
 	};
 
 	const ensureAgentGatePassed = async () => {
@@ -1017,30 +1124,30 @@ export default function CreateProjectScanDialog({
 	const handleCreate = async (action: "primary" | "secondary" = "primary") => {
 		try {
 			setCreating(true);
+			if (
+				(mode === "static" || mode === "hybrid") &&
+				requiresManualYasaLanguageSelection
+			) {
+				toast.error("请先手动指定 YASA 语言（java/golang/typescript/python）");
+				return;
+			}
 			if (sourceMode === "upload") {
 				if (!newProjectName.trim() || !newProjectFile) {
 					toast.error("请先上传项目并填写项目名");
 					return;
 				}
+				if (uploadProjectStatus === "uploading_and_creating_project") {
+					toast.info("正在创建项目并识别语言，请稍候");
+					return;
+				}
+				if (uploadProjectStatus !== "project_ready" || !uploadedProject) {
+					toast.error("请先完成项目上传与创建");
+					return;
+				}
 
-				let createdProject: Project | null = null;
 				try {
-					createdProject = await api.createProject({
-						name: newProjectName.trim(),
-						source_type: "zip",
-						repository_type: "other",
-						repository_url: undefined,
-						default_branch: "main",
-						programming_languages: [],
-					} as any);
-
-					const uploadResult = await uploadZipFile(createdProject.id, newProjectFile);
-					if (!uploadResult.success) {
-						throw new Error(uploadResult.message || "压缩包上传失败");
-					}
-
 					if (mode === "static") {
-						const result = await createStaticTasksForProject(createdProject);
+						const result = await createStaticTasksForProject(uploadedProject);
 						onOpenChange(false);
 						onTaskCreated?.();
 						toast.success("静态扫描任务已创建");
@@ -1062,20 +1169,13 @@ export default function CreateProjectScanDialog({
 					}
 
 					if (mode === "hybrid") {
-						await handleCreateHybridFullForProject(createdProject, action);
+						await handleCreateHybridFullForProject(uploadedProject, action);
 						return;
 					}
 
-					await handleCreateHybridLiteAgentForProject(createdProject, action);
+					await handleCreateHybridLiteAgentForProject(uploadedProject, action);
 					return;
 				} catch (error) {
-					if (createdProject) {
-						try {
-							await api.deleteProject(createdProject.id);
-						} catch (rollbackError) {
-							console.error("回滚失败项目失败:", rollbackError);
-						}
-					}
 					throw error;
 				}
 			}
@@ -1163,6 +1263,10 @@ export default function CreateProjectScanDialog({
 				? "border-rose-500/60 focus-visible:ring-rose-500"
 				: "";
 	const handleNavigateToEngineConfig = (engine: StaticTool) => {
+		if (!uploadProjectReady) {
+			toast.info("请先完成项目创建并识别语言");
+			return;
+		}
 		onOpenChange(false);
 		navigate(buildScanEngineConfigRoute(engine));
 	};
@@ -1173,7 +1277,7 @@ export default function CreateProjectScanDialog({
 			dialogTitle={dialogTitle}
 			allowUploadProject={allowUploadProject}
 			sourceMode={sourceMode}
-			setSourceMode={setSourceMode}
+			setSourceMode={handleSourceModeChange}
 			creating={creating}
 			lockMode={lockMode}
 			mode={mode}
@@ -1193,6 +1297,10 @@ export default function CreateProjectScanDialog({
 			newProjectName={newProjectName}
 			setNewProjectName={setNewProjectName}
 			newProjectFile={newProjectFile}
+			uploadProjectStatus={uploadProjectStatus}
+			uploadProjectError={uploadProjectError}
+			uploadedProject={uploadedProject}
+			uploadProjectReady={uploadProjectReady}
 			handleNewProjectFileSelect={handleNewProjectFileSelect}
 			loadingRules={loadingRules}
 			activeRules={activeRules}

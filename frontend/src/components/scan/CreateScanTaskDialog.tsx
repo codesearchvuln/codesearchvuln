@@ -86,6 +86,7 @@ import {
 
 import { validateZipFile } from "@/features/projects/services/repoZipScan";
 import { isZipProject } from "@/shared/utils/projectUtils";
+import type { Project } from "@/shared/types";
 import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 import {
@@ -106,6 +107,12 @@ interface CreateScanTaskDialogProps {
 	onReturn?: () => void;
 	allowUploadProject?: boolean;
 }
+
+type UploadProjectStatus =
+	| "idle"
+	| "uploading_and_creating_project"
+	| "project_ready"
+	| "project_create_failed";
 
 const isSevereRule = (rule: OpengrepRule) =>
 	String(rule.severity || "").toUpperCase() === "ERROR";
@@ -137,6 +144,10 @@ export default function CreateScanTaskDialog({
 	const [uploading, setUploading] = useState(false);
 	const [newProjectName, setNewProjectName] = useState("");
 	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
+	const [uploadProjectStatus, setUploadProjectStatus] =
+		useState<UploadProjectStatus>("idle");
+	const [uploadProjectError, setUploadProjectError] = useState<string | null>(null);
+	const [uploadedProject, setUploadedProject] = useState<Project | null>(null);
 	const newProjectFileInputRef = useRef<HTMLInputElement>(null);
 
 	const [scanMode, setScanMode] = useState<ScanMode>("agent");
@@ -157,19 +168,22 @@ export default function CreateScanTaskDialog({
 
 	const { projects, loading, loadProjects } = useProjects();
 	const selectedProject = projects.find((p) => p.id === selectedProjectId);
-	const isYasaBlockedProject = useMemo(
+	const selectedOrUploadedProjectLanguages = useMemo(
 		() =>
 			sourceMode === "existing"
-				? isYasaBlockedProjectLanguage(selectedProject?.programming_languages)
-				: false,
-		[sourceMode, selectedProject?.programming_languages],
+				? selectedProject?.programming_languages
+				: uploadedProject?.programming_languages,
+		[sourceMode, selectedProject?.programming_languages, uploadedProject?.programming_languages],
+	);
+	const isYasaBlockedProject = useMemo(
+		() =>
+			isYasaBlockedProjectLanguage(selectedOrUploadedProjectLanguages),
+		[selectedOrUploadedProjectLanguages],
 	);
 	const isPmdBlockedProject = useMemo(
 		() =>
-			sourceMode === "existing"
-				? isPmdBlockedProjectLanguage(selectedProject?.programming_languages)
-				: false,
-		[sourceMode, selectedProject?.programming_languages],
+			isPmdBlockedProjectLanguage(selectedOrUploadedProjectLanguages),
+		[selectedOrUploadedProjectLanguages],
 	);
 	const zipState = useZipFile(selectedProject, projects);
 
@@ -233,6 +247,9 @@ export default function CreateScanTaskDialog({
 			setSourceMode("existing");
 			setNewProjectName("");
 			setNewProjectFile(null);
+			setUploadProjectStatus("idle");
+			setUploadProjectError(null);
+			setUploadedProject(null);
 			zipState.reset();
 			}
 		}, [open, preselectedProjectId, initialScanMode, loadProjects]);
@@ -281,7 +298,38 @@ export default function CreateScanTaskDialog({
 		excludePatternsRef.current = excludePatterns;
 	}, [excludePatterns]);
 
-	const handleNewProjectFileSelect = (
+	const handleCreateProjectFromUpload = async (
+		projectName: string,
+		file: File,
+	) => {
+		setUploadProjectStatus("uploading_and_creating_project");
+		setUploadProjectError(null);
+		setUploadedProject(null);
+		try {
+			const createdProject = await api.createProjectWithZip(
+				{
+					name: projectName,
+					source_type: "zip",
+					repository_type: "other",
+					repository_url: undefined,
+					default_branch: "main",
+					programming_languages: [],
+				} as any,
+				file,
+			);
+			setUploadedProject(createdProject);
+			setUploadProjectStatus("project_ready");
+			toast.success("项目已创建并完成语言识别");
+			loadProjects();
+		} catch (error) {
+			const msg = extractCreateScanTaskApiErrorMessage(error);
+			setUploadProjectStatus("project_create_failed");
+			setUploadProjectError(msg);
+			toast.error(`项目创建失败: ${msg}`);
+		}
+	};
+
+	const handleNewProjectFileSelect = async (
 		event: React.ChangeEvent<HTMLInputElement>,
 	) => {
 		const file = event.target.files?.[0] || null;
@@ -298,6 +346,15 @@ export default function CreateScanTaskDialog({
 			setNewProjectName(inferredName);
 		}
 		setNewProjectFile(file);
+		const projectName = inferredName || newProjectName.trim();
+		if (!projectName) {
+			setUploadProjectStatus("project_create_failed");
+			setUploadProjectError("请输入项目名称后再上传");
+			toast.error("请输入项目名称后再上传");
+			event.target.value = "";
+			return;
+		}
+		await handleCreateProjectFromUpload(projectName, file);
 		event.target.value = "";
 	};
 
@@ -307,8 +364,16 @@ export default function CreateScanTaskDialog({
 		if (mode === "upload") {
 			setSelectedProjectId("");
 			zipState.reset();
+			setUploadProjectStatus("idle");
+			setUploadProjectError(null);
+			setUploadedProject(null);
+			setNewProjectFile(null);
 			return;
 		}
+		setUploadProjectStatus("idle");
+		setUploadProjectError(null);
+		setUploadedProject(null);
+		setNewProjectFile(null);
 
 		if (!selectedProjectId && projects.length > 0) {
 			setSelectedProjectId(projects[0].id);
@@ -328,6 +393,49 @@ export default function CreateScanTaskDialog({
 		const useStored = zipState.useStoredZip;
 		return isZip && useStored && hasStoredZip;
 	}, [selectedProject, zipState.storedZipInfo?.has_file, zipState.useStoredZip]);
+	const uploadProjectPending = useMemo(
+		() =>
+			sourceMode === "upload" &&
+			uploadProjectStatus === "uploading_and_creating_project",
+		[sourceMode, uploadProjectStatus],
+	);
+	const uploadProjectReady = useMemo(
+		() =>
+			sourceMode !== "upload" || uploadProjectStatus === "project_ready",
+		[sourceMode, uploadProjectStatus],
+	);
+
+	const selectedYasaRuleConfig = useMemo(
+		() =>
+			yasaRuleConfigs.find((item) => item.id === selectedYasaRuleConfigId),
+		[yasaRuleConfigs, selectedYasaRuleConfigId],
+	);
+	const resolvedRequestedYasaLanguage = useMemo(() => {
+		if (selectedYasaRuleConfig) {
+			return parseYasaLanguageOption(selectedYasaRuleConfig.language);
+		}
+		if (yasaLanguage !== "auto") return yasaLanguage;
+		return resolveYasaLanguageFromProgrammingLanguages(
+			selectedOrUploadedProjectLanguages,
+		);
+	}, [
+		selectedYasaRuleConfig,
+		yasaLanguage,
+		selectedOrUploadedProjectLanguages,
+	]);
+	const requiresManualYasaLanguageSelection = useMemo(
+		() =>
+			Boolean(staticTools.yasa) &&
+			selectedYasaRuleConfigId === "default" &&
+			yasaLanguage === "auto" &&
+			!resolvedRequestedYasaLanguage,
+		[
+			staticTools.yasa,
+			selectedYasaRuleConfigId,
+			yasaLanguage,
+			resolvedRequestedYasaLanguage,
+		],
+	);
 
 	const createStaticScanTasksForProject = async (
 		projectId: string,
@@ -352,9 +460,7 @@ export default function CreateScanTaskDialog({
 		let phpstanTask: { id: string } | null = null;
 		let yasaTask: { id: string } | null = null;
 		let pmdTask: { id: string } | null = null;
-		const selectedRuleConfig = yasaRuleConfigs.find(
-			(item) => item.id === selectedYasaRuleConfigId,
-		);
+		const selectedRuleConfig = selectedYasaRuleConfig;
 		const requestedYasaLanguage =
 			selectedRuleConfig?.language ||
 			(yasaLanguage !== "auto" ? yasaLanguage : undefined);
@@ -376,6 +482,16 @@ export default function CreateScanTaskDialog({
 					typeof programmingLanguages === "string" ? programmingLanguages : undefined,
 				)}，请至少启用一个其他扫描引擎`,
 			);
+		}
+		const resolvedAutoYasaLanguage =
+			resolveYasaLanguageFromProgrammingLanguages(programmingLanguages);
+		if (
+			shouldRunYasa &&
+			!selectedRuleConfig &&
+			yasaLanguage === "auto" &&
+			!resolvedAutoYasaLanguage
+		) {
+			throw new Error("请先手动指定 YASA 语言（java/golang/typescript/python）");
 		}
 		const staticBatchId = createStaticScanBatchId();
 
@@ -544,6 +660,13 @@ export default function CreateScanTaskDialog({
 	const handleStartScan = async () => {
 		try {
 			setCreating(true);
+			if (
+				scanMode === "static" &&
+				requiresManualYasaLanguageSelection
+			) {
+				toast.error("请先手动指定 YASA 语言（java/golang/typescript/python）");
+				return;
+			}
 			if (sourceMode === "upload") {
 				if (!newProjectName.trim()) {
 					toast.error("请输入项目名称");
@@ -553,21 +676,20 @@ export default function CreateScanTaskDialog({
 					toast.error("请先选择项目压缩包");
 					return;
 				}
+				if (uploadProjectStatus === "uploading_and_creating_project") {
+					toast.info("正在创建项目并识别语言，请稍候");
+					return;
+				}
+				if (uploadProjectStatus !== "project_ready" || !uploadedProject) {
+					toast.error("请先完成项目上传与创建");
+					return;
+				}
 
 				try {
-					const createdProject = await api.createProjectWithZip({
-						name: newProjectName.trim(),
-						source_type: "zip",
-						repository_type: "other",
-						repository_url: undefined,
-						default_branch: "main",
-						programming_languages: [],
-					} as any, newProjectFile);
-
 					if (scanMode === "agent") {
 						const agentTask = await createAgentTask({
-							project_id: createdProject.id,
-							name: `智能扫描-${createdProject.name}`,
+							project_id: uploadedProject.id,
+							name: `智能扫描-${uploadedProject.name}`,
 							description: `${INTELLIGENT_TASK_NAME_MARKER}智能扫描任务`,
 							audit_scope: {
 								static_bootstrap: {
@@ -599,9 +721,9 @@ export default function CreateScanTaskDialog({
 					}
 
 					const staticResult = await createStaticScanTasksForProject(
-						createdProject.id,
-						createdProject.name,
-						createdProject.programming_languages,
+						uploadedProject.id,
+						uploadedProject.name,
+						uploadedProject.programming_languages,
 					);
 					onOpenChange(false);
 					onTaskCreated();
@@ -695,10 +817,12 @@ export default function CreateScanTaskDialog({
 		}
 	};
 
-		const canStart = useMemo(() => {
+	const canStart = useMemo(() => {
 		if (sourceMode === "upload") {
 			if (!newProjectName.trim() || !newProjectFile) return false;
+			if (uploadProjectStatus !== "project_ready" || !uploadedProject) return false;
 			if (scanMode === "static") {
+				if (requiresManualYasaLanguageSelection) return false;
 				return (
 					staticTools.opengrep ||
 					staticTools.gitleaks ||
@@ -712,6 +836,7 @@ export default function CreateScanTaskDialog({
 		}
 		if (!selectedProject) return false;
 		if (scanMode === "static") {
+			if (requiresManualYasaLanguageSelection) return false;
 			return (
 				isZipProject(selectedProject) &&
 				!!zipState.storedZipInfo?.has_file &&
@@ -743,9 +868,16 @@ export default function CreateScanTaskDialog({
 		staticTools.phpstan,
 		staticTools.yasa,
 		staticTools.pmd,
+		requiresManualYasaLanguageSelection,
+		uploadProjectStatus,
+		uploadedProject,
 	]);
 
 	const handleOpenEngineConfig = (engine: StaticTool) => {
+		if (!uploadProjectReady) {
+			toast.info("请先完成项目创建并识别语言");
+			return;
+		}
 		setConfigEngine(engine);
 	};
 
@@ -871,7 +1003,7 @@ export default function CreateScanTaskDialog({
 						onChange={(e) => setNewProjectName(e.target.value)}
 						placeholder="输入项目名称"
 						className="h-10 cyber-input"
-						disabled={creating}
+						disabled={creating || uploadProjectPending || uploadProjectStatus === "project_ready"}
 					/>
 				</div>
 				<div className="rounded-lg border border-dashed border-sky-500/30 bg-sky-500/8 p-3">
@@ -892,38 +1024,60 @@ export default function CreateScanTaskDialog({
 						accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
 						onChange={handleNewProjectFileSelect}
 						className="hidden"
-						disabled={creating}
+						disabled={creating || uploadProjectPending}
 					/>
 					<Button
 						variant="outline"
 						className="cyber-btn-outline h-9"
 						onClick={() => newProjectFileInputRef.current?.click()}
-						disabled={creating}
+						disabled={creating || uploadProjectPending}
 					>
 										<Upload className="w-4 h-4 mr-2" />
-										选择压缩包
+										{uploadProjectPending ? "上传中..." : "选择压缩包"}
 									</Button>
 									{newProjectFile && (
 										<p className="text-xs text-emerald-400 font-mono">
 											已选择: {newProjectFile.name}
 										</p>
 									)}
+									{sourceMode === "upload" && uploadProjectStatus === "uploading_and_creating_project" ? (
+										<p className="text-xs text-sky-300 font-mono">
+											正在创建项目并识别语言，请稍候...
+										</p>
+									) : null}
+									{sourceMode === "upload" && uploadProjectStatus === "project_create_failed" && uploadProjectError ? (
+										<p className="text-xs text-rose-300 font-mono">
+											项目创建失败: {uploadProjectError}
+										</p>
+									) : null}
+									{sourceMode === "upload" && uploadProjectStatus === "project_ready" && uploadedProject ? (
+										<p className="text-xs text-emerald-300 font-mono">
+											项目已创建: {uploadedProject.name}（可继续选择引擎）
+										</p>
+									) : null}
 								</div>
 							</div>
 						)}
 
 						{/* 扫描模式选择 */}
 						{(sourceMode === "upload" || selectedProject) && (
-							<AgentModeSelector
-								value={scanMode}
-								onChange={setScanMode}
-								disabled={creating}
-								staticTools={staticTools}
-								onStaticToolsChange={setStaticTools}
-								disabledStaticTools={{ yasa: isYasaBlockedProject, pmd: isPmdBlockedProject }}
-								blockedStaticToolMessages={{
-									yasa: isYasaBlockedProject ? getYasaBlockedProjectMessage() : undefined,
-									pmd: isPmdBlockedProject ? getPmdBlockedProjectMessage() : undefined,
+								<AgentModeSelector
+									value={scanMode}
+									onChange={setScanMode}
+									disabled={creating}
+									staticTools={staticTools}
+									onStaticToolsChange={setStaticTools}
+									disabledStaticTools={{
+										opengrep: !uploadProjectReady,
+										gitleaks: !uploadProjectReady,
+										bandit: !uploadProjectReady,
+										phpstan: !uploadProjectReady,
+										yasa: !uploadProjectReady || isYasaBlockedProject,
+										pmd: !uploadProjectReady || isPmdBlockedProject,
+									}}
+									blockedStaticToolMessages={{
+										yasa: isYasaBlockedProject ? getYasaBlockedProjectMessage() : undefined,
+										pmd: isPmdBlockedProject ? getPmdBlockedProjectMessage() : undefined,
 								}}
 								onOpenStaticToolConfig={handleOpenEngineConfig}
 							/>
@@ -1065,13 +1219,11 @@ export default function CreateScanTaskDialog({
 				onSelectedYasaRuleConfigIdChange={setSelectedYasaRuleConfigId}
 				showYasaAutoSkipHint={
 					configEngine === "yasa" &&
+					staticTools.yasa &&
 					selectedYasaRuleConfigId === "default" &&
 					yasaLanguage === "auto" &&
-					!resolveYasaLanguageFromProgrammingLanguages(
-						sourceMode === "existing"
-							? selectedProject?.programming_languages
-							: undefined,
-					)
+					!resolvedRequestedYasaLanguage &&
+					uploadProjectReady
 				}
 				onNavigateToEngineConfig={(engine) => handleNavigateToEngineConfig(engine)}
 			/>

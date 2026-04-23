@@ -54,6 +54,12 @@ type YasaRuleConfigItem = {
   language: string;
 };
 
+type UploadProjectStatus =
+  | "idle"
+  | "uploading_and_creating_project"
+  | "project_ready"
+  | "project_create_failed";
+
 export default function CreateProjectScanDialogContent({
   open,
   onOpenChange,
@@ -80,6 +86,10 @@ export default function CreateProjectScanDialogContent({
   newProjectName,
   setNewProjectName,
   newProjectFile,
+  uploadProjectStatus,
+  uploadProjectError,
+  uploadedProject,
+  uploadProjectReady,
   handleNewProjectFileSelect,
   loadingRules,
   activeRules,
@@ -157,6 +167,10 @@ export default function CreateProjectScanDialogContent({
   newProjectName: string;
   setNewProjectName: (value: string) => void;
   newProjectFile: File | null;
+  uploadProjectStatus: UploadProjectStatus;
+  uploadProjectError: string | null;
+  uploadedProject: Project | null;
+  uploadProjectReady: boolean;
   handleNewProjectFileSelect: (event: ChangeEvent<HTMLInputElement>) => void;
   loadingRules: boolean;
   activeRules: unknown[];
@@ -228,38 +242,42 @@ export default function CreateProjectScanDialogContent({
       title: "Opengrep",
       checked: opengrepEnabled,
       setChecked: setOpengrepEnabled,
+      disabled: sourceMode === "upload" && !uploadProjectReady,
     },
     {
       key: "gitleaks",
       title: "Gitleaks",
       checked: gitleaksEnabled,
       setChecked: setGitleaksEnabled,
+      disabled: sourceMode === "upload" && !uploadProjectReady,
     },
     {
       key: "bandit",
       title: "Bandit",
       checked: banditEnabled,
       setChecked: setBanditEnabled,
+      disabled: sourceMode === "upload" && !uploadProjectReady,
     },
     {
       key: "phpstan",
       title: "PHPStan",
       checked: phpstanEnabled,
       setChecked: setPhpstanEnabled,
+      disabled: sourceMode === "upload" && !uploadProjectReady,
     },
     {
       key: "yasa",
       title: "YASA",
       checked: yasaEnabled,
       setChecked: setYasaEnabled,
-      disabled: isYasaBlockedProject,
+      disabled: (sourceMode === "upload" && !uploadProjectReady) || isYasaBlockedProject,
     },
     {
       key: "pmd",
       title: "PMD",
       checked: pmdEnabled,
       setChecked: setPmdEnabled,
-      disabled: isPmdBlockedProject,
+      disabled: (sourceMode === "upload" && !uploadProjectReady) || isPmdBlockedProject,
       visible: mode === "static",
     },
   ];
@@ -498,7 +516,7 @@ export default function CreateProjectScanDialogContent({
                   onChange={(event) => setNewProjectName(event.target.value)}
                   placeholder="请输入项目名称"
                   className="h-9 cyber-input"
-                  disabled={creating}
+                  disabled={creating || uploadProjectStatus === "uploading_and_creating_project" || uploadProjectStatus === "project_ready"}
                 />
               </div>
               <div>
@@ -511,16 +529,27 @@ export default function CreateProjectScanDialogContent({
                     accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
                     className="hidden"
                     onChange={handleNewProjectFileSelect}
-                    disabled={creating}
+                    disabled={creating || uploadProjectStatus === "uploading_and_creating_project"}
                   />
                   <span className="cyber-btn-outline h-9 px-3 inline-flex items-center cursor-pointer">
                     <Upload className="w-4 h-4 mr-2" />
-                    选择压缩包
+                    {uploadProjectStatus === "uploading_and_creating_project" ? "上传中..." : "选择压缩包"}
                   </span>
                 </label>
                 {newProjectFile && (
                   <p className="text-xs text-emerald-400 mt-2">{newProjectFile.name}</p>
                 )}
+                {sourceMode === "upload" && uploadProjectStatus === "uploading_and_creating_project" ? (
+                  <p className="text-xs text-sky-300 mt-2">正在创建项目并识别语言，请稍候...</p>
+                ) : null}
+                {sourceMode === "upload" && uploadProjectStatus === "project_create_failed" && uploadProjectError ? (
+                  <p className="text-xs text-rose-300 mt-2">项目创建失败：{uploadProjectError}</p>
+                ) : null}
+                {sourceMode === "upload" && uploadProjectStatus === "project_ready" && uploadedProject ? (
+                  <p className="text-xs text-emerald-300 mt-2">
+                    项目已创建：{uploadedProject.name}（可继续选择扫描引擎）
+                  </p>
+                ) : null}
               </div>
             </div>
           )}
@@ -560,7 +589,7 @@ export default function CreateProjectScanDialogContent({
                         size="icon"
                         className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground hover:bg-sky-500/10"
                         onClick={() => setConfigEngine(item.key)}
-                        disabled={creating}
+                        disabled={creating || (sourceMode === "upload" && !uploadProjectReady)}
                         aria-label={`配置 ${item.title} 引擎`}
                       >
                         <Settings2 className="h-4 w-4" />
