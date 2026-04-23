@@ -13,6 +13,8 @@ from uuid import uuid4
 import yaml
 
 from app.api.v1.endpoints.static_tasks_shared import (
+    _build_core_audit_exclude_patterns,
+    _is_core_ignored_path,
     cleanup_scan_workspace,
     copy_project_tree_to_scan_dir,
     ensure_scan_logs_dir,
@@ -134,10 +136,12 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
         active_rules: List[OpengrepRule],
         timeout_seconds: int = 900,
         cancel_check: Optional[Any] = None,
+        exclude_patterns: Optional[List[str]] = None,
     ) -> None:
         self.active_rules = list(active_rules or [])
         self.timeout_seconds = max(1, int(timeout_seconds))
         self.cancel_check = cancel_check
+        self.exclude_patterns = _build_core_audit_exclude_patterns(exclude_patterns)
 
     def _build_merged_rules(self) -> List[Dict[str, Any]]:
         merged_rules: List[Dict[str, Any]] = []
@@ -223,7 +227,12 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
 
         try:
             await asyncio.to_thread(shutil.rmtree, project_dir, True)
-            await asyncio.to_thread(copy_project_tree_to_scan_dir, project_root, project_dir)
+            await asyncio.to_thread(
+                copy_project_tree_to_scan_dir,
+                project_root,
+                project_dir,
+                exclude_matcher=lambda rel_path: _is_core_ignored_path(rel_path, self.exclude_patterns),
+            )
 
             with tempfile.NamedTemporaryFile(
                 mode="w",

@@ -72,6 +72,28 @@ def test_copy_project_tree_to_scan_dir_ignores_nested_destination(tmp_path):
     assert not (nested_scan_dir / "scans").exists()
 
 
+def test_copy_project_tree_to_scan_dir_supports_optional_exclude_matcher(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "src").mkdir()
+    (project_root / "src" / "app.py").write_text("dangerous()\n", encoding="utf-8")
+    (project_root / "tests").mkdir()
+    (project_root / "tests" / "test_app.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    (project_root / ".github").mkdir()
+    (project_root / ".github" / "workflow.yml").write_text("name: ci\n", encoding="utf-8")
+    scan_dir = tmp_path / "scan" / "task-1" / "project"
+
+    static_tasks_shared.copy_project_tree_to_scan_dir(
+        project_root,
+        scan_dir,
+        exclude_matcher=lambda rel_path: rel_path.startswith("tests/") or rel_path.startswith(".github/"),
+    )
+
+    assert (scan_dir / "src" / "app.py").read_text(encoding="utf-8") == "dangerous()\n"
+    assert not (scan_dir / "tests").exists()
+    assert not (scan_dir / ".github").exists()
+
+
 def test_build_backend_venv_env_prefixes_backend_venv_bin(monkeypatch):
     monkeypatch.setattr(static_tasks_shared.settings, "BACKEND_VENV_PATH", "/opt/backend-venv")
 

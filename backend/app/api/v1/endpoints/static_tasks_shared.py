@@ -11,7 +11,7 @@ import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -82,7 +82,130 @@ def cleanup_scan_workspace(scan_type: str, task_id: str) -> None:
     shutil.rmtree(workspace, ignore_errors=True)
 
 
-def copy_project_tree_to_scan_dir(project_root: str | Path, project_dir: str | Path) -> None:
+_CORE_AUDIT_EXCLUDE_PATTERNS: List[str] = [
+    "test/**",
+    "tests/**",
+    "**/test/**",
+    "**/tests/**",
+    ".*/**",
+    "**/.*/**",
+    "*config*.*",
+    "**/*config*.*",
+    "*settings*.*",
+    "**/*settings*.*",
+    ".env*",
+    "**/.env*",
+    "*.yml",
+    "**/*.yml",
+    "*.yaml",
+    "**/*.yaml",
+    "*.json",
+    "**/*.json",
+    "*.ini",
+    "**/*.ini",
+    "*.conf",
+    "**/*.conf",
+    "*.toml",
+    "**/*.toml",
+    "*.properties",
+    "**/*.properties",
+    "*.plist",
+    "**/*.plist",
+    "*.xml",
+    "**/*.xml",
+]
+
+
+def _build_core_audit_exclude_patterns(
+    user_patterns: Optional[List[str]],
+) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    raw_patterns = list(user_patterns or []) + _CORE_AUDIT_EXCLUDE_PATTERNS
+    for raw in raw_patterns:
+        if not isinstance(raw, str):
+            continue
+        normalized = raw.strip().replace("\\", "/")
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        merged.append(normalized)
+    return merged
+
+
+def _normalize_scan_path(path: str) -> str:
+    normalized = str(path or "").replace("\\", "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    while normalized.startswith("/"):
+        normalized = normalized[1:]
+    while "//" in normalized:
+        normalized = normalized.replace("//", "/")
+    return normalized
+
+
+def _path_components(path: str) -> List[str]:
+    normalized = _normalize_scan_path(path)
+    if not normalized:
+        return []
+    return [part for part in normalized.split("/") if part not in {"", ".", ".."}]
+
+
+def _match_exclude_patterns(path: str, patterns: Optional[List[str]]) -> bool:
+    import fnmatch
+
+    normalized = _normalize_scan_path(path)
+    basename = os.path.basename(normalized)
+    for pattern in patterns or []:
+        if not isinstance(pattern, str):
+            continue
+        candidate = pattern.strip().replace("\\", "/")
+        if not candidate:
+            continue
+        if fnmatch.fnmatch(normalized, candidate) or fnmatch.fnmatch(basename, candidate):
+            return True
+    return False
+
+
+def _is_core_ignored_path(
+    path: str,
+    exclude_patterns: Optional[List[str]] = None,
+) -> bool:
+    normalized = _normalize_scan_path(path)
+    if not normalized:
+        return False
+
+    parts = _path_components(normalized)
+    for part in parts[:-1]:
+        lowered = part.lower()
+        if lowered in {"test", "tests"}:
+            return True
+        if part.startswith("."):
+            return True
+
+    if parts:
+        last = parts[-1]
+        if last.lower() in {"test", "tests"}:
+            return True
+        if last.startswith("."):
+            return True
+
+    effective_patterns = _build_core_audit_exclude_patterns(exclude_patterns)
+    if _match_exclude_patterns(normalized, effective_patterns):
+        return True
+
+    return False
+
+
+def copy_project_tree_to_scan_dir(
+    project_root: str | Path,
+    project_dir: str | Path,
+    *,
+    exclude_matcher: Optional[Callable[[str], bool]] = None,
+) -> None:
     src_root = Path(project_root).resolve()
     dst_root = Path(project_dir).resolve()
 
@@ -103,8 +226,17 @@ def copy_project_tree_to_scan_dir(project_root: str | Path, project_dir: str | P
         current = Path(_current_dir).resolve()
         ignored: set[str] = set()
         for name in names:
-            if _should_ignore(current / name):
+            candidate = current / name
+            if _should_ignore(candidate):
                 ignored.add(name)
+                continue
+            if exclude_matcher is not None:
+                rel_path = _normalize_scan_path(str(candidate.relative_to(src_root)))
+                if exclude_matcher(rel_path):
+                    ignored.add(name)
+                    continue
+                if candidate.is_dir() and exclude_matcher(f"{rel_path}/"):
+                    ignored.add(name)
         return ignored
 
     shutil.copytree(src_root, dst_root, dirs_exist_ok=True, ignore=_ignore)

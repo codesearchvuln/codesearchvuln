@@ -1,3 +1,5 @@
+import sys
+import types
 import json
 import logging
 from pathlib import Path
@@ -6,6 +8,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+
+docker_stub = types.ModuleType("docker")
+docker_stub.from_env = lambda: None
+docker_stub.errors = types.SimpleNamespace(
+    DockerException=RuntimeError,
+    ImageNotFound=type("ImageNotFound", (Exception,), {}),
+    NotFound=type("NotFound", (Exception,), {}),
+)
+sys.modules.setdefault("docker", docker_stub)
 
 from app.api.v1.endpoints.agent_tasks import (
     _filter_bootstrap_findings,
@@ -105,6 +116,51 @@ async def test_prepare_embedded_bootstrap_opengrep_only_no_static_task_record(
     assert metadata.get("bootstrap_source") == "embedded_opengrep"
     assert metadata.get("bootstrap_total_findings") == 1
     assert metadata.get("bootstrap_candidate_count") == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedded_bootstrap_passes_effective_exclude_patterns_to_opengrep_prescan(
+    monkeypatch,
+):
+    active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="HIGH")]
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult(active_rules))
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    captured = {}
+
+    class _FakeOpenGrepBootstrapScanner:
+        def __init__(self, *, active_rules, timeout_seconds=900, cancel_check=None, exclude_patterns=None):
+            captured["active_rules"] = active_rules
+            captured["exclude_patterns"] = exclude_patterns
+
+        async def scan(self, project_root):
+            captured["project_root"] = project_root
+            return SimpleNamespace(total_findings=0, findings=[])
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.OpenGrepBootstrapScanner",
+        _FakeOpenGrepBootstrapScanner,
+    )
+
+    await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        exclude_patterns=["custom/**"],
+        opengrep_enabled=True,
+        gitleaks_enabled=False,
+    )
+
+    assert captured["project_root"] == "/tmp/project"
+    assert "custom/**" in (captured["exclude_patterns"] or [])
+    assert "**/tests/**" in (captured["exclude_patterns"] or [])
 
 
 @pytest.mark.asyncio
