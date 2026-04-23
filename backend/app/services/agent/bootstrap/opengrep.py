@@ -133,9 +133,11 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
         *,
         active_rules: List[OpengrepRule],
         timeout_seconds: int = 900,
+        cancel_check: Optional[Any] = None,
     ) -> None:
         self.active_rules = list(active_rules or [])
         self.timeout_seconds = max(1, int(timeout_seconds))
+        self.cancel_check = cancel_check
 
     def _build_merged_rules(self) -> List[Dict[str, Any]]:
         merged_rules: List[Dict[str, Any]] = []
@@ -256,6 +258,7 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
                     },
                     artifact_paths=["output/report.json"],
                     capture_stdout_path="output/report.json",
+                    cancel_check=self.cancel_check,
                 )
             )
 
@@ -267,22 +270,27 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
                     errors="ignore",
                 )
 
+            cancelled = isinstance(process_result.error, str) and "cancelled" in process_result.error
             payload_findings = _parse_output(stdout_text)
-            if process_result.exit_code != 0 and not payload_findings:
+            if process_result.exit_code != 0 and not payload_findings and not cancelled:
                 stderr_message = (stderr_text or stdout_text or process_result.error or "unknown error").strip()
                 raise RuntimeError(f"opengrep failed: {stderr_message[:300]}")
 
             findings = self._normalize_findings(payload_findings)
+            result_metadata: Dict[str, Any] = {
+                "rules_count": len(self.active_rules),
+                "merged_rules_count": len(merged_rules),
+                "timeout_seconds": self.timeout_seconds,
+            }
+            if cancelled:
+                result_metadata["cancelled"] = True
+                result_metadata["partial"] = True
             return StaticBootstrapScanResult(
                 scanner_name=self.scanner_name,
                 source=self.source,
                 total_findings=len(payload_findings),
                 findings=findings,
-                metadata={
-                    "rules_count": len(self.active_rules),
-                    "merged_rules_count": len(merged_rules),
-                    "timeout_seconds": self.timeout_seconds,
-                },
+                metadata=result_metadata,
             )
         finally:
             if merged_rule_path:

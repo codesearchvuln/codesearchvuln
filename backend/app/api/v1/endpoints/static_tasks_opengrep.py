@@ -691,6 +691,9 @@ async def _execute_opengrep_scan(
                     active_container_id = container_id
                     _register_scan_container("opengrep", task_id, container_id)
 
+                def _check_cancelled() -> bool:
+                    return _is_scan_task_cancelled("opengrep", task_id)
+
                 result = await run_scanner_container(
                     ScannerRunSpec(
                         scanner_type="opengrep",
@@ -703,6 +706,7 @@ async def _execute_opengrep_scan(
                         env=scan_env,
                         artifact_paths=["output/report.json"],
                         capture_stdout_path="output/report.json",
+                        cancel_check=_check_cancelled,
                     ),
                     on_container_started=_on_container_started,
                 )
@@ -743,6 +747,7 @@ async def _execute_opengrep_scan(
                             env=scan_env,
                             artifact_paths=["output/report.json"],
                             capture_stdout_path="output/report.json",
+                            cancel_check=_check_cancelled,
                         ),
                         on_container_started=_on_container_started,
                     )

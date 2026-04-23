@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -10,11 +12,47 @@ import docker
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 
 SCANNER_MOUNT_PATH = "/scan"
 MAX_RETAINED_LOG_CHARS = 12000
+_CONTAINER_POLL_INTERVAL_S = 5
+_PROGRESS_LOG_INTERVAL_S = 30
 DOCKER_EXCEPTION = getattr(getattr(docker, "errors", None), "DockerException", Exception)
 DOCKER_NOT_FOUND = getattr(getattr(docker, "errors", None), "NotFound", Exception)
+
+
+class ScannerCancelledError(Exception):
+    """Raised when a scanner run is cancelled via the cancel_check callback."""
+
+
+def _poll_container_exit(
+    container,
+    timeout_seconds: int,
+    *,
+    cancel_check: Callable[[], bool] | None = None,
+    scanner_label: str = "scanner",
+) -> dict:
+    """Poll container status to avoid Docker SDK HTTP ReadTimeout on long-running scans."""
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    start = time.monotonic()
+    last_progress_log = start
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"container did not exit within {timeout_seconds}s")
+        if cancel_check is not None and cancel_check():
+            elapsed = int(time.monotonic() - start)
+            raise ScannerCancelledError(f"{scanner_label} cancelled after {elapsed}s")
+        container.reload()
+        if container.status in ("exited", "dead"):
+            return {"StatusCode": container.attrs.get("State", {}).get("ExitCode", 1)}
+        now = time.monotonic()
+        if now - last_progress_log >= _PROGRESS_LOG_INTERVAL_S:
+            elapsed = int(now - start)
+            logger.info("%s still running (%ds elapsed, %ds remaining)", scanner_label, elapsed, int(remaining))
+            last_progress_log = now
+        time.sleep(min(_CONTAINER_POLL_INTERVAL_S, max(0.5, remaining)))
 
 
 @dataclass
@@ -29,6 +67,12 @@ class ScannerRunSpec:
     artifact_paths: list[str] = field(default_factory=list)
     capture_stdout_path: str | None = None
     capture_stderr_path: str | None = None
+    cancel_check: Callable[[], bool] | None = field(default=None, repr=False)
+
+    def to_serializable_dict(self) -> dict:
+        d = asdict(self)
+        d.pop("cancel_check", None)
+        return d
 
 
 @dataclass
@@ -145,7 +189,12 @@ def run_scanner_container_sync(
         container_id = getattr(container, "id", None)
         if container_id and on_container_started is not None:
             on_container_started(container_id)
-        wait_result = container.wait(timeout=max(1, int(spec.timeout_seconds)))
+        wait_result = _poll_container_exit(
+            container,
+            spec.timeout_seconds,
+            cancel_check=spec.cancel_check,
+            scanner_label=spec.scanner_type,
+        )
         exit_code = int((wait_result or {}).get("StatusCode", 1))
         stdout_text = ""
         stderr_text = ""
@@ -169,7 +218,7 @@ def run_scanner_container_sync(
         runner_meta_path.write_text(
             json.dumps(
                 {
-                    "spec": asdict(spec),
+                    "spec": spec.to_serializable_dict(),
                     "runner_command": rewritten_command,
                     "runner_environment": rewritten_env,
                     "workspace_volume": workspace_volume,
@@ -194,12 +243,112 @@ def run_scanner_container_sync(
             stderr_path=captured_stderr_path or retained_stderr_path,
             error=None if exit_code in expected_exit_codes else f"scanner container exited with code {exit_code}",
         )
+    except TimeoutError:
+        error_msg = f"scanner container timed out after {spec.timeout_seconds}s"
+        stdout_text = ""
+        stderr_text = ""
+        if container is not None:
+            try:
+                container.stop(timeout=5)
+            except Exception:
+                pass
+            try:
+                stdout_text = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            try:
+                stderr_text = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+        captured_stdout_path: str | None = None
+        captured_stderr_path: str | None = None
+        if spec.capture_stdout_path and stdout_text:
+            try:
+                captured_stdout_path = _write_full_text(workspace / spec.capture_stdout_path, stdout_text)
+            except Exception:
+                pass
+        retained_stderr_path = _write_retained_log(stderr_log_path, f"{error_msg}\n{stderr_text}")
+        runner_meta_path.write_text(
+            json.dumps(
+                {
+                    "spec": spec.to_serializable_dict(),
+                    "workspace_volume": _scan_workspace_volume(),
+                    "container_id": container_id,
+                    "error": error_msg,
+                    "success": False,
+                    "stdout_path": captured_stdout_path,
+                    "stderr_path": retained_stderr_path,
+                    "log_retention": "timeout",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return ScannerRunResult(
+            success=False,
+            container_id=container_id,
+            exit_code=124,
+            stdout_path=captured_stdout_path,
+            stderr_path=retained_stderr_path,
+            error=error_msg,
+        )
+    except ScannerCancelledError as exc:
+        error_msg = str(exc)
+        stdout_text = ""
+        stderr_text = ""
+        if container is not None:
+            try:
+                container.stop(timeout=5)
+            except Exception:
+                pass
+            try:
+                stdout_text = container.logs(stdout=True, stderr=False).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            try:
+                stderr_text = container.logs(stdout=False, stderr=True).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+        captured_stdout_path: str | None = None
+        captured_stderr_path: str | None = None
+        if spec.capture_stdout_path and stdout_text:
+            try:
+                captured_stdout_path = _write_full_text(workspace / spec.capture_stdout_path, stdout_text)
+            except Exception:
+                pass
+        retained_stderr_path = _write_retained_log(stderr_log_path, f"{error_msg}\n{stderr_text}")
+        runner_meta_path.write_text(
+            json.dumps(
+                {
+                    "spec": spec.to_serializable_dict(),
+                    "workspace_volume": _scan_workspace_volume(),
+                    "container_id": container_id,
+                    "error": error_msg,
+                    "success": False,
+                    "stdout_path": captured_stdout_path,
+                    "stderr_path": retained_stderr_path,
+                    "log_retention": "cancelled",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return ScannerRunResult(
+            success=False,
+            container_id=container_id,
+            exit_code=130,
+            stdout_path=captured_stdout_path,
+            stderr_path=retained_stderr_path,
+            error=error_msg,
+        )
     except DOCKER_EXCEPTION as exc:
         retained_stderr_path = _write_retained_log(stderr_log_path, str(exc))
         runner_meta_path.write_text(
             json.dumps(
                 {
-                    "spec": asdict(spec),
+                    "spec": spec.to_serializable_dict(),
                     "workspace_volume": _scan_workspace_volume(),
                     "container_id": container_id,
                     "error": str(exc),
@@ -226,7 +375,7 @@ def run_scanner_container_sync(
         runner_meta_path.write_text(
             json.dumps(
                 {
-                    "spec": asdict(spec),
+                    "spec": spec.to_serializable_dict(),
                     "workspace_volume": _scan_workspace_volume(),
                     "error": str(exc),
                     "success": False,
