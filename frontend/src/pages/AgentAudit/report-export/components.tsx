@@ -13,7 +13,6 @@ import {
   Zap,
 } from "lucide-react";
 import { getReportExportScoreColor } from "./utils";
-import { summarizeAgentAuditFindings } from "../detailViewModel";
 
 export type ReportFormat = "markdown" | "json" | "pdf";
 
@@ -83,6 +82,35 @@ export const EnhancedStatsPanel = memo(function EnhancedStatsPanel({
   task: AgentTask;
   findings?: AgentFinding[];
 }) {
+  type ManualStatusKey = "pending" | "verified" | "false_positive";
+
+  const normalizeManualStatus = (
+    value: unknown,
+  ): ManualStatusKey => {
+    const status = String(value || "").trim().toLowerCase();
+    if (status === "verified") return "verified";
+    if (status === "false_positive") return "false_positive";
+    return "pending";
+  };
+
+  const summarizeManualStatuses = (
+    rows: AgentFinding[],
+  ): {
+    pending: number;
+    verified: number;
+    false_positive: number;
+  } => {
+    const counts = {
+      pending: 0,
+      verified: 0,
+      false_positive: 0,
+    };
+    for (const row of rows) {
+      counts[normalizeManualStatus(row.manual_status)] += 1;
+    }
+    return counts;
+  };
+
   const expectedTotalFindings = Number(
     task.defect_summary?.total_count ??
       ((task.findings_count || 0) + (task.false_positive_count || 0)),
@@ -90,18 +118,18 @@ export const EnhancedStatsPanel = memo(function EnhancedStatsPanel({
   const hasExhaustiveLiveFindings =
     findings.length > 0 &&
     (expectedTotalFindings <= 0 || findings.length >= expectedTotalFindings);
-  const liveSummary = hasExhaustiveLiveFindings
-    ? summarizeAgentAuditFindings(findings)
+  const liveManualStatusCounts = hasExhaustiveLiveFindings
+    ? summarizeManualStatuses(findings)
     : null;
   const statusCounts = task.defect_summary?.status_counts;
-  const verified = liveSummary
-    ? liveSummary.verifiedCount
+  const verified = liveManualStatusCounts
+    ? liveManualStatusCounts.verified
     : Number(statusCounts?.verified ?? task.verified_count ?? 0);
-  const falsePositive = liveSummary
-    ? liveSummary.falsePositiveCount
+  const falsePositive = liveManualStatusCounts
+    ? liveManualStatusCounts.false_positive
     : Number(statusCounts?.false_positive ?? task.false_positive_count ?? 0);
-  const pending = liveSummary
-    ? liveSummary.statusCounts.pending
+  const pending = liveManualStatusCounts
+    ? liveManualStatusCounts.pending
     : Number(
         statusCounts?.pending ??
           Math.max((task.findings_count || 0) - verified, 0),

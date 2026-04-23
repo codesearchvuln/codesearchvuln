@@ -19,7 +19,7 @@ function renderPanel(props: {
   );
 }
 
-test("EnhancedStatsPanel 优先使用当前 findings 计算导出状态统计", () => {
+test("EnhancedStatsPanel 优先使用当前 findings 的人工状态计算导出状态统计", () => {
   const markup = renderPanel({
     task: {
       verified_count: 1,
@@ -39,31 +39,33 @@ test("EnhancedStatsPanel 优先使用当前 findings 计算导出状态统计", 
       {
         id: "verified-1",
         severity: "high",
-        status: "verified",
+        status: "false_positive",
+        manual_status: "verified",
         is_verified: true,
         verification_progress: "verified",
       },
       {
         id: "pending-1",
         severity: "medium",
-        status: "needs_review",
+        status: "verified",
+        manual_status: "pending",
         is_verified: false,
         verification_progress: "pending",
       },
       {
         id: "fp-1",
         severity: "low",
-        status: "false_positive",
+        status: "verified",
+        manual_status: "false_positive",
         is_verified: false,
         authenticity: "false_positive",
       },
     ],
   });
 
-  assert.match(markup, /待确认/);
-  assert.match(markup, /确报/);
-  assert.match(markup, /误报/);
-  assert.match(markup, />1<\/span>/);
+  assert.match(markup, /待确认[\s\S]*?>1<\/span>/);
+  assert.match(markup, /确报[\s\S]*?>1<\/span>/);
+  assert.match(markup, /误报[\s\S]*?>1<\/span>/);
 });
 
 test("EnhancedStatsPanel 在无 findings 时回退到 defect_summary.status_counts", () => {
