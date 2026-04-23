@@ -8,7 +8,8 @@
 #
 # 本镜像对外暴露端口 5174，nginx 配置内联，不依赖任何外部 nginx.conf。
 # ──────────────────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
+ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+FROM --platform=$BUILDPLATFORM ${DOCKERHUB_LIBRARY_MIRROR}/node:20-alpine AS builder
 WORKDIR /app
 COPY nexus-web/package.json nexus-web/pnpm-lock.yaml ./
 RUN corepack enable && corepack prepare pnpm@10 --activate
@@ -16,7 +17,7 @@ RUN pnpm install --frozen-lockfile
 COPY nexus-web/ ./
 RUN pnpm build
 
-FROM nginx:1.27-alpine AS runtime
+FROM ${DOCKERHUB_LIBRARY_MIRROR}/nginx:1.27-alpine AS runtime
 RUN set -eux; \
     rm -rf /usr/share/nginx/html/*; \
     rm -f /etc/nginx/conf.d/default.conf; \

@@ -169,6 +169,8 @@ services:
     build: !override
       context: .
       dockerfile: docker/nexus-web.Dockerfile
+      args:
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
 
 volumes:
   frontend_node_modules:
