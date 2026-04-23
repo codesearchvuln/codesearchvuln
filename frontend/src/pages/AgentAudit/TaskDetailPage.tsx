@@ -111,11 +111,9 @@ import {
 	toZhAgentName,
 } from "./localization";
 import {
-	fromAgentEvent as agentEventToRealtimeItem,
 	fromAgentFinding as agentFindingToRealtimeItem,
 	normalizeDisplaySeverity,
 } from "./realtimeFindingMapper";
-import { mergeRealtimeFindingsBatch } from "./realtimeFindingMerge";
 import { buildAgentDisplayStageSummary } from "./stageProgress";
 import {
 	buildAgentAuditStreamDisconnectTitle,
@@ -154,7 +152,6 @@ const FINDINGS_REFRESH_INTERVAL = 10000;
 const FINDINGS_PAGE_SIZE = 200;
 const BOOTSTRAP_FINDING_PAGE_SIZE = 200;
 const EVENT_DEDUP_WINDOW_SIZE = 5000;
-const MAX_REALTIME_FINDINGS = 1000;
 const TERMINAL_RECOVERY_MAX_ATTEMPTS = 2;
 const TERMINAL_RECOVERY_RETRY_INTERVAL_MS = 1500;
 const TERMINAL_RECOVERY_DEBOUNCE_MS = 30_000;
@@ -242,16 +239,6 @@ function buildRealtimeQueueSnapshot(
 			resultQueue?.current_size ?? progress?.result_queue?.current_size,
 		),
 	};
-}
-
-function limitRealtimeFindings(
-	items: RealtimeMergedFindingItem[],
-	maxItems = MAX_REALTIME_FINDINGS,
-): RealtimeMergedFindingItem[] {
-	if (items.length <= maxItems) {
-		return items;
-	}
-	return items.slice(items.length - maxItems);
 }
 
 function arePanelLayoutsEqual(current: number[], next: number[]): boolean {
@@ -957,18 +944,11 @@ function AgentAuditPageContent() {
 		() => findings.map(agentFindingToRealtimeItem),
 		[findings],
 	);
-	const isTerminalTask = useMemo(() => {
-		const normalizedTaskStatus = String(task?.status || "")
-			.trim()
-			.toLowerCase();
-		return TERMINAL_STATUSES.has(normalizedTaskStatus);
-	}, [task?.status]);
 	const visibleManagedFindings = useMemo(() => {
-		if (isTerminalTask && persistedFindingRouteItems.length > 0) {
-			return persistedFindingRouteItems;
-		}
-		return realtimeFindings;
-	}, [isTerminalTask, persistedFindingRouteItems, realtimeFindings]);
+		// NOTE: 关闭“实时/历史事件漏洞”前端解析展示，统一仅展示持久化 findings。
+		// 这样可以避免事件态条目（无置信度/不可操作）干扰终态列表。
+		return persistedFindingRouteItems;
+	}, [persistedFindingRouteItems]);
 	const failedReason = useMemo(() => {
 		if (task?.status !== "failed") return null;
 		const reason = terminalFailureReason || task.error_message || "";
@@ -2761,38 +2741,18 @@ function AgentAuditPageContent() {
 				eventType === "finding_verified" ||
 				eventType === "finding_update"
 			) {
-				const normalizedEvent: AgentEvent = {
-					id: toSafeTrimmedString((event as Record<string, unknown>).id),
-					sequence: Number(event.sequence || 0),
-					task_id: "",
-					event_type: eventType,
-					phase: null,
-					message: message || null,
-					metadata: metadata || undefined,
-					tool_name: null,
-					tool_input: undefined,
-					tool_output: undefined,
-					tool_duration_ms: null,
-					finding_id:
-						toSafeTrimmedString(
-							(event as Record<string, unknown>).finding_id,
-						) || null,
-					tokens_used:
-						typeof event.tokens_used === "number"
-							? event.tokens_used
-							: undefined,
-					timestamp: toSafeTrimmedString(event.timestamp) || "",
-				};
-				const mergedFindingItem = agentEventToRealtimeItem(normalizedEvent);
-				if (mergedFindingItem) {
-					setRealtimeFindings((prev) =>
-						limitRealtimeFindings(
-							mergeRealtimeFindingsBatch(prev, [mergedFindingItem], {
-								source: "event",
-							}),
-						),
-					);
-				}
+				// NOTE: 暂停事件态漏洞的前端解析与合并展示（仅保留事件日志）。
+				// const normalizedEvent: AgentEvent = { ... };
+				// const mergedFindingItem = agentEventToRealtimeItem(normalizedEvent);
+				// if (mergedFindingItem) {
+				// 	setRealtimeFindings((prev) =>
+				// 		limitRealtimeFindings(
+				// 			mergeRealtimeFindingsBatch(prev, [mergedFindingItem], {
+				// 				source: "event",
+				// 			}),
+				// 		),
+				// 	);
+				// }
 
 				const findingTitle =
 					sanitizeAuditText(
@@ -3177,20 +3137,21 @@ function AgentAuditPageContent() {
 				}
 
 				ingestTokenEvents(events as UnifiedAgentEvent[]);
-				if (!verifiedFindingsManuallyClearedRef.current) {
-					const findingItems = events
-						.map(agentEventToRealtimeItem)
-						.filter((item): item is RealtimeMergedFindingItem => Boolean(item));
-					if (findingItems.length) {
-						setRealtimeFindings((prev) =>
-							limitRealtimeFindings(
-								mergeRealtimeFindingsBatch(prev, findingItems, {
-									source: "event",
-								}),
-							),
-						);
-					}
-				}
+				// NOTE: 暂停历史事件中的漏洞条目解析，仅回放日志。
+				// if (!verifiedFindingsManuallyClearedRef.current) {
+				// 	const findingItems = events
+				// 		.map(agentEventToRealtimeItem)
+				// 		.filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+				// 	if (findingItems.length) {
+				// 		setRealtimeFindings((prev) =>
+				// 			limitRealtimeFindings(
+				// 				mergeRealtimeFindingsBatch(prev, findingItems, {
+				// 					source: "event",
+				// 				}),
+				// 			),
+				// 		);
+				// 	}
+				// }
 				events.forEach((event) => {
 					appendLogFromEvent(event);
 				});
@@ -3380,16 +3341,17 @@ function AgentAuditPageContent() {
 			}
 
 			ingestTokenEvents(events as UnifiedAgentEvent[]);
-			if (!verifiedFindingsManuallyClearedRef.current) {
-				const findingItems = events
-					.map(agentEventToRealtimeItem)
-					.filter((item): item is RealtimeMergedFindingItem => Boolean(item));
-				if (findingItems.length) {
-					setRealtimeFindings((prev) =>
-						mergeRealtimeFindingsBatch(prev, findingItems, { source: "event" }),
-					);
-				}
-			}
+			// NOTE: 暂停历史事件中的漏洞条目解析，仅回放日志。
+			// if (!verifiedFindingsManuallyClearedRef.current) {
+			// 	const findingItems = events
+			// 		.map(agentEventToRealtimeItem)
+			// 		.filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+			// 	if (findingItems.length) {
+			// 		setRealtimeFindings((prev) =>
+			// 			mergeRealtimeFindingsBatch(prev, findingItems, { source: "event" }),
+			// 		);
+			// 	}
+			// }
 			events.forEach((event) => {
 				appendLogFromEvent(event);
 			});
@@ -3418,21 +3380,21 @@ function AgentAuditPageContent() {
 		void loadBootstrapInputFindings(bootstrapTaskId);
 	}, [bootstrapInputsSummary?.taskId, loadBootstrapInputFindings]);
 
-	// Backfill "potential findings" from DB findings so they persist across reloads.
+	// NOTE: 暂停 DB->realtime 的漏洞镜像合并，漏洞列表直接使用持久化 findings。
 	useEffect(() => {
 		if (!findings.length) return;
-		if (!verifiedFindingsManuallyClearedRef.current) {
-			const items = findings
-				.map(agentFindingToRealtimeItem)
-				.filter((item): item is RealtimeMergedFindingItem => Boolean(item));
-			if (items.length) {
-				setRealtimeFindings((prev) =>
-					limitRealtimeFindings(
-						mergeRealtimeFindingsBatch(prev, items, { source: "db" }),
-					),
-				);
-			}
-		}
+		// if (!verifiedFindingsManuallyClearedRef.current) {
+		// 	const items = findings
+		// 		.map(agentFindingToRealtimeItem)
+		// 		.filter((item): item is RealtimeMergedFindingItem => Boolean(item));
+		// 	if (items.length) {
+		// 		setRealtimeFindings((prev) =>
+		// 			limitRealtimeFindings(
+		// 				mergeRealtimeFindingsBatch(prev, items, { source: "db" }),
+		// 			),
+		// 		);
+		// 	}
+		// }
 	}, [findings]);
 
 	// ============ Stream Event Handling ============
