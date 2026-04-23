@@ -1750,6 +1750,7 @@ async def _save_findings(
                     is_verified=is_verified,
                     ai_confidence=confidence,
                     status=db_status,
+                    manual_status=FindingStatus.NEEDS_REVIEW,
                     verdict=verdict_value,  # 新增：确实的 verdict
                     confidence=confidence_value,  # 新增：规范化的置信度
                     reachability=reachability_value,  # 新增：规范化的可达性
@@ -2153,6 +2154,7 @@ def _serialize_agent_findings(
                         else None
                     ),
                     "status": item.status,
+                    "manual_status": getattr(item, "manual_status", None),
                     "suggestion": item.suggestion,
                     # Backward-compatible for test stubs / older schemas.
                     "fix_code": getattr(item, "fix_code", None),

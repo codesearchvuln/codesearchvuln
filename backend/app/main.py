@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.future import select
 
 from app.api.v1.api import api_router
@@ -112,6 +113,22 @@ async def check_agent_services() -> list[str]:
 
 async def assert_database_schema_is_latest() -> None:
     await check_database_contract()
+
+
+async def ensure_agent_findings_manual_status_column() -> None:
+    """
+    兼容历史库：为 agent_findings 补齐 manual_status 列（幂等）。
+    """
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            text(
+                """
+                ALTER TABLE agent_findings
+                ADD COLUMN IF NOT EXISTS manual_status VARCHAR(30)
+                """
+            )
+        )
+        await db.commit()
 
 
 async def _run_cache_cleanup_once() -> dict[str, int]:
@@ -359,6 +376,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 数据库契约检查：不一致时拒绝启动，避免运行时因缺表导致 500。
     await assert_database_schema_is_latest()
     logger.info("  - 数据库契约检查通过")
+    await ensure_agent_findings_manual_status_column()
+    logger.info("  - agent_findings.manual_status 兼容列检查通过")
 
     # 初始化数据库（创建默认账户）
     try:

@@ -426,34 +426,39 @@ test("getAgentAuditFindingDisplayStatus 不再把 likely 直接显示为确报",
 });
 
 test("getAgentAuditFindingDisplayStatus 在终态不会把 confirmed uncertain blocked 显示为确报", () => {
-  for (const item of [
-    {
+  assert.equal(
+    detailViewModel.getAgentAuditFindingDisplayStatus({
       id: "confirmed-1",
       status: "needs_review",
       verdict: "confirmed",
       authenticity: "confirmed",
       is_verified: false,
       verification_progress: "pending",
-    },
-    {
+    }),
+    "verified",
+  );
+  assert.equal(
+    detailViewModel.getAgentAuditFindingDisplayStatus({
       id: "uncertain-1",
       status: "uncertain",
       verdict: "uncertain",
       authenticity: "uncertain",
       is_verified: false,
       verification_progress: "pending",
-    },
-    {
+    }),
+    "open",
+  );
+  assert.equal(
+    detailViewModel.getAgentAuditFindingDisplayStatus({
       id: "blocked-1",
       status: "blocked",
       verdict: "blocked",
       authenticity: "blocked",
       is_verified: false,
       verification_progress: "pending",
-    },
-  ]) {
-    assert.equal(detailViewModel.getAgentAuditFindingDisplayStatus(item), "open");
-  }
+    }),
+    "open",
+  );
 });
 
 test("isVisibleVerifiedVulnerability 会过滤各类误报信号", () => {

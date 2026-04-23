@@ -252,6 +252,7 @@ class AgentFindingResponse(BaseModel):
     trigger_flow: Optional[dict] = None
     poc_trigger_chain: Optional[dict] = None
     status: str
+    manual_status: Optional[str] = None
     
     suggestion: Optional[str] = None
     fix_code: Optional[str] = None

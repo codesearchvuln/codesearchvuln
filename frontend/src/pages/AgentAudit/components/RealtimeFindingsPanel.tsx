@@ -33,6 +33,7 @@ import {
 	calculateResponsiveFindingsPageSize,
 	buildFindingTableState,
 	getAgentAuditFindingDisplayStatus,
+	getAgentAuditFindingManualDisplayStatus,
 	getAgentAuditFindingStatusBadgeClass,
 	getAgentAuditFindingStatusLabel,
 	isAgentAuditFindingDetailDisabled,
@@ -81,6 +82,7 @@ export type RealtimeMergedFindingItem = {
 	context_start_line?: number | null;
 	context_end_line?: number | null;
 	status?: string | null;
+	manual_status?: string | null;
 	verdict?: string | null;
 	verification_status?: string | null;
 	authenticity?: string | null;
@@ -111,16 +113,6 @@ function readMeasuredHeight(
 	}
 	const measuredHeight = Math.round(element.getBoundingClientRect().height);
 	return measuredHeight > 0 ? measuredHeight : fallback;
-}
-
-function isFalsePositiveFinding(item: RealtimeMergedFindingItem): boolean {
-	return (
-		item.detailMode === "false_positive_reason" ||
-		String(item.authenticity || "")
-			.trim()
-			.toLowerCase() === "false_positive" ||
-		item.display_severity === "invalid"
-	);
 }
 
 function getSeverityBadgeClass(severity: string): string {
@@ -192,7 +184,7 @@ export default function RealtimeFindingsPanel(props: {
 		item: RealtimeMergedFindingItem,
 		target: Exclude<AgentAuditFindingDisplayStatus, "open">,
 	) => void;
-	getDisplayStatus?: (
+	getManualDisplayStatus?: (
 		item: RealtimeMergedFindingItem,
 	) => AgentAuditFindingDisplayStatus;
 }) {
@@ -360,13 +352,6 @@ export default function RealtimeFindingsPanel(props: {
 		updatePagination,
 	]);
 
-	function getActionLabel(item: RealtimeMergedFindingItem): string {
-		if (!props.isRunning && isFalsePositiveFinding(item)) {
-			return "查看判定依据";
-		}
-		return "详情";
-	}
-
 	return (
 		<div className="rounded-xl bg-card/50" style={{ height: "100%" }}>
 			<div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -439,7 +424,10 @@ export default function RealtimeFindingsPanel(props: {
 											<TableHead className="w-[110px]">置信度</TableHead>
 										) : null}
 										<TableHead className="w-[120px] text-center">
-											漏洞状态
+											AI判定结果
+										</TableHead>
+										<TableHead className="w-[120px] text-center">
+											人工判定结果
 										</TableHead>
 										<TableHead className="w-[280px] text-center">
 											操作
@@ -452,10 +440,13 @@ export default function RealtimeFindingsPanel(props: {
 										const detailDisabled = isAgentAuditFindingDetailDisabled(
 											props.isRunning,
 										);
-										const statusValue =
-											props.getDisplayStatus?.(findingItem) ??
-											row.statusValue ??
+										const aiStatusValue =
+											row.aiStatusValue ??
 											getAgentAuditFindingDisplayStatus(findingItem);
+										const manualStatusValue =
+											props.getManualDisplayStatus?.(findingItem) ??
+											row.manualStatusValue ??
+											getAgentAuditFindingManualDisplayStatus(findingItem);
 										const rowUpdatePrefix = `${findingItem.id}:`;
 										const rowStatusUpdating = Boolean(
 											props.updatingKey?.startsWith(rowUpdatePrefix),
@@ -507,10 +498,20 @@ export default function RealtimeFindingsPanel(props: {
 													<Badge
 														variant="outline"
 														className={`text-[11px] ${getAgentAuditFindingStatusBadgeClass(
-															statusValue,
+															aiStatusValue,
 														)}`}
 													>
-														{getAgentAuditFindingStatusLabel(statusValue)}
+														{getAgentAuditFindingStatusLabel(aiStatusValue)}
+													</Badge>
+												</TableCell>
+												<TableCell className="py-3 text-center">
+													<Badge
+														variant="outline"
+														className={`text-[11px] ${getAgentAuditFindingStatusBadgeClass(
+															manualStatusValue,
+														)}`}
+													>
+														{getAgentAuditFindingStatusLabel(manualStatusValue)}
 													</Badge>
 												</TableCell>
 												<TableCell className="py-3 text-center">
@@ -531,19 +532,19 @@ export default function RealtimeFindingsPanel(props: {
 																props.onOpenDetail(findingItem);
 															}}
 														>
-															{getActionLabel(findingItem)}
+															详情
 														</Button>
 														<Button
 															type="button"
 															size="sm"
 															variant="outline"
 															className={
-																statusValue === "verified"
+																manualStatusValue === "verified"
 																	? ACTIVE_TRUE_BUTTON_CLASS
 																	: IDLE_TRUE_BUTTON_CLASS
 															}
 															disabled={rowStatusUpdating}
-															aria-pressed={statusValue === "verified"}
+															aria-pressed={manualStatusValue === "verified"}
 															onClick={() =>
 																props.onToggleStatus?.(findingItem, "verified")
 															}
@@ -559,12 +560,12 @@ export default function RealtimeFindingsPanel(props: {
 															size="sm"
 															variant="outline"
 															className={
-																statusValue === "false_positive"
+																manualStatusValue === "false_positive"
 																	? ACTIVE_FALSE_BUTTON_CLASS
 																	: IDLE_FALSE_BUTTON_CLASS
 															}
 															disabled={rowStatusUpdating}
-															aria-pressed={statusValue === "false_positive"}
+															aria-pressed={manualStatusValue === "false_positive"}
 															onClick={() =>
 																props.onToggleStatus?.(
 																	findingItem,

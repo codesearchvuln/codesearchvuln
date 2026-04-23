@@ -758,19 +758,37 @@ def _resolve_report_export_finding_verdict(finding_row: AgentFinding) -> str:
     )
 
 
+def _resolve_report_export_finding_authenticity(finding_row: AgentFinding) -> str:
+    verification_payload = (
+        getattr(finding_row, "verification_result", None)
+        if isinstance(getattr(finding_row, "verification_result", None), dict)
+        else {}
+    )
+    return _normalize_export_finding_token(
+        verification_payload.get("authenticity")
+        or verification_payload.get("verdict")
+        or getattr(finding_row, "verdict", None)
+    )
+
+
 def _resolve_report_export_status(finding_row: AgentFinding) -> Optional[str]:
     normalized_status = _resolve_report_export_finding_status(finding_row)
     normalized_verdict = _resolve_report_export_finding_verdict(finding_row)
+    normalized_authenticity = _resolve_report_export_finding_authenticity(finding_row)
 
     if normalized_status in {FindingStatus.FIXED, FindingStatus.WONT_FIX, FindingStatus.DUPLICATE}:
         return None
-    if normalized_status == FindingStatus.FALSE_POSITIVE:
+    if (
+        normalized_verdict == "false_positive"
+        or normalized_authenticity == "false_positive"
+        or normalized_status == FindingStatus.FALSE_POSITIVE
+    ):
         return FindingStatus.FALSE_POSITIVE
-    if normalized_verdict == "false_positive":
-        return FindingStatus.FALSE_POSITIVE
-    if normalized_status == FindingStatus.VERIFIED:
-        return FindingStatus.VERIFIED
-    if normalized_verdict == "confirmed":
+    if (
+        normalized_verdict == "confirmed"
+        or normalized_authenticity == "confirmed"
+        or normalized_status == FindingStatus.VERIFIED
+    ):
         return FindingStatus.VERIFIED
     if normalized_status in {
         FindingStatus.NEW,
@@ -780,12 +798,26 @@ def _resolve_report_export_status(finding_row: AgentFinding) -> Optional[str]:
         FindingStatus.UNCERTAIN,
     }:
         return "pending"
-    if normalized_verdict in {"likely", "uncertain"}:
+    if normalized_verdict in {"likely", "uncertain"} or normalized_authenticity in {"likely", "uncertain"}:
         return "pending"
     if normalized_status in {"open", "pending"}:
         return "pending"
-    if bool(getattr(finding_row, "is_verified", False)):
+    return "pending"
+
+
+def _resolve_report_export_manual_status(finding_row: AgentFinding) -> str:
+    verification_payload = (
+        getattr(finding_row, "verification_result", None)
+        if isinstance(getattr(finding_row, "verification_result", None), dict)
+        else {}
+    )
+    raw_status = _normalize_export_finding_token(
+        getattr(finding_row, "manual_status", None) or verification_payload.get("manual_status")
+    )
+    if raw_status == FindingStatus.VERIFIED:
         return FindingStatus.VERIFIED
+    if raw_status == FindingStatus.FALSE_POSITIVE:
+        return FindingStatus.FALSE_POSITIVE
     return "pending"
 
 
@@ -1168,7 +1200,15 @@ def _build_finding_markdown_report(
     )
     authenticity = _get_report_export_authenticity_label(finding_data.get("authenticity"))
     reachability = _get_report_export_reachability_label(finding_data.get("reachability"))
-    status_label = str(finding_data.get("status_label") or "").strip()
+    ai_status_label = str(
+        finding_data.get("ai_result_label")
+        or finding_data.get("status_label")
+        or ""
+    ).strip()
+    manual_status_label = str(
+        finding_data.get("manual_result_label")
+        or ""
+    ).strip()
 
     sections.append(f"# 漏洞详情报告：{_render_markdown_heading_text(title)}")
     sections.append("")
@@ -1177,8 +1217,10 @@ def _build_finding_markdown_report(
 
     sections.append("## 漏洞概览")
     sections.append("")
-    if status_label:
-        sections.append(f"- **状态:** {_escape_markdown_inline(status_label)}")
+    if ai_status_label:
+        sections.append(f"- **AI判定结果:** {_escape_markdown_inline(ai_status_label)}")
+    if manual_status_label:
+        sections.append(f"- **人工判定结果:** {_escape_markdown_inline(manual_status_label)}")
     sections.append(f"- **严重程度:** {severity}")
     sections.append(f"- **漏洞类型:** {_escape_markdown_inline(vuln_type)}")
     sections.append(f"- **真实性判定:** {_escape_markdown_inline(authenticity)}")
@@ -1295,17 +1337,27 @@ def _build_finding_payload_from_row(
     confidence = getattr(finding_row, "confidence", None)
     if confidence is None:
         confidence = getattr(finding_row, "ai_confidence", None)
-    authenticity = getattr(finding_row, "verdict", None)
+    authenticity = (
+        getattr(finding_row, "verdict", None)
+        or verification_payload.get("authenticity")
+        or verification_payload.get("verdict")
+    )
     if not authenticity:
-        authenticity = "verified" if bool(getattr(finding_row, "is_verified", False)) else "unknown"
+        authenticity = "unknown"
+    manual_status = _resolve_report_export_manual_status(finding_row)
 
     return {
         "display_title": (
             report_descriptions.get(finding_id, {}).get("display_title")
             or getattr(finding_row, "title", None)
         ),
+        # Backward-compatible fields: status/status_label now represent AI 判定结果
         "status": export_status,
         "status_label": _get_report_export_status_label(export_status),
+        "ai_result": export_status,
+        "ai_result_label": _get_report_export_status_label(export_status),
+        "manual_result": manual_status,
+        "manual_result_label": _get_report_export_status_label(manual_status),
         "title": getattr(finding_row, "title", None),
         "severity": getattr(finding_row, "severity", None),
         "vulnerability_type": getattr(finding_row, "vulnerability_type", None),
@@ -1804,11 +1856,11 @@ def _build_task_export_markdown(
     ]
     finding_index = 1
 
-    for export_status, section_title in section_order:
+    for manual_status, section_title in section_order:
         section_findings = [
             finding_row
             for finding_row in findings
-            if export_statuses.get(str(getattr(finding_row, "id", "") or ""), "pending") == export_status
+            if _resolve_report_export_manual_status(finding_row) == manual_status
         ]
         if not section_findings:
             continue
@@ -1817,26 +1869,23 @@ def _build_task_export_markdown(
         lines.append("")
 
         for finding_row in section_findings:
-            finding_report = None
-            if (
-                _uses_default_report_export_options(export_options)
-                and export_status == FindingStatus.VERIFIED
-            ):
-                finding_report = _normalize_optional_text(getattr(finding_row, "report", None))
-            if not finding_report:
-                finding_payload = _build_finding_payload_from_row(
-                    finding_row,
-                    report_descriptions,
-                    export_status=export_status,
-                    export_options=export_options,
-                )
-                finding_report = _build_finding_markdown_report(
-                    task=task,
-                    project=project,
-                    finding_id=str(getattr(finding_row, "id", "") or ""),
-                    finding_data=finding_payload,
-                    export_options=export_options,
-                )
+            finding_export_status = export_statuses.get(
+                str(getattr(finding_row, "id", "") or ""),
+                "pending",
+            )
+            finding_payload = _build_finding_payload_from_row(
+                finding_row,
+                report_descriptions,
+                export_status=finding_export_status,
+                export_options=export_options,
+            )
+            finding_report = _build_finding_markdown_report(
+                task=task,
+                project=project,
+                finding_id=str(getattr(finding_row, "id", "") or ""),
+                finding_data=finding_payload,
+                export_options=export_options,
+            )
             finding_report = _normalize_embedded_markdown(
                 finding_report,
                 title_patterns=[
@@ -2091,9 +2140,18 @@ async def generate_audit_report(
             "findings": [
                 {
                     "id": f.id,
+                    # Backward-compatible status fields now map to AI 判定结果
                     "status": export_statuses.get(str(f.id), "pending"),
                     "status_label": _get_report_export_status_label(
                         export_statuses.get(str(f.id), "pending")
+                    ),
+                    "ai_result": export_statuses.get(str(f.id), "pending"),
+                    "ai_result_label": _get_report_export_status_label(
+                        export_statuses.get(str(f.id), "pending")
+                    ),
+                    "manual_result": _resolve_report_export_manual_status(f),
+                    "manual_result_label": _get_report_export_status_label(
+                        _resolve_report_export_manual_status(f)
                     ),
                     "finding_identity": (
                         getattr(f, "finding_identity", None)
@@ -2309,10 +2367,9 @@ async def generate_audit_report(
                     str(getattr(f, "id", "") or ""),
                     "pending",
                 )
-                verified_badge = (
-                    "[已验证]"
-                    if export_status == FindingStatus.VERIFIED
-                    else "[未验证]"
+                ai_status_label = _get_report_export_status_label(export_status)
+                manual_status_label = _get_report_export_status_label(
+                    _resolve_report_export_manual_status(f)
                 )
                 poc_badge = " [含 PoC 参考]" if f.has_poc else ""
 
@@ -2321,7 +2378,7 @@ async def generate_audit_report(
                 )
                 md_lines.append("")
                 md_lines.append(
-                    f"**{verified_badge}**{poc_badge} | 类型: {_render_markdown_code_span(f.vulnerability_type)}"
+                    f"**AI判定结果: {ai_status_label}｜人工判定结果: {manual_status_label}**{poc_badge} | 类型: {_render_markdown_code_span(f.vulnerability_type)}"
                 )
                 md_lines.append("")
 

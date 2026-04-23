@@ -91,13 +91,16 @@ async def test_update_finding_status_marks_finding_verified_and_recomputes_task_
     )
 
     assert result["status"] == FindingStatus.VERIFIED
-    assert finding.status == FindingStatus.VERIFIED
+    assert result["manual_status"] == FindingStatus.VERIFIED
+    assert finding.manual_status == FindingStatus.VERIFIED
+    assert finding.status == FindingStatus.NEEDS_REVIEW
     assert finding.is_verified is True
     assert finding.verified_at is not None
-    assert finding.verdict == "confirmed"
-    assert finding.verification_result["status"] == FindingStatus.VERIFIED
-    assert finding.verification_result["authenticity"] == "confirmed"
-    assert finding.verification_result["verdict"] == "confirmed"
+    assert finding.verdict == "likely"
+    assert finding.verification_result["status"] == FindingStatus.NEEDS_REVIEW
+    assert finding.verification_result["authenticity"] == "likely"
+    assert finding.verification_result["verdict"] == "likely"
+    assert finding.verification_result["manual_status"] == FindingStatus.VERIFIED
     assert task.findings_count == 1
     assert task.verified_count == 1
     assert task.false_positive_count == 0
@@ -160,17 +163,20 @@ async def test_update_finding_status_marks_finding_false_positive_and_hides_it_f
     )
 
     assert result["status"] == FindingStatus.FALSE_POSITIVE
-    assert finding.status == FindingStatus.FALSE_POSITIVE
+    assert result["manual_status"] == FindingStatus.FALSE_POSITIVE
+    assert finding.manual_status == FindingStatus.FALSE_POSITIVE
+    assert finding.status == FindingStatus.NEEDS_REVIEW
     assert finding.is_verified is False
     assert finding.verified_at is None
-    assert finding.verdict == "false_positive"
-    assert finding.verification_result["status"] == FindingStatus.FALSE_POSITIVE
-    assert finding.verification_result["authenticity"] == "false_positive"
-    assert finding.verification_result["verdict"] == "false_positive"
-    assert task.findings_count == 0
+    assert finding.verdict == "confirmed"
+    assert finding.verification_result["status"] == FindingStatus.NEEDS_REVIEW
+    assert finding.verification_result["authenticity"] == "confirmed"
+    assert finding.verification_result["verdict"] == "confirmed"
+    assert finding.verification_result["manual_status"] == FindingStatus.FALSE_POSITIVE
+    assert task.findings_count == 1
     assert task.verified_count == 0
-    assert task.false_positive_count == 1
-    assert task.medium_count == 0
+    assert task.false_positive_count == 0
+    assert task.medium_count == 1
 
 
 @pytest.mark.asyncio
@@ -238,8 +244,9 @@ async def test_update_finding_status_is_reflected_in_followup_report_export_json
     )
 
     assert result["status"] == FindingStatus.FALSE_POSITIVE
-    assert task.findings_count == 0
-    assert task.false_positive_count == 1
+    assert result["manual_status"] == FindingStatus.FALSE_POSITIVE
+    assert task.findings_count == 1
+    assert task.false_positive_count == 0
 
     report_db = AsyncMock()
     report_db.get = AsyncMock(
@@ -258,8 +265,10 @@ async def test_update_finding_status_is_reflected_in_followup_report_export_json
     )
 
     assert payload["summary"]["status_distribution"] == {
-        "pending": 0,
+        "pending": 1,
         "verified": 0,
-        "false_positive": 1,
+        "false_positive": 0,
     }
-    assert payload["summary"]["false_positive_findings"] == 1
+    assert payload["summary"]["false_positive_findings"] == 0
+    assert payload["findings"][0]["ai_result"] == "pending"
+    assert payload["findings"][0]["manual_result"] == FindingStatus.FALSE_POSITIVE

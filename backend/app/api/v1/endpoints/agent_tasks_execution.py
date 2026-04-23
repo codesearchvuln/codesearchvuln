@@ -925,17 +925,19 @@ async def _execute_agent_task(task_id: str):
                             or ""
                         ).strip().lower()
                         verdict_for_state = str(finding_row.verdict or "").strip().lower()
-                        current_manual_status = str(
-                            finding_row.status or ""
-                        ).strip().lower()
                         if (
-                            current_manual_status == FindingStatus.FALSE_POSITIVE
-                            or status_for_state
+                            status_for_state
                             in {"false_positive", "false-positive", "not_vulnerable", "not_exists"}
                             or verdict_for_state == "false_positive"
                         ):
                             finding_row.status = FindingStatus.FALSE_POSITIVE
-                        elif current_manual_status == FindingStatus.VERIFIED:
+                        elif status_for_state in {
+                            FindingStatus.VERIFIED,
+                            "confirmed",
+                            "true_positive",
+                            "exists",
+                            "vulnerable",
+                        } or verdict_for_state == "confirmed":
                             finding_row.status = FindingStatus.VERIFIED
                         else:
                             finding_row.status = FindingStatus.NEEDS_REVIEW

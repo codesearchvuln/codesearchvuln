@@ -320,17 +320,19 @@ def test_build_finding_markdown_report_hides_verifier_prefixed_verification_evid
     assert "verifier=Verification" not in report
 
 
-def test_build_task_export_markdown_groups_findings_for_pdf_outline():
+def test_build_task_export_markdown_groups_findings_by_manual_status_for_pdf_outline():
     task = _make_task(task_id="task-1", report="项目报告正文")
     project = SimpleNamespace(id="project-1", name="Demo")
     verified_finding = _make_finding(
         id="finding-verified",
         title="Verified Finding",
+        manual_status=reporting_endpoint.FindingStatus.VERIFIED,
         report="# 漏洞报告：Verified Finding\n\n## 漏洞概览\n\n概览正文\n\n## 修复建议\n\n尽快修复",
     )
     pending_finding = _make_finding(
         id="finding-pending",
         title="Pending Finding",
+        manual_status="pending",
         is_verified=False,
         verdict="uncertain",
         report=None,
@@ -338,6 +340,7 @@ def test_build_task_export_markdown_groups_findings_for_pdf_outline():
     false_positive_finding = _make_finding(
         id="finding-fp",
         title="False Positive Finding",
+        manual_status=reporting_endpoint.FindingStatus.FALSE_POSITIVE,
         is_verified=False,
         verdict="false_positive",
         report=None,
@@ -349,9 +352,11 @@ def test_build_task_export_markdown_groups_findings_for_pdf_outline():
         findings=[verified_finding, pending_finding, false_positive_finding],
         report_descriptions={},
         export_statuses={
-            "finding-verified": "verified",
-            "finding-pending": "pending",
-            "finding-fp": reporting_endpoint.FindingStatus.FALSE_POSITIVE,
+            # Deliberately set AI and manual status to different values to ensure
+            # section grouping follows manual_status rather than AI export status.
+            "finding-verified": "pending",
+            "finding-pending": "verified",
+            "finding-fp": "verified",
         },
         project_report_fallback="# 项目风险评估报告：Demo\n\n项目报告正文",
         export_options=reporting_endpoint.DEFAULT_REPORT_EXPORT_OPTIONS,
@@ -361,7 +366,6 @@ def test_build_task_export_markdown_groups_findings_for_pdf_outline():
     verified_group_idx = markdown.find("\n### 确报\n")
     verified_finding_idx = markdown.find("\n#### 漏洞报告 1: Verified Finding\n")
     overview_idx = markdown.find("\n##### 漏洞概览\n")
-    remediation_idx = markdown.find("\n##### 修复建议\n")
     pending_group_idx = markdown.find("\n### 待确认\n")
     pending_finding_idx = markdown.find("\n#### 漏洞报告 2: Pending Finding\n")
     false_positive_group_idx = markdown.find("\n### 误报\n")
@@ -371,7 +375,6 @@ def test_build_task_export_markdown_groups_findings_for_pdf_outline():
     assert verified_group_idx != -1
     assert verified_finding_idx != -1
     assert overview_idx != -1
-    assert remediation_idx != -1
     assert pending_group_idx != -1
     assert pending_finding_idx != -1
     assert false_positive_group_idx != -1
@@ -381,14 +384,15 @@ def test_build_task_export_markdown_groups_findings_for_pdf_outline():
         < verified_group_idx
         < verified_finding_idx
         < overview_idx
-        < remediation_idx
         < pending_group_idx
         < pending_finding_idx
         < false_positive_group_idx
         < false_positive_finding_idx
     )
+    assert "概览正文" not in markdown
+    assert "- **AI判定结果:** 待确认" in markdown
+    assert "- **人工判定结果:** 确报" in markdown
     assert "\n#### 漏洞概览\n" not in markdown
-    assert "\n#### 修复建议\n" not in markdown
 
 
 def test_build_project_report_fallback_formats_risk_overview_as_nested_lists():

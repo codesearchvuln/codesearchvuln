@@ -64,6 +64,8 @@ function mergeDuplicateFindingEntry(
   secondary: RealtimeMergedFindingItem,
 ): RealtimeMergedFindingItem {
   const mergedStatus = primary.status ?? secondary.status ?? null;
+  const mergedManualStatus =
+    primary.manual_status ?? secondary.manual_status ?? null;
   const mergedVerificationStatus =
     primary.verification_status ?? secondary.verification_status ?? null;
   const verificationProgress =
@@ -94,6 +96,7 @@ function mergeDuplicateFindingEntry(
     display_severity: falsePositiveState.displaySeverity,
     verification_progress: verificationProgress,
     status: mergedStatus,
+    manual_status: mergedManualStatus,
     verification_status: mergedVerificationStatus,
     authenticity: mergedAuthenticity,
     detailMode: falsePositiveState.detailMode,
@@ -131,6 +134,9 @@ export function mergeRealtimeFindingsBatch(
     const mergedStatus = preferIncoming
       ? (item.status ?? existing.status ?? null)
       : (existing.status ?? item.status ?? null);
+    const mergedManualStatus = preferIncoming
+      ? (item.manual_status ?? existing.manual_status ?? null)
+      : (existing.manual_status ?? item.manual_status ?? null);
     const mergedVerificationStatus = preferIncoming
       ? (item.verification_status ?? existing.verification_status ?? null)
       : (existing.verification_status ?? item.verification_status ?? null);
@@ -198,6 +204,7 @@ export function mergeRealtimeFindingsBatch(
         ? (item.cwe_id ?? existing.cwe_id)
         : (existing.cwe_id ?? item.cwe_id),
       status: mergedStatus,
+      manual_status: mergedManualStatus,
       verification_status: mergedVerificationStatus,
       code_snippet: preferIncoming
         ? (item.code_snippet ?? existing.code_snippet)

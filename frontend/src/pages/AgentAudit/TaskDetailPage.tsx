@@ -96,6 +96,7 @@ import {
 	buildStatsSummary,
 	createTokenUsageAccumulator,
 	getAgentAuditFindingDisplayStatus,
+	getAgentAuditFindingManualDisplayStatus,
 	isFalsePositiveFinding,
 	readAgentAuditFindingsPagination,
 	resolveAgentFindingDetailId,
@@ -112,7 +113,6 @@ import {
 } from "./localization";
 import {
 	fromAgentFinding as agentFindingToRealtimeItem,
-	normalizeDisplaySeverity,
 } from "./realtimeFindingMapper";
 import { buildAgentDisplayStageSummary } from "./stageProgress";
 import {
@@ -648,9 +648,10 @@ function toSafeTrimmedString(value: unknown): string {
 }
 
 function toDialogFinding(item: RealtimeMergedFindingItem): AgentFinding {
-	const displayStatus = getAgentAuditFindingDisplayStatus(item);
-	const falsePositive = displayStatus === "false_positive";
-	const isVerified = displayStatus === "verified";
+	const aiStatus = getAgentAuditFindingDisplayStatus(item);
+	const manualStatus = getAgentAuditFindingManualDisplayStatus(item);
+	const falsePositive = aiStatus === "false_positive";
+	const isVerified = manualStatus === "verified";
 	return {
 		id: item.id,
 		task_id: "",
@@ -670,17 +671,19 @@ function toDialogFinding(item: RealtimeMergedFindingItem): AgentFinding {
 		context_end_line: item.context_end_line ?? null,
 		status: falsePositive
 			? "false_positive"
-			: isVerified
+			: aiStatus === "verified"
 				? "verified"
 				: "pending",
+		manual_status:
+			manualStatus === "false_positive"
+				? "false_positive"
+				: manualStatus === "verified"
+					? "verified"
+					: "needs_review",
 		is_verified: isVerified,
-		verdict: falsePositive
-			? "false_positive"
-			: (item.verdict ?? item.authenticity ?? null),
+		verdict: item.verdict ?? item.authenticity ?? null,
 		reachability: null,
-		authenticity: falsePositive
-			? "false_positive"
-			: (item.authenticity ?? null),
+		authenticity: item.authenticity ?? null,
 		verification_evidence: item.verification_evidence ?? null,
 		verification_todo_id: item.verification_todo_id ?? null,
 		verification_fingerprint: item.verification_fingerprint ?? null,
@@ -707,20 +710,8 @@ function applyManualStatusToPersistedFinding(
 ): AgentFinding {
 	return {
 		...finding,
-		status: target,
+		manual_status: target,
 		is_verified: target === "verified",
-		verdict:
-			target === "false_positive"
-				? "false_positive"
-				: target === "verified"
-					? "confirmed"
-					: (finding.verdict ?? null),
-		authenticity:
-			target === "false_positive"
-				? "false_positive"
-				: target === "verified"
-					? "confirmed"
-					: (finding.authenticity ?? null),
 	};
 }
 
@@ -728,27 +719,10 @@ function applyManualStatusToRealtimeFinding(
 	item: RealtimeMergedFindingItem,
 	target: Exclude<AgentAuditFindingDisplayStatus, "open">,
 ): RealtimeMergedFindingItem {
-	const falsePositive = target === "false_positive";
 	return {
 		...item,
-		status: target,
-		verdict:
-			target === "false_positive"
-				? "false_positive"
-				: target === "verified"
-					? "confirmed"
-					: (item.verdict ?? item.authenticity ?? null),
-		authenticity: falsePositive
-			? "false_positive"
-			: target === "verified"
-				? "confirmed"
-				: null,
+		manual_status: target,
 		is_verified: target === "verified",
-		verification_progress: target === "verified" ? "verified" : "pending",
-		display_severity: falsePositive
-			? "invalid"
-			: normalizeDisplaySeverity(item.severity, false),
-		detailMode: falsePositive ? "false_positive_reason" : "detail",
 	};
 }
 

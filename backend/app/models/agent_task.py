@@ -369,6 +369,8 @@ class AgentFinding(Base):
     
     # 验证信息
     status = Column(String(30), default=FindingStatus.NEW, index=True)
+    # 人工判定状态（与 AI status 解耦）
+    manual_status = Column(String(30), nullable=True, index=True)
     is_verified = Column(Boolean, default=False)
     verification_method = Column(Text, nullable=True)
     verification_result = Column(JSON, nullable=True)

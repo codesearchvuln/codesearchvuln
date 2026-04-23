@@ -141,11 +141,14 @@ def _compute_result_queue_stats(findings: List[AgentFinding]) -> Dict[str, int]:
 
     for finding in findings:
         normalized_status = str(getattr(finding, "status", "") or "").strip().lower()
+        normalized_manual_status = str(
+            getattr(finding, "manual_status", "") or ""
+        ).strip().lower()
         if normalized_status == FindingStatus.FALSE_POSITIVE:
             continue
 
         is_verified = bool(getattr(finding, "is_verified", False)) or _is_manually_verified_status(
-            normalized_status
+            normalized_manual_status or normalized_status
         )
         if not is_verified:
             continue
@@ -636,31 +639,19 @@ async def update_finding_status(
         raise HTTPException(status_code=404, detail="发现不存在")
     
     normalized_status = _normalize_manual_finding_status(status)
-    finding.status = normalized_status
+    finding.manual_status = normalized_status
     finding.is_verified = normalized_status == FindingStatus.VERIFIED
     finding.verified_at = (
         datetime.now(timezone.utc)
         if normalized_status == FindingStatus.VERIFIED
         else None
     )
-    if normalized_status == FindingStatus.VERIFIED:
-        finding.verdict = "confirmed"
-    elif normalized_status == FindingStatus.FALSE_POSITIVE:
-        finding.verdict = "false_positive"
-
     verification_result = (
         dict(finding.verification_result)
         if isinstance(finding.verification_result, dict)
         else {}
     )
-    verification_result["status"] = normalized_status
-    verification_result["verification_stage_completed"] = True
-    if normalized_status == FindingStatus.VERIFIED:
-        verification_result["authenticity"] = "confirmed"
-        verification_result["verdict"] = "confirmed"
-    elif normalized_status == FindingStatus.FALSE_POSITIVE:
-        verification_result["authenticity"] = "false_positive"
-        verification_result["verdict"] = "false_positive"
+    verification_result["manual_status"] = normalized_status
     finding.verification_result = verification_result
 
     await _recompute_task_finding_counters(db, task)
@@ -670,6 +661,8 @@ async def update_finding_status(
     return {
         "message": "状态已更新",
         "finding_id": finding_id,
+        "manual_status": normalized_status,
+        # backward-compatible field
         "status": normalized_status,
     }
 

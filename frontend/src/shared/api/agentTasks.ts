@@ -170,6 +170,7 @@ export interface AgentFinding {
   context_end_line: number | null;
 
   status: string;
+  manual_status?: string | null;
   is_verified: boolean;
   verdict?: string | null;
   reachability: string | null;
@@ -309,6 +310,7 @@ export interface AgentFindingStatusUpdateResponse {
   message: string;
   finding_id: string;
   status: string;
+  manual_status?: string;
 }
 
 // ============ API Functions ============

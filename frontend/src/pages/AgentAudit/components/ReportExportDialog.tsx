@@ -147,6 +147,7 @@ export const ReportExportDialog = memo(function ReportExportDialog({
           [
             finding.id,
             finding.status ?? "",
+            finding.manual_status ?? "",
             finding.verdict ?? "",
             finding.authenticity ?? "",
             finding.is_verified ? "1" : "0",

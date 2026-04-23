@@ -33,6 +33,7 @@ export interface RealtimeFindingLike {
   verification_fingerprint?: string | null;
   timestamp?: string | null;
   status?: string | null;
+  manual_status?: string | null;
   verification_status?: string | null;
   verdict?: string | null;
   authenticity?: string | null;
@@ -205,9 +206,12 @@ export interface FindingTableRow {
   confidence: number | null;
   confidenceLabel: string | null;
   confidenceScore: number;
-  statusValue: AgentAuditFindingDisplayStatus;
-  statusLabel: string;
-  statusClassName: string;
+  aiStatusValue: AgentAuditFindingDisplayStatus;
+  aiStatusLabel: string;
+  aiStatusClassName: string;
+  manualStatusValue: AgentAuditFindingDisplayStatus;
+  manualStatusLabel: string;
+  manualStatusClassName: string;
   filePath: string;
   line: number | null;
   location: string;
@@ -499,7 +503,7 @@ export function resolveAgentFindingDetailId(input: {
 }
 
 export function isFalsePositiveFinding(item: RealtimeFindingLike): boolean {
-  return normalizeFindingStatusToken(item.status) === "false_positive";
+  return getAgentAuditFindingDisplayStatus(item) === "false_positive";
 }
 
 export function isVerifiedFinding(item: RealtimeFindingLike): boolean {
@@ -617,9 +621,22 @@ export function isVisibleManagedFinding(item: RealtimeFindingLike): boolean {
 export function getAgentAuditFindingDisplayStatus(
   item: RealtimeFindingLike,
 ): AgentAuditFindingDisplayStatus {
+  const verdict = normalizeFindingStatusToken(item.verdict || item.authenticity);
+  if (verdict === "false_positive") return "false_positive";
+  if (verdict === "confirmed") return "verified";
+  if (verdict === "likely" || verdict === "uncertain") return "open";
   const status = normalizeFindingStatusToken(item.status);
   if (status === "false_positive") return "false_positive";
   if (status === "verified") return "verified";
+  return "open";
+}
+
+export function getAgentAuditFindingManualDisplayStatus(
+  item: RealtimeFindingLike,
+): AgentAuditFindingDisplayStatus {
+  const manualStatus = normalizeFindingStatusToken(item.manual_status);
+  if (manualStatus === "false_positive") return "false_positive";
+  if (manualStatus === "verified") return "verified";
   return "open";
 }
 
@@ -863,7 +880,8 @@ function buildFindingRow(item: RealtimeFindingLike): FindingTableRow {
     typeof item.confidence === "number" && Number.isFinite(item.confidence)
       ? item.confidence
       : null;
-  const statusValue = getAgentAuditFindingDisplayStatus(item);
+  const aiStatusValue = getAgentAuditFindingDisplayStatus(item);
+  const manualStatusValue = getAgentAuditFindingManualDisplayStatus(item);
   const filePath = String(item.file_path || "").trim() || "-";
   const line = toPositiveNumberOrNull(item.line_start);
   const title = String(item.display_title || item.title || "未命名漏洞").trim() || "未命名漏洞";
@@ -879,9 +897,12 @@ function buildFindingRow(item: RealtimeFindingLike): FindingTableRow {
     confidence,
     confidenceLabel: getConfidenceLabel(confidence),
     confidenceScore: getConfidenceScore(confidence),
-    statusValue,
-    statusLabel: getAgentAuditFindingStatusLabel(statusValue),
-    statusClassName: getAgentAuditFindingStatusBadgeClass(statusValue),
+    aiStatusValue,
+    aiStatusLabel: getAgentAuditFindingStatusLabel(aiStatusValue),
+    aiStatusClassName: getAgentAuditFindingStatusBadgeClass(aiStatusValue),
+    manualStatusValue,
+    manualStatusLabel: getAgentAuditFindingStatusLabel(manualStatusValue),
+    manualStatusClassName: getAgentAuditFindingStatusBadgeClass(manualStatusValue),
     filePath,
     line,
     location: getLocation(item),
