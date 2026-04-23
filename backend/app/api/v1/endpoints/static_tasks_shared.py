@@ -2,8 +2,8 @@ import asyncio
 import json
 import logging
 import os
-import signal
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -26,9 +26,9 @@ from app.services.backend_venv import (
     build_backend_venv_env,
     resolve_backend_venv_executable,
 )
-from app.services.yasa_runtime_config import get_cached_global_yasa_runtime_config
 from app.services.llm.service import LLMConfigError, LLMService
 from app.services.scanner_runner import stop_scanner_container_sync
+from app.services.yasa_runtime_config import get_cached_global_yasa_runtime_config
 
 logger = logging.getLogger(__name__)
 SCAN_PROGRESS_MAX_LOGS = 120
@@ -83,10 +83,59 @@ def cleanup_scan_workspace(scan_type: str, task_id: str) -> None:
 
 
 _CORE_AUDIT_EXCLUDE_PATTERNS: List[str] = [
+    # 测试相关
     "test/**",
     "tests/**",
     "**/test/**",
     "**/tests/**",
+    "spec/**",
+    "specs/**",
+    "**/spec/**",
+    "**/specs/**",
+    "integration_tests/**",
+    "**/integration_tests/**",
+    "e2e/**",
+    "**/e2e/**",
+    "__tests__/**",
+    "**/__tests__/**",
+    # Fuzz 测试相关
+    "fuzz/**",
+    "**/fuzz/**",
+    "fuzzing/**",
+    "**/fuzzing/**",
+    "fuzzers/**",
+    "**/fuzzers/**",
+    "fuzz_tests/**",
+    "**/fuzz_tests/**",
+    "__fuzz__/**",
+    "**/__fuzz__/**",
+    "*_fuzz.py",
+    "**/*_fuzz.py",
+    "*_fuzzer.py",
+    "**/*_fuzzer.py",
+    "*_fuzz_test.py",
+    "**/*_fuzz_test.py",
+    "fuzz_*.py",
+    "**/fuzz_*.py",
+    "fuzzer_*.py",
+    "**/fuzzer_*.py",
+    "afl/**",
+    "**/afl/**",
+    "afl_output/**",
+    "**/afl_output/**",
+    "libfuzzer/**",
+    "**/libfuzzer/**",
+    "corpus/**",
+    "**/corpus/**",
+    "crashes/**",
+    "**/crashes/**",
+    "hangs/**",
+    "**/hangs/**",
+    "oss-fuzz/**",
+    "**/oss-fuzz/**",
+    "clusterfuzz/**",
+    "**/clusterfuzz/**",
+    # 隐私和配置文件
     ".*/**",
     "**/.*/**",
     "*config*.*",
@@ -113,6 +162,78 @@ _CORE_AUDIT_EXCLUDE_PATTERNS: List[str] = [
     "**/*.plist",
     "*.xml",
     "**/*.xml",
+    # IDE/编辑器
+    ".idea/**",
+    "**/.idea/**",
+    ".vscode/**",
+    "**/.vscode/**",
+    ".vs/**",
+    "**/.vs/**",
+    "*.iml",
+    ".project",
+    ".classpath",
+    ".settings/**",
+    "**/.settings/**",
+    ".metadata/**",
+    "**/.metadata/**",
+    # 构建产物
+    "target/**",
+    "**/target/**",
+    "build/**",
+    "**/build/**",
+    "dist/**",
+    "**/dist/**",
+    "out/**",
+    "**/out/**",
+    "bin/**",
+    "**/bin/**",
+    "__pycache__/**",
+    "**/__pycache__/**",
+    "*.py[cod]",
+    "*.class",
+    "*.jar",
+    "*.war",
+    "node_modules/**",
+    "**/node_modules/**",
+    "vendor/**",
+    "**/vendor/**",
+    # 日志和临时文件
+    "*.log",
+    "**/*.log",
+    "logs/**",
+    "**/logs/**",
+    "*.tmp",
+    "*.temp",
+    "*.swp",
+    "*.swo",
+    "*~",
+    ".lock",
+    "*.lock",
+    # 缓存
+    ".cache/**",
+    "**/.cache/**",
+    "cache/**",
+    "**/cache/**",
+    ".pytest_cache/**",
+    "**/.pytest_cache/**",
+    ".coverage",
+    "htmlcov/**",
+    "**/htmlcov/**",
+    # 操作系统
+    ".DS_Store",
+    "**/.DS_Store",
+    "Thumbs.db",
+    "**/Thumbs.db",
+    "Desktop.ini",
+    # 其他
+    "*.orig",
+    "*.rej",
+    "*.bak",
+    "*.backup",
+    ".dockerignore",
+    ".editorconfig",
+    ".github/workflows/**",
+    "**/.github/workflows/**",
 ]
 
 
@@ -347,6 +468,8 @@ async def _get_project_root(project_id: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error getting project root for {project_id}: {e}")
         return None
+
+
 _static_scan_process_lock = threading.Lock()
 _static_running_scan_processes: Dict[str, subprocess.Popen] = {}
 _static_running_scan_containers: Dict[str, str] = {}
@@ -420,7 +543,9 @@ async def _release_request_db_session(db: Any) -> None:
     in_transaction = getattr(db, "in_transaction", None)
     should_rollback = False
     try:
-        should_rollback = bool(in_transaction()) if callable(in_transaction) else bool(in_transaction)
+        should_rollback = (
+            bool(in_transaction()) if callable(in_transaction) else bool(in_transaction)
+        )
     except Exception:
         should_rollback = False
 
@@ -485,7 +610,9 @@ def _request_scan_task_cancel(scan_type: str, task_id: str) -> bool:
         try:
             stop_scanner_container_sync(container_id)
         except Exception as e:
-            logger.warning("Failed to stop %s scan container for task %s: %s", scan_type, task_id, e)
+            logger.warning(
+                "Failed to stop %s scan container for task %s: %s", scan_type, task_id, e
+            )
         finally:
             with _static_scan_process_lock:
                 _static_running_scan_containers.pop(key, None)
@@ -783,6 +910,8 @@ def _sync_task_scan_duration(task: Any, finished_at: Optional[datetime] = None) 
         getattr(task, "created_at", None),
         finished_at=finished_at,
     )
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -811,12 +940,12 @@ def prune_scan_progress_store(
     ttl = max(
         1,
         int(
-            ttl_seconds
-            or getattr(settings, "STATIC_SCAN_PROGRESS_TTL_SECONDS", 60 * 60)
-            or 60 * 60
+            ttl_seconds or getattr(settings, "STATIC_SCAN_PROGRESS_TTL_SECONDS", 60 * 60) or 60 * 60
         ),
     )
-    reference_time = now.astimezone(timezone.utc) if isinstance(now, datetime) else datetime.now(timezone.utc)
+    reference_time = (
+        now.astimezone(timezone.utc) if isinstance(now, datetime) else datetime.now(timezone.utc)
+    )
     cutoff = reference_time - timedelta(seconds=ttl)
     expired_task_ids: list[str] = []
 
@@ -882,6 +1011,8 @@ def _record_scan_progress(
     _scan_progress_store[task_id] = state
     if str(state.get("status", "")).lower() in SCAN_PROGRESS_TERMINAL_STATUSES:
         _clear_scan_progress(task_id)
+
+
 async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional[Dict[str, Any]]:
     """获取用户配置（与 agent_tasks 一致）"""
     if not user_id:
