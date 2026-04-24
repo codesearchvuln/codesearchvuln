@@ -175,6 +175,7 @@ class Settings(BaseSettings):
     AGENT_MAX_ITERATIONS: int = 50  # Agent 最大迭代次数
     AGENT_TOKEN_BUDGET: int = 100000  # Agent Token 预算
     AGENT_TIMEOUT_SECONDS: int = 1800  # Agent 超时时间（30分钟）
+    AGENT_HIDE_THINKING_LOGS: bool = True  # 是否完全隐藏思考类日志（库+实时）
 
     # Agent 并发配置
     ENABLE_PARALLEL_ANALYSIS: bool = True  # 是否启用 Analysis 阶段并行处理

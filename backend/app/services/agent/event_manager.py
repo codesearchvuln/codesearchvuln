@@ -6,6 +6,7 @@ Agent 事件管理器
 import asyncio
 import json
 import logging
+import os
 from typing import Optional, Dict, Any, List, AsyncGenerator, Callable
 from datetime import datetime, timezone
 from dataclasses import dataclass
@@ -18,6 +19,21 @@ logger = logging.getLogger(__name__)
 # Keep full-fidelity logs for UI detail dialog and export.
 # Still protects DB/SSE from extreme payloads via `truncated` marker.
 MAX_EVENT_PAYLOAD_CHARS = 2000000
+HIDDEN_THINKING_EVENT_TYPES = {"thinking", "thinking_token", "thinking_start", "thinking_end"}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+AGENT_HIDE_THINKING_LOGS = _env_bool("AGENT_HIDE_THINKING_LOGS", True)
 
 
 def _truncate_payload(value: str, max_chars: int = MAX_EVENT_PAYLOAD_CHARS) -> tuple[str, bool]:
@@ -370,6 +386,10 @@ class EventManager:
         self._next_realtime_sequence: Dict[str, int] = {}
         self._realtime_publish_state_lock = asyncio.Lock()
         self._realtime_publish_flush_lock = asyncio.Lock()
+    @staticmethod
+    def _is_hidden_thinking_event(event_type: str) -> bool:
+        normalized = str(event_type or "").strip().lower()
+        return normalized in HIDDEN_THINKING_EVENT_TYPES or normalized.startswith("llm_")
 
     @staticmethod
     def _normalize_tool_call_key(
@@ -569,6 +589,9 @@ class EventManager:
         metadata: Optional[Dict] = None,
     ):
         """添加事件"""
+        if AGENT_HIDE_THINKING_LOGS and self._is_hidden_thinking_event(event_type):
+            return None
+
         event_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc)
         
@@ -598,7 +621,6 @@ class EventManager:
             timestamp=event_data["timestamp"],
         )
         
-        # 保存到数据库（跳过高频事件如 thinking_token）
         skip_db_events = {"thinking_token"}
         if self.db_session_factory and event_type not in skip_db_events:
             try:
