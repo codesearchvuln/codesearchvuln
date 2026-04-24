@@ -110,6 +110,10 @@ export interface StreamOptions {
   onError?: (error: string, context: StreamErrorContext) => void;
   onHeartbeat?: () => void;
   onEvent?: StreamEventCallback;  // 通用事件回调
+  onConnectionStateChange?: (
+    connected: boolean,
+    context: { reason: "connected" | "transport_error" | "stream_end" | "disconnect" },
+  ) => void;
 }
 
 /**
@@ -187,6 +191,10 @@ export class AgentStreamHandler {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts += 1;
       const delay = this.reconnectDelay * this.reconnectAttempts;
+      this.isConnected = false;
+      this.options.onConnectionStateChange?.(false, {
+        reason: source === "transport" ? "transport_error" : "stream_end",
+      });
       if (source === 'stream_end') {
         console.info('[AgentStream] stream_done_reconnect', {
           attempt: this.reconnectAttempts,
@@ -211,6 +219,9 @@ export class AgentStreamHandler {
     }
 
     this.isConnected = false;
+    this.options.onConnectionStateChange?.(false, {
+      reason: source === "transport" ? "transport_error" : "stream_end",
+    });
     if (source === 'transport') {
       console.error('[AgentStream] transport_reconnect_exhausted', {
         attempts: this.reconnectAttempts,
@@ -263,6 +274,7 @@ export class AgentStreamHandler {
       }
 
       this.isConnected = true;
+      this.options.onConnectionStateChange?.(true, { reason: 'connected' });
       this.reconnectAttempts = 0;
 
       this.reader = response.body?.getReader() || null;
@@ -285,6 +297,7 @@ export class AgentStreamHandler {
         if (done) {
           console.log('[AgentStream] Reader done, stream ended');
           this.isConnected = false;
+          this.options.onConnectionStateChange?.(false, { reason: 'stream_end' });
           this.scheduleReconnect(
             'stream_end',
             '事件流连接中断，自动重连失败'
@@ -327,6 +340,7 @@ export class AgentStreamHandler {
       }
 
       this.isConnected = false;
+      this.options.onConnectionStateChange?.(false, { reason: 'transport_error' });
       console.error('Stream connection error:', error);
       const message = error instanceof Error ? error.message : String(error);
       this.scheduleReconnect('transport', `连接失败: ${message}`);
@@ -579,6 +593,7 @@ export class AgentStreamHandler {
     //  标记正在断开，防止重连
     this.isDisconnecting = true;
     this.isConnected = false;
+    this.options.onConnectionStateChange?.(false, { reason: 'disconnect' });
     this.clearReconnectTimeout();
 
     //  取消 fetch 请求 (wrap in try-catch to handle AbortError)

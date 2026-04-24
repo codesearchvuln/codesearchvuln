@@ -223,10 +223,13 @@ export function useAgentStream(
       onHeartbeat: () => {
         callbackOptionsRef.current.onHeartbeat?.();
       },
+
+      onConnectionStateChange: (connected) => {
+        setIsConnected(connected);
+      },
     });
 
     handlerRef.current.connect();
-    setIsConnected(true);
   }, [taskId, includeThinking, includeToolCalls, maxEvents]); //  移除 afterSequence 依赖，使用 ref 代替
 
   // 断开连接

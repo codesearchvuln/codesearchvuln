@@ -156,6 +156,7 @@ const TERMINAL_RECOVERY_MAX_ATTEMPTS = 2;
 const TERMINAL_RECOVERY_RETRY_INTERVAL_MS = 1500;
 const TERMINAL_RECOVERY_DEBOUNCE_MS = 30_000;
 const STREAM_SELF_HEAL_RETRY_MS = 4000;
+const AGENT_LOG_BACKFILL_INTERVAL_MS = 5000;
 const LOG_VIEWPORT_DEFAULT_HEIGHT_PX = 200;
 const LOG_VIEWPORT_MIN_HEIGHT_PX = 96;
 const FINDINGS_PANEL_MIN_HEIGHT_PX = 320;
@@ -3691,6 +3692,18 @@ function AgentAuditPageContent() {
 		isConnected,
 		connectStream,
 	]);
+
+	useEffect(() => {
+		if (!taskId || task?.status !== "running") return;
+		if (!historicalEventsLoaded) return;
+		const interval = setInterval(() => {
+			void backfillEventsSince(
+				lastEventSequenceRef.current,
+				"running_periodic_backfill",
+			);
+		}, AGENT_LOG_BACKFILL_INTERVAL_MS);
+		return () => clearInterval(interval);
+	}, [backfillEventsSince, historicalEventsLoaded, task?.status, taskId]);
 
 	// Polling
 	useEffect(() => {
