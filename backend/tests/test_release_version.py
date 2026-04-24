@@ -56,7 +56,7 @@ def _create_lightweight_tag(repo: Path, tag: str) -> None:
     _git(repo, "tag", tag)
 
 
-def _run_helper(repo: Path, source_sha: str) -> dict[str, object]:
+def _run_helper(repo: Path, source_sha: str, *extra_args: str) -> dict[str, object]:
     result = subprocess.run(
         [
             "python3",
@@ -65,6 +65,7 @@ def _run_helper(repo: Path, source_sha: str) -> dict[str, object]:
             str(repo),
             "--source-sha",
             source_sha,
+            *extra_args,
         ],
         capture_output=True,
         text=True,
@@ -189,6 +190,40 @@ def test_release_version_skips_release_for_non_whitelisted_prefixed_commit_types
         assert payload["bump_type"] is None
         assert payload["previous_version"] == "v0.0.1"
         assert payload["previous_source_sha"] == initial_sha
+
+
+def test_release_version_force_patch_bumps_for_ci_commits(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    initial_sha = _commit(repo, "feat: initial release")
+    _create_semantic_tag(repo, "v0.0.1", source_sha=initial_sha, bump_type="bootstrap")
+    source_sha = _commit(repo, "ci: refresh release assets")
+
+    payload = _run_helper(repo, source_sha, "--force-patch")
+
+    assert payload["should_release"] is True
+    assert payload["version"] == "v0.0.2"
+    assert payload["bump_type"] == "patch"
+    assert payload["existing_tag"] is False
+    assert payload["previous_version"] == "v0.0.1"
+    assert payload["previous_source_sha"] == initial_sha
+    assert payload["commit_subjects"] == ["ci: refresh release assets"]
+
+
+def test_release_version_force_patch_reuses_existing_managed_tag(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    initial_sha = _commit(repo, "feat: initial release")
+    _create_semantic_tag(repo, "v0.0.1", source_sha=initial_sha, bump_type="bootstrap")
+    source_sha = _commit(repo, "ci: refresh release assets")
+    _create_semantic_tag(repo, "v0.0.2", source_sha=source_sha, bump_type="patch")
+
+    payload = _run_helper(repo, source_sha, "--force-patch")
+
+    assert payload["should_release"] is True
+    assert payload["version"] == "v0.0.2"
+    assert payload["bump_type"] == "patch"
+    assert payload["existing_tag"] is True
+    assert payload["previous_source_sha"] == source_sha
+    assert payload["commit_subjects"] == []
 
 
 def test_release_version_ignores_release_asset_tags_and_reuses_existing_tag_for_same_source_sha(

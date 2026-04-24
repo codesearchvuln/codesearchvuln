@@ -31,6 +31,18 @@ def test_release_workflow_dispatch_exposes_manual_runtime_image_build_inputs() -
         ), input_name
 
 
+def test_release_workflow_dispatch_exposes_manual_release_asset_publish_input() -> None:
+    workflow_text = _workflow_text()
+
+    assert re.search(
+        r"      publish_release_assets:\n"
+        r"(?:        .*\n)*?"
+        r"        type: boolean\n"
+        r"        default: false\n",
+        workflow_text,
+    )
+
+
 def test_release_workflow_call_contract_stays_unchanged() -> None:
     workflow_text = _workflow_text()
     workflow_call_section = workflow_text.split("  workflow_dispatch:\n", maxsplit=1)[0]
@@ -61,12 +73,28 @@ def test_release_workflow_manual_build_mapping_respects_priority_rules() -> None
         assert expected_line in workflow_text
 
 
+def test_release_workflow_manual_asset_publish_runs_full_finalize_asset_flow() -> None:
+    workflow_text = _workflow_text()
+    force_release_assets_env = (
+        "FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.publish_release_assets || false }}"
+    )
+
+    assert (
+        "if: ${{ github.event_name != 'workflow_dispatch' || "
+        "inputs.build_offline_images || inputs.publish_release_assets }}"
+    ) in workflow_text
+    assert force_release_assets_env in workflow_text
+    assert "--force-patch" in workflow_text
+
+
 def test_release_workflow_summarizes_manual_runtime_image_build_plan() -> None:
     workflow_text = _workflow_text()
 
     assert "Manual Runtime Image Build Plan" in workflow_text
     assert "selected_builds" in workflow_text
     assert "frontend_release_image" in workflow_text
+    assert "publish_release_assets" in workflow_text
     assert "release flow uses STATIC_FRONTEND_IMAGE" in workflow_text
 
 
@@ -75,5 +103,6 @@ def test_release_workflow_dispatch_not_blocked_by_push_only_detect_changes_job()
 
     assert (
         "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
-        "'workflow_dispatch') }}"
+        "'workflow_dispatch') && (github.event_name != 'push' || "
+        "needs.detect-changes.result == 'success') }}"
     ) in workflow_text

@@ -135,7 +135,12 @@ def _resolve_current_subject(repo: Path, source_sha: str) -> list[str]:
     return [subject] if subject else []
 
 
-def resolve_release_version(repo: Path, source_sha: str) -> dict[str, object]:
+def resolve_release_version(
+    repo: Path,
+    source_sha: str,
+    *,
+    force_patch: bool = False,
+) -> dict[str, object]:
     managed_tags = _list_managed_tags(repo, _list_semantic_tags(repo))
     latest_tag = managed_tags[-1] if managed_tags else None
 
@@ -172,16 +177,19 @@ def resolve_release_version(repo: Path, source_sha: str) -> dict[str, object]:
     commit_subjects = _commit_subjects_since(repo, previous_source_sha, source_sha)
     bump_type = _classify_bump(commit_subjects)
     if bump_type is None:
-        return {
-            "should_release": False,
-            "version": None,
-            "bump_type": None,
-            "existing_tag": False,
-            "previous_version": latest_tag.semantic.name,
-            "previous_source_sha": previous_source_sha,
-            "source_sha": source_sha,
-            "commit_subjects": commit_subjects,
-        }
+        if force_patch:
+            bump_type = "patch"
+        else:
+            return {
+                "should_release": False,
+                "version": None,
+                "bump_type": None,
+                "existing_tag": False,
+                "previous_version": latest_tag.semantic.name,
+                "previous_source_sha": previous_source_sha,
+                "source_sha": source_sha,
+                "commit_subjects": commit_subjects,
+            }
 
     return {
         "should_release": True,
@@ -255,10 +263,19 @@ def main() -> int:
         type=Path,
         help="Optional path to a GitHub Actions output file",
     )
+    parser.add_argument(
+        "--force-patch",
+        action="store_true",
+        help="Treat otherwise non-releasing commit subjects as a managed patch release.",
+    )
     args = parser.parse_args()
 
     try:
-        payload = resolve_release_version(args.repo.resolve(), args.source_sha.strip())
+        payload = resolve_release_version(
+            args.repo.resolve(),
+            args.source_sha.strip(),
+            force_patch=args.force_patch,
+        )
     except ReleaseVersionError as exc:
         print(str(exc), file=sys.stderr)
         return 1

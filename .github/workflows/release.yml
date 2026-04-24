@@ -89,6 +89,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_release_assets:
+        description: '手动执行完整 finalize-publish 资产发布流程并上传 GitHub Release assets（相当于 ci 前缀 push）'
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -375,6 +380,7 @@ jobs:
           BUILD_FLOW_PARSER_RUNNER: ${{ inputs.build_flow_parser_runner }}
           BUILD_PMD_RUNNER: ${{ inputs.build_pmd_runner }}
           BUILD_SANDBOX_RUNNER: ${{ inputs.build_sandbox_runner }}
+          PUBLISH_RELEASE_ASSETS: ${{ inputs.publish_release_assets }}
         run: |
           set -euo pipefail
 
@@ -422,6 +428,7 @@ jobs:
             echo "- refresh_all_runtime_images: \`${REFRESH_ALL_RUNTIME_IMAGES}\`"
             echo "- selected_builds: \`${selection}\`"
             echo "- frontend_release_image: \`skipped (release flow uses STATIC_FRONTEND_IMAGE)\`"
+            echo "- publish_release_assets: \`${PUBLISH_RELEASE_ASSETS}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   create-draft-release:
@@ -561,7 +568,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   package-offline-images:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_offline_images }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_offline_images || inputs.publish_release_assets }}
     needs:
       - prepare-release
       - create-draft-release
@@ -962,14 +969,21 @@ jobs:
         id: resolve_semantic_version
         env:
           SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+          FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release_assets || false }}
         run: |
           set -euo pipefail
 
           git fetch --force --tags origin
-          python3 ./scripts/release_version.py \
-            --repo "$PWD" \
-            --source-sha "${SOURCE_SHA}" \
+          release_version_args=(
+            ./scripts/release_version.py
+            --repo "$PWD"
+            --source-sha "${SOURCE_SHA}"
             --github-output "$GITHUB_OUTPUT"
+          )
+          if [[ "${FORCE_RELEASE_ASSETS}" == "true" ]]; then
+            release_version_args+=(--force-patch)
+          fi
+          python3 "${release_version_args[@]}"
 
       - name: Create semantic release tag
         if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' && steps.resolve_semantic_version.outputs.existing_tag != 'true' }}

@@ -280,6 +280,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "Docker Publish" not in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "reuse_existing_images:" in workflow_text
+    assert "publish_release_assets:" in workflow_text
     assert (
         "Skip runtime image builds and reuse the current `latest` digests on GHCR"
         in workflow_text
@@ -302,12 +303,17 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
         "needs.publish-runtime-images.result == 'success')) }}"
     ) in workflow_text
     assert "package-offline-images:" in workflow_text
+    assert (
+        "if: ${{ github.event_name != 'workflow_dispatch' || "
+        "inputs.build_offline_images || inputs.publish_release_assets }}"
+    ) in workflow_text
     assert "finalize-publish:" in workflow_text
     assert "cleanup-draft-release:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert (
         "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
-        "'workflow_dispatch') }}"
+        "'workflow_dispatch') && (github.event_name != 'push' || "
+        "needs.detect-changes.result == 'success') }}"
     ) in workflow_text
     assert "build_frontend: false" in workflow_text
     assert (
@@ -397,7 +403,11 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'gh release create "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release edit "${SEMANTIC_TAG}"' in workflow_text
     assert 'gh release upload "${SEMANTIC_TAG}"' in workflow_text
-    assert "./scripts/release-assets/offline-bootstrap.sh#Vulhunter-offline-bootstrap.sh" in workflow_text
+    assert (
+        'cp "./scripts/release-assets/offline-bootstrap.sh" '
+        '"${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"'
+    ) in workflow_text
+    assert '"${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"' in workflow_text
     assert workflow_text.count("Vulhunter-offline-bootstrap.sh") >= 1
     assert 'git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}"' in workflow_text
     assert "generated_by=release.yml" in workflow_text
@@ -503,6 +513,13 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert 'echo "release_commit_sha=$(git rev-parse refs/remotes/origin/release)" >> "$GITHUB_OUTPUT"' in workflow_text
     assert "git checkout -B release origin/release" not in workflow_text
     assert "git fetch --force --tags origin" in workflow_text
+    force_release_assets_env = (
+        "FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.publish_release_assets || false }}"
+    )
+    assert force_release_assets_env in workflow_text
+    assert "--force-patch" in workflow_text
+    assert 'if [[ "${FORCE_RELEASE_ASSETS}" == "true" ]]; then' in workflow_text
     assert "git push origin --delete" not in workflow_text
     assert "release-tag-cleanup.txt" not in workflow_text
     assert "release-assets-latest" not in workflow_text
@@ -929,7 +946,7 @@ def test_release_generator_emits_offline_metadata_and_scripts(tmp_path: Path) ->
     assert f"STATIC_FRONTEND_IMAGE=vulhunter-local/static-frontend:{manifest['revision']}" in offline_env
     assert "\nSANDBOX_IMAGE=" not in offline_env
     assert f"SANDBOX_RUNNER_IMAGE=vulhunter-local/sandbox-runner:{manifest['revision']}" in offline_env
-    assert "\nNEXUS_WEB_IMAGE=" not in offline_env
+    assert f"NEXUS_WEB_IMAGE=vulhunter-local/nexus-web:{manifest['revision']}" in offline_env
     assert "\nNEXUS_ITEM_DETAIL_IMAGE=" not in offline_env
     assert "\nFRONTEND_IMAGE=" not in offline_env
     assert "RUNNER_PREFLIGHT_OFFLINE_MODE=true" in offline_env
