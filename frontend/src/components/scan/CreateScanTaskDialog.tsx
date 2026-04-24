@@ -319,7 +319,7 @@ export default function CreateScanTaskDialog({
 			);
 			setUploadedProject(createdProject);
 			setUploadProjectStatus("project_ready");
-			toast.success("项目已创建并完成语言识别");
+			toast.success("项目已创建，可继续选择扫描引擎");
 			loadProjects();
 		} catch (error) {
 			const msg = extractCreateScanTaskApiErrorMessage(error);
