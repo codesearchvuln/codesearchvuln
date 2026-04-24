@@ -1,6 +1,7 @@
 """Bootstrap scan, scope filtering, and seed building helpers for agent tasks."""
 
 import asyncio
+from contextlib import suppress
 import json
 import logging
 import os
@@ -58,6 +59,7 @@ from app.services.yasa_language import (
 )
 
 logger = logging.getLogger(__name__)
+EMBEDDED_BOOTSTRAP_HEARTBEAT_INTERVAL_SECONDS = 8
 
 
 async def _prepare_scan_project_dir_async(
@@ -702,6 +704,50 @@ def _log_embedded_bootstrap_skipped(
     )
 
 
+async def _run_embedded_bootstrap_with_heartbeat(
+    *,
+    tool_name: str,
+    bootstrap_source: str,
+    event_emitter: Any,
+    operation_coro: Any,
+) -> Any:
+    """Run a long bootstrap operation with periodic lightweight progress events."""
+    if not event_emitter:
+        return await operation_coro
+
+    loop = asyncio.get_running_loop()
+    start_time = loop.time()
+    heartbeat_tick = 0
+    operation_task = asyncio.create_task(operation_coro)
+
+    try:
+        while True:
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(operation_task),
+                    timeout=EMBEDDED_BOOTSTRAP_HEARTBEAT_INTERVAL_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                heartbeat_tick += 1
+                elapsed_seconds = max(1, int(loop.time() - start_time))
+                await event_emitter.emit_info(
+                    f"🧪 {tool_name} 内嵌预扫进行中（{elapsed_seconds}s）",
+                    metadata={
+                        "bootstrap": True,
+                        "bootstrap_task_id": None,
+                        "bootstrap_source": bootstrap_source,
+                        "bootstrap_progress_heartbeat": True,
+                        "bootstrap_progress_tick": heartbeat_tick,
+                        "bootstrap_elapsed_seconds": elapsed_seconds,
+                    },
+                )
+    finally:
+        if not operation_task.done():
+            operation_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await operation_task
+
+
 async def _prepare_embedded_bootstrap_findings(
     db: AsyncSession,
     project_root: str,
@@ -777,7 +823,12 @@ async def _prepare_embedded_bootstrap_findings(
                 active_rules=active_rules,
                 exclude_patterns=effective_exclude_patterns,
             )
-            scan_result = await scanner.scan(project_root)
+            scan_result = await _run_embedded_bootstrap_with_heartbeat(
+                tool_name="OpenGrep",
+                bootstrap_source="embedded_opengrep",
+                event_emitter=event_emitter,
+                operation_coro=scanner.scan(project_root),
+            )
         except FileNotFoundError as exc:
             _log_embedded_bootstrap_error("OpenGrep", project_root, str(exc))
             if event_emitter:
@@ -833,7 +884,12 @@ async def _prepare_embedded_bootstrap_findings(
             raise RuntimeError(message) from exc
         try:
             scanner = BanditBootstrapScanner(rule_ids=bandit_rule_ids)
-            scan_result = await scanner.scan(project_root)
+            scan_result = await _run_embedded_bootstrap_with_heartbeat(
+                tool_name="Bandit",
+                bootstrap_source="embedded_bandit",
+                event_emitter=event_emitter,
+                operation_coro=scanner.scan(project_root),
+            )
         except FileNotFoundError as exc:
             _log_embedded_bootstrap_error("Bandit", project_root, str(exc))
             if event_emitter:
@@ -880,7 +936,12 @@ async def _prepare_embedded_bootstrap_findings(
                 },
             )
         try:
-            parsed_gitleaks_findings = await _run_bootstrap_gitleaks_scan(project_root)
+            parsed_gitleaks_findings = await _run_embedded_bootstrap_with_heartbeat(
+                tool_name="Gitleaks",
+                bootstrap_source="embedded_gitleaks",
+                event_emitter=event_emitter,
+                operation_coro=_run_bootstrap_gitleaks_scan(project_root),
+            )
         except FileNotFoundError as exc:
             _log_embedded_bootstrap_error("Gitleaks", project_root, str(exc))
             if event_emitter:
@@ -924,7 +985,12 @@ async def _prepare_embedded_bootstrap_findings(
             )
         try:
             scanner = PhpstanBootstrapScanner(level=8)
-            scan_result = await scanner.scan(project_root)
+            scan_result = await _run_embedded_bootstrap_with_heartbeat(
+                tool_name="PHPStan",
+                bootstrap_source="embedded_phpstan",
+                event_emitter=event_emitter,
+                operation_coro=scanner.scan(project_root),
+            )
         except FileNotFoundError as exc:
             _log_embedded_bootstrap_error("PHPStan", project_root, str(exc))
             if event_emitter:
@@ -1034,7 +1100,12 @@ async def _prepare_embedded_bootstrap_findings(
                         language=resolved_yasa_language,
                         custom_rule_config=selected_yasa_rule_config,
                     )
-                    scan_result = await scanner.scan(project_root)
+                    scan_result = await _run_embedded_bootstrap_with_heartbeat(
+                        tool_name="YASA",
+                        bootstrap_source="embedded_yasa",
+                        event_emitter=event_emitter,
+                        operation_coro=scanner.scan(project_root),
+                    )
                 except FileNotFoundError as exc:
                     _log_embedded_bootstrap_error("YASA", project_root, str(exc))
                     if event_emitter:
