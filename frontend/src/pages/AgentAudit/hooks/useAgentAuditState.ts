@@ -14,7 +14,7 @@ import type {
   ConnectionStatus,
 } from "../types";
 import { createLogItem, filterLogsByAgent, buildAgentTree } from "../utils";
-import { isAgentAuditTerminalStatus } from "../taskStatus";
+import { isAgentAuditActiveStatus, isAgentAuditTerminalStatus } from "../taskStatus";
 
 // ============ Initial State ============
 
@@ -384,7 +384,7 @@ export function useAgentAuditState() {
   const isRunning = useMemo(() => {
     if (!state.task) return false;
     if (state.task.completed_at) return false;
-    return state.task.status === "running" || state.task.status === "pending";
+    return isAgentAuditActiveStatus(state.task.status);
   }, [state.task]);
 
   const isComplete = useMemo(() => {

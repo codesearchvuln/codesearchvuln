@@ -1,5 +1,16 @@
 import { getTaskDisplayStatusSummary } from "@/features/tasks/services/taskDisplay";
 
+const AGENT_AUDIT_ACTIVE_STATUSES = new Set([
+	"pending",
+	"initializing",
+	"running",
+	"planning",
+	"indexing",
+	"analyzing",
+	"verifying",
+	"reporting",
+]);
+
 export function isAgentAuditTerminalStatus(status: string | undefined): boolean {
 	const normalized = String(status || "").trim().toLowerCase();
 	return (
@@ -8,6 +19,11 @@ export function isAgentAuditTerminalStatus(status: string | undefined): boolean 
 		normalized === "cancelled" ||
 		normalized === "interrupted"
 	);
+}
+
+export function isAgentAuditActiveStatus(status: string | undefined): boolean {
+	const normalized = String(status || "").trim().toLowerCase();
+	return AGENT_AUDIT_ACTIVE_STATUSES.has(normalized);
 }
 
 export function toAgentAuditStatusLabel(status: string | undefined): string {

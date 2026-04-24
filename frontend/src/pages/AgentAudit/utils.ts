@@ -4,7 +4,7 @@
  */
 
 import type { AgentTreeNode, LogItem, LogType } from "./types";
-import { isAgentAuditTerminalStatus } from "./taskStatus";
+import { isAgentAuditActiveStatus, isAgentAuditTerminalStatus } from "./taskStatus";
 
 const AUDIT_EMOJI_REGEX = /[\p{Extended_Pictographic}\uFE0F\u200D]/gu;
 const AUDIT_DECORATION_REGEX = /[◆◇■□●○★☆▶▷◀◁►◄•▪▫◉◎◌⏭⏮⏯⏹⏺⏸⏵⏴⏩⏪]/g;
@@ -475,7 +475,7 @@ export function calculateSeverityCounts(
  * Check if task is in running state
  */
 export function isTaskRunning(status: string | undefined): boolean {
-  return status === "running" || status === "pending";
+  return isAgentAuditActiveStatus(status);
 }
 
 /**

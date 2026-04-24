@@ -386,6 +386,25 @@ class EventManager:
         self._next_realtime_sequence: Dict[str, int] = {}
         self._realtime_publish_state_lock = asyncio.Lock()
         self._realtime_publish_flush_lock = asyncio.Lock()
+        self._next_event_sequence: Dict[str, int] = {}
+        self._event_sequence_lock = asyncio.Lock()
+
+    async def _assign_event_sequence(self, task_id: str, requested_sequence: int) -> int:
+        """Assign a positive strictly-increasing per-task sequence."""
+        try:
+            requested = int(requested_sequence or 0)
+        except Exception:
+            requested = 0
+
+        async with self._event_sequence_lock:
+            next_sequence = self._next_event_sequence.get(task_id, 1)
+            if requested <= 0 or requested < next_sequence:
+                assigned = next_sequence
+            else:
+                assigned = requested
+            self._next_event_sequence[task_id] = assigned + 1
+            return assigned
+
     @staticmethod
     def _is_hidden_thinking_event(event_type: str) -> bool:
         normalized = str(event_type or "").strip().lower()
@@ -592,6 +611,7 @@ class EventManager:
         if AGENT_HIDE_THINKING_LOGS and self._is_hidden_thinking_event(event_type):
             return None
 
+        assigned_sequence = await self._assign_event_sequence(task_id, sequence)
         event_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc)
         
@@ -599,7 +619,7 @@ class EventManager:
             "id": event_id,
             "task_id": task_id,
             "event_type": event_type,
-            "sequence": sequence,
+            "sequence": assigned_sequence,
             "phase": phase,
             "message": message,
             "tool_name": tool_name,
@@ -694,6 +714,7 @@ class EventManager:
         self._inflight_tool_calls.pop(task_id, None)
         self._pending_realtime_events.pop(task_id, None)
         self._next_realtime_sequence.pop(task_id, None)
+        self._next_event_sequence.pop(task_id, None)
         waiter = self._tool_drain_waiters.pop(task_id, None)
         if waiter is not None:
             waiter.set()
@@ -848,6 +869,7 @@ class EventManager:
         self._inflight_tool_calls.clear()
         self._pending_realtime_events.clear()
         self._next_realtime_sequence.clear()
+        self._next_event_sequence.clear()
         for waiter in self._tool_drain_waiters.values():
             waiter.set()
         self._tool_drain_waiters.clear()

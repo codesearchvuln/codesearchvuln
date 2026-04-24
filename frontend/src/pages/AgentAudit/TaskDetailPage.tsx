@@ -117,6 +117,7 @@ import {
 import { buildAgentDisplayStageSummary } from "./stageProgress";
 import {
 	buildAgentAuditStreamDisconnectTitle,
+	isAgentAuditActiveStatus,
 	toAgentAuditStatusLabel,
 } from "./taskStatus";
 import { getTerminalStatusTransitionPolicy } from "./terminalStatePolicy";
@@ -1521,10 +1522,7 @@ function AgentAuditPageContent() {
 		const status = String(task?.status || "")
 			.trim()
 			.toLowerCase();
-		if (
-			(status !== "running" && status !== "pending") ||
-			!taskStartedAtRef.current
-		) {
+		if (!isAgentAuditActiveStatus(status) || !taskStartedAtRef.current) {
 			return;
 		}
 		const timer = setInterval(() => {
@@ -3626,7 +3624,7 @@ function AgentAuditPageContent() {
 	// Stream connection -  任务运行后尽早连接，历史事件回放通过并行回补完成
 	useEffect(() => {
 		// 任务正在运行时尽早连接 SSE，避免预扫长阶段日志空窗
-		if (!taskId || !task?.status || task.status !== "running") return;
+		if (!taskId || !isRunning) return;
 
 		//  避免重复连接 - 只连接一次
 		if (hasConnectedRef.current) return;
@@ -3645,15 +3643,10 @@ function AgentAuditPageContent() {
 		// afterSequence 通过 streamOptions 传递，不需要在这里触发重连
 		// 如果包含它，当 loadHistoricalEvents 更新 afterSequence 时会触发断开重连
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [
-		taskId,
-		task?.status,
-		connectStream,
-		disconnectStream,
-	]);
+	}, [taskId, isRunning, connectStream, disconnectStream]);
 
 	useEffect(() => {
-		if (!taskId || task?.status !== "running") return;
+		if (!taskId || !isRunning) return;
 		if (!hasConnectedRef.current) return;
 		if (isConnected) return;
 
@@ -3663,7 +3656,7 @@ function AgentAuditPageContent() {
 				? 0
 				: STREAM_SELF_HEAL_RETRY_MS - elapsed;
 		const timer = setTimeout(() => {
-			if (taskStatusRef.current !== "running") return;
+			if (!isAgentAuditActiveStatus(taskStatusRef.current)) return;
 			lastStreamSelfHealAttemptRef.current = Date.now();
 			console.warn("[AgentAudit] stream_self_heal_reconnect", {
 				taskId,
@@ -3675,15 +3668,10 @@ function AgentAuditPageContent() {
 		return () => {
 			clearTimeout(timer);
 		};
-	}, [
-		taskId,
-		task?.status,
-		isConnected,
-		connectStream,
-	]);
+	}, [taskId, isRunning, isConnected, connectStream]);
 
 	useEffect(() => {
-		if (!taskId || task?.status !== "running") return;
+		if (!taskId || !isRunning) return;
 		const interval = setInterval(() => {
 			void backfillEventsSince(
 				lastEventSequenceRef.current,
@@ -3691,10 +3679,10 @@ function AgentAuditPageContent() {
 			);
 		}, AGENT_LOG_BACKFILL_INTERVAL_MS);
 		return () => clearInterval(interval);
-	}, [backfillEventsSince, task?.status, taskId]);
+	}, [backfillEventsSince, isRunning, taskId]);
 
 	useEffect(() => {
-		if (!taskId || task?.status !== "running") {
+		if (!taskId || !isRunning) {
 			streamConnectedStateRef.current = false;
 			return;
 		}
@@ -3707,7 +3695,7 @@ function AgentAuditPageContent() {
 				payload: { ...nowTime, type: "info", title: "已连接扫描事件流" },
 			});
 		}
-	}, [taskId, task?.status, isConnected, dispatch, buildNowRelativeLogTime]);
+	}, [taskId, isRunning, isConnected, dispatch, buildNowRelativeLogTime]);
 
 	// Polling
 	useEffect(() => {
