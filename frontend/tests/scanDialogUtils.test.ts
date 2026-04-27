@@ -86,7 +86,7 @@ test("extractCreateProjectScanApiErrorMessage falls back to error.message", () =
   );
 });
 
-test("buildHybridStaticBootstrapConfig includes yasa_rule_config_id when custom config is selected", () => {
+test("buildHybridStaticBootstrapConfig disables YASA even when custom config is selected", () => {
   assert.deepEqual(
     buildHybridStaticBootstrapConfig({
       opengrepEnabled: true,
@@ -103,14 +103,14 @@ test("buildHybridStaticBootstrapConfig includes yasa_rule_config_id when custom 
       bandit_enabled: false,
       gitleaks_enabled: false,
       phpstan_enabled: false,
-      yasa_enabled: true,
+      yasa_enabled: false,
       yasa_language: "auto",
-      yasa_rule_config_id: "custom-yasa-1",
+      yasa_rule_config_id: null,
     },
   );
 });
 
-test("buildHybridStaticBootstrapConfig omits yasa_rule_config_id for default selection", () => {
+test("buildHybridStaticBootstrapConfig ignores stale YASA selection", () => {
   assert.deepEqual(
     buildHybridStaticBootstrapConfig({
       opengrepEnabled: false,
@@ -127,8 +127,8 @@ test("buildHybridStaticBootstrapConfig omits yasa_rule_config_id for default sel
       bandit_enabled: false,
       gitleaks_enabled: false,
       phpstan_enabled: true,
-      yasa_enabled: true,
-      yasa_language: "typescript",
+      yasa_enabled: false,
+      yasa_language: "auto",
       yasa_rule_config_id: null,
     },
   );

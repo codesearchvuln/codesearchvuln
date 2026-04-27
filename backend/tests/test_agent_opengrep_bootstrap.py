@@ -879,11 +879,11 @@ def test_resolve_static_bootstrap_config_accepts_manual_yasa_language():
         }
     )
     config = _resolve_static_bootstrap_config(task, source_mode="hybrid")
-    assert config["yasa_enabled"] is True
-    assert config["yasa_language"] == "typescript"
+    assert config["yasa_enabled"] is False
+    assert config["yasa_language"] == "auto"
 
 
-def test_resolve_static_bootstrap_config_preserves_yasa_rule_config_id():
+def test_resolve_static_bootstrap_config_clears_yasa_rule_config_id_for_hybrid():
     task = SimpleNamespace(
         audit_scope={
             "static_bootstrap": {
@@ -895,10 +895,12 @@ def test_resolve_static_bootstrap_config_preserves_yasa_rule_config_id():
         }
     )
     config = _resolve_static_bootstrap_config(task, source_mode="hybrid")
-    assert config["yasa_rule_config_id"] == "cfg-1"
+    assert config["yasa_enabled"] is False
+    assert config["yasa_language"] == "auto"
+    assert config["yasa_rule_config_id"] is None
 
 
-def test_resolve_static_bootstrap_config_accepts_yasa_rule_config_id():
+def test_resolve_static_bootstrap_config_ignores_yasa_rule_config_id_for_hybrid():
     task = SimpleNamespace(
         audit_scope={
             "static_bootstrap": {
@@ -910,10 +912,11 @@ def test_resolve_static_bootstrap_config_accepts_yasa_rule_config_id():
         }
     )
     config = _resolve_static_bootstrap_config(task, source_mode="hybrid")
-    assert config["yasa_rule_config_id"] == "custom-yasa-1"
+    assert config["yasa_enabled"] is False
+    assert config["yasa_rule_config_id"] is None
 
 
-def test_resolve_static_bootstrap_config_rejects_invalid_yasa_language():
+def test_resolve_static_bootstrap_config_ignores_invalid_yasa_language_for_hybrid():
     task = SimpleNamespace(
         audit_scope={
             "static_bootstrap": {
@@ -923,8 +926,48 @@ def test_resolve_static_bootstrap_config_rejects_invalid_yasa_language():
             }
         }
     )
-    with pytest.raises(HTTPException, match="不支持语言: php"):
-        _resolve_static_bootstrap_config(task, source_mode="hybrid")
+    config = _resolve_static_bootstrap_config(task, source_mode="hybrid")
+    assert config["yasa_enabled"] is False
+    assert config["yasa_language"] == "auto"
+
+
+def test_resolve_static_bootstrap_config_ignores_blank_yasa_rule_config_id_for_hybrid():
+    task = SimpleNamespace(
+        audit_scope={
+            "static_bootstrap": {
+                "mode": "embedded",
+                "yasa_enabled": True,
+                "yasa_rule_config_id": " ",
+            }
+        }
+    )
+    config = _resolve_static_bootstrap_config(task, source_mode="hybrid")
+    assert config["yasa_enabled"] is False
+    assert config["yasa_rule_config_id"] is None
+
+
+def test_resolve_static_bootstrap_config_ignores_yasa_fields_for_intelligent():
+    task = SimpleNamespace(
+        audit_scope={
+            "static_bootstrap": {
+                "mode": "embedded",
+                "yasa_enabled": True,
+                "yasa_language": "php",
+                "yasa_rule_config_id": " ",
+            }
+        }
+    )
+    config = _resolve_static_bootstrap_config(task, source_mode="intelligent")
+    assert config == {
+        "mode": "disabled",
+        "opengrep_enabled": False,
+        "bandit_enabled": False,
+        "gitleaks_enabled": False,
+        "phpstan_enabled": False,
+        "yasa_enabled": False,
+        "yasa_language": "auto",
+        "yasa_rule_config_id": None,
+    }
 
 
 @pytest.mark.asyncio

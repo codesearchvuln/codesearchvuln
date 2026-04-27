@@ -271,6 +271,7 @@ export default function CreateProjectScanDialogContent({
       checked: yasaEnabled,
       setChecked: setYasaEnabled,
       disabled: (sourceMode === "upload" && !uploadProjectReady) || isYasaBlockedProject,
+      visible: mode === "static",
     },
     {
       key: "pmd",

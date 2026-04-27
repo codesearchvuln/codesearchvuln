@@ -255,15 +255,20 @@ def _resolve_static_bootstrap_config(
         if raw_yasa_rule_config_value is not None
         else ""
     )
-    if raw_yasa_rule_config_value is not None and not raw_yasa_rule_config_id:
-        raise HTTPException(status_code=400, detail="yasa_rule_config_id 不能为空")
-    try:
-        normalized_yasa_language = normalize_yasa_language(
-            str(raw_yasa_language or "").strip(),
-            allow_auto=True,
-        ) or "auto"
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if mode == "disabled" or source_mode == "hybrid":
+        yasa_enabled = False
+        normalized_yasa_language = "auto"
+        raw_yasa_rule_config_id = ""
+    else:
+        if raw_yasa_rule_config_value is not None and not raw_yasa_rule_config_id:
+            raise HTTPException(status_code=400, detail="yasa_rule_config_id 不能为空")
+        try:
+            normalized_yasa_language = normalize_yasa_language(
+                str(raw_yasa_language or "").strip(),
+                allow_auto=True,
+            ) or "auto"
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if mode == "disabled":
         opengrep_enabled = False

@@ -58,16 +58,8 @@ export function buildHybridStaticBootstrapConfig(params: {
 		bandit_enabled: params.banditEnabled,
 		gitleaks_enabled: params.gitleaksEnabled,
 		phpstan_enabled: params.phpstanEnabled,
-		yasa_enabled: params.yasaEnabled,
-		yasa_language: params.yasaLanguage as
-			| "java"
-			| "golang"
-			| "typescript"
-			| "python"
-			| "auto",
-		yasa_rule_config_id:
-			params.selectedYasaRuleConfigId !== "default"
-				? params.selectedYasaRuleConfigId
-				: null,
+		yasa_enabled: false,
+		yasa_language: "auto" as const,
+		yasa_rule_config_id: null,
 	};
 }
