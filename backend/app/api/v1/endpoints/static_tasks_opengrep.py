@@ -59,9 +59,11 @@ from app.services.upload.upload_manager import UploadManager
 from app.api.v1.endpoints.static_tasks_shared import (
     _cleanup_incorrect_rules,
     _clear_scan_task_cancel,
+    _build_core_audit_exclude_patterns,
     copy_project_tree_to_scan_dir,
     _dt_to_iso,
     _ensure_opengrep_xdg_dirs,
+    _is_core_ignored_path,
     _get_project_root,
     _get_user_config,
     _is_scan_task_cancelled,
@@ -472,7 +474,15 @@ async def _execute_opengrep_scan(
         meta_dir.mkdir(parents=True, exist_ok=True)
 
         shutil.rmtree(project_dir, ignore_errors=True)
-        copy_project_tree_to_scan_dir(project_root, project_dir)
+        effective_exclude_patterns = _build_core_audit_exclude_patterns([])
+        copy_project_tree_to_scan_dir(
+            project_root,
+            project_dir,
+            exclude_matcher=lambda rel_path: _is_core_ignored_path(
+                rel_path,
+                effective_exclude_patterns,
+            ),
+        )
 
         full_target_path = os.path.join(str(project_dir), target_path)
         if not os.path.exists(full_target_path):

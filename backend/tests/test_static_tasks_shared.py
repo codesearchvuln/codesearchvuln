@@ -4,6 +4,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -92,6 +93,43 @@ def test_copy_project_tree_to_scan_dir_supports_optional_exclude_matcher(tmp_pat
     assert (scan_dir / "src" / "app.py").read_text(encoding="utf-8") == "dangerous()\n"
     assert not (scan_dir / "tests").exists()
     assert not (scan_dir / ".github").exists()
+
+
+def test_core_audit_exclude_matcher_prunes_test_and_fuzz_paths(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "src").mkdir()
+    (project_root / "src" / "app.py").write_text("dangerous()\n", encoding="utf-8")
+    (project_root / "tests").mkdir()
+    (project_root / "tests" / "test_app.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+    (project_root / "fuzz").mkdir()
+    (project_root / "fuzz" / "fuzzer.py").write_text("def fuzz(data):\n    pass\n", encoding="utf-8")
+    (project_root / "src" / "parser_fuzz.py").write_text("def fuzz_case():\n    pass\n", encoding="utf-8")
+    scan_dir = tmp_path / "scan" / "task-1" / "project"
+    exclude_patterns = static_tasks_shared._build_core_audit_exclude_patterns([])
+
+    static_tasks_shared.copy_project_tree_to_scan_dir(
+        project_root,
+        scan_dir,
+        exclude_matcher=lambda rel_path: static_tasks_shared._is_core_ignored_path(
+            rel_path,
+            exclude_patterns,
+        ),
+    )
+
+    assert (scan_dir / "src" / "app.py").read_text(encoding="utf-8") == "dangerous()\n"
+    assert not (scan_dir / "tests").exists()
+    assert not (scan_dir / "fuzz").exists()
+    assert not (scan_dir / "src" / "parser_fuzz.py").exists()
+
+
+def test_opengrep_static_scan_staging_uses_core_audit_exclude_matcher():
+    source = Path(static_tasks_shared.__file__).with_name("static_tasks_opengrep.py").read_text(
+        encoding="utf-8",
+    )
+
+    assert "effective_exclude_patterns = _build_core_audit_exclude_patterns([])" in source
+    assert "exclude_matcher=lambda rel_path: _is_core_ignored_path" in source
 
 
 def test_build_backend_venv_env_prefixes_backend_venv_bin(monkeypatch):

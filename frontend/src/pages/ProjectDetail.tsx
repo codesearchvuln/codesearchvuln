@@ -73,30 +73,35 @@ import type { Project } from "@/shared/types";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 const DETAIL_RECENT_TASK_LIMIT = 10;
-const DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT = 200;
+const DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT = 100;
 const DETAIL_POTENTIAL_FINDINGS_PAGE_SIZE = 10;
 
 type PotentialStatus = "loading" | "ready" | "empty" | "failed";
 type ProjectDescriptionStatus = "idle" | "generating" | "ready" | "failed";
 type ProjectDescriptionSource = "llm" | "static" | null;
 
-async function getAllOpengrepTaskFindings(taskId: string): Promise<OpengrepFinding[]> {
-	const findings: OpengrepFinding[] = [];
-	let skip = 0;
-
-	while (true) {
-		const page = await getOpengrepScanFindings({
+async function getHighSignalOpengrepTaskFindings(
+	taskId: string,
+): Promise<OpengrepFinding[]> {
+	const pages = await Promise.all([
+		getOpengrepScanFindings({
 			taskId,
-			skip,
+			severity: "ERROR",
+			skip: 0,
 			limit: DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT,
-		});
-		if (!Array.isArray(page) || page.length === 0) break;
-		findings.push(...page);
-		if (page.length < DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT) break;
-		skip += page.length;
+		}),
+		getOpengrepScanFindings({
+			taskId,
+			severity: "WARNING",
+			skip: 0,
+			limit: DETAIL_POTENTIAL_FINDINGS_FETCH_LIMIT,
+		}),
+	]);
+	const byId = new Map<string, OpengrepFinding>();
+	for (const finding of pages.flat()) {
+		byId.set(finding.id, finding);
 	}
-
-	return findings;
+	return Array.from(byId.values());
 }
 
 interface ProjectDescriptionSectionProps {
@@ -375,7 +380,9 @@ export default function ProjectDetail() {
 				}
 
 				const staticFindingsResult = await Promise.allSettled(
-					sourceOpengrepTasks.map((task) => getAllOpengrepTaskFindings(task.id)),
+					sourceOpengrepTasks.map((task) =>
+						getHighSignalOpengrepTaskFindings(task.id),
+					),
 				);
 
 				const staticFindings: OpengrepFinding[] = staticFindingsResult.flatMap(

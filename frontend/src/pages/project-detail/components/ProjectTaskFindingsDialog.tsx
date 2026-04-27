@@ -18,9 +18,10 @@ import {
 import { isTerminalTaskStatus } from "@/features/tasks/services/taskProgress";
 import { type AgentFinding, getAgentFindings } from "@/shared/api/agentTasks";
 import {
-	getOpengrepScanFindings,
-	type OpengrepFinding,
-} from "@/shared/api/opengrep";
+	getUnifiedStaticFindings,
+	type UnifiedStaticFindingItem,
+	type UnifiedStaticFindingSortBy,
+} from "@/shared/api/staticUnifiedFindings";
 import { resolveCweDisplay } from "@/shared/security/cweCatalog";
 import {
 	appendReturnTo,
@@ -37,8 +38,6 @@ import {
 } from "./projectTaskFindingsDialog.utils";
 
 const DIALOG_PAGE_SIZE = 10;
-const FINDING_BATCH_SIZE = 200;
-const MAX_FINDING_BATCHES = 50;
 
 type LoadStatus = "idle" | "loading" | "ready" | "failed";
 
@@ -116,16 +115,6 @@ function resolveAgentFindingTitle(finding: AgentFinding): string {
 		String(finding.display_title || "").trim() ||
 		String(finding.title || "").trim() ||
 		String(finding.vulnerability_type || "").trim() ||
-		String(finding.description || "").trim() ||
-		"未命名漏洞"
-	);
-}
-
-function resolveStaticFindingTitle(finding: OpengrepFinding): string {
-	const rule = (finding.rule || {}) as Record<string, unknown>;
-	return (
-		String(finding.rule_name || "").trim() ||
-		String(rule.check_id || rule.id || "").trim() ||
 		String(finding.description || "").trim() ||
 		"未命名漏洞"
 	);
@@ -213,22 +202,6 @@ function toStaticRelativePath(projectName: string, filePath: string): string {
 	return trimmed || "-";
 }
 
-async function fetchAllStaticFindings(
-	taskId: string,
-): Promise<OpengrepFinding[]> {
-	const findings: OpengrepFinding[] = [];
-	for (let batchIndex = 0; batchIndex < MAX_FINDING_BATCHES; batchIndex += 1) {
-		const page = await getOpengrepScanFindings({
-			taskId,
-			skip: batchIndex * FINDING_BATCH_SIZE,
-			limit: FINDING_BATCH_SIZE,
-		});
-		findings.push(...page);
-		if (page.length < FINDING_BATCH_SIZE) break;
-	}
-	return findings;
-}
-
 function normalizeAgentFindings(
 	taskId: string,
 	findings: AgentFinding[],
@@ -269,32 +242,75 @@ function normalizeAgentFindings(
 	});
 }
 
-function normalizeStaticFindings(
-	taskId: string,
-	findings: OpengrepFinding[],
+function getColumnFilterValue(
+	state: DataTableQueryState,
+	columnId: string,
+): unknown {
+	return state.columnFilters.find((filter) => filter.id === columnId)?.value;
+}
+
+function toOptionalString(value: unknown): string | undefined {
+	const normalized = String(value ?? "").trim();
+	return normalized ? normalized : undefined;
+}
+
+function resolveUnifiedSeverityFilter(
+	value: unknown,
+): "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | undefined {
+	const normalized = toOptionalString(value);
+	if (
+		normalized === "CRITICAL" ||
+		normalized === "HIGH" ||
+		normalized === "MEDIUM" ||
+		normalized === "LOW"
+	) {
+		return normalized;
+	}
+	return undefined;
+}
+
+function resolveUnifiedConfidenceFilter(
+	value: unknown,
+): "HIGH" | "MEDIUM" | "LOW" | undefined {
+	const normalized = toOptionalString(value);
+	if (normalized === "HIGH" || normalized === "MEDIUM" || normalized === "LOW") {
+		return normalized;
+	}
+	return undefined;
+}
+
+function resolveStaticSortBy(
+	state: DataTableQueryState,
+): UnifiedStaticFindingSortBy {
+	const sorting = state.sorting[0];
+	if (!sorting) return "severity";
+	if (sorting.id === "confidence") return "confidence";
+	if (sorting.id === "location") return "file_path";
+	return "severity";
+}
+
+function normalizeUnifiedStaticFindings(
+	items: UnifiedStaticFindingItem[],
 ): TaskFindingRow[] {
-	return findings.map((finding) => {
+	return items.map((finding) => {
 		const typeDisplay = resolveCweDisplay({
-			cwe: finding.cwe,
-			fallbackLabel:
-				String(finding.rule_name || "").trim() ||
-				resolveStaticFindingTitle(finding),
+			fallbackLabel: finding.rule,
 		});
 
 		return {
 			id: finding.id,
-			taskId,
+			taskId: finding.task_id,
 			taskCategory: "static",
-			title: resolveStaticFindingTitle(finding),
+			title: finding.rule,
 			typeLabel: typeDisplay.label,
 			typeTooltip: typeDisplay.tooltip,
 			filePath: String(finding.file_path || "").trim() || "-",
-			line: toPositiveLine(finding.start_line),
+			line: toPositiveLine(finding.line),
 			severity: normalizeTaskFindingSeverity(finding.severity),
 			confidence: normalizeTaskFindingConfidence(finding.confidence),
 			route: buildFindingDetailPath({
 				source: "static",
-				taskId,
+				taskId: finding.task_id,
 				findingId: finding.id,
 				engine: "opengrep",
 			}),
@@ -302,6 +318,39 @@ function normalizeStaticFindings(
 			createdAt: null,
 		};
 	});
+}
+
+async function fetchStaticFindingsPage(
+	taskId: string,
+	state: DataTableQueryState,
+): Promise<{ rows: TaskFindingRow[]; total: number }> {
+	const pageIndex = Math.max(0, Number(state.pagination.pageIndex || 0));
+	const pageSize = Math.max(1, Number(state.pagination.pageSize || DIALOG_PAGE_SIZE));
+	const sorting = state.sorting[0];
+	const keyword =
+		toOptionalString(state.globalFilter) ??
+		toOptionalString(getColumnFilterValue(state, "typeLabel")) ??
+		toOptionalString(getColumnFilterValue(state, "location"));
+
+	const response = await getUnifiedStaticFindings({
+		opengrepTaskId: taskId,
+		page: pageIndex + 1,
+		pageSize,
+		keyword,
+		severity: resolveUnifiedSeverityFilter(
+			getColumnFilterValue(state, "severity"),
+		),
+		confidence: resolveUnifiedConfidenceFilter(
+			getColumnFilterValue(state, "confidence"),
+		),
+		sortBy: resolveStaticSortBy(state),
+		sortOrder: sorting?.desc === false ? "asc" : "desc",
+	});
+
+	return {
+		rows: normalizeUnifiedStaticFindings(response.items),
+		total: response.total,
+	};
 }
 
 export default function ProjectTaskFindingsDialog({
@@ -317,6 +366,7 @@ export default function ProjectTaskFindingsDialog({
 	const [status, setStatus] = useState<LoadStatus>("idle");
 	const [errorMessage, setErrorMessage] = useState("");
 	const [allRows, setAllRows] = useState<TaskFindingRow[]>([]);
+	const [totalRows, setTotalRows] = useState(0);
 	const [tableState, setTableState] = useState<DataTableQueryState>({
 		globalFilter: "",
 		columnFilters: [],
@@ -364,10 +414,49 @@ export default function ProjectTaskFindingsDialog({
 			rowSelection: {},
 			density: "comfortable",
 		});
+		setAllRows([]);
+		setTotalRows(0);
+	}, [open, taskCategory, taskId]);
+
+	useEffect(() => {
+		if (!open || !taskId) return;
+		if (taskCategory !== "static") return;
+
+		let cancelled = false;
+
+		const loadStaticFindings = async () => {
+			setStatus("loading");
+			try {
+				const page = await fetchStaticFindingsPage(taskId, tableState);
+				if (cancelled) return;
+				setAllRows(page.rows);
+				setTotalRows(page.total);
+				setStatus("ready");
+			} catch (error) {
+				if (cancelled) return;
+				console.error("Failed to load task findings:", error);
+				setAllRows([]);
+				setTotalRows(0);
+				setErrorMessage("加载漏洞失败");
+				setStatus("failed");
+			}
+		};
+
+		void loadStaticFindings();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [open, taskCategory, taskId, tableState]);
+
+	useEffect(() => {
+		if (!open || !taskId) return;
+		if (taskCategory === "static") return;
 
 		const cachedRows = cacheRef.current.get(cacheKey);
 		if (cachedRows) {
 			setAllRows(cachedRows);
+			setTotalRows(cachedRows.length);
 			setStatus("ready");
 			return;
 		}
@@ -377,32 +466,28 @@ export default function ProjectTaskFindingsDialog({
 		const loadFindings = async () => {
 			setStatus("loading");
 			try {
-				const nextRows =
-					taskCategory === "static"
-						? normalizeStaticFindings(
-								taskId,
-								await fetchAllStaticFindings(taskId),
-							)
-						: normalizeAgentFindings(
-								taskId,
-								await getAgentFindings(taskId, {
-									include_false_positive: false,
-								}),
-							).map((item) => ({
-								...item,
-								taskCategory,
-							}));
+				const nextRows = normalizeAgentFindings(
+					taskId,
+					await getAgentFindings(taskId, {
+						include_false_positive: false,
+					}),
+				).map((item) => ({
+					...item,
+					taskCategory,
+				}));
 
 				const sortedRows = sortTaskFindings(nextRows);
 				if (cancelled) return;
 
 				cacheRef.current.set(cacheKey, sortedRows);
 				setAllRows(sortedRows);
+				setTotalRows(sortedRows.length);
 				setStatus("ready");
 			} catch (error) {
 				if (cancelled) return;
 				console.error("Failed to load task findings:", error);
 				setAllRows([]);
+				setTotalRows(0);
 				setErrorMessage("加载漏洞失败");
 				setStatus("failed");
 			}
@@ -589,7 +674,7 @@ export default function ProjectTaskFindingsDialog({
 									任务 ID：{taskId}
 								</span>
 								<span className="inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
-									漏洞共 {allRows.length.toLocaleString()} 条
+									漏洞共 {totalRows.toLocaleString()} 条
 								</span>
 							</div>
 						</div>
@@ -612,6 +697,7 @@ export default function ProjectTaskFindingsDialog({
 							key={`${cacheKey}:${open ? "open" : "closed"}`}
 							data={allRows}
 							columns={columns}
+							mode={taskCategory === "static" ? "server" : "local"}
 							state={tableState}
 							onStateChange={setTableState}
 							loading={status === "loading"}
@@ -632,6 +718,8 @@ export default function ProjectTaskFindingsDialog({
 							pagination={{
 								enabled: true,
 								pageSizeOptions: [10, 20, 50],
+								totalCount:
+									taskCategory === "static" ? totalRows : undefined,
 								infoLabel: ({ table, filteredCount }) => {
 									const pageIndex = table.getState().pagination.pageIndex;
 									const pageCount = Math.max(1, table.getPageCount());
