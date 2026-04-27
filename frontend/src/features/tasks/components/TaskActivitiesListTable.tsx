@@ -26,6 +26,7 @@ interface TaskActivitiesListTableProps {
 	nowMs: number;
 	emptyText?: string;
 	pageSize?: number;
+	onInterruptActivity?: (activity: TaskActivityItem) => Promise<void>;
 	onDeleteActivity?: (activity: TaskActivityItem) => Promise<void>;
 }
 
@@ -44,6 +45,8 @@ function getDefectSummaryLabel(activity: TaskActivityItem): string {
 function getColumns(
 	nowMs: number,
 	currentRoute: string,
+	handleInterrupt: ((activity: TaskActivityItem) => Promise<void>) | null,
+	interruptingActivityId: string | null,
 	handleDelete: ((activity: TaskActivityItem) => Promise<void>) | null,
 	deletingActivityId: string | null,
 ): AppColumnDef<TaskActivityItem, unknown>[] {
@@ -188,10 +191,16 @@ function getColumns(
 			enableSorting: false,
 			meta: {
 				label: "操作",
-				width: 196,
-				minWidth: 196,
+				width: 292,
+				minWidth: 292,
 			},
 			cell: ({ row }) => {
+				const normalizedStatus = String(row.original.status || "")
+					.trim()
+					.toLowerCase();
+				const canInterrupt =
+					normalizedStatus === "running" || normalizedStatus === "pending";
+				const isInterrupting = interruptingActivityId === row.original.id;
 				const isDeleting = deletingActivityId === row.original.id;
 				return (
 					<div className="flex flex-nowrap items-center gap-2 whitespace-nowrap">
@@ -203,13 +212,27 @@ function getColumns(
 						>
 							<Link to={appendReturnTo(row.original.route, currentRoute)}>
 								详情
-							</Link>
-						</Button>
+								</Link>
+							</Button>
+						{canInterrupt ? (
+							<Button
+								size="sm"
+								variant="secondary"
+								className="h-8 shrink-0 whitespace-nowrap px-3"
+								disabled={!handleInterrupt || isInterrupting}
+								onClick={() => {
+									if (!handleInterrupt) return;
+									void handleInterrupt(row.original);
+								}}
+							>
+								{isInterrupting ? "中止中..." : "中止任务"}
+							</Button>
+						) : null}
 						<Button
 							size="sm"
 							variant="destructive"
 							className="h-8 shrink-0 whitespace-nowrap px-3"
-							disabled={!handleDelete || isDeleting}
+							disabled={!handleDelete || isDeleting || isInterrupting}
 							onClick={() => {
 								if (!handleDelete) return;
 								void handleDelete(row.original);
@@ -230,11 +253,37 @@ export default function TaskActivitiesListTable({
 	nowMs,
 	emptyText = "暂无任务",
 	pageSize = 10,
+	onInterruptActivity,
 	onDeleteActivity,
 }: TaskActivitiesListTableProps) {
 	const location = useLocation();
 	const currentRoute = `${location.pathname}${location.search}`;
+	const [interruptingActivityId, setInterruptingActivityId] = useState<string | null>(null);
 	const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
+
+	const handleInterrupt =
+		onInterruptActivity == null
+			? null
+			: async (activity: TaskActivityItem) => {
+					const confirmed = window.confirm(
+						`确认中止任务「${activity.projectName} / ${getTaskStatusText(
+							activity.status,
+						)}」吗？`,
+					);
+					if (!confirmed) return;
+					setInterruptingActivityId(activity.id);
+					try {
+						await onInterruptActivity(activity);
+						toast.success("任务已中止");
+					} catch (error) {
+						console.error("Failed to interrupt task:", error);
+						toast.error("中止任务失败");
+					} finally {
+						setInterruptingActivityId((current) =>
+							current === activity.id ? null : current,
+						);
+					}
+			  };
 
 	const handleDelete =
 		onDeleteActivity == null
@@ -262,13 +311,22 @@ export default function TaskActivitiesListTable({
 
 	const columns = useMemo<ColumnDef<TaskActivityItem>[]>(
 		() =>
-			getColumns(
-				nowMs,
-				currentRoute,
-				handleDelete,
-				deletingActivityId,
-			),
-		[currentRoute, deletingActivityId, handleDelete, nowMs],
+				getColumns(
+					nowMs,
+					currentRoute,
+					handleInterrupt,
+					interruptingActivityId,
+					handleDelete,
+					deletingActivityId,
+				),
+		[
+			currentRoute,
+			deletingActivityId,
+			handleDelete,
+			handleInterrupt,
+			interruptingActivityId,
+			nowMs,
+		],
 	);
 
 	const defaultState = useMemo<Partial<DataTableQueryState>>(

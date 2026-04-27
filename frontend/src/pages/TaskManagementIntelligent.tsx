@@ -12,6 +12,7 @@ import { useTaskClock } from "@/features/tasks/hooks/useTaskClock";
 import {
 	deleteTaskActivity,
 	filterIntelligentActivities,
+	interruptTaskActivity,
 } from "@/features/tasks/services/taskActivities";
 
 const CreateProjectScanDialog = lazy(
@@ -162,6 +163,10 @@ export default function TaskManagementIntelligent() {
 						loading={loading}
 						nowMs={nowMs}
 						emptyText="暂无智能扫描任务"
+						onInterruptActivity={async (activity) => {
+							await interruptTaskActivity(activity);
+							await refresh();
+						}}
 						onDeleteActivity={async (activity) => {
 							await deleteTaskActivity(activity);
 							await refresh();

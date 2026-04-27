@@ -41,3 +41,15 @@ test("deleteTaskActivity performs cancel then delete for agent tasks", () => {
 	assert.match(source, /deleteAgentTask/);
 	assert.match(source, /if \(!AGENT_TERMINAL_STATUSES\.has\(normalizedStatus\)\)/);
 });
+
+test("interruptTaskActivity supports static engines and agent tasks", () => {
+	const source = readFileSync(taskActivitiesPath, "utf8");
+	assert.match(source, /export async function interruptTaskActivity/);
+	assert.match(source, /interruptOpengrepScanTask/);
+	assert.match(source, /interruptGitleaksScanTask/);
+	assert.match(source, /interruptBanditScanTask/);
+	assert.match(source, /interruptPhpstanScanTask/);
+	assert.match(source, /interruptPmdScanTask/);
+	assert.match(source, /interruptYasaScanTask/);
+	assert.match(source, /await cancelAgentTask\(taskId\)/);
+});

@@ -713,6 +713,56 @@ const AGENT_TERMINAL_STATUSES = new Set([
 	"interrupted",
 ]);
 
+function buildStaticInterruptOperations(
+	activity: TaskActivityItem,
+): Array<() => Promise<unknown>> {
+	const operations: Array<() => Promise<unknown>> = [];
+	if (activity.opengrepTaskId) {
+		const taskId = activity.opengrepTaskId;
+		operations.push(() => interruptOpengrepScanTask(taskId));
+	}
+	if (activity.gitleaksTaskId) {
+		const taskId = activity.gitleaksTaskId;
+		operations.push(() => interruptGitleaksScanTask(taskId));
+	}
+	if (activity.banditTaskId) {
+		const taskId = activity.banditTaskId;
+		operations.push(() => interruptBanditScanTask(taskId));
+	}
+	if (activity.phpstanTaskId) {
+		const taskId = activity.phpstanTaskId;
+		operations.push(() => interruptPhpstanScanTask(taskId));
+	}
+	if (activity.pmdTaskId) {
+		const taskId = activity.pmdTaskId;
+		operations.push(() => interruptPmdScanTask(taskId));
+	}
+	if (activity.yasaTaskId) {
+		const taskId = activity.yasaTaskId;
+		operations.push(() => interruptYasaScanTask(taskId));
+	}
+	return operations;
+}
+
+export async function interruptTaskActivity(activity: TaskActivityItem): Promise<void> {
+	if (activity.kind === "rule_scan") {
+		const operations = buildStaticInterruptOperations(activity);
+		if (operations.length === 0) {
+			throw new Error("缺少可中止的静态任务标识");
+		}
+		for (const runOperation of operations) {
+			await runOperation();
+		}
+		return;
+	}
+
+	const taskId = activity.agentTaskId;
+	if (!taskId) {
+		throw new Error("缺少可中止的智能任务标识");
+	}
+	await cancelAgentTask(taskId);
+}
+
 async function interruptAndDeleteStaticTask(
 	taskId: string,
 	interruptFn: (taskId: string) => Promise<unknown>,
