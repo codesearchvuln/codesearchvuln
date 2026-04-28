@@ -133,6 +133,7 @@ REMOVABLE_CACHE_DIRS = {
     ".cache",
 }
 TEST_FILE_RE = re.compile(r".*\.(test|spec)(\.|$).*", re.IGNORECASE)
+PRESERVED_TEST_FILE_RE = re.compile(r"^tsconfig.*\.json$", re.IGNORECASE)
 NOTICE_RE = re.compile(
     r"(copyright|license|licensed|spdx|agpl|gpl|affero|author|attribution|notice)",
     re.IGNORECASE,
@@ -185,7 +186,8 @@ def prune_artifacts() -> None:
             if is_preserved_path(path):
                 continue
             is_removable_suffix = Path(filename).suffix.lower() in REMOVABLE_FILE_SUFFIXES
-            if is_removable_suffix or TEST_FILE_RE.search(filename):
+            is_test_source = TEST_FILE_RE.search(filename) and not PRESERVED_TEST_FILE_RE.match(filename)
+            if is_removable_suffix or is_test_source:
                 remove_path(path)
 
 
@@ -301,6 +303,7 @@ REMOVABLE_CACHE_DIRS = {
     ".cache",
 }
 TEST_FILE_RE = re.compile(r".*\.(test|spec)(\.|$).*", re.IGNORECASE)
+PRESERVED_TEST_FILE_RE = re.compile(r"^tsconfig.*\.json$", re.IGNORECASE)
 failures = []
 
 
@@ -328,7 +331,8 @@ for dirpath, dirnames, filenames in os.walk(root):
         if is_preserved(path):
             continue
         is_removable_suffix = Path(filename).suffix.lower() in REMOVABLE_FILE_SUFFIXES
-        if is_removable_suffix or TEST_FILE_RE.search(filename):
+        is_test_source = TEST_FILE_RE.search(filename) and not PRESERVED_TEST_FILE_RE.match(filename)
+        if is_removable_suffix or is_test_source:
             failures.append(rel(path))
 
 if failures:

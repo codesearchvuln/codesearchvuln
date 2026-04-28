@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -69,6 +70,11 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert (output_dir / "docker" / "env" / "backend" / "env.example").is_file()
     assert (output_dir / "backend" / "app").is_dir()
     assert (output_dir / "frontend" / "src").is_dir()
+    assert (output_dir / "frontend" / "tsconfig.test.json").is_file()
+    frontend_tsconfig = json.loads((output_dir / "frontend" / "tsconfig.json").read_text(encoding="utf-8"))
+    for reference in frontend_tsconfig["references"]:
+        reference_path = reference["path"].removeprefix("./")
+        assert (output_dir / "frontend" / reference_path).is_file()
     assert (output_dir / "backend" / "app" / "api" / "v1" / "endpoints" / "agent_test.py").is_file()
     assert (output_dir / "backend" / "app" / "services" / "agent" / "skill_test_runner.py").is_file()
     assert (output_dir / "backend" / "app" / "services" / "agent" / "agents" / "skill_test.py").is_file()
@@ -180,6 +186,7 @@ def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_sourc
     _write_tracked_file(source_dir, "docker/env/backend/env.example", "LLM_API_KEY=\n")
     _write_tracked_file(source_dir, "docker/Dockerfile", "FROM scratch\n")
     _write_tracked_file(source_dir, "frontend/src/main.ts", "export {}\n")
+    _write_tracked_file(source_dir, "frontend/tsconfig.test.json", "{}\n")
     _write_tracked_file(source_dir, "nexus-web/index.html", "<html></html>\n")
     _write_tracked_file(source_dir, "nexus-itemDetail/index.html", "<html></html>\n")
     _write_tracked_file(source_dir, "docker-compose.yml", (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
@@ -209,6 +216,7 @@ def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_sourc
     assert (output_dir / "backend" / "app" / "keep.py").is_file()
     assert not (output_dir / "backend" / "app" / "__pycache__").exists()
     assert not (output_dir / "backend" / "app" / ".ruff_cache").exists()
+    assert (output_dir / "frontend" / "tsconfig.test.json").is_file()
     assert not (output_dir / "frontend" / "src" / "component.test.ts").exists()
     assert not (output_dir / "frontend" / "src" / "component.spec.tsx").exists()
     assert not (output_dir / "frontend" / "src" / "component.test.helper.ts").exists()
