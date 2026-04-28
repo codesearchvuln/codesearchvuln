@@ -212,7 +212,6 @@ skills/
 !backend/app/services/agent/skills/**
 
 # Codex integration - session logs and generated docs
-.codex/
 .claude/
 
 .playwright-cli/
@@ -246,3 +245,11 @@ backend/log/
 .codex
 .omx/
 .alma-snapshots
+.codex/*
+!.codex/agents/
+!.codex/agents/**
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/**
+!.codex/prompts/
+!.codex/prompts/**

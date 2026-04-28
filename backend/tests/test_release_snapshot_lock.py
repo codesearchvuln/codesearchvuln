@@ -26,6 +26,7 @@ def _write_release_manifest(path: Path) -> dict[str, object]:
             "adminer": {"ref": "ghcr.io/acme-sec/adminer@sha256:" + "c" * 64},
             "scan_workspace_init": {"ref": "ghcr.io/acme-sec/scan-workspace-init@sha256:" + "d" * 64},
             "static_frontend": {"ref": "ghcr.io/acme-sec/static-frontend@sha256:" + "e" * 64},
+            "nexus_web": {"ref": "ghcr.io/acme-sec/vulhunter-nexus-web@sha256:" + "f" * 64},
             "sandbox_runner": {"ref": "ghcr.io/acme-sec/vulhunter-sandbox-runner@sha256:" + "2" * 64},
             "scanner_yasa": {"ref": "ghcr.io/acme-sec/vulhunter-yasa-runner@sha256:" + "3" * 64},
             "scanner_opengrep": {"ref": "ghcr.io/acme-sec/vulhunter-opengrep-runner@sha256:" + "4" * 64},
@@ -247,6 +248,7 @@ def test_release_bundle_contract_schema_is_authoritative() -> None:
         "adminer",
         "scan_workspace_init",
         "static_frontend",
+        "nexus_web",
     ]
     assert contract["bundles"]["scanner"]["tree_metadata_filename"] == "images-manifest-scanner.json"
     assert contract["bundles"]["scanner"]["asset_name_template"] == "vulhunter-scanner-images-{arch}.tar.zst"

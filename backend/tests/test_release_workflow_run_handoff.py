@@ -42,7 +42,8 @@ def test_release_workflow_push_and_dispatch_paths_own_runtime_builds() -> None:
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert (
-        "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
+        "if: ${{ always() && !cancelled() && needs.prepare-release.result == "
+        "'success' && (github.event_name == 'push' || github.event_name == "
         "'workflow_dispatch') && (github.event_name != 'push' || "
         "needs.detect-changes.result == 'success') }}"
     ) in workflow_text

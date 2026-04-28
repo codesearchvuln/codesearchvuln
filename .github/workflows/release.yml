@@ -300,6 +300,7 @@ jobs:
 
   resolve-entry:
     needs: await-turn
+    if: ${{ always() && !cancelled() && needs.await-turn.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -338,6 +339,7 @@ jobs:
 
   prepare-release:
     needs: resolve-entry
+    if: ${{ always() && !cancelled() && needs.resolve-entry.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -435,6 +437,7 @@ jobs:
     needs:
       - prepare-release
       - resolve-release-manifest
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.resolve-release-manifest.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -492,7 +495,7 @@ jobs:
           echo "snapshot_url=${html_url}" >> "$GITHUB_OUTPUT"
 
   publish-runtime-images:
-    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'push' || needs.detect-changes.result == 'success') }}
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'push' || needs.detect-changes.result == 'success') }}
     needs:
       - detect-changes
       - prepare-release
@@ -568,7 +571,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   package-offline-images:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_offline_images || inputs.publish_release_assets }}
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.create-draft-release.result == 'success' && needs.resolve-release-manifest.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.build_offline_images || inputs.publish_release_assets) }}
     needs:
       - prepare-release
       - create-draft-release

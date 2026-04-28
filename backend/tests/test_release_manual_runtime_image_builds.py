@@ -75,17 +75,53 @@ def test_release_workflow_manual_build_mapping_respects_priority_rules() -> None
 
 def test_release_workflow_manual_asset_publish_runs_full_finalize_asset_flow() -> None:
     workflow_text = _workflow_text()
+    package_offline_images_if = (
+        "if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && "
+        "needs.create-draft-release.result == 'success' && "
+        "needs.resolve-release-manifest.result == 'success' && "
+        "(github.event_name != 'workflow_dispatch' || inputs.build_offline_images || "
+        "inputs.publish_release_assets) }}"
+    )
+    finalize_publish_if = (
+        "if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && "
+        "needs.create-draft-release.result == 'success' && "
+        "needs.resolve-release-manifest.result == 'success' && "
+        "(needs.package-offline-images.result == 'success' || "
+        "needs.package-offline-images.result == 'skipped') }}"
+    )
     force_release_assets_env = (
         "FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && "
         "(inputs.build_offline_images || inputs.publish_release_assets) || false }}"
     )
 
-    assert (
-        "if: ${{ github.event_name != 'workflow_dispatch' || "
-        "inputs.build_offline_images || inputs.publish_release_assets }}"
-    ) in workflow_text
+    assert package_offline_images_if in workflow_text
+    assert finalize_publish_if in workflow_text
     assert force_release_assets_env in workflow_text
     assert "--force-patch" in workflow_text
+
+
+def test_release_workflow_dispatch_release_chain_survives_push_only_skips() -> None:
+    workflow_text = _workflow_text()
+
+    assert "commit-gate:\n    if: ${{ github.event_name == 'push' }}" in workflow_text
+    assert (
+        "resolve-entry:\n"
+        "    needs: await-turn\n"
+        "    if: ${{ always() && !cancelled() && "
+        "needs.await-turn.result == 'success' }}"
+    ) in workflow_text
+    assert (
+        "prepare-release:\n"
+        "    needs: resolve-entry\n"
+        "    if: ${{ always() && !cancelled() && "
+        "needs.resolve-entry.result == 'success' }}"
+    ) in workflow_text
+    assert (
+        "if: ${{ always() && !cancelled() && "
+        "needs.prepare-release.result == 'success' && "
+        "(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && "
+        "(github.event_name != 'push' || needs.detect-changes.result == 'success') }}"
+    ) in workflow_text
 
 
 def test_release_workflow_summarizes_manual_runtime_image_build_plan() -> None:
@@ -102,7 +138,8 @@ def test_release_workflow_dispatch_not_blocked_by_push_only_detect_changes_job()
     workflow_text = _workflow_text()
 
     assert (
-        "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
+        "if: ${{ always() && !cancelled() && needs.prepare-release.result == "
+        "'success' && (github.event_name == 'push' || github.event_name == "
         "'workflow_dispatch') && (github.event_name != 'push' || "
         "needs.detect-changes.result == 'success') }}"
     ) in workflow_text

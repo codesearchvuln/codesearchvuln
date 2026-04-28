@@ -304,14 +304,18 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     ) in workflow_text
     assert "package-offline-images:" in workflow_text
     assert (
-        "if: ${{ github.event_name != 'workflow_dispatch' || "
-        "inputs.build_offline_images || inputs.publish_release_assets }}"
+        "if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && "
+        "needs.create-draft-release.result == 'success' && "
+        "needs.resolve-release-manifest.result == 'success' && "
+        "(github.event_name != 'workflow_dispatch' || inputs.build_offline_images || "
+        "inputs.publish_release_assets) }}"
     ) in workflow_text
     assert "finalize-publish:" in workflow_text
     assert "cleanup-draft-release:" in workflow_text
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
     assert (
-        "if: ${{ always() && (github.event_name == 'push' || github.event_name == "
+        "if: ${{ always() && !cancelled() && needs.prepare-release.result == "
+        "'success' && (github.event_name == 'push' || github.event_name == "
         "'workflow_dispatch') && (github.event_name != 'push' || "
         "needs.detect-changes.result == 'success') }}"
     ) in workflow_text
