@@ -1,0 +1,46 @@
+{
+  "revision": "326383a2296a55044de7f13d2bd092b54d5cf10b",
+  "bundle_template": "images/vulhunter-scanner-images-{arch}.tar.zst",
+  "images": {
+    "sandbox_runner": {
+      "env_var": "SANDBOX_RUNNER_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-sandbox-runner@sha256:15be6f6abd14bc03755cac0aa97f2027f30b125fda38c0b00b335e431745d077",
+      "local_tag": "vulhunter-local/sandbox-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    },
+    "scanner_yasa": {
+      "env_var": "SCANNER_YASA_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-yasa-runner@sha256:3834c4e85d82e644a699c6d4a25c8768bc5342263d86b6c8bde8f6168e52bbf3",
+      "local_tag": "vulhunter-local/yasa-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    },
+    "scanner_opengrep": {
+      "env_var": "SCANNER_OPENGREP_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-opengrep-runner@sha256:9d9d23c14eeba399ae629b37379bf719140b9728ae77674716264c7524268445",
+      "local_tag": "vulhunter-local/opengrep-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    },
+    "scanner_bandit": {
+      "env_var": "SCANNER_BANDIT_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-bandit-runner@sha256:d0849ee017c8dedf2d86efac9259d8032a349e69e5a786e0d9954b502ea53ff8",
+      "local_tag": "vulhunter-local/bandit-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    },
+    "scanner_gitleaks": {
+      "env_var": "SCANNER_GITLEAKS_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-gitleaks-runner@sha256:c4150672c2ad608e77a98ca51cba9b60be442227937e883ad2bc8079b029a767",
+      "local_tag": "vulhunter-local/gitleaks-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    },
+    "scanner_phpstan": {
+      "env_var": "SCANNER_PHPSTAN_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-phpstan-runner@sha256:8c42282aa6d2e66274117bd7fcdb609bcc279bfaf0198da720fcff447b6b2a4b",
+      "local_tag": "vulhunter-local/phpstan-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    },
+    "scanner_pmd": {
+      "env_var": "SCANNER_PMD_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-pmd-runner@sha256:8a78feabdb6e54208eb0ecd45fb7216f7ecdea73b468ddbe6be90b0e96f8bc12",
+      "local_tag": "vulhunter-local/pmd-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    },
+    "flow_parser_runner": {
+      "env_var": "FLOW_PARSER_RUNNER_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-flow-parser-runner@sha256:31cc8635779106f84147c24b40ad34a17bc42d7d68ee8802d7293a84c27741ef",
+      "local_tag": "vulhunter-local/flow-parser-runner:326383a2296a55044de7f13d2bd092b54d5cf10b"
+    }
+  }
+}
