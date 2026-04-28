@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     
     # ZIP文件存储配置
     ZIP_STORAGE_PATH: str = "./uploads/zip_files"  # ZIP文件存储目录
+    NEXUS_CACHE_STORAGE_PATH: str = "./nexus_cache"  # Nexus 缓存文件存储目录
     SCAN_WORKSPACE_ROOT: str = "/tmp/vulhunter/scans"
     SCAN_WORKSPACE_VOLUME: str = "vulhunter_scan_workspace"
     GHCR_REGISTRY: str = _default_ghcr_registry()

@@ -1,9 +1,11 @@
 from fastapi import APIRouter
+
 from app.api.v1.endpoints import (
     agent_tasks,
     agent_test,
     config,
     members,
+    nexus,
     projects,
     prompts,
     rules,
@@ -25,3 +27,4 @@ api_router.include_router(agent_tasks.router, prefix="/agent-tasks", tags=["agen
 api_router.include_router(agent_test.router, prefix="/agent-test", tags=["agent-test"])
 api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
 api_router.include_router(static_tasks.router, prefix="/static-tasks", tags=["static-tasks"])
+api_router.include_router(nexus.router, prefix="/nexus", tags=["nexus"])
