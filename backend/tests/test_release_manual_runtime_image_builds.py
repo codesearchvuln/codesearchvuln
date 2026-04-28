@@ -77,7 +77,7 @@ def test_release_workflow_manual_asset_publish_runs_full_finalize_asset_flow() -
     workflow_text = _workflow_text()
     force_release_assets_env = (
         "FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && "
-        "inputs.publish_release_assets || false }}"
+        "(inputs.build_offline_images || inputs.publish_release_assets) || false }}"
     )
 
     assert (

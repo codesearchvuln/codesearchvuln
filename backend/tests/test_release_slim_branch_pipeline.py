@@ -515,7 +515,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "git fetch --force --tags origin" in workflow_text
     force_release_assets_env = (
         "FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && "
-        "inputs.publish_release_assets || false }}"
+        "(inputs.build_offline_images || inputs.publish_release_assets) || false }}"
     )
     assert force_release_assets_env in workflow_text
     assert "--force-patch" in workflow_text

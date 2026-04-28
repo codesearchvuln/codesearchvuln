@@ -160,7 +160,7 @@ def resolve_release_version(
         (managed_tag for managed_tag in reversed(managed_tags) if managed_tag.metadata["source_sha"] == source_sha),
         None,
     )
-    if existing_managed_tag is not None:
+    if existing_managed_tag is not None and not force_patch:
         return {
             "should_release": True,
             "version": existing_managed_tag.semantic.name,
@@ -266,7 +266,7 @@ def main() -> int:
     parser.add_argument(
         "--force-patch",
         action="store_true",
-        help="Treat otherwise non-releasing commit subjects as a managed patch release.",
+        help="Always resolve the next managed patch release, even for non-releasing commits or an already-tagged source SHA.",
     )
     args = parser.parse_args()
 

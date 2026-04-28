@@ -969,7 +969,7 @@ jobs:
         id: resolve_semantic_version
         env:
           SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
-          FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release_assets || false }}
+          FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && (inputs.build_offline_images || inputs.publish_release_assets) || false }}
         run: |
           set -euo pipefail
 
