@@ -37,10 +37,10 @@ die() {
 
 clean_generated_tree() {
   find "$OUTPUT_DIR" \
-    \( -name '__pycache__' -o -name '.pytest_cache' -o -name '.mypy_cache' \) \
+    \( -name '__pycache__' -o -name '.pytest_cache' -o -name '.mypy_cache' -o -name '.ruff_cache' -o -name '.cache' \) \
     -exec rm -rf {} +
   find "$OUTPUT_DIR" \
-    \( -name '*.pyc' -o -name '*.pyo' -o -name '.DS_Store' \) \
+    \( -name '*.pyc' -o -name '*.pyo' -o -name '.DS_Store' -o -name '*.tmp' -o -name '*.bak' -o -name '*.swp' -o -name '*.map' -o -name '*.log' \) \
     -delete
 }
 
@@ -95,6 +95,248 @@ overlay_templates() {
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/Makefile" "$OUTPUT_DIR/Makefile"
   cp "$TEMPLATE_DIR/docker-compose.full.yml" "$OUTPUT_DIR/docker-compose.full.yml"
+}
+
+sanitize_public_tree() {
+  python3 - "$OUTPUT_DIR" <<'PY_SANITIZE'
+import io
+import os
+import re
+import shutil
+import sys
+import tokenize
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+
+PRESERVED_PREFIXES = (
+    "backend/app/db/rules/",
+    "backend/app/db/rules_",
+)
+REMOVABLE_DIR_NAMES = {
+    "__tests__",
+    "fixtures",
+    "fixture",
+    "mocks",
+    "mock",
+    "samples",
+    "sample",
+    "examples",
+    "example",
+}
+REMOVABLE_FILE_SUFFIXES = {".pyc", ".pyo", ".tmp", ".bak", ".swp", ".map", ".log"}
+REMOVABLE_CACHE_DIRS = {
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".cache",
+}
+TEST_FILE_RE = re.compile(r".*\.(test|spec)(\.|$).*", re.IGNORECASE)
+NOTICE_RE = re.compile(
+    r"(copyright|license|licensed|spdx|agpl|gpl|affero|author|attribution|notice)",
+    re.IGNORECASE,
+)
+DIRECTIVE_RE = re.compile(
+    r"(coding[:=]|shellcheck|eslint|ts-ignore|ts-nocheck|type:\s*ignore|noqa|pylint|"
+    r"pragma:|coverage:|yaml-language-server|dockerfile)",
+    re.IGNORECASE,
+)
+COMMENT_STRIP_ALLOWLIST = {
+    "backend/app/keep.py",
+    "scripts/setup-env.sh",
+}
+
+
+def rel(path: Path) -> str:
+    return path.resolve().relative_to(root).as_posix()
+
+
+def is_preserved_path(path: Path) -> bool:
+    rel_path = rel(path)
+    if rel_path == "LICENSE" or rel_path.startswith(".git/"):
+        return True
+    return rel_path.startswith(PRESERVED_PREFIXES)
+
+
+def remove_path(path: Path) -> None:
+    if not path.exists() or is_preserved_path(path):
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def prune_artifacts() -> None:
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+        current = Path(dirpath)
+        if is_preserved_path(current):
+            dirnames[:] = []
+            continue
+        for dirname in list(dirnames):
+            path = current / dirname
+            lowered = dirname.lower()
+            if lowered in REMOVABLE_CACHE_DIRS or dirname in REMOVABLE_DIR_NAMES:
+                remove_path(path)
+                dirnames.remove(dirname)
+        for filename in filenames:
+            path = current / filename
+            if is_preserved_path(path):
+                continue
+            is_removable_suffix = Path(filename).suffix.lower() in REMOVABLE_FILE_SUFFIXES
+            if is_removable_suffix or TEST_FILE_RE.search(filename):
+                remove_path(path)
+
+
+def preserve_comment(text: str, *, line_number: int) -> bool:
+    stripped = text.strip()
+    if line_number == 1 and stripped.startswith("#!"):
+        return True
+    return bool(NOTICE_RE.search(stripped) or DIRECTIVE_RE.search(stripped))
+
+
+def strip_python_comments(path: Path) -> None:
+    raw = path.read_bytes()
+    try:
+        source = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except tokenize.TokenError:
+        return
+    changed = False
+    filtered = []
+    for token in tokens:
+        if token.type == tokenize.COMMENT and not preserve_comment(token.string, line_number=token.start[0]):
+            changed = True
+            continue
+        filtered.append(token)
+    if changed:
+        path.write_text(tokenize.untokenize(filtered), encoding="utf-8")
+
+
+def strip_line_comments(path: Path) -> None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    except UnicodeDecodeError:
+        return
+    changed = False
+    kept = []
+    in_heredoc = False
+    heredoc_end = ""
+    for index, line in enumerate(lines, start=1):
+        stripped = line.lstrip()
+        if in_heredoc:
+            kept.append(line)
+            if line.strip() == heredoc_end:
+                in_heredoc = False
+            continue
+        match = re.search(r"<<-?'?([A-Za-z_][A-Za-z0-9_]*)'?", line)
+        if match:
+            in_heredoc = True
+            heredoc_end = match.group(1)
+            kept.append(line)
+            continue
+        if stripped.startswith("#") and not preserve_comment(stripped, line_number=index):
+            changed = True
+            continue
+        kept.append(line)
+    if changed:
+        path.write_text("".join(kept), encoding="utf-8")
+
+
+def strip_comments() -> None:
+    for path in root.rglob("*"):
+        if not path.is_file() or is_preserved_path(path):
+            continue
+        rel_path = rel(path)
+        if rel_path not in COMMENT_STRIP_ALLOWLIST:
+            continue
+        suffix = path.suffix.lower()
+        if suffix == ".py":
+            strip_python_comments(path)
+        elif suffix in {".sh", ".yml", ".yaml"} or path.name in {
+            "Dockerfile",
+            "docker-compose.yml",
+            "docker-compose.full.yml",
+        }:
+            strip_line_comments(path)
+
+
+prune_artifacts()
+strip_comments()
+PY_SANITIZE
+}
+assert_no_sanitizer_artifacts() {
+  python3 - "$OUTPUT_DIR" <<'PY_VALIDATE'
+import os
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+PRESERVED_PREFIXES = (
+    "backend/app/db/rules/",
+    "backend/app/db/rules_",
+)
+REMOVABLE_DIR_NAMES = {
+    "__tests__",
+    "fixtures",
+    "fixture",
+    "mocks",
+    "mock",
+    "samples",
+    "sample",
+    "examples",
+    "example",
+}
+REMOVABLE_FILE_SUFFIXES = {".pyc", ".pyo", ".tmp", ".bak", ".swp", ".map", ".log"}
+REMOVABLE_CACHE_DIRS = {
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".cache",
+}
+TEST_FILE_RE = re.compile(r".*\.(test|spec)(\.|$).*", re.IGNORECASE)
+failures = []
+
+
+def rel(path: Path) -> str:
+    return path.resolve().relative_to(root).as_posix()
+
+
+def is_preserved(path: Path) -> bool:
+    rel_path = rel(path)
+    if rel_path == "LICENSE":
+        return True
+    return any(rel_path == prefix.rstrip("/") or rel_path.startswith(prefix) for prefix in PRESERVED_PREFIXES)
+
+for dirpath, dirnames, filenames in os.walk(root):
+    current = Path(dirpath)
+    if is_preserved(current):
+        dirnames[:] = []
+        continue
+    for dirname in dirnames:
+        lowered = dirname.lower()
+        if lowered in REMOVABLE_CACHE_DIRS or dirname in REMOVABLE_DIR_NAMES:
+            failures.append(rel(current / dirname))
+    for filename in filenames:
+        path = current / filename
+        if is_preserved(path):
+            continue
+        is_removable_suffix = Path(filename).suffix.lower() in REMOVABLE_FILE_SUFFIXES
+        if is_removable_suffix or TEST_FILE_RE.search(filename):
+            failures.append(rel(path))
+
+if failures:
+    print("[sourcecode-tree] forbidden sanitizer artifacts present:", file=sys.stderr)
+    for failure in sorted(failures)[:100]:
+        print(f"  - {failure}", file=sys.stderr)
+    raise SystemExit(1)
+PY_VALIDATE
 }
 
 validate_sourcecode_tree() {
@@ -154,6 +396,15 @@ validate_sourcecode_tree() {
   for rel_path in "${forbidden_paths[@]}"; do
     [[ ! -e "$OUTPUT_DIR/$rel_path" ]] || die "forbidden path present in sourcecode tree: $rel_path"
   done
+
+  assert_no_sanitizer_artifacts
+
+  if ! grep -Fq "商业交付、商业支持" "$OUTPUT_DIR/README.md"; then
+    die "public sourcecode readme is missing the project distribution notice: README.md"
+  fi
+  if ! grep -Fq "separate commercial delivery/support terms may apply outside the license" "$OUTPUT_DIR/README_EN.md"; then
+    die "public sourcecode readme is missing the project distribution notice: README_EN.md"
+  fi
 
   [[ -d "$OUTPUT_DIR/scripts" ]] || die "scripts directory is required"
   [[ "$(find "$OUTPUT_DIR/scripts" -mindepth 1 | wc -l)" -eq 1 ]] || \
@@ -240,6 +491,7 @@ mkdir -p "$OUTPUT_DIR"
 export_tracked_tree
 prune_public_tree
 overlay_templates
+sanitize_public_tree
 clean_generated_tree
 
 if [[ "$VALIDATE" == "true" ]]; then

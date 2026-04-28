@@ -7,7 +7,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _run_sourcecode_generator(output_dir: Path, *, validate: bool = False) -> subprocess.CompletedProcess[str]:
+def _run_sourcecode_generator(
+    output_dir: Path, *, source_dir: Path | None = None, validate: bool = False
+) -> subprocess.CompletedProcess[str]:
     script_path = REPO_ROOT / "scripts" / "generate-sourcecode-branch.sh"
 
     env = os.environ.copy()
@@ -19,6 +21,8 @@ def _run_sourcecode_generator(output_dir: Path, *, validate: bool = False) -> su
         "--output",
         str(output_dir),
     ]
+    if source_dir is not None:
+        command.extend(["--source", str(source_dir)])
     if validate:
         command.append("--validate")
 
@@ -65,6 +69,9 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert (output_dir / "docker" / "env" / "backend" / "env.example").is_file()
     assert (output_dir / "backend" / "app").is_dir()
     assert (output_dir / "frontend" / "src").is_dir()
+    assert (output_dir / "backend" / "app" / "api" / "v1" / "endpoints" / "agent_test.py").is_file()
+    assert (output_dir / "backend" / "app" / "services" / "agent" / "skill_test_runner.py").is_file()
+    assert (output_dir / "backend" / "app" / "services" / "agent" / "agents" / "skill_test.py").is_file()
 
     assert not (output_dir / ".github").exists()
     assert not (output_dir / "docs").exists()
@@ -100,6 +107,8 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
 
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in readme_text
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in readme_en_text
+    assert "商业交付、商业支持" in readme_text
+    assert "separate commercial delivery/support terms may apply outside the license" in readme_en_text
 
     if shutil.which("docker") and subprocess.run(
         ["docker", "compose", "version"],
@@ -137,6 +146,8 @@ def test_sourcecode_templates_and_setup_env_expose_full_only_entrypoint() -> Non
 
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in template_readme
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in template_readme_en
+    assert "商业交付、商业支持" in template_readme
+    assert "separate commercial delivery/support terms may apply outside the license" in template_readme_en
     assert "# 部署指南" in template_readme
     assert "# Deployment Guide" in template_readme_en
     assert "podman compose" not in template_readme
@@ -149,6 +160,79 @@ def test_sourcecode_templates_and_setup_env_expose_full_only_entrypoint() -> Non
     assert "\nbuild-frontend:\n" not in template_makefile
     assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in setup_env_text
     assert "唯一推荐入口" in full_compose_text
+
+
+def _write_tracked_file(repo_dir: Path, rel_path: str, content: str, *, executable: bool = False) -> None:
+    path = repo_dir / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    if executable:
+        path.chmod(0o755)
+
+
+def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_source(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source-repo"
+    output_dir = tmp_path / "sourcecode-tree"
+    source_dir.mkdir()
+    subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
+
+    _write_tracked_file(source_dir, "scripts/setup-env.sh", "#!/usr/bin/env bash\n# remove setup comment\necho setup\n", executable=True)
+    _write_tracked_file(source_dir, "docker/env/backend/env.example", "LLM_API_KEY=\n")
+    _write_tracked_file(source_dir, "docker/Dockerfile", "FROM scratch\n")
+    _write_tracked_file(source_dir, "frontend/src/main.ts", "export {}\n")
+    _write_tracked_file(source_dir, "nexus-web/index.html", "<html></html>\n")
+    _write_tracked_file(source_dir, "nexus-itemDetail/index.html", "<html></html>\n")
+    _write_tracked_file(source_dir, "docker-compose.yml", (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    _write_tracked_file(source_dir, "backend/app/keep.py", "# remove module comment\n# noqa: preserve directive\nvalue = '# not a comment'  # remove inline comment\n")
+    _write_tracked_file(source_dir, "backend/app/not_allowlisted.py", "# preserve ordinary comment outside allowlist\nvalue = 1\n")
+    _write_tracked_file(source_dir, "backend/app/__pycache__/gone.pyc", "bytecode")
+    _write_tracked_file(source_dir, "backend/app/.ruff_cache/state", "cache")
+    _write_tracked_file(source_dir, "frontend/src/component.test.ts", "console.log('test')\n")
+    _write_tracked_file(source_dir, "frontend/src/component.spec.tsx", "console.log('spec')\n")
+    _write_tracked_file(source_dir, "frontend/src/component.test.helper.ts", "console.log('test helper')\n")
+    _write_tracked_file(source_dir, "frontend/src/component.spec.helper.ts", "console.log('spec helper')\n")
+    _write_tracked_file(source_dir, "frontend/src/app.js.map", "{}")
+    _write_tracked_file(source_dir, "frontend/src/debug.log", "debug")
+    _write_tracked_file(source_dir, "fixtures/input.txt", "fixture")
+    _write_tracked_file(source_dir, "mocks/mock.txt", "mock")
+    _write_tracked_file(source_dir, "samples/sample.txt", "sample")
+    _write_tracked_file(source_dir, "__tests__/case.txt", "test")
+    _write_tracked_file(source_dir, "backend/app/db/rules/fixtures/keep.txt", "runtime rule fixture")
+    _write_tracked_file(source_dir, "LICENSE", (REPO_ROOT / "LICENSE").read_text(encoding="utf-8"))
+
+    subprocess.run(["git", "-C", str(source_dir), "add", "-A"], check=True)
+
+    result = _run_sourcecode_generator(output_dir, source_dir=source_dir, validate=True)
+
+    assert result.returncode == 0, result.stderr
+    assert (output_dir / "scripts" / "setup-env.sh").is_file()
+    assert (output_dir / "backend" / "app" / "keep.py").is_file()
+    assert not (output_dir / "backend" / "app" / "__pycache__").exists()
+    assert not (output_dir / "backend" / "app" / ".ruff_cache").exists()
+    assert not (output_dir / "frontend" / "src" / "component.test.ts").exists()
+    assert not (output_dir / "frontend" / "src" / "component.spec.tsx").exists()
+    assert not (output_dir / "frontend" / "src" / "component.test.helper.ts").exists()
+    assert not (output_dir / "frontend" / "src" / "component.spec.helper.ts").exists()
+    assert not (output_dir / "frontend" / "src" / "app.js.map").exists()
+    assert not (output_dir / "frontend" / "src" / "debug.log").exists()
+    assert not (output_dir / "fixtures").exists()
+    assert not (output_dir / "mocks").exists()
+    assert not (output_dir / "samples").exists()
+    assert not (output_dir / "__tests__").exists()
+    assert (output_dir / "backend" / "app" / "db" / "rules" / "fixtures" / "keep.txt").is_file()
+
+    setup_text = (output_dir / "scripts" / "setup-env.sh").read_text(encoding="utf-8")
+    assert setup_text.startswith("#!/usr/bin/env bash")
+    assert "remove setup comment" not in setup_text
+
+    python_text = (output_dir / "backend" / "app" / "keep.py").read_text(encoding="utf-8")
+    assert "remove module comment" not in python_text
+    assert "# noqa: preserve directive" in python_text
+    assert "# not a comment" in python_text
+    assert "remove inline comment" not in python_text
+
+    not_allowlisted_text = (output_dir / "backend" / "app" / "not_allowlisted.py").read_text(encoding="utf-8")
+    assert "preserve ordinary comment outside allowlist" in not_allowlisted_text
 
 
 def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch() -> None:
@@ -195,7 +279,9 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
     assert "Smoke test sourcecode build" in workflow_text
     assert "docker-compose.full.yml" in workflow_text
     assert "RUNNER_PREFLIGHT_ENABLED=false" in workflow_text
-    assert "up --build -d --wait" in workflow_text
+    assert '"${compose_cmd[@]}" build' in workflow_text
+    assert '"${compose_cmd[@]}" up -d' in workflow_text
+    assert "healthy_services=(db redis backend frontend nexus-web)" in workflow_text
 
     # Both smoke test and publish are conditional on detect_changes
     smoke_idx = workflow_text.index("Smoke test sourcecode build")

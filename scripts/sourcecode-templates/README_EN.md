@@ -1,4 +1,6 @@
 # Deployment Guide
+
+> This source snapshot is provided under the repository license; separate commercial delivery/support terms may apply outside the license.
 ## Deployment Preparation
 
 1. Copy the backend environment file:
