@@ -139,18 +139,343 @@ NOTICE_RE = re.compile(
     re.IGNORECASE,
 )
 DIRECTIVE_RE = re.compile(
-    r"(coding[:=]|shellcheck|eslint|ts-ignore|ts-nocheck|type:\s*ignore|noqa|pylint|"
-    r"pragma:|coverage:|yaml-language-server|dockerfile)",
+    r"(coding[:=]|shellcheck|eslint|ts-ignore|ts-expect-error|ts-nocheck|type:\s*ignore|"
+    r"noqa|pylint|pragma:|coverage:|yaml-language-server|dockerfile|@vite-ignore|"
+    r"webpack|@jsx|@jsximportsource|@refresh|@preserve|@__pure__|#__pure__)",
     re.IGNORECASE,
 )
 COMMENT_STRIP_ALLOWLIST = {
     "backend/app/keep.py",
     "scripts/setup-env.sh",
 }
+FRONTEND_HARDEN_PREFIXES = (
+    "frontend/src/app/",
+    "frontend/src/shared/api/",
+    "frontend/src/shared/services/",
+    "frontend/src/shared/utils/",
+    "frontend/src/features/",
+)
+FRONTEND_HARDEN_SUFFIXES = {".ts", ".tsx"}
+FRONTEND_HARDEN_EXCLUDED_PARTS = {
+    "__generated__",
+    "__mocks__",
+    "__tests__",
+    "fixtures",
+    "generated",
+    "mocks",
+    "stories",
+    "storybook",
+}
+FRONTEND_HARDEN_EXCLUDED_SUFFIXES = (
+    ".d.ts",
+    ".generated.ts",
+    ".generated.tsx",
+)
+FRONTEND_STORY_RE = re.compile(r".*\.(stories|story)(\.|$).*", re.IGNORECASE)
+REGEX_PREFIX_TOKENS = {
+    "",
+    "(",
+    "[",
+    "{",
+    ",",
+    ";",
+    ":",
+    "=",
+    "!",
+    "?",
+    "&",
+    "|",
+    "^",
+    "~",
+    "+",
+    "-",
+    "*",
+    "%",
+    "<",
+    ">",
+    "=>",
+    "return",
+    "throw",
+    "case",
+    "delete",
+    "void",
+    "typeof",
+    "instanceof",
+    "yield",
+    "await",
+    "else",
+    "do",
+}
 
 
 def rel(path: Path) -> str:
     return path.resolve().relative_to(root).as_posix()
+
+
+def is_identifier_start(char: str) -> bool:
+    return char == "_" or char == "$" or char.isalpha()
+
+
+def is_identifier_part(char: str) -> bool:
+    return char == "_" or char == "$" or char.isalnum()
+
+
+def last_non_whitespace(chunks) -> str:
+    for chunk in reversed(chunks):
+        for char in reversed(chunk):
+            if not char.isspace():
+                return char
+    return ""
+
+
+def next_non_whitespace(source: str, index: int) -> str:
+    while index < len(source) and source[index].isspace():
+        index += 1
+    return source[index] if index < len(source) else ""
+
+
+def needs_separator(previous: str, following: str) -> bool:
+    if not previous or not following:
+        return False
+    if is_identifier_part(previous) and is_identifier_part(following):
+        return True
+    return (previous == following and previous in {"+", "-"})
+
+
+def normalize_frontend_source(source: str) -> str:
+    normalized = "\n".join(line.rstrip() for line in source.splitlines())
+    normalized = normalized.strip("\n")
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    if source.endswith(("\n", "\r")):
+        normalized += "\n"
+    return normalized
+
+
+def regex_literal_allowed_after(token) -> bool:
+    return (token or "") in REGEX_PREFIX_TOKENS
+
+
+def current_line_is_whitespace(chunks) -> bool:
+    for chunk in reversed(chunks):
+        for char in reversed(chunk):
+            if char in "\r\n":
+                return True
+            if not char.isspace():
+                return False
+    return True
+
+
+def skip_line_ending(source: str, index: int) -> int:
+    if index < len(source) and source[index] == "\r":
+        index += 1
+        if index < len(source) and source[index] == "\n":
+            index += 1
+        return index
+    if index < len(source) and source[index] == "\n":
+        return index + 1
+    return index
+
+
+def is_frontend_hardening_candidate(path: Path) -> bool:
+    rel_path = rel(path)
+    lowered_name = path.name.lower()
+    if not rel_path.startswith(FRONTEND_HARDEN_PREFIXES):
+        return False
+    if path.suffix.lower() not in FRONTEND_HARDEN_SUFFIXES:
+        return False
+    if lowered_name.endswith(FRONTEND_HARDEN_EXCLUDED_SUFFIXES):
+        return False
+    if TEST_FILE_RE.search(path.name) or FRONTEND_STORY_RE.search(path.name):
+        return False
+    rel_parts = {part.lower() for part in Path(rel_path).parts}
+    return rel_parts.isdisjoint(FRONTEND_HARDEN_EXCLUDED_PARTS)
+
+
+def transform_frontend_source(source: str, *, is_tsx: bool):
+    output = []
+    index = 0
+    line_number = 1
+    last_token = None
+    jsx_depth = 0
+    length = len(source)
+
+    while index < length:
+        char = source[index]
+        following = source[index + 1] if index + 1 < length else ""
+
+        if is_tsx and jsx_depth > 0:
+            output.append(char)
+            if char == "\n":
+                line_number += 1
+            if char in {'"', "'"}:
+                quote = char
+                index += 1
+                while index < length:
+                    current = source[index]
+                    output.append(current)
+                    if current == "\n":
+                        line_number += 1
+                    if current == "\\":
+                        index += 1
+                        if index < length:
+                            escaped = source[index]
+                            output.append(escaped)
+                            if escaped == "\n":
+                                line_number += 1
+                    elif current == quote:
+                        break
+                    index += 1
+                else:
+                    return source, False, "unterminated_jsx_attribute"
+            elif char == "{":
+                jsx_depth += 1
+            elif char == "}":
+                jsx_depth = max(0, jsx_depth - 1)
+            elif char == ">" and jsx_depth == 1:
+                jsx_depth = 0
+            index += 1
+            continue
+
+        if char.isspace():
+            output.append(char)
+            if char == "\n":
+                line_number += 1
+            index += 1
+            continue
+
+        if is_identifier_start(char):
+            end = index + 1
+            while end < length and is_identifier_part(source[end]):
+                end += 1
+            token = source[index:end]
+            output.append(token)
+            last_token = token
+            index = end
+            continue
+
+        if char in {'"', "'", "`"}:
+            quote = char
+            start = index
+            index += 1
+            while index < length:
+                current = source[index]
+                if current == "\n":
+                    line_number += 1
+                    if quote != "`":
+                        return source, False, "newline_in_string_literal"
+                if current == "\\":
+                    index += 2
+                    continue
+                if current == quote:
+                    index += 1
+                    output.append(source[start:index])
+                    last_token = "literal"
+                    break
+                index += 1
+            else:
+                return source, False, "unterminated_string_or_template"
+            continue
+
+        if char == "/" and following == "/":
+            end = index + 2
+            while end < length and source[end] not in "\r\n":
+                end += 1
+            comment = source[index:end]
+            if preserve_comment(comment, line_number=line_number):
+                output.append(comment)
+                index = end
+            elif current_line_is_whitespace(output):
+                line_number += 1 if end < length and source[end] in "\r\n" else 0
+                index = skip_line_ending(source, end)
+            else:
+                index = end
+            continue
+
+        if char == "/" and following == "*":
+            end = index + 2
+            while end + 1 < length and source[end : end + 2] != "*/":
+                end += 1
+            if end + 1 >= length:
+                return source, False, "unterminated_block_comment"
+            end += 2
+            comment = source[index:end]
+            start_line = line_number
+            line_number += comment.count("\n")
+            if preserve_comment(comment, line_number=start_line):
+                output.append(comment)
+            elif current_line_is_whitespace(output):
+                line_number += 1 if end < length and source[end] in "\r\n" else 0
+                index = skip_line_ending(source, end)
+                continue
+            else:
+                previous = last_non_whitespace(output)
+                next_char = next_non_whitespace(source, end)
+                if previous == "{" and next_char == "}":
+                    output.append("/* */")
+                elif "\n" in comment:
+                    output.append("\n")
+                elif needs_separator(previous, next_char):
+                    output.append(" ")
+            index = end
+            continue
+
+        if char == "/" and following not in {"/", "*"} and regex_literal_allowed_after(last_token):
+            end = index + 1
+            escaped = False
+            in_character_class = False
+            while end < length:
+                current = source[end]
+                if current == "\n":
+                    break
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == "[":
+                    in_character_class = True
+                elif current == "]" and in_character_class:
+                    in_character_class = False
+                elif current == "/" and not in_character_class:
+                    end += 1
+                    while end < length and is_identifier_part(source[end]):
+                        end += 1
+                    output.append(source[index:end])
+                    last_token = "literal"
+                    index = end
+                    break
+                end += 1
+            else:
+                output.append(char)
+                last_token = char
+                index += 1
+                continue
+            if index == end:
+                continue
+            if end >= length or source[end - 1] != "/" and not is_identifier_part(source[end - 1]):
+                output.append(char)
+                last_token = char
+                index += 1
+            continue
+
+        if is_tsx and char == "<" and (following.isalpha() or following in {">", "/"}):
+            jsx_depth = 1
+            output.append(char)
+            last_token = char
+            index += 1
+            continue
+
+        if char == "=" and following == ">":
+            output.append("=>")
+            last_token = "=>"
+            index += 2
+            continue
+
+        output.append(char)
+        last_token = char
+        index += 1
+
+    transformed = normalize_frontend_source("".join(output))
+    return transformed, transformed != source, None
 
 
 def is_preserved_path(path: Path) -> bool:
@@ -267,8 +592,49 @@ def strip_comments() -> None:
             strip_line_comments(path)
 
 
+def harden_frontend_sources() -> None:
+    hardened = []
+    unchanged = []
+    skipped = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or is_preserved_path(path) or not is_frontend_hardening_candidate(path):
+            continue
+        rel_path = rel(path)
+        try:
+            source = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            skipped.append((rel_path, "non_utf8"))
+            continue
+        transformed, changed, skip_reason = transform_frontend_source(
+            source,
+            is_tsx=path.suffix.lower() == ".tsx",
+        )
+        if skip_reason:
+            skipped.append((rel_path, skip_reason))
+            continue
+        if changed:
+            path.write_text(transformed, encoding="utf-8")
+            hardened.append(rel_path)
+        else:
+            unchanged.append(rel_path)
+
+    print(
+        "[sourcecode-tree] frontend hardening: "
+        f"hardened={len(hardened)} unchanged={len(unchanged)} skipped={len(skipped)}"
+    )
+    if hardened:
+        shown = ", ".join(hardened[:20])
+        suffix = "" if len(hardened) <= 20 else f", ... (+{len(hardened) - 20})"
+        print(f"[sourcecode-tree] frontend hardening hardened paths: {shown}{suffix}")
+    if skipped:
+        shown = ", ".join(f"{path} ({reason})" for path, reason in skipped[:20])
+        suffix = "" if len(skipped) <= 20 else f", ... (+{len(skipped) - 20})"
+        print(f"[sourcecode-tree] frontend hardening skipped paths: {shown}{suffix}")
+
+
 prune_artifacts()
 strip_comments()
+harden_frontend_sources()
 PY_SANITIZE
 }
 assert_no_sanitizer_artifacts() {
@@ -343,6 +709,377 @@ if failures:
 PY_VALIDATE
 }
 
+assert_frontend_hardening() {
+  python3 - "$OUTPUT_DIR" <<'PY_VALIDATE_FRONTEND_HARDENING'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+NOTICE_RE = re.compile(
+    r"(copyright|license|licensed|spdx|agpl|gpl|affero|author|attribution|notice)",
+    re.IGNORECASE,
+)
+DIRECTIVE_RE = re.compile(
+    r"(coding[:=]|shellcheck|eslint|ts-ignore|ts-expect-error|ts-nocheck|type:\s*ignore|"
+    r"noqa|pylint|pragma:|coverage:|yaml-language-server|dockerfile|@vite-ignore|"
+    r"webpack|@jsx|@jsximportsource|@refresh|@preserve|@__pure__|#__pure__)",
+    re.IGNORECASE,
+)
+TEST_FILE_RE = re.compile(r".*\.(test|spec)(\.|$).*", re.IGNORECASE)
+FRONTEND_STORY_RE = re.compile(r".*\.(stories|story)(\.|$).*", re.IGNORECASE)
+FRONTEND_HARDEN_PREFIXES = (
+    "frontend/src/app/",
+    "frontend/src/shared/api/",
+    "frontend/src/shared/services/",
+    "frontend/src/shared/utils/",
+    "frontend/src/features/",
+)
+FRONTEND_HARDEN_SUFFIXES = {".ts", ".tsx"}
+FRONTEND_HARDEN_EXCLUDED_PARTS = {
+    "__generated__",
+    "__mocks__",
+    "__tests__",
+    "fixtures",
+    "generated",
+    "mocks",
+    "stories",
+    "storybook",
+}
+FRONTEND_HARDEN_EXCLUDED_SUFFIXES = (
+    ".d.ts",
+    ".generated.ts",
+    ".generated.tsx",
+)
+REGEX_PREFIX_TOKENS = {
+    "",
+    "(",
+    "[",
+    "{",
+    ",",
+    ";",
+    ":",
+    "=",
+    "!",
+    "?",
+    "&",
+    "|",
+    "^",
+    "~",
+    "+",
+    "-",
+    "*",
+    "%",
+    "<",
+    ">",
+    "=>",
+    "return",
+    "throw",
+    "case",
+    "delete",
+    "void",
+    "typeof",
+    "instanceof",
+    "yield",
+    "await",
+    "else",
+    "do",
+}
+
+
+def rel(path: Path) -> str:
+    return path.resolve().relative_to(root).as_posix()
+
+
+def is_identifier_start(char: str) -> bool:
+    return char == "_" or char == "$" or char.isalpha()
+
+
+def is_identifier_part(char: str) -> bool:
+    return char == "_" or char == "$" or char.isalnum()
+
+
+def last_non_whitespace(chunks) -> str:
+    for chunk in reversed(chunks):
+        for char in reversed(chunk):
+            if not char.isspace():
+                return char
+    return ""
+
+
+def next_non_whitespace(source: str, index: int) -> str:
+    while index < len(source) and source[index].isspace():
+        index += 1
+    return source[index] if index < len(source) else ""
+
+
+def needs_separator(previous: str, following: str) -> bool:
+    if not previous or not following:
+        return False
+    if is_identifier_part(previous) and is_identifier_part(following):
+        return True
+    return (previous == following and previous in {"+", "-"})
+
+
+def normalize_frontend_source(source: str) -> str:
+    normalized = "\n".join(line.rstrip() for line in source.splitlines())
+    if source.endswith(("\n", "\r")):
+        normalized += "\n"
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized
+
+
+def preserve_comment(text: str, *, line_number: int) -> bool:
+    stripped = text.strip()
+    if line_number == 1 and stripped.startswith("#!"):
+        return True
+    return bool(NOTICE_RE.search(stripped) or DIRECTIVE_RE.search(stripped))
+
+
+def regex_literal_allowed_after(token) -> bool:
+    return (token or "") in REGEX_PREFIX_TOKENS
+
+
+def is_frontend_hardening_candidate(path: Path) -> bool:
+    rel_path = rel(path)
+    lowered_name = path.name.lower()
+    if not rel_path.startswith(FRONTEND_HARDEN_PREFIXES):
+        return False
+    if path.suffix.lower() not in FRONTEND_HARDEN_SUFFIXES:
+        return False
+    if lowered_name.endswith(FRONTEND_HARDEN_EXCLUDED_SUFFIXES):
+        return False
+    if TEST_FILE_RE.search(path.name) or FRONTEND_STORY_RE.search(path.name):
+        return False
+    rel_parts = {part.lower() for part in Path(rel_path).parts}
+    return rel_parts.isdisjoint(FRONTEND_HARDEN_EXCLUDED_PARTS)
+
+
+def transform_frontend_source(source: str, *, is_tsx: bool):
+    output = []
+    index = 0
+    line_number = 1
+    last_token = None
+    jsx_depth = 0
+    length = len(source)
+
+    while index < length:
+        char = source[index]
+        following = source[index + 1] if index + 1 < length else ""
+
+        if is_tsx and jsx_depth > 0:
+            output.append(char)
+            if char == "\n":
+                line_number += 1
+            if char in {'"', "'"}:
+                quote = char
+                index += 1
+                while index < length:
+                    current = source[index]
+                    output.append(current)
+                    if current == "\n":
+                        line_number += 1
+                    if current == "\\":
+                        index += 1
+                        if index < length:
+                            escaped = source[index]
+                            output.append(escaped)
+                            if escaped == "\n":
+                                line_number += 1
+                    elif current == quote:
+                        break
+                    index += 1
+                else:
+                    return source, False, "unterminated_jsx_attribute"
+            elif char == "{":
+                jsx_depth += 1
+            elif char == "}":
+                jsx_depth = max(0, jsx_depth - 1)
+            elif char == ">" and jsx_depth == 1:
+                jsx_depth = 0
+            index += 1
+            continue
+
+        if char.isspace():
+            output.append(char)
+            if char == "\n":
+                line_number += 1
+            index += 1
+            continue
+
+        if is_identifier_start(char):
+            end = index + 1
+            while end < length and is_identifier_part(source[end]):
+                end += 1
+            token = source[index:end]
+            output.append(token)
+            last_token = token
+            index = end
+            continue
+
+        if char in {'"', "'", "`"}:
+            quote = char
+            start = index
+            index += 1
+            while index < length:
+                current = source[index]
+                if current == "\n":
+                    line_number += 1
+                    if quote != "`":
+                        return source, False, "newline_in_string_literal"
+                if current == "\\":
+                    index += 2
+                    continue
+                if current == quote:
+                    index += 1
+                    output.append(source[start:index])
+                    last_token = "literal"
+                    break
+                index += 1
+            else:
+                return source, False, "unterminated_string_or_template"
+            continue
+
+        if char == "/" and following == "/":
+            end = index + 2
+            while end < length and source[end] not in "\r\n":
+                end += 1
+            comment = source[index:end]
+            if preserve_comment(comment, line_number=line_number):
+                output.append(comment)
+            index = end
+            continue
+
+        if char == "/" and following == "*":
+            end = index + 2
+            while end + 1 < length and source[end : end + 2] != "*/":
+                end += 1
+            if end + 1 >= length:
+                return source, False, "unterminated_block_comment"
+            end += 2
+            comment = source[index:end]
+            start_line = line_number
+            line_number += comment.count("\n")
+            if preserve_comment(comment, line_number=start_line):
+                output.append(comment)
+            else:
+                previous = last_non_whitespace(output)
+                next_char = next_non_whitespace(source, end)
+                if previous == "{" and next_char == "}":
+                    output.append("/* */")
+                elif "\n" in comment:
+                    output.append("\n")
+                elif needs_separator(previous, next_char):
+                    output.append(" ")
+            index = end
+            continue
+
+        if char == "/" and following not in {"/", "*"} and regex_literal_allowed_after(last_token):
+            end = index + 1
+            escaped = False
+            in_character_class = False
+            while end < length:
+                current = source[end]
+                if current == "\n":
+                    break
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == "[":
+                    in_character_class = True
+                elif current == "]" and in_character_class:
+                    in_character_class = False
+                elif current == "/" and not in_character_class:
+                    end += 1
+                    while end < length and is_identifier_part(source[end]):
+                        end += 1
+                    output.append(source[index:end])
+                    last_token = "literal"
+                    index = end
+                    break
+                end += 1
+            else:
+                output.append(char)
+                last_token = char
+                index += 1
+                continue
+            if index == end:
+                continue
+            if end >= length or source[end - 1] != "/" and not is_identifier_part(source[end - 1]):
+                output.append(char)
+                last_token = char
+                index += 1
+            continue
+
+        if is_tsx and char == "<" and (following.isalpha() or following in {">", "/"}):
+            jsx_depth = 1
+            output.append(char)
+            last_token = char
+            index += 1
+            continue
+
+        if char == "=" and following == ">":
+            output.append("=>")
+            last_token = "=>"
+            index += 2
+            continue
+
+        output.append(char)
+        last_token = char
+        index += 1
+
+    transformed = normalize_frontend_source("".join(output))
+    return transformed, transformed != source, None
+
+
+checked = []
+skipped = []
+not_hardened = []
+for path in sorted(root.rglob("*")):
+    if not path.is_file() or not is_frontend_hardening_candidate(path):
+        continue
+    rel_path = rel(path)
+    try:
+        source = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        skipped.append((rel_path, "non_utf8"))
+        continue
+    transformed, changed, skip_reason = transform_frontend_source(
+        source,
+        is_tsx=path.suffix.lower() == ".tsx",
+    )
+    if skip_reason:
+        skipped.append((rel_path, skip_reason))
+    elif changed:
+        not_hardened.append(rel_path)
+    else:
+        checked.append(rel_path)
+
+if not checked:
+    print("[sourcecode-tree] frontend hardening validation found no hardened candidate files", file=sys.stderr)
+    if skipped:
+        for rel_path, reason in skipped[:100]:
+            print(f"  - skipped {rel_path}: {reason}", file=sys.stderr)
+    raise SystemExit(1)
+
+if not_hardened:
+    print("[sourcecode-tree] frontend hardening validation found unhashed candidates:", file=sys.stderr)
+    for rel_path in not_hardened[:100]:
+        print(f"  - {rel_path}", file=sys.stderr)
+    raise SystemExit(1)
+
+print(
+    "[sourcecode-tree] frontend hardening validation: "
+    f"hardened_candidates={len(checked)} skipped={len(skipped)}"
+)
+if skipped:
+    shown = ", ".join(f"{rel_path} ({reason})" for rel_path, reason in skipped[:20])
+    suffix = "" if len(skipped) <= 20 else f", ... (+{len(skipped) - 20})"
+    print(f"[sourcecode-tree] frontend hardening validation skipped paths: {shown}{suffix}")
+PY_VALIDATE_FRONTEND_HARDENING
+}
+
 validate_sourcecode_tree() {
   local rel_path
   local required_paths=(
@@ -402,6 +1139,7 @@ validate_sourcecode_tree() {
   done
 
   assert_no_sanitizer_artifacts
+  assert_frontend_hardening
 
   if ! grep -Fq "商业交付、商业支持" "$OUTPUT_DIR/README.md"; then
     die "public sourcecode readme is missing the project distribution notice: README.md"

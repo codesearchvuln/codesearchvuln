@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -49,6 +50,34 @@ def _git_tree_hash(source_dir: Path, repo_dir: Path) -> str:
     ).stdout.strip()
 
 
+_NOTICE_OR_DIRECTIVE_RE = re.compile(
+    r"(copyright|license|licensed|spdx|agpl|gpl|affero|author|attribution|notice|"
+    r"@ts-ignore|@ts-nocheck|eslint|prettier|vite-ignore|type:\s*ignore|noqa)",
+    re.IGNORECASE,
+)
+
+
+def _count_blank_lines(text: str) -> int:
+    return sum(1 for line in text.splitlines() if not line.strip())
+
+
+def _count_removable_comment_lines(text: str) -> int:
+    count = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or _NOTICE_OR_DIRECTIVE_RE.search(stripped):
+            continue
+        if (
+            stripped.startswith("//")
+            or stripped.startswith("/*")
+            or stripped.startswith("*")
+            or stripped.startswith("*/")
+            or "{/*" in stripped
+        ):
+            count += 1
+    return count
+
+
 def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(tmp_path: Path) -> None:
     output_dir = tmp_path / "sourcecode-tree"
 
@@ -75,6 +104,25 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     for reference in frontend_tsconfig["references"]:
         reference_path = reference["path"].removeprefix("./")
         assert (output_dir / "frontend" / reference_path).is_file()
+
+    expected_hardened_paths = [
+        Path("frontend/src/shared/api/agentStream.ts"),
+        Path("frontend/src/shared/utils/logger.ts"),
+    ]
+    hardened_paths_with_reduced_comments = []
+    for rel_path in expected_hardened_paths:
+        source_text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+        generated_text = (output_dir / rel_path).read_text(encoding="utf-8")
+
+        assert "import" in generated_text or "export" in generated_text
+        assert _count_blank_lines(generated_text) <= _count_blank_lines(source_text)
+        if _count_removable_comment_lines(generated_text) < _count_removable_comment_lines(source_text):
+            hardened_paths_with_reduced_comments.append(rel_path.as_posix())
+
+    assert hardened_paths_with_reduced_comments, (
+        "Expected at least one selected real frontend source file to show sourcecode hardening; "
+        f"checked: {[path.as_posix() for path in expected_hardened_paths]}"
+    )
     assert (output_dir / "backend" / "app" / "api" / "v1" / "endpoints" / "agent_test.py").is_file()
     assert (output_dir / "backend" / "app" / "services" / "agent" / "skill_test_runner.py").is_file()
     assert (output_dir / "backend" / "app" / "services" / "agent" / "agents" / "skill_test.py").is_file()
@@ -182,11 +230,73 @@ def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_sourc
     source_dir.mkdir()
     subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
 
+    expected_hardened_paths = (
+        Path("frontend/src/app/main.tsx"),
+        Path("frontend/src/shared/api/serverClient.ts"),
+        Path("frontend/src/shared/utils/runtimeGuards.ts"),
+    )
+    expected_skipped_paths = (
+        Path("frontend/src/global.d.ts"),
+        Path("frontend/tsconfig.test.json"),
+    )
+    source_fixture_texts = {
+        Path("frontend/src/app/main.tsx"): r"""// removable app heading
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import React from "react";
+
+const endpoint = "https://example.test/a//b";
+const commentLikeText = "literal /* keep */ value";
+const endpointPattern = /https?:\/\/example\.test\/a\/[a-z]+/;
+
+/* removable app block */
+const template = `prefix ${endpoint} // keep ${commentLikeText}`;
+// @ts-ignore: fixture directive must stay
+const dynamicFeature = import("@/pages/AgentAudit");
+
+export function SyntheticApp() {
+  return (
+    <main data-endpoint={endpointPattern.test(endpoint) ? endpoint : "fallback"}>
+      {/* removable jsx comment */}
+      <span>{template}</span>
+    </main>
+  );
+}
+
+export { dynamicFeature };
+""",
+        Path("frontend/src/shared/api/serverClient.ts"): r"""/* removable api block */
+export const serverUrl = "https://example.test/api//v1";
+export const routePattern = /\/api\/v1\/items(?:\?.*)?$/;
+
+// removable API line
+export async function loadDashboard() {
+  return import("@/features/dashboard/services/dashboardSnapshotStore");
+}
+""",
+        Path("frontend/src/shared/utils/runtimeGuards.ts"): r"""/*! Copyright AuditTool authors */
+/* remove utils block */
+const commentLikeString = "keep // and /* tokens */ inside strings";
+
+export function runtimeGuard(value: unknown) {
+  const normalized = `${value ?? "missing"} // still string`; // drop inline utility comment
+  return normalized.includes(commentLikeString);
+}
+""",
+        Path("frontend/src/global.d.ts"): (
+            "/* public declaration comment should remain because declarations are skipped */\n"
+            'declare module "virtual:sourcecode-fixture" {\n'
+            "  export const value: string;\n"
+            "}\n"
+        ),
+        Path("frontend/tsconfig.test.json"): "{}\n",
+    }
+
     _write_tracked_file(source_dir, "scripts/setup-env.sh", "#!/usr/bin/env bash\n# remove setup comment\necho setup\n", executable=True)
     _write_tracked_file(source_dir, "docker/env/backend/env.example", "LLM_API_KEY=\n")
     _write_tracked_file(source_dir, "docker/Dockerfile", "FROM scratch\n")
     _write_tracked_file(source_dir, "frontend/src/main.ts", "export {}\n")
-    _write_tracked_file(source_dir, "frontend/tsconfig.test.json", "{}\n")
+    for rel_path, content in source_fixture_texts.items():
+        _write_tracked_file(source_dir, rel_path.as_posix(), content)
     _write_tracked_file(source_dir, "nexus-web/index.html", "<html></html>\n")
     _write_tracked_file(source_dir, "nexus-itemDetail/index.html", "<html></html>\n")
     _write_tracked_file(source_dir, "docker-compose.yml", (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
@@ -228,6 +338,52 @@ def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_sourc
     assert not (output_dir / "samples").exists()
     assert not (output_dir / "__tests__").exists()
     assert (output_dir / "backend" / "app" / "db" / "rules" / "fixtures" / "keep.txt").is_file()
+
+    assert expected_hardened_paths
+    assert expected_skipped_paths
+    for rel_path in expected_hardened_paths:
+        source_text = source_fixture_texts[rel_path]
+        generated_path = output_dir / rel_path
+        assert generated_path.is_file()
+        generated_text = generated_path.read_text(encoding="utf-8")
+        assert _count_removable_comment_lines(generated_text) < _count_removable_comment_lines(source_text)
+        assert _count_blank_lines(generated_text) <= _count_blank_lines(source_text)
+
+    app_text = (output_dir / "frontend/src/app/main.tsx").read_text(encoding="utf-8")
+    assert "removable app heading" not in app_text
+    assert "removable app block" not in app_text
+    assert "removable jsx comment" not in app_text
+    assert "SPDX-License-Identifier: AGPL-3.0-or-later" in app_text
+    assert "@ts-ignore: fixture directive must stay" in app_text
+    assert "https://example.test/a//b" in app_text
+    assert "literal /* keep */ value" in app_text
+    assert r"/https?:\/\/example\.test\/a\/[a-z]+/" in app_text
+    assert "`prefix ${endpoint} // keep ${commentLikeText}`" in app_text
+    assert 'import("@/pages/AgentAudit")' in app_text
+    assert "<main" in app_text
+    assert "</main>" in app_text
+    assert "export function SyntheticApp" in app_text
+
+    api_text = (output_dir / "frontend/src/shared/api/serverClient.ts").read_text(encoding="utf-8")
+    assert "removable api block" not in api_text
+    assert "removable API line" not in api_text
+    assert "https://example.test/api//v1" in api_text
+    assert r"/\/api\/v1\/items(?:\?.*)?$/" in api_text
+    assert 'import("@/features/dashboard/services/dashboardSnapshotStore")' in api_text
+    assert "export async function loadDashboard" in api_text
+
+    utils_text = (output_dir / "frontend/src/shared/utils/runtimeGuards.ts").read_text(encoding="utf-8")
+    assert "Copyright AuditTool authors" in utils_text
+    assert "remove utils block" not in utils_text
+    assert "drop inline utility comment" not in utils_text
+    assert "keep // and /* tokens */ inside strings" in utils_text
+    assert '`${value ?? "missing"} // still string`' in utils_text
+    assert "export function runtimeGuard" in utils_text
+
+    for rel_path in expected_skipped_paths:
+        assert (output_dir / rel_path).read_text(encoding="utf-8") == source_fixture_texts[rel_path]
+    for rel_path, original_text in source_fixture_texts.items():
+        assert (source_dir / rel_path).read_text(encoding="utf-8") == original_text
 
     setup_text = (output_dir / "scripts" / "setup-env.sh").read_text(encoding="utf-8")
     assert setup_text.startswith("#!/usr/bin/env bash")
