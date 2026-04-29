@@ -390,18 +390,15 @@ class EventManager:
         self._event_sequence_lock = asyncio.Lock()
 
     async def _assign_event_sequence(self, task_id: str, requested_sequence: int) -> int:
-        """Assign a positive strictly-increasing per-task sequence."""
-        try:
-            requested = int(requested_sequence or 0)
-        except Exception:
-            requested = 0
+        """Assign a positive contiguous per-task sequence.
 
+        Realtime publishing drains by monotonically increasing sequence from
+        `_next_realtime_sequence`. If we allow jumps here, a missing sequence
+        can block all subsequent realtime events in `_publish_realtime_event`.
+        """
         async with self._event_sequence_lock:
             next_sequence = self._next_event_sequence.get(task_id, 1)
-            if requested <= 0 or requested < next_sequence:
-                assigned = next_sequence
-            else:
-                assigned = requested
+            assigned = next_sequence
             self._next_event_sequence[task_id] = assigned + 1
             return assigned
 
