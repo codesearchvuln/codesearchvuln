@@ -1,0 +1,14 @@
+.git
+.github
+docs
+deploy
+frontend
+nexus-web
+nexus-itemDetail
+backend/.venv
+backend/**/__pycache__
+backend/.pytest_cache
+backend/.ruff_cache
+backend/tests
+backend/log
+backend/uploads

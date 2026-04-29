@@ -1,0 +1,1242 @@
+/**
+ * Create Task Dialog
+ * Cyberpunk Terminal Aesthetic
+ */
+
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
+	Search,
+	Upload,
+	Package,
+	Shield,
+	Loader2,
+	Zap,
+	Bot,
+} from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/shared/api/database";
+import { createAgentTask } from "@/shared/api/agentTasks";
+import {
+	createOpengrepScanTask,
+	getOpengrepRules,
+	type OpengrepRule,
+} from "@/shared/api/opengrep";
+import { createGitleaksScanTask } from "@/shared/api/gitleaks";
+import { createBanditScanTask } from "@/shared/api/bandit";
+import { createPhpstanScanTask } from "@/shared/api/phpstan";
+import { createPmdScanTask } from "@/shared/api/pmd";
+import {
+	createYasaScanTask,
+	getYasaRuleConfigs,
+	type YasaRuleConfig,
+} from "@/shared/api/yasa";
+import {
+	getOpengrepActiveRules,
+	setOpengrepActiveRules,
+	subscribeOpengrepActiveRules,
+} from "@/shared/stores/opengrepRulesStore";
+
+import { useProjects } from "./hooks/useTaskForm";
+import { useZipFile } from "./hooks/useZipFile";
+import FileSelectionDialog from "./FileSelectionDialog";
+import AgentModeSelector, {
+	type ScanMode,
+	type StaticTool,
+	type StaticToolSelection,
+} from "@/components/agent/AgentModeSelector";
+import AdvancedOptionsSection from "./create-scan-task/AdvancedOptionsSection";
+import ProjectCard from "./create-scan-task/ProjectCard";
+import ZipUploadCard from "./create-scan-task/ZipUploadCard";
+import {
+	DEFAULT_SCAN_EXCLUDES,
+	extractCreateScanTaskApiErrorMessage,
+	stripScanArchiveSuffix,
+} from "./create-scan-task/utils";
+import {
+	getYasaBlockedProjectMessage,
+	getYasaUnsupportedLanguageMessage,
+	isYasaBlockedProjectLanguage,
+	parseYasaLanguageOption,
+	resolveYasaLanguageFromProgrammingLanguages,
+	type YasaLanguageOption,
+} from "@/shared/utils/yasaLanguage";
+import {
+	getPmdBlockedProjectMessage,
+	isPmdBlockedProjectLanguage,
+} from "@/shared/utils/pmdLanguage";
+
+import { validateZipFile } from "@/features/projects/services/repoZipScan";
+import { isZipProject } from "@/shared/utils/projectUtils";
+import type { Project } from "@/shared/types";
+import { INTELLIGENT_TASK_NAME_MARKER } from "@/features/tasks/services/taskActivities";
+import { appendReturnTo } from "@/shared/utils/findingRoute";
+import {
+	appendStaticScanBatchMarker,
+	createStaticScanBatchId,
+} from "@/shared/utils/staticScanBatch";
+import StaticEngineConfigDialog from "@/components/scan/create-scan-task/StaticEngineConfigDialog";
+import { buildScanEngineConfigRoute } from "@/shared/constants/scanEngines";
+
+interface CreateScanTaskDialogProps {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	onTaskCreated: () => void;
+	preselectedProjectId?: string;
+	initialScanMode?: ScanMode;
+	navigateOnSuccess?: boolean;
+	showReturnButton?: boolean;
+	onReturn?: () => void;
+	allowUploadProject?: boolean;
+}
+
+type UploadProjectStatus =
+	| "idle"
+	| "uploading_and_creating_project"
+	| "project_ready"
+	| "project_create_failed";
+
+const isSevereRule = (rule: OpengrepRule) =>
+	String(rule.severity || "").toUpperCase() === "ERROR";
+
+export default function CreateScanTaskDialog({
+	open,
+	onOpenChange,
+	onTaskCreated,
+	preselectedProjectId,
+	initialScanMode,
+	navigateOnSuccess = true,
+	showReturnButton = false,
+	onReturn,
+	allowUploadProject = false,
+}: CreateScanTaskDialogProps) {
+	const navigate = useNavigate();
+	const location = useLocation();
+	const currentRoute = `${location.pathname}${location.search}`;
+	const [sourceMode, setSourceMode] = useState<"existing" | "upload">(
+		"existing",
+	);
+	const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+	const [searchTerm, setSearchTerm] = useState("");
+	const [excludePatterns, setExcludePatterns] = useState(DEFAULT_SCAN_EXCLUDES);
+	const [selectedFiles, setSelectedFiles] = useState<string[] | undefined>();
+	const [showAdvanced, setShowAdvanced] = useState(false);
+	const [showFileSelection, setShowFileSelection] = useState(false);
+	const [creating, setCreating] = useState(false);
+	const [uploading, setUploading] = useState(false);
+	const [newProjectName, setNewProjectName] = useState("");
+	const [newProjectFile, setNewProjectFile] = useState<File | null>(null);
+	const [uploadProjectStatus, setUploadProjectStatus] =
+		useState<UploadProjectStatus>("idle");
+	const [uploadProjectError, setUploadProjectError] = useState<string | null>(null);
+	const [uploadedProject, setUploadedProject] = useState<Project | null>(null);
+	const newProjectFileInputRef = useRef<HTMLInputElement>(null);
+
+	const [scanMode, setScanMode] = useState<ScanMode>("agent");
+	const [staticTools, setStaticTools] = useState<StaticToolSelection>({
+		opengrep: true,
+		gitleaks: false,
+		bandit: false,
+		phpstan: false,
+		yasa: false,
+		pmd: false,
+	});
+	const [yasaLanguage, setYasaLanguage] = useState<YasaLanguageOption>("auto");
+	const [yasaRuleConfigs, setYasaRuleConfigs] = useState<YasaRuleConfig[]>([]);
+	const [selectedYasaRuleConfigId, setSelectedYasaRuleConfigId] = useState<string>("default");
+	const [staticRules, setStaticRules] = useState<OpengrepRule[]>([]);
+	const [selectedRuleIds, setSelectedRuleIds] = useState<string[]>([]);
+	const [configEngine, setConfigEngine] = useState<StaticTool | null>(null);
+
+	const { projects, loading, loadProjects } = useProjects();
+	const selectedProject = projects.find((p) => p.id === selectedProjectId);
+	const selectedOrUploadedProjectLanguages = useMemo(
+		() =>
+			sourceMode === "existing"
+				? selectedProject?.programming_languages
+				: uploadedProject?.programming_languages,
+		[sourceMode, selectedProject?.programming_languages, uploadedProject?.programming_languages],
+	);
+	const isYasaBlockedProject = useMemo(
+		() =>
+			isYasaBlockedProjectLanguage(selectedOrUploadedProjectLanguages),
+		[selectedOrUploadedProjectLanguages],
+	);
+	const isPmdBlockedProject = useMemo(
+		() =>
+			isPmdBlockedProjectLanguage(selectedOrUploadedProjectLanguages),
+		[selectedOrUploadedProjectLanguages],
+	);
+	const zipState = useZipFile(selectedProject, projects);
+
+	const filteredProjects = useMemo(() => {
+		const visibleProjects = projects.filter((project) => isZipProject(project));
+		if (!searchTerm) return visibleProjects;
+		const term = searchTerm.toLowerCase();
+		return visibleProjects.filter(
+			(p) =>
+				p.name.toLowerCase().includes(term) ||
+				p.description?.toLowerCase().includes(term),
+		);
+	}, [projects, searchTerm]);
+
+	useEffect(() => {
+		const cached = getOpengrepActiveRules().filter(isSevereRule);
+		if (cached.length > 0) {
+			setStaticRules(cached);
+		}
+		const unsubscribe = subscribeOpengrepActiveRules((rules) => {
+			setStaticRules(rules.filter(isSevereRule));
+		});
+		return () => {
+			unsubscribe();
+		};
+	}, []);
+
+	useEffect(() => {
+		const loadStaticRules = async () => {
+			if (!open || scanMode !== "static" || !staticTools.opengrep) return;
+			try {
+				const rules = (await getOpengrepRules({ is_active: true })).filter(
+					isSevereRule,
+				);
+				setStaticRules(rules);
+				setOpengrepActiveRules(rules);
+				setSelectedRuleIds((prev) => {
+					if (prev.length === 0) return prev;
+					const validRuleIds = new Set(rules.map((rule) => rule.id));
+					return prev.filter((id) => validRuleIds.has(id));
+				});
+			} catch (error) {
+				console.error("加载静态分析规则失败:", error);
+			}
+		};
+		loadStaticRules();
+	}, [open, scanMode, staticTools.opengrep]);
+
+	useEffect(() => {
+		if (open) {
+			loadProjects();
+			setSelectedProjectId(preselectedProjectId || "");
+			setSearchTerm("");
+			setShowAdvanced(false);
+			setSelectedRuleIds([]);
+			setScanMode(initialScanMode || "agent");
+			setStaticTools({ opengrep: true, gitleaks: false, bandit: false, phpstan: false, yasa: false, pmd: false });
+			setYasaLanguage("auto");
+			setSelectedYasaRuleConfigId("default");
+			setConfigEngine(null);
+			setSourceMode("existing");
+			setNewProjectName("");
+			setNewProjectFile(null);
+			setUploadProjectStatus("idle");
+			setUploadProjectError(null);
+			setUploadedProject(null);
+			zipState.reset();
+			}
+		}, [open, preselectedProjectId, initialScanMode, loadProjects]);
+
+	useEffect(() => {
+		if (!open) return;
+		const loadYasaConfigs = async () => {
+			try {
+				const rows = await getYasaRuleConfigs({ isActive: true, limit: 200 });
+				setYasaRuleConfigs(rows);
+			} catch (error) {
+				console.error("加载 YASA 自定义规则配置失败:", error);
+				setYasaRuleConfigs([]);
+			}
+		};
+		void loadYasaConfigs();
+	}, [open]);
+
+	useEffect(() => {
+		if (isYasaBlockedProject && staticTools.yasa) {
+			setStaticTools((prev) => ({ ...prev, yasa: false }));
+			toast.info(getYasaBlockedProjectMessage());
+		}
+	}, [isYasaBlockedProject, staticTools.yasa]);
+
+	useEffect(() => {
+		if (isPmdBlockedProject && staticTools.pmd) {
+			setStaticTools((prev) => ({ ...prev, pmd: false }));
+			toast.info(getPmdBlockedProjectMessage());
+		}
+	}, [isPmdBlockedProject, staticTools.pmd]);
+
+	useEffect(() => {
+		if (!open || sourceMode !== "existing") return;
+		if (selectedProjectId) return;
+		if (projects.length === 0) return;
+		setSelectedProjectId(projects[0].id);
+	}, [open, sourceMode, selectedProjectId, projects]);
+
+	const excludePatternsRef = useRef(excludePatterns);
+	useEffect(() => {
+		if (excludePatternsRef.current !== excludePatterns && selectedFiles) {
+			setSelectedFiles(undefined);
+			toast.info("排除模式已更改，请重新选择文件");
+		}
+		excludePatternsRef.current = excludePatterns;
+	}, [excludePatterns]);
+
+	const handleCreateProjectFromUpload = async (
+		projectName: string,
+		file: File,
+	) => {
+		setUploadProjectStatus("uploading_and_creating_project");
+		setUploadProjectError(null);
+		setUploadedProject(null);
+		try {
+			const createdProject = await api.createProjectWithZip(
+				{
+					name: projectName,
+					source_type: "zip",
+					repository_type: "other",
+					repository_url: undefined,
+					default_branch: "main",
+					programming_languages: [],
+				} as any,
+				file,
+			);
+			setUploadedProject(createdProject);
+			setUploadProjectStatus("project_ready");
+			toast.success("项目已创建，可继续选择扫描引擎");
+			loadProjects();
+		} catch (error) {
+			const msg = extractCreateScanTaskApiErrorMessage(error);
+			setUploadProjectStatus("project_create_failed");
+			setUploadProjectError(msg);
+			toast.error(`项目创建失败: ${msg}`);
+		}
+	};
+
+	const handleNewProjectFileSelect = async (
+		event: React.ChangeEvent<HTMLInputElement>,
+	) => {
+		const file = event.target.files?.[0] || null;
+		if (!file) return;
+		const validation = validateZipFile(file);
+		if (!validation.valid) {
+			toast.error(validation.error || "文件无效");
+			event.target.value = "";
+			return;
+		}
+
+		const inferredName = stripScanArchiveSuffix(file.name).trim();
+		if (inferredName) {
+			setNewProjectName(inferredName);
+		}
+		setNewProjectFile(file);
+		const projectName = inferredName || newProjectName.trim();
+		if (!projectName) {
+			setUploadProjectStatus("project_create_failed");
+			setUploadProjectError("请输入项目名称后再上传");
+			toast.error("请输入项目名称后再上传");
+			event.target.value = "";
+			return;
+		}
+		await handleCreateProjectFromUpload(projectName, file);
+		event.target.value = "";
+	};
+
+	const handleSourceModeChange = (mode: "existing" | "upload") => {
+		setSourceMode(mode);
+		setSelectedFiles(undefined);
+		if (mode === "upload") {
+			setSelectedProjectId("");
+			zipState.reset();
+			setUploadProjectStatus("idle");
+			setUploadProjectError(null);
+			setUploadedProject(null);
+			setNewProjectFile(null);
+			return;
+		}
+		setUploadProjectStatus("idle");
+		setUploadProjectError(null);
+		setUploadedProject(null);
+		setNewProjectFile(null);
+
+		if (!selectedProjectId && projects.length > 0) {
+			setSelectedProjectId(projects[0].id);
+		}
+	};
+
+	const effectiveTargetFiles = useMemo(() => {
+		if (selectedFiles && selectedFiles.length > 0) {
+			return selectedFiles;
+		}
+		return [];
+	}, [selectedFiles]);
+	const canSelectFiles = useMemo(() => {
+		if (!selectedProject) return false;
+		const isZip = isZipProject(selectedProject);
+		const hasStoredZip = Boolean(zipState.storedZipInfo?.has_file);
+		const useStored = zipState.useStoredZip;
+		return isZip && useStored && hasStoredZip;
+	}, [selectedProject, zipState.storedZipInfo?.has_file, zipState.useStoredZip]);
+	const uploadProjectPending = useMemo(
+		() =>
+			sourceMode === "upload" &&
+			uploadProjectStatus === "uploading_and_creating_project",
+		[sourceMode, uploadProjectStatus],
+	);
+	const uploadProjectReady = useMemo(
+		() =>
+			sourceMode !== "upload" || uploadProjectStatus === "project_ready",
+		[sourceMode, uploadProjectStatus],
+	);
+
+	const selectedYasaRuleConfig = useMemo(
+		() =>
+			yasaRuleConfigs.find((item) => item.id === selectedYasaRuleConfigId),
+		[yasaRuleConfigs, selectedYasaRuleConfigId],
+	);
+	const resolvedRequestedYasaLanguage = useMemo(() => {
+		if (selectedYasaRuleConfig) {
+			return parseYasaLanguageOption(selectedYasaRuleConfig.language);
+		}
+		if (yasaLanguage !== "auto") return yasaLanguage;
+		return resolveYasaLanguageFromProgrammingLanguages(
+			selectedOrUploadedProjectLanguages,
+		);
+	}, [
+		selectedYasaRuleConfig,
+		yasaLanguage,
+		selectedOrUploadedProjectLanguages,
+	]);
+	const requiresManualYasaLanguageSelection = useMemo(
+		() =>
+			Boolean(staticTools.yasa) &&
+			selectedYasaRuleConfigId === "default" &&
+			yasaLanguage === "auto" &&
+			!resolvedRequestedYasaLanguage,
+		[
+			staticTools.yasa,
+			selectedYasaRuleConfigId,
+			yasaLanguage,
+			resolvedRequestedYasaLanguage,
+		],
+	);
+
+	const createStaticScanTasksForProject = async (
+		projectId: string,
+		projectName: string,
+		programmingLanguages?: unknown,
+	) => {
+		// PHPStan integration: enforce 4-engine minimum selection check.
+		if (
+			!staticTools.opengrep &&
+			!staticTools.gitleaks &&
+			!staticTools.bandit &&
+			!staticTools.phpstan &&
+			!staticTools.yasa &&
+			!staticTools.pmd
+		) {
+			throw new Error("请选择至少一个静态分析工具");
+		}
+
+		let opengrepTask: { id: string } | null = null;
+		let gitleaksTask: { id: string } | null = null;
+		let banditTask: { id: string } | null = null;
+		let phpstanTask: { id: string } | null = null;
+		let yasaTask: { id: string } | null = null;
+		let pmdTask: { id: string } | null = null;
+		const selectedRuleConfig = selectedYasaRuleConfig;
+		const requestedYasaLanguage =
+			selectedRuleConfig?.language ||
+			(yasaLanguage !== "auto" ? yasaLanguage : undefined);
+		let shouldRunYasa = staticTools.yasa;
+		if (isYasaBlockedProjectLanguage(programmingLanguages)) {
+			shouldRunYasa = false;
+			toast.info(getYasaBlockedProjectMessage());
+		}
+		if (
+			!staticTools.opengrep &&
+			!staticTools.gitleaks &&
+			!staticTools.bandit &&
+			!staticTools.phpstan &&
+			!shouldRunYasa &&
+			!staticTools.pmd
+		) {
+			throw new Error(
+				`${getYasaUnsupportedLanguageMessage(
+					typeof programmingLanguages === "string" ? programmingLanguages : undefined,
+				)}，请至少启用一个其他扫描引擎`,
+			);
+		}
+		const resolvedAutoYasaLanguage =
+			resolveYasaLanguageFromProgrammingLanguages(programmingLanguages);
+		if (
+			shouldRunYasa &&
+			!selectedRuleConfig &&
+			yasaLanguage === "auto" &&
+			!resolvedAutoYasaLanguage
+		) {
+			throw new Error("请先手动指定 YASA 语言（java/golang/typescript/python）");
+		}
+		const staticBatchId = createStaticScanBatchId();
+
+		if (staticTools.opengrep) {
+			const pickActiveRuleIds = (rules: OpengrepRule[]) => {
+				const severeRules = rules.filter(isSevereRule);
+				const validRuleIds = new Set(severeRules.map((rule) => rule.id));
+				const selected = selectedRuleIds.filter((id) => validRuleIds.has(id));
+				return selected.length > 0
+					? selected
+					: severeRules.map((rule) => rule.id);
+			};
+
+			const activeRuleIds = pickActiveRuleIds(staticRules);
+			if (activeRuleIds.length === 0) {
+				throw new Error("未找到启用的规则，请先在规则管理中启用规则");
+			}
+			try {
+				opengrepTask = await createOpengrepScanTask({
+					project_id: projectId,
+					name: appendStaticScanBatchMarker(
+						`静态分析-Opengrep-${projectName}`,
+						staticBatchId,
+					),
+					rule_ids: activeRuleIds,
+					target_path: ".",
+				});
+			} catch (error) {
+				const apiMsg = extractCreateScanTaskApiErrorMessage(error);
+				const shouldReloadRules =
+					apiMsg.includes("部分规则不存在") || apiMsg.includes("规则不存在");
+				if (!shouldReloadRules) throw error;
+
+				const freshRules = (await getOpengrepRules({ is_active: true })).filter(
+					isSevereRule,
+				);
+				setStaticRules(freshRules);
+				setOpengrepActiveRules(freshRules);
+
+				const retryRuleIds = pickActiveRuleIds(freshRules);
+				if (retryRuleIds.length === 0) {
+					throw new Error("规则已更新，请刷新规则后重试");
+				}
+
+				opengrepTask = await createOpengrepScanTask({
+					project_id: projectId,
+					name: appendStaticScanBatchMarker(
+						`静态分析-Opengrep-${projectName}`,
+						staticBatchId,
+					),
+					rule_ids: retryRuleIds,
+					target_path: ".",
+				});
+			}
+		}
+
+		if (staticTools.gitleaks) {
+			gitleaksTask = await createGitleaksScanTask({
+				project_id: projectId,
+				name: appendStaticScanBatchMarker(
+					`静态分析-Gitleaks-${projectName}`,
+					staticBatchId,
+				),
+				target_path: ".",
+				no_git: true,
+			});
+		}
+
+		if (staticTools.bandit) {
+			banditTask = await createBanditScanTask({
+				project_id: projectId,
+				name: appendStaticScanBatchMarker(
+					`静态分析-Bandit-${projectName}`,
+					staticBatchId,
+				),
+				target_path: ".",
+			});
+		}
+		// PHPStan integration: create static task in the same batch marker group.
+		if (staticTools.phpstan) {
+			phpstanTask = await createPhpstanScanTask({
+				project_id: projectId,
+				name: appendStaticScanBatchMarker(
+					`静态分析-PHPStan-${projectName}`,
+					staticBatchId,
+				),
+				target_path: ".",
+			});
+		}
+		if (shouldRunYasa) {
+			yasaTask = await createYasaScanTask({
+				project_id: projectId,
+				name: appendStaticScanBatchMarker(
+					`静态分析-YASA-${projectName}`,
+					staticBatchId,
+				),
+				target_path: ".",
+				language: selectedRuleConfig ? undefined : requestedYasaLanguage || undefined,
+				rule_config_id: selectedRuleConfig?.id,
+			});
+		}
+		if (staticTools.pmd) {
+			pmdTask = await createPmdScanTask({
+				project_id: projectId,
+				name: appendStaticScanBatchMarker(
+					`静态分析-PMD-${projectName}`,
+					staticBatchId,
+				),
+				target_path: ".",
+				ruleset: "security",
+			});
+		}
+
+		const primaryTaskId =
+			opengrepTask?.id ||
+			gitleaksTask?.id ||
+			banditTask?.id ||
+			phpstanTask?.id ||
+			yasaTask?.id ||
+			pmdTask?.id;
+		if (!primaryTaskId) {
+			throw new Error("静态分析任务创建失败");
+		}
+
+		const params = new URLSearchParams();
+		if (opengrepTask) {
+			params.set("opengrepTaskId", opengrepTask.id);
+		}
+		if (gitleaksTask) {
+			params.set("gitleaksTaskId", gitleaksTask.id);
+		}
+		if (banditTask) {
+			params.set("banditTaskId", banditTask.id);
+		}
+		if (phpstanTask) {
+			params.set("phpstanTaskId", phpstanTask.id);
+		}
+		if (yasaTask) {
+			params.set("yasaTaskId", yasaTask.id);
+		}
+		if (pmdTask) {
+			params.set("pmdTaskId", pmdTask.id);
+		}
+		if (!opengrepTask && !banditTask && !phpstanTask && !yasaTask && !pmdTask && gitleaksTask) {
+			params.set("tool", "gitleaks");
+		}
+		if (!opengrepTask && !gitleaksTask && !phpstanTask && !yasaTask && !pmdTask && banditTask) {
+			params.set("tool", "bandit");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && !yasaTask && !pmdTask && phpstanTask) {
+			params.set("tool", "phpstan");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && !phpstanTask && !pmdTask && yasaTask) {
+			params.set("tool", "yasa");
+		}
+		if (!opengrepTask && !gitleaksTask && !banditTask && !phpstanTask && !yasaTask && pmdTask) {
+			params.set("tool", "pmd");
+		}
+
+		return {
+			primaryTaskId,
+			query: params.toString(),
+		};
+	};
+
+	const handleStartScan = async () => {
+		try {
+			setCreating(true);
+			if (
+				scanMode === "static" &&
+				requiresManualYasaLanguageSelection
+			) {
+				toast.error("请先手动指定 YASA 语言（java/golang/typescript/python）");
+				return;
+			}
+			if (sourceMode === "upload") {
+				if (!newProjectName.trim()) {
+					toast.error("请输入项目名称");
+					return;
+				}
+				if (!newProjectFile) {
+					toast.error("请先选择项目压缩包");
+					return;
+				}
+				if (uploadProjectStatus === "uploading_and_creating_project") {
+					toast.info("正在创建项目并识别语言，请稍候");
+					return;
+				}
+				if (uploadProjectStatus !== "project_ready" || !uploadedProject) {
+					toast.error("请先完成项目上传与创建");
+					return;
+				}
+
+				try {
+					if (scanMode === "agent") {
+						const agentTask = await createAgentTask({
+							project_id: uploadedProject.id,
+							name: `智能扫描-${uploadedProject.name}`,
+							description: `${INTELLIGENT_TASK_NAME_MARKER}智能扫描任务`,
+							audit_scope: {
+								static_bootstrap: {
+									mode: "disabled",
+									opengrep_enabled: false,
+									bandit_enabled: false,
+									gitleaks_enabled: false,
+									phpstan_enabled: false,
+									yasa_enabled: false,
+									yasa_language: "auto",
+								},
+							},
+							target_files:
+								effectiveTargetFiles.length > 0
+									? effectiveTargetFiles
+									: undefined,
+							use_prompt_skills: true,
+							verification_level: "analysis_with_poc_plan",
+						});
+
+						onOpenChange(false);
+						onTaskCreated();
+						toast.success("智能扫描任务已创建");
+						if (navigateOnSuccess) {
+							navigate(`/agent-audit/${agentTask.id}`);
+						}
+						loadProjects();
+						return;
+					}
+
+					const staticResult = await createStaticScanTasksForProject(
+						uploadedProject.id,
+						uploadedProject.name,
+						uploadedProject.programming_languages,
+					);
+					onOpenChange(false);
+					onTaskCreated();
+					toast.success("静态分析任务已创建");
+					if (navigateOnSuccess) {
+						navigate(
+							appendReturnTo(
+								`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
+								}`,
+								currentRoute,
+							),
+						);
+					}
+					loadProjects();
+					return;
+				} catch (error) {
+					throw error;
+				}
+			}
+
+			if (!selectedProject) {
+				toast.error("请选择项目");
+				return;
+			}
+
+			if (scanMode === "agent") {
+				const agentTask = await createAgentTask({
+					project_id: selectedProject.id,
+					name: `智能扫描-${selectedProject.name}`,
+					description: `${INTELLIGENT_TASK_NAME_MARKER}智能扫描任务`,
+					audit_scope: {
+						static_bootstrap: {
+							mode: "disabled",
+							opengrep_enabled: false,
+							bandit_enabled: false,
+							gitleaks_enabled: false,
+							phpstan_enabled: false,
+							yasa_enabled: false,
+							yasa_language: "auto",
+						},
+					},
+					exclude_patterns: excludePatterns,
+					target_files:
+						effectiveTargetFiles.length > 0 ? effectiveTargetFiles : undefined,
+					use_prompt_skills: true,
+					verification_level: "analysis_with_poc_plan",
+				});
+
+				onOpenChange(false);
+				onTaskCreated();
+				toast.success("智能扫描任务已创建");
+				if (navigateOnSuccess) {
+					navigate(`/agent-audit/${agentTask.id}`);
+				}
+				return;
+			}
+
+			if (!isZipProject(selectedProject)) {
+				toast.error("静态分析仅支持源码归档项目");
+				return;
+			}
+			if (!zipState.storedZipInfo?.has_file) {
+				toast.error("请先上传源码归档");
+				return;
+			}
+
+			const staticResult = await createStaticScanTasksForProject(
+				selectedProject.id,
+				selectedProject.name,
+				selectedProject.programming_languages,
+			);
+			onOpenChange(false);
+			onTaskCreated();
+			toast.success("静态分析任务已创建");
+			if (navigateOnSuccess) {
+				navigate(
+					appendReturnTo(
+						`/static-analysis/${staticResult.primaryTaskId}${staticResult.query ? `?${staticResult.query}` : ""
+						}`,
+						currentRoute,
+					),
+				);
+			}
+		} catch (error) {
+			const msg = extractCreateScanTaskApiErrorMessage(error);
+			toast.error(`启动失败: ${msg}`);
+		} finally {
+			setCreating(false);
+			setSelectedFiles(undefined);
+			setExcludePatterns(DEFAULT_SCAN_EXCLUDES);
+		}
+	};
+
+	const canStart = useMemo(() => {
+		if (sourceMode === "upload") {
+			if (!newProjectName.trim() || !newProjectFile) return false;
+			if (uploadProjectStatus !== "project_ready" || !uploadedProject) return false;
+			if (scanMode === "static") {
+				if (requiresManualYasaLanguageSelection) return false;
+				return (
+					staticTools.opengrep ||
+					staticTools.gitleaks ||
+					staticTools.bandit ||
+					staticTools.phpstan ||
+					staticTools.yasa ||
+					staticTools.pmd
+				);
+			}
+			return true;
+		}
+		if (!selectedProject) return false;
+		if (scanMode === "static") {
+			if (requiresManualYasaLanguageSelection) return false;
+			return (
+				isZipProject(selectedProject) &&
+				!!zipState.storedZipInfo?.has_file &&
+				(staticTools.opengrep ||
+					staticTools.gitleaks ||
+					staticTools.bandit ||
+					staticTools.phpstan ||
+					staticTools.yasa ||
+					staticTools.pmd)
+			);
+		}
+		if (!isZipProject(selectedProject)) return false;
+		const ready =
+			(zipState.useStoredZip && zipState.storedZipInfo?.has_file) ||
+			!!zipState.zipFile;
+		if (!ready) return false;
+		return true;
+	}, [
+		sourceMode,
+		newProjectName,
+		newProjectFile,
+		selectedProject,
+		zipState,
+		scanMode,
+		effectiveTargetFiles,
+		staticTools.opengrep,
+		staticTools.gitleaks,
+		staticTools.bandit,
+		staticTools.phpstan,
+		staticTools.yasa,
+		staticTools.pmd,
+		requiresManualYasaLanguageSelection,
+		uploadProjectStatus,
+		uploadedProject,
+	]);
+
+	const handleOpenEngineConfig = (engine: StaticTool) => {
+		if (!uploadProjectReady) {
+			toast.info("请先完成项目创建并识别语言");
+			return;
+		}
+		setConfigEngine(engine);
+	};
+
+	const handleNavigateToEngineConfig = (engine: StaticTool) => {
+		onOpenChange(false);
+		navigate(buildScanEngineConfigRoute(engine));
+	};
+
+	return (
+		<>
+			<Dialog open={open} onOpenChange={onOpenChange}>
+				<DialogContent
+					aria-describedby={undefined}
+					className="!w-[min(90vw,520px)] !max-w-none max-h-[85vh] flex flex-col p-0 gap-0 cyber-dialog border border-border rounded-lg"
+				>
+					{/* Header */}
+					<DialogHeader className="px-5 py-4 border-b border-border flex-shrink-0 bg-muted">
+						<DialogTitle className="flex items-center gap-3 font-mono text-foreground">
+							<div className="p-2 bg-primary/20 rounded border border-primary/30">
+								<Shield className="w-5 h-5 text-primary" />
+							</div>
+							<div>
+								<span className="text-base font-bold uppercase tracking-wider">
+									开始代码扫描
+								</span>
+								<p className="text-xs text-muted-foreground font-normal mt-0.5">
+									Code Security Analysis
+								</p>
+							</div>
+						</DialogTitle>
+					</DialogHeader>
+
+					<div className="flex-1 overflow-y-auto p-5 space-y-5">
+						{allowUploadProject && (
+							<div className="space-y-2">
+								<span className="text-sm font-mono font-bold uppercase text-muted-foreground">
+									项目来源
+								</span>
+								<div className="grid grid-cols-2 gap-2">
+									<Button
+										variant={sourceMode === "existing" ? "default" : "outline"}
+										className={
+											sourceMode === "existing"
+												? "cyber-btn-primary"
+							: "cyber-btn-outline"
+						}
+						onClick={() => handleSourceModeChange("existing")}
+						disabled={creating}
+					>
+						选择已有项目
+					</Button>
+									<Button
+										variant={sourceMode === "upload" ? "default" : "outline"}
+										className={
+											sourceMode === "upload"
+												? "cyber-btn-primary"
+							: "cyber-btn-outline"
+						}
+						onClick={() => handleSourceModeChange("upload")}
+						disabled={creating}
+					>
+						上传新项目
+					</Button>
+								</div>
+							</div>
+						)}
+
+						{sourceMode === "existing" ? (
+							<div className="space-y-3">
+								<div className="flex items-center justify-between">
+									<span className="text-sm font-mono font-bold uppercase text-muted-foreground">
+										选择项目
+									</span>
+									<Badge className="cyber-badge-muted font-mono text-xs">
+										{filteredProjects.length} 个
+									</Badge>
+								</div>
+
+								<div className="relative mt-1.5">
+									<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+									<Input
+										placeholder="搜索项目..."
+										value={searchTerm}
+										onChange={(e) => setSearchTerm(e.target.value)}
+										className="!pl-10 h-10 cyber-input"
+									/>
+								</div>
+
+								<ScrollArea className="h-[180px] border border-border rounded bg-muted/50">
+									{loading ? (
+										<div className="flex items-center justify-center h-full">
+											<Loader2 className="w-5 h-5 animate-spin text-primary" />
+										</div>
+									) : filteredProjects.length === 0 ? (
+										<div className="flex flex-col items-center justify-center h-full text-muted-foreground font-mono">
+											<Package className="w-8 h-8 mb-2 opacity-50" />
+											<span className="text-sm">
+												{searchTerm ? "未找到" : "暂无项目"}
+											</span>
+										</div>
+									) : (
+										<div className="p-1">
+											{filteredProjects.map((project) => (
+												<ProjectCard
+													key={project.id}
+													project={project}
+													selected={selectedProjectId === project.id}
+													onSelect={() => setSelectedProjectId(project.id)}
+												/>
+											))}
+										</div>
+									)}
+								</ScrollArea>
+							</div>
+						) : (
+							<div className="space-y-3 border border-border rounded p-3 bg-muted/40">
+								<div className="space-y-1.5">
+									<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+										项目名称
+									</Label>
+					<Input
+						value={newProjectName}
+						onChange={(e) => setNewProjectName(e.target.value)}
+						placeholder="输入项目名称"
+						className="h-10 cyber-input"
+						disabled={creating || uploadProjectPending || uploadProjectStatus === "project_ready"}
+					/>
+				</div>
+				<div className="rounded-lg border border-dashed border-sky-500/30 bg-sky-500/8 p-3">
+					<p className="text-xs font-mono font-bold uppercase text-sky-100 mb-1">
+						自动生成简介
+					</p>
+					<p className="text-xs leading-5 text-sky-50/85">
+						上传完成后，系统会基于项目结构自动生成 1-2 句项目使用场景简介。
+					</p>
+				</div>
+				<div className="space-y-2">
+					<Label className="font-mono font-bold uppercase text-xs text-muted-foreground">
+						源码压缩包
+									</Label>
+									<input
+										ref={newProjectFileInputRef}
+										type="file"
+						accept=".zip,.tar,.tar.gz,.tar.bz2,.7z,.rar"
+						onChange={handleNewProjectFileSelect}
+						className="hidden"
+						disabled={creating || uploadProjectPending}
+					/>
+					<Button
+						variant="outline"
+						className="cyber-btn-outline h-9"
+						onClick={() => newProjectFileInputRef.current?.click()}
+						disabled={creating || uploadProjectPending}
+					>
+										<Upload className="w-4 h-4 mr-2" />
+										{uploadProjectPending ? "上传中..." : "选择压缩包"}
+									</Button>
+									{newProjectFile && (
+										<p className="text-xs text-emerald-400 font-mono">
+											已选择: {newProjectFile.name}
+										</p>
+									)}
+									{sourceMode === "upload" && uploadProjectStatus === "uploading_and_creating_project" ? (
+										<p className="text-xs text-sky-300 font-mono">
+											正在创建项目并识别语言，请稍候...
+										</p>
+									) : null}
+									{sourceMode === "upload" && uploadProjectStatus === "project_create_failed" && uploadProjectError ? (
+										<p className="text-xs text-rose-300 font-mono">
+											项目创建失败: {uploadProjectError}
+										</p>
+									) : null}
+									{sourceMode === "upload" && uploadProjectStatus === "project_ready" && uploadedProject ? (
+										<p className="text-xs text-emerald-300 font-mono">
+											项目已创建: {uploadedProject.name}（可继续选择引擎）
+										</p>
+									) : null}
+								</div>
+							</div>
+						)}
+
+						{/* 扫描模式选择 */}
+						{(sourceMode === "upload" || selectedProject) && (
+								<AgentModeSelector
+									value={scanMode}
+									onChange={setScanMode}
+									disabled={creating}
+									staticTools={staticTools}
+									onStaticToolsChange={setStaticTools}
+									disabledStaticTools={{
+										opengrep: !uploadProjectReady,
+										gitleaks: !uploadProjectReady,
+										bandit: !uploadProjectReady,
+										phpstan: !uploadProjectReady,
+										yasa: !uploadProjectReady || isYasaBlockedProject,
+										pmd: !uploadProjectReady || isPmdBlockedProject,
+									}}
+									blockedStaticToolMessages={{
+										yasa: isYasaBlockedProject ? getYasaBlockedProjectMessage() : undefined,
+										pmd: isPmdBlockedProject ? getPmdBlockedProjectMessage() : undefined,
+								}}
+								onOpenStaticToolConfig={handleOpenEngineConfig}
+							/>
+						)}
+
+						{/* 配置区域 */}
+						{sourceMode === "existing" && selectedProject && (
+							<div className="space-y-4">
+								<span className="text-sm font-mono font-bold uppercase text-muted-foreground">
+									配置
+								</span>
+
+								<ZipUploadCard
+									zipState={zipState}
+									onUpload={async () => {
+										if (!zipState.zipFile || !selectedProject) return;
+										setUploading(true);
+										try {
+											await api.uploadProjectZip(
+												selectedProject.id,
+												zipState.zipFile,
+											);
+											toast.success("文件上传成功");
+											zipState.switchToStored();
+											loadProjects();
+										} catch (error) {
+											const msg =
+												error instanceof Error ? error.message : "上传失败";
+											toast.error(msg);
+										} finally {
+											setUploading(false);
+										}
+									}}
+									uploading={uploading}
+								/>
+
+								{scanMode === "static" && null}
+
+								<AdvancedOptionsSection
+									open={showAdvanced}
+									onOpenChange={setShowAdvanced}
+									excludePatterns={excludePatterns}
+									onResetExcludes={() =>
+										setExcludePatterns(DEFAULT_SCAN_EXCLUDES)
+									}
+									onRemoveExclude={(pattern) =>
+										setExcludePatterns((prev) =>
+											prev.filter((item) => item !== pattern),
+										)
+									}
+									onAddExclude={(pattern) => {
+										if (!excludePatterns.includes(pattern)) {
+											setExcludePatterns((prev) => [...prev, pattern]);
+										}
+									}}
+									onCustomExcludeEnter={(value) => {
+										const trimmed = value.trim();
+										if (trimmed && !excludePatterns.includes(trimmed)) {
+											setExcludePatterns((prev) => [...prev, trimmed]);
+										}
+									}}
+									canSelectFiles={canSelectFiles}
+									selectedFiles={selectedFiles}
+									onResetSelectedFiles={() => setSelectedFiles(undefined)}
+									onOpenFileSelection={() => setShowFileSelection(true)}
+								/>
+							</div>
+						)}
+					</div>
+
+					{/* Footer */}
+					<div className="flex-shrink-0 flex justify-end gap-3 px-5 py-4 bg-muted border-t border-border">
+						{showReturnButton && (
+							<Button
+								variant="outline"
+								onClick={() => {
+								onOpenChange(false);
+								onReturn?.();
+							}}
+							disabled={creating}
+							className="px-4 h-10 cyber-btn-outline font-mono"
+						>
+								返回
+							</Button>
+						)}
+					<Button
+						variant="ghost"
+						onClick={() => onOpenChange(false)}
+						disabled={creating}
+						className="px-4 h-10 font-mono text-muted-foreground hover:text-foreground hover:bg-muted"
+					>
+							取消
+						</Button>
+					<Button
+						onClick={handleStartScan}
+						disabled={!canStart || creating}
+						className="px-5 h-10 cyber-btn-primary font-mono font-bold uppercase"
+					>
+							{creating ? (
+								<>
+									<Loader2 className="w-4 h-4 animate-spin mr-2" />
+									启动中...
+								</>
+							) : scanMode === "agent" ? (
+								<>
+									<Bot className="w-4 h-4 mr-2" />
+									启动智能扫描
+								</>
+							) : (
+								<>
+									<Zap className="w-4 h-4 mr-2" />
+									开始静态分析
+								</>
+							)}
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
+			<StaticEngineConfigDialog
+				engine={configEngine ?? "opengrep"}
+				open={configEngine !== null}
+				onOpenChange={(open) => {
+					if (!open) setConfigEngine(null);
+				}}
+				scanMode="static"
+				enabled={configEngine ? staticTools[configEngine] : false}
+				creating={creating}
+				blockedReason={
+					configEngine === "yasa" && isYasaBlockedProject
+						? getYasaBlockedProjectMessage()
+						: configEngine === "pmd" && isPmdBlockedProject
+							? getPmdBlockedProjectMessage()
+							: null
+				}
+				yasaLanguage={yasaLanguage}
+				onYasaLanguageChange={(value) => setYasaLanguage(parseYasaLanguageOption(value))}
+				yasaRuleConfigs={yasaRuleConfigs}
+				selectedYasaRuleConfigId={selectedYasaRuleConfigId}
+				onSelectedYasaRuleConfigIdChange={setSelectedYasaRuleConfigId}
+				showYasaAutoSkipHint={
+					configEngine === "yasa" &&
+					staticTools.yasa &&
+					selectedYasaRuleConfigId === "default" &&
+					yasaLanguage === "auto" &&
+					!resolvedRequestedYasaLanguage &&
+					uploadProjectReady
+				}
+				onNavigateToEngineConfig={(engine) => handleNavigateToEngineConfig(engine)}
+			/>
+
+			{sourceMode === "existing" && selectedProjectId ? (
+				<FileSelectionDialog
+					open={showFileSelection}
+					onOpenChange={setShowFileSelection}
+					projectId={selectedProjectId}
+					excludePatterns={excludePatterns}
+					onConfirm={setSelectedFiles}
+				/>
+			) : null}
+		</>
+	);
+}

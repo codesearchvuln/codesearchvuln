@@ -1,0 +1,6 @@
+**
+!backend/scripts/package_source_selector.py
+!backend/app/runtime/launchers/yasa_engine_launcher.py
+!backend/app/runtime/launchers/yasa_launcher.py
+!backend/app/runtime/launchers/yasa_uast4py_launcher.py
+!frontend/yasa-engine-overrides/**

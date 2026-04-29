@@ -1,0 +1,12 @@
+# Workflow agent pool sizes.
+# Recon Host is always single-instance per workflow run.
+# `recon.count` controls only module-level Recon SubAgent worker concurrency.
+# `analysis.count` is the shared total pool for both analysis and business_logic_analysis.
+# Set count to 1 to force serial execution for that phase/pool.
+agents:
+  recon:
+    count: 3
+  analysis:
+    count: 5
+  verification:
+    count: 3

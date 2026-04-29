@@ -1,0 +1,5 @@
+**
+!backend/scripts/package_source_selector.py
+!backend/scripts/flow_parser_runner.py
+!backend/app/services/parser.py
+!docker/flow-parser-runner.requirements.txt
