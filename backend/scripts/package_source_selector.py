@@ -10,7 +10,7 @@ from typing import Iterable, Sequence
 
 
 DEFAULT_NPM_PROBE_PATHS = ["/-/ping", "/"]
-DEFAULT_PYPI_PROBE_PATHS = ["/simple/pip/", "/simple/"]
+DEFAULT_PYPI_PROBE_PATHS = ["/pip/", "/"]
 
 
 @dataclass(frozen=True)

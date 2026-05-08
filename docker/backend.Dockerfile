@@ -102,12 +102,15 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv,shar
   uv_http_timeout=120; \
   step_timeout=600; \
   pypi_index_candidates="${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://mirrors.huaweicloud.com/repository/pypi/simple/,https://pypi.org/simple}"; \
-  best_index="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}"; \
+  best_index="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.huaweicloud.com/repository/pypi/simple/}"; \
   ordered="$(python3 /usr/local/bin/package_source_selector.py \
   --candidates "${pypi_index_candidates}" --kind pypi --timeout-seconds 5 2>/dev/null || true)"; \
   if [ -n "${ordered}" ]; then \
   first="$(printf '%s\n' "${ordered}" | head -1)"; \
-  [ -z "${first}" ] || best_index="${first}"; \
+  if [ -n "${first}" ] && [ "${first}" != "${best_index}" ]; then \
+  echo "Selector ranks ${first} above ${best_index}; switching"; \
+  best_index="${first}"; \
+  fi; \
   fi; \
   printf '%s\n' "${best_index}" > /tmp/pypi-best-index; \
   printf '%s\n' "${ordered}" > /tmp/pypi-ordered-indices; \
@@ -120,7 +123,7 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv,shar
   if timeout "${step_timeout}" env \
   VIRTUAL_ENV="${BACKEND_VENV_PATH}" PATH="${BACKEND_VENV_PATH}/bin:${PATH}" \
   UV_INDEX_URL="${idx}" UV_HTTP_TIMEOUT="${uv_http_timeout}" \
-  UV_CONCURRENT_DOWNLOADS=24 UV_CONCURRENT_INSTALLS=8 \
+  UV_CONCURRENT_DOWNLOADS=8 UV_CONCURRENT_INSTALLS=8 \
   UV_LINK_MODE=copy UV_NO_PROGRESS=1 \
   uv pip install --no-deps --index-url "${idx}" -r requirements-heavy.txt; then \
   return 0; \
@@ -172,7 +175,7 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv,shar
   if timeout "${uv_step_timeout}" env \
   VIRTUAL_ENV="${BACKEND_VENV_PATH}" PATH="${BACKEND_VENV_PATH}/bin:${PATH}" \
   UV_HTTP_TIMEOUT="${uv_http_timeout}" UV_INDEX_URL="${idx}" PIP_INDEX_URL="${idx}" \
-  UV_CONCURRENT_DOWNLOADS=24 UV_CONCURRENT_INSTALLS=8 \
+  UV_CONCURRENT_DOWNLOADS=8 UV_CONCURRENT_INSTALLS=8 \
   UV_LINK_MODE=copy UV_NO_PROGRESS=1 \
   uv sync --active --frozen --no-dev; then \
   return 0; \
