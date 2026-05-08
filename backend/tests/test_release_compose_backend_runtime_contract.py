@@ -5,12 +5,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners() -> None:
-    compose_text = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    hybrid_text = (REPO_ROOT / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
+    compose_text = (REPO_ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+    hybrid_text = (REPO_ROOT / "docker" / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
 
-    assert "docker compose up" not in compose_text
-    assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in compose_text
-    assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" not in compose_text
+    assert "./start-local-services.sh" in compose_text
+    assert "./start-local-services.sh hybrid" in compose_text
+    assert "docker-compose.full.yml" not in compose_text
     assert "docker-compose.release.yml" not in compose_text
     assert "docker-compose.release-cython.yml" not in compose_text
     assert "docker-compose.self-contained.yml" not in compose_text
@@ -38,7 +38,7 @@ def test_release_compose_contract_uses_only_supported_commands_and_cloud_runners
     assert "RUNNER_PREFLIGHT_BUILD_CONTEXT" not in compose_text
     assert "RUNNER_PREFLIGHT_BUILD_TIMEOUT_SECONDS" not in compose_text
 
-    assert "docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build" in hybrid_text
+    assert "./start-local-services.sh hybrid" in hybrid_text
     assert "docker-compose.full.yml" not in hybrid_text
     assert "build: !override" in hybrid_text
     # backend + frontend + nexus-web override 各一处

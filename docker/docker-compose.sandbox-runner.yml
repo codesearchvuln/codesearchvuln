@@ -1,8 +1,8 @@
 # =============================================
 # Sandbox Runner 专用构建配置
 # =============================================
-# 使用方式: docker compose -f docker-compose.yml -f docker-compose.sandbox-runner.yml build sandbox-runner
-# 或: docker compose -f docker-compose.yml -f docker-compose.sandbox-runner.yml up --build
+# 使用方式: docker compose --project-directory . -f docker/docker-compose.yml -f docker/docker-compose.sandbox-runner.yml build sandbox-runner
+# 或: docker compose --project-directory . -f docker/docker-compose.yml -f docker/docker-compose.sandbox-runner.yml up --build
 
 services:
   # Sandbox Runner - 按需加载的轻量级代码执行镜像

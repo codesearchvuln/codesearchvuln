@@ -6,7 +6,7 @@
 #
 # 使用方法:
 #   make setup      — 一次性探测运行时，写入根 .env（推荐首次运行）
-#   make up         — 从 GHCR 拉取镜像并启动（等效于 compose up -d）
+#   make up         — 默认本地构建 frontend+backend 并启动
 #   make up-build   — 混合构建（frontend+backend 本地构建，runner 拉云端）
 #   make up-full    — 全量本地构建
 #   make down       — 停止并删除容器
@@ -17,9 +17,10 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-COMPOSE_FILES_BASE     := -f docker-compose.yml
-COMPOSE_FILES_HYBRID   := -f docker-compose.yml -f docker-compose.hybrid.yml
-COMPOSE_FILES_FULL     := -f docker-compose.yml -f docker-compose.full.yml
+COMPOSE_PROJECT_DIR    := --project-directory .
+COMPOSE_FILES_BASE     := $(COMPOSE_PROJECT_DIR) -f docker/docker-compose.yml
+COMPOSE_FILES_HYBRID   := $(COMPOSE_FILES_BASE) -f docker/docker-compose.hybrid.yml
+COMPOSE_FILES_FULL     := $(COMPOSE_FILES_BASE) -f docker/docker-compose.full.yml
 
 # ─── 运行时自动探测 ──────────────────────────────────────────────────────────
 # 探测顺序: docker compose → podman compose → docker-compose
@@ -51,7 +52,7 @@ help:
 	@echo "VulHunter Make 目标"
 	@echo "──────────────────────────────────────────────────────────"
 	@echo "  make setup       一次性探测运行时，写入根 .env"
-	@echo "  make up          拉取镜像并启动（后台）"
+	@echo "  make up          默认本地构建 frontend+backend 并启动（后台）"
 	@echo "  make up-build    混合构建（frontend+backend 本地）+ 启动"
 	@echo "  make up-full     全量本地构建 + 启动"
 	@echo "  make down        停止并删除容器"
@@ -68,7 +69,7 @@ setup:
 
 .PHONY: up
 up:
-	@bash scripts/compose-up-with-fallback.sh $(COMPOSE_FILES_BASE) up -d
+	@./start-local-services.sh default
 
 .PHONY: up-attached
 up-attached:
@@ -76,16 +77,15 @@ up-attached:
 
 .PHONY: up-build
 up-build:
-	@bash scripts/compose-up-with-fallback.sh $(COMPOSE_FILES_HYBRID) up --build -d
+	@./start-local-services.sh hybrid
 
 .PHONY: up-full
 up-full:
-	@bash scripts/compose-up-with-fallback.sh $(COMPOSE_FILES_FULL) up --build -d
+	@./start-local-services.sh full
 
 .PHONY: down
 down:
-	$(DETECT_RUNTIME); \
-	$$COMPOSE_CMD $(COMPOSE_FILES_BASE) down
+	@./stop-local-services.sh
 
 .PHONY: logs
 logs:

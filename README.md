@@ -6,7 +6,7 @@
 
 当前仓库里需要区分两份 compose 合同：
 
-- 源码仓库 compose 合同：直接在仓库根目录执行 `docker compose up` 时生效；主 frontend 服务仍使用 `FRONTEND_IMAGE`，默认指向 `vulhunter-frontend` 运行镜像，源码仓库内也可继续叠加 `docker-compose.hybrid.yml`
+- 源码仓库 compose 合同：直接在仓库根目录执行 `./start-local-services.sh` 时生效；默认本地构建 backend/frontend，并通过 `docker/docker-compose.yml` + `docker/docker-compose.hybrid.yml` 启动
 - generated release tree compose 合同：发布流程生成的运行包只保留运行时 `docker-compose.yml`、环境模板和静态 bundle，不附带 `backend` / `frontend` 源码，也不提供本地 build overlay；这里的主 frontend 仍是 `STATIC_FRONTEND_IMAGE` 加 `deploy/runtime/frontend/site` 与 `deploy/runtime/frontend/nginx/default.conf`，不是 `vulhunter-frontend` 运行镜像
 
 下面的启动步骤指 generated release tree。

@@ -201,6 +201,19 @@ compose_args_contains_full_yml() {
   return 1
 }
 
+compose_args_contains_file_flag() {
+  local -a args=("$@")
+  local arg
+  for arg in "${args[@]}"; do
+    case "$arg" in
+      -f|--file)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 # 校验参数必须是正整数，否则打印错误并退出
 require_positive_int() {
   local name="$1"
@@ -759,7 +772,7 @@ run_with_retries() {
 # ─── 本地构建回退 ─────────────────────────────────────────────────────────────
 # 将 COMPOSE_ARGS 转换为本地构建回退参数：
 #   1. 剥离现有 -f/--file 标志
-#   2. 注入 -f docker-compose.yml -f docker-compose.full.yml
+#   2. 注入 --project-directory + docker/ 下的 base/full compose 文件
 #   3. 在子命令参数中追加 --build（若尚未存在）
 # 使用 bash nameref 将结果写入调用方的数组变量
 build_local_fallback_compose_args() {
@@ -780,7 +793,10 @@ build_local_fallback_compose_args() {
           # 跳过现有 -f 标志及其值
           idx=$((idx + 1))
           ;;
-        --env-file|-p|--project-name|--project-directory|--profile|--ansi|--parallel)
+        --project-directory)
+          idx=$((idx + 1))
+          ;;
+        --env-file|-p|--project-name|--profile|--ansi|--parallel)
           global_opts+=("$arg")
           idx=$((idx + 1))
           if [ "$idx" -lt "${#input_args[@]}" ]; then
@@ -805,7 +821,7 @@ build_local_fallback_compose_args() {
   if [ "${#global_opts[@]}" -gt 0 ]; then
     _out_arr+=("${global_opts[@]}")
   fi
-  _out_arr+=(-f docker-compose.yml -f docker-compose.full.yml)
+  _out_arr+=(--project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker/docker-compose.yml" -f "$REPO_ROOT/docker/docker-compose.full.yml")
   if [ "${#subcmd_args[@]}" -gt 0 ]; then
     _out_arr+=("${subcmd_args[@]}")
   fi
@@ -908,6 +924,10 @@ if [ "$#" -eq 0 ]; then
   COMPOSE_ARGS=(up -d)
 else
   COMPOSE_ARGS=("$@")
+fi
+
+if ! compose_args_contains_file_flag "${COMPOSE_ARGS[@]}"; then
+  COMPOSE_ARGS=(--project-directory "$REPO_ROOT" -f "$REPO_ROOT/docker/docker-compose.yml" "${COMPOSE_ARGS[@]}")
 fi
 
 if compose_args_target_attached_up "${COMPOSE_ARGS[@]}" && [ -z "${COMPOSE_MENU+x}" ]; then

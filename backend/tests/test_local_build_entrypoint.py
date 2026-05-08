@@ -31,12 +31,12 @@ def test_local_build_script_builds_services_sequentially_before_up() -> None:
     assert '"${COMPOSE[@]}" build frontend' in script_text
     assert '"${COMPOSE[@]}" build nexus-web' in script_text
     assert "build nexus-itemDetail" not in script_text
-    assert '"${COMPOSE[@]}" up -d' in script_text
+    assert 'exec "$REPO_ROOT/start-local-services.sh" full "$@"' in script_text
 
 
 def test_local_build_entrypoint_remains_separate_from_release_publish_targets() -> None:
     script_text = (REPO_ROOT / "scripts" / "compose-up-local-build.sh").read_text(encoding="utf-8")
-    hybrid_compose_text = (REPO_ROOT / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
+    hybrid_compose_text = (REPO_ROOT / "docker" / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
 
     assert "publish-runtime-images.yml" not in script_text
     assert "runtime-release" not in script_text

@@ -285,7 +285,7 @@ async def test_pmd(project_root: str):
 
     说明:
     - PMD 现在依赖 SCANNER_PMD_IMAGE 提供扫描镜像
-    - 默认 `docker compose up` 会先拉取远程 backend 镜像；如需本地镜像构建，请显式叠加 `docker-compose.full.yml`
+    - 默认 `./start-local-services.sh` 会先本地构建 backend/frontend 镜像；如需全量联调，请运行 `./start-local-services.sh full`
     - 真正执行扫描时，backend 会通过 Docker SDK 基于 SCANNER_PMD_IMAGE 动态拉起临时 runner 容器
     - 执行方式是运行期按需启动的一次性 runner 容器，不是 compose service 常驻参与扫描
     - 这里只是可选的手工 smoke test，不属于默认自动验收

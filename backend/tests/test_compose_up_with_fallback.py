@@ -211,31 +211,52 @@ def test_attached_up_disables_compose_menu_by_default(tmp_path: Path) -> None:
     log_output = _read_log(tmp_path / "docker-invocation.log")
 
     assert "COMPOSE_MENU=false" in log_output
-    assert "ARGS=compose up " in log_output
+    assert f"ARGS=compose --project-directory {REPO_ROOT} -f {REPO_ROOT / 'docker' / 'docker-compose.yml'} up " in log_output
 
 
 def test_attached_up_with_global_file_flags_disables_compose_menu(tmp_path: Path) -> None:
     result = _run_compose_wrapper(
-        tmp_path, ["-f", "docker-compose.yml", "-f", "docker-compose.full.yml", "up", "--build"]
+        tmp_path,
+        [
+            "--project-directory",
+            str(REPO_ROOT),
+            "-f",
+            str(REPO_ROOT / "docker" / "docker-compose.yml"),
+            "-f",
+            str(REPO_ROOT / "docker" / "docker-compose.full.yml"),
+            "up",
+            "--build",
+        ],
     )
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
     log_output = _read_log(tmp_path / "docker-invocation.log")
 
+    assert f"ARGS=compose --project-directory {REPO_ROOT} -f {REPO_ROOT / 'docker' / 'docker-compose.yml'} up -d " in log_output
+
     assert "COMPOSE_MENU=false" in log_output
-    assert "ARGS=compose -f docker-compose.yml -f docker-compose.full.yml up --build " in log_output
+    assert f"ARGS=compose --project-directory {REPO_ROOT} -f {REPO_ROOT / 'docker' / 'docker-compose.yml'} -f {REPO_ROOT / 'docker' / 'docker-compose.full.yml'} up --build " in log_output
 
 
 def test_attached_explicit_local_build_flags_are_preserved(tmp_path: Path) -> None:
     result = _run_compose_wrapper(
         tmp_path,
-        ["-f", "docker-compose.yml", "-f", "docker-compose.full.yml", "up", "--build"],
+        [
+            "--project-directory",
+            str(REPO_ROOT),
+            "-f",
+            str(REPO_ROOT / "docker" / "docker-compose.yml"),
+            "-f",
+            str(REPO_ROOT / "docker" / "docker-compose.full.yml"),
+            "up",
+            "--build",
+        ],
     )
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
     log_output = _read_log(tmp_path / "docker-invocation.log")
 
-    assert "ARGS=compose -f docker-compose.yml -f docker-compose.full.yml up --build " in log_output
+    assert f"ARGS=compose --project-directory {REPO_ROOT} -f {REPO_ROOT / 'docker' / 'docker-compose.yml'} -f {REPO_ROOT / 'docker' / 'docker-compose.full.yml'} up --build " in log_output
 
 
 def test_detached_up_keeps_compose_menu_unset(tmp_path: Path) -> None:
@@ -244,6 +265,7 @@ def test_detached_up_keeps_compose_menu_unset(tmp_path: Path) -> None:
     assert result.returncode == 0, combined_output
     log_output = _read_log(tmp_path / "docker-invocation.log")
 
+    assert f"ARGS=compose --project-directory {REPO_ROOT} -f {REPO_ROOT / 'docker' / 'docker-compose.yml'} up -d " in log_output
     assert "COMPOSE_MENU=__UNSET__" in log_output
 
 
@@ -433,6 +455,7 @@ def test_local_build_fallback_injects_build_flag(tmp_path: Path) -> None:
     ]
     assert len(fallback_lines) >= 1, f"No fallback invocation found in log:\n{log_output}"
     fallback_args = fallback_lines[0]
-    assert "-f docker-compose.yml" in fallback_args
-    assert "-f docker-compose.full.yml" in fallback_args
+    assert f"--project-directory {REPO_ROOT}" in fallback_args
+    assert f"-f {REPO_ROOT / 'docker' / 'docker-compose.yml'}" in fallback_args
+    assert f"-f {REPO_ROOT / 'docker' / 'docker-compose.full.yml'}" in fallback_args
     assert "--build" in fallback_args

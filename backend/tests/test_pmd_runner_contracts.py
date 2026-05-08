@@ -33,7 +33,7 @@ def test_backend_dockerfile_no_longer_installs_local_pmd_runtime() -> None:
 
 
 def test_compose_exposes_scanner_pmd_image_without_compose_runner_service() -> None:
-    compose_path = _repo_root() / "docker-compose.yml"
+    compose_path = _repo_root() / "docker" / "docker-compose.yml"
     compose_text = compose_path.read_text(encoding="utf-8")
 
     assert (
@@ -48,7 +48,7 @@ def test_compose_exposes_scanner_pmd_image_without_compose_runner_service() -> N
 
 
 def test_full_overlay_exposes_scanner_pmd_image_without_compose_runner_service() -> None:
-    compose_path = _repo_root() / "docker-compose.full.yml"
+    compose_path = _repo_root() / "docker" / "docker-compose.full.yml"
     compose_text = compose_path.read_text(encoding="utf-8")
 
     assert "SCANNER_PMD_IMAGE: ${SCANNER_PMD_IMAGE:-vulhunter/pmd-runner-local:latest}" in compose_text
@@ -64,12 +64,12 @@ def test_external_tools_manual_pmd_section_documents_runner_requirements() -> No
     assert "SCANNER_PMD_IMAGE" in manual_text
     assert "按需" in manual_text
     assert "runner 容器" in manual_text
-    assert "默认 `docker compose up` 会先拉取远程 backend 镜像" in manual_text
+    assert "默认 `./start-local-services.sh` 会先本地构建 backend/frontend 镜像" in manual_text
     assert "Docker SDK" in manual_text
     assert "动态拉起临时 runner 容器" in manual_text
     assert "手工 smoke test" in manual_text
     assert "默认自动验收" in manual_text
-    assert "docker compose up" in manual_text
+    assert "./start-local-services.sh full" in manual_text
     assert "docker compose up --build" not in manual_text
 
 

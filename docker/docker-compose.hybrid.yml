@@ -2,7 +2,7 @@
 # VulHunter v3.0.4 Docker Compose 混合构建覆盖层
 # =============================================
 # 用法:
-# docker compose -f docker-compose.yml -f docker-compose.hybrid.yml up --build
+# ./start-local-services.sh hybrid
 # backend target 固定为 runtime-plain，仅用于本地开发调试；不要用于发布镜像。
 #
 # 构建策略:

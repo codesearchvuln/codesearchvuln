@@ -5,9 +5,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_compose_backend_env_file_is_optional_and_env_dir_is_mounted() -> None:
-    compose_text = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    hybrid_text = (REPO_ROOT / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
-    full_text = (REPO_ROOT / "docker-compose.full.yml").read_text(encoding="utf-8")
+    compose_text = (REPO_ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+    hybrid_text = (REPO_ROOT / "docker" / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
+    full_text = (REPO_ROOT / "docker" / "docker-compose.full.yml").read_text(encoding="utf-8")
 
     assert "env_file:" in compose_text
     assert "path: ./docker/env/backend/.env" in compose_text

@@ -4,7 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd -- "$FRONTEND_DIR/.." && pwd)"
-COMPOSE=(docker compose -f "$REPO_ROOT/docker-compose.yml")
+COMPOSE=(
+  docker compose
+  --project-directory "$REPO_ROOT"
+  -f "$REPO_ROOT/docker/docker-compose.yml"
+)
 SERVICE="frontend"
 
 if ! command -v docker >/dev/null 2>&1; then
