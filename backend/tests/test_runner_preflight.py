@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import logging
 import sys
 import types
@@ -32,13 +33,18 @@ alembic_script_stub.ScriptDirectory = type(
     (),
     {"from_config": staticmethod(lambda *_args, **_kwargs: SimpleNamespace(get_current_head=lambda: "head"))},
 )
-sys.modules.setdefault("fastmcp", fastmcp_stub)
-sys.modules.setdefault("fastmcp.client", fastmcp_client_stub)
-sys.modules.setdefault("fastmcp.client.transports", fastmcp_transports_stub)
-sys.modules.setdefault("docker", docker_stub)
-sys.modules.setdefault("git", git_stub)
-sys.modules.setdefault("alembic.config", alembic_config_stub)
-sys.modules.setdefault("alembic.script", alembic_script_stub)
+def _install_stub_if_missing(module_name: str, module: types.ModuleType) -> None:
+    if importlib.util.find_spec(module_name) is None:
+        sys.modules.setdefault(module_name, module)
+
+
+_install_stub_if_missing("fastmcp", fastmcp_stub)
+_install_stub_if_missing("fastmcp.client", fastmcp_client_stub)
+_install_stub_if_missing("fastmcp.client.transports", fastmcp_transports_stub)
+_install_stub_if_missing("docker", docker_stub)
+_install_stub_if_missing("git", git_stub)
+_install_stub_if_missing("alembic.config", alembic_config_stub)
+_install_stub_if_missing("alembic.script", alembic_script_stub)
 
 
 from app.services import runner_preflight

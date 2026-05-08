@@ -1,6 +1,6 @@
 services:
   frontend:
-    image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/nginx:1.27-alpine}
+    image: ${STATIC_FRONTEND_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}/nginx:1.27-alpine}
     build: !reset null
     working_dir: !reset null
     command: !reset null

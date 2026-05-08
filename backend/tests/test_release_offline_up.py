@@ -251,7 +251,7 @@ services:
   scan-workspace-init:
     image: ${SCAN_WORKSPACE_INIT_IMAGE:-ghcr.io/acme-sec/scan-workspace-init@sha256:$(printf 'd%.0s' {1..64})}
   frontend:
-    image: ${STATIC_FRONTEND_IMAGE:-docker.m.daocloud.io/library/nginx:1.27-alpine}
+    image: ${STATIC_FRONTEND_IMAGE:-m.daocloud.io/docker.io/library/nginx:1.27-alpine}
 EOF
     exit 0
   fi
@@ -335,7 +335,7 @@ if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ] && [ "${3:-}" = "--format"
       ghcr.io/acme-sec/redis@sha256:*) echo "sha256:target-redis" ;;
       ghcr.io/acme-sec/adminer@sha256:*) echo "sha256:target-adminer" ;;
       ghcr.io/acme-sec/scan-workspace-init@sha256:*) echo "sha256:target-scan-workspace-init" ;;
-      docker.m.daocloud.io/library/nginx:1.27-alpine) echo "sha256:target-static-frontend" ;;
+      m.daocloud.io/docker.io/library/nginx:1.27-alpine) echo "sha256:target-static-frontend" ;;
       ghcr.io/acme-sec/nginx@sha256:*) echo "sha256:target-static-frontend" ;;
       vulhunter-local/*) echo "sha256:${target##*/}" ;;
       *) exit 1 ;;

@@ -11,7 +11,7 @@ services:
       context: .
       dockerfile: docker/sandbox-runner.Dockerfile
       args:
-        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}
         - SANDBOX_RUNNER_APT_MIRROR_PRIMARY=${SANDBOX_RUNNER_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}
         - SANDBOX_RUNNER_APT_SECURITY_PRIMARY=${SANDBOX_RUNNER_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
         - SANDBOX_RUNNER_APT_MIRROR_FALLBACK=${SANDBOX_RUNNER_APT_MIRROR_FALLBACK:-deb.debian.org}
@@ -19,15 +19,15 @@ services:
         - SANDBOX_RUNNER_PYPI_INDEX_PRIMARY=${SANDBOX_RUNNER_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}
         - SANDBOX_RUNNER_NPM_REGISTRY_PRIMARY=${SANDBOX_RUNNER_NPM_REGISTRY:-https://registry.npmmirror.com}
     image: vulhunter/sandbox-runner:latest
-    profiles: ["build", "sandbox-runner"]
+    profiles: [ "build", "sandbox-runner" ]
     restart: "no"
-    command: ["python3", "-c", "import requests; import httpx; import jwt; print('✅ Sandbox Runner OK')"]
+    command: [ "python3", "-c", "import requests; import httpx; import jwt; print('✅ Sandbox Runner OK')" ]
 
   # 预热服务 (可选) - 在 backend 启动前拉取镜像
   sandbox-runner-warmup:
     image: vulhunter/sandbox-runner:latest
-    profiles: ["warmup"]
-    command: ["true"]
+    profiles: [ "warmup" ]
+    command: [ "true" ]
     restart: "no"
 
 # 环境变量配置示例

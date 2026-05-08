@@ -224,7 +224,7 @@ parse_args "$@"
 apply_mode_defaults
 assert_no_runner_scanner_services "${SUPPORT_PULL_SERVICES[@]}" "${LOCAL_BUILD_SERVICES[@]}"
 
-export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}"
+export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}"
 export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"

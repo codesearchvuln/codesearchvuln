@@ -192,7 +192,7 @@ $env:COMPOSE_DOCKER_CLI_BUILD = "1"
 
 # Define candidates
 $dockerhubCandidates = @(
-    "docker.m.daocloud.io/library",
+    "m.daocloud.io/docker.io/library",
     "docker.1ms.run/library",
     "docker.io/library"
 )

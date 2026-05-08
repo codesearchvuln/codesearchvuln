@@ -294,7 +294,7 @@ git push origin v1.0.0
       context: ./nexus-web
       dockerfile: ../docker/nexus-web.Dockerfile
       args:
-        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}
     ports:
       - "5174:5174"
 ```
@@ -344,7 +344,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5174/
       context: ./nexus-web
       dockerfile: ../docker/nexus-web.Dockerfile
       args:
-        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}
+        - DOCKERHUB_LIBRARY_MIRROR=${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}
         - NEXUS_WEB_NPM_REGISTRY=${NEXUS_WEB_NPM_REGISTRY:-https://registry.npmmirror.com}
         - NEXUS_WEB_NPM_REGISTRY_FALLBACK=${NEXUS_WEB_NPM_REGISTRY_FALLBACK:-https://registry.npmjs.org}
         - NEXUS_WEB_PNPM_VERSION=${NEXUS_WEB_PNPM_VERSION:-10.32.1}

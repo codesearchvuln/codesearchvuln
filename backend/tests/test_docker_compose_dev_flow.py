@@ -115,7 +115,7 @@ def test_default_compose_uses_backend_managed_runner_preflight() -> None:
     assert "YASA_TIMEOUT_SECONDS: ${YASA_TIMEOUT_SECONDS:-600}" in compose_text
     assert "/tmp/vulhunter/scans:/tmp/vulhunter/scans" not in compose_text
     assert "scan_workspace:/tmp/vulhunter/scans" in compose_text
-    assert "image: ${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}/alpine:3.20" in compose_text
+    assert "image: ${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}/alpine:3.20" in compose_text
     assert "touch /tmp/vulhunter/scans/.scan-workspace-ready" in compose_text
     assert "scan-workspace-init:\n        condition: service_healthy" in compose_text
     assert "${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock" in compose_text

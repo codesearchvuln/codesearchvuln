@@ -1,7 +1,7 @@
 # VulHunter Sandbox Runner
 # 统一的安全代码执行环境，用于漏洞验证和 PoC 运行
 
-ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+ARG DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library
 ARG SANDBOX_RUNNER_BASE_IMAGE=docker.m.daocloud.io/python:3.11-slim
 ARG NODEJS24_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/node:24-bookworm-slim
 FROM ${NODEJS24_IMAGE} AS node24-base

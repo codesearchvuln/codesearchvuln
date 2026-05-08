@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "compose-up-with-fallback.sh"
 
 _EXPLICIT_MIRROR_ENV = {
-    "DOCKERHUB_LIBRARY_MIRROR": "docker.m.daocloud.io/library",
+    "DOCKERHUB_LIBRARY_MIRROR": "m.daocloud.io/docker.io/library",
     "GHCR_REGISTRY": "ghcr.io",
     "VULHUNTER_IMAGE_NAMESPACE": "codesearchvuln",
     "VULHUNTER_IMAGE_TAG": "latest",

@@ -53,6 +53,7 @@
 - [ ] **Step 1: 定位 builder 阶段的 apt-get install 指令**
 
   打开 [docker/backend.Dockerfile](docker/backend.Dockerfile#L67-L74)，找到第 69-73 行：
+
   ```dockerfile
     install_builder_packages() { \
     apt-get update && \
@@ -69,6 +70,7 @@
   将 `gcc \` 改为 `gcc \` + `ccache \`（按字母顺序排在 gcc 之后）：
 
   **old_string:**
+
   ```
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       gcc \
@@ -76,6 +78,7 @@
   ```
 
   **new_string:**
+
   ```
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ccache \
@@ -88,16 +91,19 @@
 - [ ] **Step 3: 本地验证 builder 阶段可以构建（可选）**
 
   仅构建 builder 阶段以确认 ccache 安装：
+
   ```bash
   docker buildx build \
     --target builder \
-    --build-arg DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library \
+    --build-arg DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library \
     -f docker/backend.Dockerfile . \
     --progress=plain 2>&1 | grep -E "(ccache|Step|RUN)"
   ```
+
   预期：看到 `ccache` 被成功安装。
 
 - [ ] **Step 4: commit**
+
   ```bash
   git add docker/backend.Dockerfile
   git commit -m "build(backend): install ccache in builder stage for cython speedup"
@@ -122,6 +128,7 @@
   **RUN 1（安装 Cython，行 591-594）：** 保持不变（uv pip install）
   
   **RUN 2（执行编译，行 601-608）：**
+
   ```dockerfile
   RUN set -eux; \
       cd /build; \
@@ -138,6 +145,7 @@
   将 RUN 2 替换为（使用 Edit 工具）：
   
   **old_string（完整内容）：**
+
   ```dockerfile
   # 执行编译，产物写入 /build/compiled/
   RUN set -eux; \
@@ -151,6 +159,7 @@
   ```
 
   **new_string：**
+
   ```dockerfile
   # 执行编译，产物写入 /build/compiled/
   # --parallel $(nproc): 并行 gcc 编译所有 .c 文件（4vCPU→ ~6 分钟，原串行 ~22 分钟）
@@ -183,6 +192,7 @@
   > ⚠️ **必须执行此步骤再 commit**：验证 `--parallel` 参数被当前环境的 setuptools 接受。
 
   在本地 Python 3.11 + setuptools >= 68 环境验证（或在 builder stage 容器内验证）：
+
   ```bash
   # 方案 A：本地有同版本 Python 时
   cd /home/xyf/AuditTool/backend
@@ -191,12 +201,13 @@
 
   # 方案 B：通过 Docker 在 builder stage 内验证
   docker buildx build --target builder \
-    --build-arg DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library \
+    --build-arg DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library \
     -f docker/backend.Dockerfile . \
     --load -t test-builder --progress=plain 2>&1 | tail -3
   docker run --rm test-builder /bin/sh -c \
     "/opt/backend-venv/bin/python -c \"from setuptools.command.build_ext import build_ext; print([o for o in build_ext.user_options if 'parallel' in str(o)])\""
   ```
+
   预期：输出中包含 `parallel`。若未出现，则将 `--parallel "${NPROC}"` 改为在 `setup.py` 中设置 `nthreads` 即可（Cython 已有此支持）。
 
 - [ ] **Step 4: 构建 cython-compiler 阶段并检查时间**
@@ -204,16 +215,18 @@
   ```bash
   time docker buildx build \
     --target cython-compiler \
-    --build-arg DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library \
+    --build-arg DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library \
     -f docker/backend.Dockerfile . \
     --progress=plain 2>&1 | tee /tmp/cython-build.log
 
   # 检查 ccache 统计
   grep -E "(ccache|parallel|nproc|SO_COUNT)" /tmp/cython-build.log
   ```
+
   预期：构建时间 < 8 分钟（首次，无 cache），第二次构建 < 1 分钟（ccache hit）。
 
 - [ ] **Step 5: commit**
+
   ```bash
   git add docker/backend.Dockerfile
   git commit -m "perf(backend/cython): parallel C compilation + ccache
@@ -250,6 +263,7 @@
 打开 [docker/backend.Dockerfile](docker/backend.Dockerfile#L13-L18)，找到以下内容：
 
 **old_string:**
+
 ```dockerfile
 ARG BACKEND_INSTALL_CJK_FONTS=0
 ARG BACKEND_INSTALL_YASA=1
@@ -260,6 +274,7 @@ ARG DOCKER_CLI_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/docker:cli
 ```
 
 **new_string:**
+
 ```dockerfile
 ARG BACKEND_INSTALL_CJK_FONTS=0
 ARG DOCKER_CLI_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/docker:cli
@@ -274,6 +289,7 @@ ARG DOCKER_CLI_IMAGE=${DOCKERHUB_LIBRARY_MIRROR}/docker:cli
 打开 [docker/backend.Dockerfile](docker/backend.Dockerfile#L221-L233)，找到以下内容：
 
 **old_string:**
+
 ```dockerfile
 ENV YASA_HOME=/opt/yasa
 ENV YASA_BIN_DIR=/opt/yasa/bin
@@ -298,6 +314,7 @@ COPY --chmod=755 backend/app/runtime/launchers/yasa_uast4py_launcher.py /tmp/yas
 打开 [docker/backend.Dockerfile](docker/backend.Dockerfile#L292-L558)，找到以下阶段起始注释：
 
 **old_string（用于定位的起始标记——整个阶段约 266 行）：**
+
 ```dockerfile
 # ============================================
 # 多阶段构建 - 扫描工具基础阶段
@@ -306,6 +323,7 @@ FROM runtime-base AS scanner-tools-base
 ```
 
 该阶段在以下行结束（最后一条 RUN 命令的末尾）：
+
 ```dockerfile
   /usr/local/bin/yasa --version; \
   test -d /opt/yasa/resource
@@ -318,9 +336,11 @@ FROM runtime-base AS scanner-tools-base
 > 2. 再删除主 RUN（YASA 下载编译部分，约 215 行）
 
 **检查点：** 删除后确认 `FROM runtime-base AS scanner-tools-base` 这行不再存在：
+
 ```bash
 grep -n "scanner-tools-base\|YASA_ENGINE_DIR\|BACKEND_INSTALL_YASA" docker/backend.Dockerfile
 ```
+
 预期：无任何输出（或只剩下 runtime 阶段中和 dev-runtime 无关的行）。
 
 - [ ] 使用 Edit 工具删除整个 `scanner-tools-base` 阶段（含前置注释）
@@ -332,6 +352,7 @@ grep -n "scanner-tools-base\|YASA_ENGINE_DIR\|BACKEND_INSTALL_YASA" docker/backe
 打开 [docker/backend.Dockerfile](docker/backend.Dockerfile#L693-L696)，找到：
 
 **old_string:**
+
 ```dockerfile
 COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-engine-overrides
 ```
@@ -349,6 +370,7 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 打开 [docker-compose.full.yml](docker-compose.full.yml)，找到 backend 服务的 build args 部分（约第 29-30 行）：
 
 **old_string:**
+
 ```yaml
           - BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}
           - YASA_VERSION=${YASA_VERSION:-v0.2.33}
@@ -359,6 +381,7 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 同时，找到 backend 服务的 environment 部分（约第 69 行）：
 
 **old_string:**
+
 ```yaml
       BACKEND_INSTALL_YASA: ${BACKEND_INSTALL_YASA:-1}
 ```
@@ -375,6 +398,7 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 打开 [docker-compose.hybrid.yml](docker-compose.hybrid.yml)，找到 backend 服务的 build args 部分（约第 31-32 行）：
 
 **old_string:**
+
 ```yaml
           - BACKEND_INSTALL_YASA=${BACKEND_INSTALL_YASA:-1}
           - YASA_VERSION=${YASA_VERSION:-v0.2.33}
@@ -385,6 +409,7 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 同时，找到 backend 服务的 environment 部分（约第 79 行）：
 
 **old_string:**
+
 ```yaml
       BACKEND_INSTALL_YASA: ${BACKEND_INSTALL_YASA:-1}
 ```
@@ -401,6 +426,7 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 打开 [docker-compose.yml](docker-compose.yml)，找到 backend 服务 environment 中（约第 82 行）：
 
 **old_string:**
+
 ```yaml
       BACKEND_INSTALL_YASA: ${BACKEND_INSTALL_YASA:-1}
 ```
@@ -414,21 +440,26 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 ### Step 8: 验证构建正确性
 
 - [ ] **验证 Dockerfile 语法**：
+
   ```bash
   docker buildx build --target runtime-base \
-    --build-arg DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library \
+    --build-arg DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library \
     -f docker/backend.Dockerfile . \
     --progress=plain --no-cache 2>&1 | tail -10
   ```
+
   预期：`runtime-base` 阶段成功构建，无 `YASA_HOME`、`YASA_BIN_DIR` 等 ENV 定义。
 
 - [ ] **确认 scanner-tools-base 已消失**：
+
   ```bash
   grep -c "scanner-tools-base" docker/backend.Dockerfile
   ```
+
   预期：输出 `0`。
 
 - [ ] **commit**
+
   ```bash
   git add docker/backend.Dockerfile docker-compose.yml docker-compose.full.yml docker-compose.hybrid.yml
   git commit -m "refactor(backend): decouple YASA from backend image
@@ -456,6 +487,7 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 - [ ] **Step 1: 定位后端构建步骤**
 
   打开 [.github/workflows/docker-publish.yml](../../../.github/workflows/docker-publish.yml#L163-L176)，找到：
+
   ```yaml
       - name: 构建并推送后端 Docker 镜像
         id: build-backend
@@ -476,15 +508,17 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 - [ ] **Step 2: 替换 cache 策略，添加 build-args**
 
   **old_string：**
+
   ```yaml
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
   ```
 
   **new_string：**
+
   ```yaml
           build-args: |
-            DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+            DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library
           cache-from: |
             type=registry,ref=${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:buildcache
             type=gha,scope=backend
@@ -499,21 +533,26 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
 - [ ] **Step 3: 确认 GHCR 有权限推送 buildcache tag**
 
   `vulhunter-backend:buildcache` 会作为一个新 tag 推送到 ghcr.io。检查工作流的 `packages: write` 权限已配置（[docker-publish.yml:89](../../../.github/workflows/docker-publish.yml#L89)）：
+
   ```yaml
     permissions:
       packages: write  # ← 此行必须存在
   ```
+
   该权限已存在，无需修改。
 
 - [ ] **Step 4: 手动触发 CI 验证**
 
   推送测试 tag 或使用 workflow_dispatch 触发构建。观察日志中的 cache hit 情况：
+
   ```
   => importing cache manifest from ghcr.io/.../vulhunter-backend:buildcache
   ```
+
   第一次构建会 miss（正常），第二次构建应有大量 cache hit。
 
 - [ ] **Step 5: commit**
+
   ```bash
   git add .github/workflows/docker-publish.yml
   git commit -m "ci(backend): switch to registry cache (mode=max) for persistent layer caching
@@ -664,6 +703,7 @@ COPY frontend/yasa-engine-overrides /opt/backend-build-context/frontend/yasa-eng
   - `merge-backend-manifest` job 是否成功创建 multi-arch manifest
 
 - [ ] **Step 4: commit**
+
   ```bash
   git add .github/workflows/docker-publish.yml
   git commit -m "ci(backend): parallel native amd64/arm64 builds via matrix + ubuntu-24.04-arm

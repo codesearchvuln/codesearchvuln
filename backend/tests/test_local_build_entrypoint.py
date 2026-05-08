@@ -15,23 +15,28 @@ def test_backend_dockerfile_derives_docker_cli_image_from_selected_mirror() -> N
 
 
 def test_local_build_script_prefers_daocloud_defaults_for_local_builds() -> None:
-    script_text = (REPO_ROOT / "scripts" / "compose-up-local-build.sh").read_text(encoding="utf-8")
+    wrapper_text = (REPO_ROOT / "scripts" / "compose-up-local-build.sh").read_text(encoding="utf-8")
+    start_script_text = (REPO_ROOT / "start-local-services.sh").read_text(encoding="utf-8")
 
-    assert 'export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}"' in script_text
-    assert 'export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"' in script_text
-    assert "load_container_socket_gid_env" in script_text
+    assert 'exec "$REPO_ROOT/start-local-services.sh" full "$@"' in wrapper_text
+    assert 'export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}"' in start_script_text
+    assert 'export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"' in start_script_text
+    assert "load_container_socket_gid_env" in start_script_text
 
 
 def test_local_build_script_builds_services_sequentially_before_up() -> None:
-    script_text = (REPO_ROOT / "scripts" / "compose-up-local-build.sh").read_text(encoding="utf-8")
+    wrapper_text = (REPO_ROOT / "scripts" / "compose-up-local-build.sh").read_text(encoding="utf-8")
+    start_script_text = (REPO_ROOT / "start-local-services.sh").read_text(encoding="utf-8")
 
-    assert 'export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"' in script_text
-    assert 'export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"' in script_text
-    assert '"${COMPOSE[@]}" build backend' in script_text
-    assert '"${COMPOSE[@]}" build frontend' in script_text
-    assert '"${COMPOSE[@]}" build nexus-web' in script_text
-    assert "build nexus-itemDetail" not in script_text
-    assert 'exec "$REPO_ROOT/start-local-services.sh" full "$@"' in script_text
+    assert 'exec "$REPO_ROOT/start-local-services.sh" full "$@"' in wrapper_text
+    assert 'export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"' in start_script_text
+    assert 'export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"' in start_script_text
+    assert 'LOCAL_BUILD_SERVICES=(' in start_script_text
+    assert '  backend' in start_script_text
+    assert '  frontend' in start_script_text
+    assert 'run_cmd "${COMPOSE[@]}" build "${LOCAL_BUILD_SERVICES[@]}"' in start_script_text
+    assert "build nexus-web" not in start_script_text
+    assert "build nexus-itemDetail" not in start_script_text
 
 
 def test_local_build_entrypoint_remains_separate_from_release_publish_targets() -> None:
@@ -82,8 +87,15 @@ def test_local_build_script_bootstraps_backend_env_from_example(tmp_path: Path) 
         (REPO_ROOT / "scripts" / "lib" / "compose-env.sh").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    (repo_root / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
-    (repo_root / "docker-compose.full.yml").write_text("services: {}\n", encoding="utf-8")
+    (repo_root / "start-local-services.sh").write_text(
+        (REPO_ROOT / "start-local-services.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (repo_root / "start-local-services.sh").chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    docker_dir = repo_root / "docker"
+    docker_dir.mkdir(exist_ok=True)
+    (docker_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    (docker_dir / "docker-compose.full.yml").write_text("services: {}\n", encoding="utf-8")
     env_example = backend_env_dir / "env.example"
     env_example.write_text("LLM_API_KEY=example-key\n", encoding="utf-8")
 
@@ -100,7 +112,7 @@ def test_local_build_script_bootstraps_backend_env_from_example(tmp_path: Path) 
     env["STUB_DOCKER_LOG"] = str(log_path)
 
     result = subprocess.run(
-        [str(script_path)],
+        [str(script_path), "--skip-nexus-check"],
         cwd=repo_root,
         env=env,
         capture_output=True,
@@ -115,9 +127,10 @@ def test_local_build_script_bootstraps_backend_env_from_example(tmp_path: Path) 
     assert "自动生成 backend Docker 环境文件" in combined_output
 
     log_output = log_path.read_text(encoding="utf-8")
-    assert "ARGS=compose -f" in log_output
-    assert "build backend" in log_output
-    assert "build frontend" in log_output
-    assert "build nexus-web" in log_output
+    assert "ARGS=compose --project-directory" in log_output
+    assert "docker/docker-compose.yml" in log_output
+    assert "docker/docker-compose.full.yml" in log_output
+    assert "build backend frontend" in log_output
+    assert "build nexus-web" not in log_output
     assert "build nexus-itemDetail" not in log_output
     assert "up -d" in log_output

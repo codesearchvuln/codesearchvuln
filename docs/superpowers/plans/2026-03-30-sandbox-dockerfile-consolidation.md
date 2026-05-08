@@ -51,7 +51,7 @@
 # 安全代码执行环境，用于漏洞验证和 PoC 运行
 # 专注于 Python 代码执行，不内置扫描引擎（由专用 runner 镜像承担）
 
-ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+ARG DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library
 ARG SANDBOX_BASE_IMAGE=docker.m.daocloud.io/python:3.11-slim
 FROM ${DOCKERHUB_LIBRARY_MIRROR}/node:22-slim AS nodebase
 FROM ${SANDBOX_BASE_IMAGE}
@@ -203,13 +203,16 @@ git commit -m "feat: add docker/sandbox.Dockerfile - lightweight sandbox without
 - [ ] **Step 1: 更新 sandbox service 构建配置**
 
 找到 `docker-compose.yml` 中 `sandbox:` service 部分（约第201行），将：
+
 ```yaml
   sandbox:
     build:
       context: ./docker/sandbox
       dockerfile: Dockerfile
 ```
+
 改为：
+
 ```yaml
   sandbox:
     build:
@@ -243,11 +246,14 @@ git commit -m "fix: update sandbox build context to project root in docker-compo
 - [ ] **Step 1: 更新 `docker-publish.yml` 中的 sandbox 构建步骤**
 
 找到以下内容（约第237-238行）：
+
 ```yaml
           context: ./docker/sandbox
           file: ./docker/sandbox/Dockerfile
 ```
+
 改为：
+
 ```yaml
           context: .
           file: ./docker/sandbox.Dockerfile
@@ -256,10 +262,13 @@ git commit -m "fix: update sandbox build context to project root in docker-compo
 - [ ] **Step 2: 更新 `release.yml` 中的 tar 打包列表**
 
 找到（约第135行）：
+
 ```yaml
             docker/sandbox/
 ```
+
 改为（分两行，包含 sandbox.Dockerfile 和 sandbox-runner 相关文件）：
+
 ```yaml
             docker/sandbox.Dockerfile \
             docker/sandbox-runner.Dockerfile \
@@ -271,11 +280,14 @@ git commit -m "fix: update sandbox build context to project root in docker-compo
 - [ ] **Step 3: 更新 `release.yml` 中的 sandbox 镜像构建步骤**
 
 找到（约第262-263行）：
+
 ```yaml
           context: ./docker/sandbox
           file: ./docker/sandbox/Dockerfile
 ```
+
 改为：
+
 ```yaml
           context: .
           file: ./docker/sandbox.Dockerfile
@@ -300,6 +312,7 @@ git commit -m "fix: update sandbox build context paths in GitHub Actions workflo
 - [ ] **Step 1: 更新 `setup_security_tools.sh`**
 
 找到（约第621-638行）：
+
 ```bash
     local sandbox_dir="$PROJECT_ROOT/docker/sandbox"
     local dockerfile="$sandbox_dir/Dockerfile"
@@ -322,6 +335,7 @@ git commit -m "fix: update sandbox build context paths in GitHub Actions workflo
 ```
 
 改为：
+
 ```bash
     local dockerfile="$PROJECT_ROOT/docker/sandbox.Dockerfile"
 
@@ -344,10 +358,13 @@ git commit -m "fix: update sandbox build context paths in GitHub Actions workflo
 - [ ] **Step 2: 更新 `sandbox_tool.py` 中的 build_hint**
 
 找到（约第167行）：
+
 ```python
         build_hint = "cd docker/sandbox && docker build -t vulhunter/sandbox:latest ."
 ```
+
 改为：
+
 ```python
         build_hint = "docker build -f docker/sandbox.Dockerfile -t vulhunter/sandbox:latest ."
 ```
@@ -355,10 +372,13 @@ git commit -m "fix: update sandbox build context paths in GitHub Actions workflo
 - [ ] **Step 3: 更新 `env.example` 注释**
 
 找到（约第164行）：
+
 ```
 # 构建方式 2: cd docker/sandbox && ./build.sh
 ```
+
 改为：
+
 ```
 # 构建方式 2: docker build -f docker/sandbox.Dockerfile -t vulhunter/sandbox:latest .
 ```
@@ -442,6 +462,7 @@ grep "build_hint" backend/app/services/agent/tools/sandbox_tool.py
 ```
 
 Expected:
+
 ```
 docker/sandbox-runner.Dockerfile
 docker/sandbox.Dockerfile

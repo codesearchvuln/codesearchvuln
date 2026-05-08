@@ -1,8 +1,8 @@
 # ============================================
 # 多阶段构建 - 构建阶段
 # ============================================
-ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:latest
+ARG DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library
+ARG UV_IMAGE=m.daocloud.io/ghcr.io/astral-sh/uv:latest
 ARG BACKEND_APT_MIRROR_PRIMARY=mirrors.aliyun.com
 ARG BACKEND_APT_SECURITY_PRIMARY=mirrors.aliyun.com
 ARG BACKEND_APT_MIRROR_FALLBACK=deb.debian.org
@@ -97,29 +97,31 @@ COPY backend/scripts/package_source_selector.py /usr/local/bin/package_source_se
 # 注意：此文件中的版本号必须与 uv.lock 保持一致。
 COPY backend/requirements-heavy.txt ./requirements-heavy.txt
 
-RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv,sharing=locked \
   set -eux; \
-  uv_http_timeout=45; \
-  step_timeout=300; \
+  uv_http_timeout=120; \
+  step_timeout=600; \
   pypi_index_candidates="${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://mirrors.huaweicloud.com/repository/pypi/simple/,https://pypi.org/simple}"; \
   best_index="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}"; \
   ordered="$(python3 /usr/local/bin/package_source_selector.py \
-  --candidates "${pypi_index_candidates}" --kind pypi --timeout-seconds 2 2>/dev/null || true)"; \
+  --candidates "${pypi_index_candidates}" --kind pypi --timeout-seconds 5 2>/dev/null || true)"; \
   if [ -n "${ordered}" ]; then \
   first="$(printf '%s\n' "${ordered}" | head -1)"; \
   [ -z "${first}" ] || best_index="${first}"; \
   fi; \
   printf '%s\n' "${best_index}" > /tmp/pypi-best-index; \
+  printf '%s\n' "${ordered}" > /tmp/pypi-ordered-indices; \
   echo "Selected PyPI index: ${best_index}"; \
   uv venv "${BACKEND_VENV_PATH}"; \
   install_heavy() { \
   idx="$1"; attempt=1; \
   while [ "${attempt}" -le 2 ]; do \
-  echo "uv pip install heavy deps via ${idx} (attempt ${attempt}/2)"; \
+  echo "uv pip install heavy deps via ${idx} (attempt ${attempt}/2, http_timeout=${uv_http_timeout}s)"; \
   if timeout "${step_timeout}" env \
   VIRTUAL_ENV="${BACKEND_VENV_PATH}" PATH="${BACKEND_VENV_PATH}/bin:${PATH}" \
   UV_INDEX_URL="${idx}" UV_HTTP_TIMEOUT="${uv_http_timeout}" \
-  UV_CONCURRENT_DOWNLOADS=50 UV_CONCURRENT_INSTALLS=8 \
+  UV_CONCURRENT_DOWNLOADS=24 UV_CONCURRENT_INSTALLS=8 \
+  UV_LINK_MODE=copy UV_NO_PROGRESS=1 \
   uv pip install --no-deps --index-url "${idx}" -r requirements-heavy.txt; then \
   return 0; \
   fi; \
@@ -129,7 +131,12 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
   if install_heavy "${best_index}"; then \
   exit 0; \
   fi; \
-  OLD_IFS="${IFS}"; IFS=','; set -- ${pypi_index_candidates}; IFS="${OLD_IFS}"; \
+  if [ -n "${ordered}" ]; then \
+  fallback_list="$(printf '%s' "${ordered}" | tr '\n' ',')"; \
+  else \
+  fallback_list="${pypi_index_candidates}"; \
+  fi; \
+  OLD_IFS="${IFS}"; IFS=','; set -- ${fallback_list}; IFS="${OLD_IFS}"; \
   for idx in "$@"; do \
   stripped="$(printf '%s' "${idx}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"; \
   [ -n "${stripped}" ] && [ "${stripped}" != "${best_index}" ] || continue; \
@@ -144,24 +151,29 @@ RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
 # 重量级包已在 venv 中，uv sync 直接跳过它们，仅安装剩余轻量级包，速度显著提升。
 COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 
-RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv \
+RUN --mount=type=cache,id=vulhunter-backend-uv-cache,target=/root/.cache/uv,sharing=locked \
   set -eux; \
-  uv_step_timeout=240; \
-  uv_http_timeout=45; \
+  uv_step_timeout=600; \
+  uv_http_timeout=120; \
   if [ -f /tmp/pypi-best-index ] && [ -s /tmp/pypi-best-index ]; then \
   best_index="$(cat /tmp/pypi-best-index)"; \
   else \
   best_index="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}"; \
   fi; \
+  if [ -f /tmp/pypi-ordered-indices ] && [ -s /tmp/pypi-ordered-indices ]; then \
+  pypi_index_candidates="$(tr '\n' ',' < /tmp/pypi-ordered-indices)"; \
+  else \
   pypi_index_candidates="${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://mirrors.huaweicloud.com/repository/pypi/simple/,https://pypi.org/simple}"; \
+  fi; \
   sync_with_index() { \
   idx="$1"; attempt=1; \
   while [ "${attempt}" -le 2 ]; do \
-  echo "uv sync via ${idx} (attempt ${attempt}/2, timeout ${uv_step_timeout}s)"; \
+  echo "uv sync via ${idx} (attempt ${attempt}/2, timeout ${uv_step_timeout}s, http_timeout ${uv_http_timeout}s)"; \
   if timeout "${uv_step_timeout}" env \
   VIRTUAL_ENV="${BACKEND_VENV_PATH}" PATH="${BACKEND_VENV_PATH}/bin:${PATH}" \
   UV_HTTP_TIMEOUT="${uv_http_timeout}" UV_INDEX_URL="${idx}" PIP_INDEX_URL="${idx}" \
-  UV_CONCURRENT_DOWNLOADS=50 UV_CONCURRENT_INSTALLS=8 \
+  UV_CONCURRENT_DOWNLOADS=24 UV_CONCURRENT_INSTALLS=8 \
+  UV_LINK_MODE=copy UV_NO_PROGRESS=1 \
   uv sync --active --frozen --no-dev; then \
   return 0; \
   else \

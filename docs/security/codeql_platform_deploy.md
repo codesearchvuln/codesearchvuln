@@ -107,7 +107,7 @@
 ### 4.3 Dockerfile 参考模板
 
 ```dockerfile
-ARG DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library
+ARG DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library
 ARG BACKEND_APT_MIRROR_PRIMARY=mirrors.aliyun.com
 ARG BACKEND_APT_SECURITY_PRIMARY=mirrors.aliyun.com
 ARG BACKEND_APT_MIRROR_FALLBACK=deb.debian.org
@@ -648,4 +648,3 @@ docker compose logs backend | rg -n "preflight|codeql"
 # 4) 通过 API 创建一次 codeql 任务（示意）
 # curl -X POST http://localhost:8000/api/v1/static-tasks/codeql/scan ...
 ```
-

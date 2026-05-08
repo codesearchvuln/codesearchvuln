@@ -12,7 +12,7 @@
 ::     powershell -ExecutionPolicy Bypass -File scripts\compose-up-with-fallback.ps1
 ::
 :: 预设镜像源（可通过同名环境变量覆盖）:
-::   DOCKERHUB_LIBRARY_MIRROR  — docker.m.daocloud.io/library
+::   DOCKERHUB_LIBRARY_MIRROR  — m.daocloud.io/docker.io/library
 ::   GHCR_REGISTRY             — ghcr.io
 ::   VULHUNTER_IMAGE_NAMESPACE — backend/frontend/runner/sandbox 默认命名空间
 ::   FRONTEND_NPM_REGISTRY     — https://registry.npmmirror.com
@@ -57,7 +57,7 @@ set "DOCKER_BUILDKIT=1"
 set "COMPOSE_DOCKER_CLI_BUILD=1"
 
 REM Set default mirrors (China mirrors for better connectivity)
-if not defined DOCKERHUB_LIBRARY_MIRROR set "DOCKERHUB_LIBRARY_MIRROR=docker.m.daocloud.io/library"
+if not defined DOCKERHUB_LIBRARY_MIRROR set "DOCKERHUB_LIBRARY_MIRROR=m.daocloud.io/docker.io/library"
 if not defined GHCR_REGISTRY set "GHCR_REGISTRY=ghcr.io"
 if not defined VULHUNTER_IMAGE_NAMESPACE set "VULHUNTER_IMAGE_NAMESPACE=codesearchvuln"
 if not defined VULHUNTER_IMAGE_TAG set "VULHUNTER_IMAGE_TAG=latest"
