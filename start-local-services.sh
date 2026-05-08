@@ -10,6 +10,7 @@ DO_PULL=true
 DO_BUILD=true
 DO_UP=true
 CHECK_NEXUS_DIST=true
+NO_PREFLIGHT=false
 EXTRA_UP_ARGS=()
 
 SUPPORT_PULL_SERVICES=(
@@ -44,6 +45,7 @@ Options:
   --no-pull          Skip image pull phase.
   --no-build         Skip local build phase.
   --no-up            Prepare only; do not start services.
+  --no-preflight     Set RUNNER_PREFLIGHT_ENABLED=false and RUNNER_PREFLIGHT_STRICT=false for this run.
   --skip-nexus-check Do not require nexus-web/dist and nexus-itemDetail/dist.
   -h, --help         Show this help.
 
@@ -53,6 +55,7 @@ Examples:
   ./start-local-services.sh hybrid
   ./start-local-services.sh full --dry-run
   ./start-local-services.sh full --build-only
+  ./start-local-services.sh --no-preflight
   ./start-local-services.sh hybrid -- --force-recreate
 
 Stop services with:
@@ -131,6 +134,9 @@ parse_args() {
         ;;
       --no-up)
         DO_UP=false
+        ;;
+      --no-preflight)
+        NO_PREFLIGHT=true
         ;;
       --skip-nexus-check)
         CHECK_NEXUS_DIST=false
@@ -222,6 +228,13 @@ export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.i
 export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
+if [[ "$NO_PREFLIGHT" == "true" ]]; then
+  export RUNNER_PREFLIGHT_ENABLED=false
+  export RUNNER_PREFLIGHT_STRICT=false
+else
+  export RUNNER_PREFLIGHT_ENABLED=true
+  export RUNNER_PREFLIGHT_STRICT=true
+fi
 
 if ! detect_compose_cmd_auto; then
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -242,7 +255,13 @@ log_info "DOCKERHUB_LIBRARY_MIRROR=$DOCKERHUB_LIBRARY_MIRROR"
 log_info "DOCKER_CLI_IMAGE=$DOCKER_CLI_IMAGE"
 log_info "COMPOSE_BAKE=$COMPOSE_BAKE"
 log_info "COMPOSE_PARALLEL_LIMIT=$COMPOSE_PARALLEL_LIMIT"
-log_info "Remote runner/scanner/sandbox image pulls: disabled in local build modes"
+log_info "RUNNER_PREFLIGHT_ENABLED=$RUNNER_PREFLIGHT_ENABLED"
+log_info "RUNNER_PREFLIGHT_STRICT=$RUNNER_PREFLIGHT_STRICT"
+if [[ "$RUNNER_PREFLIGHT_ENABLED" == "false" ]]; then
+  log_info "Remote runner/scanner/sandbox image preflight: disabled by --no-preflight"
+else
+  log_info "Remote runner/scanner/sandbox image preflight: enabled; backend may pull configured preflight images"
+fi
 
 if [[ "$CHECK_NEXUS_DIST" == "true" ]]; then
   assert_nexus_dist

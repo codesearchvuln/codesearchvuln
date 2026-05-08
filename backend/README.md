@@ -29,7 +29,8 @@ If either host port is already in use, start Compose with `VULHUNTER_FRONTEND_PO
 For the stricter full local build path, run `./start-local-services.sh full` or the compatibility wrapper `./scripts/compose-up-local-build.sh`.
 For direct Compose debugging, pass `--project-directory .` and use files under `docker/`.
 The default compose startup now only brings up the long-lived services.
-Instead, backend runs the configured runner preflight during startup to verify the images and commands behind `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE`.
+For local source startup, runner preflight is enabled by default and may pull `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE` / `SANDBOX_RUNNER_IMAGE`.
+To test only backend/frontend local builds plus public base-image pulls, run `./start-local-services.sh --no-preflight`.
 Those compose services are not the runtime scan workers. During actual scans, backend uses the Docker SDK and `SCANNER_*_IMAGE` / `FLOW_PARSER_RUNNER_IMAGE` to start temporary runner containers on demand.
 
 ### Startup project import

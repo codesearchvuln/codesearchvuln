@@ -133,7 +133,7 @@ async def run_configured_runner_preflights() -> list[RunnerPreflightResult]:
             return await run_runner_preflight(spec)
 
     results = list(await asyncio.gather(*[_run(spec) for spec in specs]))
-    if bool(getattr(settings, "RUNNER_PREFLIGHT_STRICT", False)):
+    if bool(getattr(settings, "RUNNER_PREFLIGHT_STRICT", True)):
         failures = [result for result in results if not result.success]
         if failures:
             summary = ", ".join(
