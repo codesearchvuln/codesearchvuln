@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -226,6 +229,16 @@ assert_no_runner_scanner_services "${SUPPORT_PULL_SERVICES[@]}" "${LOCAL_BUILD_S
 
 export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}"
 export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"
+export BACKEND_PYPI_INDEX_PRIMARY="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.huaweicloud.com/repository/pypi/simple/}"
+export BACKEND_PYPI_INDEX_FALLBACK="${BACKEND_PYPI_INDEX_FALLBACK:-https://mirrors.aliyun.com/pypi/simple/}"
+export BACKEND_PYPI_INDEX_CANDIDATES="${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.aliyun.com/pypi/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.bfsu.edu.cn/pypi/web/simple/,https://pypi.org/simple}"
+export BACKEND_UV_HTTP_TIMEOUT_SECONDS="${BACKEND_UV_HTTP_TIMEOUT_SECONDS:-60}"
+export BACKEND_UV_STEP_TIMEOUT_SECONDS="${BACKEND_UV_STEP_TIMEOUT_SECONDS:-120}"
+export BACKEND_UV_CONCURRENT_DOWNLOADS="${BACKEND_UV_CONCURRENT_DOWNLOADS:-16}"
+export BACKEND_UV_CONCURRENT_INSTALLS="${BACKEND_UV_CONCURRENT_INSTALLS:-8}"
+export BACKEND_UV_ATTEMPTS_PER_INDEX="${BACKEND_UV_ATTEMPTS_PER_INDEX:-1}"
+export BACKEND_UV_CONCURRENT_DOWNLOADS="${BACKEND_UV_CONCURRENT_DOWNLOADS:-4}"
+export BACKEND_UV_CONCURRENT_INSTALLS="${BACKEND_UV_CONCURRENT_INSTALLS:-4}"
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
 if [[ "$NO_PREFLIGHT" == "true" ]]; then
@@ -253,6 +266,10 @@ log_info "REPO_ROOT=$REPO_ROOT"
 log_info "Compose files: ${COMPOSE[*]}"
 log_info "DOCKERHUB_LIBRARY_MIRROR=$DOCKERHUB_LIBRARY_MIRROR"
 log_info "DOCKER_CLI_IMAGE=$DOCKER_CLI_IMAGE"
+log_info "BACKEND_PYPI_INDEX_PRIMARY=$BACKEND_PYPI_INDEX_PRIMARY"
+log_info "BACKEND_PYPI_INDEX_FALLBACK=$BACKEND_PYPI_INDEX_FALLBACK"
+log_info "BACKEND_UV_STEP_TIMEOUT_SECONDS=$BACKEND_UV_STEP_TIMEOUT_SECONDS"
+log_info "BACKEND_UV_HTTP_TIMEOUT_SECONDS=$BACKEND_UV_HTTP_TIMEOUT_SECONDS"
 log_info "COMPOSE_BAKE=$COMPOSE_BAKE"
 log_info "COMPOSE_PARALLEL_LIMIT=$COMPOSE_PARALLEL_LIMIT"
 log_info "RUNNER_PREFLIGHT_ENABLED=$RUNNER_PREFLIGHT_ENABLED"

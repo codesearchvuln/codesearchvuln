@@ -14,14 +14,53 @@ def test_backend_dockerfile_derives_docker_cli_image_from_selected_mirror() -> N
     assert "ARG DOCKER_CLI_IMAGE=docker.m.daocloud.io/docker:cli" not in dockerfile_text
 
 
+def test_backend_dockerfile_uses_huaweicloud_first_with_bounded_uv_fallbacks() -> None:
+    import re
+    dockerfile_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
+
+    assert (
+        "ARG BACKEND_PYPI_INDEX_PRIMARY=https://mirrors.huaweicloud.com/repository/pypi/simple/"
+        in dockerfile_text
+    )
+    # Property-based assertion: timeout must be between 30s and 600s (not literal-coupled to default)
+    timeout_match = re.search(r'ARG BACKEND_UV_STEP_TIMEOUT_SECONDS=(\d+)', dockerfile_text)
+    assert timeout_match is not None, "BACKEND_UV_STEP_TIMEOUT_SECONDS not found"
+    timeout_val = int(timeout_match.group(1))
+    assert 30 <= timeout_val <= 600, f"timeout {timeout_val} out of range [30, 600]"
+
+    assert "ARG BACKEND_UV_ATTEMPTS_PER_INDEX=1" in dockerfile_text
+    assert 'ordered="$(printf \'%s\\n%s\\n\' "${best_index}" "${ordered}"' in dockerfile_text
+    assert 'UV_CONCURRENT_DOWNLOADS="${uv_concurrent_downloads}"' in dockerfile_text
+
+
 def test_local_build_script_prefers_daocloud_defaults_for_local_builds() -> None:
+    import re
     wrapper_text = (REPO_ROOT / "scripts" / "compose-up-local-build.sh").read_text(encoding="utf-8")
     start_script_text = (REPO_ROOT / "start-local-services.sh").read_text(encoding="utf-8")
 
     assert 'exec "$REPO_ROOT/start-local-services.sh" full "$@"' in wrapper_text
     assert 'export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}"' in start_script_text
     assert 'export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"' in start_script_text
+    assert (
+        'export BACKEND_PYPI_INDEX_PRIMARY="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.huaweicloud.com/repository/pypi/simple/}"'
+        in start_script_text
+    )
+    # Property-based assertion: timeout must be between 30s and 600s (not literal-coupled to default)
+    timeout_match = re.search(r'export BACKEND_UV_STEP_TIMEOUT_SECONDS="\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}"', start_script_text)
+    assert timeout_match is not None, "BACKEND_UV_STEP_TIMEOUT_SECONDS export not found"
+    timeout_val = int(timeout_match.group(1))
+    assert 30 <= timeout_val <= 600, f"timeout {timeout_val} out of range [30, 600]"
+
     assert "load_container_socket_gid_env" in start_script_text
+
+
+def test_local_build_entrypoints_reexec_under_bash_when_invoked_by_sh() -> None:
+    start_script_text = (REPO_ROOT / "start-local-services.sh").read_text(encoding="utf-8")
+    wrapper_text = (REPO_ROOT / "scripts" / "compose-up-local-build.sh").read_text(encoding="utf-8")
+
+    guard = 'if [ -z "${BASH_VERSION:-}" ]; then\n  exec bash "$0" "$@"\nfi'
+    assert guard in start_script_text
+    assert guard in wrapper_text
 
 
 def test_local_build_script_builds_services_sequentially_before_up() -> None:

@@ -31,9 +31,14 @@ services:
         - BACKEND_APT_SECURITY_PRIMARY=${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
         - BACKEND_APT_MIRROR_FALLBACK=${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}
         - BACKEND_APT_SECURITY_FALLBACK=${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
-        - BACKEND_PYPI_INDEX_PRIMARY=${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}
-        - BACKEND_PYPI_INDEX_FALLBACK=${BACKEND_PYPI_INDEX_FALLBACK:-https://pypi.org/simple}
-        - BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}
+        - BACKEND_PYPI_INDEX_PRIMARY=${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.huaweicloud.com/repository/pypi/simple/}
+        - BACKEND_PYPI_INDEX_FALLBACK=${BACKEND_PYPI_INDEX_FALLBACK:-https://mirrors.aliyun.com/pypi/simple/}
+        - BACKEND_PYPI_INDEX_CANDIDATES=${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.aliyun.com/pypi/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}
+        - BACKEND_UV_HTTP_TIMEOUT_SECONDS=${BACKEND_UV_HTTP_TIMEOUT_SECONDS:-60}
+        - BACKEND_UV_STEP_TIMEOUT_SECONDS=${BACKEND_UV_STEP_TIMEOUT_SECONDS:-120}
+        - BACKEND_UV_ATTEMPTS_PER_INDEX=${BACKEND_UV_ATTEMPTS_PER_INDEX:-1}
+        - BACKEND_UV_CONCURRENT_DOWNLOADS=${BACKEND_UV_CONCURRENT_DOWNLOADS:-16}
+        - BACKEND_UV_CONCURRENT_INSTALLS=${BACKEND_UV_CONCURRENT_INSTALLS:-8}
         - BACKEND_INSTALL_CJK_FONTS=${BACKEND_INSTALL_CJK_FONTS:-1}
         - http_proxy=
         - https_proxy=
@@ -72,9 +77,9 @@ services:
       BACKEND_APT_SECURITY_PRIMARY: ${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}
       BACKEND_APT_MIRROR_FALLBACK: ${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}
       BACKEND_APT_SECURITY_FALLBACK: ${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}
-      BACKEND_PYPI_INDEX_PRIMARY: ${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.aliyun.com/pypi/simple/}
-      BACKEND_PYPI_INDEX_FALLBACK: ${BACKEND_PYPI_INDEX_FALLBACK:-https://pypi.org/simple}
-      BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}
+      BACKEND_PYPI_INDEX_PRIMARY: ${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.huaweicloud.com/repository/pypi/simple/}
+      BACKEND_PYPI_INDEX_FALLBACK: ${BACKEND_PYPI_INDEX_FALLBACK:-https://mirrors.aliyun.com/pypi/simple/}
+      BACKEND_PYPI_INDEX_CANDIDATES: ${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.aliyun.com/pypi/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}
       SCANNER_YASA_IMAGE: ${SCANNER_YASA_IMAGE:-vulhunter/yasa-runner-local:latest}
       SCANNER_OPENGREP_IMAGE: ${SCANNER_OPENGREP_IMAGE:-vulhunter/opengrep-runner-local:latest}
       SCANNER_BANDIT_IMAGE: ${SCANNER_BANDIT_IMAGE:-vulhunter/bandit-runner-local:latest}

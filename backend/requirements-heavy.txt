@@ -61,10 +61,25 @@ regex==2025.11.3
 charset-normalizer==3.4.4
 
 # ── gRPC（fastmcp / opentelemetry 依赖）──────────────────────────────────────
-grpcio==1.76.0
+# WARNING: pinned to grpcio==1.67.1 because uv.lock has resolution-marker entries:
+#   grpcio==1.67.1 for python_full_version<'3.12'  (current: python:3.11-slim)
+#   grpcio==1.76.0 for python_full_version>='3.14'
+# When upgrading the base Python image, RE-CHECK uv.lock for the active version.
+grpcio==1.67.1
 
 # ── Rust 原生数据结构（jsonschema 依赖）──────────────────────────────────────
 rpds-py==0.30.0
 
 # ── HuggingFace Tokenizers（Rust 编译）──────────────────────────────────────
 tokenizers==0.22.1
+
+# ── weasyprint 依赖（C/CFFI 编译，体积大）────────────────────────────────────
+brotli==1.2.0
+fonttools==4.61.1
+pyphen==0.17.2
+
+# ── 加密扩展（pycryptodomex 是 jose 依赖）────────────────────────────────────
+pycryptodomex==3.23.0
+
+# ── HuggingFace 缓存客户端（体积大）──────────────────────────────────────────
+hf-xet==1.2.0

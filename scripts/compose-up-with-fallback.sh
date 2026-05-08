@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
 # scripts/compose-up-with-fallback.sh — 带镜像源探测与故障转移的 docker compose 包装脚本
 #
 # 用法:
@@ -20,7 +23,7 @@
 #   VULHUNTER_IMAGE_NAMESPACE       — backend/frontend/runner/sandbox 默认命名空间
 #   VULHUNTER_IMAGE_TAG             — backend/frontend/runner/sandbox 默认 tag
 #   FRONTEND_NPM_REGISTRY           — 前端 NPM 镜像源
-#   BACKEND_PYPI_INDEX_PRIMARY      — Backend PyPI 主索引
+#   BACKEND_PYPI_INDEX_PRIMARY      — Backend PyPI 主索引（默认华为云）
 #   SANDBOX_PYPI_INDEX_PRIMARY      — Sandbox PyPI 主索引
 #   PHASE_RETRY_COUNT               — 每个 phase 的最大重试次数（默认 3）
 #   PROBE_ATTEMPTS                  — 每个候选镜像的探测次数（默认 3，取中位数）
@@ -983,7 +986,7 @@ DOCKERHUB_CANDIDATES_DEFAULT="${DOCKERHUB_LIBRARY_MIRROR_CANDIDATES:-${DOCKERHUB
 GHCR_CANDIDATES_DEFAULT="${GHCR_REGISTRY_CANDIDATES:-${OFFICIAL_GHCR_REGISTRY:-ghcr.io}}"
 FRONTEND_NPM_CANDIDATES_DEFAULT="${FRONTEND_NPM_REGISTRY_CANDIDATES:-https://registry.npmmirror.com,https://registry.npmjs.org}"
 SANDBOX_NPM_CANDIDATES_DEFAULT="${SANDBOX_NPM_REGISTRY_CANDIDATES:-https://registry.npmmirror.com,https://registry.npmjs.org}"
-BACKEND_PYPI_CANDIDATES_DEFAULT="${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.aliyun.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"
+BACKEND_PYPI_CANDIDATES_DEFAULT="${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.aliyun.com/pypi/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.org/simple}"
 SANDBOX_PYPI_CANDIDATES_DEFAULT="${SANDBOX_PYPI_INDEX_CANDIDATES:-${BACKEND_PYPI_CANDIDATES_DEFAULT}}"
 BACKEND_APT_MIRROR_CANDIDATES_DEFAULT="${BACKEND_APT_MIRROR_CANDIDATES:-mirrors.aliyun.com,deb.debian.org}"
 BACKEND_APT_SECURITY_CANDIDATES_DEFAULT="${BACKEND_APT_SECURITY_CANDIDATES:-mirrors.aliyun.com,security.debian.org}"
