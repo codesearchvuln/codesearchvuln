@@ -5,7 +5,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -78,7 +77,9 @@ def _count_removable_comment_lines(text: str) -> int:
     return count
 
 
-def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(tmp_path: Path) -> None:
+def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
+    tmp_path: Path,
+) -> None:
     output_dir = tmp_path / "sourcecode-tree"
 
     result = _run_sourcecode_generator(output_dir, validate=True)
@@ -100,7 +101,9 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert (output_dir / "backend" / "app").is_dir()
     assert (output_dir / "frontend" / "src").is_dir()
     assert (output_dir / "frontend" / "tsconfig.test.json").is_file()
-    frontend_tsconfig = json.loads((output_dir / "frontend" / "tsconfig.json").read_text(encoding="utf-8"))
+    frontend_tsconfig = json.loads(
+        (output_dir / "frontend" / "tsconfig.json").read_text(encoding="utf-8")
+    )
     for reference in frontend_tsconfig["references"]:
         reference_path = reference["path"].removeprefix("./")
         assert (output_dir / "frontend" / reference_path).is_file()
@@ -116,7 +119,9 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
 
         assert "import" in generated_text or "export" in generated_text
         assert _count_blank_lines(generated_text) <= _count_blank_lines(source_text)
-        if _count_removable_comment_lines(generated_text) < _count_removable_comment_lines(source_text):
+        if _count_removable_comment_lines(generated_text) < _count_removable_comment_lines(
+            source_text
+        ):
             hardened_paths_with_reduced_comments.append(rel_path.as_posix())
 
     assert hardened_paths_with_reduced_comments, (
@@ -124,8 +129,12 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
         f"checked: {[path.as_posix() for path in expected_hardened_paths]}"
     )
     assert (output_dir / "backend" / "app" / "api" / "v1" / "endpoints" / "agent_test.py").is_file()
-    assert (output_dir / "backend" / "app" / "services" / "agent" / "skill_test_runner.py").is_file()
-    assert (output_dir / "backend" / "app" / "services" / "agent" / "agents" / "skill_test.py").is_file()
+    assert (
+        output_dir / "backend" / "app" / "services" / "agent" / "skill_test_runner.py"
+    ).is_file()
+    assert (
+        output_dir / "backend" / "app" / "services" / "agent" / "agents" / "skill_test.py"
+    ).is_file()
 
     assert not (output_dir / ".github").exists()
     assert not (output_dir / "docs").exists()
@@ -136,9 +145,10 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert not (output_dir / "backend" / "tests").exists()
     assert not (output_dir / "frontend" / "tests").exists()
 
-    assert sorted(path.relative_to(output_dir / "scripts").as_posix() for path in (output_dir / "scripts").rglob("*")) == [
-        "setup-env.sh"
-    ]
+    assert sorted(
+        path.relative_to(output_dir / "scripts").as_posix()
+        for path in (output_dir / "scripts").rglob("*")
+    ) == ["setup-env.sh"]
 
     readme_text = (output_dir / "README.md").read_text(encoding="utf-8")
     readme_en_text = (output_dir / "README_EN.md").read_text(encoding="utf-8")
@@ -159,18 +169,37 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
         assert "compose-up-with-fallback" not in text
         assert "docker compose up" not in text
 
-    assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in readme_text
-    assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in readme_en_text
+    assert (
+        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in readme_text
+    )
+    assert (
+        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
+        in readme_en_text
+    )
     assert "商业交付、商业支持" in readme_text
-    assert "separate commercial delivery/support terms may apply outside the license" in readme_en_text
+    assert (
+        "separate commercial delivery/support terms may apply outside the license" in readme_en_text
+    )
 
-    if shutil.which("docker") and subprocess.run(
-        ["docker", "compose", "version"],
-        capture_output=True,
-        text=True,
-    ).returncode == 0:
+    if (
+        shutil.which("docker")
+        and subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    ):
         config_result = subprocess.run(
-            ["docker", "compose", "-f", "docker-compose.yml", "-f", "docker-compose.full.yml", "config"],
+            [
+                "docker",
+                "compose",
+                "-f",
+                "docker-compose.yml",
+                "-f",
+                "docker-compose.full.yml",
+                "config",
+            ],
             cwd=output_dir,
             capture_output=True,
             text=True,
@@ -179,29 +208,50 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
 
 
 def test_sourcecode_templates_and_setup_env_expose_full_only_entrypoint() -> None:
-    template_readme = (REPO_ROOT / "scripts" / "sourcecode-templates" / "README.md").read_text(encoding="utf-8")
-    template_readme_en = (REPO_ROOT / "scripts" / "sourcecode-templates" / "README_EN.md").read_text(encoding="utf-8")
-    template_makefile = (REPO_ROOT / "scripts" / "sourcecode-templates" / "Makefile").read_text(encoding="utf-8")
-    setup_env_text = (REPO_ROOT / "scripts" / "setup-env.sh").read_text(encoding="utf-8")
-    compose_text = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    full_compose_text = (REPO_ROOT / "docker-compose.full.yml").read_text(encoding="utf-8")
+    template_readme = (REPO_ROOT / "scripts" / "sourcecode-templates" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    template_readme_en = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "README_EN.md"
+    ).read_text(encoding="utf-8")
+    template_makefile = (REPO_ROOT / "scripts" / "sourcecode-templates" / "Makefile").read_text(
+        encoding="utf-8"
+    )
+    template_setup_env = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "setup-env.sh"
+    ).read_text(encoding="utf-8")
+    template_compose = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "docker-compose.yml"
+    ).read_text(encoding="utf-8")
+    template_full_compose = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "docker-compose.full.yml"
+    ).read_text(encoding="utf-8")
 
     for text in (
         template_readme,
         template_readme_en,
         template_makefile,
-        setup_env_text,
-        compose_text,
-        full_compose_text,
+        template_setup_env,
+        template_compose,
+        template_full_compose,
     ):
         assert "docker-compose.hybrid.yml" not in text
         assert "compose-up-with-fallback" not in text
         assert "docker compose up" not in text
 
-    assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in template_readme
-    assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in template_readme_en
+    assert (
+        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
+        in template_readme
+    )
+    assert (
+        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
+        in template_readme_en
+    )
     assert "商业交付、商业支持" in template_readme
-    assert "separate commercial delivery/support terms may apply outside the license" in template_readme_en
+    assert (
+        "separate commercial delivery/support terms may apply outside the license"
+        in template_readme_en
+    )
     assert "# 部署指南" in template_readme
     assert "# Deployment Guide" in template_readme_en
     assert "podman compose" not in template_readme
@@ -212,11 +262,17 @@ def test_sourcecode_templates_and_setup_env_expose_full_only_entrypoint() -> Non
     assert "\nup-attached:\n" not in template_makefile
     assert "\nbuild-backend:\n" not in template_makefile
     assert "\nbuild-frontend:\n" not in template_makefile
-    assert "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in setup_env_text
-    assert "唯一推荐入口" in full_compose_text
+    assert (
+        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
+        in template_setup_env
+    )
+    assert "唯一推荐入口" in template_compose
+    assert "唯一推荐入口" in template_full_compose
 
 
-def _write_tracked_file(repo_dir: Path, rel_path: str, content: str, *, executable: bool = False) -> None:
+def _write_tracked_file(
+    repo_dir: Path, rel_path: str, content: str, *, executable: bool = False
+) -> None:
     path = repo_dir / rel_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -224,7 +280,9 @@ def _write_tracked_file(repo_dir: Path, rel_path: str, content: str, *, executab
         path.chmod(0o755)
 
 
-def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_source(tmp_path: Path) -> None:
+def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_source(
+    tmp_path: Path,
+) -> None:
     source_dir = tmp_path / "source-repo"
     output_dir = tmp_path / "sourcecode-tree"
     source_dir.mkdir()
@@ -240,7 +298,9 @@ def test_sourcecode_generator_sanitizes_generated_tree_only_with_synthetic_sourc
         Path("frontend/tsconfig.test.json"),
     )
     source_fixture_texts = {
-        Path("frontend/src/app/main.tsx"): r"""// removable app heading
+        Path(
+            "frontend/src/app/main.tsx"
+        ): r"""// removable app heading
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import React from "react";
 
@@ -264,7 +324,9 @@ export function SyntheticApp() {
 
 export { dynamicFeature };
 """,
-        Path("frontend/src/shared/api/serverClient.ts"): r"""/* removable api block */
+        Path(
+            "frontend/src/shared/api/serverClient.ts"
+        ): r"""/* removable api block */
 export const serverUrl = "https://example.test/api//v1";
 export const routePattern = /\/api\/v1\/items(?:\?.*)?$/;
 
@@ -273,7 +335,9 @@ export async function loadDashboard() {
   return import("@/features/dashboard/services/dashboardSnapshotStore");
 }
 """,
-        Path("frontend/src/shared/utils/runtimeGuards.ts"): r"""/*! Copyright AuditTool authors */
+        Path(
+            "frontend/src/shared/utils/runtimeGuards.ts"
+        ): r"""/*! Copyright AuditTool authors */
 /* remove utils block */
 const commentLikeString = "keep // and /* tokens */ inside strings";
 
@@ -291,30 +355,60 @@ export function runtimeGuard(value: unknown) {
         Path("frontend/tsconfig.test.json"): "{}\n",
     }
 
-    _write_tracked_file(source_dir, "scripts/setup-env.sh", "#!/usr/bin/env bash\n# remove setup comment\necho setup\n", executable=True)
+    _write_tracked_file(
+        source_dir,
+        "scripts/setup-env.sh",
+        "#!/usr/bin/env bash\n# remove setup comment\necho setup\n",
+        executable=True,
+    )
     _write_tracked_file(source_dir, "docker/env/backend/env.example", "LLM_API_KEY=\n")
     _write_tracked_file(source_dir, "docker/Dockerfile", "FROM scratch\n")
     _write_tracked_file(source_dir, "frontend/src/main.ts", "export {}\n")
     for rel_path, content in source_fixture_texts.items():
         _write_tracked_file(source_dir, rel_path.as_posix(), content)
     _write_tracked_file(source_dir, "nexus-web/index.html", "<html></html>\n")
+    _write_tracked_file(
+        source_dir, "nexus-web/package.json", '{"scripts":{"build":"vite build"}}\n'
+    )
+    _write_tracked_file(source_dir, "nexus-web/pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+    _write_tracked_file(source_dir, "nexus-web/src/main.tsx", "export {}\n")
     _write_tracked_file(source_dir, "nexus-itemDetail/index.html", "<html></html>\n")
-    _write_tracked_file(source_dir, "docker-compose.yml", (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
-    _write_tracked_file(source_dir, "backend/app/keep.py", "# remove module comment\n# noqa: preserve directive\nvalue = '# not a comment'  # remove inline comment\n")
-    _write_tracked_file(source_dir, "backend/app/not_allowlisted.py", "# preserve ordinary comment outside allowlist\nvalue = 1\n")
+    _write_tracked_file(
+        source_dir,
+        "docker/docker-compose.yml",
+        (REPO_ROOT / "scripts" / "sourcecode-templates" / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        ),
+    )
+    _write_tracked_file(
+        source_dir,
+        "backend/app/keep.py",
+        "# remove module comment\n# noqa: preserve directive\nvalue = '# not a comment'  # remove inline comment\n",
+    )
+    _write_tracked_file(
+        source_dir,
+        "backend/app/not_allowlisted.py",
+        "# preserve ordinary comment outside allowlist\nvalue = 1\n",
+    )
     _write_tracked_file(source_dir, "backend/app/__pycache__/gone.pyc", "bytecode")
     _write_tracked_file(source_dir, "backend/app/.ruff_cache/state", "cache")
     _write_tracked_file(source_dir, "frontend/src/component.test.ts", "console.log('test')\n")
     _write_tracked_file(source_dir, "frontend/src/component.spec.tsx", "console.log('spec')\n")
-    _write_tracked_file(source_dir, "frontend/src/component.test.helper.ts", "console.log('test helper')\n")
-    _write_tracked_file(source_dir, "frontend/src/component.spec.helper.ts", "console.log('spec helper')\n")
+    _write_tracked_file(
+        source_dir, "frontend/src/component.test.helper.ts", "console.log('test helper')\n"
+    )
+    _write_tracked_file(
+        source_dir, "frontend/src/component.spec.helper.ts", "console.log('spec helper')\n"
+    )
     _write_tracked_file(source_dir, "frontend/src/app.js.map", "{}")
     _write_tracked_file(source_dir, "frontend/src/debug.log", "debug")
     _write_tracked_file(source_dir, "fixtures/input.txt", "fixture")
     _write_tracked_file(source_dir, "mocks/mock.txt", "mock")
     _write_tracked_file(source_dir, "samples/sample.txt", "sample")
     _write_tracked_file(source_dir, "__tests__/case.txt", "test")
-    _write_tracked_file(source_dir, "backend/app/db/rules/fixtures/keep.txt", "runtime rule fixture")
+    _write_tracked_file(
+        source_dir, "backend/app/db/rules/fixtures/keep.txt", "runtime rule fixture"
+    )
     _write_tracked_file(source_dir, "LICENSE", (REPO_ROOT / "LICENSE").read_text(encoding="utf-8"))
 
     subprocess.run(["git", "-C", str(source_dir), "add", "-A"], check=True)
@@ -346,7 +440,9 @@ export function runtimeGuard(value: unknown) {
         generated_path = output_dir / rel_path
         assert generated_path.is_file()
         generated_text = generated_path.read_text(encoding="utf-8")
-        assert _count_removable_comment_lines(generated_text) < _count_removable_comment_lines(source_text)
+        assert _count_removable_comment_lines(generated_text) < _count_removable_comment_lines(
+            source_text
+        )
         assert _count_blank_lines(generated_text) <= _count_blank_lines(source_text)
 
     app_text = (output_dir / "frontend/src/app/main.tsx").read_text(encoding="utf-8")
@@ -372,7 +468,9 @@ export function runtimeGuard(value: unknown) {
     assert 'import("@/features/dashboard/services/dashboardSnapshotStore")' in api_text
     assert "export async function loadDashboard" in api_text
 
-    utils_text = (output_dir / "frontend/src/shared/utils/runtimeGuards.ts").read_text(encoding="utf-8")
+    utils_text = (output_dir / "frontend/src/shared/utils/runtimeGuards.ts").read_text(
+        encoding="utf-8"
+    )
     assert "Copyright AuditTool authors" in utils_text
     assert "remove utils block" not in utils_text
     assert "drop inline utility comment" not in utils_text
@@ -395,7 +493,9 @@ export function runtimeGuard(value: unknown) {
     assert "# not a comment" in python_text
     assert "remove inline comment" not in python_text
 
-    not_allowlisted_text = (output_dir / "backend" / "app" / "not_allowlisted.py").read_text(encoding="utf-8")
+    not_allowlisted_text = (output_dir / "backend" / "app" / "not_allowlisted.py").read_text(
+        encoding="utf-8"
+    )
     assert "preserve ordinary comment outside allowlist" in not_allowlisted_text
 
 
@@ -411,7 +511,7 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
     assert "git worktree add --detach --force" in workflow_text
     assert "bash ./scripts/generate-sourcecode-branch.sh" in workflow_text
     assert "git_tree_hash_for_dir()" in workflow_text
-    assert 'git rev-parse refs/remotes/origin/sourcecode^{tree}' in workflow_text
+    assert "git rev-parse refs/remotes/origin/sourcecode^{tree}" in workflow_text
     assert 'git checkout --orphan "sourcecode-publish-${GITHUB_RUN_ID}"' in workflow_text
     assert "git checkout -B sourcecode origin/sourcecode" not in workflow_text
     assert "git push origin HEAD:sourcecode" not in workflow_text
@@ -419,7 +519,7 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
 
     # Detect-changes step gates smoke test and publish
     assert "id: detect_changes" in workflow_text
-    assert 'has_changes=${has_changes}' in workflow_text
+    assert "has_changes=${has_changes}" in workflow_text
     gate_condition = "steps.detect_changes.outputs.has_changes == 'true'"
     assert workflow_text.count(gate_condition) == 2, (
         f"Expected detect_changes gate on both smoke test and publish steps (2 occurrences), "
@@ -428,16 +528,17 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
 
     # Verify each gated step has the condition immediately after its name
     import re
+
     gated_steps = re.findall(
         r"-\s+name:\s*(.+)\n\s+if:\s*" + re.escape(gate_condition),
         workflow_text,
     )
-    assert "Smoke test sourcecode build" in gated_steps, (
-        f"Smoke test step missing detect_changes gate; gated steps: {gated_steps}"
-    )
-    assert "Publish sourcecode branch" in gated_steps, (
-        f"Publish step missing detect_changes gate; gated steps: {gated_steps}"
-    )
+    assert (
+        "Smoke test sourcecode build" in gated_steps
+    ), f"Smoke test step missing detect_changes gate; gated steps: {gated_steps}"
+    assert (
+        "Publish sourcecode branch" in gated_steps
+    ), f"Publish step missing detect_changes gate; gated steps: {gated_steps}"
 
     # Smoke test step exists and uses full build compose command
     assert "Smoke test sourcecode build" in workflow_text
@@ -466,7 +567,9 @@ def test_generate_sourcecode_branch_script_is_tracked_executable_in_git_index() 
     assert result.stdout.startswith("100755 "), result.stdout
 
 
-def test_git_tree_hash_ignores_empty_directories_when_comparing_sourcecode_snapshots(tmp_path: Path) -> None:
+def test_git_tree_hash_ignores_empty_directories_when_comparing_sourcecode_snapshots(
+    tmp_path: Path,
+) -> None:
     baseline_dir = tmp_path / "baseline"
     sourcecode_dir = tmp_path / "sourcecode"
     (baseline_dir / "scripts").mkdir(parents=True)

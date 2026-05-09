@@ -94,7 +94,10 @@ overlay_templates() {
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
   cp "$TEMPLATE_DIR/Makefile" "$OUTPUT_DIR/Makefile"
+  cp "$TEMPLATE_DIR/setup-env.sh" "$OUTPUT_DIR/scripts/setup-env.sh"
+  cp "$TEMPLATE_DIR/docker-compose.yml" "$OUTPUT_DIR/docker-compose.yml"
   cp "$TEMPLATE_DIR/docker-compose.full.yml" "$OUTPUT_DIR/docker-compose.full.yml"
+  chmod +x "$OUTPUT_DIR/scripts/setup-env.sh"
 }
 
 sanitize_public_tree() {
@@ -1088,6 +1091,9 @@ validate_sourcecode_tree() {
     "docker"
     "data"
     "nexus-web"
+    "nexus-web/package.json"
+    "nexus-web/pnpm-lock.yaml"
+    "nexus-web/src"
     "nexus-itemDetail"
     "docker-compose.yml"
     "docker-compose.full.yml"
