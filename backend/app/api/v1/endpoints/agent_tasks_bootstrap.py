@@ -696,6 +696,19 @@ def _log_embedded_bootstrap_error(
     )
 
 
+def _log_embedded_bootstrap_timeout(
+    tool_name: str,
+    project_root: str,
+    message: str,
+) -> None:
+    logger.warning(
+        "[EmbeddedBootstrap][%s] timeout project_root=%s reason=%s",
+        tool_name,
+        project_root,
+        message,
+    )
+
+
 def _log_embedded_bootstrap_skipped(
     tool_name: str,
     project_root: str,
@@ -706,6 +719,21 @@ def _log_embedded_bootstrap_skipped(
         tool_name,
         project_root,
         reason,
+    )
+
+
+def _is_timeout_like_error(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    lowered = str(exc or "").strip().lower()
+    return any(
+        token in lowered
+        for token in (
+            "timeout",
+            "timed out",
+            "deadline exceeded",
+            "超时",
+        )
     )
 
 
@@ -727,30 +755,57 @@ async def _run_embedded_bootstrap_with_heartbeat(
 
     try:
         while True:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.shield(operation_task),
-                    timeout=EMBEDDED_BOOTSTRAP_HEARTBEAT_INTERVAL_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                heartbeat_tick += 1
-                elapsed_seconds = max(1, int(loop.time() - start_time))
-                await event_emitter.emit_info(
-                    f"🧪 {tool_name} 内嵌预扫进行中（{elapsed_seconds}s）",
-                    metadata={
-                        "bootstrap": True,
-                        "bootstrap_task_id": None,
-                        "bootstrap_source": bootstrap_source,
-                        "bootstrap_progress_heartbeat": True,
-                        "bootstrap_progress_tick": heartbeat_tick,
-                        "bootstrap_elapsed_seconds": elapsed_seconds,
-                    },
-                )
+            # Do not use wait_for() here: asyncio.TimeoutError aliases built-in
+            # TimeoutError, so scanner-raised tool timeouts can be mistaken for
+            # heartbeat ticks and loop forever.
+            done, _pending = await asyncio.wait(
+                {operation_task},
+                timeout=EMBEDDED_BOOTSTRAP_HEARTBEAT_INTERVAL_SECONDS,
+            )
+            if operation_task in done:
+                return await operation_task
+
+            heartbeat_tick += 1
+            elapsed_seconds = max(1, int(loop.time() - start_time))
+            await event_emitter.emit_info(
+                f"🧪 {tool_name} 内嵌预扫进行中（{elapsed_seconds}s）",
+                metadata={
+                    "bootstrap": True,
+                    "bootstrap_task_id": None,
+                    "bootstrap_source": bootstrap_source,
+                    "bootstrap_progress_heartbeat": True,
+                    "bootstrap_progress_tick": heartbeat_tick,
+                    "bootstrap_elapsed_seconds": elapsed_seconds,
+                },
+            )
     finally:
         if not operation_task.done():
             operation_task.cancel()
             with suppress(asyncio.CancelledError):
                 await operation_task
+
+
+async def _emit_opengrep_timeout_degraded(
+    *,
+    event_emitter: Any,
+    error_message: str,
+) -> None:
+    if not event_emitter:
+        return
+    await event_emitter.emit_warning(
+        "OpenGrep 预扫超时，已降级为空候选并继续后续流程",
+        metadata={
+            "bootstrap": True,
+            "bootstrap_task_id": None,
+            "bootstrap_source": "embedded_opengrep",
+            "bootstrap_tool": "opengrep",
+            "bootstrap_degraded": True,
+            "bootstrap_error_class": "timeout",
+            "bootstrap_error": error_message[:300],
+            "bootstrap_total_findings": 0,
+            "bootstrap_candidate_count": 0,
+        },
+    )
 
 
 async def _prepare_embedded_bootstrap_findings(
@@ -840,10 +895,27 @@ async def _prepare_embedded_bootstrap_findings(
                 await event_emitter.emit_error("OpenGrep 预处理失败：未安装 opengrep")
             raise RuntimeError("OpenGrep 预处理失败：未安装 opengrep") from exc
         except Exception as exc:
-            _log_embedded_bootstrap_error("OpenGrep", project_root, str(exc))
-            if event_emitter:
-                await event_emitter.emit_error(f"OpenGrep 预处理失败：{str(exc)[:160]}")
-            raise RuntimeError(f"OpenGrep 预处理失败：{str(exc)[:200]}") from exc
+            if _is_timeout_like_error(exc):
+                error_message = str(exc) or exc.__class__.__name__
+                _log_embedded_bootstrap_timeout("OpenGrep", project_root, error_message)
+                await _emit_opengrep_timeout_degraded(
+                    event_emitter=event_emitter,
+                    error_message=error_message,
+                )
+                scan_result = SimpleNamespace(
+                    total_findings=0,
+                    findings=[],
+                    metadata={
+                        "timeout": True,
+                        "degraded": True,
+                        "error": error_message[:300],
+                    },
+                )
+            else:
+                _log_embedded_bootstrap_error("OpenGrep", project_root, str(exc))
+                if event_emitter:
+                    await event_emitter.emit_error(f"OpenGrep 预处理失败：{str(exc)[:160]}")
+                raise RuntimeError(f"OpenGrep 预处理失败：{str(exc)[:200]}") from exc
 
         opengrep_total_findings = int(getattr(scan_result, "total_findings", 0) or 0)
         normalized_opengrep_findings = []

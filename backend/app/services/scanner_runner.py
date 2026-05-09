@@ -262,7 +262,7 @@ def run_scanner_container_sync(
                 pass
         captured_stdout_path: str | None = None
         captured_stderr_path: str | None = None
-        if spec.capture_stdout_path and stdout_text:
+        if spec.capture_stdout_path:
             try:
                 captured_stdout_path = _write_full_text(workspace / spec.capture_stdout_path, stdout_text)
             except Exception:
@@ -312,7 +312,7 @@ def run_scanner_container_sync(
                 pass
         captured_stdout_path: str | None = None
         captured_stderr_path: str | None = None
-        if spec.capture_stdout_path and stdout_text:
+        if spec.capture_stdout_path:
             try:
                 captured_stdout_path = _write_full_text(workspace / spec.capture_stdout_path, stdout_text)
             except Exception:

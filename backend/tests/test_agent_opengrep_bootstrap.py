@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import types
 import json
@@ -25,6 +26,7 @@ from app.api.v1.endpoints.agent_tasks import (
     _resolve_bandit_effective_rule_ids_for_bootstrap,
     _run_bootstrap_gitleaks_scan,
     _resolve_static_bootstrap_config,
+    _run_embedded_bootstrap_with_heartbeat,
 )
 import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
@@ -261,6 +263,134 @@ async def test_prepare_embedded_bootstrap_no_active_rules_abort():
 
     assert "当前没有启用规则" in str(exc_info.value)
     event_emitter.emit_error.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_embedded_bootstrap_heartbeat_propagates_operation_timeout(monkeypatch):
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.EMBEDDED_BOOTSTRAP_HEARTBEAT_INTERVAL_SECONDS",
+        0.01,
+    )
+    event_emitter = SimpleNamespace(emit_info=AsyncMock())
+
+    async def _slow_timeout():
+        await asyncio.sleep(0.02)
+        raise TimeoutError("scanner container timed out after 900s")
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        await _run_embedded_bootstrap_with_heartbeat(
+            tool_name="OpenGrep",
+            bootstrap_source="embedded_opengrep",
+            event_emitter=event_emitter,
+            operation_coro=_slow_timeout(),
+        )
+
+    event_emitter.emit_info.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedded_bootstrap_opengrep_timeout_degrades_to_empty_seed(monkeypatch, caplog):
+    active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="HIGH")]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult(active_rules))
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+    caplog.set_level(logging.INFO, logger="app.api.v1.endpoints.agent_tasks_bootstrap")
+
+    class _TimeoutOpenGrepBootstrapScanner:
+        def __init__(
+            self,
+            *,
+            active_rules,
+            timeout_seconds=900,
+            cancel_check=None,
+            exclude_patterns=None,
+        ):
+            self.active_rules = active_rules
+
+        async def scan(self, project_root):
+            raise TimeoutError("scanner container timed out after 900s")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.OpenGrepBootstrapScanner",
+        _TimeoutOpenGrepBootstrapScanner,
+    )
+
+    candidates, bootstrap_task_id, source = await _prepare_embedded_bootstrap_findings(
+        db=db,
+        project_root="/tmp/project",
+        event_emitter=event_emitter,
+        opengrep_enabled=True,
+        bandit_enabled=False,
+        gitleaks_enabled=False,
+        phpstan_enabled=False,
+        yasa_enabled=False,
+    )
+
+    assert candidates == []
+    assert bootstrap_task_id is None
+    assert source == "embedded_opengrep"
+    event_emitter.emit_error.assert_not_awaited()
+    event_emitter.emit_warning.assert_awaited()
+
+    warning_message = event_emitter.emit_warning.await_args.args[0]
+    warning_metadata = event_emitter.emit_warning.await_args.kwargs.get("metadata")
+    assert "OpenGrep 预扫超时" in warning_message
+    assert warning_metadata["bootstrap"] is True
+    assert warning_metadata["bootstrap_source"] == "embedded_opengrep"
+    assert warning_metadata["bootstrap_tool"] == "opengrep"
+    assert warning_metadata["bootstrap_degraded"] is True
+    assert warning_metadata["bootstrap_error_class"] == "timeout"
+    assert "[EmbeddedBootstrap][OpenGrep] timeout" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_prepare_embedded_bootstrap_opengrep_non_timeout_failure_still_aborts(monkeypatch):
+    active_rules = [SimpleNamespace(id="rule-1", pattern_yaml="rules: []", confidence="HIGH")]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarListResult(active_rules))
+    event_emitter = SimpleNamespace(
+        emit_info=AsyncMock(),
+        emit_warning=AsyncMock(),
+        emit_error=AsyncMock(),
+    )
+
+    class _FailingOpenGrepBootstrapScanner:
+        def __init__(
+            self,
+            *,
+            active_rules,
+            timeout_seconds=900,
+            cancel_check=None,
+            exclude_patterns=None,
+        ):
+            self.active_rules = active_rules
+
+        async def scan(self, project_root):
+            raise RuntimeError("opengrep command error")
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.agent_tasks_bootstrap.OpenGrepBootstrapScanner",
+        _FailingOpenGrepBootstrapScanner,
+    )
+
+    with pytest.raises(RuntimeError, match="OpenGrep 预处理失败"):
+        await _prepare_embedded_bootstrap_findings(
+            db=db,
+            project_root="/tmp/project",
+            event_emitter=event_emitter,
+            opengrep_enabled=True,
+            bandit_enabled=False,
+            gitleaks_enabled=False,
+            phpstan_enabled=False,
+            yasa_enabled=False,
+        )
+
+    event_emitter.emit_error.assert_awaited()
+    event_emitter.emit_warning.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -124,6 +124,21 @@ def _parse_output(stdout: str) -> List[Dict[str, Any]]:
     return parsed
 
 
+def _is_timeout_result(process_result: Any) -> bool:
+    if int(getattr(process_result, "exit_code", 0) or 0) == 124:
+        return True
+    lowered = str(getattr(process_result, "error", "") or "").strip().lower()
+    return any(
+        token in lowered
+        for token in (
+            "timeout",
+            "timed out",
+            "deadline exceeded",
+            "超时",
+        )
+    )
+
+
 class OpenGrepBootstrapScanner(StaticBootstrapScanner):
     """OpenGrep 预扫实现。"""
 
@@ -280,7 +295,21 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
                 )
 
             cancelled = isinstance(process_result.error, str) and "cancelled" in process_result.error
-            payload_findings = _parse_output(stdout_text)
+            timed_out = _is_timeout_result(process_result)
+            try:
+                payload_findings = _parse_output(stdout_text)
+            except Exception as exc:
+                if timed_out:
+                    raise TimeoutError(
+                        process_result.error
+                        or f"opengrep timed out after {self.timeout_seconds}s"
+                    ) from exc
+                raise
+            if timed_out and not payload_findings and not cancelled:
+                raise TimeoutError(
+                    process_result.error
+                    or f"opengrep timed out after {self.timeout_seconds}s"
+                )
             if process_result.exit_code != 0 and not payload_findings and not cancelled:
                 stderr_message = (stderr_text or stdout_text or process_result.error or "unknown error").strip()
                 raise RuntimeError(f"opengrep failed: {stderr_message[:300]}")

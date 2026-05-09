@@ -12,6 +12,12 @@ def test_run_scanner_container_passes_mounts_env_and_command(tmp_path, monkeypat
 
     class _FakeContainer:
         id = "container-xyz"
+        status = "exited"
+        attrs = {"State": {"ExitCode": 0}}
+
+        def reload(self):
+            seen["reloaded"] = True
+            return None
 
         def wait(self, timeout=None):
             seen["wait_timeout"] = timeout
@@ -75,7 +81,7 @@ def test_run_scanner_container_passes_mounts_env_and_command(tmp_path, monkeypat
     assert seen["volumes"] == {
         "vulhunter_scan_workspace": {"bind": str(workspace_root), "mode": "rw"},
     }
-    assert seen["wait_timeout"] == 123
+    assert seen["reloaded"] is True
     assert result.stdout_path is None
     assert result.stderr_path is None
     assert not (workspace_dir / "logs" / "stdout.log").exists()
@@ -95,6 +101,11 @@ def test_run_scanner_container_failure_keeps_truncated_error_logs(tmp_path, monk
 
     class _FakeContainer:
         id = "container-failed"
+        status = "exited"
+        attrs = {"State": {"ExitCode": 2}}
+
+        def reload(self):
+            return None
 
         def wait(self, timeout=None):
             return {"StatusCode": 2}
@@ -153,6 +164,11 @@ def test_run_scanner_container_expected_nonzero_exit_keeps_logs(tmp_path, monkey
 
     class _FakeContainer:
         id = "container-expected-nonzero"
+        status = "exited"
+        attrs = {"State": {"ExitCode": 1}}
+
+        def reload(self):
+            return None
 
         def wait(self, timeout=None):
             return {"StatusCode": 1}
@@ -227,16 +243,14 @@ def test_run_scanner_container_rejects_workspace_outside_shared_root(tmp_path, m
 
 
 def test_stop_scan_container_handles_missing_container_gracefully(monkeypatch):
+    class _FakeNotFound(Exception):
+        pass
+
     class _FakeContainers:
         def get(self, _container_id):
-            raise scanner_runner.docker.errors.NotFound("missing")
+            raise _FakeNotFound("missing")
 
-    monkeypatch.setattr(
-        scanner_runner.docker,
-        "errors",
-        SimpleNamespace(NotFound=RuntimeError),
-        raising=False,
-    )
+    monkeypatch.setattr(scanner_runner, "DOCKER_NOT_FOUND", _FakeNotFound)
     monkeypatch.setattr(
         scanner_runner.docker,
         "from_env",
@@ -245,3 +259,66 @@ def test_stop_scan_container_handles_missing_container_gracefully(monkeypatch):
     )
 
     assert scanner_runner.stop_scanner_container_sync("missing-container") is False
+
+
+def test_run_scanner_container_timeout_retains_stdout_capture_even_when_empty(tmp_path, monkeypatch):
+    workspace_root = tmp_path / "scan-root"
+    workspace_dir = workspace_root / "opengrep-bootstrap" / "task-1"
+    workspace_dir.mkdir(parents=True)
+
+    class _FakeContainer:
+        id = "container-timeout"
+        status = "running"
+        attrs = {"State": {"ExitCode": None}}
+
+        def reload(self):
+            return None
+
+        def stop(self, timeout=5):
+            return None
+
+        def logs(self, stdout=True, stderr=False):
+            if stdout and not stderr:
+                return b""
+            if stderr and not stdout:
+                return b"still scanning"
+            return b""
+
+        def remove(self, force=False):
+            return None
+
+    class _FakeContainers:
+        def run(self, image, command, detach, auto_remove, volumes, environment, working_dir):
+            return _FakeContainer()
+
+    monkeypatch.setattr(
+        scanner_runner.docker,
+        "from_env",
+        lambda: SimpleNamespace(containers=_FakeContainers()),
+        raising=False,
+    )
+    monkeypatch.setattr(scanner_runner.settings, "SCAN_WORKSPACE_ROOT", str(workspace_root))
+    monkeypatch.setattr(scanner_runner.settings, "SCAN_WORKSPACE_VOLUME", "vulhunter_scan_workspace")
+    monkeypatch.setattr(scanner_runner.time, "monotonic", iter([0, 0, 2]).__next__)
+
+    spec = scanner_runner.ScannerRunSpec(
+        scanner_type="opengrep-bootstrap",
+        image="vulhunter/opengrep-runner:test",
+        workspace_dir=str(workspace_dir),
+        command=["opengrep", "--json", "/scan/project"],
+        timeout_seconds=1,
+        env={},
+        capture_stdout_path="output/report.json",
+    )
+
+    result = scanner_runner.run_scanner_container_sync(spec)
+
+    assert result.success is False
+    assert result.exit_code == 124
+    assert result.stdout_path == str(workspace_dir / "output" / "report.json")
+    assert Path(result.stdout_path).exists()
+    assert Path(result.stdout_path).read_text(encoding="utf-8") == ""
+    assert result.stderr_path is not None
+    runner_meta = (workspace_dir / "meta" / "runner.json").read_text(encoding="utf-8")
+    assert '"stdout_path":' in runner_meta
+    assert '"log_retention": "timeout"' in runner_meta

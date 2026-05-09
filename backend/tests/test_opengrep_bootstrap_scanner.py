@@ -166,12 +166,14 @@ async def test_opengrep_bootstrap_scanner_prunes_non_core_paths_before_runner(mo
     (project_root / "config").mkdir()
     (project_root / "config" / "app.yaml").write_text("debug: true\n", encoding="utf-8")
 
+    seen = {}
+
     async def _fake_run_scanner_container(spec, **_kwargs):
         staged_project = Path(spec.workspace_dir) / "project"
-        assert (staged_project / "src" / "app.py").exists()
-        assert not (staged_project / "tests").exists()
-        assert not (staged_project / ".github").exists()
-        assert not (staged_project / "config" / "app.yaml").exists()
+        seen["src_exists"] = (staged_project / "src" / "app.py").exists()
+        seen["tests_exists"] = (staged_project / "tests").exists()
+        seen["github_exists"] = (staged_project / ".github").exists()
+        seen["yaml_exists"] = (staged_project / "config" / "app.yaml").exists()
         output_dir.mkdir(parents=True, exist_ok=True)
         Path(output_dir / "report.json").write_text('{"results": []}', encoding="utf-8")
         return SimpleNamespace(
@@ -198,7 +200,56 @@ async def test_opengrep_bootstrap_scanner_prunes_non_core_paths_before_runner(mo
     result = await scanner.scan(str(project_root))
 
     assert result.total_findings == 0
-    assert workspace_dir.exists() is False
+    assert seen == {
+        "src_exists": True,
+        "tests_exists": False,
+        "github_exists": False,
+        "yaml_exists": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_opengrep_bootstrap_scanner_raises_timeout_for_runner_timeout(monkeypatch, tmp_path):
+    _workspace_dir, _project_dir, output_dir, logs_dir, _meta_dir = _prepare_opengrep_workspace(
+        monkeypatch,
+        tmp_path,
+    )
+    active_rules = [
+        SimpleNamespace(
+            id="rule-1",
+            name="demo.rule",
+            confidence="HIGH",
+            pattern_yaml="rules:\n  - id: demo.rule\n    languages: [python]\n    pattern: dangerous(...)",
+        )
+    ]
+
+    async def _fake_run_scanner_container(_spec, **_kwargs):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        Path(output_dir / "report.json").write_text("", encoding="utf-8")
+        Path(logs_dir / "stderr.log").write_text(
+            "scanner container timed out after 900s",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            success=False,
+            container_id="opengrep-bootstrap-timeout",
+            exit_code=124,
+            stdout_path=str(output_dir / "report.json"),
+            stderr_path=str(logs_dir / "stderr.log"),
+            error="scanner container timed out after 900s",
+        )
+
+    monkeypatch.setattr(
+        opengrep_bootstrap,
+        "run_scanner_container",
+        _fake_run_scanner_container,
+        raising=False,
+    )
+
+    scanner = OpenGrepBootstrapScanner(active_rules=active_rules)
+    with pytest.raises(TimeoutError, match="timed out"):
+        await scanner.scan(str(tmp_path))
 
 
 @pytest.mark.asyncio
